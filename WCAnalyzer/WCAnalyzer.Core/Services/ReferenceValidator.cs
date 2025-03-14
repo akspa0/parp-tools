@@ -199,12 +199,13 @@ public class ReferenceValidator
                         reference.IsValid = true;
                         reference.ExistsInListfile = true;
                         
-                        // Look for the FileDataID using the uppercase version
+                        // Try to get FileDataID for the uppercase path
                         foreach (var entry in _pathToFileDataIdMap)
                         {
                             if (string.Equals(entry.Key, upperPath, StringComparison.OrdinalIgnoreCase))
                             {
                                 reference.FileDataId = entry.Value;
+                                reference.RepairedPath = entry.Key; // Use the correctly cased path from listfile
                                 _logger.LogDebug($"Assigned FileDataID {entry.Value} from uppercase match to {reference.OriginalPath}");
                                 break;
                             }
@@ -231,12 +232,13 @@ public class ReferenceValidator
                     reference.IsValid = true;
                     reference.ExistsInListfile = true;
                     
-                    // Look for the FileDataID using the uppercase version
+                    // Try to get FileDataID for the uppercase path
                     foreach (var entry in _pathToFileDataIdMap)
                     {
                         if (string.Equals(entry.Key, upperPath, StringComparison.OrdinalIgnoreCase))
                         {
                             reference.FileDataId = entry.Value;
+                            reference.RepairedPath = entry.Key; // Use the correctly cased path from listfile
                             _logger.LogDebug($"Assigned FileDataID {entry.Value} from uppercase match to {reference.OriginalPath}");
                             break;
                         }
@@ -247,39 +249,9 @@ public class ReferenceValidator
             }
         }
         
-        // Validate model placements to ensure they have FileDataIDs
-        foreach (var placement in result.ModelPlacements)
-        {
-            if (!placement.UsesFileDataId && !string.IsNullOrEmpty(placement.Name))
-            {
-                // Try to find the FileDataID for this model
-                var modelRef = result.ModelReferences.FirstOrDefault(r => 
-                    string.Equals(r.OriginalPath, placement.Name, StringComparison.OrdinalIgnoreCase));
-                
-                if (modelRef != null && modelRef.FileDataId > 0)
-                {
-                    placement.FileDataId = modelRef.FileDataId;
-                    _logger.LogDebug($"Assigned FileDataID {modelRef.FileDataId} to model placement {placement.UniqueId}");
-                }
-            }
-        }
-        
-        // Validate WMO placements to ensure they have FileDataIDs
-        foreach (var placement in result.WmoPlacements)
-        {
-            if (!placement.UsesFileDataId && !string.IsNullOrEmpty(placement.Name))
-            {
-                // Try to find the FileDataID for this WMO
-                var wmoRef = result.WmoReferences.FirstOrDefault(r => 
-                    string.Equals(r.OriginalPath, placement.Name, StringComparison.OrdinalIgnoreCase));
-                
-                if (wmoRef != null && wmoRef.FileDataId > 0)
-                {
-                    placement.FileDataId = wmoRef.FileDataId;
-                    _logger.LogDebug($"Assigned FileDataID {wmoRef.FileDataId} to WMO placement {placement.UniqueId}");
-                }
-            }
-        }
+        // Now process all placements to ensure they have FileDataIDs
+        ProcessModelPlacements(result);
+        ProcessWmoPlacements(result);
 
         return invalidCount;
     }
@@ -292,33 +264,59 @@ public class ReferenceValidator
     /// <param name="invalidCount">A reference to the running total of invalid references.</param>
     private void ValidateReference(FileReference reference, HashSet<string> knownGoodFiles, ref int invalidCount)
     {
-        // Check if the file exists in the listfile by path (case-insensitive)
-        bool existsInListfile = knownGoodFiles.Contains(reference.NormalizedPath);
-        reference.ExistsInListfile = existsInListfile;
-        
-        // If the reference has a FileDataID, check if it maps to a known path
+        // First check if the reference already has a valid FileDataID
         if (reference.UsesFileDataId && reference.FileDataId > 0)
         {
+            // Attempt to find the path for this FileDataID in our mapping
             if (_fileDataIdToPathMap.TryGetValue(reference.FileDataId, out string? mappedPath))
             {
                 reference.MatchedByFileDataId = true;
                 reference.RepairedPath = mappedPath;
-                
-                // If the original path doesn't exist but we found it by FileDataID, consider it valid
-                if (!existsInListfile)
-                {
-                    _logger.LogDebug($"Found by FileDataID {reference.FileDataId}: {mappedPath} (original: {reference.OriginalPath})");
-                }
-                
                 reference.IsValid = true;
+                reference.ExistsInListfile = true;
+                _logger.LogDebug($"Found by FileDataID {reference.FileDataId}: {mappedPath} (original: {reference.OriginalPath})");
                 return;
             }
         }
-        // If the reference has a path but no FileDataID, check if we can find a FileDataID for it
-        else if (!reference.UsesFileDataId && _pathToFileDataIdMap.TryGetValue(reference.NormalizedPath, out uint fileDataId))
+        
+        // Check if the file exists in the listfile by path (case-insensitive)
+        bool existsInListfile = knownGoodFiles.Contains(reference.NormalizedPath);
+        reference.ExistsInListfile = existsInListfile;
+        
+        // If exists in listfile, try to get its FileDataID if we don't already have one
+        if (existsInListfile && reference.FileDataId == 0 && 
+            _pathToFileDataIdMap.TryGetValue(reference.NormalizedPath, out uint fileDataId))
         {
             reference.FileDataId = fileDataId;
-            _logger.LogDebug($"Assigned FileDataID {fileDataId} to {reference.OriginalPath}");
+            _logger.LogDebug($"Assigned FileDataID {fileDataId} to {reference.OriginalPath} from direct path match");
+        }
+        
+        // If not found by normalized path, try uppercase matching as a fallback
+        if (!existsInListfile)
+        {
+            string upperPath = reference.NormalizedPath.ToUpperInvariant();
+            
+            // Try to find a match in the all-caps set
+            if (_listfileAllCaps.Contains(upperPath))
+            {
+                _logger.LogDebug($"Found uppercase match for {reference.OriginalPath}");
+                reference.IsValid = true;
+                reference.ExistsInListfile = true;
+                
+                // Find the actual path in the correct case and its FileDataID
+                foreach (var entry in _pathToFileDataIdMap)
+                {
+                    if (string.Equals(entry.Key, upperPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        reference.FileDataId = entry.Value;
+                        reference.RepairedPath = entry.Key; // Use the correctly cased path from listfile
+                        _logger.LogDebug($"Assigned FileDataID {entry.Value} from uppercase match to {reference.OriginalPath}");
+                        break;
+                    }
+                }
+                
+                return;
+            }
         }
         
         // Determine validity based on listfile presence
@@ -327,6 +325,147 @@ public class ReferenceValidator
         if (!reference.IsValid)
         {
             invalidCount++;
+        }
+    }
+    
+    /// <summary>
+    /// Process all model placements to assign FileDataIDs
+    /// </summary>
+    /// <param name="result">The ADT analysis result to process</param>
+    private void ProcessModelPlacements(AdtAnalysisResult result)
+    {
+        foreach (var placement in result.ModelPlacements)
+        {
+            // Skip placements that already use FileDataIDs
+            if (placement.UsesFileDataId && placement.FileDataId > 0)
+            {
+                _logger.LogDebug($"Model placement {placement.UniqueId} already has FileDataID {placement.FileDataId}");
+                continue;
+            }
+            
+            // For placements that have a name but no FileDataID, try to find it
+            if (!string.IsNullOrEmpty(placement.Name))
+            {
+                // First check if there's a matching model reference we can use
+                var modelRef = result.ModelReferences.FirstOrDefault(r => 
+                    string.Equals(r.OriginalPath, placement.Name, StringComparison.OrdinalIgnoreCase));
+                
+                if (modelRef != null && modelRef.FileDataId > 0)
+                {
+                    placement.FileDataId = modelRef.FileDataId;
+                    _logger.LogDebug($"Assigned FileDataID {modelRef.FileDataId} to model placement {placement.UniqueId} from matching reference");
+                }
+                else
+                {
+                    // If no matching reference, try to find the path directly in the listfile
+                    string normalizedPath = PathUtility.NormalizePath(placement.Name);
+                    
+                    // Try direct path first
+                    if (_pathToFileDataIdMap.TryGetValue(normalizedPath, out uint fileDataId))
+                    {
+                        placement.FileDataId = fileDataId;
+                        _logger.LogDebug($"Assigned FileDataID {fileDataId} to model placement {placement.UniqueId} from path lookup");
+                    }
+                    // Then try uppercase match
+                    else 
+                    {
+                        string upperPath = normalizedPath.ToUpperInvariant();
+                        
+                        // Look for the uppercase path in our dictionary
+                        foreach (var entry in _pathToFileDataIdMap)
+                        {
+                            if (string.Equals(entry.Key, upperPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                placement.FileDataId = entry.Value;
+                                _logger.LogDebug($"Assigned FileDataID {entry.Value} to model placement {placement.UniqueId} from uppercase match");
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Try alternative extensions for M2/MDX
+                    if (placement.FileDataId == 0)
+                    {
+                        if (normalizedPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string altPath = normalizedPath.Substring(0, normalizedPath.Length - 3) + ".mdx";
+                            if (_pathToFileDataIdMap.TryGetValue(altPath, out uint altFileDataId))
+                            {
+                                placement.FileDataId = altFileDataId;
+                                _logger.LogDebug($"Assigned FileDataID {altFileDataId} to model placement {placement.UniqueId} from .mdx alternative");
+                            }
+                        }
+                        else if (normalizedPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string altPath = normalizedPath.Substring(0, normalizedPath.Length - 4) + ".m2";
+                            if (_pathToFileDataIdMap.TryGetValue(altPath, out uint altFileDataId))
+                            {
+                                placement.FileDataId = altFileDataId;
+                                _logger.LogDebug($"Assigned FileDataID {altFileDataId} to model placement {placement.UniqueId} from .m2 alternative");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Process all WMO placements to assign FileDataIDs
+    /// </summary>
+    /// <param name="result">The ADT analysis result to process</param>
+    private void ProcessWmoPlacements(AdtAnalysisResult result)
+    {
+        foreach (var placement in result.WmoPlacements)
+        {
+            // Skip placements that already use FileDataIDs
+            if (placement.UsesFileDataId && placement.FileDataId > 0)
+            {
+                _logger.LogDebug($"WMO placement {placement.UniqueId} already has FileDataID {placement.FileDataId}");
+                continue;
+            }
+            
+            // For placements that have a name but no FileDataID, try to find it
+            if (!string.IsNullOrEmpty(placement.Name))
+            {
+                // First check if there's a matching WMO reference we can use
+                var wmoRef = result.WmoReferences.FirstOrDefault(r => 
+                    string.Equals(r.OriginalPath, placement.Name, StringComparison.OrdinalIgnoreCase));
+                
+                if (wmoRef != null && wmoRef.FileDataId > 0)
+                {
+                    placement.FileDataId = wmoRef.FileDataId;
+                    _logger.LogDebug($"Assigned FileDataID {wmoRef.FileDataId} to WMO placement {placement.UniqueId} from matching reference");
+                }
+                else
+                {
+                    // If no matching reference, try to find the path directly in the listfile
+                    string normalizedPath = PathUtility.NormalizePath(placement.Name);
+                    
+                    // Try direct path first
+                    if (_pathToFileDataIdMap.TryGetValue(normalizedPath, out uint fileDataId))
+                    {
+                        placement.FileDataId = fileDataId;
+                        _logger.LogDebug($"Assigned FileDataID {fileDataId} to WMO placement {placement.UniqueId} from path lookup");
+                    }
+                    // Then try uppercase match
+                    else
+                    {
+                        string upperPath = normalizedPath.ToUpperInvariant();
+                        
+                        // Look for the uppercase path in our dictionary
+                        foreach (var entry in _pathToFileDataIdMap)
+                        {
+                            if (string.Equals(entry.Key, upperPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                placement.FileDataId = entry.Value;
+                                _logger.LogDebug($"Assigned FileDataID {entry.Value} to WMO placement {placement.UniqueId} from uppercase match");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

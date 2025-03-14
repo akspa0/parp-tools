@@ -86,6 +86,34 @@ namespace WCAnalyzer.Core.Models
         /// Gets or sets detailed information about WMO placements.
         /// </summary>
         public List<WmoPlacementInfo> WmoPlacementDetails { get; set; } = new List<WmoPlacementInfo>();
+        
+        /// <summary>
+        /// Gets or sets a dictionary of additional properties for the ADT file.
+        /// </summary>
+        /// <remarks>
+        /// Used to store additional information that doesn't fit into the standard properties,
+        /// such as whether the file uses FileDataIDs.
+        /// </remarks>
+        public Dictionary<string, object> Properties { get; set; } = new Dictionary<string, object>();
+        
+        /// <summary>
+        /// Gets whether the ADT file uses FileDataIDs.
+        /// </summary>
+        public bool UsesFileDataId 
+        {
+            get
+            {
+                if (Properties.TryGetValue("UsesFileDataId", out var value) && value is bool boolValue)
+                {
+                    return boolValue;
+                }
+                return false;
+            }
+            set
+            {
+                Properties["UsesFileDataId"] = value;
+            }
+        }
     }
 
     /// <summary>
@@ -206,12 +234,18 @@ namespace WCAnalyzer.Core.Models
         /// <summary>
         /// Gets or sets the scale of the model placement.
         /// </summary>
+        /// <remarks>
+        /// This is calculated from the ushort ScalingFactor where 1024 = 1.0f
+        /// </remarks>
         public float Scale { get; set; }
 
         /// <summary>
         /// Gets or sets the flags of the model placement.
         /// </summary>
-        public int Flags { get; set; }
+        /// <remarks>
+        /// In Warcraft.NET, this is MDDFFlags, which is a ushort enum.
+        /// </remarks>
+        public ushort Flags { get; set; }
         
         /// <summary>
         /// Gets or sets whether the NameId is a FileDataID.
@@ -219,6 +253,7 @@ namespace WCAnalyzer.Core.Models
         /// <remarks>
         /// In newer versions of the ADT format, NameId can be a direct FileDataID
         /// instead of an index into the model name list.
+        /// This is determined by checking if the 0x40 bit is set in Flags (MDDFFlags.NameIdIsFiledataId).
         /// </remarks>
         public bool NameIdIsFileDataId { get; set; }
     }

@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Utilities;
+// Use explicit alias to avoid ambiguity
+using ServicesSummary = WCAnalyzer.Core.Services.AnalysisSummary;
 
 namespace WCAnalyzer.Core.Services
 {
@@ -27,7 +30,10 @@ namespace WCAnalyzer.Core.Services
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _jsonOptions = new JsonSerializerOptions
             {
-                WriteIndented = true
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                IgnoreReadOnlyProperties = false,
+                IncludeFields = true
             };
         }
 
@@ -38,7 +44,7 @@ namespace WCAnalyzer.Core.Services
         /// <param name="summary">The analysis summary.</param>
         /// <param name="outputDirectory">The directory to write reports to.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task GenerateAllReportsAsync(List<AdtAnalysisResult> results, AnalysisSummary summary, string outputDirectory)
+        public async Task GenerateAllReportsAsync(List<AdtAnalysisResult> results, ServicesSummary summary, string outputDirectory)
         {
             if (results == null)
                 throw new ArgumentNullException(nameof(results));
@@ -152,7 +158,7 @@ namespace WCAnalyzer.Core.Services
         /// <param name="summary">The analysis summary.</param>
         /// <param name="outputDirectory">The directory to write the file to.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        private async Task GenerateSummaryAsync(AnalysisSummary summary, string outputDirectory)
+        private async Task GenerateSummaryAsync(ServicesSummary summary, string outputDirectory)
         {
             var filePath = Path.Combine(outputDirectory, "summary.json");
             _logger.LogDebug("Generating summary JSON: {FilePath}", filePath);
@@ -184,7 +190,7 @@ namespace WCAnalyzer.Core.Services
         /// <param name="summary">The analysis summary.</param>
         /// <param name="outputDirectory">The directory to write the file to.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        private async Task GenerateAreaIdsAsync(AnalysisSummary summary, string outputDirectory)
+        private async Task GenerateAreaIdsAsync(ServicesSummary summary, string outputDirectory)
         {
             var filePath = Path.Combine(outputDirectory, "area_ids.json");
             _logger.LogDebug("Generating area IDs JSON: {FilePath}", filePath);
@@ -246,19 +252,24 @@ namespace WCAnalyzer.Core.Services
                 {
                     FileName = r.FileName,
                     TexturePath = t.OriginalPath,
-                    NormalizedPath = t.NormalizedPath,
+                    // Only include normalizedPath if it differs significantly from OriginalPath
+                    NormalizedPath = t.NormalizedPath != t.OriginalPath.ToLowerInvariant() ? t.NormalizedPath : null,
                     ExistsInListfile = t.ExistsInListfile,
-                    IsValid = t.IsValid,
-                    RepairedPath = t.RepairedPath
+                    FileDataId = t.FileDataId > 0 ? (uint?)t.FileDataId : null,
+                    SourceAdtX = r.XCoord,
+                    SourceAdtY = r.YCoord
                 }))
                 .GroupBy(t => t.TexturePath)
                 .Select(g => new
                 {
                     TexturePath = g.Key,
-                    Count = g.Count(),
-                    UsedIn = g.Select(t => t.FileName).Distinct().ToList()
+                    NormalizedPath = g.First().NormalizedPath,
+                    ExistsInListfile = g.First().ExistsInListfile,
+                    FileDataId = g.First().FileDataId,
+                    ReferenceCount = g.Count(),
+                    SourceAdts = g.Select(t => new { X = t.SourceAdtX, Y = t.SourceAdtY }).ToList()
                 })
-                .OrderByDescending(t => t.Count)
+                .OrderBy(t => t.TexturePath)
                 .ToList();
 
             var json = JsonSerializer.Serialize(textureReferencesJson, _jsonOptions);
@@ -281,19 +292,24 @@ namespace WCAnalyzer.Core.Services
                 {
                     FileName = r.FileName,
                     ModelPath = m.OriginalPath,
-                    NormalizedPath = m.NormalizedPath,
+                    // Only include normalizedPath if it differs significantly from OriginalPath
+                    NormalizedPath = m.NormalizedPath != m.OriginalPath.ToLowerInvariant() ? m.NormalizedPath : null,
                     ExistsInListfile = m.ExistsInListfile,
-                    IsValid = m.IsValid,
-                    RepairedPath = m.RepairedPath
+                    FileDataId = m.FileDataId > 0 ? (uint?)m.FileDataId : null,
+                    SourceAdtX = r.XCoord,
+                    SourceAdtY = r.YCoord
                 }))
                 .GroupBy(m => m.ModelPath)
                 .Select(g => new
                 {
                     ModelPath = g.Key,
-                    Count = g.Count(),
-                    UsedIn = g.Select(m => m.FileName).Distinct().ToList()
+                    NormalizedPath = g.First().NormalizedPath,
+                    ExistsInListfile = g.First().ExistsInListfile,
+                    FileDataId = g.First().FileDataId,
+                    ReferenceCount = g.Count(),
+                    SourceAdts = g.Select(m => new { X = m.SourceAdtX, Y = m.SourceAdtY }).ToList()
                 })
-                .OrderByDescending(m => m.Count)
+                .OrderBy(m => m.ModelPath)
                 .ToList();
 
             var json = JsonSerializer.Serialize(modelReferencesJson, _jsonOptions);
@@ -316,19 +332,24 @@ namespace WCAnalyzer.Core.Services
                 {
                     FileName = r.FileName,
                     WmoPath = w.OriginalPath,
-                    NormalizedPath = w.NormalizedPath,
+                    // Only include normalizedPath if it differs significantly from OriginalPath
+                    NormalizedPath = w.NormalizedPath != w.OriginalPath.ToLowerInvariant() ? w.NormalizedPath : null,
                     ExistsInListfile = w.ExistsInListfile,
-                    IsValid = w.IsValid,
-                    RepairedPath = w.RepairedPath
+                    FileDataId = w.FileDataId > 0 ? (uint?)w.FileDataId : null,
+                    SourceAdtX = r.XCoord,
+                    SourceAdtY = r.YCoord
                 }))
                 .GroupBy(w => w.WmoPath)
                 .Select(g => new
                 {
                     WmoPath = g.Key,
-                    Count = g.Count(),
-                    UsedIn = g.Select(w => w.FileName).Distinct().ToList()
+                    NormalizedPath = g.First().NormalizedPath,
+                    ExistsInListfile = g.First().ExistsInListfile,
+                    FileDataId = g.First().FileDataId,
+                    ReferenceCount = g.Count(),
+                    SourceAdts = g.Select(w => new { X = w.SourceAdtX, Y = w.SourceAdtY }).ToList()
                 })
-                .OrderByDescending(w => w.Count)
+                .OrderBy(w => w.WmoPath)
                 .ToList();
 
             var json = JsonSerializer.Serialize(wmoReferencesJson, _jsonOptions);
@@ -359,7 +380,10 @@ namespace WCAnalyzer.Core.Services
                     Position = new { X = m.Position.X, Y = m.Position.Y, Z = m.Position.Z },
                     Rotation = new { X = m.Rotation.X, Y = m.Rotation.Y, Z = m.Rotation.Z },
                     Scale = m.Scale,
-                    Flags = m.Flags
+                    Flags = m.Flags,
+                    // Add FileDataId if it's using one
+                    FileDataId = m.UsesFileDataId ? (uint?)m.FileDataId : null,
+                    UsesFileDataId = m.UsesFileDataId ? (bool?)true : null
                 }).ToList()
             }).ToList();
 
@@ -392,7 +416,11 @@ namespace WCAnalyzer.Core.Services
                     Rotation = new { X = w.Rotation.X, Y = w.Rotation.Y, Z = w.Rotation.Z },
                     DoodadSet = w.DoodadSet,
                     NameSet = w.NameSet,
-                    Flags = w.Flags
+                    Flags = w.Flags,
+                    Scale = w.Scale > 0 ? (float?)w.Scale : null, // Only include scale if it's non-zero
+                    // Add FileDataId if it's using one
+                    FileDataId = w.UsesFileDataId ? (uint?)w.FileDataId : null,
+                    UsesFileDataId = w.UsesFileDataId ? (bool?)true : null
                 }).ToList()
             }).ToList();
 

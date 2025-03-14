@@ -212,38 +212,3 @@ public class AdtAnalyzer
         return result;
     }
 }
-
-public class AnalysisSummary
-{
-    public int TotalFiles { get; set; }
-    public int ProcessedFiles { get; set; }
-    public int FailedFiles { get; set; }
-    public int TotalTextureReferences { get; set; }
-    public int TotalModelReferences { get; set; }
-    public int TotalWmoReferences { get; set; }
-    public int TotalModelPlacements { get; set; }
-    public int TotalWmoPlacements { get; set; }
-    public int TotalTerrainChunks { get; set; }
-    public int ParsingErrors { get; set; }
-    public int MissingReferences { get; set; }
-    public int FilesNotInListfile { get; set; }
-    public int DuplicateIds { get; set; }
-    public int MaxUniqueId { get; set; }
-    public Dictionary<int, HashSet<string>> AreaIdMap { get; set; } = new();
-    public Dictionary<string, HashSet<string>> MissingReferenceMap { get; set; } = new();
-    public Dictionary<string, HashSet<string>> FilesNotInListfileMap { get; set; } = new();
-    public Dictionary<int, HashSet<string>> DuplicateIdMap { get; set; } = new();
-    public HashSet<int> DuplicateIdSet { get; set; } = new();
-    public int TotalTextureLayers { get; set; }
-    public int TotalDoodadReferences { get; set; }
-    
-    // Add missing properties
-    public DateTime StartTime { get; set; } = DateTime.Now;
-    public DateTime EndTime { get; set; }
-    public TimeSpan Duration => EndTime - StartTime;
-
-    public void Complete()
-    {
-        EndTime = DateTime.Now;
-    }
-}

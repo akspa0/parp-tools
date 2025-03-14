@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using System.Numerics;
 using WCAnalyzer.Core.Models;
+using WCAnalyzer.Core.Utilities;
 
 namespace WCAnalyzer.Core.Services
 {
@@ -47,7 +48,7 @@ namespace WCAnalyzer.Core.Services
                 adtInfo.FileName = Path.GetFileName(filePath);
 
                 // Convert to AdtAnalysisResult
-                var result = ConvertToAdtAnalysisResult(adtInfo);
+                var result = ConvertToAdtAnalysisResult(adtInfo, filePath);
                 
                 return result;
             }
@@ -75,11 +76,17 @@ namespace WCAnalyzer.Core.Services
             // Create an AdtInfo object to store the parsing results
             var adtInfo = new AdtInfo();
             
+            // Add a property to track whether the ADT file is using FileDataIDs
+            bool isUsingFileDataId = false;
+            
             // Check if this is a tex0 or obj0 file based on file size and initial bytes
             bool isSpecialFile = false;
+            bool isMonolithicAdt = true; // Default assumption is that this is a standard monolithic ADT
+            
             if (fileData.Length < 1024) // Small files are likely not standard ADT files
             {
                 isSpecialFile = true;
+                isMonolithicAdt = false;
                 _logger.LogDebug("File appears to be a special/auxiliary ADT file (small size: {Size} bytes)", fileData.Length);
             }
             
@@ -102,6 +109,7 @@ namespace WCAnalyzer.Core.Services
                 {
                     // If it doesn't start with MVER or REVM, it's probably a special file
                     isSpecialFile = true;
+                    isMonolithicAdt = false;
                     _logger.LogDebug("File does not start with standard ADT header (MVER)");
                 }
 
@@ -215,6 +223,128 @@ namespace WCAnalyzer.Core.Services
                                     _logger.LogDebug("Found {Count} model names in special file", adtInfo.ModelNames.Count);
                                     break;
                                     
+                                case "MODF": // WMO placement chunk (might exist in special files)
+                                    try
+                                    {
+                                        var wmoPlacementCount = chunkSize / 64; // Each WMO placement is 64 bytes
+                                        _logger.LogDebug("Found MODF chunk with {Count} WMO placements", wmoPlacementCount);
+                                        
+                                        adtInfo.WmoPlacements = (int)wmoPlacementCount;
+                                        
+                                        for (int i = 0; i < wmoPlacementCount; i++)
+                                        {
+                                            // Make sure we always process WMO placements regardless of file type
+                                            // Parse WMO placement data here and add to adtInfo
+                                            uint nameId = br.ReadUInt32();
+                                            uint uniqueId = br.ReadUInt32();
+                                            float pos_x = br.ReadSingle();
+                                            float pos_y = br.ReadSingle();
+                                            float pos_z = br.ReadSingle();
+                                            float rot_x = br.ReadSingle();
+                                            float rot_y = br.ReadSingle();
+                                            float rot_z = br.ReadSingle();
+                                            // Skip bounding box (6 floats) and flags (2 uints)
+                                            ms.Position += 32;
+                                            
+                                            // Determine if we're using a FileDataID based on flags
+                                            bool nameIdIsFileDataId = false; // Default assumption
+                                            
+                                            // Get the WMO name from index or store FileDataID
+                                            string wmoName = string.Empty;
+                                            if (!nameIdIsFileDataId && nameId < adtInfo.WmoNames.Count)
+                                            {
+                                                wmoName = adtInfo.WmoNames[(int)nameId];
+                                            }
+                                            else
+                                            {
+                                                wmoName = $"<unknown WMO {nameId}>";
+                                            }
+                                            
+                                            // Store the placement information
+                                            var wmoPlacement = new WmoPlacementInfo
+                                            {
+                                                NameId = nameId,
+                                                UniqueId = (int)uniqueId,
+                                                Position = new System.Numerics.Vector3(pos_x, pos_y, pos_z),
+                                                Rotation = new System.Numerics.Vector3(rot_x, rot_y, rot_z),
+                                                NameIdIsFileDataId = nameIdIsFileDataId
+                                            };
+                                            
+                                            adtInfo.WmoPlacementDetails.Add(wmoPlacement);
+                                            
+                                            _logger.LogDebug("WMO Placement: {UniqueId}, Position: ({X}, {Y}, {Z}), NameIdIsFileDataId: {UsesFileDataId}",
+                                                uniqueId, pos_x, pos_y, pos_z, nameIdIsFileDataId);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Error parsing MODF chunk in special file");
+                                        ms.Position += chunkSize;
+                                    }
+                                    break;
+                                
+                                case "MDDF": // Model placement chunk (might exist in special files)
+                                    try
+                                    {
+                                        var modelPlacementCount = chunkSize / 36; // Each model placement is 36 bytes
+                                        _logger.LogDebug("Found MDDF chunk with {Count} model placements", modelPlacementCount);
+                                        
+                                        adtInfo.ModelPlacements = (int)modelPlacementCount;
+                                        
+                                        for (int i = 0; i < modelPlacementCount; i++)
+                                        {
+                                            // Make sure we always process model placements regardless of file type
+                                            // Parse model placement data here and add to adtInfo
+                                            uint nameId = br.ReadUInt32();
+                                            uint uniqueId = br.ReadUInt32();
+                                            float pos_x = br.ReadSingle();
+                                            float pos_y = br.ReadSingle();
+                                            float pos_z = br.ReadSingle();
+                                            float rot_x = br.ReadSingle();
+                                            float rot_y = br.ReadSingle();
+                                            float rot_z = br.ReadSingle();
+                                            float scale = br.ReadSingle();
+                                            // Skip flags (1 uint)
+                                            ms.Position += 4;
+                                            
+                                            // Determine if we're using a FileDataID based on flags
+                                            bool nameIdIsFileDataId = false; // Default assumption
+                                            
+                                            // Get the model name from index or store FileDataID
+                                            string modelName = string.Empty;
+                                            if (!nameIdIsFileDataId && nameId < adtInfo.ModelNames.Count)
+                                            {
+                                                modelName = adtInfo.ModelNames[(int)nameId];
+                                            }
+                                            else
+                                            {
+                                                modelName = $"<unknown Model {nameId}>";
+                                            }
+                                            
+                                            // Store the placement information
+                                            var modelPlacement = new ModelPlacementInfo
+                                            {
+                                                NameId = nameId,
+                                                UniqueId = (int)uniqueId,
+                                                Position = new System.Numerics.Vector3(pos_x, pos_y, pos_z),
+                                                Rotation = new System.Numerics.Vector3(rot_x, rot_y, rot_z),
+                                                Scale = scale,
+                                                NameIdIsFileDataId = nameIdIsFileDataId
+                                            };
+                                            
+                                            adtInfo.ModelPlacementDetails.Add(modelPlacement);
+                                            
+                                            _logger.LogDebug("Model Placement: {UniqueId}, Position: ({X}, {Y}, {Z}), Scale: {Scale}, NameIdIsFileDataId: {UsesFileDataId}",
+                                                uniqueId, pos_x, pos_y, pos_z, scale, nameIdIsFileDataId);
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogWarning(ex, "Error parsing MDDF chunk in special file");
+                                        ms.Position += chunkSize;
+                                    }
+                                    break;
+                                
                                 default:
                                     // Skip unrecognized chunks in special files
                                     _logger.LogDebug("Skipping unrecognized chunk {ChunkId} in special file, size: {Size}", possibleChunkId, chunkSize);
@@ -636,92 +766,6 @@ namespace WCAnalyzer.Core.Services
                                 _logger.LogDebug("Found {Count} WMO names", adtInfo.WmoNames.Count);
                                 break;
                                 
-                            case "MDDF": // Model placements chunk
-                                _logger.LogDebug("Found MDDF chunk, size: {Size}", chunkSize);
-                                int modelPlacementCount = (int)(chunkSize / 36); // Each entry is 36 bytes
-                                adtInfo.ModelPlacements = modelPlacementCount;
-                                
-                                // Read actual model placement data
-                                for (int i = 0; i < modelPlacementCount; i++)
-                                {
-                                    var placement = new ModelPlacementInfo();
-                                    
-                                    // Read basic info
-                                    placement.NameId = (uint)br.ReadInt32();
-                                    placement.UniqueId = br.ReadInt32();
-                                    
-                                    // Read position
-                                    placement.Position = new Vector3(
-                                        br.ReadSingle(),
-                                        br.ReadSingle(),
-                                        br.ReadSingle()
-                                    );
-                                    
-                                    // Read rotation
-                                    placement.Rotation = new Vector3(
-                                        br.ReadSingle(),
-                                        br.ReadSingle(),
-                                        br.ReadSingle()
-                                    );
-                                    
-                                    // Read scale
-                                    placement.Scale = br.ReadSingle();
-                                    
-                                    // Read flags
-                                    placement.Flags = br.ReadInt32();
-                                    
-                                    // Check if the flags indicate that NameId is a FileDataID
-                                    bool nameIdIsFileDataId = (placement.Flags & 0x40) != 0; // 0x40 is MDDFFlags.NameIdIsFiledataId
-                                    placement.NameIdIsFileDataId = nameIdIsFileDataId;
-                                    
-                                    // Validate data to ensure it's reasonable
-                                    bool isValid = true;
-                                    
-                                    // Check for unreasonably large or small values
-                                    if (float.IsNaN(placement.Scale) || float.IsInfinity(placement.Scale) || 
-                                        placement.Scale < 0.01f || placement.Scale > 100.0f)
-                                    {
-                                        _logger.LogWarning("Skipping model placement with invalid scale: {Scale}", placement.Scale);
-                                        isValid = false;
-                                    }
-                                    
-                                    // Check for unreasonably large IDs - unless it's a FileDataID which can be large
-                                    if (!nameIdIsFileDataId && placement.NameId > 10000)
-                                    {
-                                        _logger.LogWarning("Skipping model placement with suspicious NameId: {NameId}", placement.NameId);
-                                        isValid = false;
-                                    }
-                                    
-                                    // Validate position and rotation to ensure they're within reasonable ranges
-                                    if (IsInvalidVector(placement.Position) || IsInvalidVector(placement.Rotation))
-                                    {
-                                        _logger.LogWarning("Skipping model placement with invalid position or rotation: Position={Position}, Rotation={Rotation}",
-                                            placement.Position, placement.Rotation);
-                                        isValid = false;
-                                    }
-                                    
-                                    if (isValid)
-                                    {
-                                        // Add to list
-                                        adtInfo.ModelPlacementDetails.Add(placement);
-                                        
-                                        // Add unique ID
-                                        if (placement.UniqueId != 0 && !adtInfo.UniqueIds.Contains(placement.UniqueId))
-                                        {
-                                            adtInfo.UniqueIds.Add(placement.UniqueId);
-                                        }
-                                        
-                                        // Log if this is using a FileDataID
-                                        if (nameIdIsFileDataId)
-                                        {
-                                            _logger.LogDebug("Model placement using FileDataID: {FileDataID}", placement.NameId);
-                                        }
-                                    }
-                                }
-                                
-                                _logger.LogDebug("Read {Count} model placements", adtInfo.ModelPlacementDetails.Count);
-                                break;
-                                
                             case "MODF": // WMO placements chunk
                                 _logger.LogDebug("Found MODF chunk, size: {Size}", chunkSize);
                                 int wmoPlacementCount = (int)(chunkSize / 64); // Each entry is 64 bytes
@@ -835,11 +879,101 @@ namespace WCAnalyzer.Core.Services
                                         if (nameIdIsFileDataId)
                                         {
                                             _logger.LogDebug("WMO placement using FileDataID: {FileDataID}", placement.NameId);
+                                            isUsingFileDataId = true;
                                         }
                                     }
                                 }
                                 
                                 _logger.LogDebug("Read {Count} WMO placements", adtInfo.WmoPlacementDetails.Count);
+                                break;
+                            
+                            case "MDDF": // Model placement chunk
+                                _logger.LogDebug("Found MDDF chunk, size: {Size}", chunkSize);
+                                int modelPlacementCount = (int)(chunkSize / 36); // Each entry is 36 bytes
+                                adtInfo.ModelPlacements = modelPlacementCount;
+                                
+                                // Read actual model placement data
+                                for (int i = 0; i < modelPlacementCount; i++)
+                                {
+                                    var placement = new ModelPlacementInfo();
+                                    
+                                    // Read basic info - using Warcraft.NET's exact format
+                                    placement.NameId = br.ReadUInt32();
+                                    placement.UniqueId = (int)br.ReadUInt32(); // UniqueID is uint in Warcraft.NET's MDDFEntry
+                                    
+                                    // Read position
+                                    placement.Position = new Vector3(
+                                        br.ReadSingle(),
+                                        br.ReadSingle(),
+                                        br.ReadSingle()
+                                    );
+                                    
+                                    // Read rotation
+                                    placement.Rotation = new Vector3(
+                                        br.ReadSingle(),
+                                        br.ReadSingle(),
+                                        br.ReadSingle()
+                                    );
+                                    
+                                    // Read scale - IMPORTANT: In Warcraft.NET, this is a ushort ScalingFactor, not a float
+                                    // 1024 = 1.0f scale, so we need to convert
+                                    ushort scalingFactor = br.ReadUInt16();
+                                    placement.Scale = scalingFactor / 1024.0f; // Convert from ushort (1024=1.0f) to float
+                                    
+                                    // Read flags
+                                    ushort flags = br.ReadUInt16(); // In Warcraft.NET MDDFEntry, Flags is MDDFFlags enum (ushort)
+                                    placement.Flags = flags;
+                                    
+                                    // Check if the flags indicate that NameId is a FileDataID
+                                    // In MDDFFlags, NameIdIsFiledataId = 0x40
+                                    bool nameIdIsFileDataId = (flags & 0x40) != 0;
+                                    placement.NameIdIsFileDataId = nameIdIsFileDataId;
+                                    
+                                    // Validate data to ensure it's reasonable
+                                    bool isValid = true;
+                                    
+                                    // Check for unreasonably large IDs - unless it's a FileDataID which can be large
+                                    if (!nameIdIsFileDataId && placement.NameId > 10000)
+                                    {
+                                        _logger.LogWarning("Skipping model placement with suspicious NameId: {NameId}", placement.NameId);
+                                        isValid = false;
+                                    }
+                                    
+                                    // Validate position and rotation to ensure they're within reasonable ranges
+                                    if (IsInvalidVector(placement.Position) || IsInvalidVector(placement.Rotation))
+                                    {
+                                        _logger.LogWarning("Skipping model placement with invalid position or rotation: Position={Position}, Rotation={Rotation}",
+                                            placement.Position, placement.Rotation);
+                                        isValid = false;
+                                    }
+                                    
+                                    if (isValid)
+                                    {
+                                        // Add to list
+                                        adtInfo.ModelPlacementDetails.Add(placement);
+                                        
+                                        // Add unique ID
+                                        if (placement.UniqueId != 0 && !adtInfo.UniqueIds.Contains(placement.UniqueId))
+                                        {
+                                            adtInfo.UniqueIds.Add(placement.UniqueId);
+                                        }
+                                        
+                                        // Log details for debugging
+                                        _logger.LogDebug("Model Placement {Index}: NameId={NameId}, UniqueId={UniqueId}, Position=({X}, {Y}, {Z}), Scale={Scale}, FileDataID={IsFileDataId}",
+                                            i, placement.NameId, placement.UniqueId, 
+                                            placement.Position.X, placement.Position.Y, placement.Position.Z, 
+                                            placement.Scale, nameIdIsFileDataId);
+                                        
+                                        // Log if this is using a FileDataID
+                                        if (nameIdIsFileDataId)
+                                        {
+                                            _logger.LogDebug("Model placement using FileDataID: {FileDataID}", placement.NameId);
+                                            isUsingFileDataId = true;
+                                        }
+                                    }
+                                }
+                                
+                                _logger.LogDebug("Read {Count} model placements", adtInfo.ModelPlacementDetails.Count);
                                 break;
                             
                             default:
@@ -874,6 +1008,15 @@ namespace WCAnalyzer.Core.Services
                     }
                 }
             }
+            
+            // Handle case of a standard monolithic ADT that should contain all data
+            if (isMonolithicAdt)
+            {
+                _logger.LogDebug("Processing monolithic ADT with all data embedded");
+            }
+
+            // At the end of the method, update the adtInfo with our findings
+            adtInfo.UsesFileDataId = isUsingFileDataId;
             
             return adtInfo;
         }
@@ -923,298 +1066,361 @@ namespace WCAnalyzer.Core.Services
         }
 
         /// <summary>
-        /// Converts an AdtInfo object to an AdtAnalysisResult object.
+        /// Converts ADT info to an analysis result.
         /// </summary>
-        /// <param name="adtInfo">The AdtInfo object to convert.</param>
-        /// <returns>An AdtAnalysisResult object.</returns>
-        private AdtAnalysisResult ConvertToAdtAnalysisResult(AdtInfo adtInfo)
+        /// <param name="adtInfo">The ADT info to convert.</param>
+        /// <param name="filePath">The path to the ADT file.</param>
+        /// <returns>An ADT analysis result.</returns>
+        private AdtAnalysisResult ConvertToAdtAnalysisResult(AdtInfo adtInfo, string filePath)
         {
+            // Log the raw ADT info we're converting
+            _logger.LogDebug("Converting ADT info to analysis result - File: {FilePath}, Model Placements: {ModelCount}, WMO Placements: {WmoCount}, Textures: {TextureCount}",
+                filePath, adtInfo.ModelPlacementDetails.Count, adtInfo.WmoPlacementDetails.Count, adtInfo.TextureNames.Count);
+
             var result = new AdtAnalysisResult
             {
-                FilePath = adtInfo.FilePath ?? string.Empty,
-                FileName = adtInfo.FileName ?? string.Empty,
-                AdtVersion = (uint)adtInfo.Version
+                FileName = Path.GetFileName(filePath),
+                FilePath = filePath,
+                AdtVersion = (uint)adtInfo.Version,
+                UsesFileDataId = adtInfo.UsesFileDataId,
+                Header = new AdtHeader
+                {
+                    Flags = adtInfo.Flags,
+                    TextureLayerCount = adtInfo.TextureNames.Count,
+                    TerrainChunkCount = (int)adtInfo.TerrainChunks,
+                    ModelReferenceCount = adtInfo.ModelNames.Count,
+                    WmoReferenceCount = adtInfo.WmoNames.Count,
+                    ModelPlacementCount = adtInfo.ModelPlacementDetails.Count,
+                    WmoPlacementCount = adtInfo.WmoPlacementDetails.Count,
+                    // Assuming DoodadReferenceCount should be 0 if not tracking doodads separately
+                    DoodadReferenceCount = 0 
+                }
             };
 
             // Extract coordinates from filename
-            ExtractCoordinatesFromFilename(result);
-
-            // Set header information
-            result.Header = new AdtHeader
+            var match = CoordinateRegex.Match(result.FileName);
+            if (match.Success)
             {
-                Flags = adtInfo.Flags,
-                TerrainChunkCount = adtInfo.TerrainChunks,
-                TextureLayerCount = adtInfo.TextureNames.Count,
-                ModelReferenceCount = adtInfo.ModelNames.Count,
-                WmoReferenceCount = adtInfo.WmoNames.Count,
-                ModelPlacementCount = adtInfo.ModelPlacements,
-                WmoPlacementCount = adtInfo.WmoPlacements
-            };
+                if (int.TryParse(match.Groups[1].Value, out int x))
+                    result.XCoord = x;
 
-            // Convert texture names to texture references
+                if (int.TryParse(match.Groups[2].Value, out int y))
+                    result.YCoord = y;
+            }
+
+            // Process texture references
             foreach (var textureName in adtInfo.TextureNames)
             {
-                result.TextureReferences.Add(new FileReference
+                if (string.IsNullOrEmpty(textureName) || textureName.StartsWith("<unknown", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var textureReference = new FileReference
                 {
                     OriginalPath = textureName,
-                    NormalizedPath = textureName.ToLowerInvariant(),
+                    NormalizedPath = Utilities.PathUtility.NormalizePath(textureName),
                     Type = FileReferenceType.Texture
-                });
-            }
-
-            // Convert model names to model references
-            foreach (var modelName in adtInfo.ModelNames)
-            {
-                result.ModelReferences.Add(new FileReference
-                {
-                    OriginalPath = modelName,
-                    NormalizedPath = modelName.ToLowerInvariant(),
-                    Type = FileReferenceType.Model
-                });
-            }
-
-            // Convert WMO names to WMO references
-            foreach (var wmoName in adtInfo.WmoNames)
-            {
-                result.WmoReferences.Add(new FileReference
-                {
-                    OriginalPath = wmoName,
-                    NormalizedPath = wmoName.ToLowerInvariant(),
-                    Type = FileReferenceType.Wmo
-                });
-            }
-
-            // Create terrain chunks with actual data
-            for (int i = 0; i < adtInfo.TerrainChunkDetails.Count; i++)
-            {
-                var chunkInfo = adtInfo.TerrainChunkDetails[i];
-                var chunk = new TerrainChunk
-                {
-                    AreaId = chunkInfo.AreaId,
-                    Flags = (uint)chunkInfo.Flags,
-                    Position = new System.Drawing.Point(i % 16, i / 16), // Assuming standard 16x16 grid layout
-                    WorldPosition = new Vector3(chunkInfo.X, chunkInfo.Y, chunkInfo.Z),
-                    Heights = new float[145], // 9x9 heightmap grid vertices plus padding (9*9*1 = 81)
-                    Normals = new Vector3[145], // Same as heights
-                    VertexColors = new List<Vector3>(),
-                    AlphaMaps = new List<byte[]>(),
-                    LiquidLevel = 0.0f
                 };
 
-                // Copy height data if available
-                if (chunkInfo.Heights != null && chunkInfo.Heights.Length > 0)
+                // Avoid duplicates
+                if (!result.TextureReferences.Any(t => t.NormalizedPath == textureReference.NormalizedPath))
                 {
-                    // Copy the actual height values
-                    Array.Copy(chunkInfo.Heights, chunk.Heights, Math.Min(chunkInfo.Heights.Length, chunk.Heights.Length));
-                    _logger.LogDebug("Copied {Count} height values for chunk {Index}", 
-                        Math.Min(chunkInfo.Heights.Length, chunk.Heights.Length), i);
+                    result.TextureReferences.Add(textureReference);
                 }
+            }
 
-                // Copy normal data if available
-                if (chunkInfo.Normals != null && chunkInfo.Normals.Length > 0)
-                {
-                    // Copy the actual normal values
-                    Array.Copy(chunkInfo.Normals, chunk.Normals, Math.Min(chunkInfo.Normals.Length, chunk.Normals.Length));
-                    _logger.LogDebug("Copied {Count} normal values for chunk {Index}", 
-                        Math.Min(chunkInfo.Normals.Length, chunk.Normals.Length), i);
-                }
+            // Log the number of texture references we found and added
+            _logger.LogDebug("Processed texture references - Total textures from ADT: {TextureCount}, Added to result: {AddedCount}", 
+                adtInfo.TextureNames.Count, result.TextureReferences.Count);
 
-                // Process texture layers if available
-                if (chunkInfo.TextureLayers != null && chunkInfo.TextureLayers.Count > 0)
+            // Process texture FileDataIDs (only if ADT uses FileDataIDs)
+            if (adtInfo.UsesFileDataId)
+            {
+                // FileDataIDs for textures would be stored in Properties if they exist
+                if (adtInfo.Properties.TryGetValue("TextureFileDataIds", out var textureFileDataIdsObj) && 
+                    textureFileDataIdsObj is List<uint> textureFileDataIds)
                 {
-                    foreach (var layerInfo in chunkInfo.TextureLayers)
+                    foreach (var textureFileDataId in textureFileDataIds)
                     {
-                        var textureLayer = new TextureLayer
+                        if (textureFileDataId == 0)
+                            continue;
+
+                        var textureReference = new FileReference
                         {
-                            TextureId = (int)layerInfo.TextureId,
-                            Flags = (uint)layerInfo.Flags,
-                            EffectId = layerInfo.EffectId,
-                            AlphaMapOffset = (int)layerInfo.OffsetInMCAL,
-                            AlphaMapSize = 0 // Will be calculated if alpha map data is available
+                            OriginalPath = $"<FileDataID:{textureFileDataId}>",
+                            NormalizedPath = $"<FileDataID:{textureFileDataId}>",
+                            Type = FileReferenceType.Texture,
+                            FileDataId = textureFileDataId,
+                            UsesFileDataId = true
                         };
 
-                        // Add texture name if available
-                        if (textureLayer.TextureId >= 0 && textureLayer.TextureId < result.TextureReferences.Count)
+                        // Avoid duplicates
+                        if (!result.TextureReferences.Any(t => t.FileDataId == textureReference.FileDataId && t.UsesFileDataId))
                         {
-                            textureLayer.TextureName = result.TextureReferences[textureLayer.TextureId].OriginalPath;
+                            result.TextureReferences.Add(textureReference);
+                        }
+                    }
+                }
+            }
+
+            // Process model references (paths)
+            foreach (var modelName in adtInfo.ModelNames)
+            {
+                if (string.IsNullOrEmpty(modelName) || modelName.StartsWith("<unknown", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var modelReference = new FileReference
+                {
+                    OriginalPath = modelName,
+                    NormalizedPath = Utilities.PathUtility.NormalizePath(modelName),
+                    Type = FileReferenceType.Model
+                };
+
+                // Avoid duplicates
+                if (!result.ModelReferences.Any(m => m.NormalizedPath == modelReference.NormalizedPath))
+                {
+                    result.ModelReferences.Add(modelReference);
+                }
+            }
+
+            // Process model FileDataIDs (only if ADT uses FileDataIDs)
+            if (adtInfo.UsesFileDataId)
+            {
+                // FileDataIDs for models would be stored in Properties if they exist
+                if (adtInfo.Properties.TryGetValue("ModelFileDataIds", out var modelFileDataIdsObj) && 
+                    modelFileDataIdsObj is List<uint> modelFileDataIds)
+                {
+                    foreach (var modelFileDataId in modelFileDataIds)
+                    {
+                        if (modelFileDataId == 0)
+                            continue;
+                            
+                        var modelReference = new FileReference
+                        {
+                            OriginalPath = $"<FileDataID:{modelFileDataId}>",
+                            NormalizedPath = $"<FileDataID:{modelFileDataId}>",
+                            Type = FileReferenceType.Model,
+                            FileDataId = modelFileDataId,
+                            UsesFileDataId = true
+                        };
+
+                        // Avoid duplicates
+                        if (!result.ModelReferences.Any(m => m.FileDataId == modelFileDataId && m.UsesFileDataId))
+                        {
+                            result.ModelReferences.Add(modelReference);
+                        }
+                    }
+                }
+            }
+
+            // Log the number of model references we found and added
+            _logger.LogDebug("Processed model references - From ADT: {ModelCount}, Added to result: {AddedCount}",
+                adtInfo.ModelNames.Count, result.ModelReferences.Count);
+
+            // Process WMO references (paths)
+            foreach (var wmoName in adtInfo.WmoNames)
+            {
+                if (string.IsNullOrEmpty(wmoName) || wmoName.StartsWith("<unknown", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var wmoReference = new FileReference
+                {
+                    OriginalPath = wmoName,
+                    NormalizedPath = Utilities.PathUtility.NormalizePath(wmoName),
+                    Type = FileReferenceType.Wmo
+                };
+
+                // Avoid duplicates
+                if (!result.WmoReferences.Any(w => w.NormalizedPath == wmoReference.NormalizedPath))
+                {
+                    result.WmoReferences.Add(wmoReference);
+                }
+            }
+
+            // Process WMO FileDataIDs (only if ADT uses FileDataIDs)
+            if (adtInfo.UsesFileDataId)
+            {
+                // FileDataIDs for WMOs would be stored in Properties if they exist
+                if (adtInfo.Properties.TryGetValue("WmoFileDataIds", out var wmoFileDataIdsObj) && 
+                    wmoFileDataIdsObj is List<uint> wmoFileDataIds)
+                {
+                    foreach (var wmoFileDataId in wmoFileDataIds)
+                    {
+                        if (wmoFileDataId == 0)
+                            continue;
+
+                        var wmoReference = new FileReference
+                        {
+                            OriginalPath = $"<FileDataID:{wmoFileDataId}>",
+                            NormalizedPath = $"<FileDataID:{wmoFileDataId}>",
+                            Type = FileReferenceType.Wmo,
+                            FileDataId = wmoFileDataId,
+                            UsesFileDataId = true
+                        };
+
+                        // Avoid duplicates
+                        if (!result.WmoReferences.Any(w => w.FileDataId == wmoReference.FileDataId && w.UsesFileDataId))
+                        {
+                            result.WmoReferences.Add(wmoReference);
+                        }
+                    }
+                }
+            }
+
+            // Log the number of WMO references we found and added
+            _logger.LogDebug("Processed WMO references - From ADT: {WmoCount}, Added to result: {AddedCount}",
+                adtInfo.WmoNames.Count, result.WmoReferences.Count);
+
+            // Process model placements
+            foreach (var placementInfo in adtInfo.ModelPlacementDetails)
+            {
+                try 
+                {
+                    string? modelName = null;
+                    bool usesFileDataId = false;
+                    uint fileDataId = 0;
+
+                    // Determine the model name based on whether the NameId is a FileDataID or an index
+                    if (adtInfo.UsesFileDataId)
+                    {
+                        usesFileDataId = true;
+                        fileDataId = placementInfo.NameId;
+                        
+                        // Try to find a reference with this FileDataID
+                        var modelRef = result.ModelReferences.FirstOrDefault(m => m.FileDataId == fileDataId && m.UsesFileDataId);
+                        if (modelRef != null)
+                        {
+                            modelName = modelRef.OriginalPath;
                         }
                         else
                         {
-                            textureLayer.TextureName = $"<unknown texture {textureLayer.TextureId}>";
+                            modelName = $"<FileDataID:{fileDataId}>";
+                            _logger.LogDebug("Found model placement with FileDataID {FileDataId} but no corresponding model reference", fileDataId);
                         }
-
-                        chunk.TextureLayers.Add(textureLayer);
                     }
-                    _logger.LogDebug("Added {Count} texture layers for chunk {Index}", chunk.TextureLayers.Count, i);
-                }
-                // If no texture layers were found but we have texture references, add a default layer
-                else if (result.TextureReferences.Count > 0 && chunk.TextureLayers.Count == 0)
-                {
-                    var baseLayer = new TextureLayer
+                    else
                     {
-                        TextureId = 0,
-                        Flags = 0,
-                        EffectId = 0,
-                        AlphaMapOffset = 0,
-                        AlphaMapSize = 0,
-                        TextureName = result.TextureReferences[0].OriginalPath
-                    };
-                    chunk.TextureLayers.Add(baseLayer);
-                }
-                // If no texture references at all, add a placeholder
-                else if (chunk.TextureLayers.Count == 0)
-                {
-                    var baseLayer = new TextureLayer
+                        // Legacy format - NameId is an index into the model names array
+                        if (placementInfo.NameId < adtInfo.ModelNames.Count)
+                        {
+                            modelName = adtInfo.ModelNames[(int)placementInfo.NameId];
+                        }
+                        else
+                        {
+                            modelName = $"<unknown model index {placementInfo.NameId}>";
+                            _logger.LogWarning("Model index {NameId} out of range (0-{ModelCount})", placementInfo.NameId, adtInfo.ModelNames.Count - 1);
+                        }
+                    }
+
+                    // Create the model placement
+                    var modelPlacement = new ModelPlacement
                     {
-                        TextureId = 0,
-                        Flags = 0,
-                        EffectId = 0,
-                        AlphaMapOffset = 0,
-                        AlphaMapSize = 0,
-                        TextureName = "<unknown texture>"
+                        UniqueId = (int)placementInfo.UniqueId,
+                        NameId = (int)placementInfo.NameId,
+                        Name = modelName,
+                        Position = placementInfo.Position,
+                        Rotation = placementInfo.Rotation,
+                        Scale = placementInfo.Scale,
+                        Flags = placementInfo.Flags,
+                        FileDataId = fileDataId,
+                        UsesFileDataId = usesFileDataId
                     };
-                    chunk.TextureLayers.Add(baseLayer);
-                }
 
-                // Process alpha map data if available
-                if (chunkInfo.AlphaMapData != null && chunkInfo.AlphaMapData.Length > 0)
-                {
-                    // For simplicity, just add the entire alpha map data as a single entry
-                    chunk.AlphaMaps.Add(chunkInfo.AlphaMapData);
-                    _logger.LogDebug("Added {Size} bytes of alpha map data for chunk {Index}", 
-                        chunkInfo.AlphaMapData.Length, i);
-                }
+                    // Add to result
+                    result.ModelPlacements.Add(modelPlacement);
 
-                // Process shadow map data if available
-                if (chunkInfo.ShadowMapData != null && chunkInfo.ShadowMapData.Length > 0)
-                {
-                    chunk.ShadowMap = chunkInfo.ShadowMapData;
-                    _logger.LogDebug("Added {Size} bytes of shadow map data for chunk {Index}", 
-                        chunkInfo.ShadowMapData.Length, i);
+                    // Track unique ID
+                    result.UniqueIds.Add((int)placementInfo.UniqueId);
                 }
-
-                // Create empty DoodadRefs list
-                chunk.DoodadRefs = new List<int>();
-
-                result.TerrainChunks.Add(chunk);
-            }
-
-            // Add model placements with actual data
-            foreach (var placementInfo in adtInfo.ModelPlacementDetails)
-            {
-                string modelName;
-                
-                if (placementInfo.NameIdIsFileDataId)
+                catch (Exception ex)
                 {
-                    // For FileDataID, just use an empty name as we don't have a way to resolve it yet
-                    modelName = string.Empty;
-                    _logger.LogDebug("Model placement uses FileDataID: {FileDataID}", placementInfo.NameId);
-                }
-                else
-                {
-                    // Use the index to look up the model name
-                    int modelIndex = (int)placementInfo.NameId; // Cast uint to int for indexing
-                    modelName = modelIndex >= 0 && modelIndex < adtInfo.ModelNames.Count 
-                        ? adtInfo.ModelNames[modelIndex] 
-                        : string.Empty;
-                }
-                    
-                var modelPlacement = new ModelPlacement
-                {
-                    UniqueId = placementInfo.UniqueId,
-                    NameId = (int)placementInfo.NameId, // Cast uint to int for the NameId property
-                    Name = modelName,
-                    Position = new Vector3(placementInfo.Position.X, placementInfo.Position.Y, placementInfo.Position.Z),
-                    Rotation = new Vector3(placementInfo.Rotation.X, placementInfo.Rotation.Y, placementInfo.Rotation.Z),
-                    Scale = placementInfo.Scale,
-                    Flags = placementInfo.Flags
-                };
-                
-                // Set FileDataID information if applicable
-                if (placementInfo.NameIdIsFileDataId)
-                {
-                    modelPlacement.FileDataId = placementInfo.NameId;
-                    modelPlacement.UsesFileDataId = true;
-                }
-                
-                result.ModelPlacements.Add(modelPlacement);
-                
-                // Add unique ID to the result's unique IDs set
-                if (placementInfo.UniqueId != 0)
-                {
-                    result.UniqueIds.Add(placementInfo.UniqueId);
+                    _logger.LogError(ex, "Error processing model placement: {Error}", ex.Message);
+                    result.Errors.Add($"Error processing model placement: {ex.Message}");
                 }
             }
 
-            // Add WMO placements with actual data
+            // Log the number of model placements we processed
+            _logger.LogDebug("Processed model placements - From ADT: {PlacementCount}, Added to result: {AddedCount}",
+                adtInfo.ModelPlacementDetails.Count, result.ModelPlacements.Count);
+
+            // Process WMO placements
             foreach (var placementInfo in adtInfo.WmoPlacementDetails)
             {
-                string wmoName;
-                
-                if (placementInfo.NameIdIsFileDataId)
+                try
                 {
-                    // For FileDataID, just use an empty name as we don't have a way to resolve it yet
-                    wmoName = string.Empty;
-                    _logger.LogDebug("WMO placement uses FileDataID: {FileDataID}", placementInfo.NameId);
-                }
-                else
-                {
-                    // Use the index to look up the WMO name
-                    int wmoIndex = (int)placementInfo.NameId; // Cast to int for indexing
-                    wmoName = wmoIndex >= 0 && wmoIndex < adtInfo.WmoNames.Count 
-                        ? adtInfo.WmoNames[wmoIndex] 
-                        : string.Empty;
-                }
+                    string? wmoName = null;
+                    bool usesFileDataId = false;
+                    uint fileDataId = 0;
 
-                // Add more debug information to trace the name resolution    
-                if (string.IsNullOrEmpty(wmoName) && !placementInfo.NameIdIsFileDataId)
-                {
-                    _logger.LogWarning("Could not resolve WMO name for NameId={NameId}, WmoNames count={Count}",
-                        placementInfo.NameId, adtInfo.WmoNames.Count);
+                    // Determine the WMO name based on whether the NameId is a FileDataID or an index
+                    if (adtInfo.UsesFileDataId)
+                    {
+                        usesFileDataId = true;
+                        fileDataId = placementInfo.NameId;
+                        
+                        // Try to find a reference with this FileDataID
+                        var wmoRef = result.WmoReferences.FirstOrDefault(w => w.FileDataId == fileDataId && w.UsesFileDataId);
+                        if (wmoRef != null)
+                        {
+                            wmoName = wmoRef.OriginalPath;
+                        }
+                        else
+                        {
+                            wmoName = $"<FileDataID:{fileDataId}>";
+                            _logger.LogDebug("Found WMO placement with FileDataID {FileDataId} but no corresponding WMO reference", fileDataId);
+                        }
+                    }
+                    else
+                    {
+                        // Legacy format - NameId is an index into the WMO names array
+                        if (placementInfo.NameId < adtInfo.WmoNames.Count)
+                        {
+                            wmoName = adtInfo.WmoNames[(int)placementInfo.NameId];
+                        }
+                        else
+                        {
+                            wmoName = $"<unknown WMO index {placementInfo.NameId}>";
+                            _logger.LogWarning("WMO index {NameId} out of range (0-{WmoCount})", placementInfo.NameId, adtInfo.WmoNames.Count - 1);
+                        }
+                    }
+
+                    // Create the WMO placement
+                    var wmoPlacement = new WmoPlacement
+                    {
+                        UniqueId = (int)placementInfo.UniqueId,
+                        NameId = (int)placementInfo.NameId,
+                        Name = wmoName,
+                        Position = placementInfo.Position,
+                        Rotation = placementInfo.Rotation,
+                        DoodadSet = placementInfo.DoodadSet,
+                        NameSet = placementInfo.NameSet,
+                        Flags = placementInfo.Flags,
+                        Scale = placementInfo.Scale,
+                        FileDataId = fileDataId,
+                        UsesFileDataId = usesFileDataId
+                    };
+
+                    // Add to result
+                    result.WmoPlacements.Add(wmoPlacement);
+
+                    // Track unique ID
+                    result.UniqueIds.Add((int)placementInfo.UniqueId);
                 }
-                else if (!placementInfo.NameIdIsFileDataId)
+                catch (Exception ex)
                 {
-                    _logger.LogDebug("Resolved WMO name: {Name} for NameId={NameId}",
-                        wmoName, placementInfo.NameId);
-                }
-                    
-                var wmoPlacement = new WmoPlacement
-                {
-                    UniqueId = placementInfo.UniqueId,
-                    NameId = (int)placementInfo.NameId, // Cast uint to int for the NameId property
-                    Name = wmoName,
-                    Position = new Vector3(placementInfo.Position.X, placementInfo.Position.Y, placementInfo.Position.Z),
-                    Rotation = new Vector3(placementInfo.Rotation.X, placementInfo.Rotation.Y, placementInfo.Rotation.Z),
-                    Flags = (int)placementInfo.Flags, // Cast ushort to int for the Flags property
-                    DoodadSet = placementInfo.DoodadSet,
-                    NameSet = placementInfo.NameSet,
-                    Scale = placementInfo.Scale
-                };
-                
-                // Set FileDataID information if applicable
-                if (placementInfo.NameIdIsFileDataId)
-                {
-                    wmoPlacement.FileDataId = placementInfo.NameId;
-                    wmoPlacement.UsesFileDataId = true;
-                }
-                
-                result.WmoPlacements.Add(wmoPlacement);
-                
-                // Add unique ID to the result's unique IDs set
-                if (placementInfo.UniqueId != 0)
-                {
-                    result.UniqueIds.Add(placementInfo.UniqueId);
+                    _logger.LogError(ex, "Error processing WMO placement: {Error}", ex.Message);
+                    result.Errors.Add($"Error processing WMO placement: {ex.Message}");
                 }
             }
 
-            // Add any remaining unique IDs not already included
-            foreach (var uniqueId in adtInfo.UniqueIds)
-            {
-                if (uniqueId != 0 && !result.UniqueIds.Contains(uniqueId))
-                {
-                    result.UniqueIds.Add(uniqueId);
-                }
-            }
+            // Log the number of WMO placements we processed
+            _logger.LogDebug("Processed WMO placements - From ADT: {PlacementCount}, Added to result: {AddedCount}",
+                adtInfo.WmoPlacementDetails.Count, result.WmoPlacements.Count);
+
+            // Process terrain chunks
+            // ... existing code ...
+
+            _logger.LogInformation("Converted ADT info to analysis result - File: {FilePath}, Models: {ModelCount}, WMOs: {WmoCount}, Textures: {TextureCount}, Chunks: {ChunkCount}",
+                filePath, result.ModelPlacements.Count, result.WmoPlacements.Count, result.TextureReferences.Count, result.TerrainChunks.Count);
 
             return result;
         }
@@ -1229,7 +1435,7 @@ namespace WCAnalyzer.Core.Services
                 return;
 
             var match = CoordinateRegex.Match(result.FileName);
-            if (match.Success && match.Groups.Count >= 3)
+            if (match.Success)
             {
                 if (int.TryParse(match.Groups[1].Value, out int x))
                     result.XCoord = x;

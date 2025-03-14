@@ -35,6 +35,15 @@ namespace WCAnalyzer.Core.Models
         public uint AdtVersion { get; set; }
 
         /// <summary>
+        /// Gets or sets whether the ADT file uses FileDataIDs instead of file paths.
+        /// </summary>
+        /// <remarks>
+        /// In newer versions of WoW, ADT files use FileDataIDs to reference assets instead
+        /// of file paths, this property indicates whether this ADT file is using that format.
+        /// </remarks>
+        public bool UsesFileDataId { get; set; }
+
+        /// <summary>
         /// Gets or sets the header information for the ADT file.
         /// </summary>
         public AdtHeader Header { get; set; } = new AdtHeader();
