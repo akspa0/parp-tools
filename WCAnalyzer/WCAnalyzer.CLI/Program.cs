@@ -75,9 +75,197 @@ namespace WCAnalyzer.CLI
         }
     }
 
+    // Custom JSON converter for ModelPlacement
+    public class ModelPlacementConverter : JsonConverter<ModelPlacement>
+    {
+        public override ModelPlacement Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            throw new NotImplementedException("Reading ModelPlacement from JSON is not supported.");
+        }
+
+        public override void Write(Utf8JsonWriter writer, ModelPlacement value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            
+            // Check if this is a FileDataID reference and resolve it if possible
+            bool isFileDataIdRef = FileReferenceConverter.IsFileDataIdReference(value.Name, out uint fileDataId);
+            string resolvedPath = value.Name;
+            
+            if (isFileDataIdRef && fileDataId > 0 && FileReferenceConverter.TryGetResolvedPath(fileDataId, out string? mappedPath))
+            {
+                resolvedPath = mappedPath;
+            }
+            else if (value.UsesFileDataId && value.FileDataId > 0 && FileReferenceConverter.TryGetResolvedPath(value.FileDataId, out mappedPath))
+            {
+                resolvedPath = mappedPath;
+            }
+            
+            // Write basic properties
+            writer.WriteNumber("UniqueId", value.UniqueId);
+            writer.WriteNumber("NameId", value.NameId);
+            
+            // Write Name and ResolvedName
+            writer.WriteString("Name", value.Name);
+            if (resolvedPath != value.Name)
+            {
+                writer.WriteString("ResolvedName", resolvedPath);
+            }
+            
+            // Write Position as an object with X, Y, Z properties
+            writer.WritePropertyName("Position");
+            JsonSerializer.Serialize(writer, value.Position, options);
+            
+            // Write Rotation as an object with X, Y, Z properties
+            writer.WritePropertyName("Rotation");
+            JsonSerializer.Serialize(writer, value.Rotation, options);
+            
+            // Write Scale
+            writer.WriteNumber("Scale", value.Scale);
+            
+            // Write Flags
+            writer.WriteNumber("Flags", value.Flags);
+            
+            // Write FileDataId if available
+            if (value.FileDataId > 0)
+            {
+                writer.WriteNumber("FileDataId", value.FileDataId);
+            }
+            
+            // Write UsesFileDataId if true
+            if (value.UsesFileDataId)
+            {
+                writer.WriteBoolean("UsesFileDataId", value.UsesFileDataId);
+            }
+            
+            writer.WriteEndObject();
+        }
+    }
+    
+    // Custom JSON converter for WmoPlacement
+    public class WmoPlacementConverter : JsonConverter<WmoPlacement>
+    {
+        public override WmoPlacement Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            throw new NotImplementedException("Reading WmoPlacement from JSON is not supported.");
+        }
+
+        public override void Write(Utf8JsonWriter writer, WmoPlacement value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            
+            // Check if this is a FileDataID reference and resolve it if possible
+            bool isFileDataIdRef = FileReferenceConverter.IsFileDataIdReference(value.Name, out uint fileDataId);
+            string resolvedPath = value.Name;
+            
+            if (isFileDataIdRef && fileDataId > 0 && FileReferenceConverter.TryGetResolvedPath(fileDataId, out string? mappedPath))
+            {
+                resolvedPath = mappedPath;
+            }
+            else if (value.UsesFileDataId && value.FileDataId > 0 && FileReferenceConverter.TryGetResolvedPath(value.FileDataId, out mappedPath))
+            {
+                resolvedPath = mappedPath;
+            }
+            
+            // Write basic properties
+            writer.WriteNumber("UniqueId", value.UniqueId);
+            writer.WriteNumber("NameId", value.NameId);
+            
+            // Write Name and ResolvedName
+            writer.WriteString("Name", value.Name);
+            if (resolvedPath != value.Name)
+            {
+                writer.WriteString("ResolvedName", resolvedPath);
+            }
+            
+            // Write Position as an object with X, Y, Z properties
+            writer.WritePropertyName("Position");
+            JsonSerializer.Serialize(writer, value.Position, options);
+            
+            // Write Rotation as an object with X, Y, Z properties
+            writer.WritePropertyName("Rotation");
+            JsonSerializer.Serialize(writer, value.Rotation, options);
+            
+            // Write Scale
+            writer.WriteNumber("Scale", value.Scale);
+            
+            // Write DoodadSet
+            writer.WriteNumber("DoodadSet", value.DoodadSet);
+            
+            // Write NameSet
+            writer.WriteNumber("NameSet", value.NameSet);
+            
+            // Write Flags
+            writer.WriteNumber("Flags", value.Flags);
+            
+            // Write FileDataId if available
+            if (value.FileDataId > 0)
+            {
+                writer.WriteNumber("FileDataId", value.FileDataId);
+            }
+            
+            // Write UsesFileDataId if true
+            if (value.UsesFileDataId)
+            {
+                writer.WriteBoolean("UsesFileDataId", value.UsesFileDataId);
+            }
+            
+            writer.WriteEndObject();
+        }
+    }
+
     // Custom JSON converter for FileReference to exclude NormalizedPath
     public class FileReferenceConverter : JsonConverter<FileReference>
     {
+        // Add a static dictionary to store FileDataID-to-path mappings
+        private static Dictionary<uint, string> FileDataIdToPathMap = new Dictionary<uint, string>();
+        
+        // Static method to initialize the FileDataID-to-path map from the ReferenceValidator
+        public static void InitializeFileDataIdMap(ReferenceValidator referenceValidator)
+        {
+            FileDataIdToPathMap.Clear();
+            
+            // Use reflection to access the private _fileDataIdToPathMap dictionary from ReferenceValidator
+            var fieldInfo = typeof(ReferenceValidator).GetField("_fileDataIdToPathMap", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (fieldInfo != null)
+            {
+                var map = fieldInfo.GetValue(referenceValidator) as Dictionary<uint, string>;
+                if (map != null)
+                {
+                    // Copy all mappings to our static dictionary
+                    foreach (var kvp in map)
+                    {
+                        FileDataIdToPathMap[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+        }
+        
+        // Helper method to check if a string is in the format "<FileDataID:12345>"
+        public static bool IsFileDataIdReference(string path, out uint fileDataId)
+        {
+            fileDataId = 0;
+            if (string.IsNullOrEmpty(path)) return false;
+            
+            // Check if the path follows the pattern <FileDataID:12345>
+            var match = System.Text.RegularExpressions.Regex.Match(path, @"<FileDataID:(\d+)>");
+            if (match.Success && match.Groups.Count > 1)
+            {
+                if (uint.TryParse(match.Groups[1].Value, out uint id))
+                {
+                    fileDataId = id;
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Helper method to get the resolved path for a FileDataID
+        public static bool TryGetResolvedPath(uint fileDataId, out string resolvedPath)
+        {
+            return FileDataIdToPathMap.TryGetValue(fileDataId, out resolvedPath);
+        }
+        
         public override FileReference Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             throw new NotImplementedException("Reading FileReference from JSON is not supported.");
@@ -87,8 +275,23 @@ namespace WCAnalyzer.CLI
         {
             writer.WriteStartObject();
             
+            // Check if this is a FileDataID reference and resolve it if possible
+            bool isFileDataIdRef = IsFileDataIdReference(value.OriginalPath, out uint fileDataId);
+            string resolvedPath = value.OriginalPath;
+            
+            if (isFileDataIdRef && fileDataId > 0 && TryGetResolvedPath(fileDataId, out string? mappedPath))
+            {
+                resolvedPath = mappedPath;
+            }
+            
             // Write OriginalPath
             writer.WriteString("OriginalPath", value.OriginalPath);
+            
+            // Write the ResolvedPath if it's different from OriginalPath
+            if (isFileDataIdRef && resolvedPath != value.OriginalPath)
+            {
+                writer.WriteString("ResolvedPath", resolvedPath);
+            }
             
             // Write Type as string
             writer.WriteString("Type", value.Type.ToString());
@@ -212,6 +415,9 @@ namespace WCAnalyzer.CLI
                         logger.LogInformation("Loading listfile from {ListfilePath}", Path.GetFullPath(listfile));
                         knownGoodFiles = await referenceValidator.LoadListfileAsync(listfile);
                         logger.LogInformation("Loaded {Count} entries from listfile", knownGoodFiles.Count);
+                        
+                        // Initialize the FileDataID-to-path map for the FileReferenceConverter
+                        FileReferenceConverter.InitializeFileDataIdMap(referenceValidator);
                     }
                     else
                     {
@@ -239,6 +445,8 @@ namespace WCAnalyzer.CLI
                         new CustomFloatConverter(), // Controls float formatting
                         new CustomIntConverter(), // Validates integers
                         new FileReferenceConverter(), // Excludes NormalizedPath from output
+                        new ModelPlacementConverter(), // Resolves FileDataID in ModelPlacements
+                        new WmoPlacementConverter(), // Resolves FileDataID in WmoPlacements
                         new JsonStringEnumConverter() // For better enum formatting
                     }
                 };
@@ -508,6 +716,12 @@ namespace WCAnalyzer.CLI
                 () => true,
                 "Generate a comprehensive report with all assets");
             
+            // Add listfile option for UniqueID analysis
+            var uniqueIdListfileOption = new Option<string?>(
+                "--listfile",
+                description: "Path to a listfile for resolving FileDataID references");
+            uniqueIdListfileOption.AddAlias("-l");
+            
             // Add options to uniqueId command
             uniqueIdCommand.AddOption(resultsDirectoryOption);
             uniqueIdCommand.AddOption(uniqueIdOutputOption);
@@ -515,9 +729,10 @@ namespace WCAnalyzer.CLI
             uniqueIdCommand.AddOption(clusterGapThresholdOption);
             uniqueIdCommand.AddOption(comprehensiveReportOption);
             uniqueIdCommand.AddOption(verboseOption);
+            uniqueIdCommand.AddOption(uniqueIdListfileOption);
             
             // Set up handler for uniqueId command
-            uniqueIdCommand.SetHandler(async (string resultsDirectory, string output, int clusterThreshold, int clusterGap, bool comprehensive, bool verbose) =>
+            uniqueIdCommand.SetHandler(async (string resultsDirectory, string output, int clusterThreshold, int clusterGap, bool comprehensive, bool verbose, string? listfilePath) =>
             {
                 // Set up logging
                 var loggerFactory = LoggerFactory.Create(builder =>
@@ -551,11 +766,29 @@ namespace WCAnalyzer.CLI
                     // Run the analysis
                     var result = await analyzer.AnalyzeAsync(comprehensive);
                     
+                    // Create the reference validator if we have a listfile
+                    ReferenceValidator? referenceValidator = null;
+                    if (!string.IsNullOrEmpty(listfilePath))
+                    {
+                        referenceValidator = new ReferenceValidator(loggerFactory.CreateLogger<ReferenceValidator>());
+                    }
+                    
                     // Generate reports
-                    var reportGenerator = new UniqueIdReportGenerator(loggerFactory.CreateLogger<UniqueIdReportGenerator>());
+                    var reportGenerator = new UniqueIdReportGenerator(
+                        loggerFactory.CreateLogger<UniqueIdReportGenerator>(),
+                        referenceValidator);
+                    
+                    // Load the listfile if provided
+                    if (referenceValidator != null && !string.IsNullOrEmpty(listfilePath))
+                    {
+                        await reportGenerator.LoadListfileAsync(listfilePath);
+                    }
                     
                     // Generate summary report
                     await reportGenerator.GenerateSummaryReportAsync(result, Path.Combine(output, "summary.md"));
+                    
+                    // Generate comprehensive full summary report
+                    await reportGenerator.GenerateFullSummaryReportAsync(result, Path.Combine(output, "full_summary.md"));
                     
                     // Generate detailed reports for each cluster
                     foreach (var cluster in result.Clusters)
@@ -570,7 +803,7 @@ namespace WCAnalyzer.CLI
                 {
                     logger.LogError(ex, "Error during UniqueID analysis");
                 }
-            }, resultsDirectoryOption, uniqueIdOutputOption, clusterThresholdOption, clusterGapThresholdOption, comprehensiveReportOption, verboseOption);
+            }, resultsDirectoryOption, uniqueIdOutputOption, clusterThresholdOption, clusterGapThresholdOption, comprehensiveReportOption, verboseOption, uniqueIdListfileOption);
             
             // Add uniqueId command to root command
             rootCommand.Add(uniqueIdCommand);

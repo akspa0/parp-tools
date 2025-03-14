@@ -53,6 +53,9 @@ namespace WCAnalyzer.UniqueIdAnalysis
     /// </summary>
     public class AssetReference : IEquatable<AssetReference>
     {
+        private static readonly System.Text.RegularExpressions.Regex FileDataIdPattern = 
+            new System.Text.RegularExpressions.Regex(@"<FileDataID:(\d+)>", System.Text.RegularExpressions.RegexOptions.Compiled);
+        
         public string AssetPath { get; set; }
         public string Type { get; set; } // "Model" or "WMO"
         public int UniqueId { get; set; }
@@ -66,6 +69,12 @@ namespace WCAnalyzer.UniqueIdAnalysis
         public double RotationY { get; set; }
         public double RotationZ { get; set; }
         
+        // Add FileDataID property for tracking
+        public uint FileDataId { get; set; }
+        
+        // Add property to check if the asset path is a FileDataID reference
+        public bool IsFileDataIdReference => FileDataIdPattern.IsMatch(AssetPath);
+        
         public AssetReference(string assetPath, string type, int uniqueId, string adtFile, string mapName)
         {
             AssetPath = assetPath;
@@ -74,6 +83,9 @@ namespace WCAnalyzer.UniqueIdAnalysis
             AdtFile = adtFile;
             MapName = mapName;
             Scale = 1.0f;
+            
+            // Extract FileDataID if the path is in <FileDataID:12345> format
+            ExtractFileDataId();
         }
 
         public AssetReference(string assetPath, string type, int uniqueId, string adtFile, string mapName, 
@@ -95,6 +107,41 @@ namespace WCAnalyzer.UniqueIdAnalysis
             RotationX = rotX;
             RotationY = rotY;
             RotationZ = rotZ;
+        }
+        
+        /// <summary>
+        /// Extracts the FileDataID from an asset path in the format "<FileDataID:12345>"
+        /// </summary>
+        private void ExtractFileDataId()
+        {
+            var match = FileDataIdPattern.Match(AssetPath);
+            if (match.Success && match.Groups.Count > 1)
+            {
+                if (uint.TryParse(match.Groups[1].Value, out uint fileDataId))
+                {
+                    FileDataId = fileDataId;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Resolves an asset path from a FileDataID using the provided lookup dictionary
+        /// </summary>
+        /// <param name="fileDataIdToPathMap">Dictionary mapping FileDataIDs to file paths</param>
+        /// <returns>True if the path was resolved, false otherwise</returns>
+        public bool ResolveFileDataIdPath(Dictionary<uint, string> fileDataIdToPathMap)
+        {
+            if (!IsFileDataIdReference || FileDataId == 0)
+                return false;
+                
+            if (fileDataIdToPathMap.TryGetValue(FileDataId, out string? resolvedPath) && 
+                !string.IsNullOrEmpty(resolvedPath))
+            {
+                AssetPath = resolvedPath;
+                return true;
+            }
+            
+            return false;
         }
         
         // Override Equals and GetHashCode to ensure proper HashSet behavior based on asset path
