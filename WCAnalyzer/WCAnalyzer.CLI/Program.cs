@@ -10,9 +10,13 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Services;
+using WCAnalyzer.UniqueIdAnalysis;
 // Add explicit alias for AnalysisSummary to avoid ambiguity
 using ModelsSummary = WCAnalyzer.Core.Models.AnalysisSummary;
 using ServicesSummary = WCAnalyzer.Core.Services.AnalysisSummary;
+// Add explicit alias for ReportGenerator to avoid ambiguity
+using CoreReportGenerator = WCAnalyzer.Core.Services.ReportGenerator;
+using UniqueIdReportGenerator = WCAnalyzer.UniqueIdAnalysis.ReportGenerator;
 
 namespace WCAnalyzer.CLI
 {
@@ -473,6 +477,105 @@ namespace WCAnalyzer.CLI
                     successCount, adtFileGroups.Count, errorCount);
             }, directoryOption, outputOption, verboseOption, listfileOption);
 
+            // Create a command for UniqueID analysis
+            var uniqueIdCommand = new Command("uniqueid", "Analyze UniqueID data from ADT analysis results");
+            
+            // Add options for UniqueID analysis
+            var resultsDirectoryOption = new Option<string>(
+                "--results-directory",
+                description: "Directory containing JSON results from ADT analysis")
+            { IsRequired = true };
+            resultsDirectoryOption.AddAlias("-r");
+            
+            var uniqueIdOutputOption = new Option<string>(
+                "--output",
+                description: "Directory to write UniqueID analysis results to")
+            { IsRequired = true };
+            uniqueIdOutputOption.AddAlias("-o");
+            
+            var clusterThresholdOption = new Option<int>(
+                "--cluster-threshold",
+                () => 10,
+                "Minimum number of IDs to form a cluster");
+            
+            var clusterGapThresholdOption = new Option<int>(
+                "--cluster-gap",
+                () => 1000,
+                "Maximum gap between IDs to be considered part of the same cluster");
+            
+            var comprehensiveReportOption = new Option<bool>(
+                "--comprehensive",
+                () => true,
+                "Generate a comprehensive report with all assets");
+            
+            // Add options to uniqueId command
+            uniqueIdCommand.AddOption(resultsDirectoryOption);
+            uniqueIdCommand.AddOption(uniqueIdOutputOption);
+            uniqueIdCommand.AddOption(clusterThresholdOption);
+            uniqueIdCommand.AddOption(clusterGapThresholdOption);
+            uniqueIdCommand.AddOption(comprehensiveReportOption);
+            uniqueIdCommand.AddOption(verboseOption);
+            
+            // Set up handler for uniqueId command
+            uniqueIdCommand.SetHandler(async (string resultsDirectory, string output, int clusterThreshold, int clusterGap, bool comprehensive, bool verbose) =>
+            {
+                // Set up logging
+                var loggerFactory = LoggerFactory.Create(builder =>
+                {
+                    builder.AddConsole();
+                    builder.SetMinimumLevel(verbose ? Microsoft.Extensions.Logging.LogLevel.Debug : Microsoft.Extensions.Logging.LogLevel.Information);
+                });
+                
+                var logger = loggerFactory.CreateLogger<Program>();
+                
+                try
+                {
+                    logger.LogInformation("Starting UniqueID analysis...");
+                    
+                    // Create output directory if it doesn't exist
+                    if (!Directory.Exists(output))
+                    {
+                        Directory.CreateDirectory(output);
+                        logger.LogInformation("Created output directory: {OutputDir}", output);
+                    }
+                    
+                    // Create the UniqueIdAnalyzer
+                    var analyzer = new UniqueIdAnalyzer(
+                        resultsDirectory,
+                        output,
+                        loggerFactory.CreateLogger<UniqueIdAnalyzer>(),
+                        clusterThreshold,
+                        clusterGap,
+                        comprehensive);
+                    
+                    // Run the analysis
+                    var result = await analyzer.AnalyzeAsync(comprehensive);
+                    
+                    // Generate reports
+                    var reportGenerator = new UniqueIdReportGenerator(loggerFactory.CreateLogger<UniqueIdReportGenerator>());
+                    
+                    // Generate summary report
+                    await reportGenerator.GenerateSummaryReportAsync(result, Path.Combine(output, "summary.md"));
+                    
+                    // Generate detailed reports for each cluster
+                    foreach (var cluster in result.Clusters)
+                    {
+                        var clusterFileName = $"cluster_{cluster.MinId}-{cluster.MaxId}.md";
+                        await reportGenerator.GenerateClusterReportAsync(cluster, Path.Combine(output, clusterFileName));
+                    }
+                    
+                    logger.LogInformation("UniqueID analysis complete!");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error during UniqueID analysis");
+                }
+            }, resultsDirectoryOption, uniqueIdOutputOption, clusterThresholdOption, clusterGapThresholdOption, comprehensiveReportOption, verboseOption);
+            
+            // Add uniqueId command to root command
+            rootCommand.Add(uniqueIdCommand);
+
+            // Parse the command line
             return await rootCommand.InvokeAsync(args);
         }
         
