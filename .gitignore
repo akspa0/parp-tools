@@ -398,3 +398,16 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# WoW Data Files
+*.adt
+*.pm4
+*.wlw
+*.wlm
+*.wlq
+*.wdt
+*.wdl
+*.mpq
+
+# Cursor Rules
+.cursorrules
