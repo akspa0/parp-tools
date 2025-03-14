@@ -13,12 +13,12 @@ namespace WCAnalyzer.UniqueIdAnalysis
     /// </summary>
     public class ReportGenerator
     {
-        private readonly ILogger<ReportGenerator> _logger;
+        private readonly ILogger<ReportGenerator>? _logger;
         
         // Increase the default number of top assets to show
         private const int DEFAULT_TOP_ASSETS_COUNT = 50;
         
-        public ReportGenerator(ILogger<ReportGenerator> logger = null)
+        public ReportGenerator(ILogger<ReportGenerator>? logger = null)
         {
             _logger = logger;
         }
@@ -34,7 +34,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
             
             // Ensure the output directory exists
             var outputDir = Path.GetDirectoryName(outputPath);
-            if (!Directory.Exists(outputDir))
+            if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
                 _logger?.LogInformation("Created output directory: {OutputDir}", outputDir);
@@ -105,12 +105,12 @@ namespace WCAnalyzer.UniqueIdAnalysis
                     .SelectMany(g => g.Take(3)) // Take 3 examples of each asset type
                     .Take(30); // Limit to 30 total examples
                 
-                sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Scale |");
-                sb.AppendLine("|-------|------|----------|-----|----------|------------------|-------|");
+                sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Rotation (X,Y,Z) | Scale |");
+                sb.AppendLine("|-------|------|----------|-----|----------|------------------|------------------|-------|");
                 
                 foreach (var asset in placementExamples)
                 {
-                    sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | ({asset.PositionX:F2}, {asset.PositionY:F2}, {asset.PositionZ:F2}) | {asset.Scale:F2} |");
+                    sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | ({asset.PositionX:F2}, {asset.PositionY:F2}, {asset.PositionZ:F2}) | ({asset.RotationX:F2}, {asset.RotationY:F2}, {asset.RotationZ:F2}) | {asset.Scale:F2} |");
                 }
                 
                 sb.AppendLine();
@@ -132,7 +132,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
             
             // Ensure the output directory exists
             var outputDir = Path.GetDirectoryName(outputPath);
-            if (!Directory.Exists(outputDir))
+            if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
                 _logger?.LogInformation("Created output directory: {OutputDir}", outputDir);
@@ -209,8 +209,8 @@ namespace WCAnalyzer.UniqueIdAnalysis
             sb.AppendLine();
             sb.AppendLine("## Detailed Asset Placements");
             sb.AppendLine();
-            sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Scale |");
-            sb.AppendLine("|-------|------|----------|-----|----------|------------------|-------|");
+            sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Rotation (X,Y,Z) | Scale |");
+            sb.AppendLine("|-------|------|----------|-----|----------|------------------|------------------|-------|");
             
             // Take a reasonable number of assets to avoid extremely large reports
             var detailedAssets = cluster.Assets
@@ -220,7 +220,11 @@ namespace WCAnalyzer.UniqueIdAnalysis
             
             foreach (var asset in detailedAssets)
             {
-                sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | ({asset.PositionX:F2}, {asset.PositionY:F2}, {asset.PositionZ:F2}) | {asset.Scale:F2} |");
+                // Format position and rotation with more precision and ensure non-zero values are displayed
+                string position = $"({asset.PositionX:F2}, {asset.PositionY:F2}, {asset.PositionZ:F2})";
+                string rotation = $"({asset.RotationX:F2}, {asset.RotationY:F2}, {asset.RotationZ:F2})";
+                
+                sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | {position} | {rotation} | {asset.Scale:F2} |");
             }
             
             // If there are more assets than we're showing, add a note

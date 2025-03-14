@@ -61,7 +61,10 @@ namespace WCAnalyzer.UniqueIdAnalysis
         public double PositionX { get; set; }
         public double PositionY { get; set; }
         public double PositionZ { get; set; }
-        public float Scale { get; set; }
+        public float Scale { get; set; } = 1.0f;
+        public double RotationX { get; set; }
+        public double RotationY { get; set; }
+        public double RotationZ { get; set; }
         
         public AssetReference(string assetPath, string type, int uniqueId, string adtFile, string mapName)
         {
@@ -70,6 +73,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
             UniqueId = uniqueId;
             AdtFile = adtFile;
             MapName = mapName;
+            Scale = 1.0f;
         }
 
         public AssetReference(string assetPath, string type, int uniqueId, string adtFile, string mapName, 
@@ -82,8 +86,19 @@ namespace WCAnalyzer.UniqueIdAnalysis
             Scale = scale;
         }
         
+        public AssetReference(string assetPath, string type, int uniqueId, string adtFile, string mapName, 
+            double posX, double posY, double posZ, 
+            double rotX, double rotY, double rotZ, 
+            float scale = 1.0f)
+            : this(assetPath, type, uniqueId, adtFile, mapName, posX, posY, posZ, scale)
+        {
+            RotationX = rotX;
+            RotationY = rotY;
+            RotationZ = rotZ;
+        }
+        
         // Override Equals and GetHashCode to ensure proper HashSet behavior based on asset path
-        public bool Equals(AssetReference other)
+        public bool Equals(AssetReference? other)
         {
             if (other == null)
                 return false;
@@ -91,7 +106,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
             return AssetPath == other.AssetPath && Type == other.Type;
         }
         
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             return Equals(obj as AssetReference);
         }

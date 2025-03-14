@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models;
 using System.Text.Json.Serialization;
+using System.Numerics;
 
 namespace WCAnalyzer.UniqueIdAnalysis
 {
@@ -17,8 +18,9 @@ namespace WCAnalyzer.UniqueIdAnalysis
     {
         public override FileReferenceType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
-            string value = reader.GetString()?.ToLowerInvariant();
-            return value switch
+            string? value = reader.GetString();
+            string normalizedValue = value?.ToLowerInvariant() ?? string.Empty;
+            return normalizedValue switch
             {
                 "texture" => FileReferenceType.Texture,
                 "model" => FileReferenceType.Model,
@@ -35,6 +37,145 @@ namespace WCAnalyzer.UniqueIdAnalysis
     }
 
     /// <summary>
+    /// Represents position and rotation data in a Vector3-compatible format
+    /// </summary>
+    public class Vector3Data
+    {
+        public float X { get; set; }
+        public float Y { get; set; }
+        public float Z { get; set; }
+
+        public Vector3Data()
+        {
+            X = 0;
+            Y = 0;
+            Z = 0;
+        }
+
+        public Vector3Data(float x, float y, float z)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+        }
+
+        public static Vector3Data FromVector3(Vector3 vector)
+        {
+            return new Vector3Data(vector.X, vector.Y, vector.Z);
+        }
+
+        public Vector3 ToVector3()
+        {
+            return new Vector3(X, Y, Z);
+        }
+
+        public static Vector3Data FromObject(object obj)
+        {
+            var result = new Vector3Data();
+
+            if (obj == null)
+                return result;
+
+            // If it's already a Vector3Data, just return it
+            if (obj is Vector3Data v3data)
+                return v3data;
+
+            // If it's a Vector3, convert it
+            if (obj is Vector3 vector3)
+                return FromVector3(vector3);
+
+            // If it's a JsonElement, try to extract X, Y, Z properties
+            if (obj is JsonElement jsonElement)
+            {
+                if (jsonElement.TryGetProperty("X", out var xElement) && xElement.ValueKind == JsonValueKind.Number)
+                    result.X = xElement.GetSingle();
+                
+                if (jsonElement.TryGetProperty("Y", out var yElement) && yElement.ValueKind == JsonValueKind.Number)
+                    result.Y = yElement.GetSingle();
+                
+                if (jsonElement.TryGetProperty("Z", out var zElement) && zElement.ValueKind == JsonValueKind.Number)
+                    result.Z = zElement.GetSingle();
+                
+                return result;
+            }
+
+            // Try to use reflection to access X, Y, Z properties
+            try
+            {
+                var type = obj.GetType();
+                var xProp = type.GetProperty("X");
+                var yProp = type.GetProperty("Y");
+                var zProp = type.GetProperty("Z");
+
+                if (xProp != null)
+                    result.X = Convert.ToSingle(xProp.GetValue(obj));
+                
+                if (yProp != null)
+                    result.Y = Convert.ToSingle(yProp.GetValue(obj));
+                
+                if (zProp != null)
+                    result.Z = Convert.ToSingle(zProp.GetValue(obj));
+            }
+            catch (Exception)
+            {
+                // Ignore reflection errors
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Custom JsonConverter for Vector3 to handle different JSON formats
+    /// </summary>
+    public class Vector3Converter : JsonConverter<Vector3>
+    {
+        public override Vector3 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.StartObject)
+                throw new JsonException("Expected start of object");
+
+            float x = 0, y = 0, z = 0;
+            
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                    throw new JsonException("Expected property name");
+
+                string? propertyName = reader.GetString()?.ToLowerInvariant();
+                reader.Read();
+
+                switch (propertyName)
+                {
+                    case "x":
+                        x = reader.GetSingle();
+                        break;
+                    case "y":
+                        y = reader.GetSingle();
+                        break;
+                    case "z":
+                        z = reader.GetSingle();
+                        break;
+                    default:
+                        reader.Skip();
+                        break;
+                }
+            }
+
+            return new Vector3(x, y, z);
+        }
+
+        public override void Write(Utf8JsonWriter writer, Vector3 value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("X", value.X);
+            writer.WriteNumber("Y", value.Y);
+            writer.WriteNumber("Z", value.Z);
+            writer.WriteEndObject();
+        }
+    }
+
+    /// <summary>
     /// Main class for analyzing unique IDs from ADT analysis results.
     /// </summary>
     public class UniqueIdAnalyzer
@@ -43,7 +184,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
         private readonly string _outputDirectory;
         private readonly int _clusterThreshold;
         private readonly int _clusterGapThreshold;
-        private readonly ILogger<UniqueIdAnalyzer> _logger;
+        private readonly ILogger<UniqueIdAnalyzer>? _logger;
         
         private List<AdtInfo> _adtFiles = new List<AdtInfo>();
         private Dictionary<string, List<UniqueIdCluster>> _mapClusters = new Dictionary<string, List<UniqueIdCluster>>();
@@ -64,7 +205,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
         public UniqueIdAnalyzer(
             string resultsDirectory,
             string outputDirectory,
-            ILogger<UniqueIdAnalyzer> logger = null,
+            ILogger<UniqueIdAnalyzer>? logger = null,
             int clusterThreshold = 10,
             int clusterGapThreshold = 1000,
             bool generateComprehensiveReport = true)
@@ -188,7 +329,8 @@ namespace WCAnalyzer.UniqueIdAnalysis
                         Converters =
                         {
                             new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
-                            new FileReferenceTypeConverter()
+                            new FileReferenceTypeConverter(),
+                            new Vector3Converter()
                         }
                     };
                     
@@ -264,6 +406,50 @@ namespace WCAnalyzer.UniqueIdAnalysis
                                                         nameElement.GetString() ?? string.Empty : string.Empty
                                                 };
                                                 
+                                                // Extract position data from the JSON
+                                                Vector3Data positionData = new Vector3Data();
+                                                Vector3Data rotationData = new Vector3Data();
+                                                float scale = 1.0f;
+                                                
+                                                // Extract position
+                                                if (element.TryGetProperty("Position", out var positionElement))
+                                                {
+                                                    positionData = Vector3Data.FromObject(positionElement);
+                                                }
+                                                
+                                                // Extract rotation
+                                                if (element.TryGetProperty("Rotation", out var rotationElement))
+                                                {
+                                                    rotationData = Vector3Data.FromObject(rotationElement);
+                                                }
+                                                
+                                                // Extract scale
+                                                if (element.TryGetProperty("Scale", out var scaleElement) && 
+                                                    scaleElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    scale = scaleElement.GetSingle();
+                                                }
+                                                
+                                                // Set the properties
+                                                placement.Position = positionData.ToVector3();
+                                                placement.Rotation = rotationData.ToVector3();
+                                                placement.Scale = scale;
+                                                
+                                                // Check for FileDataId and flags
+                                                if (element.TryGetProperty("FileDataId", out var fileDataIdElement) && 
+                                                    fileDataIdElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.FileDataId = fileDataIdElement.GetUInt32();
+                                                    placement.UsesFileDataId = true;
+                                                }
+                                                
+                                                if (element.TryGetProperty("Flags", out var flagsElement) && 
+                                                    flagsElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.Flags = (ushort)flagsElement.GetInt32();
+                                                }
+                                                
+                                                // Add to the list
                                                 modelPlacements.Add(placement);
                                             }
                                         }
@@ -286,6 +472,61 @@ namespace WCAnalyzer.UniqueIdAnalysis
                                                         nameElement.GetString() ?? string.Empty : string.Empty
                                                 };
                                                 
+                                                // Extract position data from the JSON
+                                                Vector3Data positionData = new Vector3Data();
+                                                Vector3Data rotationData = new Vector3Data();
+                                                
+                                                // Extract position
+                                                if (element.TryGetProperty("Position", out var positionElement))
+                                                {
+                                                    positionData = Vector3Data.FromObject(positionElement);
+                                                }
+                                                
+                                                // Extract rotation
+                                                if (element.TryGetProperty("Rotation", out var rotationElement))
+                                                {
+                                                    rotationData = Vector3Data.FromObject(rotationElement);
+                                                }
+                                                
+                                                // Extract scale, DoodadSet, NameSet
+                                                if (element.TryGetProperty("Scale", out var scaleElement) && 
+                                                    scaleElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    // Convert from float to ushort by scaling
+                                                    placement.Scale = (ushort)(scaleElement.GetSingle() * 1024);
+                                                }
+
+                                                if (element.TryGetProperty("DoodadSet", out var doodadSetElement) && 
+                                                    doodadSetElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.DoodadSet = (ushort)doodadSetElement.GetInt32();
+                                                }
+                                                
+                                                if (element.TryGetProperty("NameSet", out var nameSetElement) && 
+                                                    nameSetElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.NameSet = (ushort)nameSetElement.GetInt32();
+                                                }
+                                                
+                                                // Set the properties
+                                                placement.Position = positionData.ToVector3();
+                                                placement.Rotation = rotationData.ToVector3();
+                                                
+                                                // Check for FileDataId and flags
+                                                if (element.TryGetProperty("FileDataId", out var fileDataIdElement) && 
+                                                    fileDataIdElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.FileDataId = fileDataIdElement.GetUInt32();
+                                                    placement.UsesFileDataId = true;
+                                                }
+                                                
+                                                if (element.TryGetProperty("Flags", out var flagsElement) && 
+                                                    flagsElement.ValueKind == JsonValueKind.Number)
+                                                {
+                                                    placement.Flags = (ushort)flagsElement.GetInt32();
+                                                }
+                                                
+                                                // Add to the list
                                                 wmoPlacements.Add(placement);
                                             }
                                         }
@@ -299,7 +540,12 @@ namespace WCAnalyzer.UniqueIdAnalysis
                                             FileName = fileName,
                                             FilePath = jsonFile,
                                             ModelPlacements = modelPlacements,
-                                            WmoPlacements = wmoPlacements
+                                            WmoPlacements = wmoPlacements,
+                                            UniqueIds = new HashSet<int>(
+                                                modelPlacements.Select(p => p.UniqueId)
+                                                .Concat(wmoPlacements.Select(p => p.UniqueId))
+                                                .Where(id => id != 0)
+                                            )
                                         };
                                         
                                         ProcessAdtResult(syntheticResult, mapName);
@@ -345,8 +591,23 @@ namespace WCAnalyzer.UniqueIdAnalysis
             if (uniqueIds.Count == 0)
                 return;
             
+            // Extract the actual map name from the ADT filename
+            string actualMapName = mapName;
+            string fileName = result.FileName;
+            
+            // ADT filenames typically follow the pattern "MapName_X_Y.adt"
+            if (fileName != null && fileName.Contains("_"))
+            {
+                // Extract the map name part (everything before the first underscore)
+                int firstUnderscoreIndex = fileName.IndexOf('_');
+                if (firstUnderscoreIndex > 0)
+                {
+                    actualMapName = fileName.Substring(0, firstUnderscoreIndex);
+                }
+            }
+            
             // Create AdtInfo with full file path
-            var adtInfo = new AdtInfo(result.FilePath ?? result.FileName, mapName, uniqueIds);
+            var adtInfo = new AdtInfo(result.FilePath ?? result.FileName, actualMapName, uniqueIds);
             
             // Process model placements and link them to uniqueIDs
             if (result.ModelPlacements != null)
@@ -355,20 +616,25 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 {
                     if (placement.UniqueId == 0)
                         continue;
-                        
-                    string modelPath = placement.Name;
                     
-                    // Create asset reference
+                    // Extract position data safely
+                    Vector3Data posData = Vector3Data.FromObject(placement.Position);
+                    Vector3Data rotData = Vector3Data.FromObject(placement.Rotation);
+                    float scale = placement.Scale;
+                    
                     var assetRef = new AssetReference(
-                        modelPath, 
+                        placement.Name, 
                         "Model", 
                         placement.UniqueId, 
                         result.FileName,
-                        mapName,
-                        placement.Position.X, 
-                        placement.Position.Y, 
-                        placement.Position.Z,
-                        placement.Scale);
+                        actualMapName,
+                        posData.X, 
+                        posData.Y, 
+                        posData.Z,
+                        rotData.X,
+                        rotData.Y,
+                        rotData.Z,
+                        scale);
                     
                     // Add to the AdtInfo
                     if (!adtInfo.AssetsByUniqueId.TryGetValue(placement.UniqueId, out var assetList))
@@ -388,19 +654,27 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 {
                     if (placement.UniqueId == 0)
                         continue;
-                        
-                    string wmoPath = placement.Name;
                     
-                    // Create asset reference
+                    // Extract position data safely
+                    Vector3Data posData = Vector3Data.FromObject(placement.Position);
+                    Vector3Data rotData = Vector3Data.FromObject(placement.Rotation);
+                    
+                    // Convert from ushort to float using the same scaling as for models
+                    float scale = placement.Scale / 1024.0f;
+                    
                     var assetRef = new AssetReference(
-                        wmoPath, 
+                        placement.Name, 
                         "WMO", 
                         placement.UniqueId, 
                         result.FileName,
-                        mapName,
-                        placement.Position.X, 
-                        placement.Position.Y, 
-                        placement.Position.Z);
+                        actualMapName,
+                        posData.X, 
+                        posData.Y, 
+                        posData.Z,
+                        rotData.X,
+                        rotData.Y,
+                        rotData.Z,
+                        scale);
                     
                     // Add to the AdtInfo
                     if (!adtInfo.AssetsByUniqueId.TryGetValue(placement.UniqueId, out var assetList))
