@@ -247,7 +247,7 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
     }
 
     /// <summary>
-    /// MPRL chunk - Contains position data, typically file references.
+    /// MPRL chunk - Contains position data for server-side terrain collision mesh and navigation.
     /// </summary>
     public class MPRLChunk : PM4Chunk
     {
@@ -257,9 +257,14 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
         public override string Signature => "MPRL";
 
         /// <summary>
-        /// Gets the position data entries.
+        /// Gets the metadata about this chunk
         /// </summary>
-        public List<PositionDataEntry> Entries { get; private set; } = new List<PositionDataEntry>();
+        public string Description => "Position Data - Contains vertex positions for server-side collision meshes";
+
+        /// <summary>
+        /// Gets the data entries.
+        /// </summary>
+        public List<ServerPositionData> Entries { get; private set; } = new List<ServerPositionData>();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MPRLChunk"/> class.
@@ -279,44 +284,108 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
             using (var ms = new MemoryStream(Data))
             using (var reader = new BinaryReader(ms))
             {
+                // Based on the observed pattern, the MPRL chunk contains alternating entries
+                // of two types: command records and position records.
+                // Each entry is 12 bytes (3 floats or equivalent)
+
+                int entryCount = Data.Length / 12;
+                
+                // Flag used to track the alternating pattern
+                bool isEvenEntry = true;
+                int index = 0;
+                
                 while (ms.Position < ms.Length)
                 {
-                    var entry = new PositionDataEntry
+                    float x = reader.ReadSingle();
+                    float y = reader.ReadSingle();
+                    float z = reader.ReadSingle();
+                    
+                    // Determine entry type based on the values and pattern
+                    // Control records typically have NaN in X and a specific flag pattern
+                    bool isControlRecord = float.IsNaN(x);
+                    
+                    var entry = new ServerPositionData
                     {
-                        FileDataID = reader.ReadUInt32(),
-                        Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
-                        Rotation = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
-                        Scale = reader.ReadSingle()
+                        Index = index++,
+                        Value1 = x,
+                        Value2 = y,
+                        Value3 = z,
+                        IsControlRecord = isControlRecord,
+                        
+                        // For position records, use the values directly
+                        CoordinateX = isControlRecord ? 0 : x,
+                        CoordinateY = y,
+                        CoordinateZ = isControlRecord ? 0 : z,
+                        
+                        // For control records, interpret the Z value as a flag/command
+                        CommandValue = isControlRecord ? BitConverter.ToInt32(BitConverter.GetBytes(z), 0) : 0
                     };
+                    
                     Entries.Add(entry);
+                    isEvenEntry = !isEvenEntry;
                 }
             }
         }
 
         /// <summary>
-        /// Represents a position data entry in the MPRL chunk.
+        /// Represents a server-side position data entry.
         /// </summary>
-        public class PositionDataEntry
+        public class ServerPositionData
         {
             /// <summary>
-            /// Gets or sets the file data ID (reference to a model).
+            /// Gets or sets the sequential index of this entry in the chunk
             /// </summary>
-            public uint FileDataID { get; set; }
-
+            public int Index { get; set; }
+            
             /// <summary>
-            /// Gets or sets the position.
+            /// First raw value
             /// </summary>
-            public Vector3 Position { get; set; }
-
+            public float Value1 { get; set; }
+            
             /// <summary>
-            /// Gets or sets the rotation.
+            /// Second raw value
             /// </summary>
-            public Vector3 Rotation { get; set; }
-
+            public float Value2 { get; set; }
+            
             /// <summary>
-            /// Gets or sets the scale.
+            /// Third raw value
             /// </summary>
-            public float Scale { get; set; }
+            public float Value3 { get; set; }
+            
+            /// <summary>
+            /// Indicates if this entry is a control/command record (rather than a position)
+            /// </summary>
+            public bool IsControlRecord { get; set; }
+            
+            /// <summary>
+            /// X coordinate - only valid for position records
+            /// </summary>
+            public float CoordinateX { get; set; }
+            
+            /// <summary>
+            /// Y coordinate
+            /// </summary>
+            public float CoordinateY { get; set; }
+            
+            /// <summary>
+            /// Z coordinate - only valid for position records
+            /// </summary>
+            public float CoordinateZ { get; set; }
+            
+            /// <summary>
+            /// Command/flag value - only valid for control records
+            /// </summary>
+            public int CommandValue { get; set; }
+            
+            /// <summary>
+            /// Returns a string representation of this object.
+            /// </summary>
+            public override string ToString()
+            {
+                return IsControlRecord 
+                    ? $"Control Record: Command=0x{CommandValue:X8}, Y={CoordinateY:F2}"
+                    : $"Position: ({CoordinateX:F2}, {CoordinateY:F2}, {CoordinateZ:F2})";
+            }
         }
     }
 } 

@@ -30,14 +30,29 @@ namespace WCAnalyzer.Core.Models.PM4
         public MSHDChunk? ShadowDataChunk { get; set; }
 
         /// <summary>
+        /// Gets or sets the shadow data chunk (alias for ShadowDataChunk).
+        /// </summary>
+        public IIFFChunk? ShadowData { get; set; }
+
+        /// <summary>
         /// Gets or sets the vertex positions chunk.
         /// </summary>
         public MSPVChunk? VertexPositionsChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the vertex positions chunk (alias for VertexPositionsChunk).
+        /// </summary>
+        public IIFFChunk? VertexPositions { get; set; }
 
         /// <summary>
         /// Gets or sets the vertex indices chunk.
         /// </summary>
         public MSPIChunk? VertexIndicesChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the vertex indices chunk (alias for VertexIndicesChunk).
+        /// </summary>
+        public IIFFChunk? VertexIndices { get; set; }
 
         /// <summary>
         /// Gets or sets the normal coordinates chunk.
@@ -68,6 +83,11 @@ namespace WCAnalyzer.Core.Models.PM4
         /// Gets or sets the position data chunk.
         /// </summary>
         public MPRLChunk? PositionDataChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the position data chunk (alias for PositionDataChunk).
+        /// </summary>
+        public IIFFChunk? PositionData { get; set; }
 
         /// <summary>
         /// Gets or sets the value pairs chunk.
@@ -418,83 +438,264 @@ namespace WCAnalyzer.Core.Models.PM4
         public string GetSummary()
         {
             var summary = new System.Text.StringBuilder();
-            summary.AppendLine($"PM4 File: {FileName}");
-            summary.AppendLine($"Path: {FilePath}");
-            summary.AppendLine($"Version: {(Version != null ? Version.Version.ToString() : "Unknown")}");
             
-            if (Errors.Count > 0)
-            {
-                summary.AppendLine("\nErrors encountered:");
-                foreach (var error in Errors)
-                {
-                    summary.AppendLine($"- {error}");
-                }
-            }
-
-            summary.AppendLine("\nChunks present:");
-            if (Version != null) summary.AppendLine("- MVER (Version)");
-            if (ShadowData != null) summary.AppendLine("- MSHD (Shadow Data)");
-            if (VertexPositions != null) summary.AppendLine("- MSPV (Vertex Positions)");
-            if (VertexIndices != null) summary.AppendLine("- MSPI (Vertex Indices)");
-            if (NormalCoordinates != null) summary.AppendLine("- MSCN (Normal Coordinates)");
-            if (Links != null) summary.AppendLine("- MSLK (Links)");
-            if (VertexData != null) summary.AppendLine("- MSVT (Vertex Data)");
-            if (VertexIndices2 != null) summary.AppendLine("- MSVI (Vertex Indices)");
-            if (SurfaceData != null) summary.AppendLine("- MSUR (Surface Data)");
-            if (PositionData != null) summary.AppendLine("- MPRL (Position Data)");
-            if (ValuePairs != null) summary.AppendLine("- MPRR (Value Pairs)");
-            if (BuildingData != null) summary.AppendLine("- MDBH (Building Data)");
-            if (SimpleData != null) summary.AppendLine("- MDOS (Simple Data)");
-            if (FinalData != null) summary.AppendLine("- MDSF (Final Data)");
-
-            // Add detailed chunk information
-            summary.AppendLine("\nDetailed Chunk Information:");
+            summary.AppendLine($"# PM4 File: {FileName}");
+            summary.AppendLine($"## File Information");
+            summary.AppendLine($"- Path: {FilePath}");
+            summary.AppendLine($"- Version: {Version?.Version ?? 0}");
             
+            // Summarize which chunks are present
+            summary.AppendLine("\n## Chunks Present");
+            summary.AppendLine("| Chunk | Present | Size (bytes) |");
+            summary.AppendLine("|-------|---------|-------------|");
+            summary.AppendLine($"| MSHD (Shadow Data) | {(ShadowData != null ? "Yes" : "No")} | {GetChunkSize(ShadowData)} |");
+            summary.AppendLine($"| MSPV (Vertex Positions) | {(VertexPositions != null ? "Yes" : "No")} | {GetChunkSize(VertexPositions)} |");
+            summary.AppendLine($"| MSPI (Vertex Indices) | {(VertexIndices != null ? "Yes" : "No")} | {GetChunkSize(VertexIndices)} |");
+            summary.AppendLine($"| MSCN (Normal Coordinates) | {(NormalCoordinates != null ? "Yes" : "No")} | {GetChunkSize(NormalCoordinates)} |");
+            summary.AppendLine($"| MSLK (Links) | {(Links != null ? "Yes" : "No")} | {GetChunkSize(Links)} |");
+            summary.AppendLine($"| MSVT (Vertex Data) | {(VertexData != null ? "Yes" : "No")} | {GetChunkSize(VertexData)} |");
+            summary.AppendLine($"| MSVI (Vertex Indices 2) | {(VertexIndices2 != null ? "Yes" : "No")} | {GetChunkSize(VertexIndices2)} |");
+            summary.AppendLine($"| MSUR (Surface Data) | {(SurfaceData != null ? "Yes" : "No")} | {GetChunkSize(SurfaceData)} |");
+            summary.AppendLine($"| MPRL (Position Data) | {(PositionData != null ? "Yes" : "No")} | {GetChunkSize(PositionData)} |");
+            summary.AppendLine($"| MPRR (Value Pairs) | {(ValuePairs != null ? "Yes" : "No")} | {GetChunkSize(ValuePairs)} |");
+            summary.AppendLine($"| MDBH (Building Data) | {(BuildingData != null ? "Yes" : "No")} | {GetChunkSize(BuildingData)} |");
+            summary.AppendLine($"| MDOS (Simple Data) | {(SimpleData != null ? "Yes" : "No")} | {GetChunkSize(SimpleData)} |");
+            summary.AppendLine($"| MDSF (Final Data) | {(FinalData != null ? "Yes" : "No")} | {GetChunkSize(FinalData)} |");
+            
+            // Add detailed information for specific chunks
             if (VertexPositionsChunk != null)
             {
-                summary.AppendLine($"\nMSPV (Vertex Positions):");
+                summary.AppendLine("\n## Vertex Positions (MSPV)");
                 summary.AppendLine($"- Vertex Count: {VertexPositionsChunk.Vertices.Count}");
+                
                 if (VertexPositionsChunk.Vertices.Count > 0)
                 {
-                    summary.AppendLine($"- First 5 Vertices:");
-                    for (int i = 0; i < Math.Min(5, VertexPositionsChunk.Vertices.Count); i++)
+                    summary.AppendLine("\n### Sample Vertices");
+                    summary.AppendLine("| Index | X | Y | Z |");
+                    summary.AppendLine("|-------|-----|-----|-----|");
+                    
+                    // Show first 10 vertices as a sample
+                    for (int i = 0; i < Math.Min(10, VertexPositionsChunk.Vertices.Count); i++)
                     {
-                        var v = VertexPositionsChunk.Vertices[i];
-                        summary.AppendLine($"  {i}: ({v.X}, {v.Y}, {v.Z})");
+                        var vertex = VertexPositionsChunk.Vertices[i];
+                        summary.AppendLine($"| {i} | {vertex.X:F2} | {vertex.Y:F2} | {vertex.Z:F2} |");
+                    }
+                    
+                    if (VertexPositionsChunk.Vertices.Count > 10)
+                    {
+                        summary.AppendLine($"_Showing 10 of {VertexPositionsChunk.Vertices.Count} vertices_");
                     }
                 }
             }
             
             if (VertexIndicesChunk != null)
             {
-                summary.AppendLine($"\nMSPI (Vertex Indices):");
+                summary.AppendLine("\n## Vertex Indices (MSPI)");
                 summary.AppendLine($"- Index Count: {VertexIndicesChunk.Indices.Count}");
+                
                 if (VertexIndicesChunk.Indices.Count > 0)
                 {
-                    summary.AppendLine($"- First 10 Indices:");
-                    for (int i = 0; i < Math.Min(10, VertexIndicesChunk.Indices.Count); i++)
+                    // Calculate triangle count (assuming triangles)
+                    int triangleCount = VertexIndicesChunk.Indices.Count / 3;
+                    summary.AppendLine($"- Triangle Count: {triangleCount}");
+                    
+                    // Show first few triangles
+                    summary.AppendLine("\n### Sample Triangle Indices");
+                    summary.AppendLine("| Triangle | Vertex 1 | Vertex 2 | Vertex 3 |");
+                    summary.AppendLine("|----------|----------|----------|----------|");
+                    
+                    for (int i = 0; i < Math.Min(10, triangleCount); i++)
                     {
-                        summary.AppendLine($"  {i}: {VertexIndicesChunk.Indices[i]}");
+                        int baseIndex = i * 3;
+                        if (baseIndex + 2 < VertexIndicesChunk.Indices.Count)
+                        {
+                            summary.AppendLine($"| {i} | {VertexIndicesChunk.Indices[baseIndex]} | " +
+                                $"{VertexIndicesChunk.Indices[baseIndex + 1]} | {VertexIndicesChunk.Indices[baseIndex + 2]} |");
+                        }
+                    }
+                    
+                    if (triangleCount > 10)
+                    {
+                        summary.AppendLine($"_Showing 10 of {triangleCount} triangles_");
                     }
                 }
             }
             
             if (PositionDataChunk != null)
             {
-                summary.AppendLine($"\nMPRL (Position Data):");
-                summary.AppendLine($"- Entry Count: {PositionDataChunk.Entries.Count}");
+                summary.AppendLine("\n## Position Data (MPRL)");
+                summary.AppendLine($"- Position Entry Count: {PositionDataChunk.Entries.Count}");
+                
                 if (PositionDataChunk.Entries.Count > 0)
                 {
-                    summary.AppendLine($"- First 5 Entries:");
-                    for (int i = 0; i < Math.Min(5, PositionDataChunk.Entries.Count); i++)
+                    // Count position records vs command records
+                    int positionRecords = PositionDataChunk.Entries.Count(e => !e.IsControlRecord);
+                    int commandRecords = PositionDataChunk.Entries.Count(e => e.IsControlRecord);
+                    summary.AppendLine($"- Position Records: {positionRecords}");
+                    summary.AppendLine($"- Command/Control Records: {commandRecords}");
+                    
+                    // Group by CommandValue to show distribution
+                    var groupedByCommand = PositionDataChunk.Entries
+                        .Where(e => e.IsControlRecord)
+                        .GroupBy(e => e.CommandValue)
+                        .OrderByDescending(g => g.Count())
+                        .ToList();
+                        
+                    if (groupedByCommand.Any())
+                    {
+                        summary.AppendLine($"\n### Command Value Distribution");
+                        summary.AppendLine("| Command (Hex) | Command (Dec) | Count | Sample Y Value |");
+                        summary.AppendLine("|--------------|--------------|-------|----------------|");
+                        
+                        foreach (var group in groupedByCommand.Take(10))
+                        {
+                            var sample = group.First();
+                            summary.AppendLine($"| 0x{group.Key:X8} | {group.Key} | {group.Count()} | {sample.CoordinateY:F2} |");
+                        }
+                        
+                        if (groupedByCommand.Count > 10)
+                        {
+                            summary.AppendLine($"_Showing 10 of {groupedByCommand.Count} command values_");
+                        }
+                    }
+                    
+                    // Show commands and positions with pattern analysis
+                    summary.AppendLine("\n### Command-Position Pattern Analysis");
+                    
+                    // Find the most common patterns of control records followed by position records
+                    var entryPairs = new List<(MPRLChunk.ServerPositionData Command, MPRLChunk.ServerPositionData Position)>();
+                    for (int i = 0; i < PositionDataChunk.Entries.Count - 1; i++)
+                    {
+                        var current = PositionDataChunk.Entries[i];
+                        var next = PositionDataChunk.Entries[i + 1];
+                        
+                        if (current.IsControlRecord && !next.IsControlRecord)
+                        {
+                            entryPairs.Add((current, next));
+                        }
+                    }
+                    
+                    if (entryPairs.Any())
+                    {
+                        summary.AppendLine($"- Command-Position Pairs: {entryPairs.Count}");
+                        
+                        var groupedPairs = entryPairs
+                            .GroupBy(pair => pair.Command.CommandValue)
+                            .OrderByDescending(g => g.Count())
+                            .Take(5)
+                            .ToList();
+                            
+                        summary.AppendLine("\n#### Most Common Command-Position Pairs");
+                        summary.AppendLine("| Command (Hex) | Count | Example Position |");
+                        summary.AppendLine("|--------------|-------|------------------|");
+                        
+                        foreach (var group in groupedPairs)
+                        {
+                            var sample = group.First();
+                            string posValue = $"({sample.Position.CoordinateX:F2}, {sample.Position.CoordinateY:F2}, {sample.Position.CoordinateZ:F2})";
+                            summary.AppendLine($"| 0x{group.Key:X8} | {group.Count()} | {posValue} |");
+                        }
+                    }
+                    
+                    // Show position records
+                    if (positionRecords > 0)
+                    {
+                        summary.AppendLine("\n### Position Records");
+                        summary.AppendLine("| Index | X | Y | Z |");
+                        summary.AppendLine("|-------|------------|----------|----------|");
+                        
+                        var positions = PositionDataChunk.Entries.Where(e => !e.IsControlRecord).Take(15).ToList();
+                        foreach (var entry in positions)
+                        {
+                            summary.AppendLine($"| {entry.Index} | {entry.CoordinateX:F2} | {entry.CoordinateY:F2} | {entry.CoordinateZ:F2} |");
+                        }
+                        
+                        if (positionRecords > 15)
+                        {
+                            summary.AppendLine($"_Showing 15 of {positionRecords} position records_");
+                        }
+                    }
+                    
+                    // Show command records
+                    if (commandRecords > 0)
+                    {
+                        summary.AppendLine("\n### Command Records");
+                        summary.AppendLine("| Index | Command (Hex) | Y Value |");
+                        summary.AppendLine("|-------|--------------|---------|");
+                        
+                        var commands = PositionDataChunk.Entries.Where(e => e.IsControlRecord).Take(15).ToList();
+                        foreach (var entry in commands)
+                        {
+                            summary.AppendLine($"| {entry.Index} | 0x{entry.CommandValue:X8} | {entry.CoordinateY:F2} |");
+                        }
+                        
+                        if (commandRecords > 15)
+                        {
+                            summary.AppendLine($"_Showing 15 of {commandRecords} command records_");
+                        }
+                    }
+                    
+                    // Show sample sequence of entries to demonstrate the pattern
+                    summary.AppendLine("\n### Entry Sequence Example");
+                    summary.AppendLine("| Index | Type | Value 1 | Value 2 | Value 3 | Command (Hex) |");
+                    summary.AppendLine("|-------|------|---------|---------|---------|--------------|");
+                    
+                    int maxSample = Math.Min(20, PositionDataChunk.Entries.Count);
+                    for (int i = 0; i < maxSample; i++)
                     {
                         var entry = PositionDataChunk.Entries[i];
-                        summary.AppendLine($"  {i}: FileDataID={entry.FileDataID}, Pos=({entry.Position.X}, {entry.Position.Y}, {entry.Position.Z}), Rot=({entry.Rotation.X}, {entry.Rotation.Y}, {entry.Rotation.Z}), Scale={entry.Scale}");
+                        string value1 = float.IsNaN(entry.Value1) ? "NaN" : entry.Value1.ToString("F2");
+                        string value3 = float.IsNaN(entry.Value3) ? "NaN" : entry.Value3.ToString("F2");
+                        string type = entry.IsControlRecord ? "Command" : "Position";
+                        string command = entry.IsControlRecord ? $"0x{entry.CommandValue:X8}" : "-";
+                        
+                        summary.AppendLine($"| {entry.Index} | {type} | {value1} | {entry.Value2:F2} | {value3} | {command} |");
+                    }
+                    
+                    if (PositionDataChunk.Entries.Count > 20)
+                    {
+                        summary.AppendLine($"_Showing 20 of {PositionDataChunk.Entries.Count} entries_");
                     }
                 }
             }
             
+            if (Errors.Count > 0)
+            {
+                summary.AppendLine("\n## Errors");
+                foreach (var error in Errors)
+                {
+                    summary.AppendLine($"- {error}");
+                }
+            }
+            
             return summary.ToString();
+        }
+
+        /// <summary>
+        /// Gets the size of a chunk safely
+        /// </summary>
+        private uint GetChunkSize(IIFFChunk? chunk)
+        {
+            if (chunk == null) return 0;
+            
+            // Try to cast to PM4Chunk which has a Size property
+            if (chunk is PM4Chunk pm4Chunk)
+            {
+                return pm4Chunk.Size;
+            }
+            
+            // For other IIFFChunk implementations, try to get the Data property via reflection
+            var dataProperty = chunk.GetType().GetProperty("Data");
+            if (dataProperty != null)
+            {
+                var data = dataProperty.GetValue(chunk) as byte[];
+                if (data != null)
+                {
+                    return (uint)data.Length;
+                }
+            }
+            
+            return 0;
         }
     }
 } 

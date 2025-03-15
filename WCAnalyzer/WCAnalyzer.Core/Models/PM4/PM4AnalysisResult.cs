@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using System.Linq;
 
 namespace WCAnalyzer.Core.Models.PM4
 {
@@ -106,6 +107,17 @@ namespace WCAnalyzer.Core.Models.PM4
         public Dictionary<string, object>? AdditionalData { get; set; }
 
         /// <summary>
+        /// Gets or sets the referenced PM4 file instance.
+        /// </summary>
+        [JsonIgnore]
+        public PM4File? PM4File { get; set; }
+
+        /// <summary>
+        /// Gets or sets the FileDataID to file name mapping for model references.
+        /// </summary>
+        public Dictionary<uint, string> ResolvedFileNames { get; set; } = new Dictionary<uint, string>();
+
+        /// <summary>
         /// Creates a PM4AnalysisResult from a PM4File instance.
         /// </summary>
         /// <param name="pm4File">The PM4File to analyze.</param>
@@ -133,7 +145,8 @@ namespace WCAnalyzer.Core.Models.PM4
                 HasValuePairs = pm4File.ValuePairs != null,
                 HasBuildingData = pm4File.BuildingData != null,
                 HasSimpleData = pm4File.SimpleData != null,
-                HasFinalData = pm4File.FinalData != null
+                HasFinalData = pm4File.FinalData != null,
+                PM4File = pm4File
             };
 
             return result;
@@ -146,12 +159,12 @@ namespace WCAnalyzer.Core.Models.PM4
         public string GetSummary()
         {
             var summary = new System.Text.StringBuilder();
-            summary.AppendLine($"PM4 Analysis Result for: {FileName}");
+            summary.AppendLine($"# PM4 Analysis Result for: {FileName}");
             summary.AppendLine($"Path: {FilePath}");
             summary.AppendLine($"Analysis Time: {AnalysisTime}");
             summary.AppendLine($"Version: {Version}");
             
-            summary.AppendLine("\nChunks present:");
+            summary.AppendLine("\n## Chunks present:");
             if (HasShadowData) summary.AppendLine("- MSHD (Shadow Data)");
             if (HasVertexPositions) summary.AppendLine("- MSPV (Vertex Positions)");
             if (HasVertexIndices) summary.AppendLine("- MSPI (Vertex Indices)");
@@ -166,9 +179,97 @@ namespace WCAnalyzer.Core.Models.PM4
             if (HasSimpleData) summary.AppendLine("- MDOS (Simple Data)");
             if (HasFinalData) summary.AppendLine("- MDSF (Final Data)");
 
+            // Include detailed information from the PM4File if available
+            if (PM4File != null)
+            {
+                if (PM4File.VertexPositionsChunk != null && PM4File.VertexPositionsChunk.Vertices.Count > 0)
+                {
+                    summary.AppendLine("\n## Vertex Data:");
+                    summary.AppendLine($"Total Vertices: {PM4File.VertexPositionsChunk.Vertices.Count}");
+                    
+                    // Show sample vertices
+                    summary.AppendLine("\n### Sample Vertices:");
+                    int sampleCount = Math.Min(5, PM4File.VertexPositionsChunk.Vertices.Count);
+                    for (int i = 0; i < sampleCount; i++)
+                    {
+                        var vertex = PM4File.VertexPositionsChunk.Vertices[i];
+                        summary.AppendLine($"- Vertex {i}: ({vertex.X:F2}, {vertex.Y:F2}, {vertex.Z:F2})");
+                    }
+                }
+                
+                if (PM4File.VertexIndicesChunk != null && PM4File.VertexIndicesChunk.Indices.Count > 0)
+                {
+                    summary.AppendLine("\n## Triangle Data:");
+                    int triangleCount = PM4File.VertexIndicesChunk.Indices.Count / 3;
+                    summary.AppendLine($"Total Triangles: {triangleCount}");
+                    
+                    // Show sample triangles
+                    summary.AppendLine("\n### Sample Triangles:");
+                    int sampleCount = Math.Min(3, triangleCount);
+                    for (int i = 0; i < sampleCount; i++)
+                    {
+                        int baseIndex = i * 3;
+                        if (baseIndex + 2 < PM4File.VertexIndicesChunk.Indices.Count)
+                        {
+                            summary.AppendLine($"- Triangle {i}: Vertices [{PM4File.VertexIndicesChunk.Indices[baseIndex]}, " +
+                                $"{PM4File.VertexIndicesChunk.Indices[baseIndex + 1]}, {PM4File.VertexIndicesChunk.Indices[baseIndex + 2]}]");
+                        }
+                    }
+                }
+                
+                if (PM4File.PositionDataChunk != null && PM4File.PositionDataChunk.Entries.Count > 0)
+                {
+                    summary.AppendLine("\n## Position Data:");
+                    summary.AppendLine($"Total Entries: {PM4File.PositionDataChunk.Entries.Count}");
+                    
+                    // Count position vs command records
+                    int positionRecords = PM4File.PositionDataChunk.Entries.Count(e => !e.IsControlRecord);
+                    int commandRecords = PM4File.PositionDataChunk.Entries.Count(e => e.IsControlRecord);
+                    summary.AppendLine($"Position Records: {positionRecords}");
+                    summary.AppendLine($"Command Records: {commandRecords}");
+                    
+                    // Show sample position records
+                    if (positionRecords > 0)
+                    {
+                        summary.AppendLine("\n### Sample Position Records:");
+                        int sampleCount = Math.Min(5, positionRecords);
+                        var positions = PM4File.PositionDataChunk.Entries.Where(e => !e.IsControlRecord).Take(sampleCount).ToList();
+                        foreach (var pos in positions)
+                        {
+                            summary.AppendLine($"- Index {pos.Index}: ({pos.CoordinateX:F2}, {pos.CoordinateY:F2}, {pos.CoordinateZ:F2})");
+                        }
+                    }
+                    
+                    // Show sample command records
+                    if (commandRecords > 0)
+                    {
+                        summary.AppendLine("\n### Sample Command Records:");
+                        int sampleCount = Math.Min(5, commandRecords);
+                        var commands = PM4File.PositionDataChunk.Entries.Where(e => e.IsControlRecord).Take(sampleCount).ToList();
+                        foreach (var cmd in commands)
+                        {
+                            summary.AppendLine($"- Index {cmd.Index}: Command=0x{cmd.CommandValue:X8}, Y={cmd.CoordinateY:F2}");
+                        }
+                    }
+                    
+                    // Show the sequence pattern
+                    summary.AppendLine("\n### Entry Sequence Pattern:");
+                    int sequenceSample = Math.Min(10, PM4File.PositionDataChunk.Entries.Count);
+                    for (int i = 0; i < sequenceSample; i++)
+                    {
+                        var entry = PM4File.PositionDataChunk.Entries[i];
+                        string type = entry.IsControlRecord ? "Command" : "Position";
+                        string details = entry.IsControlRecord ? 
+                            $"Command=0x{entry.CommandValue:X8}, Y={entry.CoordinateY:F2}" : 
+                            $"({entry.CoordinateX:F2}, {entry.CoordinateY:F2}, {entry.CoordinateZ:F2})";
+                        summary.AppendLine($"- Entry {i}: {type} - {details}");
+                    }
+                }
+            }
+
             if (Errors.Count > 0)
             {
-                summary.AppendLine("\nErrors encountered:");
+                summary.AppendLine("\n## Errors encountered:");
                 foreach (var error in Errors)
                 {
                     summary.AppendLine($"- {error}");

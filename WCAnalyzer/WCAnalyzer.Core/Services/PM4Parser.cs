@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models.PM4;
+using System.Linq;
 
 namespace WCAnalyzer.Core.Services
 {
@@ -178,6 +179,90 @@ namespace WCAnalyzer.Core.Services
             }
             
             return summary.ToString();
+        }
+
+        /// <summary>
+        /// Resolves file references in the PM4 analysis result using a listfile.
+        /// </summary>
+        /// <param name="result">The PM4 analysis result to enhance.</param>
+        /// <param name="listfile">Dictionary mapping FileDataIDs to file names.</param>
+        public void ResolveReferences(PM4AnalysisResult result, Dictionary<uint, string> listfile)
+        {
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+            
+            if (listfile == null || listfile.Count == 0)
+            {
+                _logger?.LogInformation("No listfile provided for reference resolution");
+                return;
+            }
+            
+            // PM4 files don't actually contain model FileDataIDs to resolve
+            // The structure previously assumed to have FileDataIDs actually contains vertex coordinates and flag data
+            
+            _logger?.LogInformation("PM4 files do not contain FileDataIDs to resolve - this is server-side collision mesh data");
+            
+            // The file contains server-side collision and navigation data, not model references
+            result.ResolvedFileNames.Clear();
+        }
+
+        /// <summary>
+        /// Asynchronously parses PM4 files from a directory and resolves references using a listfile.
+        /// </summary>
+        /// <param name="directoryPath">The directory containing PM4 files.</param>
+        /// <param name="listfilePath">Path to the listfile for reference resolution.</param>
+        /// <param name="searchPattern">File search pattern.</param>
+        /// <param name="searchOption">Directory search options.</param>
+        /// <returns>A list of PM4 analysis results.</returns>
+        public async Task<List<PM4AnalysisResult>> ParseDirectoryWithReferencesAsync(
+            string directoryPath,
+            string listfilePath,
+            string searchPattern = "*.pm4",
+            SearchOption searchOption = SearchOption.AllDirectories)
+        {
+            // First load the listfile
+            Dictionary<uint, string> listfile = new Dictionary<uint, string>();
+            try
+            {
+                if (File.Exists(listfilePath))
+                {
+                    _logger?.LogInformation("Loading listfile from {ListfilePath}", listfilePath);
+                    
+                    var lines = await File.ReadAllLinesAsync(listfilePath);
+                    foreach (var line in lines)
+                    {
+                        var parts = line.Split(';');
+                        if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileId))
+                        {
+                            listfile[fileId] = parts[1];
+                        }
+                    }
+                    
+                    _logger?.LogInformation("Loaded {Count} entries from listfile", listfile.Count);
+                }
+                else
+                {
+                    _logger?.LogWarning("Listfile not found at {ListfilePath}", listfilePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error loading listfile from {ListfilePath}", listfilePath);
+            }
+
+            // Parse the PM4 files
+            var results = await ParseDirectoryAsync(directoryPath, searchPattern, searchOption);
+
+            // Resolve references for each result
+            if (listfile.Count > 0)
+            {
+                foreach (var result in results)
+                {
+                    ResolveReferences(result, listfile);
+                }
+            }
+
+            return results;
         }
     }
 } 
