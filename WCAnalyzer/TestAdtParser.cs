@@ -1,71 +1,84 @@
+using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
-using System.Threading.Tasks;
+using System.Text.Json;
+using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Services;
-using WCAnalyzer.Core.Utilities;
 
-namespace WCAnalyzer.Test
+namespace TestAdtParser
 {
-    public class TestAdtParser
+    class Program
     {
-        public static async Task Main(string[] args)
+        static void Main(string[] args)
         {
-            // Set up logging
-            var logger = new ConsoleLogger(LogLevel.Debug);
-            
-            // Create parser
-            var parser = new AdtParser(logger);
-            
-            // Path to test data
-            string testDataPath = Path.Combine("..", "..", "test_data", "development");
-            if (!Directory.Exists(testDataPath))
+            // Create logger factory
+            using var loggerFactory = LoggerFactory.Create(builder =>
             {
-                Console.WriteLine($"Test data directory not found: {testDataPath}");
-                Console.WriteLine("Current directory: " + Directory.GetCurrentDirectory());
+                builder
+                    .AddFilter("Microsoft", LogLevel.Warning)
+                    .AddFilter("System", LogLevel.Warning)
+                    .AddFilter("TestAdtParser", LogLevel.Debug)
+                    .AddConsole();
+            });
+            
+            var logger = loggerFactory.CreateLogger<Program>();
+            logger.LogInformation("AdtParser Test Program");
+
+            if (args.Length == 0)
+            {
+                logger.LogError("Please provide a path to an ADT file");
                 return;
             }
-            
-            Console.WriteLine($"Found test data directory: {testDataPath}");
-            
-            // Find ADT files
-            var adtFiles = Directory.GetFiles(testDataPath, "*.adt", SearchOption.AllDirectories);
-            Console.WriteLine($"Found {adtFiles.Length} ADT files");
-            
-            // Parse each ADT file
-            foreach (var adtFile in adtFiles)
+
+            string adtPath = args[0];
+            if (!File.Exists(adtPath))
             {
-                Console.WriteLine($"\nParsing file: {Path.GetFileName(adtFile)}");
-                try
+                logger.LogError($"File not found: {adtPath}");
+                return;
+            }
+
+            try
+            {
+                // Create AdtParser
+                var parser = new AdtParser(loggerFactory.CreateLogger<AdtParser>());
+                
+                // Parse ADT file
+                logger.LogInformation($"Parsing ADT file: {adtPath}");
+                var adtInfo = parser.ParseAdtFile(adtPath);
+                
+                // Log model and WMO references
+                logger.LogInformation($"Found {adtInfo.ReferencedModels.Count} model FileDataIDs");
+                foreach (var modelId in adtInfo.ReferencedModels)
                 {
-                    var result = await parser.ParseAdtFileAsync(adtFile);
-                    
-                    Console.WriteLine($"  Coordinates: ({result.XCoord}, {result.YCoord})");
-                    Console.WriteLine($"  Version: {result.Version}");
-                    Console.WriteLine($"  Flags: {result.Flags}");
-                    Console.WriteLine($"  Terrain chunks: {result.TerrainChunkCount}");
-                    Console.WriteLine($"  Model placements: {result.ModelPlacementCount}");
-                    Console.WriteLine($"  WMO placements: {result.WmoPlacementCount}");
-                    Console.WriteLine($"  Texture references: {result.TextureReferences.Count}");
-                    Console.WriteLine($"  Model references: {result.ModelReferences.Count}");
-                    Console.WriteLine($"  WMO references: {result.WmoReferences.Count}");
-                    
-                    if (result.Errors.Count > 0)
-                    {
-                        Console.WriteLine($"  Errors: {result.Errors.Count}");
-                        foreach (var error in result.Errors)
-                        {
-                            Console.WriteLine($"    - {error}");
-                        }
-                    }
+                    logger.LogInformation($"Model FileDataID: {modelId}");
                 }
-                catch (Exception ex)
+                
+                logger.LogInformation($"Found {adtInfo.ReferencedWmos.Count} WMO FileDataIDs");
+                foreach (var wmoId in adtInfo.ReferencedWmos)
                 {
-                    Console.WriteLine($"  Error parsing file: {ex.Message}");
-                    if (ex.InnerException != null)
-                    {
-                        Console.WriteLine($"  Inner exception: {ex.InnerException.Message}");
-                    }
+                    logger.LogInformation($"WMO FileDataID: {wmoId}");
                 }
+                
+                // Convert to AdtAnalysisResult
+                var result = parser.ConvertToAdtAnalysisResult(adtInfo);
+                
+                // Log model and WMO references from result
+                logger.LogInformation($"Result contains {result.ModelReferences.Count} model references");
+                logger.LogInformation($"Result contains {result.WmoReferences.Count} WMO references");
+                
+                // Output as JSON
+                var jsonOptions = new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                };
+                
+                string outputPath = Path.ChangeExtension(adtPath, ".json");
+                File.WriteAllText(outputPath, JsonSerializer.Serialize(result, jsonOptions));
+                logger.LogInformation($"JSON output written to: {outputPath}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error parsing ADT file");
             }
         }
     }

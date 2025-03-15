@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace WCAnalyzer.Core.Models;
 
@@ -64,6 +65,8 @@ public class AdtHeader
 
     /// <summary>
     /// Gets or sets the number of doodad references in the ADT.
+    /// This is redundant with ModelReferenceCount since doodads are M2/MDX models.
     /// </summary>
+    [JsonIgnore]
     public int DoodadReferenceCount { get; set; }
 }

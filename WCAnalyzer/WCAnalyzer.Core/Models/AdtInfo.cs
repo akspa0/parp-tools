@@ -15,7 +15,7 @@ namespace WCAnalyzer.Core.Models
         /// <summary>
         /// Gets or sets the full path to the ADT file.
         /// </summary>
-        public string? FilePath { get; set; }
+        public string FilePath { get; set; } = string.Empty;
 
         /// <summary>
         /// Gets or sets the file name of the ADT file.
@@ -73,6 +73,16 @@ namespace WCAnalyzer.Core.Models
         public List<int> UniqueIds { get; set; } = new List<int>();
 
         /// <summary>
+        /// Gets or sets the list of model FileDataIDs referenced in the ADT file.
+        /// </summary>
+        public HashSet<uint> ReferencedModels { get; set; } = new HashSet<uint>();
+
+        /// <summary>
+        /// Gets or sets the list of WMO FileDataIDs referenced in the ADT file.
+        /// </summary>
+        public HashSet<uint> ReferencedWmos { get; set; } = new HashSet<uint>();
+
+        /// <summary>
         /// Gets or sets detailed information about terrain chunks.
         /// </summary>
         public List<TerrainChunkInfo> TerrainChunkDetails { get; set; } = new List<TerrainChunkInfo>();
@@ -114,6 +124,11 @@ namespace WCAnalyzer.Core.Models
                 Properties["UsesFileDataId"] = value;
             }
         }
+
+        /// <summary>
+        /// Terrain Level of Detail data from ML chunks
+        /// </summary>
+        public TerrainLod? TerrainLod { get; set; }
     }
 
     /// <summary>

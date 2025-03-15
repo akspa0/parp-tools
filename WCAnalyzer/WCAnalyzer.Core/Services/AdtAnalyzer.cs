@@ -131,18 +131,25 @@ public class AdtAnalyzer
                         summary.MissingReferenceMap[reference.NormalizedPath] = referencingFiles;
                     }
                     referencingFiles.Add(result.FileName);
+                }
 
-                    // Track files not in the listfile
-                    if (!reference.ExistsInListfile)
+                // Track files not in the listfile (regardless of validity)
+                foreach (var reference in result.AllReferences.Where(r => !r.ExistsInListfile))
+                {
+                    // Only increment the counter if this is the first time we've seen this file
+                    if (!summary.FilesNotInListfileMap.ContainsKey(reference.NormalizedPath))
                     {
                         summary.FilesNotInListfile++;
-                        if (!summary.FilesNotInListfileMap.TryGetValue(reference.NormalizedPath, out var notInListfileFiles))
-                        {
-                            notInListfileFiles = new HashSet<string>();
-                            summary.FilesNotInListfileMap[reference.NormalizedPath] = notInListfileFiles;
-                        }
-                        notInListfileFiles.Add(result.FileName);
+                        _logger.LogDebug("Found file not in listfile: {FilePath} (Referenced in {AdtFile})", 
+                            reference.NormalizedPath, result.FileName);
                     }
+                    
+                    if (!summary.FilesNotInListfileMap.TryGetValue(reference.NormalizedPath, out var notInListfileFiles))
+                    {
+                        notInListfileFiles = new HashSet<string>();
+                        summary.FilesNotInListfileMap[reference.NormalizedPath] = notInListfileFiles;
+                    }
+                    notInListfileFiles.Add(result.FileName);
                 }
 
                 // Track duplicate unique IDs

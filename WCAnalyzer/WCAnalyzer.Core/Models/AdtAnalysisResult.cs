@@ -89,6 +89,11 @@ namespace WCAnalyzer.Core.Models
         public List<string> Errors { get; set; } = new List<string>();
 
         /// <summary>
+        /// Gets or sets the terrain level of detail data from ML chunks.
+        /// </summary>
+        public TerrainLod? TerrainLod { get; set; }
+
+        /// <summary>
         /// Gets all file references (textures, models, and WMOs) as a single collection.
         /// </summary>
         public IEnumerable<FileReference> AllReferences

@@ -880,6 +880,25 @@ namespace WCAnalyzer.Core.Services
                                         {
                                             _logger.LogDebug("WMO placement using FileDataID: {FileDataID}", placement.NameId);
                                             isUsingFileDataId = true;
+                                            
+                                            // Store the FileDataID as a reference
+                                            if (placement.NameId > 0 && !adtInfo.ReferencedWmos.Contains(placement.NameId))
+                                            {
+                                                adtInfo.ReferencedWmos.Add(placement.NameId);
+                                                
+                                                // Also ensure we have a property to store WMO FileDataIDs
+                                                if (!adtInfo.Properties.TryGetValue("WmoFileDataIds", out var wmoFileDataIdsObj))
+                                                {
+                                                    adtInfo.Properties["WmoFileDataIds"] = new List<uint>();
+                                                    wmoFileDataIdsObj = adtInfo.Properties["WmoFileDataIds"];
+                                                }
+                                                
+                                                // Add to the list if it doesn't exist
+                                                if (wmoFileDataIdsObj is List<uint> wmoFileDataIds && !wmoFileDataIds.Contains(placement.NameId))
+                                                {
+                                                    wmoFileDataIds.Add(placement.NameId);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -969,6 +988,25 @@ namespace WCAnalyzer.Core.Services
                                         {
                                             _logger.LogDebug("Model placement using FileDataID: {FileDataID}", placement.NameId);
                                             isUsingFileDataId = true;
+                                            
+                                            // Store the FileDataID as a reference
+                                            if (placement.NameId > 0 && !adtInfo.ReferencedModels.Contains(placement.NameId))
+                                            {
+                                                adtInfo.ReferencedModels.Add(placement.NameId);
+                                                
+                                                // Also ensure we have a property to store model FileDataIDs
+                                                if (!adtInfo.Properties.TryGetValue("ModelFileDataIds", out var modelFileDataIdsObj))
+                                                {
+                                                    adtInfo.Properties["ModelFileDataIds"] = new List<uint>();
+                                                    modelFileDataIdsObj = adtInfo.Properties["ModelFileDataIds"];
+                                                }
+                                                
+                                                // Add to the list if it doesn't exist
+                                                if (modelFileDataIdsObj is List<uint> modelFileDataIds && !modelFileDataIds.Contains(placement.NameId))
+                                                {
+                                                    modelFileDataIds.Add(placement.NameId);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -977,17 +1015,299 @@ namespace WCAnalyzer.Core.Services
                                 break;
                             
                             default:
-                                // Skip unknown chunks
-                                _logger.LogDebug("Skipping unknown chunk {ChunkId}, size: {Size}", chunkId, chunkSize);
-                                try
+                                // Check for ML chunks (Terrain LOD chunks)
+                                if (chunkId.StartsWith("ML"))
                                 {
-                                    ms.Position += chunkSize;
+                                    // Initialize TerrainLod if not already created
+                                    if (adtInfo.TerrainLod == null)
+                                    {
+                                        adtInfo.TerrainLod = new Models.TerrainLod();
+                                        _logger.LogDebug("Created TerrainLod object for ML chunks");
+                                    }
+
+                                    // Process specific ML chunks
+                                    switch (chunkId)
+                                    {
+                                        case "MLHD": // LOD Header
+                                            try
+                                            {
+                                                var header = new Models.TerrainLodHeader();
+                                                header.Flags = br.ReadUInt32();
+                                                
+                                                // Read bounding box
+                                                var bbox = new Models.BoundingBox();
+                                                bbox.Min = new System.Numerics.Vector3(
+                                                    br.ReadSingle(), 
+                                                    br.ReadSingle(), 
+                                                    br.ReadSingle());
+                                                bbox.Max = new System.Numerics.Vector3(
+                                                    br.ReadSingle(), 
+                                                    br.ReadSingle(),
+                                                    br.ReadSingle());
+                                                header.BoundingBox = bbox;
+                                                
+                                                adtInfo.TerrainLod.Header = header;
+                                                _logger.LogDebug("Parsed MLHD chunk with flags: {Flags}", header.Flags);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLHD chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLVH": // LOD Heightmap
+                                            try
+                                            {
+                                                int heightCount = (int)(chunkSize / sizeof(float));
+                                                var heightData = new float[heightCount];
+                                                
+                                                for (int i = 0; i < heightCount; i++)
+                                                {
+                                                    heightData[i] = br.ReadSingle();
+                                                }
+                                                
+                                                adtInfo.TerrainLod.HeightData = heightData;
+                                                _logger.LogDebug("Parsed MLVH chunk with {Count} height values", heightCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLVH chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLLL": // LOD Levels
+                                            try
+                                            {
+                                                // Each MLLLEntry is 20 bytes
+                                                int entrySize = 20;
+                                                int entryCount = (int)(chunkSize / entrySize);
+                                                
+                                                for (int i = 0; i < entryCount; i++)
+                                                {
+                                                    var level = new Models.TerrainLodLevel
+                                                    {
+                                                        LodBands = br.ReadSingle(),
+                                                        HeightLength = br.ReadUInt32(),
+                                                        HeightIndex = br.ReadUInt32(),
+                                                        MapAreaLowLength = br.ReadUInt32(),
+                                                        MapAreaLowIndex = br.ReadUInt32()
+                                                    };
+                                                    
+                                                    adtInfo.TerrainLod.Levels.Add(level);
+                                                }
+                                                
+                                                _logger.LogDebug("Parsed MLLL chunk with {Count} level entries", entryCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLLL chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLND": // LOD Node data
+                                            try
+                                            {
+                                                // Each MLNDEntry is 20 bytes
+                                                int entrySize = 20;
+                                                int entryCount = (int)(chunkSize / entrySize);
+                                                
+                                                for (int i = 0; i < entryCount; i++)
+                                                {
+                                                    var node = new Models.TerrainLodNode
+                                                    {
+                                                        VertexIndicesOffset = br.ReadUInt32(),
+                                                        VertexIndicesLength = br.ReadUInt32(),
+                                                        Unknown1 = br.ReadUInt32(),
+                                                        Unknown2 = br.ReadUInt32()
+                                                    };
+                                                    
+                                                    // Read 4 child indices (2 bytes each)
+                                                    node.ChildIndices = new ushort[4];
+                                                    for (int j = 0; j < 4; j++)
+                                                    {
+                                                        node.ChildIndices[j] = br.ReadUInt16();
+                                                    }
+                                                    
+                                                    adtInfo.TerrainLod.Nodes.Add(node);
+                                                }
+                                                
+                                                _logger.LogDebug("Parsed MLND chunk with {Count} node entries", entryCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLND chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLVI": // LOD Vertex Indices
+                                            try
+                                            {
+                                                int indexCount = (int)(chunkSize / sizeof(ushort));
+                                                var indices = new ushort[indexCount];
+                                                
+                                                for (int i = 0; i < indexCount; i++)
+                                                {
+                                                    indices[i] = br.ReadUInt16();
+                                                }
+                                                
+                                                adtInfo.TerrainLod.VertexIndices = indices;
+                                                _logger.LogDebug("Parsed MLVI chunk with {Count} vertex indices", indexCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLVI chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLSI": // LOD Skirt Indices
+                                            try
+                                            {
+                                                int indexCount = (int)(chunkSize / sizeof(ushort));
+                                                var indices = new ushort[indexCount];
+                                                
+                                                for (int i = 0; i < indexCount; i++)
+                                                {
+                                                    indices[i] = br.ReadUInt16();
+                                                }
+                                                
+                                                adtInfo.TerrainLod.SkirtIndices = indices;
+                                                _logger.LogDebug("Parsed MLSI chunk with {Count} skirt indices", indexCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLSI chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLLD": // LOD Liquid Data
+                                            try
+                                            {
+                                                var liquidData = new Models.TerrainLodLiquidData();
+                                                liquidData.Flags = br.ReadUInt32();
+                                                liquidData.DepthChunkSize = br.ReadUInt16();
+                                                liquidData.AlphaChunkSize = br.ReadUInt16();
+                                                
+                                                // Read depth chunk data
+                                                if (liquidData.DepthChunkSize > 0)
+                                                {
+                                                    liquidData.DepthChunkData = br.ReadBytes(liquidData.DepthChunkSize);
+                                                }
+                                                
+                                                // Read alpha chunk data
+                                                if (liquidData.AlphaChunkSize > 0)
+                                                {
+                                                    liquidData.AlphaChunkData = br.ReadBytes(liquidData.AlphaChunkSize);
+                                                }
+                                                
+                                                adtInfo.TerrainLod.LiquidData = liquidData;
+                                                _logger.LogDebug("Parsed MLLD chunk with flags: {Flags}", liquidData.Flags);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLLD chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLLN": // LOD Liquid Node
+                                            try
+                                            {
+                                                var liquidNode = new Models.TerrainLodLiquidNode();
+                                                liquidNode.Unknown1 = br.ReadUInt32();
+                                                liquidNode.MlliLength = br.ReadUInt32();
+                                                liquidNode.Unknown3 = br.ReadUInt32();
+                                                liquidNode.Unknown4a = br.ReadUInt16();
+                                                liquidNode.Unknown4b = br.ReadUInt16();
+                                                liquidNode.Unknown5 = br.ReadUInt32();
+                                                liquidNode.Unknown6 = br.ReadUInt32();
+                                                
+                                                adtInfo.TerrainLod.LiquidNode = liquidNode;
+                                                _logger.LogDebug("Parsed MLLN chunk");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLLN chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLLI": // LOD Liquid Indices
+                                            try
+                                            {
+                                                int vectorCount = (int)(chunkSize / (sizeof(float) * 3)); // Each Vector3 is 12 bytes
+                                                var liquidIndices = new System.Numerics.Vector3[vectorCount];
+                                                
+                                                for (int i = 0; i < vectorCount; i++)
+                                                {
+                                                    liquidIndices[i] = new System.Numerics.Vector3(
+                                                        br.ReadSingle(),
+                                                        br.ReadSingle(),
+                                                        br.ReadSingle()
+                                                    );
+                                                }
+                                                
+                                                adtInfo.TerrainLod.LiquidIndices = liquidIndices;
+                                                _logger.LogDebug("Parsed MLLI chunk with {Count} liquid indices", vectorCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLLI chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        case "MLLV": // LOD Liquid Vertices
+                                            try
+                                            {
+                                                int vectorCount = (int)(chunkSize / (sizeof(float) * 3)); // Each Vector3 is 12 bytes
+                                                var liquidVertices = new System.Numerics.Vector3[vectorCount];
+                                                
+                                                for (int i = 0; i < vectorCount; i++)
+                                                {
+                                                    liquidVertices[i] = new System.Numerics.Vector3(
+                                                        br.ReadSingle(),
+                                                        br.ReadSingle(),
+                                                        br.ReadSingle()
+                                                    );
+                                                }
+                                                
+                                                adtInfo.TerrainLod.LiquidVertices = liquidVertices;
+                                                _logger.LogDebug("Parsed MLLV chunk with {Count} liquid vertices", vectorCount);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogWarning(ex, "Error parsing MLLV chunk");
+                                                ms.Position += chunkSize; // Skip the rest of the chunk
+                                            }
+                                            break;
+                                            
+                                        default:
+                                            // Skip unknown ML chunks
+                                            _logger.LogDebug("Skipping unknown ML chunk {ChunkId}, size: {Size}", chunkId, chunkSize);
+                                            ms.Position += chunkSize;
+                                            break;
+                                    }
                                 }
-                                catch (IOException)
+                                else
                                 {
-                                    // If we can't seek, we've likely reached the end of the file
-                                    _logger.LogDebug("Unable to seek {ChunkSize} bytes forward, ending parsing", chunkSize);
-                                    break;
+                                    // Skip other unknown chunks
+                                    _logger.LogDebug("Skipping unknown chunk {ChunkId}, size: {Size}", chunkId, chunkSize);
+                                    try
+                                    {
+                                        ms.Position += chunkSize;
+                                    }
+                                    catch (IOException)
+                                    {
+                                        // If we can't seek, we've likely reached the end of the file
+                                        _logger.LogDebug("Unable to seek {ChunkSize} bytes forward, ending parsing", chunkSize);
+                                        break;
+                                    }
                                 }
                                 break;
                         }
@@ -1018,7 +1338,87 @@ namespace WCAnalyzer.Core.Services
             // At the end of the method, update the adtInfo with our findings
             adtInfo.UsesFileDataId = isUsingFileDataId;
             
+            // If we have model or WMO placements with FileDataIDs, ensure we have those references
+            EnsureFileDataIdReferences(adtInfo);
+            
             return adtInfo;
+        }
+
+        /// <summary>
+        /// Ensures FileDataID references are properly extracted from placements.
+        /// </summary>
+        /// <param name="adtInfo">The ADT info to update.</param>
+        private void EnsureFileDataIdReferences(AdtInfo adtInfo)
+        {
+            // Collect FileDataIDs from model placements
+            var modelFileDataIds = new HashSet<uint>();
+            foreach (var placement in adtInfo.ModelPlacementDetails)
+            {
+                if (placement.NameIdIsFileDataId && placement.NameId > 0)
+                {
+                    modelFileDataIds.Add(placement.NameId);
+                    adtInfo.ReferencedModels.Add(placement.NameId);
+                }
+            }
+            
+            // Add to Properties for ModelFileDataIds
+            if (modelFileDataIds.Count > 0)
+            {
+                if (!adtInfo.Properties.TryGetValue("ModelFileDataIds", out var modelFileDataIdsObj))
+                {
+                    adtInfo.Properties["ModelFileDataIds"] = new List<uint>();
+                    modelFileDataIdsObj = adtInfo.Properties["ModelFileDataIds"];
+                }
+                
+                if (modelFileDataIdsObj is List<uint> existingModelFileDataIds)
+                {
+                    foreach (var id in modelFileDataIds)
+                    {
+                        if (!existingModelFileDataIds.Contains(id))
+                        {
+                            existingModelFileDataIds.Add(id);
+                        }
+                    }
+                }
+            }
+            
+            // Collect FileDataIDs from WMO placements
+            var wmoFileDataIds = new HashSet<uint>();
+            foreach (var placement in adtInfo.WmoPlacementDetails)
+            {
+                if (placement.NameIdIsFileDataId && placement.NameId > 0)
+                {
+                    wmoFileDataIds.Add(placement.NameId);
+                    adtInfo.ReferencedWmos.Add(placement.NameId);
+                }
+            }
+            
+            // Add to Properties for WmoFileDataIds
+            if (wmoFileDataIds.Count > 0)
+            {
+                if (!adtInfo.Properties.TryGetValue("WmoFileDataIds", out var wmoFileDataIdsObj))
+                {
+                    adtInfo.Properties["WmoFileDataIds"] = new List<uint>();
+                    wmoFileDataIdsObj = adtInfo.Properties["WmoFileDataIds"];
+                }
+                
+                if (wmoFileDataIdsObj is List<uint> existingWmoFileDataIds)
+                {
+                    foreach (var id in wmoFileDataIds)
+                    {
+                        if (!existingWmoFileDataIds.Contains(id))
+                        {
+                            existingWmoFileDataIds.Add(id);
+                        }
+                    }
+                }
+            }
+            
+            // If we found any FileDataIDs, mark the ADT as using FileDataIDs
+            if (modelFileDataIds.Count > 0 || wmoFileDataIds.Count > 0)
+            {
+                adtInfo.UsesFileDataId = true;
+            }
         }
 
         private string ReadNullTerminatedString(BinaryReader br)
@@ -1265,6 +1665,9 @@ namespace WCAnalyzer.Core.Services
                     }
                 }
             }
+            
+            // Generate references from placements with FileDataIDs if they don't already exist
+            EnsurePlacementBasedReferences(result);
 
             // Log the number of WMO references we found and added
             _logger.LogDebug("Processed WMO references - From ADT: {WmoCount}, Added to result: {AddedCount}",
@@ -1416,6 +1819,13 @@ namespace WCAnalyzer.Core.Services
             _logger.LogDebug("Processed WMO placements - From ADT: {PlacementCount}, Added to result: {AddedCount}",
                 adtInfo.WmoPlacementDetails.Count, result.WmoPlacements.Count);
 
+            // Copy TerrainLod data if it exists
+            if (adtInfo.TerrainLod != null)
+            {
+                result.TerrainLod = adtInfo.TerrainLod;
+                _logger.LogDebug("Copied TerrainLod data to analysis result");
+            }
+
             // Process terrain chunks
             // ... existing code ...
 
@@ -1465,6 +1875,81 @@ namespace WCAnalyzer.Core.Services
             }
             
             return false;
+        }
+
+        /// <summary>
+        /// Generates references from placements with FileDataIDs if they don't already exist.
+        /// </summary>
+        /// <param name="result">The AdtAnalysisResult to update.</param>
+        private void EnsurePlacementBasedReferences(AdtAnalysisResult result)
+        {
+            // Collect FileDataIDs from model placements
+            var modelFileDataIds = new HashSet<uint>();
+            foreach (var placement in result.ModelPlacements)
+            {
+                if (placement.UsesFileDataId && placement.FileDataId > 0)
+                {
+                    modelFileDataIds.Add(placement.FileDataId);
+                }
+            }
+            
+            // Create model references from FileDataIDs
+            foreach (var fileDataId in modelFileDataIds)
+            {
+                // Check if a reference with this FileDataID already exists
+                if (!result.ModelReferences.Any(r => r.FileDataId == fileDataId && r.UsesFileDataId))
+                {
+                    // Create a new reference
+                    var modelReference = new FileReference
+                    {
+                        OriginalPath = $"<FileDataID:{fileDataId}>",
+                        NormalizedPath = $"<FileDataID:{fileDataId}>",
+                        Type = FileReferenceType.Model,
+                        FileDataId = fileDataId,
+                        UsesFileDataId = true
+                    };
+                    
+                    result.ModelReferences.Add(modelReference);
+                    _logger.LogDebug("Created model reference from placement FileDataID: {FileDataID}", fileDataId);
+                }
+            }
+            
+            // Collect FileDataIDs from WMO placements
+            var wmoFileDataIds = new HashSet<uint>();
+            foreach (var placement in result.WmoPlacements)
+            {
+                if (placement.UsesFileDataId && placement.FileDataId > 0)
+                {
+                    wmoFileDataIds.Add(placement.FileDataId);
+                }
+            }
+            
+            // Create WMO references from FileDataIDs
+            foreach (var fileDataId in wmoFileDataIds)
+            {
+                // Check if a reference with this FileDataID already exists
+                if (!result.WmoReferences.Any(r => r.FileDataId == fileDataId && r.UsesFileDataId))
+                {
+                    // Create a new reference
+                    var wmoReference = new FileReference
+                    {
+                        OriginalPath = $"<FileDataID:{fileDataId}>",
+                        NormalizedPath = $"<FileDataID:{fileDataId}>",
+                        Type = FileReferenceType.Wmo,
+                        FileDataId = fileDataId,
+                        UsesFileDataId = true
+                    };
+                    
+                    result.WmoReferences.Add(wmoReference);
+                    _logger.LogDebug("Created WMO reference from placement FileDataID: {FileDataID}", fileDataId);
+                }
+            }
+            
+            // If we found any FileDataIDs, mark the ADT as using FileDataIDs
+            if (modelFileDataIds.Count > 0 || wmoFileDataIds.Count > 0)
+            {
+                result.UsesFileDataId = true;
+            }
         }
     }
 }

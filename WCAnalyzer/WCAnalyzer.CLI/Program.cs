@@ -716,6 +716,11 @@ namespace WCAnalyzer.CLI
                 () => true,
                 "Generate a comprehensive report with all assets");
             
+            var exportCsvOption = new Option<bool>(
+                "--export-csv",
+                () => true,
+                "Export data to CSV files in addition to markdown reports");
+            
             // Add listfile option for UniqueID analysis
             var uniqueIdListfileOption = new Option<string?>(
                 "--listfile",
@@ -728,11 +733,12 @@ namespace WCAnalyzer.CLI
             uniqueIdCommand.AddOption(clusterThresholdOption);
             uniqueIdCommand.AddOption(clusterGapThresholdOption);
             uniqueIdCommand.AddOption(comprehensiveReportOption);
+            uniqueIdCommand.AddOption(exportCsvOption);
             uniqueIdCommand.AddOption(verboseOption);
             uniqueIdCommand.AddOption(uniqueIdListfileOption);
             
             // Set up handler for uniqueId command
-            uniqueIdCommand.SetHandler(async (string resultsDirectory, string output, int clusterThreshold, int clusterGap, bool comprehensive, bool verbose, string? listfilePath) =>
+            uniqueIdCommand.SetHandler(async (string resultsDirectory, string output, int clusterThreshold, int clusterGap, bool comprehensive, bool exportCsv, bool verbose, string? listfilePath) =>
             {
                 // Set up logging
                 var loggerFactory = LoggerFactory.Create(builder =>
@@ -784,6 +790,9 @@ namespace WCAnalyzer.CLI
                         await reportGenerator.LoadListfileAsync(listfilePath);
                     }
                     
+                    // Generate markdown reports
+                    logger.LogInformation("Generating markdown reports...");
+                    
                     // Generate summary report
                     await reportGenerator.GenerateSummaryReportAsync(result, Path.Combine(output, "summary.md"));
                     
@@ -797,13 +806,21 @@ namespace WCAnalyzer.CLI
                         await reportGenerator.GenerateClusterReportAsync(cluster, Path.Combine(output, clusterFileName));
                     }
                     
+                    // Generate CSV reports if enabled
+                    if (exportCsv)
+                    {
+                        logger.LogInformation("Generating CSV reports...");
+                        var csvGenerator = new CsvReportGenerator(loggerFactory.CreateLogger<CsvReportGenerator>());
+                        await csvGenerator.GenerateAllCsvReportsAsync(result, output);
+                    }
+                    
                     logger.LogInformation("UniqueID analysis complete!");
                 }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "Error during UniqueID analysis");
                 }
-            }, resultsDirectoryOption, uniqueIdOutputOption, clusterThresholdOption, clusterGapThresholdOption, comprehensiveReportOption, verboseOption, uniqueIdListfileOption);
+            }, resultsDirectoryOption, uniqueIdOutputOption, clusterThresholdOption, clusterGapThresholdOption, comprehensiveReportOption, exportCsvOption, verboseOption, uniqueIdListfileOption);
             
             // Add uniqueId command to root command
             rootCommand.Add(uniqueIdCommand);

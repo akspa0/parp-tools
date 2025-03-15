@@ -22,8 +22,11 @@ namespace WCAnalyzer.Core.Utilities
                 return string.Empty;
             }
 
+            // Replace doubled backslashes with single backslashes first
+            var normalized = path.Replace("\\\\", "\\");
+            
             // Normalize separators and casing
-            var normalized = path.ToLowerInvariant().Replace('\\', '/');
+            normalized = normalized.ToLowerInvariant().Replace('\\', '/');
 
             // Remove leading ./ or /
             normalized = normalized.TrimStart('.', '/');

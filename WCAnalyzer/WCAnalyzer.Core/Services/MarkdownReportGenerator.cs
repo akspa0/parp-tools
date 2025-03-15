@@ -353,15 +353,14 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 await writer.WriteLineAsync("");
-                await writer.WriteLineAsync("## Top 20 Most Used Models");
+                await writer.WriteLineAsync("## All Used Models");
                 await writer.WriteLineAsync("");
                 await writer.WriteLineAsync("| Model Name | Times Placed |");
                 await writer.WriteLineAsync("|------------|--------------|");
                 
                 var topModels = allPlacements
                     .GroupBy(p => p.Placement.Name)
-                    .OrderByDescending(g => g.Count())
-                    .Take(20);
+                    .OrderByDescending(g => g.Count());
                 
                 foreach (var group in topModels)
                 {
@@ -370,12 +369,22 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 await writer.WriteLineAsync("");
-                await writer.WriteLineAsync("## Sample Model Placements (First 50)");
+                await writer.WriteLineAsync("## All Model Placements");
                 await writer.WriteLineAsync("");
+                
+                // Log a warning about file size
+                int totalPlacements = allPlacements.Count;
+                if (totalPlacements > 5000)
+                {
+                    _logger.LogWarning("Generating a large markdown file with {Count} model placements. This may take some time and produce a very large file.", totalPlacements);
+                    await writer.WriteLineAsync($"> **Warning**: This section contains {totalPlacements} model placements and may be very large. Consider using a specialized editor to view this file.");
+                    await writer.WriteLineAsync("");
+                }
+                
                 await writer.WriteLineAsync("| ADT File | Model Name | UniqueID | Position | Rotation | Scale |");
                 await writer.WriteLineAsync("|----------|------------|----------|----------|----------|-------|");
                 
-                foreach (var placement in allPlacements.Take(50))
+                foreach (var placement in allPlacements)
                 {
                     string modelName = string.IsNullOrEmpty(placement.Placement.Name) ? "<unknown>" : placement.Placement.Name;
                     string position = $"({placement.Placement.Position.X:F2}, {placement.Placement.Position.Y:F2}, {placement.Placement.Position.Z:F2})";
@@ -422,15 +431,14 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 await writer.WriteLineAsync("");
-                await writer.WriteLineAsync("## Top 20 Most Used WMOs");
+                await writer.WriteLineAsync("## All Used WMOs");
                 await writer.WriteLineAsync("");
                 await writer.WriteLineAsync("| WMO Name | Times Placed |");
                 await writer.WriteLineAsync("|----------|--------------|");
                 
                 var topWmos = allPlacements
                     .GroupBy(p => p.Placement.Name)
-                    .OrderByDescending(g => g.Count())
-                    .Take(20);
+                    .OrderByDescending(g => g.Count());
                 
                 foreach (var group in topWmos)
                 {
@@ -439,12 +447,22 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 await writer.WriteLineAsync("");
-                await writer.WriteLineAsync("## Sample WMO Placements (First 50)");
+                await writer.WriteLineAsync("## All WMO Placements");
                 await writer.WriteLineAsync("");
+                
+                // Log a warning about file size
+                int totalPlacements = allPlacements.Count;
+                if (totalPlacements > 5000)
+                {
+                    _logger.LogWarning("Generating a large markdown file with {Count} WMO placements. This may take some time and produce a very large file.", totalPlacements);
+                    await writer.WriteLineAsync($"> **Warning**: This section contains {totalPlacements} WMO placements and may be very large. Consider using a specialized editor to view this file.");
+                    await writer.WriteLineAsync("");
+                }
+                
                 await writer.WriteLineAsync("| ADT File | WMO Name | UniqueID | Position | Rotation | DoodadSet | NameSet |");
                 await writer.WriteLineAsync("|----------|----------|----------|----------|----------|-----------|---------|");
                 
-                foreach (var placement in allPlacements.Take(50))
+                foreach (var placement in allPlacements)
                 {
                     string wmoName = string.IsNullOrEmpty(placement.Placement.Name) ? "<unknown>" : placement.Placement.Name;
                     string position = $"({placement.Placement.Position.X:F2}, {placement.Placement.Position.Y:F2}, {placement.Placement.Position.Z:F2})";
@@ -482,11 +500,8 @@ namespace WCAnalyzer.Core.Services
                     
                     foreach (var entry in summary.FilesNotInListfileMap.OrderBy(e => e.Key))
                     {
-                        string adtFiles = string.Join(", ", entry.Value.Take(5));
-                        if (entry.Value.Count > 5)
-                        {
-                            adtFiles += $" and {entry.Value.Count - 5} more";
-                        }
+                        // Show ALL ADT files where the missing file appears
+                        string adtFiles = string.Join(", ", entry.Value);
                         
                         await writer.WriteLineAsync($"| {entry.Key} | {adtFiles} |");
                     }
