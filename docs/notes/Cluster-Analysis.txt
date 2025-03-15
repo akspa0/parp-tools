@@ -2,9 +2,10 @@ WoW UniqueID Cluster Analysis -
 
 1807 is the earliest ID and is from before September 2001.
 
-Cluster 1 is September 2001
-Cluster 2 is March 2002
-Cluster 3 is
-Cluster 4 is
-Cluster 5 is
-Cluster 6 is December 2003 (0.5.3)
+Cluster 0 (0-4530) is Pre-September 2001, Kalidar (1807)
+Cluster 1 (4531-) is September 2001, 
+Cluster 2 (7694-240197) is March-April 2002,
+Cluster 3 (242115-270107) is ,
+Cluster 4 (272674-328875) is , Ungoro 
+Cluster 5 (330057-330070) is , plagueland, silithus, Teldrassil (Kalidar on Kalimdor)
+Cluster 6 (332168-) is December 2003 (0.5.3)
