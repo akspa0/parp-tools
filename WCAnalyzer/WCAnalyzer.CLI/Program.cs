@@ -885,6 +885,19 @@ namespace WCAnalyzer.CLI
                 "Export all geometry to a single consolidated Wavefront OBJ file");
             pm4ExportConsolidatedObjOption.AddAlias("-cobj");
 
+            var pm4ExportClusteredObjOption = new Option<bool>(
+                "--export-clustered-obj",
+                () => false,
+                "Export mesh data to clustered OBJ format with vertex proximity clustering");
+            pm4ExportClusteredObjOption.AddAlias("-clobj");
+
+            // Add new option for terrain extraction
+            var pm4ExtractTerrainOption = new Option<bool>(
+                "--extract-terrain",
+                () => false,
+                "Extract and export terrain data from PM4 position data");
+            pm4ExtractTerrainOption.AddAlias("-terrain");
+
             pm4Command.AddOption(pm4DirectoryOption);
             pm4Command.AddOption(pm4OutputOption);
             pm4Command.AddOption(pm4VerboseOption);
@@ -894,6 +907,8 @@ namespace WCAnalyzer.CLI
             pm4Command.AddOption(pm4ExportCsvOption);
             pm4Command.AddOption(pm4ExportObjOption);
             pm4Command.AddOption(pm4ExportConsolidatedObjOption);
+            pm4Command.AddOption(pm4ExportClusteredObjOption);
+            pm4Command.AddOption(pm4ExtractTerrainOption);
 
             var pm4FileOption = new Option<string>(
                 "--file",
@@ -913,6 +928,8 @@ namespace WCAnalyzer.CLI
                 bool exportCsv = context.ParseResult.GetValueForOption(pm4ExportCsvOption);
                 bool exportObj = context.ParseResult.GetValueForOption(pm4ExportObjOption);
                 bool exportConsolidatedObj = context.ParseResult.GetValueForOption(pm4ExportConsolidatedObjOption);
+                bool exportClusteredObj = context.ParseResult.GetValueForOption(pm4ExportClusteredObjOption);
+                bool extractTerrain = context.ParseResult.GetValueForOption(pm4ExtractTerrainOption);
 
                 // Configure logging with fully qualified type name
                 Microsoft.Extensions.Logging.LogLevel minLevel = quiet 
@@ -955,6 +972,15 @@ namespace WCAnalyzer.CLI
                     var pm4ObjExporter = new WCAnalyzer.Core.Services.PM4ObjExporter(
                         loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4ObjExporter>(),
                         outputPath);
+                    
+                    // Create clustered OBJ exporter if needed
+                    WCAnalyzer.Core.Services.PM4ClusteredObjExporter? pm4ClusteredObjExporter = null;
+                    if (exportClusteredObj)
+                    {
+                        pm4ClusteredObjExporter = new WCAnalyzer.Core.Services.PM4ClusteredObjExporter(
+                            loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4ClusteredObjExporter>(),
+                            outputPath);
+                    }
                     
                     // Create report generator
                     var reportGenerator = new WCAnalyzer.Core.Services.ReportGenerator(
@@ -1018,6 +1044,30 @@ namespace WCAnalyzer.CLI
 
             // Generate reports with CSV option
             await reportGenerator.GeneratePM4ReportsAsync(results, outputPath, exportCsv, exportObj, exportConsolidatedObj);
+            
+            // Export to clustered OBJ if requested
+            if (exportClusteredObj && pm4ClusteredObjExporter != null)
+            {
+                logger.LogInformation("Exporting to clustered OBJ format");
+                await pm4ClusteredObjExporter.ExportAllToClusteredObjAsync(results);
+                logger.LogInformation("Clustered OBJ export completed");
+            }
+
+            // Export terrain data if requested
+            if (extractTerrain)
+            {
+                logger.LogInformation("Extracting terrain data from PM4 position data");
+                string terrainObjPath = Path.Combine(outputPath, "terrain_reconstruction.obj");
+                if (pm4ObjExporter.ExportTerrainFromPositionData(results, terrainObjPath))
+                {
+                    logger.LogInformation("Terrain data exported to: {Path}", terrainObjPath);
+                }
+                else
+                {
+                    logger.LogWarning("Failed to export terrain data");
+                }
+            }
+            
             logger.LogInformation("PM4 analysis completed. Reports written to {OutputPath}", outputPath);
         }
         catch (Exception ex)
