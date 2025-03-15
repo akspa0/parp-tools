@@ -21,13 +21,15 @@ public class TerrainDataCsvGenerator
     /// Creates a new instance of the TerrainDataCsvGenerator class.
     /// </summary>
     /// <param name="logger">The logging service to use.</param>
-    public TerrainDataCsvGenerator(ILogger<TerrainDataCsvGenerator> logger)
+    /// <param name="csvDirectory">The directory to write CSV files to.</param>
+    public TerrainDataCsvGenerator(ILogger<TerrainDataCsvGenerator> logger, string csvDirectory)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        CsvDirectory = csvDirectory ?? throw new ArgumentNullException(nameof(csvDirectory));
     }
 
     /// <summary>
-    /// The directory to write CSV files to.
+    /// Gets or sets the directory where CSV files will be written.
     /// </summary>
     public string CsvDirectory { get; private set; }
 

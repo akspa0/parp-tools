@@ -5,6 +5,9 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Utilities;
+using WCAnalyzer.Core.Models.PM4;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WCAnalyzer.Core.Services
 {
@@ -120,6 +123,76 @@ namespace WCAnalyzer.Core.Services
             await writer.WriteLineAsync($"Analysis Duration: {summary.Duration.TotalSeconds:F2} seconds");
             await writer.WriteLineAsync($"Start Time: {summary.StartTime}");
             await writer.WriteLineAsync($"End Time: {summary.EndTime}");
+        }
+
+        /// <summary>
+        /// Generates reports for PM4 analysis results.
+        /// </summary>
+        /// <param name="analysisResults">The list of PM4 analysis results.</param>
+        /// <param name="outputDirectory">Output directory for the reports.</param>
+        /// <returns>A task that represents the asynchronous operation.</returns>
+        public async Task GeneratePM4ReportsAsync(IEnumerable<PM4AnalysisResult> analysisResults, string outputDirectory)
+        {
+            if (analysisResults == null)
+                throw new ArgumentNullException(nameof(analysisResults));
+
+            var results = analysisResults.ToList();
+            if (results.Count == 0)
+            {
+                _logger?.LogWarning("No PM4 analysis results to generate reports for.");
+                return;
+            }
+
+            _logger?.LogInformation("Generating PM4 reports for {Count} analysis results to {OutputDirectory}", results.Count, outputDirectory);
+
+            // Ensure output directory exists
+            Directory.CreateDirectory(outputDirectory);
+
+            // Generate summary report - using null for logger to avoid type mismatch
+            var pm4Parser = new PM4Parser(null);
+            string summary = pm4Parser.GenerateSummary(results);
+            await File.WriteAllTextAsync(Path.Combine(outputDirectory, "pm4_summary.md"), summary);
+
+            // Generate individual reports
+            var individualReportsDir = Path.Combine(outputDirectory, "pm4_individual_reports");
+            Directory.CreateDirectory(individualReportsDir);
+
+            foreach (var result in results)
+            {
+                if (string.IsNullOrEmpty(result.FileName))
+                    continue;
+
+                string reportContent = result.GetSummary();
+                string reportFilename = Path.GetFileNameWithoutExtension(result.FileName) + "_report.md";
+                await File.WriteAllTextAsync(Path.Combine(individualReportsDir, reportFilename), reportContent);
+            }
+
+            // Generate JSON reports
+            var jsonReportsDir = Path.Combine(outputDirectory, "pm4_json_reports");
+            Directory.CreateDirectory(jsonReportsDir);
+
+            var jsonOptions = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
+
+            // Combined JSON report
+            string combinedJsonReport = JsonSerializer.Serialize(results, jsonOptions);
+            await File.WriteAllTextAsync(Path.Combine(jsonReportsDir, "pm4_combined_report.json"), combinedJsonReport);
+
+            // Individual JSON reports
+            foreach (var result in results)
+            {
+                if (string.IsNullOrEmpty(result.FileName))
+                    continue;
+
+                string jsonReport = JsonSerializer.Serialize(result, jsonOptions);
+                string reportFilename = Path.GetFileNameWithoutExtension(result.FileName) + "_report.json";
+                await File.WriteAllTextAsync(Path.Combine(jsonReportsDir, reportFilename), jsonReport);
+            }
+
+            _logger?.LogInformation("PM4 reports generation completed successfully.");
         }
     }
 }

@@ -17,6 +17,7 @@ using ServicesSummary = WCAnalyzer.Core.Services.AnalysisSummary;
 // Add explicit alias for ReportGenerator to avoid ambiguity
 using CoreReportGenerator = WCAnalyzer.Core.Services.ReportGenerator;
 using UniqueIdReportGenerator = WCAnalyzer.UniqueIdAnalysis.ReportGenerator;
+using WCAnalyzer.Core.Models.PM4;
 
 namespace WCAnalyzer.CLI
 {
@@ -390,7 +391,7 @@ namespace WCAnalyzer.CLI
 
                 // Create services
                 var adtParser = new AdtParser(loggerFactory.CreateLogger<AdtParser>());
-                var csvGenerator = new TerrainDataCsvGenerator(loggerFactory.CreateLogger<TerrainDataCsvGenerator>());
+                var csvGenerator = new TerrainDataCsvGenerator(loggerFactory.CreateLogger<TerrainDataCsvGenerator>(), output);
                 var markdownGenerator = new MarkdownReportGenerator(loggerFactory.CreateLogger<MarkdownReportGenerator>());
                 var jsonGenerator = new JsonReportGenerator(loggerFactory.CreateLogger<JsonReportGenerator>());
                 var referenceValidator = new ReferenceValidator(loggerFactory.CreateLogger<ReferenceValidator>());
@@ -553,25 +554,32 @@ namespace WCAnalyzer.CLI
                         }
                         
                         // Log the consolidated result
-                        logger.LogInformation("Successfully processed ADT group {BaseName}: {TerrainChunks} terrain chunks, {TextureCount} textures, {ModelCount} models, {WmoCount} WMOs",
-                            baseName,
-                            consolidatedResult.TerrainChunks.Count,
-                            consolidatedResult.TextureReferences.Count,
-                            consolidatedResult.ModelReferences.Count,
-                            consolidatedResult.WmoReferences.Count);
-                        
-                        // Add to results list
-                        results.Add(consolidatedResult);
-                        
-                        // Validate references if we have a listfile
-                        if (knownGoodFiles.Count > 0)
+                        if (consolidatedResult != null)
                         {
-                            int invalidCount = referenceValidator.ValidateReferences(consolidatedResult, knownGoodFiles);
-                            if (invalidCount > 0)
+                            logger.LogInformation("Successfully processed ADT group {BaseName}: {TerrainChunks} terrain chunks, {TextureCount} textures, {ModelCount} models, {WmoCount} WMOs",
+                                baseName,
+                                consolidatedResult.TerrainChunks.Count,
+                                consolidatedResult.TextureReferences.Count,
+                                consolidatedResult.ModelReferences.Count,
+                                consolidatedResult.WmoReferences.Count);
+                            
+                            // Add to results list
+                            results.Add(consolidatedResult);
+                            
+                            // Validate references if we have a listfile
+                            if (knownGoodFiles.Count > 0)
                             {
-                                logger.LogWarning("{InvalidCount} invalid references found in {FileName}", 
-                                    invalidCount, consolidatedResult.FileName);
+                                int invalidCount = referenceValidator.ValidateReferences(consolidatedResult, knownGoodFiles);
+                                if (invalidCount > 0)
+                                {
+                                    logger.LogWarning("{InvalidCount} invalid references found in {FileName}", 
+                                        invalidCount, consolidatedResult.FileName);
+                                }
                             }
+                        }
+                        else
+                        {
+                            logger.LogWarning("No valid result was created for ADT group {BaseName}", baseName);
                         }
                         
                         // Save result to output directory if specified
@@ -825,6 +833,143 @@ namespace WCAnalyzer.CLI
             // Add uniqueId command to root command
             rootCommand.Add(uniqueIdCommand);
 
+            // Add PM4 analysis command
+            var pm4Command = new Command("pm4", "Analyze PM4 files");
+
+            // Add options to the PM4 command
+            var pm4DirectoryOption = new Option<string>(
+                "--directory",
+                "Directory containing PM4 files to analyze");
+            pm4DirectoryOption.AddAlias("-d");
+
+            var pm4OutputOption = new Option<string>(
+                "--output",
+                "Directory to write analysis output to");
+            pm4OutputOption.AddAlias("-o");
+
+            var pm4VerboseOption = new Option<bool>(
+                "--verbose",
+                "Enable verbose logging");
+            pm4VerboseOption.AddAlias("-v");
+
+            var pm4QuietOption = new Option<bool>(
+                "--quiet",
+                "Suppress all but error messages");
+            pm4QuietOption.AddAlias("-q");
+
+            var pm4RecursiveOption = new Option<bool>(
+                "--recursive",
+                "Recursively search for files in subdirectories");
+            pm4RecursiveOption.AddAlias("-r");
+
+            pm4Command.AddOption(pm4DirectoryOption);
+            pm4Command.AddOption(pm4OutputOption);
+            pm4Command.AddOption(pm4VerboseOption);
+            pm4Command.AddOption(pm4QuietOption);
+            pm4Command.AddOption(pm4RecursiveOption);
+
+            var pm4FileOption = new Option<string>(
+                "--file",
+                "Path to a specific PM4 file to analyze");
+            pm4FileOption.AddAlias("-f");
+            pm4Command.AddOption(pm4FileOption);
+
+            pm4Command.SetHandler(async (context) =>
+            {
+                string inputPath = context.ParseResult.GetValueForOption(pm4DirectoryOption) ?? string.Empty;
+                string outputPath = context.ParseResult.GetValueForOption(pm4OutputOption) ?? string.Empty;
+                bool verbose = context.ParseResult.GetValueForOption(pm4VerboseOption);
+                bool quiet = context.ParseResult.GetValueForOption(pm4QuietOption);
+                bool recursive = context.ParseResult.GetValueForOption(pm4RecursiveOption);
+                string specificFile = context.ParseResult.GetValueForOption(pm4FileOption) ?? string.Empty;
+
+                // Configure logging with fully qualified type name
+                Microsoft.Extensions.Logging.LogLevel minLevel = quiet 
+                    ? Microsoft.Extensions.Logging.LogLevel.Error 
+                    : (verbose ? Microsoft.Extensions.Logging.LogLevel.Debug : Microsoft.Extensions.Logging.LogLevel.Information);
+                
+                using var loggerFactory = LoggerFactory.Create(builder =>
+                {
+                    builder.AddConsole().SetMinimumLevel(minLevel);
+                });
+                var logger = loggerFactory.CreateLogger<Program>();
+
+                try
+                {
+                    if (string.IsNullOrEmpty(inputPath) && string.IsNullOrEmpty(specificFile))
+                    {
+                        logger.LogError("Either --directory or --file option must be specified");
+                        context.ExitCode = 1;
+                        return;
+                    }
+
+                    if (string.IsNullOrEmpty(outputPath))
+                    {
+                        outputPath = Path.Combine(Directory.GetCurrentDirectory(), "pm4_analysis_output");
+                    }
+
+                    Directory.CreateDirectory(outputPath);
+                    logger.LogInformation("Output directory: {OutputPath}", outputPath);
+
+                    // Use fully qualified types to avoid ambiguity
+                    var pm4Parser = new WCAnalyzer.Core.Services.PM4Parser(
+                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4Parser>());
+                    
+                    // Create a properly configured ReportGenerator
+                    var terrainDataCsvGenerator = new WCAnalyzer.Core.Services.TerrainDataCsvGenerator(
+                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.TerrainDataCsvGenerator>(),
+                        outputPath);
+                    
+                    var reportGenerator = new CoreReportGenerator(
+                        loggerFactory.CreateLogger<CoreReportGenerator>(),
+                        terrainDataCsvGenerator);
+                    
+                    List<WCAnalyzer.Core.Models.PM4.PM4AnalysisResult> results;
+
+                    if (!string.IsNullOrEmpty(specificFile))
+                    {
+                        // Analyze a specific file
+                        logger.LogInformation("Analyzing specific PM4 file: {File}", specificFile);
+                        if (!File.Exists(specificFile))
+                        {
+                            logger.LogError("File not found: {File}", specificFile);
+                            context.ExitCode = 1;
+                            return;
+                        }
+
+                        var result = pm4Parser.ParseFile(specificFile);
+                        results = new List<WCAnalyzer.Core.Models.PM4.PM4AnalysisResult> { result };
+                    }
+                    else
+                    {
+                        // Analyze files in directory
+                        logger.LogInformation("Analyzing PM4 files in directory: {InputPath}", inputPath);
+                        if (!Directory.Exists(inputPath))
+                        {
+                            logger.LogError("Directory not found: {InputPath}", inputPath);
+                            context.ExitCode = 1;
+                            return;
+                        }
+
+                        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                        results = await pm4Parser.ParseDirectoryAsync(inputPath, "*.pm4", searchOption);
+                    }
+
+                    logger.LogInformation("Analyzed {Count} PM4 files", results.Count);
+
+                    // Generate reports
+                    await reportGenerator.GeneratePM4ReportsAsync(results, outputPath);
+                    logger.LogInformation("PM4 analysis completed. Reports written to {OutputPath}", outputPath);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error during PM4 analysis");
+                    context.ExitCode = 1;
+                }
+            });
+
+            rootCommand.AddCommand(pm4Command);
+
             // Parse the command line
             return await rootCommand.InvokeAsync(args);
         }
@@ -834,10 +979,16 @@ namespace WCAnalyzer.CLI
         /// </summary>
         private static void MergeResults(AdtAnalysisResult target, AdtAnalysisResult source)
         {
+            if (target == null || source == null)
+            {
+                Console.WriteLine("Cannot merge null results");
+                return;
+            }
+
             // Log the contents of both results before merging
             Console.WriteLine($"Merging {source.FileName} into {target.FileName}");
-            Console.WriteLine($"  Before merge - Target: {target.ModelPlacements.Count} models, {target.WmoPlacements.Count} WMOs, {target.TextureReferences.Count} textures");
-            Console.WriteLine($"  Before merge - Source: {source.ModelPlacements.Count} models, {source.WmoPlacements.Count} WMOs, {source.TextureReferences.Count} textures");
+            Console.WriteLine($"  Before merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
+            Console.WriteLine($"  Before merge - Source: {source.ModelPlacements?.Count ?? 0} models, {source.WmoPlacements?.Count ?? 0} WMOs, {source.TextureReferences?.Count ?? 0} textures");
             
             // Determine if source is a _tex0 file (contains texture information)
             bool isSourceTexFile = source.FileName.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase);
@@ -851,10 +1002,10 @@ namespace WCAnalyzer.CLI
             int initialWmoPlacementCount = target.WmoPlacements.Count;
             
             // Special handling for terrain chunks based on file type
-            foreach (var chunk in source.TerrainChunks)
+            foreach (var chunk in source.TerrainChunks ?? Enumerable.Empty<TerrainChunk>())
             {
                 // Find matching terrain chunk in target if it exists
-                var existingChunk = target.TerrainChunks.FirstOrDefault(c => 
+                var existingChunk = target.TerrainChunks?.FirstOrDefault(c => 
                     c.Position.X == chunk.Position.X && c.Position.Y == chunk.Position.Y);
                 
                 if (existingChunk == null)
@@ -976,25 +1127,25 @@ namespace WCAnalyzer.CLI
             }
             
             // Log the counts after merging to verify data is being merged correctly
-            Console.WriteLine($"  After merge - Target: {target.ModelPlacements.Count} models, {target.WmoPlacements.Count} WMOs, {target.TextureReferences.Count} textures");
-            Console.WriteLine($"  Added: {target.ModelReferences.Count - initialModelCount} model refs, {target.WmoReferences.Count - initialWmoCount} WMO refs, {target.TextureReferences.Count - initialTextureCount} texture refs");
-            Console.WriteLine($"  Added: {target.ModelPlacements.Count - initialModelPlacementCount} model placements, {target.WmoPlacements.Count - initialWmoPlacementCount} WMO placements");
+            Console.WriteLine($"  After merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
+            Console.WriteLine($"  Added: {(target.ModelReferences?.Count ?? 0) - initialModelCount} model refs, {(target.WmoReferences?.Count ?? 0) - initialWmoCount} WMO refs, {(target.TextureReferences?.Count ?? 0) - initialTextureCount} texture refs");
+            Console.WriteLine($"  Added: {(target.ModelPlacements?.Count ?? 0) - initialModelPlacementCount} model placements, {(target.WmoPlacements?.Count ?? 0) - initialWmoPlacementCount} WMO placements");
             
             // Update header information to reflect the merged data
             if (target.Header != null)
             {
                 // Update counts in the header to reflect deduplicated data
-                target.Header.ModelReferenceCount = target.ModelReferences.Count;
-                target.Header.WmoReferenceCount = target.WmoReferences.Count;
-                target.Header.ModelPlacementCount = target.ModelPlacements.Count;
-                target.Header.WmoPlacementCount = target.WmoPlacements.Count;
-                target.Header.TerrainChunkCount = target.TerrainChunks.Count;
+                target.Header.ModelReferenceCount = target.ModelReferences?.Count ?? 0;
+                target.Header.WmoReferenceCount = target.WmoReferences?.Count ?? 0;
+                target.Header.ModelPlacementCount = target.ModelPlacements?.Count ?? 0;
+                target.Header.WmoPlacementCount = target.WmoPlacements?.Count ?? 0;
+                target.Header.TerrainChunkCount = target.TerrainChunks?.Count ?? 0;
                 
                 // Determine if we have various data types
-                bool hasHeightData = target.TerrainChunks.Any(c => c.Heights != null && c.Heights.Length > 0);
-                bool hasNormalData = target.TerrainChunks.Any(c => c.Normals != null && c.Normals.Length > 0);
-                bool hasLiquidData = target.TerrainChunks.Any(c => c.LiquidLevel > 0);
-                bool hasVertexShading = target.TerrainChunks.Any(c => c.VertexColors != null && c.VertexColors.Count > 0);
+                bool hasHeightData = target.TerrainChunks?.Any(c => c.Heights != null && c.Heights.Length > 0) ?? false;
+                bool hasNormalData = target.TerrainChunks?.Any(c => c.Normals != null && c.Normals.Length > 0) ?? false;
+                bool hasLiquidData = target.TerrainChunks?.Any(c => c.LiquidLevel > 0) ?? false;
+                bool hasVertexShading = target.TerrainChunks?.Any(c => c.VertexColors != null && c.VertexColors.Count > 0) ?? false;
                 
                 // Update the Flags value based on the presence of data
                 uint newFlags = target.Header.Flags;
@@ -1005,29 +1156,29 @@ namespace WCAnalyzer.CLI
                 target.Header.Flags = newFlags;
                 
                 // Update texture layer count based on the maximum number of texture layers in any chunk
-                int maxTextureLayers = target.TerrainChunks.Count > 0 
+                int maxTextureLayers = target.TerrainChunks?.Count > 0 
                     ? target.TerrainChunks.Max(c => c.TextureLayers?.Count ?? 0) 
                     : 0;
                 target.Header.TextureLayerCount = maxTextureLayers;
             }
             
             // Double-check that all relevant collections have values before saving
-            if (target.ModelPlacements.Count > 0 && target.Header.ModelPlacementCount == 0)
+            if (target.ModelPlacements?.Count > 0 && target.Header?.ModelPlacementCount == 0)
             {
                 target.Header.ModelPlacementCount = target.ModelPlacements.Count;
             }
             
-            if (target.WmoPlacements.Count > 0 && target.Header.WmoPlacementCount == 0)
+            if (target.WmoPlacements?.Count > 0 && target.Header?.WmoPlacementCount == 0)
             {
                 target.Header.WmoPlacementCount = target.WmoPlacements.Count;
             }
             
-            if (target.ModelReferences.Count > 0 && target.Header.ModelReferenceCount == 0)
+            if (target.ModelReferences?.Count > 0 && target.Header?.ModelReferenceCount == 0)
             {
                 target.Header.ModelReferenceCount = target.ModelReferences.Count;
             }
             
-            if (target.WmoReferences.Count > 0 && target.Header.WmoReferenceCount == 0)
+            if (target.WmoReferences?.Count > 0 && target.Header?.WmoReferenceCount == 0)
             {
                 target.Header.WmoReferenceCount = target.WmoReferences.Count;
             }
