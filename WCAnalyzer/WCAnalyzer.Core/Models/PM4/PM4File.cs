@@ -20,6 +20,11 @@ namespace WCAnalyzer.Core.Models.PM4
         private object? _chunkedFile;
 
         /// <summary>
+        /// Gets or sets the file size in bytes
+        /// </summary>
+        public long FileSize { get; set; }
+
+        /// <summary>
         /// Gets or sets the version chunk.
         /// </summary>
         public MVER? Version { get; set; }
@@ -211,7 +216,9 @@ namespace WCAnalyzer.Core.Models.PM4
                 string fileName = Path.GetFileName(filePath);
                 
                 logger?.LogInformation("Loading PM4 file: {FilePath}", filePath);
-                return new PM4File(fileData, fileName, filePath, logger);
+                var pm4File = new PM4File(fileData, fileName, filePath, logger);
+                pm4File.FileSize = fileData.Length;
+                return pm4File;
             }
             catch (Exception ex)
             {

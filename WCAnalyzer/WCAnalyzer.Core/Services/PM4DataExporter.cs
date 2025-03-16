@@ -14,13 +14,15 @@ namespace WCAnalyzer.Core.Services
     {
         private readonly ILogger? _logger;
         private readonly PM4CsvGenerator _csvGenerator;
-        private readonly PM4TerrainExporter _terrainExporter;
+        private readonly PM4MeshExporter _meshExporter;
+        private readonly PM4MarkdownReportGenerator _markdownReportGenerator;
 
         public PM4DataExporter(ILogger? logger = null)
         {
             _logger = logger;
             _csvGenerator = new PM4CsvGenerator(logger);
-            _terrainExporter = new PM4TerrainExporter(logger);
+            _meshExporter = new PM4MeshExporter(logger);
+            _markdownReportGenerator = new PM4MarkdownReportGenerator(logger);
         }
 
         /// <summary>
@@ -47,8 +49,13 @@ namespace WCAnalyzer.Core.Services
                 string baseFileName = Path.GetFileNameWithoutExtension(file.FileName ?? "unknown");
                 await _csvGenerator.GenerateReportsAsync(file.PositionDataChunk, baseFileName, outputDir);
                 
-                // Export as terrain points (combining Special entries with Position entries)
-                await _terrainExporter.ExportTerrainDataAsync(file, outputDir);
+                // Export mesh and collision data for analysis and visualization
+                await _meshExporter.ExportMeshDataAsync(file, outputDir);
+                
+                // Generate comprehensive Markdown report
+                string markdownFile = Path.Combine(outputDir, $"{baseFileName}_comprehensive_analysis.md");
+                await _markdownReportGenerator.GenerateComprehensiveReportAsync(file, markdownFile);
+                _logger?.LogInformation("Generated comprehensive Markdown analysis report: {FilePath}", markdownFile);
             }
             else
             {
