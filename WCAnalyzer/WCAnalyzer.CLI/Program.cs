@@ -897,7 +897,20 @@ namespace WCAnalyzer.CLI
                 () => false,
                 "Extract and export terrain data from PM4 position data");
             pm4ExtractTerrainOption.AddAlias("-terrain");
-
+            
+            // Add new option for generating 2D map images
+            var pm4GenerateMapOption = new Option<bool>(
+                "--generate-map",
+                () => false,
+                "Generate 2D map visualization of position data as image");
+            pm4GenerateMapOption.AddAlias("-map");
+            
+            // Add option for map output resolution
+            var pm4MapResolutionOption = new Option<int>(
+                "--map-resolution",
+                () => 4096,
+                "Resolution of the generated map image in pixels (default: 4096)");
+            
             pm4Command.AddOption(pm4DirectoryOption);
             pm4Command.AddOption(pm4OutputOption);
             pm4Command.AddOption(pm4VerboseOption);
@@ -909,6 +922,8 @@ namespace WCAnalyzer.CLI
             pm4Command.AddOption(pm4ExportConsolidatedObjOption);
             pm4Command.AddOption(pm4ExportClusteredObjOption);
             pm4Command.AddOption(pm4ExtractTerrainOption);
+            pm4Command.AddOption(pm4GenerateMapOption);
+            pm4Command.AddOption(pm4MapResolutionOption);
 
             var pm4FileOption = new Option<string>(
                 "--file",
@@ -930,6 +945,8 @@ namespace WCAnalyzer.CLI
                 bool exportConsolidatedObj = context.ParseResult.GetValueForOption(pm4ExportConsolidatedObjOption);
                 bool exportClusteredObj = context.ParseResult.GetValueForOption(pm4ExportClusteredObjOption);
                 bool extractTerrain = context.ParseResult.GetValueForOption(pm4ExtractTerrainOption);
+                bool generateMap = context.ParseResult.GetValueForOption(pm4GenerateMapOption);
+                int mapResolution = context.ParseResult.GetValueForOption(pm4MapResolutionOption);
 
                 // Configure logging with fully qualified type name
                 Microsoft.Extensions.Logging.LogLevel minLevel = quiet 
@@ -1053,18 +1070,21 @@ namespace WCAnalyzer.CLI
                 logger.LogInformation("Clustered OBJ export completed");
             }
 
-            // Export terrain data if requested
-            if (extractTerrain)
+            // Generate map visualization if requested
+            if (generateMap || extractTerrain) // Always generate map when extractTerrain is true, for backward compatibility
             {
-                logger.LogInformation("Extracting terrain data from PM4 position data");
-                string terrainObjPath = Path.Combine(outputPath, "terrain_reconstruction.obj");
-                if (pm4ObjExporter.ExportTerrainFromPositionData(results, terrainObjPath))
+                logger.LogInformation("Generating 2D map visualization from position data");
+                var mapGenerator = new PM4MapImageGenerator(
+                    loggerFactory.CreateLogger<PM4MapImageGenerator>(),
+                    outputPath);
+                    
+                if (mapGenerator.GenerateMapImage(results, "azeroth_map.png", mapResolution, mapResolution))
                 {
-                    logger.LogInformation("Terrain data exported to: {Path}", terrainObjPath);
+                    logger.LogInformation("Map visualization generated successfully");
                 }
                 else
                 {
-                    logger.LogWarning("Failed to export terrain data");
+                    logger.LogWarning("Failed to generate map visualization");
                 }
             }
             
