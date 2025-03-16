@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Utilities;
 // Use explicit alias to avoid ambiguity
@@ -25,9 +26,9 @@ namespace WCAnalyzer.Core.Services
         /// Creates a new instance of the JsonReportGenerator class.
         /// </summary>
         /// <param name="logger">The logger to use.</param>
-        public JsonReportGenerator(ILogger<JsonReportGenerator> logger)
+        public JsonReportGenerator(ILogger<JsonReportGenerator>? logger)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger ?? NullLogger<JsonReportGenerator>.Instance;
             _jsonOptions = new JsonSerializerOptions
             {
                 WriteIndented = true,

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WCAnalyzer.Core.Models;
 
 namespace WCAnalyzer.Core.Services
@@ -20,9 +21,9 @@ namespace WCAnalyzer.Core.Services
         /// Creates a new instance of the MarkdownReportGenerator class.
         /// </summary>
         /// <param name="logger">The logger to use.</param>
-        public MarkdownReportGenerator(ILogger<MarkdownReportGenerator> logger)
+        public MarkdownReportGenerator(ILogger<MarkdownReportGenerator>? logger)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = logger ?? NullLogger<MarkdownReportGenerator>.Instance;
         }
 
         /// <summary>

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WCAnalyzer.Core.Models;
 using WCAnalyzer.Core.Utilities;
 
@@ -22,9 +23,9 @@ public class TerrainDataCsvGenerator
     /// </summary>
     /// <param name="logger">The logging service to use.</param>
     /// <param name="csvDirectory">The directory to write CSV files to.</param>
-    public TerrainDataCsvGenerator(ILogger<TerrainDataCsvGenerator> logger, string csvDirectory)
+    public TerrainDataCsvGenerator(ILogger<TerrainDataCsvGenerator>? logger, string csvDirectory)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _logger = logger ?? NullLogger<TerrainDataCsvGenerator>.Instance;
         CsvDirectory = csvDirectory ?? throw new ArgumentNullException(nameof(csvDirectory));
     }
 

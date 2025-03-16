@@ -9,6 +9,8 @@ using WCAnalyzer.Core.Models.PM4;
 using WCAnalyzer.Core.Models.PM4.Chunks;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
+using Warcraft.NET.Files.Interfaces;
 
 namespace WCAnalyzer.Core.Services
 {
@@ -22,27 +24,46 @@ namespace WCAnalyzer.Core.Services
         private readonly JsonReportGenerator? _jsonReportGenerator;
         private readonly MarkdownReportGenerator? _markdownReportGenerator;
         private readonly PM4ObjExporter? _pm4ObjExporter;
+        private readonly PM4EnhancedObjExporter? _pm4EnhancedObjExporter;
+        private readonly PM4CsvGenerator? _pm4CsvGenerator;
+        private readonly PM4MarkdownReportGenerator? _pm4MarkdownReportGenerator;
+        private readonly PM4TerrainExporter? _pm4TerrainExporter;
 
         /// <summary>
-        /// Creates a new instance of the ReportGenerator class.
+        /// Initializes a new instance of the <see cref="ReportGenerator"/> class with specific output directories.
         /// </summary>
-        /// <param name="logger">The logger to use.</param>
-        /// <param name="terrainDataCsvGenerator">The terrain data CSV generator to use.</param>
-        /// <param name="jsonReportGenerator">Optional JSON report generator to use.</param>
-        /// <param name="markdownReportGenerator">Optional Markdown report generator to use.</param>
-        /// <param name="pm4ObjExporter">Optional PM4 OBJ exporter to use.</param>
+        /// <param name="logger">The logger.</param>
+        /// <param name="csvOutputDirectory">The CSV output directory.</param>
+        /// <param name="objOutputDirectory">The OBJ output directory.</param>
+        /// <param name="pm4EnhancedObjExporter">Optional enhanced OBJ exporter.</param>
         public ReportGenerator(
-            ILogger<ReportGenerator> logger,
-            TerrainDataCsvGenerator terrainDataCsvGenerator,
-            JsonReportGenerator? jsonReportGenerator = null,
-            MarkdownReportGenerator? markdownReportGenerator = null,
-            PM4ObjExporter? pm4ObjExporter = null)
+            ILogger<ReportGenerator> logger, 
+            string? csvOutputDirectory = null,
+            string? objOutputDirectory = null,
+            PM4EnhancedObjExporter? pm4EnhancedObjExporter = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _terrainDataCsvGenerator = terrainDataCsvGenerator ?? throw new ArgumentNullException(nameof(terrainDataCsvGenerator));
-            _jsonReportGenerator = jsonReportGenerator;
-            _markdownReportGenerator = markdownReportGenerator;
-            _pm4ObjExporter = pm4ObjExporter;
+            
+            if (!string.IsNullOrWhiteSpace(objOutputDirectory))
+            {
+                _pm4ObjExporter = new PM4ObjExporter(null, objOutputDirectory);
+                _pm4TerrainExporter = new PM4TerrainExporter(null, objOutputDirectory);
+            }
+            
+            // Use the provided enhanced OBJ exporter if available
+            _pm4EnhancedObjExporter = pm4EnhancedObjExporter;
+            
+            if (!string.IsNullOrWhiteSpace(csvOutputDirectory))
+            {
+                _pm4CsvGenerator = new PM4CsvGenerator(null, csvOutputDirectory);
+            }
+            
+            _pm4MarkdownReportGenerator = new PM4MarkdownReportGenerator();
+
+            // Initialize other components
+            _terrainDataCsvGenerator = new TerrainDataCsvGenerator(null, string.Empty);
+            _jsonReportGenerator = new JsonReportGenerator(null);
+            _markdownReportGenerator = new MarkdownReportGenerator(null);
         }
 
         /// <summary>
@@ -138,13 +159,15 @@ namespace WCAnalyzer.Core.Services
         /// <param name="exportCsv">Whether to export CSV files.</param>
         /// <param name="exportObj">Whether to export OBJ files.</param>
         /// <param name="exportConsolidatedObj">Whether to export a single consolidated OBJ file. Defaults to true when exportObj is true.</param>
+        /// <param name="exportEnhancedObj">Whether to export an enhanced consolidated OBJ file.</param>
         /// <returns>A task that represents the asynchronous operation.</returns>
         public async Task GeneratePM4ReportsAsync(
             IEnumerable<PM4AnalysisResult> analysisResults, 
             string outputDirectory, 
             bool exportCsv = true, 
             bool exportObj = true, 
-            bool exportConsolidatedObj = true)
+            bool exportConsolidatedObj = true,
+            bool exportEnhancedObj = false)
         {
             if (analysisResults == null)
                 throw new ArgumentNullException(nameof(analysisResults));
@@ -175,22 +198,42 @@ namespace WCAnalyzer.Core.Services
             }
 
             // Generate OBJ files if requested
-            if (exportObj && _pm4ObjExporter != null)
+            if (exportObj)
             {
-                // Export individual OBJ files for each PM4
-                await _pm4ObjExporter.ExportAllToObjAsync(resultsList);
-                
-                // Export consolidated OBJ file if requested
-                if (exportConsolidatedObj)
+                if (!exportEnhancedObj)
                 {
-                    await _pm4ObjExporter.ExportToConsolidatedObjAsync(resultsList);
-                    _logger.LogInformation("Generated consolidated OBJ file containing all PM4 models");
+                    // Export using the standard OBJ exporter
+                    // Export individual OBJ files for each PM4
+                    await _pm4ObjExporter?.ExportAllToObjAsync(resultsList);
+                    
+                    // Export consolidated OBJ file if requested
+                    if (exportConsolidatedObj)
+                    {
+                        await _pm4ObjExporter?.ExportToConsolidatedObjAsync(resultsList);
+                        _logger.LogInformation("Generated consolidated OBJ file containing all PM4 models");
+                    }
+                }
+                else if (_pm4EnhancedObjExporter != null)
+                {
+                    // Export using the enhanced OBJ exporter which preserves coordinates and sorts by SpecialValueDec
+                    // Export individual OBJ files for each PM4
+                    await _pm4EnhancedObjExporter.ExportAllToObjAsync(resultsList);
+                    
+                    // Export consolidated OBJ file if requested
+                    if (exportConsolidatedObj)
+                    {
+                        await _pm4EnhancedObjExporter.ExportToConsolidatedEnhancedObjAsync(resultsList);
+                        _logger.LogInformation("Generated enhanced consolidated OBJ file with proper coordinates and sorting");
+                    }
                 }
             }
             else if (exportObj)
             {
-                _logger.LogWarning("OBJ export was requested but PM4ObjExporter is not available");
+                _logger.LogWarning("OBJ export requested but OBJ exporter is not available");
             }
+
+            // Generate comprehensive markdown report
+            await GenerateComprehensiveMarkdownReportAsync(resultsList, outputDirectory);
 
             _logger.LogInformation("PM4 report generation completed");
         }
@@ -776,7 +819,7 @@ namespace WCAnalyzer.Core.Services
             using (var positionWriter = new StreamWriter(Path.Combine(csvDir, "positions.csv")))
             {
                 // Write header
-                await positionWriter.WriteLineAsync("FileName,PositionIndex,Type,X,Y,Z,Flag");
+                await positionWriter.WriteLineAsync("FileName,PositionIndex,Type,X,Y,Z,Flag,SpecialValueDec");
                 
                 // Write data
                 foreach (var result in results)
@@ -789,22 +832,24 @@ namespace WCAnalyzer.Core.Services
                         for (int i = 0; i < positions.Count; i++)
                         {
                             var pos = positions[i];
-                            string entryType = pos.IsSpecialEntry ? "Valid" : "Special";
+                            string entryType = pos.IsSpecialEntry ? "Special" : "Valid";
                             string x = pos.IsSpecialEntry ? pos.CoordinateX.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
                                       (float.IsNaN(pos.Value1) ? "NaN" : pos.Value1.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
                             string y = pos.CoordinateY.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
                             string z = pos.IsSpecialEntry ? pos.CoordinateZ.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
                                       (float.IsNaN(pos.Value3) ? "NaN" : pos.Value3.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+                            string specialValueDec = pos.IsSpecialEntry ? pos.SpecialValue.ToString() : "";
                             
                             string line = String.Format(
-                                "{0},{1},{2},{3},{4},{5},{6}",
+                                "{0},{1},{2},{3},{4},{5},{6},{7}",
                                 fileName,
                                 i,
                                 entryType,
                                 x,
                                 y,
                                 z,
-                                pos.IsSpecialEntry
+                                pos.IsSpecialEntry,
+                                specialValueDec
                             );
                             await positionWriter.WriteLineAsync(line);
                         }
@@ -840,6 +885,185 @@ namespace WCAnalyzer.Core.Services
                                 indices[baseIndex + 2]
                             );
                             await triangleWriter.WriteLineAsync(line);
+                        }
+                    }
+                }
+            }
+            
+            // Generate CSV for normal coordinates (MSCN)
+            using (var normalWriter = new StreamWriter(Path.Combine(csvDir, "normals.csv")))
+            {
+                // Write header
+                await normalWriter.WriteLineAsync("FileName,NormalIndex,NormalX,NormalY,NormalZ");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.NormalCoordinatesChunk?.Normals != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var normals = result.PM4File.NormalCoordinatesChunk.Normals;
+                        
+                        for (int i = 0; i < normals.Count; i++)
+                        {
+                            var normal = normals[i];
+                            string line = String.Format(
+                                "{0},{1},{2},{3},{4}",
+                                fileName,
+                                i,
+                                normal.X.ToString("F6", System.Globalization.CultureInfo.InvariantCulture),
+                                normal.Y.ToString("F6", System.Globalization.CultureInfo.InvariantCulture),
+                                normal.Z.ToString("F6", System.Globalization.CultureInfo.InvariantCulture)
+                            );
+                            await normalWriter.WriteLineAsync(line);
+                        }
+                    }
+                }
+            }
+            
+            // Generate CSV for vertex info (MSVI)
+            using (var vertexInfoWriter = new StreamWriter(Path.Combine(csvDir, "vertex_info.csv")))
+            {
+                // Write header
+                await vertexInfoWriter.WriteLineAsync("FileName,VertexInfoIndex,Value1,Value2");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.VertexInfoChunk?.VertexInfos != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var vertexInfos = result.PM4File.VertexInfoChunk.VertexInfos;
+                        
+                        for (int i = 0; i < vertexInfos.Count; i++)
+                        {
+                            var info = vertexInfos[i];
+                            string line = String.Format(
+                                "{0},{1},{2},{3}",
+                                fileName,
+                                i,
+                                info.Value1,
+                                info.Value2
+                            );
+                            await vertexInfoWriter.WriteLineAsync(line);
+                        }
+                    }
+                }
+            }
+            
+            // Vertex Data (MSVT)
+            string vertexDataCsvFilePath = Path.Combine(csvDir, "vertex_data.csv");
+            await using (var vertexDataWriter = new StreamWriter(vertexDataCsvFilePath, false, Encoding.UTF8))
+            {
+                // Write headers
+                await vertexDataWriter.WriteLineAsync("FileName,VertexDataIndex,X,Y,Z,Flag1,Flag2");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.VertexDataChunk != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var vertices = result.PM4File.VertexDataChunk.Vertices;
+                        
+                        for (int i = 0; i < vertices.Count; i++)
+                        {
+                            var vertex = vertices[i];
+                            await vertexDataWriter.WriteLineAsync($"{fileName},{i},{vertex.X},{vertex.Y},{vertex.Z},{vertex.Flag1},{vertex.Flag2}");
+                        }
+                    }
+                }
+            }
+            
+            // Generate CSV for surface data (MSUR)
+            using (var surfaceWriter = new StreamWriter(Path.Combine(csvDir, "surfaces.csv")))
+            {
+                // Write header
+                await surfaceWriter.WriteLineAsync("FileName,SurfaceIndex,Index1,Index2,Index3,Flags");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.SurfaceDataChunk?.Surfaces != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var surfaces = result.PM4File.SurfaceDataChunk.Surfaces;
+                        
+                        for (int i = 0; i < surfaces.Count; i++)
+                        {
+                            var surface = surfaces[i];
+                            string line = String.Format(
+                                "{0},{1},{2},{3},{4},{5}",
+                                fileName,
+                                i,
+                                surface.Index1,
+                                surface.Index2,
+                                surface.Index3,
+                                surface.Flags
+                            );
+                            await surfaceWriter.WriteLineAsync(line);
+                        }
+                    }
+                }
+            }
+            
+            // Generate CSV for links data (MSLK)
+            using (var linkWriter = new StreamWriter(Path.Combine(csvDir, "links.csv")))
+            {
+                // Write header
+                await linkWriter.WriteLineAsync("FileName,LinkIndex,SourceIndex,TargetIndex");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.LinksChunk?.Links != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var links = result.PM4File.LinksChunk.Links;
+                        
+                        for (int i = 0; i < links.Count; i++)
+                        {
+                            var link = links[i];
+                            string line = String.Format(
+                                "{0},{1},{2},{3}",
+                                fileName,
+                                i,
+                                link.SourceIndex,
+                                link.TargetIndex
+                            );
+                            await linkWriter.WriteLineAsync(line);
+                        }
+                    }
+                }
+            }
+            
+            // Generate CSV for shadow data (MSHD)
+            using (var shadowWriter = new StreamWriter(Path.Combine(csvDir, "shadow_data.csv")))
+            {
+                // Write header
+                await shadowWriter.WriteLineAsync("FileName,ShadowIndex,Value1,Value2,Value3,Value4");
+                
+                // Write data
+                foreach (var result in results)
+                {
+                    if (result.PM4File?.ShadowDataChunk?.ShadowEntries != null)
+                    {
+                        string fileName = result.FileName?.Replace(",", "_") ?? "Unknown";
+                        var entries = result.PM4File.ShadowDataChunk.ShadowEntries;
+                        
+                        for (int i = 0; i < entries.Count; i++)
+                        {
+                            var entry = entries[i];
+                            string line = String.Format(
+                                "{0},{1},{2},{3},{4},{5}",
+                                fileName,
+                                i,
+                                entry.Value1,
+                                entry.Value2,
+                                entry.Value3,
+                                entry.Value4
+                            );
+                            await shadowWriter.WriteLineAsync(line);
                         }
                     }
                 }
@@ -881,6 +1105,237 @@ namespace WCAnalyzer.Core.Services
                     await fileSummaryWriter.WriteLineAsync(line);
                 }
             }
+        }
+
+        /// <summary>
+        /// Generates a comprehensive markdown report that includes all entries from all chunks.
+        /// </summary>
+        /// <param name="results">List of PM4 analysis results</param>
+        /// <param name="outputDirectory">Output directory</param>
+        private async Task GenerateComprehensiveMarkdownReportAsync(List<PM4AnalysisResult> results, string outputDirectory)
+        {
+            var sb = new StringBuilder();
+            
+            sb.AppendLine("# Comprehensive PM4 Analysis Report");
+            sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine();
+            sb.AppendLine($"Total Files Analyzed: {results.Count}");
+            sb.AppendLine();
+            
+            // Summary of files
+            sb.AppendLine("## File Summary");
+            sb.AppendLine("| File Name | Version | Vertex Count | Triangle Count | Position Entries | Special Entries |");
+            sb.AppendLine("|-----------|---------|--------------|----------------|------------------|-----------------|");
+            
+            foreach (var result in results)
+            {
+                int vertexCount = result.PM4File?.VertexPositionsChunk?.Vertices.Count ?? 0;
+                int triangleCount = (result.PM4File?.VertexIndicesChunk?.Indices.Count ?? 0) / 3;
+                int positionCount = result.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry) ?? 0;
+                int specialCount = result.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0;
+                
+                sb.AppendLine($"| {result.FileName} | {result.Version} | {vertexCount} | {triangleCount} | {positionCount} | {specialCount} |");
+            }
+            sb.AppendLine();
+            
+            // For each file, generate a detailed report
+            foreach (var result in results)
+            {
+                if (result.PM4File == null) continue;
+                
+                sb.AppendLine($"## {result.FileName}");
+                sb.AppendLine($"Version: {result.Version}");
+                sb.AppendLine();
+                
+                // Chunks present
+                sb.AppendLine("### Chunks Present");
+                sb.AppendLine("| Chunk | Present | Size (bytes) |");
+                sb.AppendLine("|-------|---------|-------------|");
+                sb.AppendLine($"| MSHD (Shadow Data) | {(result.HasShadowData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.ShadowData)} |");
+                sb.AppendLine($"| MSPV (Vertex Positions) | {(result.HasVertexPositions ? "Yes" : "No")} | {GetChunkSize(result.PM4File.VertexPositions)} |");
+                sb.AppendLine($"| MSPI (Vertex Indices) | {(result.HasVertexIndices ? "Yes" : "No")} | {GetChunkSize(result.PM4File.VertexIndices)} |");
+                sb.AppendLine($"| MSCN (Normal Coordinates) | {(result.HasNormalCoordinates ? "Yes" : "No")} | {GetChunkSize(result.PM4File.NormalCoordinates)} |");
+                sb.AppendLine($"| MSLK (Links) | {(result.HasLinks ? "Yes" : "No")} | {GetChunkSize(result.PM4File.Links)} |");
+                sb.AppendLine($"| MSVT (Vertex Data) | {(result.HasVertexData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.VertexData)} |");
+                sb.AppendLine($"| MSVI (Vertex Info) | {(result.HasVertexInfo ? "Yes" : "No")} | {GetChunkSize(result.PM4File.VertexInfo)} |");
+                sb.AppendLine($"| MSUR (Surface Data) | {(result.HasSurfaceData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.SurfaceData)} |");
+                sb.AppendLine($"| MPRL (Position Data) | {(result.HasPositionData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.PositionData)} |");
+                sb.AppendLine($"| MPRR (Value Pairs) | {(result.HasValuePairs ? "Yes" : "No")} | {GetChunkSize(result.PM4File.ValuePairs)} |");
+                sb.AppendLine($"| MDBH (Building Data) | {(result.HasBuildingData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.BuildingData)} |");
+                sb.AppendLine($"| MDOS (Simple Data) | {(result.HasSimpleData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.SimpleData)} |");
+                sb.AppendLine($"| MDSF (Final Data) | {(result.HasFinalData ? "Yes" : "No")} | {GetChunkSize(result.PM4File.FinalData)} |");
+                sb.AppendLine();
+                
+                // Position Data Analysis with Special Entry Correlation
+                if (result.PM4File.PositionDataChunk != null)
+                {
+                    sb.AppendLine("### Position Data Analysis");
+                    
+                    var entries = result.PM4File.PositionDataChunk.Entries;
+                    var specialEntries = entries.Where(e => e.IsSpecialEntry).ToList();
+                    var positionEntries = entries.Where(e => !e.IsSpecialEntry).ToList();
+                    
+                    sb.AppendLine($"Total Entries: {entries.Count}");
+                    sb.AppendLine($"Special Entries: {specialEntries.Count}");
+                    sb.AppendLine($"Position Entries: {positionEntries.Count}");
+                    sb.AppendLine();
+                    
+                    // Display all special entries with their SpecialValueDec
+                    if (specialEntries.Count > 0)
+                    {
+                        sb.AppendLine("#### Special Entries");
+                        sb.AppendLine("| Index | SpecialValueDec | X | Y | Z |");
+                        sb.AppendLine("|-------|----------------|---|---|---|");
+                        
+                        foreach (var entry in specialEntries)
+                        {
+                            sb.AppendLine($"| {entry.Index} | {entry.SpecialValue} | {entry.CoordinateX:F6} | {entry.CoordinateY:F6} | {entry.CoordinateZ:F6} |");
+                        }
+                        sb.AppendLine();
+                    }
+                    
+                    // Group position entries by their position in the sequence
+                    if (entries.Count > 0)
+                    {
+                        sb.AppendLine("#### Position Entry Patterns");
+                        sb.AppendLine("This section shows the pattern of special entries followed by position entries");
+                        sb.AppendLine();
+                        
+                        // Find sequential patterns where special entries are followed by position entries
+                        for (int i = 0; i < entries.Count - 1; i++)
+                        {
+                            if (entries[i].IsSpecialEntry && !entries[i + 1].IsSpecialEntry)
+                            {
+                                var specialEntry = entries[i];
+                                var posEntry = entries[i + 1];
+                                
+                                sb.AppendLine($"**Special Entry #{specialEntry.Index} (SpecialValueDec: {specialEntry.SpecialValue})** followed by Position Entry #{posEntry.Index}");
+                                sb.AppendLine($"- Special: ({specialEntry.CoordinateX:F6}, {specialEntry.CoordinateY:F6}, {specialEntry.CoordinateZ:F6})");
+                                sb.AppendLine($"- Position: ({posEntry.CoordinateX:F6}, {posEntry.CoordinateY:F6}, {posEntry.CoordinateZ:F6})");
+                                sb.AppendLine($"- Values: ({(float.IsNaN(posEntry.Value1) ? "NaN" : posEntry.Value1.ToString("F6"))}, {posEntry.Value2:F6}, {(float.IsNaN(posEntry.Value3) ? "NaN" : posEntry.Value3.ToString("F6"))})");
+                                sb.AppendLine();
+                            }
+                        }
+                    }
+                }
+                
+                // Vertex Data Summary
+                if (result.PM4File.VertexPositionsChunk != null)
+                {
+                    sb.AppendLine("### Vertex Data Summary");
+                    sb.AppendLine($"Total Vertices: {result.PM4File.VertexPositionsChunk.Vertices.Count}");
+                    
+                    if (result.PM4File.VertexPositionsChunk.Vertices.Count > 0)
+                    {
+                        // Calculate bounds
+                        var minX = result.PM4File.VertexPositionsChunk.Vertices.Min(v => v.X);
+                        var minY = result.PM4File.VertexPositionsChunk.Vertices.Min(v => v.Y);
+                        var minZ = result.PM4File.VertexPositionsChunk.Vertices.Min(v => v.Z);
+                        var maxX = result.PM4File.VertexPositionsChunk.Vertices.Max(v => v.X);
+                        var maxY = result.PM4File.VertexPositionsChunk.Vertices.Max(v => v.Y);
+                        var maxZ = result.PM4File.VertexPositionsChunk.Vertices.Max(v => v.Z);
+                        
+                        sb.AppendLine($"Bounds: X({minX:F2} to {maxX:F2}), Y({minY:F2} to {maxY:F2}), Z({minZ:F2} to {maxZ:F2})");
+                        sb.AppendLine();
+                        
+                        // Show sample vertices
+                        sb.AppendLine("#### Sample Vertices (First 10)");
+                        sb.AppendLine("| Index | X | Y | Z |");
+                        sb.AppendLine("|-------|---|---|---|");
+                        
+                        for (int i = 0; i < Math.Min(10, result.PM4File.VertexPositionsChunk.Vertices.Count); i++)
+                        {
+                            var vertex = result.PM4File.VertexPositionsChunk.Vertices[i];
+                            sb.AppendLine($"| {i} | {vertex.X:F6} | {vertex.Y:F6} | {vertex.Z:F6} |");
+                        }
+                        sb.AppendLine();
+                    }
+                }
+                
+                // Normal Coordinates Summary
+                if (result.PM4File.NormalCoordinatesChunk != null)
+                {
+                    sb.AppendLine("### Normal Coordinates Summary");
+                    sb.AppendLine($"Total Normals: {result.PM4File.NormalCoordinatesChunk.Normals.Count}");
+                    
+                    if (result.PM4File.NormalCoordinatesChunk.Normals.Count > 0)
+                    {
+                        // Show sample normals
+                        sb.AppendLine("#### Sample Normals (First 10)");
+                        sb.AppendLine("| Index | X | Y | Z |");
+                        sb.AppendLine("|-------|---|---|---|");
+                        
+                        for (int i = 0; i < Math.Min(10, result.PM4File.NormalCoordinatesChunk.Normals.Count); i++)
+                        {
+                            var normal = result.PM4File.NormalCoordinatesChunk.Normals[i];
+                            sb.AppendLine($"| {i} | {normal.X:F6} | {normal.Y:F6} | {normal.Z:F6} |");
+                        }
+                        sb.AppendLine();
+                    }
+                }
+                
+                // Triangle Data Summary
+                if (result.PM4File.VertexIndicesChunk != null)
+                {
+                    sb.AppendLine("### Triangle Data Summary");
+                    int triangleCount = result.PM4File.VertexIndicesChunk.Indices.Count / 3;
+                    sb.AppendLine($"Total Triangles: {triangleCount}");
+                    
+                    if (triangleCount > 0)
+                    {
+                        // Show sample triangles
+                        sb.AppendLine("#### Sample Triangles (First 10)");
+                        sb.AppendLine("| Index | Vertex 1 | Vertex 2 | Vertex 3 |");
+                        sb.AppendLine("|-------|----------|----------|----------|");
+                        
+                        for (int i = 0; i < Math.Min(10, triangleCount); i++)
+                        {
+                            int baseIndex = i * 3;
+                            uint v1 = result.PM4File.VertexIndicesChunk.Indices[baseIndex];
+                            uint v2 = result.PM4File.VertexIndicesChunk.Indices[baseIndex + 1];
+                            uint v3 = result.PM4File.VertexIndicesChunk.Indices[baseIndex + 2];
+                            
+                            sb.AppendLine($"| {i} | {v1} | {v2} | {v3} |");
+                        }
+                        sb.AppendLine();
+                    }
+                }
+                
+                sb.AppendLine("---");
+            }
+            
+            // Write the comprehensive report to a file
+            string reportPath = Path.Combine(outputDirectory, "pm4_comprehensive_report.md");
+            await File.WriteAllTextAsync(reportPath, sb.ToString());
+            _logger.LogInformation("Generated comprehensive markdown report: {ReportPath}", reportPath);
+        }
+
+        /// <summary>
+        /// Gets the size of a chunk safely
+        /// </summary>
+        private uint GetChunkSize(IIFFChunk? chunk)
+        {
+            if (chunk == null) return 0;
+            
+            // Try to cast to PM4Chunk which has a Size property
+            if (chunk is PM4Chunk pm4Chunk)
+            {
+                return pm4Chunk.Size;
+            }
+            
+            // For GenericChunk which also has a Size property
+            if (chunk is GenericChunk genericChunk)
+            {
+                return genericChunk.Size;
+            }
+            
+            // For other IIFFChunk implementations, try to get data through IBinarySerializable
+            if (chunk is IBinarySerializable serializable)
+            {
+                return serializable.GetSize();
+            }
+            
+            return 0;
         }
     }
 }

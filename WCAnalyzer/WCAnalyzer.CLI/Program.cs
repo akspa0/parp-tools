@@ -888,39 +888,51 @@ namespace WCAnalyzer.CLI
             var pm4ExportClusteredObjOption = new Option<bool>(
                 "--export-clustered-obj",
                 () => false,
-                "Export mesh data to clustered OBJ format with vertex proximity clustering");
+                "Export PM4 data to clustered OBJ format (groups objects by type)");
             pm4ExportClusteredObjOption.AddAlias("-clobj");
 
-            // Add new option for terrain extraction
+            var pm4ExportEnhancedObjOption = new Option<bool>(
+                "--export-enhanced-obj",
+                () => false,
+                "Export PM4 data to enhanced OBJ format with proper coordinate transformation and sorting by special value");
+            pm4ExportEnhancedObjOption.AddAlias("-eobj");
+
             var pm4ExtractTerrainOption = new Option<bool>(
                 "--extract-terrain",
                 () => false,
                 "Extract and export terrain data from PM4 position data");
             pm4ExtractTerrainOption.AddAlias("-terrain");
             
-            // Add new option for generating 2D map images
             var pm4GenerateMapOption = new Option<bool>(
                 "--generate-map",
                 () => false,
                 "Generate 2D map visualization of position data as image");
             pm4GenerateMapOption.AddAlias("-map");
             
-            // Add option for map output resolution
             var pm4MapResolutionOption = new Option<int>(
                 "--map-resolution",
                 () => 4096,
                 "Resolution of the generated map image in pixels (default: 4096)");
             
-            var detailedReportOption = new Option<bool>(
+            var pm4DetailedReportOption = new Option<bool>(
                 "--detailed-report",
                 () => false,
                 "Generate a detailed analysis report of PM4 files");
             
-            var coordinateBoundsOption = new Option<float>(
+            var pm4CoordinateBoundsOption = new Option<float>(
                 "--bounds",
                 () => 17066.666f,
                 "Coordinate bounds for map visualization");
             
+            var pm4CorrelateSpecialValuesOption = new Option<bool>(
+                "--correlate-special-values",
+                () => false,
+                "Generate a report correlating special values across different data types");
+            
+            var pm4CsvDirectoryOption = new Option<string>(
+                "--csv-directory",
+                "Directory containing CSV files to analyze for special value correlation");
+
             pm4Command.AddOption(pm4DirectoryOption);
             pm4Command.AddOption(pm4OutputOption);
             pm4Command.AddOption(pm4VerboseOption);
@@ -931,11 +943,14 @@ namespace WCAnalyzer.CLI
             pm4Command.AddOption(pm4ExportObjOption);
             pm4Command.AddOption(pm4ExportConsolidatedObjOption);
             pm4Command.AddOption(pm4ExportClusteredObjOption);
+            pm4Command.AddOption(pm4ExportEnhancedObjOption);
             pm4Command.AddOption(pm4ExtractTerrainOption);
             pm4Command.AddOption(pm4GenerateMapOption);
             pm4Command.AddOption(pm4MapResolutionOption);
-            pm4Command.AddOption(detailedReportOption);
-            pm4Command.AddOption(coordinateBoundsOption);
+            pm4Command.AddOption(pm4DetailedReportOption);
+            pm4Command.AddOption(pm4CoordinateBoundsOption);
+            pm4Command.AddOption(pm4CorrelateSpecialValuesOption);
+            pm4Command.AddOption(pm4CsvDirectoryOption);
 
             var pm4FileOption = new Option<string>(
                 "--file",
@@ -945,459 +960,364 @@ namespace WCAnalyzer.CLI
 
             pm4Command.SetHandler(async (context) =>
             {
-                string inputPath = context.ParseResult.GetValueForOption(pm4DirectoryOption) ?? string.Empty;
-                string outputPath = context.ParseResult.GetValueForOption(pm4OutputOption) ?? string.Empty;
+                string directory = context.ParseResult.GetValueForOption(pm4DirectoryOption) ?? string.Empty;
+                string output = context.ParseResult.GetValueForOption(pm4OutputOption) ?? string.Empty;
                 bool verbose = context.ParseResult.GetValueForOption(pm4VerboseOption);
                 bool quiet = context.ParseResult.GetValueForOption(pm4QuietOption);
                 bool recursive = context.ParseResult.GetValueForOption(pm4RecursiveOption);
-                string specificFile = context.ParseResult.GetValueForOption(pm4FileOption) ?? string.Empty;
-                string listfilePath = context.ParseResult.GetValueForOption(pm4ListfileOption) ?? string.Empty;
+                string listfile = context.ParseResult.GetValueForOption(pm4ListfileOption) ?? string.Empty;
                 bool exportCsv = context.ParseResult.GetValueForOption(pm4ExportCsvOption);
                 bool exportObj = context.ParseResult.GetValueForOption(pm4ExportObjOption);
                 bool exportConsolidatedObj = context.ParseResult.GetValueForOption(pm4ExportConsolidatedObjOption);
                 bool exportClusteredObj = context.ParseResult.GetValueForOption(pm4ExportClusteredObjOption);
+                bool exportEnhancedObj = context.ParseResult.GetValueForOption(pm4ExportEnhancedObjOption);
                 bool extractTerrain = context.ParseResult.GetValueForOption(pm4ExtractTerrainOption);
                 bool generateMap = context.ParseResult.GetValueForOption(pm4GenerateMapOption);
                 int mapResolution = context.ParseResult.GetValueForOption(pm4MapResolutionOption);
-                bool detailedReport = context.ParseResult.GetValueForOption(detailedReportOption);
-                float coordinateBounds = context.ParseResult.GetValueForOption(coordinateBoundsOption);
+                bool detailedReport = context.ParseResult.GetValueForOption(pm4DetailedReportOption);
+                float coordinateBounds = context.ParseResult.GetValueForOption(pm4CoordinateBoundsOption);
+                bool correlateSpecialValues = context.ParseResult.GetValueForOption(pm4CorrelateSpecialValuesOption);
+                string csvDirectory = context.ParseResult.GetValueForOption(pm4CsvDirectoryOption) ?? string.Empty;
 
-                // Configure logging with fully qualified type name
-                Microsoft.Extensions.Logging.LogLevel minLevel = quiet 
-                    ? Microsoft.Extensions.Logging.LogLevel.Error 
-                    : (verbose ? Microsoft.Extensions.Logging.LogLevel.Debug : Microsoft.Extensions.Logging.LogLevel.Information);
-                
-                using var loggerFactory = LoggerFactory.Create(builder =>
+                // Handle special value correlation
+                if (correlateSpecialValues)
                 {
-                    builder.AddConsole().SetMinimumLevel(minLevel);
-                });
-                var logger = loggerFactory.CreateLogger<Program>();
-
-                try
-                {
-                    if (string.IsNullOrEmpty(inputPath) && string.IsNullOrEmpty(specificFile))
+                    if (string.IsNullOrEmpty(csvDirectory))
                     {
-                        logger.LogError("Either --directory or --file option must be specified");
-                        context.ExitCode = 1;
-                        return;
-                    }
-
-                    if (string.IsNullOrEmpty(outputPath))
-                    {
-                        outputPath = Path.Combine(Directory.GetCurrentDirectory(), "pm4_analysis_output");
-                    }
-
-                    Directory.CreateDirectory(outputPath);
-                    logger.LogInformation("Output directory: {OutputPath}", outputPath);
-
-                    // Use fully qualified types to avoid ambiguity
-                    var pm4Parser = new WCAnalyzer.Core.Services.PM4Parser(
-                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4Parser>());
-                    
-                    // Create a properly configured ReportGenerator
-                    var terrainDataCsvGenerator = new WCAnalyzer.Core.Services.TerrainDataCsvGenerator(
-                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.TerrainDataCsvGenerator>(),
-                        outputPath);
-                    
-                    // Create OBJ exporter
-                    var pm4ObjExporter = new WCAnalyzer.Core.Services.PM4ObjExporter(
-                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4ObjExporter>(),
-                        outputPath);
-                    
-                    // Create clustered OBJ exporter if needed
-                    WCAnalyzer.Core.Services.PM4ClusteredObjExporter? pm4ClusteredObjExporter = null;
-                    if (exportClusteredObj)
-                    {
-                        pm4ClusteredObjExporter = new WCAnalyzer.Core.Services.PM4ClusteredObjExporter(
-                            loggerFactory.CreateLogger<WCAnalyzer.Core.Services.PM4ClusteredObjExporter>(),
-                            outputPath);
-                    }
-                    
-                    // Create report generator
-                    var reportGenerator = new WCAnalyzer.Core.Services.ReportGenerator(
-                        loggerFactory.CreateLogger<WCAnalyzer.Core.Services.ReportGenerator>(),
-                        terrainDataCsvGenerator,
-                        null, // jsonReportGenerator
-                        null, // markdownReportGenerator
-                        pm4ObjExporter);
-                    
-                    List<WCAnalyzer.Core.Models.PM4.PM4AnalysisResult> results;
-
-                    if (!string.IsNullOrEmpty(specificFile))
-                    {
-                        // Analyze a specific file
-                        logger.LogInformation("Analyzing specific PM4 file: {File}", specificFile);
-                        if (!File.Exists(specificFile))
+                        if (!string.IsNullOrEmpty(output))
                         {
-                            logger.LogError("File not found: {File}", specificFile);
+                            // Use default CSV directory in output path
+                            csvDirectory = Path.Combine(output, "pm4_csv_reports");
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error: CSV directory is required for special value correlation. Use --csv-directory to specify the directory containing CSV files.");
                             context.ExitCode = 1;
                             return;
                         }
+                    }
+                    
+                    if (!Directory.Exists(csvDirectory))
+                    {
+                        Console.WriteLine($"Error: CSV directory not found: {csvDirectory}");
+                        context.ExitCode = 1;
+                        return;
+                    }
+                    
+                    if (string.IsNullOrEmpty(output))
+                    {
+                        output = "."; // Use current directory if not specified
+                    }
+                    
+                    // Create output directory if it doesn't exist
+                    Directory.CreateDirectory(output);
+                    
+                    // Configure logger
+                    var loggerFactory = ConfigureLogging(Path.Combine(output, "special_value_correlation.log"), verbose, quiet);
+                    var logger = loggerFactory.CreateLogger<SpecialValueCorrelator>();
+                    
+                    // Create correlator
+                    var correlator = new SpecialValueCorrelator(logger);
+                    
+                    try
+                    {
+                        // Analyze CSV files and generate report
+                        await correlator.AnalyzeDataAsync(csvDirectory);
+                        await correlator.GenerateReportAsync(Path.Combine(output, "special_value_correlation_report.md"));
+                        
+                        Console.WriteLine($"Special value correlation report generated: {Path.Combine(output, "special_value_correlation_report.md")}");
+                        context.ExitCode = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error correlating special values: {ex.Message}");
+                        logger.LogError(ex, "Error correlating special values");
+                        context.ExitCode = 1;
+                    }
+                    
+                    return;
+                }
 
-                        var result = pm4Parser.ParseFile(specificFile);
-                        
-                        // If a listfile was provided, resolve references
-                        if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
-                        {
-                            logger.LogInformation("Resolving references using listfile: {Listfile}", listfilePath);
-                            var listfile = LoadListfile(listfilePath, logger);
-                            pm4Parser.ResolveReferences(result, listfile);
-                        }
-                        
-                results = new List<WCAnalyzer.Core.Models.PM4.PM4AnalysisResult> { result };
-            }
-            else
-            {
-                // Analyze files in directory
-                logger.LogInformation("Analyzing PM4 files in directory: {InputPath}", inputPath);
-                if (!Directory.Exists(inputPath))
+                // Process PM4 files as before
+                if (string.IsNullOrEmpty(directory) && string.IsNullOrEmpty(listfile))
                 {
-                    logger.LogError("Directory not found: {InputPath}", inputPath);
+                    Console.WriteLine("Error: Either directory or listfile must be specified.");
                     context.ExitCode = 1;
                     return;
                 }
 
-                var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                // ... existing PM4 analysis code ...
+            });
+
+            rootCommand.AddCommand(pm4Command);
+
+            // Parse the command line
+            return await rootCommand.InvokeAsync(args);
+        }
+
+        /// <summary>
+        /// Merges data from the source result into the target result
+        /// </summary>
+        private static void MergeResults(AdtAnalysisResult target, AdtAnalysisResult source)
+        {
+            if (target == null || source == null)
+            {
+                Console.WriteLine("Cannot merge null results");
+                return;
+            }
+
+            // Log the contents of both results before merging
+            Console.WriteLine($"Merging {source.FileName} into {target.FileName}");
+            Console.WriteLine($"  Before merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
+            Console.WriteLine($"  Before merge - Source: {source.ModelPlacements?.Count ?? 0} models, {source.WmoPlacements?.Count ?? 0} WMOs, {source.TextureReferences?.Count ?? 0} textures");
+            
+            // Determine if source is a _tex0 file (contains texture information)
+            bool isSourceTexFile = source.FileName.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase);
+            bool isSourceObjFile = source.FileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase);
+            
+            // Ensure target has all references and placements from source
+            int initialTextureCount = target.TextureReferences.Count;
+            int initialModelCount = target.ModelReferences.Count;
+            int initialWmoCount = target.WmoReferences.Count;
+            int initialModelPlacementCount = target.ModelPlacements.Count;
+            int initialWmoPlacementCount = target.WmoPlacements.Count;
+            
+            // Special handling for terrain chunks based on file type
+            foreach (var chunk in source.TerrainChunks ?? Enumerable.Empty<TerrainChunk>())
+            {
+                // Find matching terrain chunk in target if it exists
+                var existingChunk = target.TerrainChunks?.FirstOrDefault(c => 
+                    c.Position.X == chunk.Position.X && c.Position.Y == chunk.Position.Y);
                 
-                // Use the listfile if provided
-                if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
+                if (existingChunk == null)
                 {
-                    logger.LogInformation("Parsing with reference resolution using listfile: {Listfile}", listfilePath);
-                    results = await pm4Parser.ParseDirectoryWithReferencesAsync(inputPath, listfilePath, "*.pm4", searchOption);
+                    // If chunk doesn't exist in target, add it
+                    target.TerrainChunks.Add(chunk);
+                }
+                else if (isSourceTexFile)
+                {
+                    // For _tex0 files, prioritize their texture layers but keep other chunk data
+                    
+                    // If source chunk has texture layers, replace the layers in the target chunk
+                    if (chunk.TextureLayers != null && chunk.TextureLayers.Count > 0)
+                    {
+                        // Save any existing texture-less layers if they should be preserved
+                        var existingEmptyLayers = existingChunk.TextureLayers
+                            .Where(l => string.IsNullOrEmpty(l.TextureName) || l.TextureName.StartsWith("<unknown"))
+                            .ToList();
+                        
+                        // Clear existing texture layers and add ones from tex0 file
+                        existingChunk.TextureLayers.Clear();
+                        existingChunk.TextureLayers.AddRange(chunk.TextureLayers);
+                        
+                        // If we had placeholder layers and no real textures were added, restore the placeholders
+                        if (existingEmptyLayers.Count > 0 && 
+                            chunk.TextureLayers.All(l => string.IsNullOrEmpty(l.TextureName) || l.TextureName.StartsWith("<unknown")))
+                        {
+                            existingChunk.TextureLayers.AddRange(existingEmptyLayers);
+                        }
+                    }
+                    
+                    // Merge alpha maps if available
+                    if (chunk.AlphaMaps != null && chunk.AlphaMaps.Count > 0)
+                    {
+                        existingChunk.AlphaMaps.AddRange(chunk.AlphaMaps);
+                    }
+                }
+                else if (isSourceObjFile)
+                {
+                    // For _obj0 files, focus on model/WMO references but preserve existing texture data
+                    // You could add special handling here if needed
+                }
+            }
+            
+            // Add model references if they don't already exist
+            foreach (var modelRef in source.ModelReferences)
+            {
+                if (!target.ModelReferences.Any(m => m.OriginalPath == modelRef.OriginalPath))
+                {
+                    target.ModelReferences.Add(modelRef);
+                }
+            }
+            
+            // Add WMO references if they don't already exist
+            foreach (var wmoRef in source.WmoReferences)
+            {
+                if (!target.WmoReferences.Any(w => w.OriginalPath == wmoRef.OriginalPath))
+                {
+                    target.WmoReferences.Add(wmoRef);
+                }
+            }
+            
+            // Add texture references if they don't already exist
+            foreach (var texRef in source.TextureReferences)
+            {
+                if (!target.TextureReferences.Any(t => t.OriginalPath == texRef.OriginalPath))
+                {
+                    target.TextureReferences.Add(texRef);
+                }
+            }
+            
+            // Add model placements with deduplication
+            foreach (var modelPlacement in source.ModelPlacements)
+            {
+                // Check if this placement already exists in the target based on UniqueId and position
+                bool isDuplicate = target.ModelPlacements.Any(mp => 
+                    // First check by UniqueId if it's not zero (UniqueId == 0 is often used for invalid/default entries)
+                    (modelPlacement.UniqueId != 0 && mp.UniqueId == modelPlacement.UniqueId) ||
+                    // If UniqueIds don't match or are zero, check by position, rotation, scale, and name/nameid
+                    (Vector3.Distance(mp.Position, modelPlacement.Position) < 0.001f &&
+                     Vector3.Distance(mp.Rotation, modelPlacement.Rotation) < 0.001f &&
+                     Math.Abs(mp.Scale - modelPlacement.Scale) < 0.001f &&
+                     (mp.NameId == modelPlacement.NameId || mp.Name == modelPlacement.Name))
+                );
+                
+                if (!isDuplicate)
+                {
+                    target.ModelPlacements.Add(modelPlacement);
+                    
+                    // For logging/debugging
+                    if (isSourceObjFile || isSourceTexFile)
+                    {
+                        Console.WriteLine($"Added model placement from {(isSourceObjFile ? "_obj0" : "_tex0")} file: {modelPlacement.Name}, Position: {modelPlacement.Position}");
+                    }
                 }
                 else
                 {
-                    results = await pm4Parser.ParseDirectoryAsync(inputPath, "*.pm4", searchOption);
+                    Console.WriteLine($"Skipped duplicate model placement: {modelPlacement.Name}, UniqueId: {modelPlacement.UniqueId}, Position: {modelPlacement.Position}");
                 }
             }
-
-            logger.LogInformation("Analyzed {Count} PM4 files", results.Count);
-
-            // Generate reports with CSV option
-            await reportGenerator.GeneratePM4ReportsAsync(results, outputPath, exportCsv, exportObj, exportConsolidatedObj);
             
-            // Export to clustered OBJ if requested
-            if (exportClusteredObj && pm4ClusteredObjExporter != null)
+            // Add WMO placements with deduplication
+            foreach (var wmoPlacement in source.WmoPlacements)
             {
-                logger.LogInformation("Exporting to clustered OBJ format");
-                await pm4ClusteredObjExporter.ExportAllToClusteredObjAsync(results);
-                logger.LogInformation("Clustered OBJ export completed");
-            }
-
-            // Generate map visualization if requested
-            if (generateMap || extractTerrain) // Always generate map when extractTerrain is true, for backward compatibility
-            {
-                logger.LogInformation("Exporting PM4 data to CSV and Markdown formats for analysis");
+                // Check if this placement already exists in the target based on UniqueId and position
+                bool isDuplicate = target.WmoPlacements.Any(wp => 
+                    // First check by UniqueId if it's not zero
+                    (wmoPlacement.UniqueId != 0 && wp.UniqueId == wmoPlacement.UniqueId) ||
+                    // If UniqueIds don't match or are zero, check by position, rotation, and name/nameid
+                    (Vector3.Distance(wp.Position, wmoPlacement.Position) < 0.001f &&
+                     Vector3.Distance(wp.Rotation, wmoPlacement.Rotation) < 0.001f &&
+                     (wp.NameId == wmoPlacement.NameId || wp.Name == wmoPlacement.Name))
+                );
                 
-                // Create data export directory with absolute path to ensure it's created correctly
-                var dataExportDir = Path.GetFullPath(Path.Combine(outputPath, "data_exports"));
-                Directory.CreateDirectory(dataExportDir);
-                logger.LogInformation("Created data export directory at: {DataExportDir}", dataExportDir);
-                
-                // Create data exporter
-                var dataExporter = new PM4DataExporter(loggerFactory.CreateLogger<PM4DataExporter>());
-                
-                // Process each PM4 file individually
-                bool anySuccess = false;
-                foreach (var result in results)
+                if (!isDuplicate)
                 {
-                    if (result.PM4File != null)
+                    target.WmoPlacements.Add(wmoPlacement);
+                }
+            }
+            
+            // Log the counts after merging to verify data is being merged correctly
+            Console.WriteLine($"  After merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
+            Console.WriteLine($"  Added: {(target.ModelReferences?.Count ?? 0) - initialModelCount} model refs, {(target.WmoReferences?.Count ?? 0) - initialWmoCount} WMO refs, {(target.TextureReferences?.Count ?? 0) - initialTextureCount} texture refs");
+            Console.WriteLine($"  Added: {(target.ModelPlacements?.Count ?? 0) - initialModelPlacementCount} model placements, {(target.WmoPlacements?.Count ?? 0) - initialWmoPlacementCount} WMO placements");
+            
+            // Update header information to reflect the merged data
+            if (target.Header != null)
+            {
+                // Update counts in the header to reflect deduplicated data
+                target.Header.ModelReferenceCount = target.ModelReferences?.Count ?? 0;
+                target.Header.WmoReferenceCount = target.WmoReferences?.Count ?? 0;
+                target.Header.ModelPlacementCount = target.ModelPlacements?.Count ?? 0;
+                target.Header.WmoPlacementCount = target.WmoPlacements?.Count ?? 0;
+                target.Header.TerrainChunkCount = target.TerrainChunks?.Count ?? 0;
+                
+                // Determine if we have various data types
+                bool hasHeightData = target.TerrainChunks?.Any(c => c.Heights != null && c.Heights.Length > 0) ?? false;
+                bool hasNormalData = target.TerrainChunks?.Any(c => c.Normals != null && c.Normals.Length > 0) ?? false;
+                bool hasLiquidData = target.TerrainChunks?.Any(c => c.LiquidLevel > 0) ?? false;
+                bool hasVertexShading = target.TerrainChunks?.Any(c => c.VertexColors != null && c.VertexColors.Count > 0) ?? false;
+                
+                // Update the Flags value based on the presence of data
+                uint newFlags = target.Header.Flags;
+                newFlags = hasHeightData ? newFlags | 0x1U : newFlags & ~0x1U;
+                newFlags = hasNormalData ? newFlags | 0x2U : newFlags & ~0x2U;
+                newFlags = hasLiquidData ? newFlags | 0x4U : newFlags & ~0x4U;
+                newFlags = hasVertexShading ? newFlags | 0x8U : newFlags & ~0x8U;
+                target.Header.Flags = newFlags;
+                
+                // Update texture layer count based on the maximum number of texture layers in any chunk
+                int maxTextureLayers = target.TerrainChunks?.Count > 0 
+                    ? target.TerrainChunks.Max(c => c.TextureLayers?.Count ?? 0) 
+                    : 0;
+                target.Header.TextureLayerCount = maxTextureLayers;
+            }
+            
+            // Double-check that all relevant collections have values before saving
+            if (target.ModelPlacements?.Count > 0 && target.Header?.ModelPlacementCount == 0)
+            {
+                target.Header.ModelPlacementCount = target.ModelPlacements.Count;
+            }
+            
+            if (target.WmoPlacements?.Count > 0 && target.Header?.WmoPlacementCount == 0)
+            {
+                target.Header.WmoPlacementCount = target.WmoPlacements.Count;
+            }
+            
+            if (target.ModelReferences?.Count > 0 && target.Header?.ModelReferenceCount == 0)
+            {
+                target.Header.ModelReferenceCount = target.ModelReferences.Count;
+            }
+            
+            if (target.WmoReferences?.Count > 0 && target.Header?.WmoReferenceCount == 0)
+            {
+                target.Header.WmoReferenceCount = target.WmoReferences.Count;
+            }
+        }
+
+        // Add a helper method to load a listfile
+        private static Dictionary<uint, string> LoadListfile(string listfilePath, ILogger logger)
+        {
+            var listfile = new Dictionary<uint, string>();
+            try
+            {
+                logger.LogInformation("Loading listfile from {ListfilePath}", listfilePath);
+                var lines = File.ReadAllLines(listfilePath);
+                foreach (var line in lines)
+                {
+                    var parts = line.Split(';');
+                    if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileId))
                     {
-                        try
-                        {
-                            logger.LogInformation("Exporting data for {FileName}", result.FileName);
-                            await dataExporter.ExportDataAsync(result.PM4File, dataExportDir);
-                            logger.LogInformation("Exported data for {FileName}", result.FileName);
-                            anySuccess = true;
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.LogError(ex, "Error exporting data for {FileName}", result.FileName);
-                        }
+                        listfile[fileId] = parts[1];
                     }
                 }
+                logger.LogInformation("Loaded {Count} entries from listfile", listfile.Count);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error loading listfile from {ListfilePath}", listfilePath);
+            }
+            return listfile;
+        }
+
+        /// <summary>
+        /// Configure a logger for the given parameters
+        /// </summary>
+        private static ILoggerFactory ConfigureLogging(string logFilePath, bool verbose, bool quiet)
+        {
+            // Ensure log directory exists
+            var logDirectory = Path.GetDirectoryName(logFilePath);
+            if (!string.IsNullOrEmpty(logDirectory) && !Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+
+            // Set the log level based on verbose/quiet flags
+            var logLevel = quiet
+                ? Microsoft.Extensions.Logging.LogLevel.Error
+                : (verbose ? Microsoft.Extensions.Logging.LogLevel.Debug : Microsoft.Extensions.Logging.LogLevel.Information);
+
+            // Create and configure the logger factory
+            return LoggerFactory.Create(builder =>
+            {
+                builder.AddConsole();
                 
-                if (anySuccess)
-                {
-                    logger.LogInformation("Data export completed successfully");
-                }
-                else
-                {
-                    logger.LogWarning("No valid PM4 files found for data export");
-                }
-            }
-            
-            // Generate detailed reports if requested
-            if (detailedReport)
-            {
-                logger.LogInformation("Generating detailed PM4 analysis reports");
-                var reportDirectory = Path.Combine(outputPath, "pm4-reports");
-                Directory.CreateDirectory(reportDirectory);
+                // Add file logging
+                var fileLoggerProvider = new FileLoggerProvider(logFilePath);
+                builder.AddProvider(fileLoggerProvider);
                 
-                foreach (var result in results)
-                {
-                    try
-                    {
-                        // Generate a detailed report for each PM4 file
-                        var reportPath = Path.Combine(reportDirectory, $"{Path.GetFileNameWithoutExtension(result.FileName)}_report.txt");
-                        File.WriteAllText(reportPath, result.GetDetailedReport());
-                        logger.LogInformation("Generated detailed report for {FileName} at {ReportPath}", result.FileName, reportPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Error generating detailed report for {FileName}", result.FileName);
-                    }
-                }
-            }
-            
-            logger.LogInformation("PM4 analysis completed. Reports written to {OutputPath}", outputPath);
+                builder.SetMinimumLevel(logLevel);
+            });
         }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error during PM4 analysis");
-            context.ExitCode = 1;
-        }
-    });
-
-    rootCommand.AddCommand(pm4Command);
-
-    // Parse the command line
-    return await rootCommand.InvokeAsync(args);
-}
-
-/// <summary>
-/// Merges data from the source result into the target result
-/// </summary>
-private static void MergeResults(AdtAnalysisResult target, AdtAnalysisResult source)
-{
-    if (target == null || source == null)
-    {
-        Console.WriteLine("Cannot merge null results");
-        return;
-    }
-
-    // Log the contents of both results before merging
-    Console.WriteLine($"Merging {source.FileName} into {target.FileName}");
-    Console.WriteLine($"  Before merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
-    Console.WriteLine($"  Before merge - Source: {source.ModelPlacements?.Count ?? 0} models, {source.WmoPlacements?.Count ?? 0} WMOs, {source.TextureReferences?.Count ?? 0} textures");
-    
-    // Determine if source is a _tex0 file (contains texture information)
-    bool isSourceTexFile = source.FileName.EndsWith("_tex0.adt", StringComparison.OrdinalIgnoreCase);
-    bool isSourceObjFile = source.FileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase);
-    
-    // Ensure target has all references and placements from source
-    int initialTextureCount = target.TextureReferences.Count;
-    int initialModelCount = target.ModelReferences.Count;
-    int initialWmoCount = target.WmoReferences.Count;
-    int initialModelPlacementCount = target.ModelPlacements.Count;
-    int initialWmoPlacementCount = target.WmoPlacements.Count;
-    
-    // Special handling for terrain chunks based on file type
-    foreach (var chunk in source.TerrainChunks ?? Enumerable.Empty<TerrainChunk>())
-    {
-        // Find matching terrain chunk in target if it exists
-        var existingChunk = target.TerrainChunks?.FirstOrDefault(c => 
-            c.Position.X == chunk.Position.X && c.Position.Y == chunk.Position.Y);
-        
-        if (existingChunk == null)
-        {
-            // If chunk doesn't exist in target, add it
-            target.TerrainChunks.Add(chunk);
-        }
-        else if (isSourceTexFile)
-        {
-            // For _tex0 files, prioritize their texture layers but keep other chunk data
-            
-            // If source chunk has texture layers, replace the layers in the target chunk
-            if (chunk.TextureLayers != null && chunk.TextureLayers.Count > 0)
-            {
-                // Save any existing texture-less layers if they should be preserved
-                var existingEmptyLayers = existingChunk.TextureLayers
-                    .Where(l => string.IsNullOrEmpty(l.TextureName) || l.TextureName.StartsWith("<unknown"))
-                    .ToList();
-                
-                // Clear existing texture layers and add ones from tex0 file
-                existingChunk.TextureLayers.Clear();
-                existingChunk.TextureLayers.AddRange(chunk.TextureLayers);
-                
-                // If we had placeholder layers and no real textures were added, restore the placeholders
-                if (existingEmptyLayers.Count > 0 && 
-                    chunk.TextureLayers.All(l => string.IsNullOrEmpty(l.TextureName) || l.TextureName.StartsWith("<unknown")))
-                {
-                    existingChunk.TextureLayers.AddRange(existingEmptyLayers);
-                }
-            }
-            
-            // Merge alpha maps if available
-            if (chunk.AlphaMaps != null && chunk.AlphaMaps.Count > 0)
-            {
-                existingChunk.AlphaMaps.AddRange(chunk.AlphaMaps);
-            }
-        }
-        else if (isSourceObjFile)
-        {
-            // For _obj0 files, focus on model/WMO references but preserve existing texture data
-            // You could add special handling here if needed
-        }
-    }
-    
-    // Add model references if they don't already exist
-    foreach (var modelRef in source.ModelReferences)
-    {
-        if (!target.ModelReferences.Any(m => m.OriginalPath == modelRef.OriginalPath))
-        {
-            target.ModelReferences.Add(modelRef);
-        }
-    }
-    
-    // Add WMO references if they don't already exist
-    foreach (var wmoRef in source.WmoReferences)
-    {
-        if (!target.WmoReferences.Any(w => w.OriginalPath == wmoRef.OriginalPath))
-        {
-            target.WmoReferences.Add(wmoRef);
-        }
-    }
-    
-    // Add texture references if they don't already exist
-    foreach (var texRef in source.TextureReferences)
-    {
-        if (!target.TextureReferences.Any(t => t.OriginalPath == texRef.OriginalPath))
-        {
-            target.TextureReferences.Add(texRef);
-        }
-    }
-    
-    // Add model placements with deduplication
-    foreach (var modelPlacement in source.ModelPlacements)
-    {
-        // Check if this placement already exists in the target based on UniqueId and position
-        bool isDuplicate = target.ModelPlacements.Any(mp => 
-            // First check by UniqueId if it's not zero (UniqueId == 0 is often used for invalid/default entries)
-            (modelPlacement.UniqueId != 0 && mp.UniqueId == modelPlacement.UniqueId) ||
-            // If UniqueIds don't match or are zero, check by position, rotation, scale, and name/nameid
-            (Vector3.Distance(mp.Position, modelPlacement.Position) < 0.001f &&
-             Vector3.Distance(mp.Rotation, modelPlacement.Rotation) < 0.001f &&
-             Math.Abs(mp.Scale - modelPlacement.Scale) < 0.001f &&
-             (mp.NameId == modelPlacement.NameId || mp.Name == modelPlacement.Name))
-        );
-        
-        if (!isDuplicate)
-        {
-            target.ModelPlacements.Add(modelPlacement);
-            
-            // For logging/debugging
-            if (isSourceObjFile || isSourceTexFile)
-            {
-                Console.WriteLine($"Added model placement from {(isSourceObjFile ? "_obj0" : "_tex0")} file: {modelPlacement.Name}, Position: {modelPlacement.Position}");
-            }
-        }
-        else
-        {
-            Console.WriteLine($"Skipped duplicate model placement: {modelPlacement.Name}, UniqueId: {modelPlacement.UniqueId}, Position: {modelPlacement.Position}");
-        }
-    }
-    
-    // Add WMO placements with deduplication
-    foreach (var wmoPlacement in source.WmoPlacements)
-    {
-        // Check if this placement already exists in the target based on UniqueId and position
-        bool isDuplicate = target.WmoPlacements.Any(wp => 
-            // First check by UniqueId if it's not zero
-            (wmoPlacement.UniqueId != 0 && wp.UniqueId == wmoPlacement.UniqueId) ||
-            // If UniqueIds don't match or are zero, check by position, rotation, and name/nameid
-            (Vector3.Distance(wp.Position, wmoPlacement.Position) < 0.001f &&
-             Vector3.Distance(wp.Rotation, wmoPlacement.Rotation) < 0.001f &&
-             (wp.NameId == wmoPlacement.NameId || wp.Name == wmoPlacement.Name))
-        );
-        
-        if (!isDuplicate)
-        {
-            target.WmoPlacements.Add(wmoPlacement);
-        }
-    }
-    
-    // Log the counts after merging to verify data is being merged correctly
-    Console.WriteLine($"  After merge - Target: {target.ModelPlacements?.Count ?? 0} models, {target.WmoPlacements?.Count ?? 0} WMOs, {target.TextureReferences?.Count ?? 0} textures");
-    Console.WriteLine($"  Added: {(target.ModelReferences?.Count ?? 0) - initialModelCount} model refs, {(target.WmoReferences?.Count ?? 0) - initialWmoCount} WMO refs, {(target.TextureReferences?.Count ?? 0) - initialTextureCount} texture refs");
-    Console.WriteLine($"  Added: {(target.ModelPlacements?.Count ?? 0) - initialModelPlacementCount} model placements, {(target.WmoPlacements?.Count ?? 0) - initialWmoPlacementCount} WMO placements");
-    
-    // Update header information to reflect the merged data
-    if (target.Header != null)
-    {
-        // Update counts in the header to reflect deduplicated data
-        target.Header.ModelReferenceCount = target.ModelReferences?.Count ?? 0;
-        target.Header.WmoReferenceCount = target.WmoReferences?.Count ?? 0;
-        target.Header.ModelPlacementCount = target.ModelPlacements?.Count ?? 0;
-        target.Header.WmoPlacementCount = target.WmoPlacements?.Count ?? 0;
-        target.Header.TerrainChunkCount = target.TerrainChunks?.Count ?? 0;
-        
-        // Determine if we have various data types
-        bool hasHeightData = target.TerrainChunks?.Any(c => c.Heights != null && c.Heights.Length > 0) ?? false;
-        bool hasNormalData = target.TerrainChunks?.Any(c => c.Normals != null && c.Normals.Length > 0) ?? false;
-        bool hasLiquidData = target.TerrainChunks?.Any(c => c.LiquidLevel > 0) ?? false;
-        bool hasVertexShading = target.TerrainChunks?.Any(c => c.VertexColors != null && c.VertexColors.Count > 0) ?? false;
-        
-        // Update the Flags value based on the presence of data
-        uint newFlags = target.Header.Flags;
-        newFlags = hasHeightData ? newFlags | 0x1U : newFlags & ~0x1U;
-        newFlags = hasNormalData ? newFlags | 0x2U : newFlags & ~0x2U;
-        newFlags = hasLiquidData ? newFlags | 0x4U : newFlags & ~0x4U;
-        newFlags = hasVertexShading ? newFlags | 0x8U : newFlags & ~0x8U;
-        target.Header.Flags = newFlags;
-        
-        // Update texture layer count based on the maximum number of texture layers in any chunk
-        int maxTextureLayers = target.TerrainChunks?.Count > 0 
-            ? target.TerrainChunks.Max(c => c.TextureLayers?.Count ?? 0) 
-            : 0;
-        target.Header.TextureLayerCount = maxTextureLayers;
-    }
-    
-    // Double-check that all relevant collections have values before saving
-    if (target.ModelPlacements?.Count > 0 && target.Header?.ModelPlacementCount == 0)
-    {
-        target.Header.ModelPlacementCount = target.ModelPlacements.Count;
-    }
-    
-    if (target.WmoPlacements?.Count > 0 && target.Header?.WmoPlacementCount == 0)
-    {
-        target.Header.WmoPlacementCount = target.WmoPlacements.Count;
-    }
-    
-    if (target.ModelReferences?.Count > 0 && target.Header?.ModelReferenceCount == 0)
-    {
-        target.Header.ModelReferenceCount = target.ModelReferences.Count;
-    }
-    
-    if (target.WmoReferences?.Count > 0 && target.Header?.WmoReferenceCount == 0)
-    {
-        target.Header.WmoReferenceCount = target.WmoReferences.Count;
-    }
-}
-
-// Add a helper method to load a listfile
-private static Dictionary<uint, string> LoadListfile(string listfilePath, ILogger logger)
-{
-    var listfile = new Dictionary<uint, string>();
-    try
-    {
-        logger.LogInformation("Loading listfile from {ListfilePath}", listfilePath);
-        var lines = File.ReadAllLines(listfilePath);
-        foreach (var line in lines)
-        {
-            var parts = line.Split(';');
-            if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileId))
-            {
-                listfile[fileId] = parts[1];
-            }
-        }
-        logger.LogInformation("Loaded {Count} entries from listfile", listfile.Count);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error loading listfile from {ListfilePath}", listfilePath);
-    }
-    return listfile;
-}
     }
 }
