@@ -17,18 +17,18 @@ namespace WCAnalyzer.Core.Services
     /// </summary>
     public class PM4CsvGenerator
     {
-        private readonly ILogger<PM4CsvGenerator>? _logger;
+        private readonly ILogger? _logger;
         private readonly string _outputDirectory;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PM4CsvGenerator"/> class.
         /// </summary>
         /// <param name="logger">Optional logger instance</param>
-        /// <param name="outputDirectory">Output directory for the reports</param>
-        public PM4CsvGenerator(ILogger<PM4CsvGenerator>? logger, string outputDirectory)
+        /// <param name="outputDirectory">Optional output directory for the reports</param>
+        public PM4CsvGenerator(ILogger? logger = null, string? outputDirectory = null)
         {
             _logger = logger;
-            _outputDirectory = outputDirectory ?? throw new ArgumentNullException(nameof(outputDirectory));
+            _outputDirectory = outputDirectory ?? Path.Combine(Directory.GetCurrentDirectory(), "csv_reports");
         }
 
         /// <summary>
@@ -175,7 +175,7 @@ namespace WCAnalyzer.Core.Services
         /// </summary>
         private async Task GeneratePositionRecordsReportAsync(MPRLChunk positionChunk, string baseFileName, string outputDir)
         {
-            var positionRecords = positionChunk.Entries.Where(e => !e.IsControlRecord).ToList();
+            var positionRecords = positionChunk.Entries.Where(e => !e.IsSpecialEntry).ToList();
             if (positionRecords.Count == 0)
             {
                 _logger?.LogInformation("No position records found in {FileName}", baseFileName);
@@ -189,13 +189,22 @@ namespace WCAnalyzer.Core.Services
             {
                 using var writer = new StreamWriter(filePath);
                 
-                // Write header
-                await writer.WriteLineAsync("Index,X,Y,Z");
+                // Write header with all possible values
+                await writer.WriteLineAsync("Index,X,Y,Z,Value1,Value2,Value3,IsSpecial");
                 
-                // Write data
+                // Write data with all values
                 foreach (var entry in positionRecords)
                 {
-                    await writer.WriteLineAsync($"{entry.Index},{entry.CoordinateX.ToString(CultureInfo.InvariantCulture)},{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)},{entry.CoordinateZ.ToString(CultureInfo.InvariantCulture)}");
+                    await writer.WriteLineAsync(
+                        $"{entry.Index}," +
+                        $"{entry.CoordinateX.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateZ.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value1.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value2.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value3.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.IsSpecialEntry}"
+                    );
                 }
                 
                 _logger?.LogInformation("Generated position records report: {FilePath} ({Count} entries)", filePath, positionRecords.Count);
@@ -211,35 +220,49 @@ namespace WCAnalyzer.Core.Services
         /// </summary>
         private async Task GenerateCommandRecordsReportAsync(MPRLChunk positionChunk, string baseFileName, string outputDir)
         {
-            var commandRecords = positionChunk.Entries.Where(e => e.IsControlRecord).ToList();
-            if (commandRecords.Count == 0)
+            var specialRecords = positionChunk.Entries.Where(e => e.IsSpecialEntry).ToList();
+            if (specialRecords.Count == 0)
             {
-                _logger?.LogInformation("No command records found in {FileName}", baseFileName);
+                _logger?.LogInformation("No special entries found in {FileName}", baseFileName);
                 return;
             }
 
-            var fileName = baseFileName + "_command_records.csv";
+            var fileName = baseFileName + "_special_entries.csv";
             var filePath = Path.Combine(outputDir, fileName);
 
             try
             {
                 using var writer = new StreamWriter(filePath);
                 
-                // Write header
-                await writer.WriteLineAsync("Index,CommandHex,CommandDec,YValue,RawZ");
+                // Write header with all possible values
+                await writer.WriteLineAsync("Index,SpecialValueHex,SpecialValueDec,AsFloat,X,Y,Z,Value1,Value2,Value3,IsSpecial");
                 
-                // Write data
-                foreach (var entry in commandRecords)
+                // Write data with all values
+                foreach (var entry in specialRecords)
                 {
-                    string commandHex = $"0x{entry.CommandValue:X8}";
-                    await writer.WriteLineAsync($"{entry.Index},{commandHex},{entry.CommandValue},{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)},{entry.Value3.ToString(CultureInfo.InvariantCulture)}");
+                    string specialHex = $"0x{entry.SpecialValue:X8}";
+                    // Reinterpret the bit pattern as a float
+                    float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
+                    await writer.WriteLineAsync(
+                        $"{entry.Index}," +
+                        $"{specialHex}," +
+                        $"{entry.SpecialValue}," +
+                        $"{asFloat.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateX.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateZ.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value1.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value2.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value3.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.IsSpecialEntry}"
+                    );
                 }
                 
-                _logger?.LogInformation("Generated command records report: {FilePath} ({Count} entries)", filePath, commandRecords.Count);
+                _logger?.LogInformation("Generated special entries report: {FilePath} ({Count} entries)", filePath, specialRecords.Count);
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error generating command records report: {FilePath}", filePath);
+                _logger?.LogError(ex, "Error generating special entries report: {FilePath}", filePath);
             }
         }
 
@@ -266,10 +289,10 @@ namespace WCAnalyzer.Core.Services
                 // Write data
                 foreach (var entry in positionChunk.Entries)
                 {
-                    string type = entry.IsControlRecord ? "Command" : "Position";
+                    string type = entry.IsSpecialEntry ? "Special" : "Position";
                     string value1 = float.IsNaN(entry.Value1) ? "NaN" : entry.Value1.ToString(CultureInfo.InvariantCulture);
                     string value3 = float.IsNaN(entry.Value3) ? "NaN" : entry.Value3.ToString(CultureInfo.InvariantCulture);
-                    string commandHex = entry.IsControlRecord ? $"0x{entry.CommandValue:X8}" : "";
+                    string commandHex = entry.IsSpecialEntry ? $"0x{entry.SpecialValue:X8}" : "";
                     
                     await writer.WriteLineAsync($"{entry.Index},{type},{value1},{entry.Value2.ToString(CultureInfo.InvariantCulture)},{value3},{commandHex},{entry.CoordinateX.ToString(CultureInfo.InvariantCulture)},{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)},{entry.CoordinateZ.ToString(CultureInfo.InvariantCulture)}");
                 }
@@ -280,6 +303,81 @@ namespace WCAnalyzer.Core.Services
             {
                 _logger?.LogError(ex, "Error generating sequence report: {FilePath}", filePath);
             }
+        }
+
+        private async Task GenerateAllEntriesReportAsync(MPRLChunk positionChunk, string baseFileName, string outputDir)
+        {
+            if (positionChunk.Entries.Count == 0)
+            {
+                _logger?.LogInformation("No entries found in {FileName}", baseFileName);
+                return;
+            }
+
+            var fileName = baseFileName + "_all_entries.csv";
+            var filePath = Path.Combine(outputDir, fileName);
+
+            try
+            {
+                using var writer = new StreamWriter(filePath);
+                
+                // Write header with all possible values
+                await writer.WriteLineAsync("Index,EntryType,X,Y,Z,Value1,Value2,Value3,SpecialValueHex,SpecialValueDec,AsFloat,IsSpecial");
+                
+                // Write data with all values
+                foreach (var entry in positionChunk.Entries)
+                {
+                    string type = entry.IsSpecialEntry ? "Special" : "Position";
+                    string specialHex = entry.IsSpecialEntry ? $"0x{entry.SpecialValue:X8}" : "";
+                    string specialDec = entry.IsSpecialEntry ? entry.SpecialValue.ToString() : "";
+                    string asFloat = entry.IsSpecialEntry ? BitConverter.Int32BitsToSingle(entry.SpecialValue).ToString(CultureInfo.InvariantCulture) : "";
+                    
+                    await writer.WriteLineAsync(
+                        $"{entry.Index}," +
+                        $"{type}," +
+                        $"{entry.CoordinateX.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateY.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.CoordinateZ.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value1.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value2.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value3.ToString(CultureInfo.InvariantCulture)}," +
+                        $"{specialHex}," +
+                        $"{specialDec}," +
+                        $"{asFloat}," +
+                        $"{entry.IsSpecialEntry}"
+                    );
+                }
+                
+                _logger?.LogInformation("Generated all entries report: {FilePath} ({Count} entries)", filePath, positionChunk.Entries.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error generating all entries report: {FilePath}", filePath);
+            }
+        }
+
+        public async Task GenerateReportsAsync(MPRLChunk positionChunk, string baseFileName, string outputDir)
+        {
+            if (positionChunk == null)
+                throw new ArgumentNullException(nameof(positionChunk));
+            if (string.IsNullOrEmpty(baseFileName))
+                throw new ArgumentException("Base file name cannot be null or empty.", nameof(baseFileName));
+            if (string.IsNullOrEmpty(outputDir))
+                throw new ArgumentException("Output directory cannot be null or empty.", nameof(outputDir));
+
+            // Create output directory if it doesn't exist
+            if (!Directory.Exists(outputDir))
+            {
+                Directory.CreateDirectory(outputDir);
+            }
+
+            // Generate position records report
+            await GeneratePositionRecordsReportAsync(positionChunk, baseFileName, outputDir);
+
+            // Generate command records report
+            await GenerateCommandRecordsReportAsync(positionChunk, baseFileName, outputDir);
+            
+            // Generate all entries report (combined)
+            await GenerateAllEntriesReportAsync(positionChunk, baseFileName, outputDir);
         }
     }
 } 

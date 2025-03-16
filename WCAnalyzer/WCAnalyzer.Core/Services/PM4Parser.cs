@@ -157,7 +157,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine($"- Files with Normal Coordinates: {resultsList.Count(r => r.HasNormalCoordinates)}");
             summary.AppendLine($"- Files with Links: {resultsList.Count(r => r.HasLinks)}");
             summary.AppendLine($"- Files with Vertex Data: {resultsList.Count(r => r.HasVertexData)}");
-            summary.AppendLine($"- Files with Vertex Indices 2: {resultsList.Count(r => r.HasVertexIndices2)}");
+            summary.AppendLine($"- Files with Vertex Info: {resultsList.Count(r => r.HasVertexInfo)}");
             summary.AppendLine($"- Files with Surface Data: {resultsList.Count(r => r.HasSurfaceData)}");
             summary.AppendLine($"- Files with Position Data: {resultsList.Count(r => r.HasPositionData)}");
             summary.AppendLine($"- Files with Value Pairs: {resultsList.Count(r => r.HasValuePairs)}");

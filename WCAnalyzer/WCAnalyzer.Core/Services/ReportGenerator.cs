@@ -230,8 +230,8 @@ namespace WCAnalyzer.Core.Services
             int totalIndices = results.Sum(r => r.PM4File?.VertexIndicesChunk?.Indices.Count ?? 0);
             int triangleCount = totalIndices / 3;
             int totalPositionEntries = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count ?? 0);
-            int totalPosRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsControlRecord) ?? 0);
-            int totalCmdRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsControlRecord) ?? 0);
+            int totalPosRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry) ?? 0);
+            int totalCmdRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0);
             
             summary.AppendLine($"- **Total Vertices**: {totalVertices:N0}");
             summary.AppendLine($"- **Total Triangles**: {triangleCount:N0}");
@@ -249,7 +249,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine($"| MSCN | {results.Count(r => r.HasNormalCoordinates)} | {(float)results.Count(r => r.HasNormalCoordinates) / results.Count * 100:F1}% | Normal Coordinates |");
             summary.AppendLine($"| MSLK | {results.Count(r => r.HasLinks)} | {(float)results.Count(r => r.HasLinks) / results.Count * 100:F1}% | Links |");
             summary.AppendLine($"| MSVT | {results.Count(r => r.HasVertexData)} | {(float)results.Count(r => r.HasVertexData) / results.Count * 100:F1}% | Vertex Data |");
-            summary.AppendLine($"| MSVI | {results.Count(r => r.HasVertexIndices2)} | {(float)results.Count(r => r.HasVertexIndices2) / results.Count * 100:F1}% | Vertex Indices 2 |");
+            summary.AppendLine($"| MSVI | {results.Count(r => r.HasVertexInfo)} | {(float)results.Count(r => r.HasVertexInfo) / results.Count * 100:F1}% | Vertex Info |");
             summary.AppendLine($"| MSUR | {results.Count(r => r.HasSurfaceData)} | {(float)results.Count(r => r.HasSurfaceData) / results.Count * 100:F1}% | Surface Data |");
             summary.AppendLine($"| MPRL | {results.Count(r => r.HasPositionData)} | {(float)results.Count(r => r.HasPositionData) / results.Count * 100:F1}% | Position Data |");
             summary.AppendLine($"| MPRR | {results.Count(r => r.HasValuePairs)} | {(float)results.Count(r => r.HasValuePairs) / results.Count * 100:F1}% | Value Pairs |");
@@ -326,8 +326,8 @@ namespace WCAnalyzer.Core.Services
                 foreach (var file in filesWithMostPositions)
                 {
                     int total = file.PM4File?.PositionDataChunk?.Entries.Count ?? 0;
-                    int posCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsControlRecord) ?? 0;
-                    int cmdCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsControlRecord) ?? 0;
+                    int posCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry) ?? 0;
+                    int cmdCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0;
                     summary.AppendLine($"| {file.FileName} | {total:N0} | {posCount:N0} | {cmdCount:N0} |");
                 }
             }
@@ -336,7 +336,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine("\n### Position Records");
             
             var positionFiles = results
-                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => !e.IsControlRecord) == true)
+                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => !e.IsSpecialEntry) == true)
                 .ToList();
             
             // Analyze coordinate ranges if any position records exist
@@ -346,7 +346,7 @@ namespace WCAnalyzer.Core.Services
                 
                 foreach (var file in positionFiles)
                 {
-                    var positions = file.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsControlRecord).ToList();
+                    var positions = file.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry).ToList();
                     if (positions.Any())
                     {
                         float minX = positions.Min(p => p.CoordinateX);
@@ -390,13 +390,13 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine("| Index | X | Y | Z |");
                 summary.AppendLine("|-------|-----|-----|-----|");
                 
-                var positions = result.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsControlRecord).Take(10).ToList();
+                var positions = result.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry).Take(10).ToList();
                 foreach (var pos in positions)
                 {
                     summary.AppendLine($"| {pos.Index} | {pos.CoordinateX:F2} | {pos.CoordinateY:F2} | {pos.CoordinateZ:F2} |");
                 }
                 
-                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => !e.IsControlRecord);
+                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => !e.IsSpecialEntry);
                 if (totalCount > 10)
                 {
                     summary.AppendLine($"_Showing 10 of {totalCount} position records_");
@@ -407,7 +407,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine("\n### Command Records");
             
             var commandFiles = results
-                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => e.IsControlRecord) == true)
+                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => e.IsSpecialEntry) == true)
                 .ToList();
             
             // Example command records from different files
@@ -419,48 +419,74 @@ namespace WCAnalyzer.Core.Services
                 sampleFileCount++;
                 string fileName = result.FileName ?? "Unknown";
                 summary.AppendLine($"\n##### Sample {sampleFileCount}: {fileName}");
-                summary.AppendLine("| Index | Command (Hex) | Command (Dec) | Y Value |");
-                summary.AppendLine("|-------|--------------|--------------|---------|");
+                summary.AppendLine("| Index | Special Value (Hex) | As Float | Y Value |");
+                summary.AppendLine("|-------|--------------|---------|---------|");
                 
-                var commands = result.PM4File!.PositionDataChunk!.Entries.Where(e => e.IsControlRecord).Take(10).ToList();
+                var commands = result.PM4File!.PositionDataChunk!.Entries.Where(e => e.IsSpecialEntry).Take(10).ToList();
                 foreach (var cmd in commands)
                 {
-                    summary.AppendLine($"| {cmd.Index} | 0x{cmd.CommandValue:X8} | {cmd.CommandValue} | {cmd.CoordinateY:F2} |");
+                    float asFloat = BitConverter.Int32BitsToSingle(cmd.SpecialValue);
+                    summary.AppendLine($"| {cmd.Index} | 0x{cmd.SpecialValue:X8} | {asFloat:F2} | {cmd.CoordinateY:F2} |");
                 }
                 
-                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => e.IsControlRecord);
+                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => e.IsSpecialEntry);
                 if (totalCount > 10)
                 {
                     summary.AppendLine($"_Showing 10 of {totalCount} command records_");
                 }
             }
             
-            // Command value distribution analysis
-            summary.AppendLine("\n### Command Value Analysis");
+            // Special value distribution analysis
+            summary.AppendLine("\n### Special Value Analysis");
             
-            // Command distribution
-            var commandDistribution = results
-                .SelectMany(r => r.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsControlRecord) ?? Array.Empty<MPRLChunk.ServerPositionData>())
-                .GroupBy(e => e.CommandValue)
+            // Special value distribution
+            var specialDistribution = results
+                .SelectMany(r => r.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry) ?? Array.Empty<MPRLChunk.ServerPositionData>())
+                .GroupBy(e => e.SpecialValue)
                 .OrderByDescending(g => g.Count())
                 .Take(20)
+                .Select(g => new
+                {
+                    SpecialValue = g.Key,
+                    AsFloat = BitConverter.Int32BitsToSingle(g.Key),
+                    Count = g.Count()
+                })
                 .ToList();
                 
-            summary.AppendLine("\n#### Command Value Distribution");
-            summary.AppendLine("| Command (Hex) | Command (Dec) | Count | Percentage |");
-            summary.AppendLine("|--------------|--------------|-------|------------|");
+            summary.AppendLine("\n#### Special Value Distribution");
+            summary.AppendLine("| Special Value (Hex) | As Float | Count | Percentage |");
+            summary.AppendLine("|--------------|---------|-------|------------|");
             
-            if (totalCmdRecords > 0)
+            int totalSpecialEntries = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0);
+            foreach (var special in specialDistribution)
             {
-                foreach (var group in commandDistribution)
-                {
-                    double percentage = (double)group.Count() / totalCmdRecords * 100;
-                    summary.AppendLine($"| 0x{group.Key:X8} | {group.Key} | {group.Count():N0} | {percentage:F2}% |");
-                }
+                double percentage = (double)special.Count / totalSpecialEntries * 100;
+                summary.AppendLine($"| 0x{special.SpecialValue:X8} | {special.AsFloat:F2} | {special.Count:N0} | {percentage:F2}% |");
             }
-            else
+            
+            // Sample special entries from different files
+            summary.AppendLine("\n#### Sample Special Entries");
+            summary.AppendLine("| File | Index | Special Value (Hex) | As Float | X | Y | Z | Value1 | Value2 | Value3 |");
+            summary.AppendLine("|------|-------|--------------|---------|-----|-----|-----|--------|--------|--------|");
+
+            int entriesShown = 0;
+            foreach (var result in results.Take(5))
             {
-                summary.AppendLine("| - | No command records found | - | - |");
+                var entries = result.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry).Take(2).ToList();
+                if (entries != null && entries.Count > 0)
+                {
+                    string fileName = Path.GetFileName(result.FileName ?? "unknown");
+                    foreach (var entry in entries)
+                    {
+                        float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
+                        summary.AppendLine($"| {fileName} | {entry.Index} | 0x{entry.SpecialValue:X8} | {asFloat:F6} | " +
+                                          $"{entry.CoordinateX:F6} | {entry.CoordinateY:F6} | {entry.CoordinateZ:F6} | " +
+                                          $"{entry.Value1:F6} | {entry.Value2:F6} | {entry.Value3:F6} |");
+                        entriesShown++;
+                        if (entriesShown >= 10) break;
+                    }
+                }
+                if (entriesShown >= 10) break;
             }
             
             // Command-Position Pair Analysis
@@ -474,7 +500,7 @@ namespace WCAnalyzer.Core.Services
                 var entries = result.PM4File!.PositionDataChunk!.Entries;
                 for (int i = 0; i < entries.Count - 1; i++)
                 {
-                    if (entries[i].IsControlRecord && !entries[i + 1].IsControlRecord)
+                    if (entries[i].IsSpecialEntry && !entries[i + 1].IsSpecialEntry)
                     {
                         allPairs.Add((entries[i], entries[i + 1]));
                     }
@@ -486,7 +512,7 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine($"- Total Command-Position Pairs: {allPairs.Count:N0}");
                 
                 var groupedPairs = allPairs
-                    .GroupBy(p => p.Command.CommandValue)
+                    .GroupBy(p => p.Command.SpecialValue)
                     .OrderByDescending(g => g.Count())
                     .Take(15)
                     .ToList();
@@ -538,7 +564,7 @@ namespace WCAnalyzer.Core.Services
                 if (result.HasNormalCoordinates) presentChunks.Add("MSCN (Normal Coordinates)");
                 if (result.HasLinks) presentChunks.Add("MSLK (Links)");
                 if (result.HasVertexData) presentChunks.Add("MSVT (Vertex Data)");
-                if (result.HasVertexIndices2) presentChunks.Add("MSVI (Vertex Indices 2)");
+                if (result.HasVertexInfo) presentChunks.Add("MSVI (Vertex Info)");
                 if (result.HasSurfaceData) presentChunks.Add("MSUR (Surface Data)");
                 if (result.HasPositionData) presentChunks.Add("MPRL (Position Data)");
                 if (result.HasValuePairs) presentChunks.Add("MPRR (Value Pairs)");
@@ -613,15 +639,15 @@ namespace WCAnalyzer.Core.Services
                 {
                     var entries = result.PM4File.PositionDataChunk.Entries;
                     int totalEntries = entries.Count;
-                    int filePositionCount = entries.Count(e => !e.IsControlRecord);
-                    int fileCommandCount = entries.Count(e => e.IsControlRecord);
+                    int filePositionCount = entries.Count(e => !e.IsSpecialEntry);
+                    int fileCommandCount = entries.Count(e => e.IsSpecialEntry);
                     
                     summary.AppendLine($"\n#### Position Data: {totalEntries:N0} entries ({filePositionCount:N0} positions, {fileCommandCount:N0} commands)");
                     
                     // Show position record statistics if any
                     if (filePositionCount > 0)
                     {
-                        var filePosRecords = entries.Where(e => !e.IsControlRecord).ToList();
+                        var filePosRecords = entries.Where(e => !e.IsSpecialEntry).ToList();
                         
                         // Coordinate ranges
                         var minX = filePosRecords.Min(p => p.CoordinateX);
@@ -658,47 +684,25 @@ namespace WCAnalyzer.Core.Services
                     // Show command record statistics if any
                     if (fileCommandCount > 0)
                     {
-                        var fileCmdRecords = entries.Where(e => e.IsControlRecord).ToList();
+                        var fileCmdRecords = entries.Where(e => e.IsSpecialEntry).ToList();
                         
                         // Show sample command records
-                        summary.AppendLine("\nSample Command Records:");
-                        summary.AppendLine("| Index | Command (Hex) | Y Value |");
-                        summary.AppendLine("|-------|--------------|---------|");
-                        
-                        for (int i = 0; i < Math.Min(5, fileCommandCount); i++)
+                        summary.AppendLine("\nSample Special Entries:");
+                        summary.AppendLine("| Index | Special Value (Hex) | As Float | X | Y | Z | Value1 | Value2 | Value3 |");
+                        summary.AppendLine("|-------|--------------|---------|-----|-----|-----|--------|--------|--------|");
+
+                        for (int i = 0; i < Math.Min(10, fileCmdRecords.Count); i++)
                         {
-                            var cmd = fileCmdRecords[i];
-                            summary.AppendLine($"| {cmd.Index} | 0x{cmd.CommandValue:X8} | {cmd.CoordinateY:F2} |");
+                            var entry = fileCmdRecords[i];
+                            float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
+                            summary.AppendLine($"| {entry.Index} | 0x{entry.SpecialValue:X8} | {asFloat:F6} | " +
+                                              $"{entry.CoordinateX:F6} | {entry.CoordinateY:F6} | {entry.CoordinateZ:F6} | " +
+                                              $"{entry.Value1:F6} | {entry.Value2:F6} | {entry.Value3:F6} |");
                         }
-                        
-                        if (fileCommandCount > 5)
+
+                        if (fileCmdRecords.Count > 10)
                         {
-                            summary.AppendLine($"_Showing 5 of {fileCommandCount} command records_");
-                        }
-                        
-                        // Command value distribution for this file
-                        var fileCmdDistribution = fileCmdRecords
-                            .GroupBy(c => c.CommandValue)
-                            .OrderByDescending(g => g.Count())
-                            .Take(5)
-                            .ToList();
-                        
-                        if (fileCmdDistribution.Any())
-                        {
-                            summary.AppendLine("\nCommand Value Distribution:");
-                            summary.AppendLine("| Command (Hex) | Count | Percentage |");
-                            summary.AppendLine("|--------------|-------|------------|");
-                            
-                            foreach (var group in fileCmdDistribution)
-                            {
-                                double percentage = (double)group.Count() / fileCommandCount * 100;
-                                summary.AppendLine($"| 0x{group.Key:X8} | {group.Count()} | {percentage:F2}% |");
-                            }
-                            
-                            if (fileCmdDistribution.Count() < fileCmdRecords.GroupBy(c => c.CommandValue).Count())
-                            {
-                                summary.AppendLine($"_Showing top 5 of {fileCmdRecords.GroupBy(c => c.CommandValue).Count()} command values_");
-                            }
+                            summary.AppendLine($"_Showing top 10 of {fileCmdRecords.Count} special entries_");
                         }
                     }
                 }
@@ -785,11 +789,11 @@ namespace WCAnalyzer.Core.Services
                         for (int i = 0; i < positions.Count; i++)
                         {
                             var pos = positions[i];
-                            string entryType = pos.IsControlRecord ? "Valid" : "Special";
-                            string x = pos.IsControlRecord ? pos.CoordinateX.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
+                            string entryType = pos.IsSpecialEntry ? "Valid" : "Special";
+                            string x = pos.IsSpecialEntry ? pos.CoordinateX.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
                                       (float.IsNaN(pos.Value1) ? "NaN" : pos.Value1.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
                             string y = pos.CoordinateY.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
-                            string z = pos.IsControlRecord ? pos.CoordinateZ.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
+                            string z = pos.IsSpecialEntry ? pos.CoordinateZ.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
                                       (float.IsNaN(pos.Value3) ? "NaN" : pos.Value3.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
                             
                             string line = String.Format(
@@ -800,7 +804,7 @@ namespace WCAnalyzer.Core.Services
                                 x,
                                 y,
                                 z,
-                                pos.IsControlRecord
+                                pos.IsSpecialEntry
                             );
                             await positionWriter.WriteLineAsync(line);
                         }
@@ -863,7 +867,7 @@ namespace WCAnalyzer.Core.Services
                         result.HasNormalCoordinates ? "1" : "0",
                         result.HasLinks ? "1" : "0",
                         result.HasVertexData ? "1" : "0",
-                        result.HasVertexIndices2 ? "1" : "0",
+                        result.HasVertexInfo ? "1" : "0",
                         result.HasSurfaceData ? "1" : "0",
                         result.HasPositionData ? "1" : "0",
                         result.HasValuePairs ? "1" : "0",

@@ -259,7 +259,7 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
         /// <summary>
         /// Gets the metadata about this chunk
         /// </summary>
-        public string Description => "Position Data - Contains vertex positions for server-side collision meshes";
+        public string Description => "Position Data - Contains vertex positions and special entries for server-side collision meshes";
 
         /// <summary>
         /// Gets the data entries.
@@ -284,10 +284,9 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
             using (var ms = new MemoryStream(Data))
             using (var reader = new BinaryReader(ms))
             {
-                // Based on the observed pattern, the MPRL chunk contains alternating entries
-                // of two types: command records and position records.
-                // Each entry is 12 bytes (3 floats or equivalent)
-
+                // The MPRL chunk contains alternating entries of two types:
+                // 1. Position records with actual XYZ coordinates
+                // 2. Special records with a value and Y coordinate
                 int entryCount = Data.Length / 12;
                 
                 // Flag used to track the alternating pattern
@@ -301,8 +300,8 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
                     float z = reader.ReadSingle();
                     
                     // Determine entry type based on the values and pattern
-                    // Control records typically have NaN in X and a specific flag pattern
-                    bool isControlRecord = float.IsNaN(x);
+                    // Special records typically have NaN in X and a specific value pattern
+                    bool isSpecialEntry = float.IsNaN(x);
                     
                     var entry = new ServerPositionData
                     {
@@ -310,15 +309,15 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
                         Value1 = x,
                         Value2 = y,
                         Value3 = z,
-                        IsControlRecord = isControlRecord,
+                        IsSpecialEntry = isSpecialEntry,
                         
                         // For position records, use the values directly
-                        CoordinateX = isControlRecord ? 0 : x,
+                        CoordinateX = isSpecialEntry ? 0 : x,
                         CoordinateY = y,
-                        CoordinateZ = isControlRecord ? 0 : z,
+                        CoordinateZ = isSpecialEntry ? 0 : z,
                         
-                        // For control records, interpret the Z value as a flag/command
-                        CommandValue = isControlRecord ? BitConverter.ToInt32(BitConverter.GetBytes(z), 0) : 0
+                        // For special records, interpret the Z value as a special value
+                        SpecialValue = isSpecialEntry ? BitConverter.ToInt32(BitConverter.GetBytes(z), 0) : 0
                     };
                     
                     Entries.Add(entry);
@@ -353,9 +352,9 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
             public float Value3 { get; set; }
             
             /// <summary>
-            /// Indicates if this entry is a control/command record (rather than a position)
+            /// Indicates if this entry is a special record (rather than a position)
             /// </summary>
-            public bool IsControlRecord { get; set; }
+            public bool IsSpecialEntry { get; set; }
             
             /// <summary>
             /// X coordinate - only valid for position records
@@ -373,19 +372,342 @@ namespace WCAnalyzer.Core.Models.PM4.Chunks
             public float CoordinateZ { get; set; }
             
             /// <summary>
-            /// Command/flag value - only valid for control records
+            /// Special value - only valid for special records
             /// </summary>
-            public int CommandValue { get; set; }
+            public int SpecialValue { get; set; }
             
             /// <summary>
             /// Returns a string representation of this object.
             /// </summary>
             public override string ToString()
             {
-                return IsControlRecord 
-                    ? $"Control Record: Command=0x{CommandValue:X8}, Y={CoordinateY:F2}"
+                return IsSpecialEntry 
+                    ? $"Special Record: Value=0x{SpecialValue:X8}, Y={CoordinateY:F2}"
                     : $"Position: ({CoordinateX:F2}, {CoordinateY:F2}, {CoordinateZ:F2})";
             }
+        }
+    }
+
+    /// <summary>
+    /// MSCN chunk - Contains normal vector data for meshes.
+    /// </summary>
+    public class MSCNChunk : PM4Chunk
+    {
+        /// <summary>
+        /// Gets the chunk signature.
+        /// </summary>
+        public override string Signature => "MSCN";
+
+        /// <summary>
+        /// Gets the normal vectors.
+        /// </summary>
+        public List<Vector3> Normals { get; private set; } = new List<Vector3>();
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MSCNChunk"/> class.
+        /// </summary>
+        /// <param name="data">The chunk data.</param>
+        public MSCNChunk(byte[] data) : base(data)
+        {
+        }
+
+        /// <summary>
+        /// Reads and parses the chunk data.
+        /// </summary>
+        protected override void ReadData()
+        {
+            Normals.Clear();
+
+            using (var ms = new MemoryStream(Data))
+            using (var reader = new BinaryReader(ms))
+            {
+                // Each normal is 12 bytes (3 floats for X, Y, Z)
+                while (ms.Position < ms.Length)
+                {
+                    float x = reader.ReadSingle();
+                    float y = reader.ReadSingle();
+                    float z = reader.ReadSingle();
+                    Normals.Add(new Vector3(x, y, z));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// MSLK chunk - Contains links data between vertices.
+    /// </summary>
+    public class MSLKChunk : PM4Chunk
+    {
+        /// <summary>
+        /// Gets the chunk signature.
+        /// </summary>
+        public override string Signature => "MSLK";
+
+        /// <summary>
+        /// Gets the links data.
+        /// </summary>
+        public List<LinkData> Links { get; private set; } = new List<LinkData>();
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MSLKChunk"/> class.
+        /// </summary>
+        /// <param name="data">The chunk data.</param>
+        public MSLKChunk(byte[] data) : base(data)
+        {
+        }
+
+        /// <summary>
+        /// Reads and parses the chunk data.
+        /// </summary>
+        protected override void ReadData()
+        {
+            Links.Clear();
+
+            using (var ms = new MemoryStream(Data))
+            using (var reader = new BinaryReader(ms))
+            {
+                while (ms.Position < ms.Length)
+                {
+                    var link = new LinkData
+                    {
+                        SourceIndex = reader.ReadUInt32(),
+                        TargetIndex = reader.ReadUInt32()
+                    };
+                    Links.Add(link);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents a link between two vertices.
+        /// </summary>
+        public class LinkData
+        {
+            /// <summary>
+            /// Gets or sets the source vertex index.
+            /// </summary>
+            public uint SourceIndex { get; set; }
+
+            /// <summary>
+            /// Gets or sets the target vertex index.
+            /// </summary>
+            public uint TargetIndex { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// MSVI chunk - Contains vertex information data.
+    /// </summary>
+    public class MSVIChunk : PM4Chunk
+    {
+        /// <summary>
+        /// Gets the chunk signature.
+        /// </summary>
+        public override string Signature => "MSVI";
+
+        /// <summary>
+        /// Gets the vertex information entries.
+        /// </summary>
+        public List<VertexInfo> VertexInfos { get; private set; } = new List<VertexInfo>();
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MSVIChunk"/> class.
+        /// </summary>
+        /// <param name="data">The chunk data.</param>
+        public MSVIChunk(byte[] data) : base(data)
+        {
+        }
+
+        /// <summary>
+        /// Reads and parses the chunk data.
+        /// </summary>
+        protected override void ReadData()
+        {
+            VertexInfos.Clear();
+
+            using (var ms = new MemoryStream(Data))
+            using (var reader = new BinaryReader(ms))
+            {
+                while (ms.Position < ms.Length)
+                {
+                    var info = new VertexInfo
+                    {
+                        Value1 = reader.ReadUInt32(),
+                        Value2 = reader.ReadUInt32()
+                    };
+                    VertexInfos.Add(info);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents vertex information data.
+        /// </summary>
+        public class VertexInfo
+        {
+            /// <summary>
+            /// Gets or sets the first value.
+            /// </summary>
+            public uint Value1 { get; set; }
+
+            /// <summary>
+            /// Gets or sets the second value.
+            /// </summary>
+            public uint Value2 { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// MSVT chunk - Contains vertex data.
+    /// </summary>
+    public class MSVTChunk : PM4Chunk
+    {
+        /// <summary>
+        /// Gets the chunk signature.
+        /// </summary>
+        public override string Signature => "MSVT";
+
+        /// <summary>
+        /// Gets the vertex data entries.
+        /// </summary>
+        public List<VertexData> Vertices { get; private set; } = new List<VertexData>();
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MSVTChunk"/> class.
+        /// </summary>
+        /// <param name="data">The chunk data.</param>
+        public MSVTChunk(byte[] data) : base(data)
+        {
+        }
+
+        /// <summary>
+        /// Reads and parses the chunk data.
+        /// </summary>
+        protected override void ReadData()
+        {
+            Vertices.Clear();
+
+            using (var ms = new MemoryStream(Data))
+            using (var reader = new BinaryReader(ms))
+            {
+                while (ms.Position < ms.Length)
+                {
+                    var vertex = new VertexData
+                    {
+                        X = reader.ReadSingle(),
+                        Y = reader.ReadSingle(),
+                        Z = reader.ReadSingle(),
+                        Flag1 = reader.ReadUInt32(),
+                        Flag2 = reader.ReadUInt32()
+                    };
+                    Vertices.Add(vertex);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents vertex data.
+        /// </summary>
+        public class VertexData
+        {
+            /// <summary>
+            /// Gets or sets the X coordinate.
+            /// </summary>
+            public float X { get; set; }
+
+            /// <summary>
+            /// Gets or sets the Y coordinate.
+            /// </summary>
+            public float Y { get; set; }
+
+            /// <summary>
+            /// Gets or sets the Z coordinate.
+            /// </summary>
+            public float Z { get; set; }
+
+            /// <summary>
+            /// Gets or sets the first flag.
+            /// </summary>
+            public uint Flag1 { get; set; }
+
+            /// <summary>
+            /// Gets or sets the second flag.
+            /// </summary>
+            public uint Flag2 { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// MSUR chunk - Contains surface data.
+    /// </summary>
+    public class MSURChunk : PM4Chunk
+    {
+        /// <summary>
+        /// Gets the chunk signature.
+        /// </summary>
+        public override string Signature => "MSUR";
+
+        /// <summary>
+        /// Gets the surface data entries.
+        /// </summary>
+        public List<SurfaceData> Surfaces { get; private set; } = new List<SurfaceData>();
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MSURChunk"/> class.
+        /// </summary>
+        /// <param name="data">The chunk data.</param>
+        public MSURChunk(byte[] data) : base(data)
+        {
+        }
+
+        /// <summary>
+        /// Reads and parses the chunk data.
+        /// </summary>
+        protected override void ReadData()
+        {
+            Surfaces.Clear();
+
+            using (var ms = new MemoryStream(Data))
+            using (var reader = new BinaryReader(ms))
+            {
+                while (ms.Position < ms.Length)
+                {
+                    var surface = new SurfaceData
+                    {
+                        Index1 = reader.ReadUInt32(),
+                        Index2 = reader.ReadUInt32(),
+                        Index3 = reader.ReadUInt32(),
+                        Flags = reader.ReadUInt32()
+                    };
+                    Surfaces.Add(surface);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Represents surface data.
+        /// </summary>
+        public class SurfaceData
+        {
+            /// <summary>
+            /// Gets or sets the first vertex index.
+            /// </summary>
+            public uint Index1 { get; set; }
+
+            /// <summary>
+            /// Gets or sets the second vertex index.
+            /// </summary>
+            public uint Index2 { get; set; }
+
+            /// <summary>
+            /// Gets or sets the third vertex index.
+            /// </summary>
+            public uint Index3 { get; set; }
+
+            /// <summary>
+            /// Gets or sets the flags.
+            /// </summary>
+            public uint Flags { get; set; }
         }
     }
 } 

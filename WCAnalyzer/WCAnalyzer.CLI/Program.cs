@@ -911,6 +911,16 @@ namespace WCAnalyzer.CLI
                 () => 4096,
                 "Resolution of the generated map image in pixels (default: 4096)");
             
+            var detailedReportOption = new Option<bool>(
+                "--detailed-report",
+                () => false,
+                "Generate a detailed analysis report of PM4 files");
+            
+            var coordinateBoundsOption = new Option<float>(
+                "--bounds",
+                () => 17066.666f,
+                "Coordinate bounds for map visualization");
+            
             pm4Command.AddOption(pm4DirectoryOption);
             pm4Command.AddOption(pm4OutputOption);
             pm4Command.AddOption(pm4VerboseOption);
@@ -924,6 +934,8 @@ namespace WCAnalyzer.CLI
             pm4Command.AddOption(pm4ExtractTerrainOption);
             pm4Command.AddOption(pm4GenerateMapOption);
             pm4Command.AddOption(pm4MapResolutionOption);
+            pm4Command.AddOption(detailedReportOption);
+            pm4Command.AddOption(coordinateBoundsOption);
 
             var pm4FileOption = new Option<string>(
                 "--file",
@@ -947,6 +959,8 @@ namespace WCAnalyzer.CLI
                 bool extractTerrain = context.ParseResult.GetValueForOption(pm4ExtractTerrainOption);
                 bool generateMap = context.ParseResult.GetValueForOption(pm4GenerateMapOption);
                 int mapResolution = context.ParseResult.GetValueForOption(pm4MapResolutionOption);
+                bool detailedReport = context.ParseResult.GetValueForOption(detailedReportOption);
+                float coordinateBounds = context.ParseResult.GetValueForOption(coordinateBoundsOption);
 
                 // Configure logging with fully qualified type name
                 Microsoft.Extensions.Logging.LogLevel minLevel = quiet 
@@ -1073,18 +1087,66 @@ namespace WCAnalyzer.CLI
             // Generate map visualization if requested
             if (generateMap || extractTerrain) // Always generate map when extractTerrain is true, for backward compatibility
             {
-                logger.LogInformation("Generating 2D map visualization from position data");
-                var mapGenerator = new PM4MapImageGenerator(
-                    loggerFactory.CreateLogger<PM4MapImageGenerator>(),
-                    outputPath);
-                    
-                if (mapGenerator.GenerateMapImage(results, "azeroth_map.png", mapResolution, mapResolution))
+                logger.LogInformation("Exporting PM4 data to CSV and Markdown formats for analysis");
+                
+                // Create data export directory with absolute path to ensure it's created correctly
+                var dataExportDir = Path.GetFullPath(Path.Combine(outputPath, "data_exports"));
+                Directory.CreateDirectory(dataExportDir);
+                logger.LogInformation("Created data export directory at: {DataExportDir}", dataExportDir);
+                
+                // Create data exporter
+                var dataExporter = new PM4DataExporter(loggerFactory.CreateLogger<PM4DataExporter>());
+                
+                // Process each PM4 file individually
+                bool anySuccess = false;
+                foreach (var result in results)
                 {
-                    logger.LogInformation("Map visualization generated successfully");
+                    if (result.PM4File != null)
+                    {
+                        try
+                        {
+                            logger.LogInformation("Exporting data for {FileName}", result.FileName);
+                            await dataExporter.ExportDataAsync(result.PM4File, dataExportDir);
+                            logger.LogInformation("Exported data for {FileName}", result.FileName);
+                            anySuccess = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(ex, "Error exporting data for {FileName}", result.FileName);
+                        }
+                    }
+                }
+                
+                if (anySuccess)
+                {
+                    logger.LogInformation("Data export completed successfully");
                 }
                 else
                 {
-                    logger.LogWarning("Failed to generate map visualization");
+                    logger.LogWarning("No valid PM4 files found for data export");
+                }
+            }
+            
+            // Generate detailed reports if requested
+            if (detailedReport)
+            {
+                logger.LogInformation("Generating detailed PM4 analysis reports");
+                var reportDirectory = Path.Combine(outputPath, "pm4-reports");
+                Directory.CreateDirectory(reportDirectory);
+                
+                foreach (var result in results)
+                {
+                    try
+                    {
+                        // Generate a detailed report for each PM4 file
+                        var reportPath = Path.Combine(reportDirectory, $"{Path.GetFileNameWithoutExtension(result.FileName)}_report.txt");
+                        File.WriteAllText(reportPath, result.GetDetailedReport());
+                        logger.LogInformation("Generated detailed report for {FileName} at {ReportPath}", result.FileName, reportPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error generating detailed report for {FileName}", result.FileName);
+                    }
                 }
             }
             

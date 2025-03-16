@@ -271,7 +271,7 @@ namespace WCAnalyzer.Core.Services
             // Add position data as a separate object if available
             if (pm4File.PositionDataChunk != null)
             {
-                var positionRecords = pm4File.PositionDataChunk.Entries.Where(e => !e.IsControlRecord).ToList();
+                var positionRecords = pm4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry).ToList();
                 if (positionRecords.Count > 0)
                 {
                     sb.AppendLine();
@@ -301,7 +301,7 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 // Add command records as a separate object
-                var commandRecords = pm4File.PositionDataChunk.Entries.Where(e => e.IsControlRecord).ToList();
+                var commandRecords = pm4File.PositionDataChunk.Entries.Where(e => e.IsSpecialEntry).ToList();
                 if (commandRecords.Count > 0)
                 {
                     sb.AppendLine();
@@ -473,7 +473,7 @@ namespace WCAnalyzer.Core.Services
                 // Add position data as a separate object if available
                 if (result.PM4File.PositionDataChunk != null)
                 {
-                    var positionRecords = result.PM4File.PositionDataChunk.Entries.Where(e => !e.IsControlRecord).ToList();
+                    var positionRecords = result.PM4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry).ToList();
                     if (positionRecords.Count > 0)
                     {
                         sb.AppendLine($"o {objName}_PositionData");
@@ -502,7 +502,7 @@ namespace WCAnalyzer.Core.Services
                     }
                     
                     // Add command records as points
-                    var commandRecords = result.PM4File.PositionDataChunk.Entries.Where(e => e.IsControlRecord).ToList();
+                    var commandRecords = result.PM4File.PositionDataChunk.Entries.Where(e => e.IsSpecialEntry).ToList();
                     if (commandRecords.Count > 0)
                     {
                         sb.AppendLine($"o {objName}_CommandData");
@@ -803,7 +803,7 @@ namespace WCAnalyzer.Core.Services
                     if (result.PM4File?.PositionDataChunk == null) continue;
 
                     var positions = result.PM4File.PositionDataChunk.Entries
-                        .Where(e => !e.IsControlRecord)  // Skip control records
+                        .Where(e => !e.IsSpecialEntry)  // Skip control records
                         .Select(p => new Vector2(
                             float.Parse(p.CoordinateX.ToString("F6", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
                             float.Parse(p.CoordinateZ.ToString("F6", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture)))

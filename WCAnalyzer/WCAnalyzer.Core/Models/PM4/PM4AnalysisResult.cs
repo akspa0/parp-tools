@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Linq;
+using System.Text;
 
 namespace WCAnalyzer.Core.Models.PM4
 {
@@ -66,9 +67,9 @@ namespace WCAnalyzer.Core.Models.PM4
         public bool HasVertexData { get; set; }
 
         /// <summary>
-        /// Gets or sets a value indicating whether the second vertex indices are present.
+        /// Gets or sets a value indicating whether vertex info is present.
         /// </summary>
-        public bool HasVertexIndices2 { get; set; }
+        public bool HasVertexInfo { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether surface data is present.
@@ -139,7 +140,7 @@ namespace WCAnalyzer.Core.Models.PM4
                 HasNormalCoordinates = pm4File.NormalCoordinates != null,
                 HasLinks = pm4File.Links != null,
                 HasVertexData = pm4File.VertexData != null,
-                HasVertexIndices2 = pm4File.VertexIndices2 != null,
+                HasVertexInfo = pm4File.VertexInfo != null,
                 HasSurfaceData = pm4File.SurfaceData != null,
                 HasPositionData = pm4File.PositionData != null,
                 HasValuePairs = pm4File.ValuePairs != null,
@@ -171,7 +172,7 @@ namespace WCAnalyzer.Core.Models.PM4
             if (HasNormalCoordinates) summary.AppendLine("- MSCN (Normal Coordinates)");
             if (HasLinks) summary.AppendLine("- MSLK (Links)");
             if (HasVertexData) summary.AppendLine("- MSVT (Vertex Data)");
-            if (HasVertexIndices2) summary.AppendLine("- MSVI (Vertex Indices)");
+            if (HasVertexInfo) summary.AppendLine("- MSVI (Vertex Indices)");
             if (HasSurfaceData) summary.AppendLine("- MSUR (Surface Data)");
             if (HasPositionData) summary.AppendLine("- MPRL (Position Data)");
             if (HasValuePairs) summary.AppendLine("- MPRR (Value Pairs)");
@@ -223,32 +224,36 @@ namespace WCAnalyzer.Core.Models.PM4
                     summary.AppendLine($"Total Entries: {PM4File.PositionDataChunk.Entries.Count}");
                     
                     // Count position vs command records
-                    int positionRecords = PM4File.PositionDataChunk.Entries.Count(e => !e.IsControlRecord);
-                    int commandRecords = PM4File.PositionDataChunk.Entries.Count(e => e.IsControlRecord);
+                    int positionRecords = PM4File.PositionDataChunk.Entries.Count(e => !e.IsSpecialEntry);
+                    int specialRecords = PM4File.PositionDataChunk.Entries.Count(e => e.IsSpecialEntry);
                     summary.AppendLine($"Position Records: {positionRecords}");
-                    summary.AppendLine($"Command Records: {commandRecords}");
+                    summary.AppendLine($"Special Records: {specialRecords}");
                     
                     // Show sample position records
                     if (positionRecords > 0)
                     {
                         summary.AppendLine("\n### Sample Position Records:");
                         int sampleCount = Math.Min(5, positionRecords);
-                        var positions = PM4File.PositionDataChunk.Entries.Where(e => !e.IsControlRecord).Take(sampleCount).ToList();
+                        var positions = PM4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry).Take(sampleCount).ToList();
                         foreach (var pos in positions)
                         {
                             summary.AppendLine($"- Index {pos.Index}: ({pos.CoordinateX:F2}, {pos.CoordinateY:F2}, {pos.CoordinateZ:F2})");
                         }
                     }
                     
-                    // Show sample command records
-                    if (commandRecords > 0)
+                    // Show sample special records
+                    if (specialRecords > 0)
                     {
-                        summary.AppendLine("\n### Sample Command Records:");
-                        int sampleCount = Math.Min(5, commandRecords);
-                        var commands = PM4File.PositionDataChunk.Entries.Where(e => e.IsControlRecord).Take(sampleCount).ToList();
-                        foreach (var cmd in commands)
+                        summary.AppendLine("\n### Sample Special Records:");
+                        int sampleCount = Math.Min(5, specialRecords);
+                        var specialEntries = PM4File.PositionDataChunk.Entries.Where(e => e.IsSpecialEntry).Take(sampleCount).ToList();
+                        foreach (var entry in specialEntries)
                         {
-                            summary.AppendLine($"- Index {cmd.Index}: Command=0x{cmd.CommandValue:X8}, Y={cmd.CoordinateY:F2}");
+                            // Reinterpret the bit pattern as a float
+                            float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
+                            summary.AppendLine($"- Index {entry.Index}: Special=0x{entry.SpecialValue:X8}, As Float={asFloat:F6}");
+                            summary.AppendLine($"  X={entry.CoordinateX:F6}, Y={entry.CoordinateY:F6}, Z={entry.CoordinateZ:F6}");
+                            summary.AppendLine($"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}");
                         }
                     }
                     
@@ -258,10 +263,13 @@ namespace WCAnalyzer.Core.Models.PM4
                     for (int i = 0; i < sequenceSample; i++)
                     {
                         var entry = PM4File.PositionDataChunk.Entries[i];
-                        string type = entry.IsControlRecord ? "Command" : "Position";
-                        string details = entry.IsControlRecord ? 
-                            $"Command=0x{entry.CommandValue:X8}, Y={entry.CoordinateY:F2}" : 
-                            $"({entry.CoordinateX:F2}, {entry.CoordinateY:F2}, {entry.CoordinateZ:F2})";
+                        string type = entry.IsSpecialEntry ? "Special" : "Position";
+                        string details = entry.IsSpecialEntry ? 
+                            $"Special=0x{entry.SpecialValue:X8}, As Float={BitConverter.Int32BitsToSingle(entry.SpecialValue):F6}\n" +
+                            $"  X={entry.CoordinateX:F6}, Y={entry.CoordinateY:F6}, Z={entry.CoordinateZ:F6}\n" +
+                            $"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}" : 
+                            $"({entry.CoordinateX:F6}, {entry.CoordinateY:F6}, {entry.CoordinateZ:F6})\n" +
+                            $"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}";
                         summary.AppendLine($"- Entry {i}: {type} - {details}");
                     }
                 }
@@ -277,6 +285,51 @@ namespace WCAnalyzer.Core.Models.PM4
             }
 
             return summary.ToString();
+        }
+
+        /// <summary>
+        /// Gets a detailed report of the PM4 file analysis.
+        /// </summary>
+        /// <returns>A detailed report of the PM4 file analysis.</returns>
+        public string GetDetailedReport()
+        {
+            var report = new StringBuilder();
+            
+            // Add header
+            report.AppendLine($"=== Detailed PM4 Analysis Report: {FileName} ===");
+            report.AppendLine($"Analysis Time: {AnalysisTime}");
+            report.AppendLine($"File Path: {FilePath}");
+            report.AppendLine();
+            
+            // Add summary
+            report.AppendLine("=== Summary ===");
+            report.AppendLine(GetSummary());
+            report.AppendLine();
+            
+            // Add detailed chunk information
+            report.AppendLine("=== Detailed Chunk Information ===");
+            
+            if (PM4File != null)
+            {
+                report.AppendLine(PM4File.GetSummary());
+            }
+            else
+            {
+                report.AppendLine("No PM4 file data available.");
+            }
+            
+            // Add errors
+            if (Errors.Count > 0)
+            {
+                report.AppendLine();
+                report.AppendLine("=== Errors ===");
+                foreach (var error in Errors)
+                {
+                    report.AppendLine($"- {error}");
+                }
+            }
+            
+            return report.ToString();
         }
     }
 } 

@@ -269,7 +269,7 @@ namespace WCAnalyzer.Core.Services
             // Add position data as a separate object if available
             if (pm4File.PositionDataChunk != null)
             {
-                var positionRecords = pm4File.PositionDataChunk.Entries.Where(e => !e.IsControlRecord).ToList();
+                var positionRecords = pm4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry).ToList();
                 if (positionRecords.Count > 0)
                 {
                     sb.AppendLine();
