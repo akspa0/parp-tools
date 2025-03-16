@@ -182,5 +182,10 @@ namespace WCAnalyzer.UniqueIdAnalysis
         public int TotalAdtFiles { get; set; }
         public int TotalAssets { get; set; }
         public DateTime AnalysisTime { get; set; } = DateTime.Now;
+        
+        /// <summary>
+        /// Dictionary of non-clustered assets, keyed by UniqueID
+        /// </summary>
+        public Dictionary<int, List<AssetReference>>? NonClusteredAssets { get; set; }
     }
 } 

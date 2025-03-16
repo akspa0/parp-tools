@@ -306,8 +306,9 @@ namespace WCAnalyzer.UniqueIdAnalysis
         /// </summary>
         /// <param name="result">The analysis result</param>
         /// <param name="outputPath">Path to save the report</param>
+        /// <param name="nonClusteredAssets">Dictionary of non-clustered assets</param>
         /// <returns>A task that represents the asynchronous operation</returns>
-        public async Task GenerateFullSummaryReportAsync(UniqueIdAnalysisResult result, string outputPath)
+        public async Task GenerateFullSummaryReportAsync(UniqueIdAnalysisResult result, string outputPath, Dictionary<int, List<AssetReference>>? nonClusteredAssets = null)
         {
             _logger?.LogInformation("Generating full summary report...");
             
@@ -328,7 +329,18 @@ namespace WCAnalyzer.UniqueIdAnalysis
             sb.AppendLine("# Asset Placements Summary");
             sb.AppendLine();
             
+            // Add summary statistics
+            sb.AppendLine("## Summary Statistics");
+            sb.AppendLine($"- Total UniqueIDs: {result.TotalUniqueIds}");
+            sb.AppendLine($"- UniqueID Range: {result.MinUniqueId} - {result.MaxUniqueId}");
+            sb.AppendLine($"- Total ADT Files: {result.TotalAdtFiles}");
+            sb.AppendLine($"- Total Assets: {result.TotalAssets}");
+            sb.AppendLine($"- Total Clusters: {result.Clusters.Count}");
+            sb.AppendLine($"- Non-Clustered IDs: {nonClusteredAssets?.Count ?? 0}");
+            sb.AppendLine();
+            
             // Table header
+            sb.AppendLine("## Clustered Assets");
             sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Rotation (X,Y,Z) | Scale |");
             sb.AppendLine("|-------|------|----------|-----|----------|------------------|------------------|-------|");
             
@@ -345,6 +357,28 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 string rotation = $"({asset.RotationX:F2}, {asset.RotationY:F2}, {asset.RotationZ:F2})";
                 
                 sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | {position} | {rotation} | {asset.Scale:F2} |");
+            }
+            
+            // Add non-clustered assets if available
+            if (nonClusteredAssets != null && nonClusteredAssets.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Non-Clustered Assets");
+                sb.AppendLine("| Asset | Type | UniqueID | Map | ADT File | Position (X,Y,Z) | Rotation (X,Y,Z) | Scale |");
+                sb.AppendLine("|-------|------|----------|-----|----------|------------------|------------------|-------|");
+                
+                var nonClusteredAllAssets = nonClusteredAssets
+                    .SelectMany(kvp => kvp.Value)
+                    .OrderBy(a => a.UniqueId)
+                    .ThenBy(a => a.AssetPath);
+                
+                foreach (var asset in nonClusteredAllAssets)
+                {
+                    string position = $"({asset.PositionX:F2}, {asset.PositionY:F2}, {asset.PositionZ:F2})";
+                    string rotation = $"({asset.RotationX:F2}, {asset.RotationY:F2}, {asset.RotationZ:F2})";
+                    
+                    sb.AppendLine($"| {asset.AssetPath} | {asset.Type} | {asset.UniqueId} | {asset.MapName} | {asset.AdtFile} | {position} | {rotation} | {asset.Scale:F2} |");
+                }
             }
             
             // Write the report to file

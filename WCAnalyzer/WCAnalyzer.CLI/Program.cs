@@ -1046,7 +1046,189 @@ namespace WCAnalyzer.CLI
                     return;
                 }
 
-                // ... existing PM4 analysis code ...
+                // Create output directory if not exists
+                if (!string.IsNullOrEmpty(output))
+                {
+                    Directory.CreateDirectory(output);
+                }
+
+                // Configure logging
+                var pmLoggerFactory = ConfigureLogging(Path.Combine(output, "pm4_analysis.log"), verbose, quiet);
+                var pmLogger = pmLoggerFactory.CreateLogger<Program>();
+
+                // Create reference validator for file resolution
+                var referenceValidator = new ReferenceValidator(pmLoggerFactory.CreateLogger<ReferenceValidator>());
+
+                // Load listfile for resolving FileDataIDs
+                if (!string.IsNullOrEmpty(listfile) && File.Exists(listfile))
+                {
+                    pmLogger.LogInformation("Loading listfile from {ListfilePath}", Path.GetFullPath(listfile));
+                    await referenceValidator.LoadListfileAsync(listfile);
+                    int entryCount = await File.ReadAllLinesAsync(listfile) is var lines ? lines.Length : 0;
+                    pmLogger.LogInformation("Loaded {Count} entries from listfile", entryCount);
+                }
+
+                // Create the PM4 parser
+                var pm4Parser = new PM4Parser(pmLoggerFactory.CreateLogger<PM4Parser>());
+
+                try
+                {
+                    List<PM4AnalysisResult> results;
+
+                    // Check if we're analyzing a specific file or a directory
+                    string specificFile = context.ParseResult.GetValueForOption(pm4FileOption);
+                    if (!string.IsNullOrEmpty(specificFile))
+                    {
+                        // Analyze a single file
+                        if (!File.Exists(specificFile))
+                        {
+                            pmLogger.LogError("File not found: {FilePath}", specificFile);
+                            context.ExitCode = 1;
+                            return;
+                        }
+
+                        pmLogger.LogInformation("Analyzing PM4 file: {FilePath}", specificFile);
+                        var result = pm4Parser.ParseFile(specificFile);
+                        results = new List<PM4AnalysisResult> { result };
+                    }
+                    else
+                    {
+                        // Analyze all files in the directory
+                        if (!Directory.Exists(directory))
+                        {
+                            pmLogger.LogError("Directory not found: {Directory}", directory);
+                            context.ExitCode = 1;
+                            return;
+                        }
+
+                        SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                        var pm4Files = Directory.GetFiles(directory, "*.pm4", searchOption);
+                        
+                        if (pm4Files.Length == 0)
+                        {
+                            pmLogger.LogError("No PM4 files found in directory: {Directory}", directory);
+                            context.ExitCode = 1;
+                            return;
+                        }
+
+                        pmLogger.LogInformation("Found {Count} PM4 files in {Directory}", pm4Files.Length, directory);
+                        results = await pm4Parser.ParseFilesAsync(pm4Files);
+                    }
+
+                    // Apply coordinate bounds if specified
+                    if (coordinateBounds > 0)
+                    {
+                        // We'll implement coordinate bounds later
+                        // This might need custom extension method or property
+                        pmLogger.LogInformation("Using coordinate bounds: {Bounds}", coordinateBounds);
+                    }
+
+                    pmLogger.LogInformation("Analyzed {Count} PM4 files successfully", results.Count);
+
+                    // Export to CSV if requested
+                    if (exportCsv)
+                    {
+                        string csvOutputDir = Path.Combine(output, "pm4_csv_reports");
+                        Directory.CreateDirectory(csvOutputDir);
+
+                        var csvGenerator = new PM4CsvGenerator(pmLoggerFactory.CreateLogger<PM4CsvGenerator>());
+                        foreach (var result in results)
+                        {
+                            await csvGenerator.GenerateAllCsvReportsAsync(result);
+                        }
+                        pmLogger.LogInformation("Generated CSV reports in {Directory}", csvOutputDir);
+                    }
+
+                    // Export to OBJ if requested
+                    if (exportObj)
+                    {
+                        string objOutputDir = Path.Combine(output, "pm4_obj_output");
+                        Directory.CreateDirectory(objOutputDir);
+
+                        var objExporter = new PM4ObjExporter(pmLoggerFactory.CreateLogger<PM4ObjExporter>(), objOutputDir);
+                        foreach (var result in results)
+                        {
+                            await objExporter.ExportToObjAsync(result);
+                        }
+                        pmLogger.LogInformation("Generated OBJ files in {Directory}", objOutputDir);
+                    }
+
+                    // Export to consolidated OBJ if requested
+                    if (exportConsolidatedObj)
+                    {
+                        string consolidatedOutputDir = Path.Combine(output, "pm4_consolidated_obj");
+                        Directory.CreateDirectory(consolidatedOutputDir);
+
+                        var objExporter = new PM4ObjExporter(pmLoggerFactory.CreateLogger<PM4ObjExporter>(), consolidatedOutputDir);
+                        await objExporter.ExportToConsolidatedObjAsync(results);
+                        pmLogger.LogInformation("Generated consolidated OBJ file in {Directory}", consolidatedOutputDir);
+                    }
+
+                    // Export to enhanced OBJ if requested
+                    if (exportEnhancedObj)
+                    {
+                        string enhancedOutputDir = Path.Combine(output, "pm4_enhanced_obj");
+                        Directory.CreateDirectory(enhancedOutputDir);
+
+                        var enhancedExporter = new PM4EnhancedObjExporter(pmLoggerFactory.CreateLogger<PM4EnhancedObjExporter>(), enhancedOutputDir);
+                        foreach (var result in results)
+                        {
+                            await enhancedExporter.ExportToObjAsync(result);
+                        }
+                        pmLogger.LogInformation("Generated enhanced OBJ files in {Directory}", enhancedOutputDir);
+                    }
+
+                    // Export to clustered OBJ if requested
+                    if (exportClusteredObj)
+                    {
+                        string clusteredOutputDir = Path.Combine(output, "pm4_clustered_obj");
+                        Directory.CreateDirectory(clusteredOutputDir);
+
+                        var clusteredExporter = new PM4ClusteredObjExporter(pmLoggerFactory.CreateLogger<PM4ClusteredObjExporter>(), clusteredOutputDir);
+                        foreach (var result in results)
+                        {
+                            await clusteredExporter.ExportToClusteredObjAsync(result);
+                        }
+                        pmLogger.LogInformation("Generated clustered OBJ files in {Directory}", clusteredOutputDir);
+                    }
+
+                    // Extract terrain data if requested
+                    if (extractTerrain)
+                    {
+                        string terrainOutputDir = Path.Combine(output, "pm4_terrain_data");
+                        Directory.CreateDirectory(terrainOutputDir);
+
+                        var terrainExporter = new PM4TerrainExporter(pmLoggerFactory.CreateLogger<PM4TerrainExporter>(), terrainOutputDir);
+                        await terrainExporter.ExtractTerrainDataAsync(results);
+                        pmLogger.LogInformation("Extracted terrain data to {Directory}", terrainOutputDir);
+                    }
+
+                    // Generate 2D map visualization if requested
+                    if (generateMap)
+                    {
+                        // Map generation might not be implemented yet
+                        pmLogger.LogWarning("Map generation not fully implemented yet");
+                    }
+
+                    // Generate detailed markdown report if requested
+                    if (detailedReport)
+                    {
+                        string reportOutputPath = Path.Combine(output, "pm4_comprehensive_report.md");
+                        var reportGenerator = new PM4MarkdownReportGenerator(pmLoggerFactory.CreateLogger<PM4MarkdownReportGenerator>());
+                        await reportGenerator.GenerateComprehensiveMultiFileReportAsync(results, reportOutputPath);
+                        
+                        pmLogger.LogInformation("Generated advanced comprehensive markdown report: {Path}", reportOutputPath);
+                    }
+
+                    context.ExitCode = 0;
+                    pmLogger.LogInformation("PM4 analysis completed successfully");
+                }
+                catch (Exception ex)
+                {
+                    pmLogger.LogError(ex, "Error during PM4 analysis: {Message}", ex.Message);
+                    Console.WriteLine($"Error: {ex.Message}");
+                    context.ExitCode = 1;
+                }
             });
 
             rootCommand.AddCommand(pm4Command);
@@ -1265,59 +1447,46 @@ namespace WCAnalyzer.CLI
             }
         }
 
-        // Add a helper method to load a listfile
-        private static Dictionary<uint, string> LoadListfile(string listfilePath, ILogger logger)
-        {
-            var listfile = new Dictionary<uint, string>();
-            try
-            {
-                logger.LogInformation("Loading listfile from {ListfilePath}", listfilePath);
-                var lines = File.ReadAllLines(listfilePath);
-                foreach (var line in lines)
-                {
-                    var parts = line.Split(';');
-                    if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileId))
-                    {
-                        listfile[fileId] = parts[1];
-                    }
-                }
-                logger.LogInformation("Loaded {Count} entries from listfile", listfile.Count);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error loading listfile from {ListfilePath}", listfilePath);
-            }
-            return listfile;
-        }
-
         /// <summary>
-        /// Configure a logger for the given parameters
+        /// Configures logging for the application
         /// </summary>
+        /// <param name="logFilePath">Path to the log file</param>
+        /// <param name="verbose">Whether to enable verbose logging</param>
+        /// <param name="quiet">Whether to suppress all but error messages</param>
+        /// <returns>A configured ILoggerFactory</returns>
         private static ILoggerFactory ConfigureLogging(string logFilePath, bool verbose, bool quiet)
         {
-            // Ensure log directory exists
-            var logDirectory = Path.GetDirectoryName(logFilePath);
+            // Create directory for log file if it doesn't exist
+            string? logDirectory = Path.GetDirectoryName(logFilePath);
             if (!string.IsNullOrEmpty(logDirectory) && !Directory.Exists(logDirectory))
             {
                 Directory.CreateDirectory(logDirectory);
             }
 
-            // Set the log level based on verbose/quiet flags
-            var logLevel = quiet
-                ? Microsoft.Extensions.Logging.LogLevel.Error
-                : (verbose ? Microsoft.Extensions.Logging.LogLevel.Debug : Microsoft.Extensions.Logging.LogLevel.Information);
-
-            // Create and configure the logger factory
-            return LoggerFactory.Create(builder =>
+            // Determine log level based on verbose/quiet flags
+            Microsoft.Extensions.Logging.LogLevel minimumLevel = Microsoft.Extensions.Logging.LogLevel.Information; // Default
+            if (verbose)
             {
+                minimumLevel = Microsoft.Extensions.Logging.LogLevel.Debug;
+            }
+            else if (quiet)
+            {
+                minimumLevel = Microsoft.Extensions.Logging.LogLevel.Error;
+            }
+
+            // Configure logger factory with console and file logging
+            var loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder.SetMinimumLevel(minimumLevel);
+                
+                // Add console logger
                 builder.AddConsole();
                 
-                // Add file logging
-                var fileLoggerProvider = new FileLoggerProvider(logFilePath);
-                builder.AddProvider(fileLoggerProvider);
-                
-                builder.SetMinimumLevel(logLevel);
+                // Add file logger
+                builder.AddProvider(new FileLoggerProvider(logFilePath));
             });
+
+            return loggerFactory;
         }
     }
 }

@@ -40,8 +40,9 @@ namespace WCAnalyzer.Core.Services
         /// Analyzes CSV files to correlate special values with all available data.
         /// </summary>
         /// <param name="csvDirectory">Directory containing the CSV files.</param>
+        /// <param name="maxDegreeOfParallelism">Maximum number of parallel tasks. Default is number of processor cores.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task AnalyzeDataAsync(string csvDirectory)
+        public async Task AnalyzeDataAsync(string csvDirectory, int? maxDegreeOfParallelism = null)
         {
             _logger.LogInformation("Starting special value correlation analysis from {Directory}", csvDirectory);
             _csvDirectory = csvDirectory;
@@ -61,10 +62,17 @@ namespace WCAnalyzer.Core.Services
         /// Generates a comprehensive report for all special values.
         /// </summary>
         /// <param name="outputPath">Path to write the report.</param>
+        /// <param name="maxDegreeOfParallelism">Maximum number of parallel tasks. Default is number of processor cores.</param>
         /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task GenerateReportAsync(string outputPath)
+        public async Task GenerateReportAsync(string outputPath, int? maxDegreeOfParallelism = null)
         {
             _logger.LogInformation("Starting report generation to {OutputPath}", outputPath);
+            
+            // Determine the degree of parallelism based on processor count or user input
+            int processorCount = Environment.ProcessorCount;
+            int degreeOfParallelism = maxDegreeOfParallelism ?? Math.Max(1, processorCount - 1); // Leave one core for system tasks
+            
+            _logger.LogInformation("Using {DegreeOfParallelism} threads for report generation", degreeOfParallelism);
             
             // Process in batches to reduce memory usage
             using var writer = new StreamWriter(outputPath, false);
@@ -103,184 +111,269 @@ namespace WCAnalyzer.Core.Services
                 }
                 
                 batchesProcessed++;
-                _logger.LogInformation("Completed summary for batch {Batch} ({PercentComplete:F1}% complete)",
-                    batchesProcessed, (float)Math.Min(i + batchSize, specialValues.Count) / specialValues.Count * 100);
                 
-                // Explicitly force garbage collection between batches to release memory
-                if (batchesProcessed % 5 == 0)
-                {
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
-                }
+                // Force garbage collection between batches to reduce memory pressure
+                GC.Collect();
             }
             
             await writer.WriteLineAsync();
-            await writer.WriteLineAsync("## Detailed Special Value Reports");
             
-            // Generate detailed reports in batches
-            batchesProcessed = 0;
+            // Generate detailed reports for each special value
+            _logger.LogInformation("Generating detailed reports for each special value");
+            
+            // Process special values in parallel batches
+            var options = new ParallelOptions { MaxDegreeOfParallelism = degreeOfParallelism };
+            var detailedReportTasks = new List<Task>();
             
             for (int i = 0; i < specialValues.Count; i += batchSize)
             {
                 var batchValues = specialValues.Skip(i).Take(batchSize).ToList();
-                _logger.LogInformation("Generating detailed reports for batch {Batch} of special values ({Start}-{End} of {Total})",
-                    batchesProcessed + 1, i + 1, Math.Min(i + batchSize, specialValues.Count), specialValues.Count);
+                
+                // Create a batch of tasks for parallel processing
+                var batchTasks = new List<Task<string>>();
                 
                 foreach (var specialValue in batchValues)
                 {
-                    await GenerateDetailedReportForSpecialValueAsync(writer, specialValue);
+                    // Create a StringBuilder for each special value's report
+                    var sb = new StringBuilder();
+                    
+                    sb.AppendLine($"## Special Value: {specialValue}");
+                    sb.AppendLine();
+                    
+                    var metadata = _specialValueMetadata[specialValue];
+                    var files = _filesBySpecialValue.TryGetValue(specialValue, out var fileList) ? fileList : new List<string>();
+                    
+                    sb.AppendLine($"- Files: {files.Count}");
+                    sb.AppendLine($"- Position Entries: {metadata.PositionCount}");
+                    sb.AppendLine($"- Vertex Count: {metadata.VertexCount}");
+                    sb.AppendLine($"- Triangle Count: {metadata.TriangleCount}");
+                    sb.AppendLine($"- Normal Count: {metadata.NormalCount}");
+                    sb.AppendLine();
+                    
+                    if (files.Count > 0)
+                    {
+                        sb.AppendLine("### Files");
+                        sb.AppendLine("| File |");
+                        sb.AppendLine("|------|");
+                        
+                        foreach (var file in files.OrderBy(f => f).Take(MAX_ITEMS_PER_CATEGORY))
+                        {
+                            sb.AppendLine($"| {file} |");
+                        }
+                        
+                        if (files.Count > MAX_ITEMS_PER_CATEGORY)
+                        {
+                            sb.AppendLine($"| ... and {files.Count - MAX_ITEMS_PER_CATEGORY} more files |");
+                        }
+                        
+                        sb.AppendLine();
+                    }
+                    
+                    // Add the task to load and write position data
+                    var task = Task.Run(async () => {
+                        // Load position data
+                        var positions = await LoadPositionDataAsync(specialValue);
+                        
+                        // Write position data if available
+                        if (positions.Count > 0)
+                        {
+                            sb.AppendLine("### Position Entries");
+                            sb.AppendLine("| File | Index | Position |");
+                            sb.AppendLine("|------|-------|----------|");
+                            
+                            foreach (var position in positions.OrderBy(p => p.FileName).ThenBy(p => p.Index).Take(MAX_ITEMS_PER_CATEGORY))
+                            {
+                                sb.AppendLine($"| {position.FileName} | {position.Index} | ({position.X:F3}, {position.Y:F3}, {position.Z:F3}) |");
+                            }
+                            
+                            if (positions.Count > MAX_ITEMS_PER_CATEGORY)
+                            {
+                                sb.AppendLine($"| ... and {positions.Count - MAX_ITEMS_PER_CATEGORY} more positions |");
+                            }
+                            
+                            sb.AppendLine();
+                        }
+                        
+                        // Load vertex data
+                        var vertices = await LoadVertexDataAsync(specialValue);
+                        
+                        // Write vertex data if available
+                        if (vertices.Count > 0)
+                        {
+                            sb.AppendLine("### Vertex Data");
+                            sb.AppendLine("| File | Index | Position |");
+                            sb.AppendLine("|------|-------|----------|");
+                            
+                            foreach (var vertex in vertices.OrderBy(v => v.FileName).ThenBy(v => v.Index).Take(MAX_ITEMS_PER_CATEGORY))
+                            {
+                                sb.AppendLine($"| {vertex.FileName} | {vertex.Index} | ({vertex.X:F3}, {vertex.Y:F3}, {vertex.Z:F3}) |");
+                            }
+                            
+                            if (vertices.Count > MAX_ITEMS_PER_CATEGORY)
+                            {
+                                sb.AppendLine($"| ... and {vertices.Count - MAX_ITEMS_PER_CATEGORY} more vertices |");
+                            }
+                            
+                            sb.AppendLine();
+                        }
+                        
+                        // Load normal data
+                        var normals = await LoadNormalDataAsync(specialValue);
+                        
+                        // Write normal data if available
+                        if (normals.Count > 0)
+                        {
+                            sb.AppendLine("### Normal Data");
+                            sb.AppendLine("| File | Index | Normal |");
+                            sb.AppendLine("|------|-------|--------|");
+                            
+                            foreach (var normal in normals.OrderBy(n => n.FileName).ThenBy(n => n.Index).Take(MAX_ITEMS_PER_CATEGORY))
+                            {
+                                sb.AppendLine($"| {normal.FileName} | {normal.Index} | ({normal.X:F3}, {normal.Y:F3}, {normal.Z:F3}) |");
+                            }
+                            
+                            if (normals.Count > MAX_ITEMS_PER_CATEGORY)
+                            {
+                                sb.AppendLine($"| ... and {normals.Count - MAX_ITEMS_PER_CATEGORY} more normals |");
+                            }
+                            
+                            sb.AppendLine();
+                        }
+                        
+                        // Load triangle data
+                        var triangles = await LoadTriangleDataAsync(specialValue);
+                        
+                        // Write triangle data if available
+                        if (triangles.Count > 0)
+                        {
+                            sb.AppendLine("### Triangle Data");
+                            sb.AppendLine("| File | Index | Vertices |");
+                            sb.AppendLine("|------|-------|----------|");
+                            
+                            foreach (var triangle in triangles.OrderBy(t => t.FileName).ThenBy(t => t.Index).Take(MAX_ITEMS_PER_CATEGORY))
+                            {
+                                sb.AppendLine($"| {triangle.FileName} | {triangle.Index} | ({triangle.V1}, {triangle.V2}, {triangle.V3}) |");
+                            }
+                            
+                            if (triangles.Count > MAX_ITEMS_PER_CATEGORY)
+                            {
+                                sb.AppendLine($"| ... and {triangles.Count - MAX_ITEMS_PER_CATEGORY} more triangles |");
+                            }
+                            
+                            sb.AppendLine();
+                        }
+                        
+                        // Return the completed report section
+                        return sb.ToString();
+                    });
+                    
+                    batchTasks.Add(task);
+                }
+                
+                // Wait for all tasks in this batch to complete
+                string[] batchResults = await Task.WhenAll(batchTasks);
+                
+                // Write the results to the report file
+                foreach (var result in batchResults)
+                {
+                    await writer.WriteAsync(result);
                 }
                 
                 batchesProcessed++;
-                _logger.LogInformation("Completed detailed reports for batch {Batch} ({PercentComplete:F1}% complete)",
-                    batchesProcessed, (float)Math.Min(i + batchSize, specialValues.Count) / specialValues.Count * 100);
+                _logger.LogInformation("Completed batch {Batch} of detailed reports", batchesProcessed);
                 
-                // Explicitly force garbage collection between batches
+                // Force garbage collection between batches
                 GC.Collect();
-                GC.WaitForPendingFinalizers();
             }
             
-            _logger.LogInformation("Report generation completed successfully");
+            _logger.LogInformation("Report generation complete: {OutputPath}", outputPath);
         }
         
         /// <summary>
-        /// Generate a detailed report for a single special value
+        /// Load position data for a specific special value
         /// </summary>
-        private async Task GenerateDetailedReportForSpecialValueAsync(TextWriter writer, uint specialValue)
+        private async Task<List<PositionData>> LoadPositionDataAsync(uint specialValue)
         {
-            _logger.LogDebug("Generating detailed report for special value {SpecialValue}", specialValue);
-            
-            await writer.WriteLineAsync($"### Special Value: {specialValue}");
-            
-            // Files containing this special value
-            if (_filesBySpecialValue.TryGetValue(specialValue, out var files))
-            {
-                await writer.WriteLineAsync("#### Files");
-                foreach (var file in files.OrderBy(f => f))
-                {
-                    await writer.WriteLineAsync($"- {file}");
-                }
-                await writer.WriteLineAsync();
-            }
-            
-            // Position entries - stream from CSV file
-            await LoadAndWritePositionDataAsync(writer, specialValue);
-            
-            // Vertex entries - stream from CSV file
-            await LoadAndWriteVertexDataAsync(writer, specialValue);
-            
-            // Normal entries - stream from CSV file
-            await LoadAndWriteNormalDataAsync(writer, specialValue);
-            
-            // Triangle entries - stream from CSV file
-            await LoadAndWriteTriangleDataAsync(writer, specialValue);
-            
-            await writer.WriteLineAsync("---");
-        }
-        
-        /// <summary>
-        /// Load and stream position data for a specific special value
-        /// </summary>
-        private async Task LoadAndWritePositionDataAsync(TextWriter writer, uint specialValue)
-        {
+            var positions = new List<PositionData>();
             var filePath = Path.Combine(_csvDirectory, "positions.csv");
+            
             if (!File.Exists(filePath))
             {
-                return;
+                return positions;
             }
             
-            var positions = new List<PositionData>();
+            using var reader = new StreamReader(new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
             
-            // First pass - collect position data
-            using (var reader = new StreamReader(new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
+            // Skip header
+            await reader.ReadLineAsync();
+            
+            string? line;
+            while ((line = await reader.ReadLineAsync()) != null)
             {
-                // Skip header
-                await reader.ReadLineAsync();
+                var parts = line.Split(',');
+                if (parts.Length < 8) continue;
                 
-                string? line;
-                while ((line = await reader.ReadLineAsync()) != null)
+                var fileName = parts[0];
+                
+                if (!int.TryParse(parts[1], out var index)) continue;
+                var type = parts[2];
+                
+                if (!float.TryParse(parts[3], CultureInfo.InvariantCulture, out var x)) continue;
+                if (!float.TryParse(parts[4], CultureInfo.InvariantCulture, out var y)) continue;
+                if (!float.TryParse(parts[5], CultureInfo.InvariantCulture, out var z)) continue;
+                
+                var isSpecial = type == "Special";
+                
+                if (isSpecial && uint.TryParse(parts[7], out var specialValueId) && specialValueId == specialValue)
                 {
-                    var parts = line.Split(',');
-                    if (parts.Length < 8) continue;
-                    
-                    var fileName = parts[0];
-                    
-                    if (!int.TryParse(parts[1], out var index)) continue;
-                    var type = parts[2];
-                    
-                    if (!float.TryParse(parts[3], CultureInfo.InvariantCulture, out var x)) continue;
-                    if (!float.TryParse(parts[4], CultureInfo.InvariantCulture, out var y)) continue;
-                    if (!float.TryParse(parts[5], CultureInfo.InvariantCulture, out var z)) continue;
-                    
-                    var isSpecial = type == "Special";
-                    
-                    if (isSpecial && uint.TryParse(parts[7], out var value) && value == specialValue)
+                    positions.Add(new PositionData
+                    {
+                        FileName = fileName,
+                        Index = index,
+                        IsSpecial = true,
+                        X = x,
+                        Y = y,
+                        Z = z
+                    });
+                }
+                else if (!isSpecial && index > 0)
+                {
+                    // Check if previous entry was special with this specialValue
+                    var previousEntry = positions.FirstOrDefault(p => 
+                        p.FileName == fileName && p.Index == index - 1 && p.IsSpecial);
+                        
+                    if (previousEntry != null)
                     {
                         positions.Add(new PositionData
                         {
                             FileName = fileName,
                             Index = index,
-                            IsSpecial = true,
+                            IsSpecial = false,
                             X = x,
                             Y = y,
                             Z = z
                         });
                     }
-                    else if (!isSpecial && index > 0)
-                    {
-                        // Check if previous entry was special with this specialValue
-                        var previousEntry = positions.FirstOrDefault(p => 
-                            p.FileName == fileName && p.Index == index - 1 && p.IsSpecial);
-                            
-                        if (previousEntry != null)
-                        {
-                            positions.Add(new PositionData
-                            {
-                                FileName = fileName,
-                                Index = index,
-                                IsSpecial = false,
-                                X = x,
-                                Y = y,
-                                Z = z
-                            });
-                        }
-                    }
                 }
             }
             
-            // Only write if we found positions
-            if (positions.Count > 0)
-            {
-                await writer.WriteLineAsync("#### Position Entries");
-                await writer.WriteLineAsync("| File | Index | Position |");
-                await writer.WriteLineAsync("|------|-------|----------|");
-                
-                foreach (var position in positions.OrderBy(p => p.FileName).ThenBy(p => p.Index))
-                {
-                    await writer.WriteLineAsync($"| {position.FileName} | {position.Index} | ({position.X:F3}, {position.Y:F3}, {position.Z:F3}) |");
-                }
-                
-                await writer.WriteLineAsync();
-            }
-            
-            // Clear list to free memory
-            positions.Clear();
+            return positions;
         }
         
         /// <summary>
-        /// Load and stream vertex data for files containing a specific special value
+        /// Load vertex data for files containing a specific special value
         /// </summary>
-        private async Task LoadAndWriteVertexDataAsync(TextWriter writer, uint specialValue)
+        private async Task<List<VertexData>> LoadVertexDataAsync(uint specialValue)
         {
             if (!_filesBySpecialValue.TryGetValue(specialValue, out var files) || files.Count == 0)
             {
-                return;
+                return new List<VertexData>();
             }
             
             var filePath = Path.Combine(_csvDirectory, "vertices.csv");
             if (!File.Exists(filePath))
             {
-                return;
+                return new List<VertexData>();
             }
             
             var vertices = new List<VertexData>();
@@ -328,46 +421,23 @@ namespace WCAnalyzer.Core.Services
                 }
             }
             
-            // Only write if we found vertices
-            if (vertices.Count > 0)
-            {
-                await writer.WriteLineAsync("#### Vertex Entries");
-                await writer.WriteLineAsync("| File | Index | Position |");
-                await writer.WriteLineAsync("|------|-------|----------|");
-                
-                // Limit to MAX_ITEMS_PER_CATEGORY vertices for readability
-                var displayVertices = vertices.OrderBy(v => v.FileName).ThenBy(v => v.Index).Take(MAX_ITEMS_PER_CATEGORY).ToList();
-                foreach (var vertex in displayVertices)
-                {
-                    await writer.WriteLineAsync($"| {vertex.FileName} | {vertex.Index} | ({vertex.X:F3}, {vertex.Y:F3}, {vertex.Z:F3}) |");
-                }
-                
-                if (vertices.Count > MAX_ITEMS_PER_CATEGORY)
-                {
-                    await writer.WriteLineAsync($"*...and {vertices.Count - MAX_ITEMS_PER_CATEGORY} more vertices...*");
-                }
-                
-                await writer.WriteLineAsync();
-            }
-            
-            // Clear list to free memory
-            vertices.Clear();
+            return vertices;
         }
         
         /// <summary>
-        /// Load and stream normal data for files containing a specific special value
+        /// Load normal data for files containing a specific special value
         /// </summary>
-        private async Task LoadAndWriteNormalDataAsync(TextWriter writer, uint specialValue)
+        private async Task<List<NormalData>> LoadNormalDataAsync(uint specialValue)
         {
             if (!_filesBySpecialValue.TryGetValue(specialValue, out var files) || files.Count == 0)
             {
-                return;
+                return new List<NormalData>();
             }
             
             var filePath = Path.Combine(_csvDirectory, "normals.csv");
             if (!File.Exists(filePath))
             {
-                return;
+                return new List<NormalData>();
             }
             
             var normals = new List<NormalData>();
@@ -415,46 +485,23 @@ namespace WCAnalyzer.Core.Services
                 }
             }
             
-            // Only write if we found normals
-            if (normals.Count > 0)
-            {
-                await writer.WriteLineAsync("#### Normal Entries");
-                await writer.WriteLineAsync("| File | Index | Normal |");
-                await writer.WriteLineAsync("|------|-------|--------|");
-                
-                // Limit to MAX_ITEMS_PER_CATEGORY normals for readability
-                var displayNormals = normals.OrderBy(n => n.FileName).ThenBy(n => n.Index).Take(MAX_ITEMS_PER_CATEGORY).ToList();
-                foreach (var normal in displayNormals)
-                {
-                    await writer.WriteLineAsync($"| {normal.FileName} | {normal.Index} | ({normal.X:F3}, {normal.Y:F3}, {normal.Z:F3}) |");
-                }
-                
-                if (normals.Count > MAX_ITEMS_PER_CATEGORY)
-                {
-                    await writer.WriteLineAsync($"*...and {normals.Count - MAX_ITEMS_PER_CATEGORY} more normals...*");
-                }
-                
-                await writer.WriteLineAsync();
-            }
-            
-            // Clear list to free memory
-            normals.Clear();
+            return normals;
         }
         
         /// <summary>
-        /// Load and stream triangle data for files containing a specific special value
+        /// Load triangle data for files containing a specific special value
         /// </summary>
-        private async Task LoadAndWriteTriangleDataAsync(TextWriter writer, uint specialValue)
+        private async Task<List<TriangleData>> LoadTriangleDataAsync(uint specialValue)
         {
             if (!_filesBySpecialValue.TryGetValue(specialValue, out var files) || files.Count == 0)
             {
-                return;
+                return new List<TriangleData>();
             }
             
             var filePath = Path.Combine(_csvDirectory, "triangles.csv");
             if (!File.Exists(filePath))
             {
-                return;
+                return new List<TriangleData>();
             }
             
             var triangles = new List<TriangleData>();
@@ -502,30 +549,7 @@ namespace WCAnalyzer.Core.Services
                 }
             }
             
-            // Only write if we found triangles
-            if (triangles.Count > 0)
-            {
-                await writer.WriteLineAsync("#### Triangle Entries");
-                await writer.WriteLineAsync("| File | Index | Vertices |");
-                await writer.WriteLineAsync("|------|-------|----------|");
-                
-                // Limit to MAX_ITEMS_PER_CATEGORY triangles for readability
-                var displayTriangles = triangles.OrderBy(t => t.FileName).ThenBy(t => t.Index).Take(MAX_ITEMS_PER_CATEGORY).ToList();
-                foreach (var triangle in displayTriangles)
-                {
-                    await writer.WriteLineAsync($"| {triangle.FileName} | {triangle.Index} | ({triangle.V1}, {triangle.V2}, {triangle.V3}) |");
-                }
-                
-                if (triangles.Count > MAX_ITEMS_PER_CATEGORY)
-                {
-                    await writer.WriteLineAsync($"*...and {triangles.Count - MAX_ITEMS_PER_CATEGORY} more triangles...*");
-                }
-                
-                await writer.WriteLineAsync();
-            }
-            
-            // Clear list to free memory
-            triangles.Clear();
+            return triangles;
         }
         
         /// <summary>
@@ -646,9 +670,24 @@ namespace WCAnalyzer.Core.Services
         /// </summary>
         private async Task CountDataTypesBySpecialValueAsync()
         {
-            await CountVerticesAsync();
-            await CountNormalsAsync();
-            await CountTrianglesAsync();
+            // Determine the degree of parallelism based on processor count
+            int processorCount = Environment.ProcessorCount;
+            int degreeOfParallelism = Math.Max(1, processorCount - 1); // Leave one core for system tasks
+            
+            _logger.LogInformation("Using {DegreeOfParallelism} threads for data processing", degreeOfParallelism);
+            
+            // Create a list of tasks to run in parallel
+            var tasks = new List<Task>
+            {
+                CountVerticesAsync(),
+                CountNormalsAsync(),
+                CountTrianglesAsync()
+            };
+            
+            // Wait for all tasks to complete
+            await Task.WhenAll(tasks);
+            
+            _logger.LogInformation("Completed counting data types for all special values");
         }
         
         private async Task CountVerticesAsync()

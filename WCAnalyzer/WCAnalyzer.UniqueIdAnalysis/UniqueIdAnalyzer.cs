@@ -5,9 +5,11 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WCAnalyzer.Core.Models;
 using System.Text.Json.Serialization;
 using System.Numerics;
+using WCAnalyzer.Core.Services;
 
 namespace WCAnalyzer.UniqueIdAnalysis
 {
@@ -291,7 +293,8 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 MinUniqueId = allUniqueIds.Any() ? allUniqueIds.Min() : 0,
                 MaxUniqueId = allUniqueIds.Any() ? allUniqueIds.Max() : 0,
                 TotalAdtFiles = _adtFiles.Count,
-                TotalAssets = _adtFiles.Sum(a => a.AssetsByUniqueId.Values.Sum(v => v.Count))
+                TotalAssets = _adtFiles.Sum(a => a.AssetsByUniqueId.Values.Sum(v => v.Count)),
+                NonClusteredAssets = generateComprehensiveReport ? _nonClusteredAssets : null
             };
             
             _logger?.LogInformation("UniqueID analysis complete!");
@@ -859,6 +862,54 @@ namespace WCAnalyzer.UniqueIdAnalysis
             }
             
             _logger?.LogInformation("Found {NonClusteredCount} non-clustered IDs", _nonClusteredIds.Count);
+        }
+
+        // Implement a new method to generate reports that includes non-clustered IDs
+        public async Task GenerateReportsAsync(UniqueIdAnalysisResult result, string outputDirectoryPath, ReferenceValidator? referenceValidator = null)
+        {
+            _logger?.LogInformation("Generating reports to {OutputDirectory}", outputDirectoryPath);
+            
+            // Ensure output directory exists
+            if (!Directory.Exists(outputDirectoryPath))
+            {
+                Directory.CreateDirectory(outputDirectoryPath);
+            }
+            
+            // Create report generator with null logger (it will use NullLogger internally)
+            var reportGenerator = new ReportGenerator(null, referenceValidator);
+            
+            // Load listfile if provided
+            if (referenceValidator != null)
+            {
+                var listfilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "listfile.csv");
+                if (File.Exists(listfilePath))
+                {
+                    await reportGenerator.LoadListfileAsync(listfilePath);
+                }
+            }
+            
+            // Generate summary report
+            var summaryReportPath = Path.Combine(outputDirectoryPath, "uniqueid_summary.md");
+            await reportGenerator.GenerateSummaryReportAsync(result, summaryReportPath);
+            
+            // Generate cluster reports
+            var clusterDirectoryPath = Path.Combine(outputDirectoryPath, "clusters");
+            if (!Directory.Exists(clusterDirectoryPath))
+            {
+                Directory.CreateDirectory(clusterDirectoryPath);
+            }
+            
+            foreach (var cluster in result.Clusters)
+            {
+                var clusterReportPath = Path.Combine(clusterDirectoryPath, $"cluster_{cluster.MinId}_{cluster.MaxId}.md");
+                await reportGenerator.GenerateClusterReportAsync(cluster, clusterReportPath);
+            }
+            
+            // Generate comprehensive report that includes non-clustered IDs
+            var fullReportPath = Path.Combine(outputDirectoryPath, "full_report.md");
+            await reportGenerator.GenerateFullSummaryReportAsync(result, fullReportPath, result.NonClusteredAssets);
+            
+            _logger?.LogInformation("Report generation complete");
         }
     }
 } 
