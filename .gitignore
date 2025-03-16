@@ -411,3 +411,8 @@ FodyWeavers.xsd
 
 # Cursor Rules
 .cursorrules
+
+# Listfiles
+community-listfile-withcapitals.csv
+community-listfile.csv
+*.csv
