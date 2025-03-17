@@ -1,85 +1,69 @@
 using System;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
+using WCAnalyzer.Core.Models.PM4.Chunks;
 
 namespace WCAnalyzer.Core.Models.PM4
 {
     /// <summary>
-    /// Generic chunk implementation for storing raw chunk data that does not have
-    /// a specific implementation. This is used as a fallback during PM4 parsing.
+    /// Represents a generic chunk with unknown format.
     /// </summary>
-    public class GenericChunk : IIFFChunk
+    public class GenericChunk : PM4Chunk
     {
+        private readonly string _signature;
+
         /// <summary>
         /// Gets the chunk signature.
         /// </summary>
-        public string Signature { get; private set; }
-
-        /// <summary>
-        /// Gets the raw binary data of the chunk.
-        /// </summary>
-        public byte[] Data { get; private set; }
-
-        /// <summary>
-        /// Gets the size of the chunk data.
-        /// </summary>
-        public uint Size => (uint)(Data?.Length ?? 0);
+        public override string Signature => _signature;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="GenericChunk"/> class.
         /// </summary>
         /// <param name="signature">The chunk signature.</param>
-        /// <param name="data">The raw binary data of the chunk.</param>
-        public GenericChunk(string signature, byte[] data)
+        /// <param name="data">The chunk data.</param>
+        public GenericChunk(string signature, byte[] data) : base(data)
         {
-            Signature = signature ?? throw new ArgumentNullException(nameof(signature));
-            Data = data ?? throw new ArgumentNullException(nameof(data));
+            if (string.IsNullOrEmpty(signature))
+                throw new ArgumentNullException(nameof(signature));
+
+            _signature = signature;
         }
 
         /// <summary>
-        /// Gets the signature of the chunk.
+        /// Reads and parses the chunk data.
         /// </summary>
-        /// <returns>The chunk's signature.</returns>
-        public string GetSignature()
+        protected override void ReadData()
         {
-            return Signature;
+            // No specific parsing for generic chunks
         }
 
         /// <summary>
-        /// Loads the chunk data from a byte array.
+        /// Returns a string representation of this chunk.
         /// </summary>
-        /// <param name="data">The binary data to load from.</param>
-        public void LoadBinaryData(byte[] data)
+        /// <returns>A string representation of this chunk.</returns>
+        public override string ToString()
         {
-            if (data == null)
-                throw new ArgumentNullException(nameof(data));
-
-            Data = data;
+            return $"Generic Chunk: {Signature}, Size: {Size} bytes";
         }
 
         /// <summary>
-        /// Reads the chunk data from a binary reader.
+        /// Gets a hexadecimal representation of the chunk data.
         /// </summary>
-        /// <param name="reader">The binary reader to read from.</param>
-        /// <param name="size">The size of the chunk data.</param>
-        public void ReadData(BinaryReader reader, uint size)
+        /// <param name="maxBytes">The maximum number of bytes to include in the representation.</param>
+        /// <returns>A hexadecimal representation of the chunk data.</returns>
+        public string GetHexDump(int maxBytes = 64)
         {
-            if (reader == null)
-                throw new ArgumentNullException(nameof(reader));
+            if (Data == null || Data.Length == 0)
+                return "Empty";
 
-            Data = reader.ReadBytes((int)size);
-        }
-
-        /// <summary>
-        /// Writes the chunk data to a binary writer.
-        /// </summary>
-        /// <param name="writer">The binary writer to write to.</param>
-        public void WriteData(BinaryWriter writer)
-        {
-            if (writer == null)
-                throw new ArgumentNullException(nameof(writer));
-
-            writer.Write(Data);
+            int bytesToShow = Math.Min(maxBytes, Data.Length);
+            var hexDump = BitConverter.ToString(Data, 0, bytesToShow).Replace("-", " ");
+            
+            if (bytesToShow < Data.Length)
+                hexDump += " ...";
+                
+            return hexDump;
         }
     }
 } 

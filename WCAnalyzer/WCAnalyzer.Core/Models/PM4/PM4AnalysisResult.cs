@@ -3,333 +3,268 @@ using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using System.Linq;
 using System.Text;
+using System.Numerics;
+using WCAnalyzer.Core.Models.PM4.Chunks;
+using WCAnalyzer.Core.Utilities;
+using Warcraft.NET.Files.Interfaces;
+using WCAnalyzer.Core.Services;
 
 namespace WCAnalyzer.Core.Models.PM4
 {
     /// <summary>
-    /// Represents the results of a PM4 file analysis.
+    /// Analysis result for a PM4 file.
     /// </summary>
     public class PM4AnalysisResult
     {
         /// <summary>
-        /// Gets or sets the name of the analyzed file.
+        /// Gets or sets the file name.
         /// </summary>
-        public string? FileName { get; set; }
+        public string FileName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the path of the analyzed file.
+        /// Gets or sets the file path.
         /// </summary>
-        public string? FilePath { get; set; }
+        public string FilePath { get; set; } = string.Empty;
 
         /// <summary>
-        /// Gets or sets the errors encountered during analysis.
+        /// Gets or sets the list of errors.
         /// </summary>
         public List<string> Errors { get; set; } = new List<string>();
 
         /// <summary>
-        /// Gets or sets the timestamp when the analysis was performed.
+        /// Gets or sets the parsed PM4 data.
         /// </summary>
-        public DateTime AnalysisTime { get; set; } = DateTime.Now;
+        public PM4Data PM4Data { get; set; } = new PM4Data();
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the analysis was successful.
+        /// </summary>
+        public bool Success { get; set; } = true;
+
+        /// <summary>
+        /// Gets the PM4 file for backward compatibility.
+        /// </summary>
+        public PM4File PM4File => null;
+
+        /// <summary>
+        /// Gets a value indicating whether the analysis has errors.
+        /// </summary>
+        public bool HasErrors => Errors.Count > 0 || (PM4Data?.Errors.Count > 0);
+
+        /// <summary>
+        /// Gets a value indicating whether the file has vertex positions.
+        /// </summary>
+        public bool HasVertexPositions => PM4Data?.VertexPositions?.Count > 0;
+
+        /// <summary>
+        /// Gets a value indicating whether the file has vertex indices.
+        /// </summary>
+        public bool HasVertexIndices => PM4Data?.VertexIndices?.Count > 0;
+
+        /// <summary>
+        /// Gets a value indicating whether the file has links.
+        /// </summary>
+        public bool HasLinks => PM4Data?.Links?.Count > 0;
+
+        /// <summary>
+        /// Gets a value indicating whether the file has position data.
+        /// </summary>
+        public bool HasPositionData => PM4Data?.PositionData?.Count > 0 || PM4Data?.Positions?.Count > 0;
+
+        /// <summary>
+        /// Gets a value indicating whether the file has position references.
+        /// </summary>
+        public bool HasPositionReferences => PM4Data?.PositionReferences?.Count > 0;
+
+        // Backward compatibility properties
+        public bool HasShadowData => false;
+        public bool HasNormalCoordinates => false;
+        public bool HasVertexData => HasVertexPositions;
+        public bool HasVertexInfo => HasVertexIndices;
+        public bool HasSurfaceData => false;
+        public bool HasPositionReference => HasPositionReferences;
+        public bool HasDestructibleBuildingHeader => false;
+        public bool HasObjectData => false;
+        public bool HasServerFlagData => false;
+        public bool HasVersion => Version > 0;
+        public bool HasCRC => false;
+        public int Version => PM4Data?.Version ?? 0;
+        public List<string> ResolvedFileNames { get; set; } = new List<string>();
+        
+        /// <summary>
+        /// Returns a string that represents the current object.
+        /// </summary>
+        /// <returns>A string that represents the current object.</returns>
+        public override string ToString()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"File: {FileName}");
+            
+            if (HasErrors)
+            {
+                sb.AppendLine($"Errors: {Errors.Count + (PM4Data?.Errors.Count ?? 0)}");
+                foreach (var error in Errors)
+                {
+                    sb.AppendLine($"- {error}");
+                }
+                
+                if (PM4Data?.Errors != null)
+                {
+                    foreach (var error in PM4Data.Errors)
+                    {
+                        sb.AppendLine($"- {error}");
+                    }
+                }
+            }
+            
+            if (PM4Data != null)
+            {
+                sb.AppendLine($"Version: {PM4Data.Version}");
+                sb.AppendLine($"Vertex Positions: {PM4Data.VertexPositions?.Count ?? 0}");
+                sb.AppendLine($"Vertex Indices: {PM4Data.VertexIndices?.Count ?? 0}");
+                sb.AppendLine($"Links: {PM4Data.Links?.Count ?? 0}");
+                sb.AppendLine($"Position Data: {PM4Data.PositionData?.Count ?? 0}");
+                sb.AppendLine($"Position References: {PM4Data.PositionReferences?.Count ?? 0}");
+            }
+            
+            return sb.ToString();
+        }
+        
+        /// <summary>
+        /// Gets a summary of the analysis result.
+        /// </summary>
+        /// <returns>A string containing a summary of the analysis result.</returns>
+        public string GetSummary()
+        {
+            return ToString();
+        }
+        
+        /// <summary>
+        /// Gets a detailed report of the analysis result.
+        /// </summary>
+        /// <returns>A string containing a detailed report of the analysis result.</returns>
+        public string GetDetailedReport()
+        {
+            var sb = new StringBuilder(ToString());
+            
+            if (PM4Data != null)
+            {
+                // Add more detailed information about the file content
+                if (HasVertexPositions && PM4Data.VertexPositions != null)
+                {
+                    sb.AppendLine("\nVertex Positions (first 10):");
+                    for (int i = 0; i < Math.Min(10, PM4Data.VertexPositions.Count); i++)
+                    {
+                        sb.AppendLine($"  {i}: {PM4Data.VertexPositions[i]}");
+                    }
+                }
+                
+                if (HasVertexIndices && PM4Data.VertexIndices != null)
+                {
+                    sb.AppendLine("\nVertex Indices (first 10):");
+                    for (int i = 0; i < Math.Min(10, PM4Data.VertexIndices.Count); i++)
+                    {
+                        sb.AppendLine($"  {i}: {PM4Data.VertexIndices[i]}");
+                    }
+                }
+                
+                if (HasLinks && PM4Data.Links != null)
+                {
+                    sb.AppendLine("\nLinks (first 10):");
+                    for (int i = 0; i < Math.Min(10, PM4Data.Links.Count); i++)
+                    {
+                        sb.AppendLine($"  {i}: {PM4Data.Links[i].SourceIndex} -> {PM4Data.Links[i].TargetIndex}");
+                    }
+                }
+            }
+            
+            return sb.ToString();
+        }
+    }
+    
+    /// <summary>
+    /// Represents an unknown chunk in a PM4 file.
+    /// </summary>
+    public class UnknownChunk
+    {
+        /// <summary>
+        /// Gets or sets the chunk name (reversed from file).
+        /// </summary>
+        public string ChunkName { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the original chunk name as read from file.
+        /// </summary>
+        public string OriginalChunkName { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the chunk size in bytes.
+        /// </summary>
+        public int Size { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the position in the file where the chunk data starts.
+        /// </summary>
+        public long Position { get; set; }
+        
+        /// <summary>
+        /// Gets or sets a hexadecimal preview of the first few bytes of the chunk.
+        /// </summary>
+        public string HexPreview { get; set; }
+    }
+    
+    /// <summary>
+    /// Represents the parsed data from a PM4 file.
+    /// </summary>
+    public class PM4Data
+    {
         /// <summary>
         /// Gets or sets the file version.
         /// </summary>
         public int Version { get; set; }
-
+        
         /// <summary>
-        /// Gets or sets a value indicating whether shadow data is present.
+        /// Gets or sets the list of errors.
         /// </summary>
-        public bool HasShadowData { get; set; }
-
+        public List<string> Errors { get; set; } = new List<string>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether vertex positions are present.
+        /// Gets or sets the list of unknown chunks encountered during parsing.
         /// </summary>
-        public bool HasVertexPositions { get; set; }
-
+        public List<UnknownChunk> UnknownChunks { get; set; } = new List<UnknownChunk>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether vertex indices are present.
+        /// Gets or sets the list of vertex positions.
         /// </summary>
-        public bool HasVertexIndices { get; set; }
-
+        public List<Services.Vector3> VertexPositions { get; set; } = new List<Services.Vector3>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether normal coordinates are present.
+        /// Gets or sets the list of vertex indices.
         /// </summary>
-        public bool HasNormalCoordinates { get; set; }
-
+        public List<int> VertexIndices { get; set; } = new List<int>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether links are present.
+        /// Gets or sets the list of links.
         /// </summary>
-        public bool HasLinks { get; set; }
-
+        public List<LinkData> Links { get; set; } = new List<LinkData>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether vertex data is present.
+        /// Gets or sets the list of position data.
         /// </summary>
-        public bool HasVertexData { get; set; }
-
+        public List<PositionData> PositionData { get; set; } = new List<PositionData>();
+        
         /// <summary>
-        /// Gets or sets a value indicating whether vertex info is present.
+        /// Gets or sets the list of position data (alias for PositionData for compatibility).
         /// </summary>
-        public bool HasVertexInfo { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether surface data is present.
-        /// </summary>
-        public bool HasSurfaceData { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether position data is present.
-        /// </summary>
-        public bool HasPositionData { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether value pairs are present.
-        /// </summary>
-        public bool HasValuePairs { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether building data is present.
-        /// </summary>
-        public bool HasBuildingData { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether simple data is present.
-        /// </summary>
-        public bool HasSimpleData { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value indicating whether final data is present.
-        /// </summary>
-        public bool HasFinalData { get; set; }
-
-        /// <summary>
-        /// Gets or sets additional metadata or context for the analysis.
-        /// </summary>
-        [JsonExtensionData]
-        public Dictionary<string, object>? AdditionalData { get; set; }
-
-        /// <summary>
-        /// Gets or sets the referenced PM4 file instance.
-        /// </summary>
-        [JsonIgnore]
-        public PM4File? PM4File { get; set; }
-
-        /// <summary>
-        /// Gets or sets the FileDataID to file name mapping for model references.
-        /// </summary>
-        public Dictionary<uint, string> ResolvedFileNames { get; set; } = new Dictionary<uint, string>();
-
-        /// <summary>
-        /// Creates a PM4AnalysisResult from a PM4File instance.
-        /// </summary>
-        /// <param name="pm4File">The PM4File to analyze.</param>
-        /// <returns>A PM4AnalysisResult containing the analysis data.</returns>
-        public static PM4AnalysisResult FromPM4File(PM4File pm4File)
-        {
-            if (pm4File == null)
-                throw new ArgumentNullException(nameof(pm4File));
-
-            var result = new PM4AnalysisResult
-            {
-                FileName = pm4File.FileName,
-                FilePath = pm4File.FilePath,
-                Errors = new List<string>(pm4File.Errors),
-                Version = pm4File.Version?.Version != null ? (int)pm4File.Version.Version : 0,
-                HasShadowData = pm4File.ShadowData != null,
-                HasVertexPositions = pm4File.VertexPositions != null,
-                HasVertexIndices = pm4File.VertexIndices != null,
-                HasNormalCoordinates = pm4File.NormalCoordinates != null,
-                HasLinks = pm4File.Links != null,
-                HasVertexData = pm4File.VertexData != null,
-                HasVertexInfo = pm4File.VertexInfo != null,
-                HasSurfaceData = pm4File.SurfaceData != null,
-                HasPositionData = pm4File.PositionData != null,
-                HasValuePairs = pm4File.ValuePairs != null,
-                HasBuildingData = pm4File.BuildingData != null,
-                HasSimpleData = pm4File.SimpleData != null,
-                HasFinalData = pm4File.FinalData != null,
-                PM4File = pm4File
-            };
-
-            return result;
+        public List<PositionData> Positions 
+        { 
+            get => PositionData; 
+            set => PositionData = value; 
         }
-
+        
         /// <summary>
-        /// Gets a summary string representing the analysis results.
+        /// Gets or sets the list of position references.
         /// </summary>
-        /// <returns>A summary string.</returns>
-        public string GetSummary()
-        {
-            var summary = new System.Text.StringBuilder();
-            summary.AppendLine($"# PM4 Analysis Result for: {FileName}");
-            summary.AppendLine($"Path: {FilePath}");
-            summary.AppendLine($"Analysis Time: {AnalysisTime}");
-            summary.AppendLine($"Version: {Version}");
-            
-            summary.AppendLine("\n## Chunks present:");
-            if (HasShadowData) summary.AppendLine("- MSHD (Shadow Data)");
-            if (HasVertexPositions) summary.AppendLine("- MSPV (Vertex Positions)");
-            if (HasVertexIndices) summary.AppendLine("- MSPI (Vertex Indices)");
-            if (HasNormalCoordinates) summary.AppendLine("- MSCN (Normal Coordinates)");
-            if (HasLinks) summary.AppendLine("- MSLK (Links)");
-            if (HasVertexData) summary.AppendLine("- MSVT (Vertex Data)");
-            if (HasVertexInfo) summary.AppendLine("- MSVI (Vertex Indices)");
-            if (HasSurfaceData) summary.AppendLine("- MSUR (Surface Data)");
-            if (HasPositionData) summary.AppendLine("- MPRL (Position Data)");
-            if (HasValuePairs) summary.AppendLine("- MPRR (Value Pairs)");
-            if (HasBuildingData) summary.AppendLine("- MDBH (Building Data)");
-            if (HasSimpleData) summary.AppendLine("- MDOS (Simple Data)");
-            if (HasFinalData) summary.AppendLine("- MDSF (Final Data)");
-
-            // Include detailed information from the PM4File if available
-            if (PM4File != null)
-            {
-                if (PM4File.VertexPositionsChunk != null && PM4File.VertexPositionsChunk.Vertices.Count > 0)
-                {
-                    summary.AppendLine("\n## Vertex Data:");
-                    summary.AppendLine($"Total Vertices: {PM4File.VertexPositionsChunk.Vertices.Count}");
-                    
-                    // Show sample vertices
-                    summary.AppendLine("\n### Sample Vertices:");
-                    int sampleCount = Math.Min(5, PM4File.VertexPositionsChunk.Vertices.Count);
-                    for (int i = 0; i < sampleCount; i++)
-                    {
-                        var vertex = PM4File.VertexPositionsChunk.Vertices[i];
-                        summary.AppendLine($"- Vertex {i}: ({vertex.X:F2}, {vertex.Y:F2}, {vertex.Z:F2})");
-                    }
-                }
-                
-                if (PM4File.VertexIndicesChunk != null && PM4File.VertexIndicesChunk.Indices.Count > 0)
-                {
-                    summary.AppendLine("\n## Triangle Data:");
-                    int triangleCount = PM4File.VertexIndicesChunk.Indices.Count / 3;
-                    summary.AppendLine($"Total Triangles: {triangleCount}");
-                    
-                    // Show sample triangles
-                    summary.AppendLine("\n### Sample Triangles:");
-                    int sampleCount = Math.Min(3, triangleCount);
-                    for (int i = 0; i < sampleCount; i++)
-                    {
-                        int baseIndex = i * 3;
-                        if (baseIndex + 2 < PM4File.VertexIndicesChunk.Indices.Count)
-                        {
-                            summary.AppendLine($"- Triangle {i}: Vertices [{PM4File.VertexIndicesChunk.Indices[baseIndex]}, " +
-                                $"{PM4File.VertexIndicesChunk.Indices[baseIndex + 1]}, {PM4File.VertexIndicesChunk.Indices[baseIndex + 2]}]");
-                        }
-                    }
-                }
-                
-                if (PM4File.PositionDataChunk != null && PM4File.PositionDataChunk.Entries.Count > 0)
-                {
-                    summary.AppendLine("\n## Position Data:");
-                    summary.AppendLine($"Total Entries: {PM4File.PositionDataChunk.Entries.Count}");
-                    
-                    // Count position vs command records
-                    int positionRecords = PM4File.PositionDataChunk.Entries.Count(e => !e.IsSpecialEntry);
-                    int specialRecords = PM4File.PositionDataChunk.Entries.Count(e => e.IsSpecialEntry);
-                    summary.AppendLine($"Position Records: {positionRecords}");
-                    summary.AppendLine($"Special Records: {specialRecords}");
-                    
-                    // Show sample position records
-                    if (positionRecords > 0)
-                    {
-                        summary.AppendLine("\n### Sample Position Records:");
-                        int sampleCount = Math.Min(5, positionRecords);
-                        var positions = PM4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry).Take(sampleCount).ToList();
-                        foreach (var pos in positions)
-                        {
-                            summary.AppendLine($"- Index {pos.Index}: ({pos.CoordinateX:F2}, {pos.CoordinateY:F2}, {pos.CoordinateZ:F2})");
-                        }
-                    }
-                    
-                    // Show sample special records
-                    if (specialRecords > 0)
-                    {
-                        summary.AppendLine("\n### Sample Special Records:");
-                        int sampleCount = Math.Min(5, specialRecords);
-                        var specialEntries = PM4File.PositionDataChunk.Entries.Where(e => e.IsSpecialEntry).Take(sampleCount).ToList();
-                        foreach (var entry in specialEntries)
-                        {
-                            // Reinterpret the bit pattern as a float
-                            float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
-                            summary.AppendLine($"- Index {entry.Index}: Special=0x{entry.SpecialValue:X8}, As Float={asFloat:F6}");
-                            summary.AppendLine($"  X={entry.CoordinateX:F6}, Y={entry.CoordinateY:F6}, Z={entry.CoordinateZ:F6}");
-                            summary.AppendLine($"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}");
-                        }
-                    }
-                    
-                    // Show the sequence pattern
-                    summary.AppendLine("\n### Entry Sequence Pattern:");
-                    int sequenceSample = Math.Min(10, PM4File.PositionDataChunk.Entries.Count);
-                    for (int i = 0; i < sequenceSample; i++)
-                    {
-                        var entry = PM4File.PositionDataChunk.Entries[i];
-                        string type = entry.IsSpecialEntry ? "Special" : "Position";
-                        string details = entry.IsSpecialEntry ? 
-                            $"Special=0x{entry.SpecialValue:X8}, As Float={BitConverter.Int32BitsToSingle(entry.SpecialValue):F6}\n" +
-                            $"  X={entry.CoordinateX:F6}, Y={entry.CoordinateY:F6}, Z={entry.CoordinateZ:F6}\n" +
-                            $"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}" : 
-                            $"({entry.CoordinateX:F6}, {entry.CoordinateY:F6}, {entry.CoordinateZ:F6})\n" +
-                            $"  Value1={entry.Value1:F6}, Value2={entry.Value2:F6}, Value3={entry.Value3:F6}";
-                        summary.AppendLine($"- Entry {i}: {type} - {details}");
-                    }
-                }
-            }
-
-            if (Errors.Count > 0)
-            {
-                summary.AppendLine("\n## Errors encountered:");
-                foreach (var error in Errors)
-                {
-                    summary.AppendLine($"- {error}");
-                }
-            }
-
-            return summary.ToString();
-        }
-
-        /// <summary>
-        /// Gets a detailed report of the PM4 file analysis.
-        /// </summary>
-        /// <returns>A detailed report of the PM4 file analysis.</returns>
-        public string GetDetailedReport()
-        {
-            var report = new StringBuilder();
-            
-            // Add header
-            report.AppendLine($"=== Detailed PM4 Analysis Report: {FileName} ===");
-            report.AppendLine($"Analysis Time: {AnalysisTime}");
-            report.AppendLine($"File Path: {FilePath}");
-            report.AppendLine();
-            
-            // Add summary
-            report.AppendLine("=== Summary ===");
-            report.AppendLine(GetSummary());
-            report.AppendLine();
-            
-            // Add detailed chunk information
-            report.AppendLine("=== Detailed Chunk Information ===");
-            
-            if (PM4File != null)
-            {
-                report.AppendLine(PM4File.GetSummary());
-            }
-            else
-            {
-                report.AppendLine("No PM4 file data available.");
-            }
-            
-            // Add errors
-            if (Errors.Count > 0)
-            {
-                report.AppendLine();
-                report.AppendLine("=== Errors ===");
-                foreach (var error in Errors)
-                {
-                    report.AppendLine($"- {error}");
-                }
-            }
-            
-            return report.ToString();
-        }
+        public List<PositionReference> PositionReferences { get; set; } = new List<PositionReference>();
     }
 } 

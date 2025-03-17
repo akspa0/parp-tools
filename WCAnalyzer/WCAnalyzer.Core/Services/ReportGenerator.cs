@@ -1,114 +1,155 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Numerics;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WCAnalyzer.Core.Models;
-using WCAnalyzer.Core.Utilities;
 using WCAnalyzer.Core.Models.PM4;
+using WCAnalyzer.Core.Models.PD4;
 using WCAnalyzer.Core.Models.PM4.Chunks;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text;
 using Warcraft.NET.Files.Interfaces;
+using WCAnalyzer.Core.Utilities;
 
 namespace WCAnalyzer.Core.Services
 {
     /// <summary>
-    /// Service for generating reports from ADT analysis results.
+    /// Service for generating reports from PM4 analysis results.
     /// </summary>
     public class ReportGenerator
     {
         private readonly ILogger<ReportGenerator> _logger;
-        private readonly TerrainDataCsvGenerator _terrainDataCsvGenerator;
-        private readonly JsonReportGenerator? _jsonReportGenerator;
+        private readonly string _outputDirectory;
+        private readonly bool _generateObjFiles;
         private readonly MarkdownReportGenerator? _markdownReportGenerator;
-        private readonly PM4ObjExporter? _pm4ObjExporter;
-        private readonly PM4EnhancedObjExporter? _pm4EnhancedObjExporter;
-        private readonly PM4CsvGenerator? _pm4CsvGenerator;
-        private readonly PM4MarkdownReportGenerator? _pm4MarkdownReportGenerator;
-        private readonly PM4TerrainExporter? _pm4TerrainExporter;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ReportGenerator"/> class with specific output directories.
+        /// Initializes a new instance of the <see cref="ReportGenerator"/> class.
         /// </summary>
-        /// <param name="logger">The logger.</param>
-        /// <param name="csvOutputDirectory">The CSV output directory.</param>
-        /// <param name="objOutputDirectory">The OBJ output directory.</param>
-        /// <param name="pm4EnhancedObjExporter">Optional enhanced OBJ exporter.</param>
+        /// <param name="logger">Logger instance.</param>
+        /// <param name="outputDirectory">Output directory for reports.</param>
+        /// <param name="generateObjFiles">Whether to generate OBJ files.</param>
         public ReportGenerator(
-            ILogger<ReportGenerator> logger, 
-            string? csvOutputDirectory = null,
-            string? objOutputDirectory = null,
-            PM4EnhancedObjExporter? pm4EnhancedObjExporter = null)
+            ILogger<ReportGenerator>? logger = null,
+            string? outputDirectory = null,
+            bool generateObjFiles = false)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            
-            if (!string.IsNullOrWhiteSpace(objOutputDirectory))
-            {
-                _pm4ObjExporter = new PM4ObjExporter(null, objOutputDirectory);
-                _pm4TerrainExporter = new PM4TerrainExporter(null, objOutputDirectory);
-            }
-            
-            // Use the provided enhanced OBJ exporter if available
-            _pm4EnhancedObjExporter = pm4EnhancedObjExporter;
-            
-            if (!string.IsNullOrWhiteSpace(csvOutputDirectory))
-            {
-                _pm4CsvGenerator = new PM4CsvGenerator(null, csvOutputDirectory);
-            }
-            
-            _pm4MarkdownReportGenerator = new PM4MarkdownReportGenerator();
+            _logger = logger ?? NullLogger<ReportGenerator>.Instance;
+            _outputDirectory = outputDirectory ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
+            _generateObjFiles = generateObjFiles;
 
-            // Initialize other components
-            _terrainDataCsvGenerator = new TerrainDataCsvGenerator(null, string.Empty);
-            _jsonReportGenerator = new JsonReportGenerator(null);
+            // Create markdown report generator
             _markdownReportGenerator = new MarkdownReportGenerator(null);
         }
 
         /// <summary>
-        /// Generates all reports for the analysis results.
+        /// Generates reports for the specified PM4 analysis results.
         /// </summary>
-        /// <param name="results">The ADT analysis results.</param>
-        /// <param name="summary">The analysis summary.</param>
-        /// <param name="outputDirectory">The directory to write reports to.</param>
-        /// <returns>A task representing the asynchronous operation.</returns>
-        public async Task GenerateAllReportsAsync(List<AdtAnalysisResult> results, AnalysisSummary summary, string outputDirectory)
+        /// <param name="results">The PM4 analysis results.</param>
+        /// <param name="summary">Optional summary text.</param>
+        public async Task GenerateReportsAsync(List<PM4AnalysisResult> results, string? summary = null)
         {
-            if (results == null)
-                throw new ArgumentNullException(nameof(results));
-            if (summary == null)
-                throw new ArgumentNullException(nameof(summary));
-            if (string.IsNullOrEmpty(outputDirectory))
-                throw new ArgumentException("Output directory cannot be null or empty.", nameof(outputDirectory));
+            if (results == null || !results.Any())
+            {
+                _logger.LogWarning("No PM4 analysis results to generate reports for.");
+                return;
+            }
 
-            // Create output directory if it doesn't exist
+            string outputDirectory = CreateOutputDirectory(_outputDirectory);
+            _logger.LogInformation("Generating reports for {Count} PM4 files in {OutputDirectory}", results.Count, outputDirectory);
+
+            // Generate PM4 reports
+            await GeneratePM4ReportsAsync(
+                results,
+                outputDirectory,
+                exportCsv: true,
+                exportObj: _generateObjFiles,
+                exportConsolidatedObj: _generateObjFiles,
+                exportEnhancedObj: false);
+
+            _logger.LogInformation("Finished generating reports for {Count} PM4 files.", results.Count);
+        }
+
+        /// <summary>
+        /// Generates reports for a list of PD4 analysis results.
+        /// </summary>
+        /// <param name="results">List of PD4 analysis results.</param>
+        /// <param name="summary">Optional summary message.</param>
+        /// <returns>A task that represents the asynchronous operation.</returns>
+        public async Task GenerateReportsAsync(List<PD4AnalysisResult> results, string? summary = null)
+        {
+            string outputDirectory = CreateOutputDirectory(_outputDirectory);
+            
+            if (results == null || results.Count == 0)
+            {
+                _logger.LogWarning("No PD4 analysis results to report on.");
+                return;
+            }
+
+            _logger.LogInformation("Generating reports for {Count} PD4 files to {Directory}", results.Count, outputDirectory);
+
+            // TODO: Add markdown reporting for PD4 files
+
+            _logger.LogInformation("Report generation completed.");
+        }
+
+        /// <summary>
+        /// Creates the output directory if it doesn't exist.
+        /// </summary>
+        /// <param name="baseDirectory">Base output directory.</param>
+        /// <returns>The created output directory path.</returns>
+        private string CreateOutputDirectory(string baseDirectory)
+        {
+            // Include timestamp in directory name for uniqueness
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string outputDirectory = Path.Combine(baseDirectory, timestamp);
+            
             if (!Directory.Exists(outputDirectory))
             {
                 Directory.CreateDirectory(outputDirectory);
             }
+            
+            return outputDirectory;
+        }
 
-            _logger.LogInformation("Generating reports in {OutputDirectory}", outputDirectory);
-
-            // Generate terrain data CSV reports
-            await _terrainDataCsvGenerator.GenerateAllCsvAsync(results, outputDirectory);
-
-            // Generate JSON reports if available
-            if (_jsonReportGenerator != null)
+        /// <summary>
+        /// Generates all reports for the ADT analysis results.
+        /// </summary>
+        /// <param name="results">The ADT analysis results.</param>
+        /// <param name="summary">The analysis summary.</param>
+        /// <param name="outputDirectory">The output directory.</param>
+        public async Task GenerateAllReportsAsync(List<AdtAnalysisResult> results, AnalysisSummary summary, string outputDirectory)
+        {
+            if (results == null || !results.Any())
             {
-                await _jsonReportGenerator.GenerateAllReportsAsync(results, summary, outputDirectory);
+                _logger.LogWarning("No ADT analysis results to generate reports for.");
+                return;
             }
 
-            // Generate Markdown reports if available
-            if (_markdownReportGenerator != null)
-            {
-                await _markdownReportGenerator.GenerateReportsAsync(results, summary, outputDirectory);
-            }
+            _logger.LogInformation("Generating reports for {Count} ADT files in {OutputDirectory}", results.Count, outputDirectory);
 
-            // Generate summary report
+            // Create the output directory if it doesn't exist
+            Directory.CreateDirectory(outputDirectory);
+
+            // Generate the summary report
             await GenerateSummaryReportAsync(summary, outputDirectory);
 
-            _logger.LogInformation("Report generation complete.");
+            // Generate the terrain data CSV reports
+            // Removed: await _terrainDataCsvGenerator.GenerateAllCsvAsync(results, outputDirectory);
+
+            // Generate the JSON reports
+            // Removed: if (_jsonReportGenerator != null)
+            // {
+            //     await _jsonReportGenerator.GenerateAllReportsAsync(results, summary, outputDirectory);
+            // }
+
+            _logger.LogInformation("Finished generating reports for {Count} ADT files.", results.Count);
         }
 
         /// <summary>
@@ -152,15 +193,14 @@ namespace WCAnalyzer.Core.Services
         }
 
         /// <summary>
-        /// Generates reports for PM4 analysis results.
+        /// Generates PM4 reports for the specified analysis results.
         /// </summary>
-        /// <param name="analysisResults">The PM4 analysis results to report on.</param>
-        /// <param name="outputDirectory">The output directory for the reports.</param>
+        /// <param name="analysisResults">The PM4 analysis results.</param>
+        /// <param name="outputDirectory">The output directory.</param>
         /// <param name="exportCsv">Whether to export CSV files.</param>
         /// <param name="exportObj">Whether to export OBJ files.</param>
-        /// <param name="exportConsolidatedObj">Whether to export a single consolidated OBJ file. Defaults to true when exportObj is true.</param>
-        /// <param name="exportEnhancedObj">Whether to export an enhanced consolidated OBJ file.</param>
-        /// <returns>A task that represents the asynchronous operation.</returns>
+        /// <param name="exportConsolidatedObj">Whether to export consolidated OBJ files.</param>
+        /// <param name="exportEnhancedObj">Whether to export enhanced OBJ files.</param>
         public async Task GeneratePM4ReportsAsync(
             IEnumerable<PM4AnalysisResult> analysisResults, 
             string outputDirectory, 
@@ -170,72 +210,61 @@ namespace WCAnalyzer.Core.Services
             bool exportEnhancedObj = false)
         {
             if (analysisResults == null)
-                throw new ArgumentNullException(nameof(analysisResults));
-
-            if (string.IsNullOrWhiteSpace(outputDirectory))
-                throw new ArgumentException("Output directory cannot be null or whitespace.", nameof(outputDirectory));
-
-            // Ensure output directory exists
-            Directory.CreateDirectory(outputDirectory);
-
-            var resultsList = analysisResults.ToList();
-
-            if (resultsList.Count == 0)
             {
-                _logger.LogWarning("No PM4 analysis results to report on.");
+                _logger.LogWarning("No PM4 analysis results to generate reports for.");
                 return;
             }
 
-            _logger.LogInformation("Generating reports for {Count} PM4 analysis results", resultsList.Count);
+            var resultsList = analysisResults.ToList();
+            if (!resultsList.Any())
+            {
+                _logger.LogWarning("No PM4 analysis results to generate reports for.");
+                return;
+            }
 
-            // Generate consolidated report
-            await GenerateConsolidatedPM4ReportAsync(resultsList, outputDirectory);
+            _logger.LogInformation("Generating reports for {Count} PM4 files in {OutputDirectory}", resultsList.Count, outputDirectory);
 
-            // Generate CSV reports if requested
+            // Create the output directory if it doesn't exist
+            Directory.CreateDirectory(outputDirectory);
+
+            // Generate CSV reports
             if (exportCsv)
             {
                 await GeneratePM4CsvReportsAsync(resultsList, outputDirectory);
             }
 
-            // Generate OBJ files if requested
+            // Export to OBJ files
             if (exportObj)
             {
-                if (!exportEnhancedObj)
-                {
-                    // Export using the standard OBJ exporter
-                    // Export individual OBJ files for each PM4
-                    await _pm4ObjExporter?.ExportAllToObjAsync(resultsList);
-                    
-                    // Export consolidated OBJ file if requested
-                    if (exportConsolidatedObj)
-                    {
-                        await _pm4ObjExporter?.ExportToConsolidatedObjAsync(resultsList);
-                        _logger.LogInformation("Generated consolidated OBJ file containing all PM4 models");
-                    }
-                }
-                else if (_pm4EnhancedObjExporter != null)
-                {
-                    // Export using the enhanced OBJ exporter which preserves coordinates and sorts by SpecialValueDec
-                    // Export individual OBJ files for each PM4
-                    await _pm4EnhancedObjExporter.ExportAllToObjAsync(resultsList);
-                    
-                    // Export consolidated OBJ file if requested
-                    if (exportConsolidatedObj)
-                    {
-                        await _pm4EnhancedObjExporter.ExportToConsolidatedEnhancedObjAsync(resultsList);
-                        _logger.LogInformation("Generated enhanced consolidated OBJ file with proper coordinates and sorting");
-                    }
-                }
+                // Removed: await _pm4ObjExporter?.ExportAllToObjAsync(resultsList);
+                _logger.LogInformation("OBJ export is disabled as the exporter has been removed");
             }
-            else if (exportObj)
+
+            // Export to consolidated OBJ file
+            if (exportConsolidatedObj)
             {
-                _logger.LogWarning("OBJ export requested but OBJ exporter is not available");
+                // Removed: await _pm4ObjExporter?.ExportToConsolidatedObjAsync(resultsList);
+                _logger.LogInformation("Consolidated OBJ export is disabled as the exporter has been removed");
             }
 
-            // Generate comprehensive markdown report
-            await GenerateComprehensiveMarkdownReportAsync(resultsList, outputDirectory);
+            // Export to enhanced OBJ files
+            if (exportEnhancedObj)
+            {
+                // Removed: else if (_pm4EnhancedObjExporter != null)
+                // {
+                //     // Export to enhanced OBJ files
+                //     await _pm4EnhancedObjExporter.ExportAllToObjAsync(resultsList);
+                //
+                //     // Export to consolidated enhanced OBJ file
+                //     await _pm4EnhancedObjExporter.ExportToConsolidatedEnhancedObjAsync(resultsList);
+                // }
+                _logger.LogInformation("Enhanced OBJ export is disabled as the exporter has been removed");
+            }
 
-            _logger.LogInformation("PM4 report generation completed");
+            // Generate consolidated report
+            await GenerateConsolidatedPM4ReportAsync(resultsList, outputDirectory);
+
+            _logger.LogInformation("Finished generating reports for {Count} PM4 files.", resultsList.Count);
         }
 
         private async Task GenerateConsolidatedPM4ReportAsync(List<PM4AnalysisResult> results, string outputDirectory)
@@ -273,8 +302,8 @@ namespace WCAnalyzer.Core.Services
             int totalIndices = results.Sum(r => r.PM4File?.VertexIndicesChunk?.Indices.Count ?? 0);
             int triangleCount = totalIndices / 3;
             int totalPositionEntries = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count ?? 0);
-            int totalPosRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry) ?? 0);
-            int totalCmdRecords = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0);
+            int totalPosRecords = totalPositionEntries; // All entries are now position records
+            int totalCmdRecords = 0; // Special records have been removed
             
             summary.AppendLine($"- **Total Vertices**: {totalVertices:N0}");
             summary.AppendLine($"- **Total Triangles**: {triangleCount:N0}");
@@ -295,10 +324,10 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine($"| MSVI | {results.Count(r => r.HasVertexInfo)} | {(float)results.Count(r => r.HasVertexInfo) / results.Count * 100:F1}% | Vertex Info |");
             summary.AppendLine($"| MSUR | {results.Count(r => r.HasSurfaceData)} | {(float)results.Count(r => r.HasSurfaceData) / results.Count * 100:F1}% | Surface Data |");
             summary.AppendLine($"| MPRL | {results.Count(r => r.HasPositionData)} | {(float)results.Count(r => r.HasPositionData) / results.Count * 100:F1}% | Position Data |");
-            summary.AppendLine($"| MPRR | {results.Count(r => r.HasValuePairs)} | {(float)results.Count(r => r.HasValuePairs) / results.Count * 100:F1}% | Value Pairs |");
-            summary.AppendLine($"| MDBH | {results.Count(r => r.HasBuildingData)} | {(float)results.Count(r => r.HasBuildingData) / results.Count * 100:F1}% | Building Data |");
-            summary.AppendLine($"| MDOS | {results.Count(r => r.HasSimpleData)} | {(float)results.Count(r => r.HasSimpleData) / results.Count * 100:F1}% | Simple Data |");
-            summary.AppendLine($"| MDSF | {results.Count(r => r.HasFinalData)} | {(float)results.Count(r => r.HasFinalData) / results.Count * 100:F1}% | Final Data |");
+            summary.AppendLine($"| MPRR | {results.Count(r => r.HasPositionReference)} | {(float)results.Count(r => r.HasPositionReference) / results.Count * 100:F1}% | Position Reference |");
+            summary.AppendLine($"| MDBH | {results.Count(r => r.HasDestructibleBuildingHeader)} | {(float)results.Count(r => r.HasDestructibleBuildingHeader) / results.Count * 100:F1}% | Destructible Building Header |");
+            summary.AppendLine($"| MDOS | {results.Count(r => r.HasObjectData)} | {(float)results.Count(r => r.HasObjectData) / results.Count * 100:F1}% | Object Data |");
+            summary.AppendLine($"| MDSF | {results.Count(r => r.HasServerFlagData)} | {(float)results.Count(r => r.HasServerFlagData) / results.Count * 100:F1}% | Server Flag Data |");
             
             // Geometry statistics
             summary.AppendLine("\n## Geometry Statistics");
@@ -369,8 +398,8 @@ namespace WCAnalyzer.Core.Services
                 foreach (var file in filesWithMostPositions)
                 {
                     int total = file.PM4File?.PositionDataChunk?.Entries.Count ?? 0;
-                    int posCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry) ?? 0;
-                    int cmdCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0;
+                    int posCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => !e.IsSpecialEntry()) ?? 0;
+                    int cmdCount = file.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry()) ?? 0;
                     summary.AppendLine($"| {file.FileName} | {total:N0} | {posCount:N0} | {cmdCount:N0} |");
                 }
             }
@@ -379,7 +408,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine("\n### Position Records");
             
             var positionFiles = results
-                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => !e.IsSpecialEntry) == true)
+                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => !e.IsSpecialEntry()) == true)
                 .ToList();
             
             // Analyze coordinate ranges if any position records exist
@@ -389,15 +418,15 @@ namespace WCAnalyzer.Core.Services
                 
                 foreach (var file in positionFiles)
                 {
-                    var positions = file.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry).ToList();
+                    var positions = file.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry()).ToList();
                     if (positions.Any())
                     {
-                        float minX = positions.Min(p => p.CoordinateX);
-                        float maxX = positions.Max(p => p.CoordinateX);
-                        float minY = positions.Min(p => p.CoordinateY);
-                        float maxY = positions.Max(p => p.CoordinateY);
-                        float minZ = positions.Min(p => p.CoordinateZ);
-                        float maxZ = positions.Max(p => p.CoordinateZ);
+                        float minX = positions.Min(p => p.CoordinateX());
+                        float maxX = positions.Max(p => p.CoordinateX());
+                        float minY = positions.Min(p => p.CoordinateY());
+                        float maxY = positions.Max(p => p.CoordinateY());
+                        float minZ = positions.Min(p => p.CoordinateZ());
+                        float maxZ = positions.Max(p => p.CoordinateZ());
                         
                         coordRanges.Add((minX, maxX, minY, maxY, minZ, maxZ));
                     }
@@ -433,13 +462,13 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine("| Index | X | Y | Z |");
                 summary.AppendLine("|-------|-----|-----|-----|");
                 
-                var positions = result.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry).Take(10).ToList();
+                var positions = result.PM4File!.PositionDataChunk!.Entries.Where(e => !e.IsSpecialEntry()).Take(10).ToList();
                 foreach (var pos in positions)
                 {
                     summary.AppendLine($"| {pos.Index} | {pos.CoordinateX:F2} | {pos.CoordinateY:F2} | {pos.CoordinateZ:F2} |");
                 }
                 
-                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => !e.IsSpecialEntry);
+                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => !e.IsSpecialEntry());
                 if (totalCount > 10)
                 {
                     summary.AppendLine($"_Showing 10 of {totalCount} position records_");
@@ -450,7 +479,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine("\n### Command Records");
             
             var commandFiles = results
-                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => e.IsSpecialEntry) == true)
+                .Where(r => r.PM4File?.PositionDataChunk?.Entries.Any(e => e.IsSpecialEntry()) == true)
                 .ToList();
             
             // Example command records from different files
@@ -465,14 +494,14 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine("| Index | Special Value (Hex) | As Float | Y Value |");
                 summary.AppendLine("|-------|--------------|---------|---------|");
                 
-                var commands = result.PM4File!.PositionDataChunk!.Entries.Where(e => e.IsSpecialEntry).Take(10).ToList();
+                var commands = result.PM4File!.PositionDataChunk!.Entries.Where(e => e.IsSpecialEntry()).Take(10).ToList();
                 foreach (var cmd in commands)
                 {
-                    float asFloat = BitConverter.Int32BitsToSingle(cmd.SpecialValue);
-                    summary.AppendLine($"| {cmd.Index} | 0x{cmd.SpecialValue:X8} | {asFloat:F2} | {cmd.CoordinateY:F2} |");
+                    float asFloat = BitConverter.Int32BitsToSingle(cmd.SpecialValue());
+                    summary.AppendLine($"| {cmd.Index} | 0x{cmd.SpecialValue():X8} | {asFloat:F2} | {cmd.CoordinateY():F2} |");
                 }
                 
-                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => e.IsSpecialEntry);
+                int totalCount = result.PM4File.PositionDataChunk.Entries.Count(e => e.IsSpecialEntry());
                 if (totalCount > 10)
                 {
                     summary.AppendLine($"_Showing 10 of {totalCount} command records_");
@@ -484,8 +513,8 @@ namespace WCAnalyzer.Core.Services
             
             // Special value distribution
             var specialDistribution = results
-                .SelectMany(r => r.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry) ?? Array.Empty<MPRLChunk.ServerPositionData>())
-                .GroupBy(e => e.SpecialValue)
+                .SelectMany(r => r.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry()) ?? Array.Empty<MPRLChunk.ServerPositionData>())
+                .GroupBy(e => e.SpecialValue())
                 .OrderByDescending(g => g.Count())
                 .Take(20)
                 .Select(g => new
@@ -500,7 +529,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine("| Special Value (Hex) | As Float | Count | Percentage |");
             summary.AppendLine("|--------------|---------|-------|------------|");
             
-            int totalSpecialEntries = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry) ?? 0);
+            int totalSpecialEntries = results.Sum(r => r.PM4File?.PositionDataChunk?.Entries.Count(e => e.IsSpecialEntry()) ?? 0);
             foreach (var special in specialDistribution)
             {
                 double percentage = (double)special.Count / totalSpecialEntries * 100;
@@ -515,16 +544,16 @@ namespace WCAnalyzer.Core.Services
             int entriesShown = 0;
             foreach (var result in results.Take(5))
             {
-                var entries = result.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry).Take(2).ToList();
+                var entries = result.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry()).Take(2).ToList();
                 if (entries != null && entries.Count > 0)
                 {
                     string fileName = Path.GetFileName(result.FileName ?? "unknown");
                     foreach (var entry in entries)
                     {
-                        float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
-                        summary.AppendLine($"| {fileName} | {entry.Index} | 0x{entry.SpecialValue:X8} | {asFloat:F6} | " +
-                                          $"{entry.CoordinateX:F6} | {entry.CoordinateY:F6} | {entry.CoordinateZ:F6} | " +
-                                          $"{entry.Value1:F6} | {entry.Value2:F6} | {entry.Value3:F6} |");
+                        float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue());
+                        summary.AppendLine($"| {fileName} | {entry.Index} | 0x{entry.SpecialValue():X8} | {asFloat:F6} | " +
+                                          $"{entry.CoordinateX():F6} | {entry.CoordinateY():F6} | {entry.CoordinateZ():F6} | " +
+                                          $"{entry.Value1():F6} | {entry.Value2():F6} | {entry.Value3():F6} |");
                         entriesShown++;
                         if (entriesShown >= 10) break;
                     }
@@ -543,7 +572,7 @@ namespace WCAnalyzer.Core.Services
                 var entries = result.PM4File!.PositionDataChunk!.Entries;
                 for (int i = 0; i < entries.Count - 1; i++)
                 {
-                    if (entries[i].IsSpecialEntry && !entries[i + 1].IsSpecialEntry)
+                    if (entries[i].IsSpecialEntry() && !entries[i + 1].IsSpecialEntry())
                     {
                         allPairs.Add((entries[i], entries[i + 1]));
                     }
@@ -555,7 +584,7 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine($"- Total Command-Position Pairs: {allPairs.Count:N0}");
                 
                 var groupedPairs = allPairs
-                    .GroupBy(p => p.Command.SpecialValue)
+                    .GroupBy(p => p.Command.SpecialValue())
                     .OrderByDescending(g => g.Count())
                     .Take(15)
                     .ToList();
@@ -610,10 +639,10 @@ namespace WCAnalyzer.Core.Services
                 if (result.HasVertexInfo) presentChunks.Add("MSVI (Vertex Info)");
                 if (result.HasSurfaceData) presentChunks.Add("MSUR (Surface Data)");
                 if (result.HasPositionData) presentChunks.Add("MPRL (Position Data)");
-                if (result.HasValuePairs) presentChunks.Add("MPRR (Value Pairs)");
-                if (result.HasBuildingData) presentChunks.Add("MDBH (Building Data)");
-                if (result.HasSimpleData) presentChunks.Add("MDOS (Simple Data)");
-                if (result.HasFinalData) presentChunks.Add("MDSF (Final Data)");
+                if (result.HasPositionReference) presentChunks.Add("MPRR (Position Reference)");
+                if (result.HasDestructibleBuildingHeader) presentChunks.Add("MDBH (Destructible Building Header)");
+                if (result.HasObjectData) presentChunks.Add("MDOS (Object Data)");
+                if (result.HasServerFlagData) presentChunks.Add("MDSF (Server Flag Data)");
                 
                 for (int i = 0; i < presentChunks.Count; i++)
                 {
@@ -682,23 +711,23 @@ namespace WCAnalyzer.Core.Services
                 {
                     var entries = result.PM4File.PositionDataChunk.Entries;
                     int totalEntries = entries.Count;
-                    int filePositionCount = entries.Count(e => !e.IsSpecialEntry);
-                    int fileCommandCount = entries.Count(e => e.IsSpecialEntry);
+                    int filePositionCount = entries.Count(e => !e.IsSpecialEntry());
+                    int fileCommandCount = entries.Count(e => e.IsSpecialEntry());
                     
                     summary.AppendLine($"\n#### Position Data: {totalEntries:N0} entries ({filePositionCount:N0} positions, {fileCommandCount:N0} commands)");
                     
                     // Show position record statistics if any
                     if (filePositionCount > 0)
                     {
-                        var filePosRecords = entries.Where(e => !e.IsSpecialEntry).ToList();
+                        var filePosRecords = entries.Where(e => !e.IsSpecialEntry()).ToList();
                         
                         // Coordinate ranges
-                        var minX = filePosRecords.Min(p => p.CoordinateX);
-                        var maxX = filePosRecords.Max(p => p.CoordinateX);
-                        var minY = filePosRecords.Min(p => p.CoordinateY);
-                        var maxY = filePosRecords.Max(p => p.CoordinateY);
-                        var minZ = filePosRecords.Min(p => p.CoordinateZ);
-                        var maxZ = filePosRecords.Max(p => p.CoordinateZ);
+                        var minX = filePosRecords.Min(p => p.CoordinateX());
+                        var maxX = filePosRecords.Max(p => p.CoordinateX());
+                        var minY = filePosRecords.Min(p => p.CoordinateY());
+                        var maxY = filePosRecords.Max(p => p.CoordinateY());
+                        var minZ = filePosRecords.Min(p => p.CoordinateZ());
+                        var maxZ = filePosRecords.Max(p => p.CoordinateZ());
                         
                         summary.AppendLine("\nPosition Record Coordinate Ranges:");
                         summary.AppendLine("| Axis | Minimum | Maximum | Range |");
@@ -727,7 +756,7 @@ namespace WCAnalyzer.Core.Services
                     // Show command record statistics if any
                     if (fileCommandCount > 0)
                     {
-                        var fileCmdRecords = entries.Where(e => e.IsSpecialEntry).ToList();
+                        var fileCmdRecords = entries.Where(e => e.IsSpecialEntry()).ToList();
                         
                         // Show sample command records
                         summary.AppendLine("\nSample Special Entries:");
@@ -737,10 +766,10 @@ namespace WCAnalyzer.Core.Services
                         for (int i = 0; i < Math.Min(10, fileCmdRecords.Count); i++)
                         {
                             var entry = fileCmdRecords[i];
-                            float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue);
-                            summary.AppendLine($"| {entry.Index} | 0x{entry.SpecialValue:X8} | {asFloat:F6} | " +
-                                              $"{entry.CoordinateX:F6} | {entry.CoordinateY:F6} | {entry.CoordinateZ:F6} | " +
-                                              $"{entry.Value1:F6} | {entry.Value2:F6} | {entry.Value3:F6} |");
+                            float asFloat = BitConverter.Int32BitsToSingle(entry.SpecialValue());
+                            summary.AppendLine($"| {entry.Index} | 0x{entry.SpecialValue():X8} | {asFloat:F6} | " +
+                                              $"{entry.CoordinateX():F6} | {entry.CoordinateY():F6} | {entry.CoordinateZ():F6} | " +
+                                              $"{entry.Value1():F6} | {entry.Value2():F6} | {entry.Value3():F6} |");
                         }
 
                         if (fileCmdRecords.Count > 10)
@@ -832,13 +861,13 @@ namespace WCAnalyzer.Core.Services
                         for (int i = 0; i < positions.Count; i++)
                         {
                             var pos = positions[i];
-                            string entryType = pos.IsSpecialEntry ? "Special" : "Valid";
-                            string x = pos.IsSpecialEntry ? pos.CoordinateX.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
-                                      (float.IsNaN(pos.Value1) ? "NaN" : pos.Value1.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
-                            string y = pos.CoordinateY.ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
-                            string z = pos.IsSpecialEntry ? pos.CoordinateZ.ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
-                                      (float.IsNaN(pos.Value3) ? "NaN" : pos.Value3.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
-                            string specialValueDec = pos.IsSpecialEntry ? pos.SpecialValue.ToString() : "";
+                            string entryType = pos.IsSpecialEntry() ? "Special" : "Valid";
+                            string x = pos.IsSpecialEntry() ? pos.CoordinateX().ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
+                                      (float.IsNaN(pos.Value1()) ? "NaN" : pos.Value1().ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+                            string y = pos.CoordinateY().ToString("F6", System.Globalization.CultureInfo.InvariantCulture);
+                            string z = pos.IsSpecialEntry() ? pos.CoordinateZ().ToString("F6", System.Globalization.CultureInfo.InvariantCulture) : 
+                                      (float.IsNaN(pos.Value3()) ? "NaN" : pos.Value3().ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+                            string specialValueDec = pos.IsSpecialEntry() ? pos.SpecialValue().ToString() : "";
                             
                             string line = String.Format(
                                 "{0},{1},{2},{3},{4},{5},{6},{7}",
@@ -848,7 +877,7 @@ namespace WCAnalyzer.Core.Services
                                 x,
                                 y,
                                 z,
-                                pos.IsSpecialEntry,
+                                pos.IsSpecialEntry(),
                                 specialValueDec
                             );
                             await positionWriter.WriteLineAsync(line);
@@ -1094,10 +1123,10 @@ namespace WCAnalyzer.Core.Services
                         result.HasVertexInfo ? "1" : "0",
                         result.HasSurfaceData ? "1" : "0",
                         result.HasPositionData ? "1" : "0",
-                        result.HasValuePairs ? "1" : "0",
-                        result.HasBuildingData ? "1" : "0",
-                        result.HasSimpleData ? "1" : "0",
-                        result.HasFinalData ? "1" : "0",
+                        result.HasPositionReference ? "1" : "0",
+                        result.HasDestructibleBuildingHeader ? "1" : "0",
+                        result.HasObjectData ? "1" : "0",
+                        result.HasServerFlagData ? "1" : "0",
                         vertexCount,
                         triangleCount,
                         result.Errors.Count
@@ -1114,13 +1143,27 @@ namespace WCAnalyzer.Core.Services
         /// <param name="outputDirectory">Output directory</param>
         private async Task GenerateComprehensiveMarkdownReportAsync(List<PM4AnalysisResult> results, string outputDirectory)
         {
-            if (_pm4MarkdownReportGenerator == null)
-            {
-                _pm4MarkdownReportGenerator = new PM4MarkdownReportGenerator(_logger);
-            }
+            // Comment out the PM4MarkdownReportGenerator usage as it's no longer available
+            // var markdownReportGenerator = _pm4MarkdownReportGenerator ?? new PM4MarkdownReportGenerator(_logger);
             
             string outputPath = Path.Combine(outputDirectory, "pm4_comprehensive_report.md");
-            await _pm4MarkdownReportGenerator.GenerateComprehensiveMultiFileReportAsync(results, outputPath);
+            // await markdownReportGenerator.GenerateComprehensiveMultiFileReportAsync(results, outputPath);
+            
+            // Use standard markdown report generator instead
+            var markdownContent = new StringBuilder();
+            markdownContent.AppendLine("# PM4 Comprehensive Report");
+            markdownContent.AppendLine($"Generated on: {DateTime.Now}");
+            markdownContent.AppendLine();
+            
+            foreach (var result in results)
+            {
+                markdownContent.AppendLine($"## {result.FileName}");
+                markdownContent.AppendLine($"Path: {result.FilePath}");
+                markdownContent.AppendLine($"Success: {result.Success}");
+                markdownContent.AppendLine();
+            }
+            
+            await File.WriteAllTextAsync(outputPath, markdownContent.ToString());
             
             _logger.LogInformation("Generated comprehensive PM4 report at {OutputPath}", outputPath);
         }
@@ -1138,10 +1181,15 @@ namespace WCAnalyzer.Core.Services
                 return pm4Chunk.Size;
             }
             
-            // For GenericChunk which also has a Size property
-            if (chunk is GenericChunk genericChunk)
+            // For GenericChunk which also has a Size property - specify the namespace to avoid ambiguity
+            if (chunk is Models.PM4.GenericChunk pm4GenericChunk)
             {
-                return genericChunk.Size;
+                return pm4GenericChunk.Size;
+            }
+            
+            if (chunk is Models.PD4.GenericChunk pd4GenericChunk)
+            {
+                return pd4GenericChunk.Size;
             }
             
             // For other IIFFChunk implementations, try to get data through IBinarySerializable

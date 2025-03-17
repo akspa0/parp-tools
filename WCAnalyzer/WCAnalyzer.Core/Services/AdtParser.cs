@@ -95,23 +95,11 @@ namespace WCAnalyzer.Core.Services
             {
                 // Check for reversed chunk IDs (common in some ADT files)
                 byte[] firstFourBytes = br.ReadBytes(4);
-                string firstToken = Encoding.ASCII.GetString(firstFourBytes);
-                _logger.LogDebug("First 4 bytes of file: {FirstToken}", firstToken);
+                ms.Position = 0; // Go back to start
 
-                bool reversedChunks = false;
-                if (firstToken == "REVM") // Reversed "MVER"
-                {
-                    _logger.LogDebug("File has reversed chunk IDs, correcting...");
-                    reversedChunks = true;
-                    ms.Position = 0; // Go back to start
-                }
-                else if (firstToken != "MVER")
-                {
-                    // If it doesn't start with MVER or REVM, it's probably a special file
-                    isSpecialFile = true;
-                    isMonolithicAdt = false;
-                    _logger.LogDebug("File does not start with standard ADT header (MVER)");
-                }
+                // All chunk names in files are reversed, so we will always reverse them during parsing
+                bool reversedChunks = true;
+                _logger.LogDebug("Assuming all chunk IDs are reversed from documentation");
 
                 // Create a helper to read 4-byte chunk identifiers
                 Func<string> readChunkId = () =>
@@ -125,10 +113,8 @@ namespace WCAnalyzer.Core.Services
                             return string.Empty;
                         }
                         
-                        if (reversedChunks)
-                        {
-                            Array.Reverse(bytes);
-                        }
+                        // Always reverse bytes to get the correct chunk ID
+                        Array.Reverse(bytes);
                         return Encoding.ASCII.GetString(bytes);
                     }
                     catch (EndOfStreamException)
@@ -599,14 +585,14 @@ namespace WCAnalyzer.Core.Services
                                                     try
                                                     {
                                                         // Normals are stored as a 9x9 grid of 3-byte values (145 values total)
-                                                        terrainChunk.Normals = new Vector3[145];
+                                                        terrainChunk.Normals = new System.Numerics.Vector3[145];
                                                         for (int i = 0; i < 145 && ms.Position < subChunkEndPos; i++)
                                                         {
                                                             // Normals are stored as signed bytes (-127 to 127) and need to be normalized
                                                             float nx = br.ReadSByte() / 127.0f;
                                                             float ny = br.ReadSByte() / 127.0f;
                                                             float nz = br.ReadSByte() / 127.0f;
-                                                            terrainChunk.Normals[i] = new Vector3(nx, ny, nz);
+                                                            terrainChunk.Normals[i] = new System.Numerics.Vector3(nx, ny, nz);
                                                         }
                                                         _logger.LogDebug("Read {Count} normal vectors", terrainChunk.Normals.Length);
                                                     }
@@ -805,27 +791,27 @@ namespace WCAnalyzer.Core.Services
                                     placement.UniqueId = br.ReadInt32();
                                     
                                     // Read position
-                                    placement.Position = new Vector3(
+                                    placement.Position = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
                                     );
                                     
                                     // Read rotation
-                                    placement.Rotation = new Vector3(
+                                    placement.Rotation = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
                                     );
                                     
                                     // Read bounds
-                                    placement.BoundingBox1 = new Vector3(
+                                    placement.BoundingBox1 = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
                                     );
                                     
-                                    placement.BoundingBox2 = new Vector3(
+                                    placement.BoundingBox2 = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
@@ -921,14 +907,14 @@ namespace WCAnalyzer.Core.Services
                                     placement.UniqueId = (int)br.ReadUInt32(); // UniqueID is uint in Warcraft.NET's MDDFEntry
                                     
                                     // Read position
-                                    placement.Position = new Vector3(
+                                    placement.Position = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
                                     );
                                     
                                     // Read rotation
-                                    placement.Rotation = new Vector3(
+                                    placement.Rotation = new System.Numerics.Vector3(
                                         br.ReadSingle(),
                                         br.ReadSingle(),
                                         br.ReadSingle()
@@ -1554,7 +1540,7 @@ namespace WCAnalyzer.Core.Services
                         };
 
                         // Avoid duplicates
-                        if (!result.TextureReferences.Any(t => t.FileDataId == textureReference.FileDataId && t.UsesFileDataId))
+                        if (!result.TextureReferences.Any(t => t.FileDataId == textureFileDataId && t.UsesFileDataId))
                         {
                             result.TextureReferences.Add(textureReference);
                         }
@@ -1658,7 +1644,7 @@ namespace WCAnalyzer.Core.Services
                         };
 
                         // Avoid duplicates
-                        if (!result.WmoReferences.Any(w => w.FileDataId == wmoReference.FileDataId && w.UsesFileDataId))
+                        if (!result.WmoReferences.Any(w => w.FileDataId == wmoFileDataId && w.UsesFileDataId))
                         {
                             result.WmoReferences.Add(wmoReference);
                         }
@@ -1858,7 +1844,7 @@ namespace WCAnalyzer.Core.Services
         /// <summary>
         /// Checks if a Vector3 has invalid values (NaN, Infinity, or unreasonably large/small)
         /// </summary>
-        private bool IsInvalidVector(Vector3 vector)
+        private bool IsInvalidVector(System.Numerics.Vector3 vector)
         {
             // Check for NaN or Infinity
             if (float.IsNaN(vector.X) || float.IsInfinity(vector.X) ||
@@ -1869,7 +1855,35 @@ namespace WCAnalyzer.Core.Services
             }
             
             // Check for unreasonably large values
-            if (Math.Abs(vector.X) > 100000 || Math.Abs(vector.Y) > 100000 || Math.Abs(vector.Z) > 100000)
+            const float maxReasonableValue = 100000.0f;
+            if (Math.Abs(vector.X) > maxReasonableValue ||
+                Math.Abs(vector.Y) > maxReasonableValue ||
+                Math.Abs(vector.Z) > maxReasonableValue)
+            {
+                return true;
+            }
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if a Vector3 has invalid values (NaN, Infinity, or unreasonably large/small)
+        /// </summary>
+        private bool IsInvalidVector(Services.Vector3 vector)
+        {
+            // Check for NaN or Infinity
+            if (float.IsNaN(vector.X) || float.IsInfinity(vector.X) ||
+                float.IsNaN(vector.Y) || float.IsInfinity(vector.Y) ||
+                float.IsNaN(vector.Z) || float.IsInfinity(vector.Z))
+            {
+                return true;
+            }
+            
+            // Check for unreasonably large values
+            const float maxReasonableValue = 100000.0f;
+            if (Math.Abs(vector.X) > maxReasonableValue ||
+                Math.Abs(vector.Y) > maxReasonableValue ||
+                Math.Abs(vector.Z) > maxReasonableValue)
             {
                 return true;
             }
@@ -1950,6 +1964,35 @@ namespace WCAnalyzer.Core.Services
             {
                 result.UsesFileDataId = true;
             }
+        }
+
+        /// <summary>
+        /// Converts from WCAnalyzer.Core.Services.Vector3 to System.Numerics.Vector3
+        /// </summary>
+        private System.Numerics.Vector3 Convert(WCAnalyzer.Core.Services.Vector3 v)
+        {
+            return new System.Numerics.Vector3(v.X, v.Y, v.Z);
+        }
+
+        /// <summary>
+        /// Converts from System.Numerics.Vector3 to WCAnalyzer.Core.Services.Vector3
+        /// </summary>
+        private WCAnalyzer.Core.Services.Vector3 ConvertBack(System.Numerics.Vector3 v)
+        {
+            return new WCAnalyzer.Core.Services.Vector3(v.X, v.Y, v.Z);
+        }
+
+        /// <summary>
+        /// Converts an array of WCAnalyzer.Core.Services.Vector3 to System.Numerics.Vector3[]
+        /// </summary>
+        private System.Numerics.Vector3[] ConvertArray(WCAnalyzer.Core.Services.Vector3[] source)
+        {
+            var result = new System.Numerics.Vector3[source.Length];
+            for (int i = 0; i < source.Length; i++)
+            {
+                result[i] = Convert(source[i]);
+            }
+            return result;
         }
     }
 }

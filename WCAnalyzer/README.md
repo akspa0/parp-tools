@@ -1,4 +1,3 @@
-
 # WCAnalyzer: Comprehensive Warcraft File Analysis Toolkit
 
 [![.NET 8.0](https://img.shields.io/badge/.NET-8.0-blue)](https://dotnet.microsoft.com/download/dotnet/8.0)
@@ -108,6 +107,47 @@ dotnet run -- uniqueid -l "path/to/listfile.csv" -d "path/to/files" -o "output/d
 # Process batch of IDs
 dotnet run -- uniqueid --id-list "path/to/id_list.txt" -o "output/directory"
 ```
+
+## Quick Start Guide
+
+### Analyzing PM4 Files
+
+To analyze PM4 files, use the following command:
+
+```bash
+WCAnalyzer.CLI.exe pm4 analyze -i [path-to-pm4-file] -o [output-directory]
+```
+
+For example:
+
+```bash
+WCAnalyzer.CLI.exe pm4 analyze -i .\test_data\development_00_00.pm4 -o test_output
+```
+
+### Analyzing PD4 Files
+
+To analyze PD4 files, use the following command:
+
+```bash
+WCAnalyzer.CLI.exe pd4 analyze -i [path-to-pd4-file] -o [output-directory]
+```
+
+### Analyzing ADT (Terrain) Files
+
+To analyze ADT terrain files, use the following command:
+
+```bash
+WCAnalyzer.CLI.exe adt analyze -i [path-to-adt-file] -o [output-directory]
+```
+
+### Output
+
+For each analyzed file, the tool creates a subdirectory in the output directory named after the input file (without extension). This subdirectory contains:
+
+1. CSV files with data extracted from the file (only if that data type exists in the file)
+2. A summary.txt file that describes what data was found and what files were generated
+
+If no CSV files are generated, it means the input file did not contain any of the expected data formats.
 
 ## Command Reference
 

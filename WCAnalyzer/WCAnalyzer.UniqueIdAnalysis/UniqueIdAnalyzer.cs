@@ -61,14 +61,14 @@ namespace WCAnalyzer.UniqueIdAnalysis
             Z = z;
         }
 
-        public static Vector3Data FromVector3(Vector3 vector)
+        public static Vector3Data FromVector3(System.Numerics.Vector3 vector)
         {
             return new Vector3Data(vector.X, vector.Y, vector.Z);
         }
 
-        public Vector3 ToVector3()
+        public System.Numerics.Vector3 ToVector3()
         {
-            return new Vector3(X, Y, Z);
+            return new System.Numerics.Vector3(X, Y, Z);
         }
 
         public static Vector3Data FromObject(object obj)
@@ -83,7 +83,7 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 return v3data;
 
             // If it's a Vector3, convert it
-            if (obj is Vector3 vector3)
+            if (obj is System.Numerics.Vector3 vector3)
                 return FromVector3(vector3);
 
             // If it's a JsonElement, try to extract X, Y, Z properties
@@ -130,9 +130,9 @@ namespace WCAnalyzer.UniqueIdAnalysis
     /// <summary>
     /// Custom JsonConverter for Vector3 to handle different JSON formats
     /// </summary>
-    public class Vector3Converter : JsonConverter<Vector3>
+    public class Vector3Converter : JsonConverter<System.Numerics.Vector3>
     {
-        public override Vector3 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        public override System.Numerics.Vector3 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             if (reader.TokenType != JsonTokenType.StartObject)
                 throw new JsonException("Expected start of object");
@@ -164,10 +164,10 @@ namespace WCAnalyzer.UniqueIdAnalysis
                 }
             }
 
-            return new Vector3(x, y, z);
+            return new System.Numerics.Vector3(x, y, z);
         }
 
-        public override void Write(Utf8JsonWriter writer, Vector3 value, JsonSerializerOptions options)
+        public override void Write(Utf8JsonWriter writer, System.Numerics.Vector3 value, JsonSerializerOptions options)
         {
             writer.WriteStartObject();
             writer.WriteNumber("X", value.X);

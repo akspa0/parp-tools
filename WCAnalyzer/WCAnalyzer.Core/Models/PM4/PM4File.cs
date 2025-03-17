@@ -30,6 +30,16 @@ namespace WCAnalyzer.Core.Models.PM4
         public MVER? Version { get; set; }
 
         /// <summary>
+        /// Gets or sets the CRC chunk.
+        /// </summary>
+        public MCRCChunk? CrcChunk { get; set; }
+
+        /// <summary>
+        /// Gets or sets the CRC chunk (alias for CrcChunk).
+        /// </summary>
+        public IIFFChunk? Crc { get; set; }
+
+        /// <summary>
         /// Gets or sets the shadow data chunk.
         /// </summary>
         public MSHDChunk? ShadowDataChunk { get; set; }
@@ -120,37 +130,57 @@ namespace WCAnalyzer.Core.Models.PM4
         public IIFFChunk? PositionData { get; set; }
 
         /// <summary>
-        /// Gets or sets the value pairs chunk.
+        /// Gets or sets the position reference chunk.
         /// </summary>
-        public IIFFChunk? ValuePairs { get; set; }
+        public MPRRChunk? PositionReferenceChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the position reference chunk (alias for PositionReferenceChunk).
+        /// </summary>
+        public IIFFChunk? PositionReference { get; set; }
 
         /// <summary>
-        /// Gets or sets the building data chunk.
+        /// Gets or sets the destructible building header chunk.
         /// </summary>
-        public IIFFChunk? BuildingData { get; set; }
+        public MDBHChunk? DestructibleBuildingHeaderChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the destructible building header chunk (alias for DestructibleBuildingHeaderChunk).
+        /// </summary>
+        public IIFFChunk? DestructibleBuildingHeader { get; set; }
 
         /// <summary>
-        /// Gets or sets the simple data chunk.
+        /// Gets or sets the object data chunk.
         /// </summary>
-        public IIFFChunk? SimpleData { get; set; }
+        public MDOSChunk? ObjectDataChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the object data chunk (alias for ObjectDataChunk).
+        /// </summary>
+        public IIFFChunk? ObjectData { get; set; }
 
         /// <summary>
-        /// Gets or sets the final data chunk.
+        /// Gets or sets the server flag data chunk.
         /// </summary>
-        public IIFFChunk? FinalData { get; set; }
+        public MDSFChunk? ServerFlagDataChunk { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the server flag data chunk (alias for ServerFlagDataChunk).
+        /// </summary>
+        public IIFFChunk? ServerFlagData { get; set; }
 
         /// <summary>
-        /// Gets the list of errors encountered during parsing.
+        /// Gets the list of errors encountered during processing.
         /// </summary>
         public List<string> Errors { get; private set; } = new List<string>();
 
         /// <summary>
-        /// Gets the file name.
+        /// Gets the filename of the PM4 file.
         /// </summary>
         public string? FileName { get; private set; }
 
         /// <summary>
-        /// Gets the file path.
+        /// Gets the file path of the PM4 file.
         /// </summary>
         public string? FilePath { get; private set; }
 
@@ -300,6 +330,12 @@ namespace WCAnalyzer.Core.Models.PM4
                     Version = new MVER(data);
                     break;
 
+                case "MCRC":
+                case "CRCM":
+                    CrcChunk = new MCRCChunk(data);
+                    Crc = CrcChunk;
+                    break;
+
                 case "MSHD":
                 case "DHSM":
                     ShadowDataChunk = new MSHDChunk(data);
@@ -356,22 +392,26 @@ namespace WCAnalyzer.Core.Models.PM4
 
                 case "MPRR":
                 case "RRPM":
-                    ValuePairs = new GenericChunk(signature, data);
+                    PositionReferenceChunk = new MPRRChunk(data);
+                    PositionReference = PositionReferenceChunk;
                     break;
 
                 case "MDBH":
                 case "HBDM":
-                    BuildingData = new GenericChunk(signature, data);
+                    DestructibleBuildingHeaderChunk = new MDBHChunk(data);
+                    DestructibleBuildingHeader = DestructibleBuildingHeaderChunk;
                     break;
 
                 case "MDOS":
                 case "SODM":
-                    SimpleData = new GenericChunk(signature, data);
+                    ObjectDataChunk = new MDOSChunk(data);
+                    ObjectData = ObjectDataChunk;
                     break;
 
                 case "MDSF":
                 case "FSDM":
-                    FinalData = new GenericChunk(signature, data);
+                    ServerFlagDataChunk = new MDSFChunk(data);
+                    ServerFlagData = ServerFlagDataChunk;
                     break;
 
                 // For other chunks, we still use the generic chunk class
@@ -397,78 +437,92 @@ namespace WCAnalyzer.Core.Models.PM4
                     Version = chunk as MVER;
                     break;
 
+                case "MCRC":
+                case "CRCM":
+                    Crc = chunk;
+                    CrcChunk = chunk as MCRCChunk;
+                    break;
+
                 case "MSHD":
                 case "DHSM":
+                    ShadowData = chunk;
                     ShadowDataChunk = chunk as MSHDChunk;
-                    ShadowData = ShadowDataChunk;
                     break;
 
                 case "MSPV":
                 case "VPSM":
+                    VertexPositions = chunk;
                     VertexPositionsChunk = chunk as MSPVChunk;
-                    VertexPositions = VertexPositionsChunk;
                     break;
 
                 case "MSPI":
                 case "IPSM":
+                    VertexIndices = chunk;
                     VertexIndicesChunk = chunk as MSPIChunk;
-                    VertexIndices = VertexIndicesChunk;
                     break;
 
                 case "MSCN":
                 case "NCSM":
+                    NormalCoordinates = chunk;
                     NormalCoordinatesChunk = chunk as MSCNChunk;
-                    NormalCoordinates = NormalCoordinatesChunk;
                     break;
 
                 case "MSLK":
                 case "KLSM":
+                    Links = chunk;
                     LinksChunk = chunk as MSLKChunk;
-                    Links = LinksChunk;
                     break;
 
                 case "MSVT":
                 case "TVSM":
+                    VertexData = chunk;
                     VertexDataChunk = chunk as MSVTChunk;
-                    VertexData = VertexDataChunk;
                     break;
 
                 case "MSVI":
                 case "IVSM":
+                    VertexInfo = chunk;
                     VertexInfoChunk = chunk as MSVIChunk;
-                    VertexInfo = VertexInfoChunk;
                     break;
 
                 case "MSUR":
                 case "RUSM":
+                    SurfaceData = chunk;
                     SurfaceDataChunk = chunk as MSURChunk;
-                    SurfaceData = SurfaceDataChunk;
                     break;
 
                 case "MPRL":
                 case "LRPM":
+                    PositionData = chunk;
                     PositionDataChunk = chunk as MPRLChunk;
-                    PositionData = PositionDataChunk;
                     break;
 
                 case "MPRR":
                 case "RRPM":
-                    ValuePairs = chunk;
+                    PositionReference = chunk;
+                    PositionReferenceChunk = chunk as MPRRChunk;
                     break;
 
                 case "MDBH":
                 case "HBDM":
-                    BuildingData = chunk;
+                    DestructibleBuildingHeader = chunk;
+                    DestructibleBuildingHeaderChunk = chunk as MDBHChunk;
                     break;
 
                 case "MDOS":
                 case "SODM":
-                    SimpleData = chunk;
+                    ObjectData = chunk;
+                    ObjectDataChunk = chunk as MDOSChunk;
                     break;
 
                 case "MDSF":
                 case "FSDM":
-                    FinalData = chunk;
+                    ServerFlagData = chunk;
+                    ServerFlagDataChunk = chunk as MDSFChunk;
+                    break;
+
+                default:
+                    _logger?.LogWarning("Unknown chunk signature: {Signature}", signature);
                     break;
             }
         }
@@ -499,10 +553,10 @@ namespace WCAnalyzer.Core.Models.PM4
             summary.AppendLine($"| MSVI (Vertex Indices 2) | {(VertexInfo != null ? "Yes" : "No")} | {GetChunkSize(VertexInfo)} |");
             summary.AppendLine($"| MSUR (Surface Data) | {(SurfaceData != null ? "Yes" : "No")} | {GetChunkSize(SurfaceData)} |");
             summary.AppendLine($"| MPRL (Position Data) | {(PositionData != null ? "Yes" : "No")} | {GetChunkSize(PositionData)} |");
-            summary.AppendLine($"| MPRR (Value Pairs) | {(ValuePairs != null ? "Yes" : "No")} | {GetChunkSize(ValuePairs)} |");
-            summary.AppendLine($"| MDBH (Building Data) | {(BuildingData != null ? "Yes" : "No")} | {GetChunkSize(BuildingData)} |");
-            summary.AppendLine($"| MDOS (Simple Data) | {(SimpleData != null ? "Yes" : "No")} | {GetChunkSize(SimpleData)} |");
-            summary.AppendLine($"| MDSF (Final Data) | {(FinalData != null ? "Yes" : "No")} | {GetChunkSize(FinalData)} |");
+            summary.AppendLine($"| MPRR (Position Reference) | {(PositionReference != null ? "Yes" : "No")} | {GetChunkSize(PositionReference)} |");
+            summary.AppendLine($"| MDBH (Destructible Building Header) | {(DestructibleBuildingHeader != null ? "Yes" : "No")} | {GetChunkSize(DestructibleBuildingHeader)} |");
+            summary.AppendLine($"| MDOS (Object Data) | {(ObjectData != null ? "Yes" : "No")} | {GetChunkSize(ObjectData)} |");
+            summary.AppendLine($"| MDSF (Server Flag Data) | {(ServerFlagData != null ? "Yes" : "No")} | {GetChunkSize(ServerFlagData)} |");
             
             // Add detailed information for specific chunks
             if (ShadowDataChunk != null)
@@ -628,7 +682,7 @@ namespace WCAnalyzer.Core.Models.PM4
                     for (int i = 0; i < Math.Min(5, VertexDataChunk.Vertices.Count); i++)
                     {
                         var vertex = VertexDataChunk.Vertices[i];
-                        summary.AppendLine($"  Vertex {i}: X={vertex.X}, Y={vertex.Y}, Z={vertex.Z}, Flag1={vertex.Flag1}, Flag2={vertex.Flag2}");
+                        summary.AppendLine($"  Vertex {i}: X={vertex.WorldX}, Y={vertex.WorldY}, Z={vertex.WorldZ}");
                     }
                 }
             }

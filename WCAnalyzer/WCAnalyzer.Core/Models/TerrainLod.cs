@@ -5,173 +5,172 @@ using System.Numerics;
 namespace WCAnalyzer.Core.Models
 {
     /// <summary>
-    /// Represents the Level of Detail (LOD) data for terrain in ADT files.
-    /// These chunks start with ML prefix and are used for terrain rendering at different distances.
+    /// Terrain Level of Detail information.
     /// </summary>
     public class TerrainLod
     {
         /// <summary>
-        /// MLHD: Header for the Level of Detail data containing basic information.
+        /// Gets or sets the terrain LOD header.
         /// </summary>
         public TerrainLodHeader Header { get; set; } = new TerrainLodHeader();
         
         /// <summary>
-        /// MLVH: Heightmap data for LOD terrain.
+        /// Gets or sets the height data.
         /// </summary>
         public float[] HeightData { get; set; } = Array.Empty<float>();
         
         /// <summary>
-        /// MLLL: Level data defining distances at which different LOD levels are used.
+        /// Gets or sets the LOD levels.
         /// </summary>
         public List<TerrainLodLevel> Levels { get; set; } = new List<TerrainLodLevel>();
         
         /// <summary>
-        /// MLND: Quadtree node data for LOD terrain rendering.
+        /// Gets or sets the LOD nodes.
         /// </summary>
         public List<TerrainLodNode> Nodes { get; set; } = new List<TerrainLodNode>();
         
         /// <summary>
-        /// MLVI: Vertex indices for LOD terrain geometry.
+        /// Gets or sets the vertex indices.
         /// </summary>
         public ushort[] VertexIndices { get; set; } = Array.Empty<ushort>();
         
         /// <summary>
-        /// MLSI: Skirt indices for LOD terrain edges.
+        /// Gets or sets the skirt indices.
         /// </summary>
         public ushort[] SkirtIndices { get; set; } = Array.Empty<ushort>();
         
         /// <summary>
-        /// MLLD: LOD liquid data.
+        /// Gets or sets the liquid data.
         /// </summary>
         public TerrainLodLiquidData LiquidData { get; set; } = new TerrainLodLiquidData();
         
         /// <summary>
-        /// MLLN: Data for LOD liquid meshes.
+        /// Gets or sets the liquid node.
         /// </summary>
         public TerrainLodLiquidNode LiquidNode { get; set; } = new TerrainLodLiquidNode();
         
         /// <summary>
-        /// MLLI: Indices for LOD liquid meshes.
+        /// Gets or sets the liquid indices.
         /// </summary>
         public Vector3[] LiquidIndices { get; set; } = Array.Empty<Vector3>();
         
         /// <summary>
-        /// MLLV: Vertices for LOD liquid meshes.
+        /// Gets or sets the liquid vertices.
         /// </summary>
         public Vector3[] LiquidVertices { get; set; } = Array.Empty<Vector3>();
     }
     
     /// <summary>
-    /// MLHD: Header data for terrain LOD.
+    /// Terrain LOD header information.
     /// </summary>
     public class TerrainLodHeader
     {
         /// <summary>
-        /// Version or flags.
+        /// Gets or sets the flags.
         /// </summary>
         public uint Flags { get; set; }
         
         /// <summary>
-        /// Bounding box for the terrain.
+        /// Gets or sets the bounding box.
         /// </summary>
         public BoundingBox BoundingBox { get; set; } = new BoundingBox();
     }
     
     /// <summary>
-    /// MLLL: Level data for terrain LOD.
+    /// Terrain LOD level information.
     /// </summary>
     public class TerrainLodLevel
     {
         /// <summary>
-        /// LOD distance bands.
+        /// Gets or sets the LOD bands.
         /// </summary>
         public float LodBands { get; set; }
         
         /// <summary>
-        /// Height data length.
+        /// Gets or sets the height length.
         /// </summary>
         public uint HeightLength { get; set; }
         
         /// <summary>
-        /// Height data index.
+        /// Gets or sets the height index.
         /// </summary>
         public uint HeightIndex { get; set; }
         
         /// <summary>
-        /// Map area low data length.
+        /// Gets or sets the map area low length.
         /// </summary>
         public uint MapAreaLowLength { get; set; }
         
         /// <summary>
-        /// Map area low data index.
+        /// Gets or sets the map area low index.
         /// </summary>
         public uint MapAreaLowIndex { get; set; }
     }
     
     /// <summary>
-    /// MLND: Node data for terrain LOD quadtree.
+    /// Terrain LOD node information.
     /// </summary>
     public class TerrainLodNode
     {
         /// <summary>
-        /// Vertex indices offset.
+        /// Gets or sets the vertex indices offset.
         /// </summary>
         public uint VertexIndicesOffset { get; set; }
         
         /// <summary>
-        /// Vertex indices length.
+        /// Gets or sets the vertex indices length.
         /// </summary>
         public uint VertexIndicesLength { get; set; }
         
         /// <summary>
-        /// Unknown value 1.
+        /// Gets or sets the unknown value 1.
         /// </summary>
         public uint Unknown1 { get; set; }
         
         /// <summary>
-        /// Unknown value 2.
+        /// Gets or sets the unknown value 2.
         /// </summary>
         public uint Unknown2 { get; set; }
         
         /// <summary>
-        /// Child node indices (4 indices for quadtree children).
+        /// Gets or sets the child indices.
         /// </summary>
         public ushort[] ChildIndices { get; set; } = new ushort[4];
     }
     
     /// <summary>
-    /// MLLD: Liquid data for terrain LOD.
+    /// Terrain LOD liquid data.
     /// </summary>
     public class TerrainLodLiquidData
     {
         /// <summary>
-        /// Flags for the liquid data.
+        /// Gets or sets the flags.
         /// </summary>
         public uint Flags { get; set; }
         
         /// <summary>
-        /// Size of the depth chunk.
+        /// Gets or sets the depth chunk size.
         /// </summary>
         public ushort DepthChunkSize { get; set; }
         
         /// <summary>
-        /// Approximate size of the alpha chunk.
+        /// Gets or sets the alpha chunk size.
         /// </summary>
         public ushort AlphaChunkSize { get; set; }
         
         /// <summary>
-        /// Depth chunk data.
+        /// Gets or sets the depth chunk data.
         /// </summary>
         public byte[] DepthChunkData { get; set; } = Array.Empty<byte>();
         
         /// <summary>
-        /// Alpha chunk data.
+        /// Gets or sets the alpha chunk data.
         /// </summary>
         public byte[] AlphaChunkData { get; set; } = Array.Empty<byte>();
     }
     
     /// <summary>
-    /// MLLN: Liquid node data for terrain LOD.
+    /// Terrain LOD liquid node.
     /// </summary>
     public class TerrainLodLiquidNode
     {
@@ -209,21 +208,5 @@ namespace WCAnalyzer.Core.Models
         /// Unknown value 6.
         /// </summary>
         public uint Unknown6 { get; set; }
-    }
-    
-    /// <summary>
-    /// Bounding box for 3D objects.
-    /// </summary>
-    public class BoundingBox
-    {
-        /// <summary>
-        /// Minimum corner of the bounding box.
-        /// </summary>
-        public Vector3 Min { get; set; }
-        
-        /// <summary>
-        /// Maximum corner of the bounding box.
-        /// </summary>
-        public Vector3 Max { get; set; }
     }
 } 
