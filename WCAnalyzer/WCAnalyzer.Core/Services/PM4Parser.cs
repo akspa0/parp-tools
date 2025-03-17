@@ -149,12 +149,20 @@ namespace WCAnalyzer.Core.Services
                             data.VertexPositions = ReadVertexPositions(reader, chunkSize);
                             chunkProcessed = true;
                             break;
-                        case "MSVI": // MS Vertex Indices
+                        case "MSPI": // MS Vertex Indices
                             data.VertexIndices = ReadVertexIndices(reader, chunkSize);
+                            chunkProcessed = true;
+                            break;
+                        case "MSVI": // MS Vertex Indices for MSVT vertices (interior models)
+                            data.MsviIndices = ReadMsviIndices(reader, chunkSize);
                             chunkProcessed = true;
                             break;
                         case "MSLK": // MS Links
                             data.Links = ReadLinkData(reader, chunkSize);
+                            chunkProcessed = true;
+                            break;
+                        case "MSVT": // MS Vertex Data
+                            data.VertexData = ReadVertexData(reader, chunkSize);
                             chunkProcessed = true;
                             break;
                         case "MPRL": // MP Position Data
@@ -167,7 +175,6 @@ namespace WCAnalyzer.Core.Services
                             break;
                         // Add the other implemented chunks
                         case "MSHD": // MS Header
-                        case "MSPI": // MS Position Indices
                         case "MSCN": // MS Connections
                         case "MSUR": // MS Unknown References
                         case "MDBH": // Database Header
@@ -265,6 +272,29 @@ namespace WCAnalyzer.Core.Services
         }
         
         /// <summary>
+        /// Reads MSVI indices from the binary reader.
+        /// </summary>
+        /// <param name="reader">The binary reader to read from.</param>
+        /// <param name="chunkSize">The size of the chunk in bytes.</param>
+        /// <returns>A list of MSVI indices.</returns>
+        private List<int> ReadMsviIndices(BinaryReader reader, int chunkSize)
+        {
+            var indices = new List<int>();
+            
+            // MSVI chunk likely contains uint32 indices that reference into MSVT vertices
+            var entryCount = chunkSize / 4; // 4 bytes per index (32-bit)
+            
+            _logger?.LogInformation("Reading {Count} MSVI indices for interior model faces", entryCount);
+            
+            for (int i = 0; i < entryCount; i++)
+            {
+                indices.Add((int)reader.ReadUInt32());
+            }
+            
+            return indices;
+        }
+        
+        /// <summary>
         /// Reads link data from the binary reader.
         /// </summary>
         private List<LinkData> ReadLinkData(BinaryReader reader, int chunkSize)
@@ -321,19 +351,19 @@ namespace WCAnalyzer.Core.Services
         /// </summary>
         private List<PositionReference> ReadPositionReferences(BinaryReader reader, int chunkSize)
         {
-            var entrySize = 8; // Each position reference entry is 8 bytes
+            var entrySize = 4; // Each position reference entry is 4 bytes (2 uint16 values)
             var entryCount = chunkSize / entrySize;
             var references = new List<PositionReference>(entryCount);
             
             for (int i = 0; i < entryCount; i++)
             {
-                var value1 = reader.ReadInt32();
-                var value2 = reader.ReadInt32();
+                var value1 = reader.ReadUInt16();
+                var value2 = reader.ReadUInt16();
                 
                 var reference = new PositionReference
                 {
-                    Value0x00 = value1,
-                    Value0x04 = value2,
+                    Value0x00 = value1, // Store the uint16 in the int property
+                    Value0x04 = value2, // Store the uint16 in the int property
                     Value0x08 = 0,
                     Value0x0C = 0,
                     Value1 = value1,
@@ -344,6 +374,51 @@ namespace WCAnalyzer.Core.Services
             }
             
             return references;
+        }
+
+        /// <summary>
+        /// Reads vertex data from the binary reader for MSVT chunk.
+        /// The data is ordered YXZ as per documentation and requires specific transformations.
+        /// </summary>
+        private List<VertexData> ReadVertexData(BinaryReader reader, int chunkSize)
+        {
+            // Constants for coordinate transformations as per documentation
+            const float CoordinateOffset = 17066.666f;
+            const float HeightConversion = 36.0f; // Convert internal inch height to yards
+            
+            var entrySize = 12; // 3 floats x 4 bytes each
+            var entryCount = chunkSize / entrySize;
+            var vertices = new List<VertexData>(entryCount);
+            
+            for (int i = 0; i < entryCount; i++)
+            {
+                // Read the raw values in YXZ order as per documentation
+                float rawY = reader.ReadSingle();
+                float rawX = reader.ReadSingle();
+                float rawZ = reader.ReadSingle();
+                
+                // Apply the transformation formulas from the documentation
+                float worldY = CoordinateOffset - rawY;
+                float worldX = CoordinateOffset - rawX;
+                float worldZ = rawZ / HeightConversion;
+                
+                var vertex = new VertexData
+                {
+                    // Store both raw and transformed values
+                    RawY = rawY,
+                    RawX = rawX,
+                    RawZ = rawZ,
+                    
+                    // Store transformed world coordinates
+                    WorldX = worldX,
+                    WorldY = worldY,
+                    WorldZ = worldZ
+                };
+                
+                vertices.Add(vertex);
+            }
+            
+            return vertices;
         }
         
         /// <summary>

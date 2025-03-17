@@ -381,15 +381,12 @@ namespace WCAnalyzer.CLI
                             // Parse the PM4 file
                             var result = pm4Parser.ParseFile(input.FullName);
                             
-                            if (result.HasVertexPositions)
+                            if (result.HasVertexPositions || result.HasVertexData)
                             {
-                                // Export to OBJ format
-                                var objFileName = Path.GetFileNameWithoutExtension(input.Name) + ".obj";
-                                var objFilePath = Path.Combine(output.FullName, objFileName);
+                                // Export to OBJ format using the new method that creates separate files
+                                await objExporter.ExportToDirectoryAsync(result, output.FullName);
                                 
-                                await objExporter.ExportToObjAsync(result, objFilePath);
-                                
-                                logger.LogInformation("Exported to OBJ: {OutputFile}", objFilePath);
+                                logger.LogInformation("Exported to OBJ files in: {OutputDirectory}", output.FullName);
                                 successCount++;
                             }
                             else

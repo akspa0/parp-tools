@@ -79,7 +79,7 @@ namespace WCAnalyzer.Core.Models.PM4
         // Backward compatibility properties
         public bool HasShadowData => false;
         public bool HasNormalCoordinates => false;
-        public bool HasVertexData => HasVertexPositions;
+        public bool HasVertexData => PM4Data?.VertexData?.Count > 0;
         public bool HasVertexInfo => HasVertexIndices;
         public bool HasSurfaceData => false;
         public bool HasPositionReference => HasPositionReferences;
@@ -88,6 +88,7 @@ namespace WCAnalyzer.Core.Models.PM4
         public bool HasServerFlagData => false;
         public bool HasVersion => Version > 0;
         public bool HasCRC => false;
+        public bool HasMsviIndices => PM4Data?.MsviIndices?.Count > 0;
         public int Version => PM4Data?.Version ?? 0;
         public List<string> ResolvedFileNames { get; set; } = new List<string>();
         
@@ -266,5 +267,15 @@ namespace WCAnalyzer.Core.Models.PM4
         /// Gets or sets the list of position references.
         /// </summary>
         public List<PositionReference> PositionReferences { get; set; } = new List<PositionReference>();
+        
+        /// <summary>
+        /// Gets or sets the list of vertex data from MSVT chunk.
+        /// </summary>
+        public List<VertexData> VertexData { get; set; } = new List<VertexData>();
+        
+        /// <summary>
+        /// Gets or sets the list of MSVI indices that reference MSVT vertices.
+        /// </summary>
+        public List<int> MsviIndices { get; set; } = new List<int>();
     }
 } 

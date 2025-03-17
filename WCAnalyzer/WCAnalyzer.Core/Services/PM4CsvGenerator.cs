@@ -13,10 +13,6 @@ using WCAnalyzer.Core.Utilities;
 
 namespace WCAnalyzer.Core.Services
 {
-    // NOTE: Special value handling has been removed from the PM4 file format.
-    // This class needs to be updated to remove all references to IsSpecialEntry and SpecialValue.
-    // For now, the class will continue to work but may produce incorrect results for PM4 files.
-    
     /// <summary>
     /// Service for generating CSV reports from PM4 analysis results.
     /// </summary>
@@ -40,30 +36,6 @@ namespace WCAnalyzer.Core.Services
             {
                 Directory.CreateDirectory(_outputDirectory);
             }
-        }
-
-        /// <summary>
-        /// Safely checks if an entry should be treated as a special entry based on its values.
-        /// </summary>
-        /// <param name="entry">The entry to check.</param>
-        /// <returns>True if the entry should be treated as special, otherwise false.</returns>
-        private bool ShouldTreatAsSpecial(MPRLChunk.ServerPositionData entry)
-        {
-            if (entry == null)
-                return false;
-                
-            // Special entries are those with Value0x02 == -1
-            return entry.Value0x02 == -1;
-        }
-
-        /// <summary>
-        /// Safely gets value from entry
-        /// </summary>
-        /// <param name="entry">The entry to get the value from.</param>
-        /// <returns>The value from the entry.</returns>
-        private int GetEntryValue(MPRLChunk.ServerPositionData entry)
-        {
-            return entry?.Value0x04 ?? 0;
         }
 
         /// <summary>
@@ -104,6 +76,9 @@ namespace WCAnalyzer.Core.Services
                 // Generate position references report
                 await GeneratePositionReferencesReportAsync(result, outputDir);
 
+                // Generate vertex data report (MSVT)
+                await GenerateVertexDataReportAsync(result, outputDir);
+
                 // Generate links report
                 await GenerateLinksReportAsync(result, outputDir);
 
@@ -112,6 +87,14 @@ namespace WCAnalyzer.Core.Services
 
                 // Generate unknown chunks report
                 await GenerateUnknownChunksReportAsync(result, outputDir);
+
+                // Export to OBJ format if vertex data is available (either MSPV or MSVT)
+                if (result.HasVertexPositions || result.HasVertexData)
+                {
+                    _logger.LogInformation("Exporting vertex data to OBJ format");
+                    var objExporter = new PM4ObjExporter();
+                    await objExporter.ExportToDirectoryAsync(result, outputDir);
+                }
 
                 _logger.LogInformation("Successfully generated all CSV reports for {FileName}", result.FileName);
             }
@@ -146,7 +129,7 @@ namespace WCAnalyzer.Core.Services
             for (int i = 0; i < positions.Count; i++)
             {
                 var pos = positions[i];
-                csv.AppendLine($"{i},{pos.X.ToString(CultureInfo.InvariantCulture)},{pos.Y.ToString(CultureInfo.InvariantCulture)},{pos.Z.ToString(CultureInfo.InvariantCulture)}");
+                csv.AppendLine($"{i},{pos.X.ToString("F8", CultureInfo.InvariantCulture)},{pos.Y.ToString("F8", CultureInfo.InvariantCulture)},{pos.Z.ToString("F8", CultureInfo.InvariantCulture)}");
             }
 
             await File.WriteAllTextAsync(outputPath, csv.ToString());
@@ -207,13 +190,13 @@ namespace WCAnalyzer.Core.Services
             _logger.LogInformation("Generating position data report at {OutputPath}", outputPath);
 
             var csv = new StringBuilder();
-            csv.AppendLine("Index,Value0x00,Value0x04,Value0x08,Value0x0C,Value0x10,IsSpecialEntry");
+            csv.AppendLine("Index,Value0x00,Value0x04,Value0x08,Value0x0C,Value0x10");
 
             var positions = result.PM4Data.PositionData;
             for (int i = 0; i < positions.Count; i++)
             {
                 var pos = positions[i];
-                csv.AppendLine($"{i},{pos.Value0x00},{pos.Value0x04},{pos.Value0x08.ToString(CultureInfo.InvariantCulture)},{pos.Value0x0C.ToString(CultureInfo.InvariantCulture)},{pos.Value0x10},{pos.IsSpecialEntry()}");
+                csv.AppendLine($"{i},{pos.Value0x00},{pos.Value0x04},{pos.Value0x08.ToString("F8", CultureInfo.InvariantCulture)},{pos.Value0x0C.ToString("F8", CultureInfo.InvariantCulture)},{pos.Value0x10}");
             }
 
             await File.WriteAllTextAsync(outputPath, csv.ToString());
@@ -238,13 +221,16 @@ namespace WCAnalyzer.Core.Services
             _logger.LogInformation("Generating position references report at {OutputPath}", outputPath);
 
             var csv = new StringBuilder();
-            csv.AppendLine("Index,Value1,Value2");
+            csv.AppendLine("Index,Value0x00,Value0x04");
 
             var references = result.PM4Data.PositionReferences;
             for (int i = 0; i < references.Count; i++)
             {
                 var reference = references[i];
-                csv.AppendLine($"{i},{reference.Value1},{reference.Value2}");
+                
+                // Output the actual values as they are without trying to convert them to floats
+                // since they're 16-bit values and not IEEE 754 format
+                csv.AppendLine($"{i},{reference.Value0x00},{reference.Value0x04}");
             }
 
             await File.WriteAllTextAsync(outputPath, csv.ToString());
@@ -336,6 +322,9 @@ namespace WCAnalyzer.Core.Services
                 // Generate position references report
                 await GeneratePositionReferencesReportAsync(result, fileOutputDir);
 
+                // Generate vertex data report (MSVT)
+                await GenerateVertexDataReportAsync(result, fileOutputDir);
+
                 // Generate links report
                 await GenerateLinksReportAsync(result, fileOutputDir);
                 
@@ -345,12 +334,12 @@ namespace WCAnalyzer.Core.Services
                 // Generate unknown chunks report
                 await GenerateUnknownChunksReportAsync(result, fileOutputDir);
                 
-                // Export to OBJ format if vertex data is available
-                if (result.HasVertexPositions)
+                // Export to OBJ format if vertex data is available (either MSPV or MSVT)
+                if (result.HasVertexPositions || result.HasVertexData)
                 {
                     _logger.LogInformation("Exporting vertex data to OBJ format");
                     var objExporter = new PM4ObjExporter();
-                    await objExporter.ExportToObjAsync(result, fileOutputDir);
+                    await objExporter.ExportToDirectoryAsync(result, fileOutputDir);
                 }
 
                 _logger.LogInformation("Successfully generated all reports for {FileName}", result.FileName);
@@ -385,27 +374,23 @@ namespace WCAnalyzer.Core.Services
                 using var writer = new StreamWriter(outputPath, false, Encoding.UTF8);
                 
                 // Write header
-                await writer.WriteLineAsync("Index,Value0x00,Value0x04,Value0x08,Value0x0C,Value0x10,Value0x14,Value0x18,Value0x1C,IsSpecial,SpecialValue");
+                await writer.WriteLineAsync("Index,Value0x00,Value0x04,Value0x08,Value0x0C,Value0x10,Value0x14,Value0x18,Value0x1C");
                 
                 // Write data
                 for (int i = 0; i < positionData.Count; i++)
                 {
                     var entry = positionData[i];
-                    bool isSpecial = entry.IsSpecialEntry();
-                    int specialValue = isSpecial ? entry.SpecialValue() : 0;
                     
                     await writer.WriteLineAsync(
                         $"{i}," +
                         $"{entry.Value0x00}," +
                         $"{entry.Value0x04}," +
-                        $"{entry.Value0x08.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{entry.Value0x0C.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{entry.Value0x10.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{entry.Value0x14.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{entry.Value0x18.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{entry.Value0x1C.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{isSpecial}," +
-                        $"{specialValue}");
+                        $"{entry.Value0x08.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value0x0C.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value0x10.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value0x14.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value0x18.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{entry.Value0x1C.ToString("F8", CultureInfo.InvariantCulture)}");
                 }
             }
             catch (Exception ex)
@@ -447,9 +432,9 @@ namespace WCAnalyzer.Core.Services
                     
                     await writer.WriteLineAsync(
                         $"{i}," +
-                        $"{vertex.X.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{vertex.Y.ToString(CultureInfo.InvariantCulture)}," +
-                        $"{vertex.Z.ToString(CultureInfo.InvariantCulture)}");
+                        $"{vertex.X.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{vertex.Y.ToString("F8", CultureInfo.InvariantCulture)}," +
+                        $"{vertex.Z.ToString("F8", CultureInfo.InvariantCulture)}");
                 }
             }
             catch (Exception ex)
@@ -575,19 +560,16 @@ namespace WCAnalyzer.Core.Services
                 using var writer = new StreamWriter(outputPath, false, Encoding.UTF8);
                 
                 // Write header
-                await writer.WriteLineAsync("Index,Value0x00,Value0x04,Value0x08,Value0x0C");
+                await writer.WriteLineAsync("Index,Value0x00,Value0x04");
                 
                 // Write data
                 for (int i = 0; i < positionReferences.Count; i++)
                 {
                     var reference = positionReferences[i];
                     
-                    await writer.WriteLineAsync(
-                        $"{i}," +
-                        $"{reference.Value0x00}," +
-                        $"{reference.Value0x04}," +
-                        $"{reference.Value0x08}," +
-                        $"{reference.Value0x0C}");
+                    // Output the actual values as they are without trying to convert them to floats
+                    // since they're 16-bit values and not IEEE 754 format
+                    await writer.WriteLineAsync($"{i},{reference.Value0x00},{reference.Value0x04}");
                 }
             }
             catch (Exception ex)
@@ -595,6 +577,43 @@ namespace WCAnalyzer.Core.Services
                 _logger.LogError(ex, "Error generating position references CSV: {Path}", outputPath);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Generates a CSV report of vertex data (MSVT chunk) from a PM4 analysis result.
+        /// </summary>
+        /// <param name="result">The PM4 analysis result to report on.</param>
+        /// <param name="outputDir">The output directory for the report.</param>
+        /// <returns>A task that represents the asynchronous operation.</returns>
+        private async Task GenerateVertexDataReportAsync(PM4AnalysisResult result, string outputDir)
+        {
+            if (!result.HasVertexData)
+            {
+                _logger.LogInformation("No vertex data (MSVT) in {FileName}, skipping report", result.FileName);
+                return;
+            }
+
+            var outputPath = Path.Combine(outputDir, "vertex_data_msvt.csv");
+            _logger.LogInformation("Generating vertex data (MSVT) report at {OutputPath}", outputPath);
+
+            var csv = new StringBuilder();
+            csv.AppendLine("Index,RawY,RawX,RawZ,WorldX,WorldY,WorldZ");
+
+            var vertices = result.PM4Data.VertexData;
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                var vertex = vertices[i];
+                csv.AppendLine($"{i}," +
+                    $"{vertex.RawY.ToString("F8", CultureInfo.InvariantCulture)}," +
+                    $"{vertex.RawX.ToString("F8", CultureInfo.InvariantCulture)}," +
+                    $"{vertex.RawZ.ToString("F8", CultureInfo.InvariantCulture)}," +
+                    $"{vertex.WorldX.ToString("F8", CultureInfo.InvariantCulture)}," +
+                    $"{vertex.WorldY.ToString("F8", CultureInfo.InvariantCulture)}," +
+                    $"{vertex.WorldZ.ToString("F8", CultureInfo.InvariantCulture)}");
+            }
+
+            await File.WriteAllTextAsync(outputPath, csv.ToString());
+            _logger.LogInformation("Vertex data (MSVT) report generated with {Count} entries", vertices.Count);
         }
 
         /// <summary>
@@ -644,6 +663,7 @@ namespace WCAnalyzer.Core.Services
             summary.AppendLine($"- Vertex Indices: {(result.HasVertexIndices ? "Yes" : "No")} ({result.PM4Data.VertexIndices.Count} entries)");
             summary.AppendLine($"- Position Data: {(result.HasPositionData ? "Yes" : "No")} ({result.PM4Data.PositionData.Count} entries)");
             summary.AppendLine($"- Position References: {(result.HasPositionReference ? "Yes" : "No")} ({result.PM4Data.PositionReferences.Count} entries)");
+            summary.AppendLine($"- Vertex Data (MSVT): {(result.HasVertexData ? "Yes" : "No")} ({result.PM4Data.VertexData.Count} entries)");
             summary.AppendLine($"- Links: {(result.HasLinks ? "Yes" : "No")} ({result.PM4Data.Links.Count} entries)");
             summary.AppendLine();
             
@@ -657,7 +677,10 @@ namespace WCAnalyzer.Core.Services
                 
                 foreach (var chunk in result.PM4Data.UnknownChunks)
                 {
-                    summary.AppendLine($"{chunk.ChunkName,-9}| {chunk.OriginalChunkName,-11}| {chunk.Size,-12}| {chunk.Position,-8}| {chunk.HexPreview}");
+                    // Try to identify float values in hex and display them in standard notation
+                    string previewText = chunk.HexPreview;
+                    
+                    summary.AppendLine($"{chunk.ChunkName,-9}| {chunk.OriginalChunkName,-11}| {chunk.Size,-12}| {chunk.Position,-8}| {previewText}");
                 }
                 
                 summary.AppendLine();
@@ -674,6 +697,8 @@ namespace WCAnalyzer.Core.Services
                 summary.AppendLine("- position_data.csv");
             if (result.HasPositionReference)
                 summary.AppendLine("- position_references.csv");
+            if (result.HasVertexData)
+                summary.AppendLine("- vertex_data_msvt.csv");
             if (result.HasLinks)
                 summary.AppendLine("- links.csv");
             

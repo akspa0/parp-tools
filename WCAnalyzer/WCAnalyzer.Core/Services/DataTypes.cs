@@ -262,4 +262,61 @@ namespace WCAnalyzer.Core.Services
         /// </summary>
         public int Value2 { get; set; }
     }
+
+    /// <summary>
+    /// Represents vertex data from the MSVT chunk with both raw and transformed world coordinates.
+    /// </summary>
+    public class VertexData
+    {
+        /// <summary>
+        /// Gets or sets the raw Y value as read from the file.
+        /// </summary>
+        public float RawY { get; set; }
+
+        /// <summary>
+        /// Gets or sets the raw X value as read from the file.
+        /// </summary>
+        public float RawX { get; set; }
+
+        /// <summary>
+        /// Gets or sets the raw Z value as read from the file.
+        /// </summary>
+        public float RawZ { get; set; }
+
+        /// <summary>
+        /// Gets or sets the transformed world X coordinate.
+        /// Formula: worldPos.x = 17066.666 - position.x
+        /// </summary>
+        public float WorldX { get; set; }
+
+        /// <summary>
+        /// Gets or sets the transformed world Y coordinate.
+        /// Formula: worldPos.y = 17066.666 - position.y
+        /// </summary>
+        public float WorldY { get; set; }
+
+        /// <summary>
+        /// Gets or sets the transformed world Z coordinate.
+        /// Formula: worldPos.z = position.z / 36.0f (converts internal inch height to yards)
+        /// </summary>
+        public float WorldZ { get; set; }
+        
+        /// <summary>
+        /// Gets the raw Vector3 representing the original data in YXZ order.
+        /// </summary>
+        public Vector3 RawPosition => new Vector3(RawX, RawY, RawZ);
+        
+        /// <summary>
+        /// Gets the Vector3 representation of the world position.
+        /// </summary>
+        public Vector3 WorldPosition => new Vector3(WorldX, WorldY, WorldZ);
+        
+        /// <summary>
+        /// Returns a string representation of this vertex.
+        /// </summary>
+        public override string ToString()
+        {
+            return $"Vertex: World({WorldX:F2}, {WorldY:F2}, {WorldZ:F2}), Raw({RawX:F2}, {RawY:F2}, {RawZ:F2})";
+        }
+    }
 } 
