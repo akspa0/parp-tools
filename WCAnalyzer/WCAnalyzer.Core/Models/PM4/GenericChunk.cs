@@ -1,69 +1,85 @@
 using System;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
-using WCAnalyzer.Core.Models.PM4.Chunks;
 
 namespace WCAnalyzer.Core.Models.PM4
 {
     /// <summary>
-    /// Represents a generic chunk with unknown format.
+    /// Generic chunk implementation for storing raw chunk data that does not have
+    /// a specific implementation. This is used as a fallback during PM4 parsing.
     /// </summary>
-    public class GenericChunk : PM4Chunk
+    public class GenericChunk : IIFFChunk
     {
-        private readonly string _signature;
-
         /// <summary>
         /// Gets the chunk signature.
         /// </summary>
-        public override string Signature => _signature;
+        public string Signature { get; private set; }
+
+        /// <summary>
+        /// Gets the raw binary data of the chunk.
+        /// </summary>
+        public byte[] Data { get; private set; }
+
+        /// <summary>
+        /// Gets the size of the chunk data.
+        /// </summary>
+        public uint Size => (uint)(Data?.Length ?? 0);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="GenericChunk"/> class.
         /// </summary>
         /// <param name="signature">The chunk signature.</param>
-        /// <param name="data">The chunk data.</param>
-        public GenericChunk(string signature, byte[] data) : base(data)
+        /// <param name="data">The raw binary data of the chunk.</param>
+        public GenericChunk(string signature, byte[] data)
         {
-            if (string.IsNullOrEmpty(signature))
-                throw new ArgumentNullException(nameof(signature));
-
-            _signature = signature;
+            Signature = signature ?? throw new ArgumentNullException(nameof(signature));
+            Data = data ?? throw new ArgumentNullException(nameof(data));
         }
 
         /// <summary>
-        /// Reads and parses the chunk data.
+        /// Gets the signature of the chunk.
         /// </summary>
-        protected override void ReadData()
+        /// <returns>The chunk's signature.</returns>
+        public string GetSignature()
         {
-            // No specific parsing for generic chunks
+            return Signature;
         }
 
         /// <summary>
-        /// Returns a string representation of this chunk.
+        /// Loads the chunk data from a byte array.
         /// </summary>
-        /// <returns>A string representation of this chunk.</returns>
-        public override string ToString()
+        /// <param name="data">The binary data to load from.</param>
+        public void LoadBinaryData(byte[] data)
         {
-            return $"Generic Chunk: {Signature}, Size: {Size} bytes";
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
+            Data = data;
         }
 
         /// <summary>
-        /// Gets a hexadecimal representation of the chunk data.
+        /// Reads the chunk data from a binary reader.
         /// </summary>
-        /// <param name="maxBytes">The maximum number of bytes to include in the representation.</param>
-        /// <returns>A hexadecimal representation of the chunk data.</returns>
-        public string GetHexDump(int maxBytes = 64)
+        /// <param name="reader">The binary reader to read from.</param>
+        /// <param name="size">The size of the chunk data.</param>
+        public void ReadData(BinaryReader reader, uint size)
         {
-            if (Data == null || Data.Length == 0)
-                return "Empty";
+            if (reader == null)
+                throw new ArgumentNullException(nameof(reader));
 
-            int bytesToShow = Math.Min(maxBytes, Data.Length);
-            var hexDump = BitConverter.ToString(Data, 0, bytesToShow).Replace("-", " ");
-            
-            if (bytesToShow < Data.Length)
-                hexDump += " ...";
-                
-            return hexDump;
+            Data = reader.ReadBytes((int)size);
+        }
+
+        /// <summary>
+        /// Writes the chunk data to a binary writer.
+        /// </summary>
+        /// <param name="writer">The binary writer to write to.</param>
+        public void WriteData(BinaryWriter writer)
+        {
+            if (writer == null)
+                throw new ArgumentNullException(nameof(writer));
+
+            writer.Write(Data);
         }
     }
 } 

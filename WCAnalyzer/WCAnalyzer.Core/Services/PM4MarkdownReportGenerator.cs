@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Numerics;
 using Microsoft.Extensions.Logging;
 using WCAnalyzer.Core.Models.PM4;
 using WCAnalyzer.Core.Models.PM4.Chunks;
@@ -128,10 +129,10 @@ namespace WCAnalyzer.Core.Services
             // Special Value Analysis
             report.AppendLine("## Special Value Analysis <a name=\"special-value-analysis\"></a>");
             
-            var allSpecialValues = new Dictionary<uint, int>();
+            var allSpecialValues = new Dictionary<int, int>();
             foreach (var result in results)
             {
-                var specialEntries = result.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry) ?? Enumerable.Empty<MPRLEntry>();
+                var specialEntries = result.PM4File?.PositionDataChunk?.Entries.Where(e => e.IsSpecialEntry) ?? Enumerable.Empty<MPRLChunk.ServerPositionData>();
                 foreach (var entry in specialEntries)
                 {
                     if (allSpecialValues.ContainsKey(entry.SpecialValue))
@@ -171,13 +172,23 @@ namespace WCAnalyzer.Core.Services
             // Coordinate Bounds
             report.AppendLine("## Coordinate Bounds <a name=\"coordinate-bounds\"></a>");
             
-            var allVertices = results
-                .SelectMany(r => r.PM4File?.VertexPositionsChunk?.Vertices ?? Enumerable.Empty<MSPVVertex>())
-                .ToList();
+            var allVertices = new List<Vector3>();
+            foreach (var result in results)
+            {
+                if (result.PM4File?.VertexPositionsChunk?.Vertices != null)
+                {
+                    allVertices.AddRange(result.PM4File.VertexPositionsChunk.Vertices);
+                }
+            }
                 
-            var allPositions = results
-                .SelectMany(r => r.PM4File?.PositionDataChunk?.Entries.Where(e => !e.IsSpecialEntry) ?? Enumerable.Empty<MPRLEntry>())
-                .ToList();
+            var allPositions = new List<MPRLChunk.ServerPositionData>();
+            foreach (var result in results)
+            {
+                if (result.PM4File?.PositionDataChunk?.Entries != null)
+                {
+                    allPositions.AddRange(result.PM4File.PositionDataChunk.Entries.Where(e => !e.IsSpecialEntry));
+                }
+            }
             
             if (allVertices.Count > 0)
             {
@@ -283,14 +294,14 @@ namespace WCAnalyzer.Core.Services
                 report.AppendLine($"| MSUR (Surface Data) | Yes | {pm4File.SurfaceDataChunk.Size:N0} |");
             if (pm4File.PositionDataChunk != null)
                 report.AppendLine($"| MPRL (Position Data) | Yes | {pm4File.PositionDataChunk.Size:N0} |");
-            if (pm4File.ValuePairsChunk != null)
-                report.AppendLine($"| MPRR (Value Pairs) | Yes | {pm4File.ValuePairsChunk.Size:N0} |");
-            if (pm4File.BuildingDataChunk != null)
-                report.AppendLine($"| MDBH (Building Data) | Yes | {pm4File.BuildingDataChunk.Size:N0} |");
-            if (pm4File.SimpleDataChunk != null)
-                report.AppendLine($"| MDOS (Simple Data) | Yes | {pm4File.SimpleDataChunk.Size:N0} |");
-            if (pm4File.FinalDataChunk != null)
-                report.AppendLine($"| MDSF (Final Data) | Yes | {pm4File.FinalDataChunk.Size:N0} |");
+            if (pm4File.ValuePairs != null)
+                report.AppendLine($"| MPRR (Value Pairs) | Yes | {GetChunkSize(pm4File.ValuePairs):N0} |");
+            if (pm4File.BuildingData != null)
+                report.AppendLine($"| MDBH (Building Data) | Yes | {GetChunkSize(pm4File.BuildingData):N0} |");
+            if (pm4File.SimpleData != null)
+                report.AppendLine($"| MDOS (Simple Data) | Yes | {GetChunkSize(pm4File.SimpleData):N0} |");
+            if (pm4File.FinalData != null)
+                report.AppendLine($"| MDSF (Final Data) | Yes | {GetChunkSize(pm4File.FinalData):N0} |");
 
             // Position Data Analysis
             if (pm4File.PositionDataChunk != null)
@@ -365,13 +376,13 @@ namespace WCAnalyzer.Core.Services
             if (result.HasPositionData)
                 report.AppendLine($"| MPRL (Position Data) | Yes | {result.PM4File.PositionDataChunk?.Size ?? 0:N0} |");
             if (result.HasValuePairs)
-                report.AppendLine($"| MPRR (Value Pairs) | Yes | {result.PM4File.ValuePairsChunk?.Size ?? 0:N0} |");
+                report.AppendLine($"| MPRR (Value Pairs) | Yes | {GetChunkSize(result.PM4File.ValuePairs):N0} |");
             if (result.HasBuildingData)
-                report.AppendLine($"| MDBH (Building Data) | Yes | {result.PM4File.BuildingDataChunk?.Size ?? 0:N0} |");
+                report.AppendLine($"| MDBH (Building Data) | Yes | {GetChunkSize(result.PM4File.BuildingData):N0} |");
             if (result.HasSimpleData)
-                report.AppendLine($"| MDOS (Simple Data) | Yes | {result.PM4File.SimpleDataChunk?.Size ?? 0:N0} |");
+                report.AppendLine($"| MDOS (Simple Data) | Yes | {GetChunkSize(result.PM4File.SimpleData):N0} |");
             if (result.HasFinalData)
-                report.AppendLine($"| MDSF (Final Data) | Yes | {result.PM4File.FinalDataChunk?.Size ?? 0:N0} |");
+                report.AppendLine($"| MDSF (Final Data) | Yes | {GetChunkSize(result.PM4File.FinalData):N0} |");
             
             // Data summaries
             int vertexCount = result.PM4File.VertexPositionsChunk?.Vertices.Count ?? 0;
@@ -604,6 +615,22 @@ namespace WCAnalyzer.Core.Services
                     }
                 }
             }
+        }
+        
+        /// <summary>
+        /// Gets the size of a chunk.
+        /// </summary>
+        private uint GetChunkSize(Warcraft.NET.Files.Interfaces.IIFFChunk? chunk)
+        {
+            if (chunk == null)
+                return 0;
+                
+            // Check if it's a PM4Chunk
+            if (chunk is PM4Chunk pm4Chunk)
+                return pm4Chunk.Size;
+                
+            // For other chunk types, you might need to implement specific handling
+            return 0;
         }
     }
 } 
