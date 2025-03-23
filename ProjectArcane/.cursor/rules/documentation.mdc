@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Follow the documentation
+
+You must follow the specification for each filetype format, 1:1, without over-complicating things or inventing new descriptions for the chunk names. Do not create new names, only use the chunk names when describing them in the code!
+
+- [PM4.md](mdc:docs/PM4.md)
+- [PD4.md](mdc:docs/PD4.md)
+- [ADT_v18.md](mdc:docs/ADT_v18.md)
+- [ADT_v22.md](mdc:docs/ADT_v22.md)
+- [ADT_v23.md](mdc:docs/ADT_v23.md)
+- [WDT.md](mdc:docs/WDT.md)
+- [WDL_v18.md](mdc:docs/WDL_v18.md)
+- [Alpha.md](mdc:docs/Alpha.md)
+- [WMO.md](mdc:docs/WMO.md)
+- [M2.md](mdc:docs/M2.md)

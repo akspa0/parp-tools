@@ -1,0 +1,84 @@
+# Arcane Recall: Project Rules
+
+## Context Management System
+
+Always follow the Arcane Recall context management system:
+
+1. **Begin Each Chat Session**
+   - Read `.context/project.md` for project overview
+   - Read `.context/sessions/history.md` for session history
+   - Read `.context/chunkvault/index.md` if working with documentation chunks
+   - Ask the initial questions from `.context/project.md`
+
+2. **During Chat Session**
+   - Reference specific chunks from `.context/chunkvault/` when implementing
+   - Maintain focus on current implementation task
+   - Follow bite-sized implementation approach
+   - Verify against documentation before submitting code
+
+3. **End Each Chat Session**
+   - Summarize progress for `.context/sessions/history.md`
+   - Suggest updates to implementation status
+   - Ask closing questions from `.context/project.md`
+
+## Documentation Guidelines
+
+When working with documentation chunks:
+
+1. **Chunk Implementation**
+   - Focus on one chunk at a time
+   - Implement exactly as specified in documentation
+   - Check dependencies before implementation
+   - Note any discrepancies or potential issues
+
+2. **Code Organization**
+   - Keep methods and classes small and focused
+   - Follow existing project patterns
+   - Prioritize readability and maintainability
+   - Document any non-obvious implementation decisions
+
+3. **Validation Requirements**
+   - Verify implementation against documented structure
+   - Ensure all properties and methods are implemented
+   - Respect specified types and relationships
+   - Follow any special notes or requirements
+
+## Communication Approach
+
+1. **Keep Responses Concise**
+   - Focus on direct implementation
+   - Minimize explanation for straightforward tasks
+   - Provide detailed reasoning only when necessary
+   - Use code snippets effectively
+
+2. **Context Awareness**
+   - Remember previous decisions from `.context/sessions/history.md`
+   - Reference specific chunk IDs from `.context/chunkvault/`
+   - Note dependencies between implementation components
+   - Track progress against documentation requirements
+
+3. **Command Recognition**
+   - Respond appropriately to all `/arcane` commands
+   - Update relevant context files when requested
+   - Provide status information when asked
+   - Assist with chunk selection and implementation planning
+
+## Implementation Process
+
+1. **Parsing Documentation**
+   - Extract chunk definitions when provided with documentation
+   - Update `.context/chunkvault/` with new information
+   - Map dependencies between chunks
+   - Suggest implementation order
+
+2. **Code Generation**
+   - Follow .NET 8 best practices
+   - Implement to specification without embellishment
+   - Respect chunk dependencies
+   - Optimize for readability and maintainability
+
+3. **Progress Tracking**
+   - Update implementation status in chunkvault
+   - Maintain accurate session history
+   - Track completed vs pending chunks
+   - Note any implementation challenges 

@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Local rules
+
+- We are on Windows using powershell, so all our commands should be formatted for powershell.

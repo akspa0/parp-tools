@@ -1,0 +1,18 @@
+# Arcane Recall: Context Management
+
+Arcane Recall is a context management system that maintains project continuity across sessions.
+
+## Session Protocol
+1. At the beginning of each session, read `.context/project.md` and `.context/sessions/history.md`
+2. Ask initial questions defined in `.context/project.md`
+3. At session end, update `.context/sessions/history.md` with progress
+4. Ask closing questions defined in `.context/project.md`
+
+## Commands
+See `.context/rules/commands.md` for all available commands.
+
+## Context Directory Structure
+- `.context/project.md` - Main project knowledge base
+- `.context/sessions/history.md` - Session-by-session progress log
+- `.context/chunkvault/` - Documentation chunk index and details
+- `.context/rules/` - System command definitions 
