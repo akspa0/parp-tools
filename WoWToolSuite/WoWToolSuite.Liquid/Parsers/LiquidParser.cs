@@ -2,10 +2,20 @@ using System;
 using System.IO;
 using System.Text;
 using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
 using WowToolSuite.Liquid.Models;
 
 namespace WowToolSuite.Liquid.Parsers
 {
+    public class LiquidFile
+    {
+        public List<LiquidBlock> Blocks { get; set; } = new List<LiquidBlock>();
+        public required LiquidHeader Header { get; set; }
+        public required string FilePath { get; set; }
+        public bool IsWlm { get; set; }
+    }
+
     public static class LiquidParser
     {
         public static LiquidFile? ParseWlwOrWlmFile(string filePath, bool isWlm = false, bool verbose = false)
@@ -60,6 +70,7 @@ namespace WowToolSuite.Liquid.Parsers
                 for (int i = 0; i < header.BlockCount; i++)
                 {
                     var block = new LiquidBlock();
+                    block.LiquidType = header.LiquidType;
 
                     // Read 16 vertices (48 floats total, 3 floats per vertex)
                     for (int j = 0; j < 16; j++)
@@ -77,6 +88,15 @@ namespace WowToolSuite.Liquid.Parsers
                     for (int j = 0; j < 80; j++)
                     {
                         block.Data[j] = reader.ReadUInt16();
+                    }
+
+                    // Fill height map from vertices (arranged in a 4x4 grid)
+                    for (int h = 0; h < 4; h++)
+                    {
+                        for (int w = 0; w < 4; w++)
+                        {
+                            block.Heights[h][w] = block.Vertices[h * 4 + w].Z;
+                        }
                     }
 
                     result.Blocks.Add(block);
@@ -148,6 +168,7 @@ namespace WowToolSuite.Liquid.Parsers
                 for (int i = 0; i < header.BlockCount; i++)
                 {
                     var block = new LiquidBlock();
+                    block.LiquidType = header.LiquidType;
 
                     // Read 16 vertices (48 floats total, 3 floats per vertex)
                     for (int j = 0; j < 16; j++)
@@ -171,6 +192,15 @@ namespace WowToolSuite.Liquid.Parsers
                     for (int j = 0; j < 80; j++)
                     {
                         block.Data[j] = reader.ReadUInt16();
+                    }
+
+                    // Fill height map from vertices (arranged in a 4x4 grid)
+                    for (int h = 0; h < 4; h++)
+                    {
+                        for (int w = 0; w < 4; w++)
+                        {
+                            block.Heights[h][w] = block.Vertices[h * 4 + w].Z;
+                        }
                     }
 
                     result.Blocks.Add(block);

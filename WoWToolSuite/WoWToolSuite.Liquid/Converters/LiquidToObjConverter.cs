@@ -9,53 +9,72 @@ namespace WowToolSuite.Liquid.Converters
 {
     public class LiquidToObjConverter
     {
-        private readonly List<Vector3> _vertices = new();
-        private readonly List<Vector2> _texCoords = new();
-        private readonly List<(int v1, int v2, int v3)> _faces = new();
-        private readonly LiquidFile _liquidFile;
-        private readonly LiquidFile? _wlqFile;
-
-        public LiquidToObjConverter(LiquidFile liquidFile, LiquidFile? wlqFile = null)
+        private class Component
         {
-            _liquidFile = liquidFile;
-            _wlqFile = wlqFile;
+            public string Name { get; set; } = string.Empty;
+            public List<Vector3> Vertices { get; } = new();
+            public List<Vector2> TexCoords { get; } = new();
+            public List<(int v1, int v2, int v3)> Faces { get; } = new();
+            public string MaterialName { get; set; } = string.Empty;
+        }
+
+        private readonly List<Component> _components = new();
+        private readonly HashSet<string> _materials = new();
+        private string _outputDirectory = string.Empty;
+
+        public void AddLiquidFile(LiquidFile liquidFile, LiquidFile? wlqFile, string componentName)
+        {
+            var component = new Component
+            {
+                Name = componentName,
+                MaterialName = liquidFile.Header.LiquidTypeString
+            };
+
+            ProcessLiquidFile(liquidFile, component);
+            if (wlqFile != null)
+            {
+                ProcessLiquidFile(wlqFile, component);
+            }
+
+            _components.Add(component);
+            _materials.Add(liquidFile.Header.LiquidTypeString);
         }
 
         public void ConvertToObj(string outputPath, bool verbose = false)
         {
             if (verbose)
             {
-                Console.WriteLine($"Converting {(_liquidFile.IsWlm ? "WLM" : "WLW")} file to OBJ: {_liquidFile.FilePath}");
+                Console.WriteLine($"Writing combined OBJ file: {outputPath}");
             }
 
-            ProcessLiquidFile(_liquidFile, verbose);
-            if (_wlqFile != null)
-            {
-                ProcessLiquidFile(_wlqFile, verbose);
-            }
+            _outputDirectory = Path.GetDirectoryName(outputPath) ?? "";
+            
+            // Create textures directory if it doesn't exist
+            var texturesDir = Path.Combine(_outputDirectory, "textures");
+            Directory.CreateDirectory(texturesDir);
 
             WriteObjFile(outputPath, verbose);
             WriteMtlFile(Path.ChangeExtension(outputPath, ".mtl"), verbose);
         }
 
-        private void ProcessLiquidFile(LiquidFile file, bool verbose)
+        private void ProcessLiquidFile(LiquidFile file, Component component)
         {
             foreach (var block in file.Blocks)
             {
-                int baseVertexIndex = _vertices.Count;
-                int baseTexCoordIndex = _texCoords.Count;
+                int baseVertexIndex = component.Vertices.Count;
 
                 // Add vertices and texture coordinates
                 for (int i = 0; i < 16; i++)
                 {
                     var vertex = block.Vertices[i];
                     // Convert from WoW coordinate system to OBJ coordinate system
-                    _vertices.Add(new Vector3(vertex.X, vertex.Z, -vertex.Y));
+                    component.Vertices.Add(new Vector3(vertex.X, vertex.Z, -vertex.Y));
 
                     // Calculate texture coordinates (0 to 1 across the grid)
-                    float u = (i % 4) / 3.0f;
-                    float v = (i / 4) / 3.0f;
-                    _texCoords.Add(new Vector2(u, v));
+                    // Adjust UV coordinates to repeat the texture more times
+                    float u = ((i % 4) / 3.0f) * 2.0f; // Repeat texture twice horizontally
+                    float v = ((i / 4) / 3.0f) * 2.0f; // Repeat texture twice vertically
+                    component.TexCoords.Add(new Vector2(u, v));
                 }
 
                 // Generate faces for the 4x4 grid
@@ -74,9 +93,9 @@ namespace WowToolSuite.Liquid.Converters
                         int topRight = topLeft + 1;
 
                         // First triangle (counter-clockwise winding)
-                        _faces.Add((bottomLeft, topLeft, topRight));
+                        component.Faces.Add((bottomLeft, topLeft, topRight));
                         // Second triangle (counter-clockwise winding)
-                        _faces.Add((bottomLeft, topRight, bottomRight));
+                        component.Faces.Add((bottomLeft, topRight, bottomRight));
                     }
                 }
             }
@@ -84,11 +103,6 @@ namespace WowToolSuite.Liquid.Converters
 
         private void WriteObjFile(string objPath, bool verbose)
         {
-            if (verbose)
-            {
-                Console.WriteLine($"Writing OBJ file: {objPath}");
-            }
-
             using var writer = new StreamWriter(objPath);
             var mtlName = Path.GetFileNameWithoutExtension(objPath) + ".mtl";
 
@@ -96,28 +110,45 @@ namespace WowToolSuite.Liquid.Converters
             writer.WriteLine($"mtllib {mtlName}");
             writer.WriteLine();
 
-            // Write vertices
-            foreach (var v in _vertices)
-            {
-                writer.WriteLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6}");
-            }
-            writer.WriteLine();
+            int vertexOffset = 1; // OBJ uses 1-based indices
+            int texCoordOffset = 1;
 
-            // Write texture coordinates
-            foreach (var vt in _texCoords)
+            foreach (var component in _components)
             {
-                writer.WriteLine($"vt {vt.X:F6} {vt.Y:F6}");
-            }
-            writer.WriteLine();
+                writer.WriteLine($"o {component.Name}");
 
-            // Write material
-            writer.WriteLine($"usemtl {_liquidFile.Header.LiquidTypeString}");
-            writer.WriteLine("s 1"); // Enable smooth shading
+                // Write vertices for this component
+                foreach (var v in component.Vertices)
+                {
+                    writer.WriteLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6}");
+                }
+                writer.WriteLine();
 
-            // Write faces (OBJ uses 1-based indices)
-            foreach (var face in _faces)
-            {
-                writer.WriteLine($"f {face.v1 + 1}/{face.v1 + 1} {face.v2 + 1}/{face.v2 + 1} {face.v3 + 1}/{face.v3 + 1}");
+                // Write texture coordinates for this component
+                foreach (var vt in component.TexCoords)
+                {
+                    writer.WriteLine($"vt {vt.X:F6} {vt.Y:F6}");
+                }
+                writer.WriteLine();
+
+                // Write material
+                writer.WriteLine($"usemtl {component.MaterialName}");
+                writer.WriteLine("s 1"); // Enable smooth shading
+
+                // Write faces with proper offsets
+                foreach (var face in component.Faces)
+                {
+                    writer.WriteLine(
+                        $"f {face.v1 + vertexOffset}/{face.v1 + texCoordOffset} " +
+                        $"{face.v2 + vertexOffset}/{face.v2 + texCoordOffset} " +
+                        $"{face.v3 + vertexOffset}/{face.v3 + texCoordOffset}"
+                    );
+                }
+                writer.WriteLine();
+
+                // Update offsets for next component
+                vertexOffset += component.Vertices.Count;
+                texCoordOffset += component.TexCoords.Count;
             }
         }
 
@@ -129,13 +160,46 @@ namespace WowToolSuite.Liquid.Converters
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine($"newmtl {_liquidFile.Header.LiquidTypeString}");
-            sb.AppendLine("Ka 1.000 1.000 1.000");
-            sb.AppendLine("Kd 1.000 1.000 1.000");
-            sb.AppendLine("Ks 0.000 0.000 0.000");
-            sb.AppendLine("d 0.8"); // Make water slightly transparent
-            sb.AppendLine("illum 2");
-            sb.AppendLine($"map_Kd {_liquidFile.Header.TextureFilename}");
+
+            // Write each unique material
+            foreach (var materialName in _materials)
+            {
+                // Get texture path relative to MTL file
+                var textureFilename = LiquidConstants.GetTextureFilename(materialName, _outputDirectory);
+                
+                sb.AppendLine($"newmtl {materialName}");
+                // Ambient color
+                sb.AppendLine("Ka 0.800 0.800 0.800");
+                // Diffuse color - make it slightly colored based on material type
+                switch (materialName)
+                {
+                    case "ocean":
+                    case "river":
+                    case "still":
+                    case "fast flowing":
+                        sb.AppendLine("Kd 0.000 0.200 0.800");
+                        break;
+                    case "magma":
+                        sb.AppendLine("Kd 0.800 0.200 0.000");
+                        break;
+                    case "slime":
+                        sb.AppendLine("Kd 0.200 0.800 0.000");
+                        break;
+                    default:
+                        sb.AppendLine("Kd 0.500 0.500 0.500");
+                        break;
+                }
+                // Specular color and shininess
+                sb.AppendLine("Ks 1.000 1.000 1.000");
+                sb.AppendLine("Ns 50.000"); // Specular exponent
+                sb.AppendLine("d 0.8"); // Transparency
+                sb.AppendLine("Tr 0.2"); // Transparency (alternative format)
+                sb.AppendLine("illum 2"); // Illumination model: 2 = highlight on
+                // Texture maps
+                sb.AppendLine($"map_Kd {textureFilename}");
+                sb.AppendLine($"map_Ks {textureFilename}"); // Use same texture for specular
+                sb.AppendLine();
+            }
 
             File.WriteAllText(mtlPath, sb.ToString());
         }
