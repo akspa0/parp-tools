@@ -419,3 +419,10 @@ community-listfile.csv
 
 # Context Management
 .context/*.md
+
+# Other Projects
+!.cursor/*
+!docs/apps/*
+!memory-bank/*
+!lib/Warcraft.NET/*
+!lib/DBCD/*
