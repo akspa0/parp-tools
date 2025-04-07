@@ -421,8 +421,12 @@ community-listfile.csv
 .context/*.md
 
 # Other Projects
-!.cursor/*
-!docs/apps/*
-!memory-bank/*
-!lib/Warcraft.NET/*
-!lib/DBCD/*
+.cursor/*
+docs/apps/*
+memory-bank/*
+PM4Tool/lib/Warcraft.NET/*
+PM4Tool/lib/DBCD/*
+PM4Tool/docs/apps/
+PM4Tool/docs/apps/mirrormachine
+PM4Tool/docs/apps/noggit-red
+PM4Tool/docs/apps/gillijimproject
