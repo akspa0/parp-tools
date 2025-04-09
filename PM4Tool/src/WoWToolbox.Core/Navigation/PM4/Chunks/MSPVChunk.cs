@@ -1,79 +1,101 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
-using WoWToolbox.Core.Vectors;
+using Warcraft.NET.Files.Structures; // Need this for C3Vector
+using WoWToolbox.Core.Vectors; // May not be needed if C3Vectori isn't used
 
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
     /// <summary>
-    /// Represents the MSPV chunk containing MSP vertices.
-    /// Uses WoWToolbox.Core.Vectors.C3Vectori based on documentation.
+    /// Represents the MSPV chunk containing path vertices.
+    /// Reverting to C3Vector (float) based on analysis of raw bytes read as int.
     /// </summary>
     public class MSPVChunk : IIFFChunk, IBinarySerializable
     {
-        public const string Signature = "MSPV";
+        public const string ExpectedSignature = "MSPV";
+        public string GetSignature() => ExpectedSignature;
 
-        public List<C3Vectori> Vertices { get; private set; }
+        // Using C3Vector (float) based on data analysis
+        public List<C3Vector> Vertices { get; private set; } = new List<C3Vector>();
 
-        public MSPVChunk()
+        /// <inheritdoc/>
+        public uint GetSize()
         {
-            Vertices = new List<C3Vectori>();
+            // Size is 12 bytes per vertex (3 * float)
+            return (uint)(Vertices.Count * 12);
         }
 
-        public string GetSignature() => Signature;
-
-        public void LoadBinaryData(byte[] inData)
+        /// <inheritdoc/>
+        public void LoadBinaryData(byte[] chunkData)
         {
-            using var ms = new MemoryStream(inData);
+            if (chunkData == null) throw new ArgumentNullException(nameof(chunkData));
+
+            using var ms = new MemoryStream(chunkData);
             using var br = new BinaryReader(ms);
-            Read(br, (uint)inData.Length);
+            Load(br);
         }
 
-        public void Read(BinaryReader reader, uint size)
+        /// <inheritdoc/>
+        public void Load(BinaryReader br)
         {
-            const int vertexSize = 12; // 3 * int32, Size of WoWToolbox.Core.Vectors.C3Vectori
+            long startPosition = br.BaseStream.Position;
+            long size = br.BaseStream.Length - startPosition;
+            int vertexSize = 12; // sizeof(float) * 3
+
+            if (size < 0) throw new InvalidDataException("Stream size is negative.");
             if (size % vertexSize != 0)
             {
-                throw new InvalidDataException($"MSPV chunk size ({size}) must be a multiple of {vertexSize}.");
+                Console.WriteLine($"Warning: MSPV chunk size {size} is not a multiple of vertex size {vertexSize}. Possible padding or corruption.");
+                size -= (size % vertexSize); 
             }
 
             int vertexCount = (int)(size / vertexSize);
-            Vertices = new List<C3Vectori>(vertexCount);
+            Vertices = new List<C3Vector>(vertexCount);
 
             for (int i = 0; i < vertexCount; i++)
             {
-                C3Vectori vertex = new C3Vectori
+                 if (br.BaseStream.Position + vertexSize > br.BaseStream.Length)
                 {
-                    X = reader.ReadInt32(),
-                    Y = reader.ReadInt32(),
-                    Z = reader.ReadInt32()
+                    Console.WriteLine($"Warning: MSPV chunk unexpected end of stream at vertex {i}. Read {Vertices.Count} vertices out of expected {vertexCount}.");
+                    break;
+                }
+                // Read as floats
+                var vertex = new C3Vector
+                {
+                    X = br.ReadSingle(),
+                    Y = br.ReadSingle(),
+                    Z = br.ReadSingle()
                 };
                 Vertices.Add(vertex);
             }
-        }
 
-        public byte[] Serialize(long offset = 0)
-        {
-            using var ms = new MemoryStream();
-            using var bw = new BinaryWriter(ms);
-            Write(bw);
-            return ms.ToArray();
-        }
-
-        public void Write(BinaryWriter writer)
-        {
-            foreach (var vertex in Vertices)
+            long bytesRead = br.BaseStream.Position - startPosition;
+            if (bytesRead != size && size > 0)
             {
-                writer.Write(vertex.X);
-                writer.Write(vertex.Y);
-                writer.Write(vertex.Z);
+                 Console.WriteLine($"Warning: MSPV chunk read {bytesRead} bytes, expected to process {size} bytes based on multiples of {vertexSize}.");
             }
         }
 
-        public uint GetSize()
+        /// <inheritdoc/>
+        public byte[] Serialize(long offset = 0)
         {
-            const int vertexSize = 12; // Size of WoWToolbox.Core.Vectors.C3Vectori
-            return (uint)Vertices.Count * vertexSize;
+            using var ms = new MemoryStream((int)GetSize());
+            using var bw = new BinaryWriter(ms);
+
+            foreach (var vertex in Vertices)
+            {
+                bw.Write(vertex.X);
+                bw.Write(vertex.Y);
+                bw.Write(vertex.Z);
+            }
+
+            return ms.ToArray();
+        }
+
+        public override string ToString()
+        {
+            return $"MSPV Chunk [{Vertices.Count} Vertices] (Reading as Float)";
         }
     }
 } 

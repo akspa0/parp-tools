@@ -121,35 +121,30 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             // The meaning of Unknown_0x00 and Unknown_0x02 is currently unclear.
             // Cannot apply old logic based on MprlIndex and specific Unknown_0x00 flags.
             // Console.WriteLine("Warning: MPRR Index Validation is temporarily disabled pending structural understanding.");
-            return true; // Temporarily return true to allow build/test
-/* 
-            // Original logic (now invalid due to structure change):
-            if (mprlEntryCount <= 0) return Entries.Count == 0; 
+            // return true; // Temporarily return true to allow build/test
 
-            for(int i = 0; i < Entries.Count; i++)
+            // IMPLEMENTED VALIDATION based on 4-byte structure (ushort, ushort)
+            // Assuming Unknown_0x00 and Unknown_0x02 are indices into MPRL
+            if (mprlEntryCount <= 0) return Entries.Count == 0; // If no MPRL entries, MPRR should be empty to be valid
+
+            for (int i = 0; i < Entries.Count; i++)
             {
                 var entry = Entries[i];
-                uint indexToCheck = entry.MprlIndex; // Default to using the raw index
+                ushort index1 = entry.Unknown_0x00;
+                ushort index2 = entry.Unknown_0x02;
 
-                // Only apply the mask if Unknown_0x00 has the specific flag value
-                if (entry.Unknown_0x00 == 0x03000000)
+                // Skip sentinel check (65535 is invalid anyway if >= mprlEntryCount)
+                // if (index1 == 65535 || index2 == 65535) continue;
+
+                // Check if either index is out of bounds
+                if (index1 >= mprlEntryCount || index2 >= mprlEntryCount)
                 {
-                    // Apply mask to get the lower 16 bits as the effective index
-                    indexToCheck = entry.MprlIndex & 0xFFFF;
-                }
-                
-                // Perform bounds check using the determined index (raw or masked)
-                if (indexToCheck >= mprlEntryCount)
-                {
-                    // Add specific logging just before failure
-                    Console.WriteLine($">>> FAIL: MPRR entry {i} check failed. Index: {indexToCheck} >= MPRL Count: {mprlEntryCount}."); 
-                    Console.WriteLine($"   Raw Values: Unk0=0x{entry.Unknown_0x00:X8}, Unk4=0x{entry.Unknown_0x04:X8}, MprlIdx=0x{entry.MprlIndex:X8}, UnkC=0x{entry.Unknown_0x0C:X8}");
-                    Console.WriteLine($"Validation Error: MPRR entry {i} MprlIndex (Raw: 0x{entry.MprlIndex:X8}, Checked: 0x{indexToCheck:X8}) is out of bounds for MPRL entry count {mprlEntryCount}.");
+                    Console.WriteLine($">>> FAIL: MPRR Validation Failed. Entry {i} has index out of bounds.");
+                    Console.WriteLine($"    Raw Indices: Idx1={index1}, Idx2={index2}. MPRL Count: {mprlEntryCount}.");
                     return false;
                 }
             }
             return true;
-*/
         }
 
         public override string ToString()

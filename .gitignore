@@ -408,6 +408,7 @@ FodyWeavers.xsd
 *.wdt
 *.wdl
 *.mpq
+*.pd4
 
 # Cursor Rules
 .cursorrules

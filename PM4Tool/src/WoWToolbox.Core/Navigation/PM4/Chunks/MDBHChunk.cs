@@ -84,10 +84,19 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             uint entryCount = br.ReadUInt32();
             Entries = new List<MdbhEntry>((int)entryCount);
 
+            if (entryCount > 0 && streamLength - br.BaseStream.Position < 4)
+            {
+                 Console.WriteLine($"Warning: MDBH chunk has count {entryCount} but not enough data for the first index. Stopping MDBH entry load.");
+                 return;
+            }
+
             for (int i = 0; i < entryCount; i++)
             {
                  if (br.BaseStream.Position + 4 > streamLength)
-                     throw new InvalidDataException($"MDBH chunk unexpected end of stream while reading index for entry {i}.");
+                 {
+                     Console.WriteLine($"Warning: MDBH chunk unexpected end of stream while reading index for entry {i}. Processed {Entries.Count} entries.");
+                     break;
+                 }
 
                 var entry = new MdbhEntry();
                 try

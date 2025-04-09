@@ -13,24 +13,37 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     {
         public uint Value_0x00 { get; set; }
         public uint Value_0x04 { get; set; }
+        // public uint[] Values { get; private set; } = new uint[32]; // Reverted
 
-        public const int Size = 8; // Bytes (uint32 + uint32)
+        public const int Size = 8; // Bytes (uint32 + uint32) - Reverted to PM4 docs
 
         public void Load(BinaryReader br)
         {
             Value_0x00 = br.ReadUInt32();
             Value_0x04 = br.ReadUInt32();
+            /* Reverted
+            for (int j = 0; j < 32; j++)
+            {
+                Values[j] = br.ReadUInt32();
+            }
+            */
         }
 
         public void Write(BinaryWriter bw)
         {
             bw.Write(Value_0x00);
             bw.Write(Value_0x04);
+            /* Reverted
+            for (int j = 0; j < 32; j++)
+            {
+                bw.Write(Values[j]);
+            }
+            */
         }
 
         public override string ToString()
         {
-            return $"MDOS Entry [Val0: 0x{Value_0x00:X8}, Val4: 0x{Value_0x04:X8}]";
+            return $"MDOS Entry [Val0: 0x{Value_0x00:X8}, Val4: 0x{Value_0x04:X8}]"; // Reverted
         }
     }
 
@@ -54,6 +67,9 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public void LoadBinaryData(byte[] chunkData)
         {
             if (chunkData == null) throw new ArgumentNullException(nameof(chunkData));
+            // --- DEBUG: Log the size of the data received from the ChunkedFile loader ---
+            Console.WriteLine($"DEBUG: MDOSChunk.LoadBinaryData received chunkData with Length = {chunkData.Length}");
+            // --- END DEBUG ---
 
             using var ms = new MemoryStream(chunkData);
             using var br = new BinaryReader(ms);

@@ -7,100 +7,49 @@ using System.Numerics; // For Vector3 if used in entry helpers
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
     /// <summary>
-    /// Represents a single entry in the MDSF chunk.
-    /// Contains structure-related data with mixed types.
+    /// Represents an entry in the MDSF chunk.
+    /// Structure based *strictly* on documentation at wowdev.wiki/PM4.md (MDSF section)
     /// </summary>
-    public class MDSFEntry
+    public class MdsfEntry
     {
-        public uint Value_0x00 { get; set; } // uint32_t
-        public uint Value_0x04 { get; set; } // uint32_t
-        public uint Value_0x08 { get; set; } // uint32_t
-        public uint Value_0x0C { get; set; } // uint32_t
-        public uint Value_0x10 { get; set; } // uint32_t
-        public uint Value_0x14 { get; set; } // uint32_t
-        public float Float_0x18 { get; set; } // float
-        public float Float_0x1C { get; set; } // float
-        public float Float_0x20 { get; set; } // float
-        public float Float_0x24 { get; set; } // float
-        public float Float_0x28 { get; set; } // float
-        public float Float_0x2C { get; set; } // float
-        public float Float_0x30 { get; set; } // float
-        public float Float_0x34 { get; set; } // float (Duplicate field name in spec? Assuming this is 0x34)
-        public uint Value_0x38 { get; set; } // uint32_t
-        public uint Value_0x3C { get; set; } // uint32_t
-        public uint Value_0x40 { get; set; } // uint32_t
+        // Reverting to 8-byte structure based on PM4 documentation
+        public uint Value_0x00 { get; set; }
+        public uint Value_0x04 { get; set; }
 
-        public const int EntrySize = 68; // 6*4 + 8*4 + 3*4 = 24 + 32 + 12 = 68
+        public const int Size = 8; // Bytes (uint32 + uint32)
 
         public void Load(BinaryReader br)
         {
             Value_0x00 = br.ReadUInt32();
             Value_0x04 = br.ReadUInt32();
-            Value_0x08 = br.ReadUInt32();
-            Value_0x0C = br.ReadUInt32();
-            Value_0x10 = br.ReadUInt32();
-            Value_0x14 = br.ReadUInt32();
-            Float_0x18 = br.ReadSingle();
-            Float_0x1C = br.ReadSingle();
-            Float_0x20 = br.ReadSingle();
-            Float_0x24 = br.ReadSingle();
-            Float_0x28 = br.ReadSingle();
-            Float_0x2C = br.ReadSingle();
-            Float_0x30 = br.ReadSingle();
-            Float_0x34 = br.ReadSingle();
-            Value_0x38 = br.ReadUInt32();
-            Value_0x3C = br.ReadUInt32();
-            Value_0x40 = br.ReadUInt32();
         }
 
         public void Write(BinaryWriter bw)
         {
             bw.Write(Value_0x00);
             bw.Write(Value_0x04);
-            bw.Write(Value_0x08);
-            bw.Write(Value_0x0C);
-            bw.Write(Value_0x10);
-            bw.Write(Value_0x14);
-            bw.Write(Float_0x18);
-            bw.Write(Float_0x1C);
-            bw.Write(Float_0x20);
-            bw.Write(Float_0x24);
-            bw.Write(Float_0x28);
-            bw.Write(Float_0x2C);
-            bw.Write(Float_0x30);
-            bw.Write(Float_0x34);
-            bw.Write(Value_0x38);
-            bw.Write(Value_0x3C);
-            bw.Write(Value_0x40);
         }
-
-        // Optional helper methods from spec example
-        // public Vector3 GetPotentialPosition() => new Vector3(Float_0x18, Float_0x1C, Float_0x20);
-        // public Vector3 GetPotentialRotation() => new Vector3(Float_0x24, Float_0x28, Float_0x2C);
-        // public float GetPotentialScale() => Float_0x30; // Spec example seems off, maybe 0x30 or 0x34?
 
         public override string ToString()
         {
-            // Provide a concise representation
-            return $"MDSF Entry [0x00={Value_0x00:X8}, ..., Pos?=({Float_0x18}, {Float_0x1C}, {Float_0x20}), ..., 0x40={Value_0x40:X8}]";
+            return $"MDSF Entry [Val0: 0x{Value_0x00:X8}, Val4: 0x{Value_0x04:X8}]";
         }
     }
 
     /// <summary>
-    /// Represents the MDSF chunk containing structure data.
-    /// Based on documentation at chunkvault/chunks/PM4/M014_MDSF.md
+    /// Represents the MDSF chunk containing surface data.
     /// </summary>
     public class MDSFChunk : IIFFChunk, IBinarySerializable
     {
         public const string ExpectedSignature = "MDSF";
         public string GetSignature() => ExpectedSignature;
 
-        public List<MDSFEntry> Entries { get; private set; } = new List<MDSFEntry>();
+        public List<MdsfEntry> Entries { get; private set; } = new List<MdsfEntry>();
 
         /// <inheritdoc/>
         public uint GetSize()
         {
-            return (uint)Entries.Count * MDSFEntry.EntrySize;
+            return (uint)(Entries.Count * MdsfEntry.Size);
         }
 
         /// <inheritdoc/>
@@ -117,37 +66,39 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public void Load(BinaryReader br)
         {
             long startPosition = br.BaseStream.Position;
-            long endPosition = br.BaseStream.Length;
+            long endPosition = br.BaseStream.Length; // Assuming the reader is positioned at the start of the chunk data
             long size = endPosition - startPosition;
 
-             if (size < 0) throw new InvalidOperationException("Stream size is negative.");
+            if (size < 0) throw new InvalidDataException("Stream size is negative.");
 
-            if (size % MDSFEntry.EntrySize != 0)
+            // Use the corrected Entry Size from the documentation
+            if (size % MdsfEntry.Size != 0)
             {
-                Entries.Clear();
-                Console.WriteLine($"Warning: MDSF chunk size {size} is not a multiple of {MDSFEntry.EntrySize} bytes. Entry data might be corrupt.");
-                size -= (size % MDSFEntry.EntrySize); // Process only complete entries
+                // Log a warning, but continue processing based on the number of full entries
+                Console.WriteLine($"Warning: MDSF chunk size {size} is not a multiple of the documented entry size {MdsfEntry.Size}. Possible padding or corruption.");
+                size -= (size % MdsfEntry.Size); // Process only complete entries
             }
 
-            int entryCount = (int)(size / MDSFEntry.EntrySize);
-            Entries = new List<MDSFEntry>(entryCount);
+            int entryCount = (int)(size / MdsfEntry.Size);
+            Entries = new List<MdsfEntry>(entryCount);
 
             for (int i = 0; i < entryCount; i++)
             {
-                 if (br.BaseStream.Position + MDSFEntry.EntrySize > br.BaseStream.Length)
+                if (br.BaseStream.Position + MdsfEntry.Size > br.BaseStream.Length)
                 {
-                     Console.WriteLine($"Warning: MDSF chunk unexpected end of stream at entry {i}. Read {Entries.Count} entries out of expected {entryCount}.");
-                     break;
+                    Console.WriteLine($"Warning: MDSF chunk unexpected end of stream at entry {i}. Read {Entries.Count} entries out of expected {entryCount}.");
+                    break;
                 }
-                var entry = new MDSFEntry();
+                var entry = new MdsfEntry();
                 entry.Load(br);
                 Entries.Add(entry);
             }
-            
-             long bytesRead = br.BaseStream.Position - startPosition;
-            if (bytesRead != size + (size % MDSFEntry.EntrySize))
+
+            long bytesRead = br.BaseStream.Position - startPosition;
+            // Check if we read exactly the multiple of entry size we decided to process
+            if (bytesRead != size && size > 0)
             {
-                 Console.WriteLine($"Warning: MDSF chunk read {bytesRead} bytes, expected to process based on size {size}. Original size reported by header might have padding or corruption.");
+                 Console.WriteLine($"Warning: MDSF chunk read {bytesRead} bytes, but expected to process {size} bytes based on multiples of {MdsfEntry.Size}.");
             }
         }
 

@@ -20,7 +20,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public float UnknownFloat_0x0C { get; set; }             // _0x0C
         public float UnknownFloat_0x10 { get; set; }             // _0x10
         public uint MsviFirstIndex { get; set; }      // _0x14
-        public uint Unknown_0x18 { get; set; }            // _0x18
+        public uint MdosIndex { get; set; }            // _0x18 - Renamed from Unknown_0x18
         public uint Unknown_0x1C { get; set; }            // _0x1C
 
         public const int Size = 32; // Bytes
@@ -36,7 +36,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             UnknownFloat_0x0C = br.ReadSingle();
             UnknownFloat_0x10 = br.ReadSingle();
             MsviFirstIndex = br.ReadUInt32();
-            Unknown_0x18 = br.ReadUInt32();
+            MdosIndex = br.ReadUInt32(); // Read _0x18 as MdosIndex
             Unknown_0x1C = br.ReadUInt32();
         }
 
@@ -51,13 +51,13 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             bw.Write(UnknownFloat_0x0C);
             bw.Write(UnknownFloat_0x10);
             bw.Write(MsviFirstIndex);
-            bw.Write(Unknown_0x18);
+            bw.Write(MdosIndex); // Write MdosIndex at _0x18
             bw.Write(Unknown_0x1C);
         }
 
         public override string ToString()
         {
-            return $"MSUR Entry [Index: {MsviFirstIndex}, Count: {IndexCount}, Flags: {FlagsOrUnknown_0x00:X2}]";
+            return $"MSUR Entry [Index: {MsviFirstIndex}, Count: {IndexCount}, Flags: {FlagsOrUnknown_0x00:X2}, MdosIndex: {MdosIndex}]"; // Updated ToString
         }
     }
 

@@ -11,7 +11,7 @@ namespace WoWToolbox.Core.Navigation.PM4
     /// <summary>
     /// Represents a PM4 file, which is a variant of ADT files used for phasing/pathing data
     /// </summary>
-    public class PM4File : ChunkedFile, IBinarySerializable, IIFFFile, IParentFile
+    public class PM4File : ChunkedFile, IBinarySerializable
     {
         /// <summary>
         /// Gets or sets the MVER chunk

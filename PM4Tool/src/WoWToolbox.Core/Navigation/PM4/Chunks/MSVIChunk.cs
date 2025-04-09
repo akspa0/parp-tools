@@ -90,15 +90,19 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         /// <returns>True if all indices are valid, false otherwise.</returns>
         public bool ValidateIndices(int vertexCount)
         {
+            Console.WriteLine($"--- MSVIChunk.ValidateIndices START (Vertex Count: {vertexCount}) ---");
+            bool isValid = true;
             foreach (uint index in Indices)
             {
+                // Console.WriteLine($"  MSVI Validating Index: {index}"); // Re-commented: Very verbose
                 if (index >= vertexCount)
                 {
-                    Console.WriteLine($"Error: MSVI index {index} is out of bounds (vertex count: {vertexCount}).");
-                    return false;
+                    Console.WriteLine($"Error: MSVIChunk.ValidateIndices - Index {index} is OUT OF BOUNDS (>= Vertex Count: {vertexCount}).");
+                    isValid = false; // Keep original logic: flag invalidity but finish loop (though unlikely to hit now)
                 }
             }
-            return true;
+            Console.WriteLine($"--- MSVIChunk.ValidateIndices END (Result: {isValid}) ---");
+            return isValid;
         }
 
         /// <summary>

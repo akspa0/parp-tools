@@ -3,15 +3,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Warcraft.NET.Files.Interfaces;
-using WoWToolbox.Core.Vectors; // Use C3Vector instead of C3Vectori
-using Warcraft.NET.Files.Structures; // <-- Add this for C3Vector
+// using WoWToolbox.Core.Vectors; // Use C3Vectori from Warcraft.NET instead
+// using Warcraft.NET.Files.Structures; // Using C3Vectori from WoWToolbox.Core.Vectors
+using WoWToolbox.Core.Vectors; // Keep this for C3Vectori definition
 // Assuming C3Vector is accessible from here, as it's defined with MSPVChunk
+using Warcraft.NET.Files.Structures; // Use C3Vector from Warcraft.NET
 
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
     /// <summary>
     /// Represents an entry in the MPRL chunk.
     /// Based on documentation at wowdev.wiki/PM4.md
+    /// Reverting Position to C3Vector (float) based on visual results.
     /// </summary>
     public class MprlEntry
     {
@@ -19,41 +22,48 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public short Unknown_0x02 { get; set; }           // _0x02 in doc
         public ushort Unknown_0x04 { get; set; }          // _0x04 in doc
         public ushort Unknown_0x06 { get; set; }          // _0x06 in doc
-        public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Changed to C3Vector (float)
+        public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Reverted to C3Vector (float)
         public short Unknown_0x14 { get; set; }           // _0x14 in doc
         public ushort Unknown_0x16 { get; set; }          // _0x16 in doc
         // Removed old UnknownFloat fields
 
-        public const int Size = 24; // Bytes (2+2+2+2 + C3Vector=12 + 2+2)
+        public const int Size = 24; // Bytes (2+2+2+2 + C3Vector(12) + 2+2)
 
         public void Load(BinaryReader br)
         {
+            // Read fields before position
             Unknown_0x00 = br.ReadUInt16();
             Unknown_0x02 = br.ReadInt16();
             Unknown_0x04 = br.ReadUInt16();
             Unknown_0x06 = br.ReadUInt16();
-            Position = new C3Vector // Read as floats
-            {
-                X = br.ReadSingle(),
-                Y = br.ReadSingle(),
-                Z = br.ReadSingle()
-            };
+            
+            // Read Position as C3Vector (float, assuming X, Y, Z order in file for simplicity now)
+            float fileX = br.ReadSingle();
+            float fileY = br.ReadSingle(); 
+            float fileZ = br.ReadSingle(); 
+            
+            // Assign to struct properties
+            Position = new C3Vector { X = fileX, Y = fileY, Z = fileZ };
+
+            // Read fields after position
             Unknown_0x14 = br.ReadInt16();
             Unknown_0x16 = br.ReadUInt16();
-
-            // Remove debug log
-            // Console.WriteLine($"DEBUG MPRL Entry: Pos=({Position.X}, {Position.Y}, {Position.Z})"); 
         }
 
         public void Write(BinaryWriter bw)
         {
+            // Write fields before position
             bw.Write(Unknown_0x00);
             bw.Write(Unknown_0x02);
             bw.Write(Unknown_0x04);
             bw.Write(Unknown_0x06);
-            bw.Write(Position.X); // Write floats
-            bw.Write(Position.Y);
+
+            // Write Position as C3Vector (X, Y, Z)
+            bw.Write(Position.X);
+            bw.Write(Position.Y); 
             bw.Write(Position.Z);
+
+            // Write fields after position
             bw.Write(Unknown_0x14);
             bw.Write(Unknown_0x16);
         }

@@ -2,25 +2,26 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
-using WoWToolbox.Core.Vectors; // Ensure this using is present
+using System.Numerics;
+using WoWToolbox.Core.Vectors; // Keep for C3Vectori if used elsewhere, remove if not
 
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
     /// <summary>
-    /// Represents the MSCN chunk, believed to contain normal vectors or similar.
-    /// Based on documentation structure C3Vectori mscn[];
-    /// Documentation explicitly states 'n != normals'.
+    /// Represents the MSCN chunk, containing normal vectors (read as floats).
+    /// Documentation notes 'n != normals', but treating as floats for export.
     /// </summary>
     public class MSCNChunk : IIFFChunk, IBinarySerializable
     {
         public const string Signature = "MSCN";
 
-        // Renamed from Normals based on documentation note 'n != normals'
-        public List<C3Vectori> Vectors { get; private set; }
+        // Changed from C3Vectori to Vector3 (float-based)
+        public List<Vector3> Vectors { get; private set; }
 
         public MSCNChunk()
         {
-            Vectors = new List<C3Vectori>();
+            // Initialize with Vector3 list
+            Vectors = new List<Vector3>();
         }
 
         public string GetSignature() => Signature;
@@ -32,24 +33,26 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             Read(br, (uint)inData.Length);
         }
 
+        // Updated to read floats (Vector3)
         public void Read(BinaryReader reader, uint size)
         {
-            const int vectorSize = 12; // Size of C3Vectori (3 * int)
+            const int vectorSize = sizeof(float) * 3; // Size of Vector3 (3 * float)
             if (size % vectorSize != 0)
             {
                 throw new InvalidDataException($"MSCN chunk size ({size}) must be a multiple of {vectorSize}.");
             }
 
             int vectorCount = (int)(size / vectorSize);
-            Vectors = new List<C3Vectori>(vectorCount);
+            Vectors = new List<Vector3>(vectorCount);
 
             for (int i = 0; i < vectorCount; i++)
             {
-                C3Vectori vector = new C3Vectori
+                // Read X, Y, Z as floats
+                Vector3 vector = new Vector3
                 {
-                    X = reader.ReadInt32(),
-                    Y = reader.ReadInt32(),
-                    Z = reader.ReadInt32()
+                    X = reader.ReadSingle(),
+                    Y = reader.ReadSingle(),
+                    Z = reader.ReadSingle()
                 };
                 Vectors.Add(vector);
             }
@@ -63,6 +66,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             return ms.ToArray();
         }
 
+        // Updated to write floats (Vector3)
         public void Write(BinaryWriter writer)
         {
             foreach (var vector in Vectors)
@@ -73,15 +77,17 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             }
         }
 
+        // Updated to use Vector3 size
         public uint GetSize()
         {
-            const int vectorSize = 12;
+            const int vectorSize = sizeof(float) * 3;
             return (uint)Vectors.Count * vectorSize;
         }
 
         public override string ToString()
         {
-            return $"MSCN Chunk [{Vectors.Count} Vectors]";
+            // Update type in string
+            return $"MSCN Chunk [{Vectors.Count} Vectors (Vector3)]";
         }
     }
 } 
