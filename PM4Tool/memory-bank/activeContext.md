@@ -1,30 +1,32 @@
-# Active Context: PM4 Coordinate Transformations & Visualization
+# Active Context: Interpreting PD4 MSLK Structure
 
-**Goal:** Correctly parse all PM4 chunks according to documentation and data analysis, resolve discrepancies, and export valid, separate `.obj` files for visualization of key geometry components.
+**Goal:** Accurately parse PD4 and PM4 files, understand their structure (especially shared chunks like MSLK, MSUR), resolve discrepancies, and export relevant data. Key focus is understanding the **differences in MSLK structure between PM4 and PD4, driven by file scope.**
 
-**Current Focus:** Finalizing coordinate transformations for `.obj` export and enabling remaining geometry chunks (`MSCN`).
-*   User confirmed current test code output for `MSPV` (Raw floats `(X, Y, Z)`) and `MSVT` (Swapped floats `(Y, X, Z)`) is **visually correct**.
-*   `MPRL` output (Raw floats `(X, Y, Z)`) alignment still needs verification/adjustment.
-*   `MSCN` export is disabled; needs enabling and transformation logic.
-*   User reported potential issues with `MSUR` output, requiring clarification.
+**Current Focus:** Analyzing the detailed MSLK entry data from the updated PD4 logs (`6or_garrison...`) to understand the patterns and meaning of fields within "Node Only" groups (`Unk00`, `Unk01`, `Unk10`).
 
 **Recent Changes:**
-*   User confirmed visual correctness of current MSPV `(X,Y,Z)` and MSVT `(Y,X,Z)` output from `PM4FileTests.cs`.
-*   User reviewed and potentially modified `PM4FileTests.cs`.
-*   Fixed build issues & resolved MSVI/MSLK parsing questions.
-*   **Investigated `MDBH` chunk warning:** Confirmed issue is truncated data in the test file. Parser handles it correctly.
-*   **Investigated `MPRR` index errors:**
-    *   Confirmed 4-byte structure, implemented `ValidateIndices`, confirmed test file has invalid indices (test assertion now fails as expected but is temporarily commented out).
-*   Iterated through several coordinate transformations for MSVT and MPRL based on visual feedback and documentation attempts. Previous attempts were manually adjusted by user. The current *code* output is raw or simple swaps.
-*   MPRR export enabled in test (`exportMprrLines=true`) with bounds checking.
-*   Persistent syntax errors with automated edits required manual correction by user.
-*   `MSCN`, `MDSF` exports remain disabled.
+*   **PM4 MSLK JSON Export:** Added logic to `PM4FileTests` to generate a hierarchical JSON file (`_mslk_hierarchy.json`) representing the Mixed Group structure.
+*   **PD4 MSLK Analysis Tool Update:** Modified `MslkAnalyzer` to log detailed information for every entry within each group (node and geometry).
+*   **PD4 Log Regeneration:** Re-ran the updated `MslkAnalyzer` on PD4 logs to generate detailed analysis files.
+*   **PD4 MSLK Structure Interpretation:**
+    *   Confirmed PD4 uses separate "Node Only" / "Geometry Only" groups (based on `Unk04`), unlike PM4's "Mixed Groups".
+    *   **Hypothesis:** This difference stems from PD4 representing a single object (WMO) while PM4 represents a multi-object collection (map tile), making explicit node-geometry linking via group ID unnecessary in PD4.
+    *   Preliminary analysis of PD4 "Node Only" groups (limited sample) showed potentially consistent `Unk00=0x01`, variable `Unk01`, and presence of `Unk10` (MSVI link).
+*   **Memory Bank Update:** Updated `systemPatterns.md`, `techContext.md`, and `progress.md` with the latest findings regarding MSLK structural differences, the file scope hypothesis, and preliminary PD4 node analysis.
 
 **Next Steps:**
-1.  **Enable MSCN Export:** Set `exportMscnNormals = true` in `PM4FileTests.cs` and add basic `vn` export logic (initial transform TBD/visual check).
-2.  **Clarify MSUR Issue:** Get details from user on what's wrong/missing with the `MSUR` face output.
-3.  **Verify/Adjust MPRL Alignment:** Visually check `MPRL` (`X,Y,Z`) alignment with correct MSPV/MSVT and adjust transform if needed.
-4.  **Refine MSCN Transform:** Based on visual check, implement the correct transformation for `MSCN` normals.
-5.  **Research MDSF:** Investigate `MDSF` usage.
+1.  **Analyze More PD4 MSLK Nodes:** Examine the detailed output in the *newly generated* `6or_garrison..._mslk_analysis.log` files for more "Node Only" groups. Confirm `Unk00`/`Unk01` patterns and value ranges. (Current step)
+2.  **Interpret PD4 Node Semantics:** Determine the meaning/purpose of different `Unk01` values and the role of nodes in a single-object context.
+3.  **Investigate PD4 `Unk10` Links:** If patterns emerge, plan how to cross-reference node `Unk10` values with `MSVI` data.
+4.  **Revisit PM4/PD4 General Tasks:** Address other items like MSCN alignment, MDSF research, MSUR analysis based on MSLK insights.
 
-**--- (Previous Context Notes Removed/Archived) ---**
+**--- (Context Updated: PD4 MSLK structure difference linked to file scope, preliminary node analysis done, detailed logs generated) ---**
+
+## Recent Findings & Decisions
+*   **MSLK `Unknown_0x04` Behavior:** Confirmed difference PM4 (Mixed Groups link node/geom) vs PD4 (Node Only/Geom Only groups). **Hypothesis:** Driven by multi-object (PM4) vs single-object (PD4) file scope.
+*   **PD4 MSLK Node Preliminary:** `Unk00` often `0x01`, `Unk01` varies, `Unk10` (MSVI link) present.
+*   **Analysis Tool:** Updated `MslkAnalyzer` to provide detailed entry logs.
+*   **PM4 Visualization:** Added JSON export for hierarchy.
+*   **Chunk Correlations:** Documented known direct/indirect links (`MSUR`->`MDOS`/`MSVI`, `MSLK`->`MSPI`/`MSVI`) and lack of implemented links (`MSLK`<->`MSCN`/`MSUR`).
+*   PD4 MSLK.Unk10 Analysis: (Status unchanged) Confirmed likely `MSVI` index. Purpose TBD.
+*   PM4 Test Build: Resolved persistent build issues by moving analysis logic to a separate console application (`WoWToolbox.AnalysisTool`).
