@@ -86,100 +86,58 @@ namespace WoWToolbox.Tests.Navigation.PM4
         [Fact]
         public void LoadPM4File_ShouldLoadChunks()
         {
-            Console.WriteLine("--- LoadPM4File_ShouldLoadChunks START ---"); // Execution Start Log
-            // Arrange
-            var inputFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TestDataPath);
-            
-            // --- Define Separate Output Paths --- Attempt 21 ---
-            string baseOutputPath = Path.Combine(Path.GetDirectoryName(TestDataPath) ?? AppDomain.CurrentDomain.BaseDirectory, Path.GetFileNameWithoutExtension(TestDataPath));
+            Console.WriteLine("--- LoadPM4File_ShouldLoadChunks START ---");
+
+            // --- Path Construction (Relative to Test Output Directory) ---
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var testDataSubDir = Path.Combine("test_data", "development"); // Relative path within output dir
+            var inputFileName = "development_00_00.pm4";
+            var inputFilePath = Path.Combine(baseDir, testDataSubDir, inputFileName);
+
+            var outputSubDir = Path.Combine("output", "development"); // Relative path for output files
+            var outputDir = Path.Combine(baseDir, outputSubDir);
+            Directory.CreateDirectory(outputDir); // Ensure the output directory exists
+
+            var baseOutputName = "development_00_00";
+            var baseOutputPath = Path.Combine(outputDir, baseOutputName);
+            // --- End Path Construction ---
+
+            // --- Define Output File Paths (Using new baseOutputPath) ---
             var outputMsvtFilePath = baseOutputPath + "_msvt.obj";
             var outputMspvFilePath = baseOutputPath + "_mspv.obj";
-            // Revert to single MPRL output path
             var outputMprlFilePath = baseOutputPath + "_mprl.obj";
-            var outputMscnFilePath = baseOutputPath + "_mscn.obj"; // ADDED MSCN output path
-            var outputMslkFilePath = baseOutputPath + "_mslk.obj"; // ADDED MSLK output path
-            var outputMslkJsonPath = baseOutputPath + "_mslk_hierarchy.json"; // ADDED MSLK JSON output path
-            var outputSkippedMslkLogPath = baseOutputPath + "_skipped_mslk.log"; // ADDED Skipped MSLK log path
-            // var outputMprlXZYFilePath = baseOutputPath + "_mprl_XZY.obj"; // Removed
-            // var outputMprlNegXZYFilePath = baseOutputPath + "_mprl_negXZY.obj"; // Removed
-            // var outputMscnFilePath = baseOutputPath + "_mscn.obj"; // Reverted: MSCN Disabled
-            // var outputCombinedFilePath = baseOutputPath + "_combined.obj"; // Reverted: Removed Combined
+            var outputMscnFilePath = baseOutputPath + "_mscn.obj";
+            var outputMslkFilePath = baseOutputPath + "_mslk.obj";
+            var outputMslkJsonPath = baseOutputPath + "_mslk_hierarchy.json";
+            var outputSkippedMslkLogPath = baseOutputPath + "_skipped_mslk.log";
+            var outputPm4MslkNodesFilePath = baseOutputPath + "_pm4_mslk_nodes.obj";
             string debugLogPath = baseOutputPath + ".debug.log";
-            string summaryLogPath = baseOutputPath + ".summary.log"; // ADDED Summary Log Path
+            string summaryLogPath = baseOutputPath + ".summary.log";
+            var outputBuildingIdsPath = baseOutputPath + "_building_ids.log";
 
+            Console.WriteLine($"Base Directory: {baseDir}");
+            Console.WriteLine($"Input File Path: {inputFilePath}");
+            Console.WriteLine($"Output Directory: {outputDir}");
             Console.WriteLine($"Output MSVT OBJ: {outputMsvtFilePath}");
             Console.WriteLine($"Output MSPV OBJ: {outputMspvFilePath}");
-            // Update console output for single MPRL file
             Console.WriteLine($"Output MPRL OBJ: {outputMprlFilePath}");
-            Console.WriteLine($"Output MSCN OBJ: {outputMscnFilePath}"); // ADDED log for MSCN path
-            Console.WriteLine($"Output MSLK OBJ: {outputMslkFilePath}"); // ADDED log for MSLK path
-            Console.WriteLine($"Output MSLK JSON: {outputMslkJsonPath}"); // ADDED log for MSLK JSON path
-            Console.WriteLine($"Output Skipped MSLK Log: {outputSkippedMslkLogPath}"); // ADDED log for skipped MSLK path
-            // Console.WriteLine($"Output MPRL (XZY) OBJ: {outputMprlXZYFilePath}"); // Removed
-            // Console.WriteLine($"Output MPRL (NegXZY) OBJ: {outputMprlNegXZYFilePath}"); // Removed
-            // Console.WriteLine($"Output MSCN OBJ: {outputMscnFilePath}"); // Reverted: MSCN Disabled
-            // Console.WriteLine($"Output Combined OBJ: {outputCombinedFilePath}"); // Reverted: Removed Combined
+            Console.WriteLine($"Output MSCN OBJ: {outputMscnFilePath}");
+            Console.WriteLine($"Output MSLK OBJ: {outputMslkFilePath}");
+            Console.WriteLine($"Output MSLK JSON: {outputMslkJsonPath}");
+            Console.WriteLine($"Output Skipped MSLK Log: {outputSkippedMslkLogPath}");
+            Console.WriteLine($"Output PM4 MSLK Nodes OBJ: {outputPm4MslkNodesFilePath}");
             Console.WriteLine($"Debug Log: {debugLogPath}");
-            Console.WriteLine($"Summary Log: {summaryLogPath}"); // ADDED log for summary path
+            Console.WriteLine($"Summary Log: {summaryLogPath}");
+            Console.WriteLine($"Building IDs Log: {outputBuildingIdsPath}");
+
+            // Initialize collection for unique building IDs
+            var uniqueBuildingIds = new HashSet<uint>();
 
             // Act
-            var pm4File = PM4File.FromFile(TestDataPath);
+            var pm4File = PM4File.FromFile(inputFilePath);
 
             // Assert - Basic Chunk Loading
             Assert.NotNull(pm4File);
-            Assert.NotNull(pm4File.MVER);
-            Assert.NotNull(pm4File.MSHD);
-            Assert.NotNull(pm4File.MSLK);
-            Assert.NotNull(pm4File.MSPI);
-            Assert.NotNull(pm4File.MSPV);
-            Assert.NotNull(pm4File.MSVT);
-            Assert.NotNull(pm4File.MSVI);
-            Assert.NotNull(pm4File.MSUR);
-            Assert.NotNull(pm4File.MSCN);
-            Assert.NotNull(pm4File.MPRL);
-            Assert.NotNull(pm4File.MPRR);
-            Assert.NotNull(pm4File.MDBH);
-            Assert.NotNull(pm4File.MDOS);
-            Assert.NotNull(pm4File.MDSF);
-            // MSRN is optional, so don't assert not null
-            // Assert.NotNull(pm4File.MSRN); 
-
-            // Log MDOS Entry Count for verification (MOVED INSIDE TRY BLOCK)
-            // int mdosEntryCount = pm4File.MDOS?.Entries.Count ?? -1;
-            // Console.WriteLine($"INFO: Loaded MDOS Chunk contains {mdosEntryCount} entries.");
-            // debugWriter.WriteLine($"INFO: Loaded MDOS Chunk contains {mdosEntryCount} entries.");
-
-            // Assert - Basic Counts (assuming test file has data)
-            Assert.True(pm4File.MSLK?.Entries.Count > 0);
-            Assert.True(pm4File.MSPI?.Indices.Count > 0);
-            Assert.True(pm4File.MSPV?.Vertices.Count > 0);
-            Assert.True(pm4File.MSVT?.Vertices.Count > 0);
-            Assert.True(pm4File.MSVI?.Indices.Count > 0);
-            Assert.True(pm4File.MSUR?.Entries.Count > 0);
-            // Check if MSCN exists and has data, but allow it to be empty if not present in file
-            if (pm4File.MSCN != null)
-            {
-                 Assert.True(pm4File.MSCN.Vectors.Count >= 0); // Allow empty chunk
-            }
-            // else Assert.Null(pm4File.MSCN); // Optionally assert it's null if not expected
-            Assert.True(pm4File.MPRL?.Entries.Count > 0);
-            Assert.True(pm4File.MPRR?.Entries.Count > 0);
-            // Check if MDBH exists and has entries, allowing for empty if not present
-            if (pm4File.MDBH != null)
-            {
-                Assert.True(pm4File.MDBH.Entries.Count >= 0); // Allow empty
-                // Optional: Could add checks on parsed data within MDBH entries if needed
-            }
-            // Check if MDOS exists and has entries, allowing for empty if not present
-            if (pm4File.MDOS != null)
-            {
-                 Assert.True(pm4File.MDOS.Entries.Count >= 0); // Allow empty
-            }
-            // Check if MDSF exists and has entries, allowing for empty if not present
-            if (pm4File.MDSF != null)
-            {
-                Assert.True(pm4File.MDSF.Entries.Count >= 0); // Allow empty
-            }
 
             // Log first few MPRR entries for debugging index issue
             Console.WriteLine("\n--- Dumping MPRR Entries 60-75 (if they exist) ---");
@@ -197,45 +155,46 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Console.WriteLine("--- End MPRR Dump ---\n");
 
             // Assert - Index Validations
-            Assert.NotNull(pm4File.MVER); // Basic check: MVER should always exist
-            Assert.NotNull(pm4File.MSHD); 
-            
-            // --- Export Configuration Flags ---
-            bool exportMspvVertices = true;  // REVERTED
-            bool exportMsvtVertices = true;  // REVERTED
-            bool exportMprlPoints = true; // REVERTED
-            bool exportMscnNormals = true; // REVERTED (ENABLED MSCN Export)
-            bool exportMslkPaths = true; // REVERTED
-            bool exportOnlyFirstMslk = false; 
-            bool processMsurEntries = true; // Renamed from exportMsurFaces - Remains ENABLED
-            bool exportOnlyFirstMsur = false; // RE-ADDED THIS FLAG
-            bool exportMprrLines = true; // REVERTED (ENABLED MPRR LINE EXPORT FOR DEBUGGING)
-            bool exportMdsfFaces = true; // REVERTED
-            // --- End Configuration Flags ---
+            int mprlVertexCount = pm4File.MPRL?.Entries.Count ?? 0;
+            Console.WriteLine($"\n--- Validating MPRR Indices against MPRL Vertex Count: {mprlVertexCount} ---");
+
+            int msvtVertexCount = pm4File.MSVT?.Vertices.Count ?? 0;
+            Console.WriteLine($"\n--- Validating MSVI Indices against MSVT Vertex Count: {msvtVertexCount} ---");
+
+            int mspvVertexCount = pm4File.MSPV?.Vertices.Count ?? 0;
+            Console.WriteLine($"\n--- Validating MSPI Indices against MSPV Vertex Count: {mspvVertexCount} ---");
+
+            int totalMspiIndices = pm4File.MSPI?.Indices.Count ?? 0;
+            Console.WriteLine($"\n--- Validating MSUR Index Ranges against MSVI Index Count: {totalMspiIndices} ---");
+
+            // Assert - Export Configuration Flags
+            bool exportMspvVertices = true;
+            bool exportMsvtVertices = true;
+            bool exportMprlPoints = true;
+            bool exportMscnNormals = true;
+            bool exportMslkPaths = true;
+            bool exportOnlyFirstMslk = false;
+            bool processMsurEntries = true;
+            bool exportOnlyFirstMsur = false;
+            bool exportMprrLines = true;
+            bool logMdsfLinks = true;
 
             // --- Reverted to Separate OBJ Export Setup ---
             StreamWriter? debugWriter = null;
-            StreamWriter? summaryWriter = null; // ADDED Summary Writer Variable
-            // StreamWriter? combinedWriter = null; // Reverted: Removed Combined
+            StreamWriter? summaryWriter = null;
             StreamWriter? msvtWriter = null;
             StreamWriter? mspvWriter = null;
             StreamWriter? mprlWriter = null;
-            StreamWriter? mscnWriter = null; // ADDED MSCN writer variable
-            StreamWriter? mslkWriter = null; // Added writer for MSLK geometry
-            StreamWriter? skippedMslkWriter = null; // Added writer for skipped MSLK entries
+            StreamWriter? mscnWriter = null;
+            StreamWriter? mslkWriter = null;
+            StreamWriter? skippedMslkWriter = null;
+            StreamWriter? mslkNodesWriter = null;
             
-            // Reverted: Removed Global vertex tracking
-            // int globalVertexCount = 0;
-            // int baseMspvIndex = 0;
-            // int baseMsvtIndex = 0;
-            // int baseMprlIndex = 0;
-            // int baseMscnIndex = 0;
-
             try
             {
                 // Initialize writers here, now that we are inside the try block
                 debugWriter = new StreamWriter(debugLogPath, false);
-                summaryWriter = new StreamWriter(summaryLogPath, false); // ADDED Summary Writer Init
+                summaryWriter = new StreamWriter(summaryLogPath, false);
                 
                 // Log MDOS Entry Count for verification (MOVED HERE)
                 int mdosEntryCount = pm4File.MDOS?.Entries.Count ?? -1;
@@ -252,89 +211,74 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 debugWriter.WriteLine($"INFO: MSUR Entries: {pm4File.MSUR?.Entries.Count ?? -1}");
                 debugWriter.WriteLine($"INFO: MDBH Entries: {pm4File.MDBH?.Entries.Count ?? -1}");
                 debugWriter.WriteLine($"INFO: MDSF Entries: {pm4File.MDSF?.Entries.Count ?? -1}");
-                debugWriter.WriteLine($"INFO: MSLK Entries: {pm4File.MSLK?.Entries.Count ?? -1}"); // Added MSLK count
-                debugWriter.WriteLine($"INFO: MSRN Normals: {pm4File.MSRN?.Normals.Count ?? -1}"); // MSRN is optional, uses Normals property
+                debugWriter.WriteLine($"INFO: MSLK Entries: {pm4File.MSLK?.Entries.Count ?? -1}");
 
-                // combinedWriter = new StreamWriter(outputCombinedFilePath); // Reverted: Removed Combined
+                // combinedWriter = new StreamWriter(outputCombinedFilePath);
                 msvtWriter = new StreamWriter(outputMsvtFilePath);
                 mspvWriter = new StreamWriter(outputMspvFilePath);
                 mprlWriter = new StreamWriter(outputMprlFilePath);
-                mscnWriter = new StreamWriter(outputMscnFilePath); // ADDED Init
-                mslkWriter = new StreamWriter(outputMslkFilePath); // Initialize MSLK writer
-                skippedMslkWriter = new StreamWriter(outputSkippedMslkLogPath); // Initialize skipped MSLK writer
-                // mscnWriter = new StreamWriter(outputMsvtFilePath, true); // REMOVED writer init
+                mscnWriter = new StreamWriter(outputMscnFilePath);
+                mslkWriter = new StreamWriter(outputMslkFilePath);
+                skippedMslkWriter = new StreamWriter(outputSkippedMslkLogPath);
+                mslkNodesWriter = new StreamWriter(outputPm4MslkNodesFilePath, false);
+                mslkNodesWriter.WriteLine($"# PM4 MSLK Node Anchor Points (from Unk10 -> MSVI -> MSVT)");
+                mslkNodesWriter.WriteLine($"# Transform: Y, X, Z");
 
-                // Write headers (Reverted)
-                // combinedWriter.WriteLine("# PM4 Combined Geometry (Direct Mapping -> Final Transform: X, Z, -Y)"); 
-                msvtWriter.WriteLine("# PM4 MSVT/MSUR Geometry (Y, X, Z)"); // Corrected Header
-                mspvWriter.WriteLine("# PM4 MSPV/MSLK Geometry (X, Y, Z)"); // Corrected Header
-                mprlWriter.WriteLine("# PM4 MPRL/MPRR Geometry (Y, Z, X)"); // Corrected Header (based on user change)
-                mscnWriter.WriteLine("# MSCN Data as Vertices (Raw X, Y, Z)"); // ADDED Header
-                mslkWriter.WriteLine("# PM4 MSLK Geometry (Points 'p' and Lines 'l') (Exported: {DateTime.Now})"); // MSLK Header
-                skippedMslkWriter.WriteLine("# PM4 Skipped/Invalid MSLK Entries Log (Generated: {DateTime.Now})"); // Skipped MSLK Header
+                // Write headers
+                msvtWriter.WriteLine("# PM4 MSVT/MSUR Geometry (Y, X, Z)");
+                mspvWriter.WriteLine("# PM4 MSPV/MSLK Geometry (X, Y, Z)");
+                mprlWriter.WriteLine("# PM4 MPRL/MPRR Geometry (Y, Z, X)");
+                mscnWriter.WriteLine("# MSCN Data as Vertices (Raw X, Y, Z)");
+                mslkWriter.WriteLine("# PM4 MSLK Geometry (Points 'p' and Lines 'l') (Exported: {DateTime.Now})");
+                skippedMslkWriter.WriteLine("# PM4 Skipped/Invalid MSLK Entries Log (Generated: {DateTime.Now})");
 
                 // --- Moved Index Validation Logging Inside Try Block ---
-                int mprlVertexCount = pm4File.MPRL?.Entries.Count ?? 0;
+                mprlVertexCount = pm4File.MPRL?.Entries.Count ?? 0;
                 debugWriter.WriteLine($"\n--- Validating MPRR Indices against MPRL Vertex Count: {mprlVertexCount} ---");
-                // Assert.True(pm4File.MPRR?.ValidateIndices(mprlVertexCount), "MPRR indices are out of bounds for MPRL vertices."); // TEMP COMMENTED: Test file has invalid MPRR data.
                 
-                int msvtVertexCount = pm4File.MSVT?.Vertices.Count ?? 0;
+                msvtVertexCount = pm4File.MSVT?.Vertices.Count ?? 0;
                 debugWriter.WriteLine($"\n--- Validating MSVI Indices against MSVT Vertex Count: {msvtVertexCount} ---");
-                // Re-enable MSVI validation check - We expect this might fail with the test file, but want to see the failure.
-                // Assert.True(pm4File.MSVI?.ValidateIndices(msvtVertexCount), "MSVI indices are out of bounds for MSVT vertices."); // RE-COMMENTED AGAIN - Temporarily to ensure MSUR logging runs
-
-                int mspvVertexCount = pm4File.MSPV?.Vertices.Count ?? 0;
-                debugWriter.WriteLine($"\n--- Validating MSPI Indices against MSPV Vertex Count: {mspvVertexCount} ---");
-                Assert.True(pm4File.MSPI?.ValidateIndices(mspvVertexCount), "MSPI indices are out of bounds for MSPV vertices.");
                 
-                int totalMspiIndices = pm4File.MSPI?.Indices.Count ?? 0; // Renamed variable
-                debugWriter.WriteLine($"\n--- Validating MSUR Index Ranges against MSVI Index Count: {totalMspiIndices} ---"); // Used renamed variable
-                // Assert.True(pm4File.MSLK?.ValidateIndices(totalMspiIndices), "MSLK indices are out of bounds for MSPI indices."); // MSLK class does not have ValidateIndices method
-                // Assert.True(pm4File.MSUR?.ValidateIndices(totalMspiIndices), "MSUR index ranges are out of bounds for MSVI indices."); // Commented out - MSUR purpose/link is unclear
-                // --- End Validation Logging ---
+                mspvVertexCount = pm4File.MSPV?.Vertices.Count ?? 0;
+                debugWriter.WriteLine($"\n--- Validating MSPI Indices against MSPV Vertex Count: {mspvVertexCount} ---");
+                
+                totalMspiIndices = pm4File.MSPI?.Indices.Count ?? 0;
+                debugWriter.WriteLine($"\n--- Validating MSUR Index Ranges against MSVI Index Count: {totalMspiIndices} ---");
 
-                debugWriter.WriteLine("--- Exporting Split Geometry (Standard Transform) ---"); // Reverted
-                // ... (Log Summary Information remains the same) ...
+                debugWriter.WriteLine("--- Exporting Split Geometry (Standard Transform) ---");
 
                 // Vertex counters specific to each separate file
                 int mspvFileVertexCount = 0;
                 int msvtFileVertexCount = 0;
                 int mprlFileVertexCount = 0;
-                // int mscnFileVertexCount = 0; // Reverted: MSCN Disabled
 
                 // --- 1. Export MSPV vertices -> mspvWriter ONLY ---
-                // baseMspvIndex = globalVertexCount; // Reverted
                 if (exportMspvVertices)
                 {
                     mspvWriter.WriteLine("# MSPV Vertices");
                     if (pm4File.MSPV != null)
                     {
-                        debugWriter.WriteLine("\n--- Exporting MSPV Vertices (X, Z, -Y) -> _mspv.obj ---"); // Reverted
-                        summaryWriter.WriteLine("\n--- MSPV Vertices (First 10) ---"); // ADDED Summary Header
+                        debugWriter.WriteLine("\n--- Exporting MSPV Vertices (X, Z, -Y) -> _mspv.obj ---");
+                        summaryWriter.WriteLine("\n--- MSPV Vertices (First 10) ---");
                         int logCounterMspv = 0;
                         foreach (var vertex in pm4File.MSPV.Vertices)
                         {
-                            // Applying standard (X, Z, -Y) transform - Reverted
                             float worldX = vertex.X;
                             float worldY = vertex.Y; 
                             float worldZ = vertex.Z;
 
-                            // Write final coords to separate file ONLY
-                            // Log ALL entries to debugWriter
                             debugWriter.WriteLine(FormattableString.Invariant($"  MSPV Vertex {mspvFileVertexCount}: Raw=({vertex.X:F3}, {vertex.Y:F3}, {vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})")); 
-                            // Limit summaryWriter log
                             if (logCounterMspv < 10) { 
-                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSPV Vertex {mspvFileVertexCount}: Raw=({vertex.X:F3}, {vertex.Y:F3}, {vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})")); // ADDED Summary Log
+                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSPV Vertex {mspvFileVertexCount}: Raw=({vertex.X:F3}, {vertex.Y:F3}, {vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})"));
                             }
                             mspvWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
                             mspvFileVertexCount++;
                             logCounterMspv++; 
                         }
                         if (pm4File.MSPV.Vertices.Count > 10) { 
-                            // debugWriter.WriteLine("  ... MSPV log truncated ..."); // No truncation for debug log
-                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ..."); // ADDED Summary Truncation
+                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ...");
                         }
-                        debugWriter.WriteLine($"Wrote {mspvFileVertexCount} MSPV vertices to _mspv.obj."); // Reverted log
+                        debugWriter.WriteLine($"Wrote {mspvFileVertexCount} MSPV vertices to _mspv.obj.");
                         mspvWriter.WriteLine();
                         debugWriter.Flush();
                     }
@@ -344,38 +288,31 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 }
 
                 // --- 2. Export MSVT vertices -> msvtWriter ONLY ---
-                // baseMsvtIndex = globalVertexCount; // Reverted
                 if (exportMsvtVertices)
                 {
                     msvtWriter.WriteLine("# MSVT Vertices");
                     if (pm4File.MSVT != null && pm4File.MSVT.Vertices.Count > 0)
                     {
                         debugWriter.WriteLine($"\n--- Exporting MSVT Vertices (Using PD4.md Formula) -> _msvt.obj ---");
-                        summaryWriter.WriteLine("\n--- MSVT Vertices (First 10) ---"); // ADDED Summary Header
+                        summaryWriter.WriteLine("\n--- MSVT Vertices (First 10) ---");
                         int logCounterMsvt = 0;
+                        msvtFileVertexCount = 0;
                         foreach (var vertex in pm4File.MSVT.Vertices)
                         {
-                            // REVERTING MSVT transform back to: (-Y, Z/36, X)
-                            // Input vertex fields are (Y, X, Z)
-                            // Output OBJ coords are (X, Y, Z)
+                            msvtFileVertexCount++;
                             float worldX = vertex.Y;         // Mirror X by negating input Y
                             float worldY = vertex.X;  // Z (Up, Scaled) -> Y (Up)
                             float worldZ = vertex.Z;          // X -> Z (Depth)
                             
-                            // Write final coords to separate file ONLY
-                            // Log ALL entries to debugWriter
                             debugWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})")); 
-                            // Limit summaryWriter log
                             if (logCounterMsvt < 10) { 
-                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})")); // ADDED Summary Log
+                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})"));
                             }
-                            msvtWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}")); // Needs syntax check
-                            msvtFileVertexCount++;
+                            msvtWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
                             logCounterMsvt++; 
                         }
                         if (pm4File.MSVT.Vertices.Count > 10) { 
-                            // debugWriter.WriteLine("  ... MSVT log truncated ..."); // No truncation for debug log
-                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ..."); // ADDED Summary Truncation
+                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ...");
                         }
                         debugWriter.WriteLine($"Wrote {msvtFileVertexCount} MSVT vertices to _msvt.obj."); 
                         msvtWriter.WriteLine();
@@ -387,45 +324,39 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 }
 
                  // --- 3. Export MPRL vertices -> mprlWriter ONLY ---
-                 // baseMprlIndex = globalVertexCount; // Reverted
                  if (exportMprlPoints)
                  {
-                     mprlWriter.WriteLine("# MPRL Vertices (X, Z, -Y)"); // Reverted
+                     mprlWriter.WriteLine("# MPRL Vertices (X, Z, -Y)");
 
                      if (pm4File.MPRL != null && pm4File.MPRL.Entries.Count > 0)
                      {
-                        debugWriter.WriteLine($"\n--- Exporting MPRL Vertices (X, Z, Y) -> _mprl.obj ---"); // Reverted
-                        summaryWriter.WriteLine("\n--- MPRL Vertices (First 10) ---"); // ADDED Summary Header
+                        debugWriter.WriteLine($"\n--- Exporting MPRL Vertices (X, Z, Y) -> _mprl.obj ---");
+                        summaryWriter.WriteLine("\n--- MPRL Vertices (First 10) ---");
                         int logCounterMprl = 0;
                         mprlFileVertexCount = 0;
 
                         foreach (var entry in pm4File.MPRL.Entries)
                         {
-                            // Input (X, Y, Z)
-                            float worldX = entry.Position.X; 
-                            float worldY = -entry.Position.Z; 
-                            float worldZ = entry.Position.Y; 
+                            float worldX = entry.Position.Y; 
+                            float worldY = entry.Position.Z; 
+                            float worldZ = entry.Position.X; 
 
-                            // Write final coords to separate file ONLY
-                            // Log ALL entries to debugWriter
                             debugWriter.WriteLine(FormattableString.Invariant(
                                 $"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})"
                             )); 
-                            // Limit summaryWriter log
                             if (logCounterMprl < 10) { 
                                 summaryWriter.WriteLine(FormattableString.Invariant(
                                     $"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> Exported=({worldX:F3}, {worldY:F3}, {worldZ:F3})"
-                                )); // ADDED Summary Log
+                                ));
                             }
-                            mprlWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}")); // Needs syntax check
+                            mprlWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
                             mprlFileVertexCount++;
                             logCounterMprl++; 
                         }
                         if (pm4File.MPRL.Entries.Count > 10) { 
-                            // debugWriter.WriteLine("  ... MPRL log truncated ..."); // No truncation for debug log
-                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ..."); // ADDED Summary Truncation
+                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ...");
                         }
-                         debugWriter.WriteLine($"Wrote {mprlFileVertexCount} MPRL vertices to _mprl.obj file."); // Reverted comment
+                         debugWriter.WriteLine($"Wrote {mprlFileVertexCount} MPRL vertices to _mprl.obj file.");
                         mprlWriter.WriteLine();
                         debugWriter.Flush();
                      }
@@ -435,49 +366,43 @@ namespace WoWToolbox.Tests.Navigation.PM4
                  }
 
                  // --- 4. Process MSCN Data (Output as Vertices to separate file) ---
-                 // var mscnNormalStrings = new List<string>(); // REMOVED List
                  if (exportMscnNormals) 
                  {
-                     if (pm4File.MSCN != null && pm4File.MSCN.Vectors.Count > 0 && mscnWriter != null) // Check mscnWriter
+                     if (pm4File.MSCN != null && pm4File.MSCN.Vectors.Count > 0 && mscnWriter != null)
                      {
-                        int mscnVertexCount = 0; // Renamed variable
-                        debugWriter.WriteLine($"\n--- Exporting MSCN Data as Vertices (Raw X, Y, Z) -> _mscn.obj ---"); // Updated log
-                        summaryWriter.WriteLine("\n--- MSCN Vertices (First 10) ---"); // ADDED Summary Header
+                        int mscnVertexCount = 0;
+                        debugWriter.WriteLine($"\n--- Exporting MSCN Data as Vertices (Raw X, Y, Z) -> _mscn.obj ---");
+                        summaryWriter.WriteLine("\n--- MSCN Vertices (First 10) ---");
                         int logCounterMscn = 0;
 
-                        foreach (var vectorData in pm4File.MSCN.Vectors) // Renamed loop variable
+                        foreach (var vectorData in pm4File.MSCN.Vectors)
                         {
-                            // Input (X, Y, Z) - Assuming raw export for now
                             float vX = vectorData.X; 
                             float vY = vectorData.Y; 
                             float vZ = vectorData.Z; 
 
-                            // Write directly to mscnWriter as a vertex ('v')
                             var vertexString = FormattableString.Invariant($"v {vX:F6} {vY:F6} {vZ:F6}");
                             mscnWriter.WriteLine(vertexString);
                             mscnVertexCount++;
 
-                            // Log ALL entries to debugWriter
                             debugWriter.WriteLine(FormattableString.Invariant(
                                 $"  MSCN Vertex {mscnVertexCount-1}: Raw=({vectorData.X:F3}, {vectorData.Y:F3}, {vectorData.Z:F3}) -> Exported=({vX:F3}, {vY:F3}, {vZ:F3})"
                             ));
-                            // Limit summaryWriter log
                             if (logCounterMscn < 10) { 
                                 summaryWriter.WriteLine(FormattableString.Invariant(
                                     $"  MSCN Vertex {mscnVertexCount-1}: Raw=({vectorData.X:F3}, {vectorData.Y:F3}, {vectorData.Z:F3}) -> Exported=({vX:F3}, {vY:F3}, {vZ:F3})"
-                                )); // ADDED Summary Log
+                                ));
                             }
                             logCounterMscn++; 
                         }
                         if (pm4File.MSCN.Vectors.Count > 10) { 
-                            // debugWriter.WriteLine("  ... MSCN log truncated ..."); // No truncation for debug log
-                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ..."); // ADDED Summary Truncation
+                            summaryWriter.WriteLine("  ... (Summary log limited to first 10) ...");
                         }
-                        debugWriter.WriteLine($"Wrote {mscnVertexCount} MSCN vertices to _mscn.obj file."); // Updated log
-                        mscnWriter.WriteLine(); // Add final newline
+                        debugWriter.WriteLine($"Wrote {mscnVertexCount} MSCN vertices to _mscn.obj file.");
+                        mscnWriter.WriteLine();
                         debugWriter.Flush();
                      }
-                     else { debugWriter.WriteLine("No MSCN data found or mscnWriter not available."); } // Updated log
+                     else { debugWriter.WriteLine("No MSCN data found or mscnWriter not available."); }
                  } else { 
                      debugWriter.WriteLine("\n--- Skipping MSCN export (Flag 'exportMscnNormals' is False) ---");
                  }
@@ -494,27 +419,30 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         int skippedMslkCount = 0;
                         int exportedPaths = 0;
                         int exportedPoints = 0;
+                        int processedMslkNodes = 0;
+
+                        var msviIndices = pm4File.MSVI?.Indices;
+                        var msvtVertices = pm4File.MSVT?.Vertices;
+                        int msviCount = msviIndices?.Count ?? 0;
+                        int msvtCount = msvtVertices?.Count ?? 0;
+                        debugWriter.WriteLine($"INFO: Cached MSVI ({msviCount}) and MSVT ({msvtCount}) for node processing.");
 
                         for (int entryIndex = 0; entryIndex < entriesToProcessMslk; entryIndex++)
                         {
-                            // --- Start MSLK Processing ---
                             var mslkEntry = pm4File.MSLK.Entries[entryIndex];
-                            // Log entry details (always to debug, limited to summary)
                             if (entryIndex < 10) {
                                 summaryWriter.WriteLine($"  Processing MSLK Entry {entryIndex}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}");
                             }
-                            debugWriter.WriteLine($"  Processing MSLK Entry {entryIndex}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}, Unk00=0x{mslkEntry.Unknown_0x00:X2}, Unk01=0x{mslkEntry.Unknown_0x01:X2}, Unk04=0x{mslkEntry.Unknown_0x04:X8}, Unk10=0x{mslkEntry.Unknown_0x10:X4}");
+                            debugWriter.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                                 $"Processing MSLK Entry {entryIndex}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}, Unk00=0x{mslkEntry.Unknown_0x00:X2}, Unk01=0x{mslkEntry.Unknown_0x01:X2}, Unk04=0x{mslkEntry.Unknown_0x04:X8}, Unk10=0x{mslkEntry.Unknown_0x10:X4}, Unk12=0x{mslkEntry.Unknown_0x12:X4}"));
 
-                            // Condition 1: Potentially Valid Geometry Check
                             if (mslkEntry.MspiIndexCount > 0 && mslkEntry.MspiFirstIndex >= 0)
                             {
                                 int mspiStart = mslkEntry.MspiFirstIndex;
                                 int mspiEndExclusive = mspiStart + mslkEntry.MspiIndexCount;
 
-                                // Condition 2: MSPI Range Check
                                 if (mspiEndExclusive <= totalMspiIndices)
                                 {
-                                    // Valid Range
                                     List<int> validMspvIndices = new List<int>();
                                     for (int mspiIndex = mspiStart; mspiIndex < mspiEndExclusive; mspiIndex++)
                                     {
@@ -530,10 +458,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                         }
                                     }
 
-                                    // Condition 3: Valid Vertex Count Check
                                     if (validMspvIndices.Count >= 2)
                                     {
-                                        // Export as line (path) to mslkWriter
                                         mslkWriter.WriteLine($"g MSLK_Path_{entryIndex}");
                                         mslkWriter.WriteLine("l " + string.Join(" ", validMspvIndices));
                                         debugWriter.WriteLine($"    Exported line with {validMspvIndices.Count} vertices to _mslk.obj.");
@@ -542,7 +468,6 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     }
                                     else if (validMspvIndices.Count == 1)
                                     {
-                                        // Export as point to mslkWriter
                                         mslkWriter.WriteLine($"g MSLK_Point_{entryIndex}");
                                         mslkWriter.WriteLine($"p {validMspvIndices[0]}");
                                         debugWriter.WriteLine($"    Exported single point at vertex {validMspvIndices[0]} to _mslk.obj.");
@@ -551,43 +476,77 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     }
                                     else
                                     {
-                                        // No valid points found for this entry
                                         debugWriter.WriteLine($"    INFO: MSLK Entry {entryIndex} resulted in 0 valid MSPV indices. Skipping geometry output.");
                                         if (entryIndex < 10) { summaryWriter.WriteLine($"    INFO: Resulted in 0 valid MSPV indices. Skipping."); }
-                                        // Log skipped entry
                                         skippedMslkWriter.WriteLine($"Skipped (0 Valid MSPV): {mslkEntry.ToString()}");
                                         skippedMslkCount++;
                                     }
                                 }
                                 else
                                 {
-                                    // Invalid MSPI Range
                                     debugWriter.WriteLine($"    ERROR: MSLK Entry {entryIndex} defines invalid MSPI range [First:{mspiStart}, Count:{mslkEntry.MspiIndexCount}] (Max MSPI Index: {totalMspiIndices - 1}). Skipping entry.");
                                     if (entryIndex < 10) { summaryWriter.WriteLine($"    ERROR: Invalid MSPI range. Skipping entry."); }
-                                    // Log skipped entry
                                     skippedMslkWriter.WriteLine($"Skipped (Invalid MSPI Range): {mslkEntry.ToString()}");
                                     skippedMslkCount++;
                                 }
                             }
                             else
                             {
-                                // Skip entries with count 0 or invalid first index
                                 debugWriter.WriteLine($"    INFO: MSLK Entry {entryIndex} has MSPICount=0 or MSPIFirst=-1. Skipping geometry export.");
                                 if (entryIndex < 10) { summaryWriter.WriteLine($"    INFO: MSPICount=0 or MSPIFirst=-1. Skipping."); }
-                                // Log skipped entry
                                 skippedMslkWriter.WriteLine($"Skipped (Count=0 or FirstIndex<0): {mslkEntry.ToString()}");
                                 skippedMslkCount++;
                             }
-                        } // --- End MSLK Processing Loop ---
+
+                            if (mslkEntry.MspiFirstIndex == -1)
+                            {
+                                if (msviIndices != null && msvtVertices != null && msviCount > 0 && msvtCount > 0)
+                                {
+                                    ushort msviLookupIndex = mslkEntry.Unknown_0x10;
+                                    if (msviLookupIndex < msviCount)
+                                    {
+                                        uint msvtLookupIndex = msviIndices[msviLookupIndex];
+                                        if (msvtLookupIndex < msvtCount)
+                                        {
+                                            var msvtVertex = msvtVertices[(int)msvtLookupIndex];
+
+                                            float worldX = msvtVertex.Y;
+                                            float worldY = msvtVertex.X;
+                                            float worldZ = msvtVertex.Z;
+
+                                            mslkNodesWriter.WriteLine($"v {worldX.ToString(CultureInfo.InvariantCulture)} {worldY.ToString(CultureInfo.InvariantCulture)} {worldZ.ToString(CultureInfo.InvariantCulture)} # Node Idx={entryIndex} Unk00=0x{mslkEntry.Unknown_0x00:X2} Unk01=0x{mslkEntry.Unknown_0x01:X2} Unk10={mslkEntry.Unknown_0x10}");
+                                            processedMslkNodes++;
+
+                                            debugWriter.WriteLine($"  MSLK Node Entry {entryIndex}: Unk10={mslkEntry.Unknown_0x10} -> MSVI[{mslkEntry.Unknown_0x10}]={msvtLookupIndex} -> MSVT[{msvtLookupIndex}]=({msvtVertex.X},{msvtVertex.Y},{msvtVertex.Z}) -> World=({worldX},{worldY},{worldZ}) Unk00=0x{mslkEntry.Unknown_0x00:X2} Unk01=0x{mslkEntry.Unknown_0x01:X2}");
+                                        }
+                                        else
+                                        {
+                                            debugWriter.WriteLine($"  WARN: MSLK Node Entry {entryIndex}: MSVI index {msvtLookupIndex} (from MSVI[{mslkEntry.Unknown_0x10}]) is out of bounds for MSVT ({msvtCount}). Skipping node export.");
+                                            skippedMslkWriter.WriteLine($"Node Entry {entryIndex}: Invalid MSVT Index {msvtLookupIndex} (from MSVI[{mslkEntry.Unknown_0x10}]) for MSVT Count {msvtCount}. Unk10={mslkEntry.Unknown_0x10}");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        debugWriter.WriteLine($"  WARN: MSLK Node Entry {entryIndex}: Unk10 index {mslkEntry.Unknown_0x10} is out of bounds for MSVI ({msviCount}). Skipping node export.");
+                                        skippedMslkWriter.WriteLine($"Node Entry {entryIndex}: Invalid MSVI Index {mslkEntry.Unknown_0x10} for MSVI Count {msviCount}.");
+                                    }
+                                }
+                                else
+                                {
+                                    debugWriter.WriteLine($"  WARN: MSLK Node Entry {entryIndex}: MSVI or MSVT data is missing or empty. Cannot process node anchor.");
+                                    skippedMslkWriter.WriteLine($"Node Entry {entryIndex}: Missing MSVI/MSVT data. Cannot process node.");
+                                }
+                            }
+                        }
                         debugWriter.WriteLine($"Finished processing {entriesToProcessMslk} MSLK entries. Exported {exportedPaths} paths, {exportedPoints} points. Skipped {skippedMslkCount} entries.");
                         if (exportOnlyFirstMslk && pm4File.MSLK.Entries.Count > 1)
                         {
                             debugWriter.WriteLine("Note: MSLK processing was limited to the first entry by 'exportOnlyFirstMslk' flag.");
                         }
                         summaryWriter.WriteLine($"--- Finished MSLK Processing (Exported Paths: {exportedPaths}, Points: {exportedPoints}, Skipped: {skippedMslkCount}) ---");
-                        mslkWriter.WriteLine(); // Add final newline to geometry file
+                        mslkWriter.WriteLine();
                         debugWriter.Flush();
-                        skippedMslkWriter.Flush(); // Ensure skipped log is written
+                        skippedMslkWriter.Flush();
                     }
                     else
                     {
@@ -598,64 +557,86 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 }
 
                 // --- 6. Export MSUR surfaces -> msvtWriter ONLY ---
-                if (processMsurEntries) // Renamed from exportMsurFaces
+                if (processMsurEntries)
                 {
                     if (pm4File.MSUR != null && pm4File.MSVI != null && pm4File.MSVT != null && pm4File.MDOS != null && msvtFileVertexCount > 0)
                     {
-                        debugWriter.WriteLine($"\n--- Processing MSUR -> MSVI Links (Logging Only - First 20 Entries) ---"); // Updated description
-                        summaryWriter.WriteLine("\n--- MSUR -> MSVI Links (First 20 Entries) ---"); // ADDED Summary Header
+                        debugWriter.WriteLine($"\n--- Processing MSUR -> MSVI Links (Logging Only - First 20 Entries) ---");
+                        summaryWriter.WriteLine("\n--- MSUR -> MSVI Links (First 20 Entries) ---");
 
                         int entriesToProcess = exportOnlyFirstMsur ? Math.Min(1, pm4File.MSUR.Entries.Count) : pm4File.MSUR.Entries.Count;
-                        // Limit logging to the first 20 entries for BOTH writers
                         for (int entryIndex = 0; entryIndex < Math.Min(entriesToProcess, 20); entryIndex++)
                         {
                             var msurEntry = pm4File.MSUR.Entries[entryIndex];
-                            // Log details for the current MSUR entry being processed
                             debugWriter.WriteLine($"  Processing MSUR Entry {entryIndex}: MsviFirstIndex={msurEntry.MsviFirstIndex}, IndexCount={msurEntry.IndexCount}, MdosIndex={msurEntry.MdosIndex}, FlagsOrUnk0={msurEntry.FlagsOrUnknown_0x00:X2}, Unk02={msurEntry.Unknown_0x02}"); 
-                            summaryWriter.WriteLine($"  Processing MSUR Entry {entryIndex}: MsviFirstIndex={msurEntry.MsviFirstIndex}, IndexCount={msurEntry.IndexCount}, MdosIndex={msurEntry.MdosIndex}, FlagsOrUnk0={msurEntry.FlagsOrUnknown_0x00:X2}, Unk02={msurEntry.Unknown_0x02}"); // ADDED Summary Log
+                            summaryWriter.WriteLine($"  Processing MSUR Entry {entryIndex}: MsviFirstIndex={msurEntry.MsviFirstIndex}, IndexCount={msurEntry.IndexCount}, MdosIndex={msurEntry.MdosIndex}, FlagsOrUnk0={msurEntry.FlagsOrUnknown_0x00:X2}, Unk02={msurEntry.Unknown_0x02}");
                             
                             int firstIndex = (int)msurEntry.MsviFirstIndex;
                             int indexCount = msurEntry.IndexCount;
                             uint mdosIndex = msurEntry.MdosIndex;
 
-                            // Determine group name for logging context 
                             string groupName;
                             if (mdosIndex < (pm4File.MDOS?.Entries.Count ?? 0))
                             {
                                 var mdosEntry = pm4File.MDOS!.Entries[(int)mdosIndex];
-                                groupName = $"MSUR_Mdos{mdosIndex}_ID{mdosEntry.Value_0x00:X8}";
+                                groupName = $"MSUR_Mdos{mdosIndex}_ID{mdosEntry.m_destructible_building_index:X8}";
                                 debugWriter.WriteLine($"    MDOS Link Found: Index={mdosIndex}, Entry={mdosEntry}");
-                                summaryWriter.WriteLine($"    MDOS Link Found: Index={mdosIndex}, Entry={mdosEntry}"); // ADDED Summary Log
+                                summaryWriter.WriteLine($"    MDOS Link Found: Index={mdosIndex}, Entry={mdosEntry}");
                             }
                             else
                             {
                                 debugWriter.WriteLine($"  MSUR Entry {entryIndex}: Invalid MDOS index {mdosIndex}. Assigning default group name.");
-                                summaryWriter.WriteLine($"  MSUR Entry {entryIndex}: Invalid MDOS index {mdosIndex}. Assigning default group name."); // ADDED Summary Log
+                                summaryWriter.WriteLine($"  MSUR Entry {entryIndex}: Invalid MDOS index {mdosIndex}. Assigning default group name.");
                             }
 
-                            if (pm4File.MSVI == null) { /* Should not happen due to outer check */ continue; }
+                            if (pm4File.MSVI == null) { continue; }
 
                             if (firstIndex >= 0 && firstIndex + indexCount <= pm4File.MSVI!.Indices.Count)
                             {
                                  if (indexCount < 1) { 
                                      debugWriter.WriteLine($"    Skipping: Zero indices requested (IndexCount={indexCount}).");
-                                     summaryWriter.WriteLine($"    Skipping: Zero indices requested (IndexCount={indexCount})."); // ADDED Summary Log
+                                     summaryWriter.WriteLine($"    Skipping: Zero indices requested (IndexCount={indexCount}).");
                                      continue; 
                                  }
 
                                 List<uint> msviIndices = pm4File.MSVI.Indices.GetRange(firstIndex, indexCount);
-                                // Log only the count of indices fetched to debug
                                 debugWriter.WriteLine($"    Fetched {msviIndices.Count} MSVI Indices (Expected {indexCount}).");
-                                // Log the actual indices fetched for the first 20 entries to debug
-                                debugWriter.WriteLine($"      Debug MSVI Indices: [{string.Join(", ", msviIndices)}]"); // Log full list to debug
+                                debugWriter.WriteLine($"      Debug MSVI Indices: [{string.Join(", ", msviIndices)}]");
                                 
-                                // Log count to summary
                                 if (entryIndex < 20) { summaryWriter.WriteLine($"    Fetched {msviIndices.Count} MSVI Indices (Expected {indexCount})."); }
-                                // Log first ~15 indices to summary
+                                
+                                bool faceIsValid = true;
+                                List<int> objFaceIndices = new List<int>(indexCount);
+                                foreach (uint msviIdx in msviIndices)
+                                {
+                                    if (msviIdx < msvtFileVertexCount) 
+                                    {
+                                        objFaceIndices.Add((int)msviIdx + 1);
+                                    }
+                                    else
+                                    {
+                                        debugWriter.WriteLine($"    ERROR: MSUR Entry {entryIndex} references invalid MSVT index {msviIdx} (via MSVI). Max exported MSVT index: {msvtFileVertexCount - 1}. Skipping face.");
+                                        if (entryIndex < 20) { summaryWriter.WriteLine($"    ERROR: MSUR Entry {entryIndex} references invalid MSVT index {msviIdx} (via MSVI). Max exported: {msvtFileVertexCount - 1}. Skipping face."); }
+                                        faceIsValid = false;
+                                        break;
+                                    }
+                                }
+
+                                if (faceIsValid && objFaceIndices.Count >= 3)
+                                {
+                                    msvtWriter.WriteLine("f " + string.Join(" ", objFaceIndices));
+                                    debugWriter.WriteLine($"    Wrote face with {objFaceIndices.Count} vertices to _msvt.obj.");
+                                    if (entryIndex < 20) { summaryWriter.WriteLine($"    Wrote face with {objFaceIndices.Count} vertices to _msvt.obj."); }
+                                }
+                                else if (faceIsValid)
+                                {
+                                    debugWriter.WriteLine($"    Skipping face for MSUR Entry {entryIndex}: Not enough valid vertices ({objFaceIndices.Count}). Minimum required: 3.");
+                                    if (entryIndex < 20) { summaryWriter.WriteLine($"    Skipping face: Not enough valid vertices ({objFaceIndices.Count})."); }
+                                }
+
                                 int indicesToLogSummary = Math.Min(msviIndices.Count, 15);
                                 if (entryIndex < 20) {
                                     summaryWriter.WriteLine($"      Summary MSVI Indices (first {indicesToLogSummary}): [{string.Join(", ", msviIndices.Take(indicesToLogSummary))}]" + (msviIndices.Count > 15 ? " ..." : "")); 
-                                    // ADDED: Log corresponding MSVT vertices
                                     summaryWriter.WriteLine("        MSVT Vertices (Raw Y, X, Z):");
                                     for(int k=0; k < indicesToLogSummary; k++) {
                                         uint msviIdx = msviIndices[k];
@@ -669,7 +650,6 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     if (msviIndices.Count > 15) { summaryWriter.WriteLine("          ..."); }
                                 }
 
-                                // ADDED: Log corresponding MSVT vertices to debug log as well (full list)
                                 debugWriter.WriteLine("        Debug MSVT Vertices (Raw Y, X, Z):");
                                 foreach(uint msviIdx in msviIndices) {
                                     if (msviIdx < msvtVertexCount) {
@@ -682,24 +662,21 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
                             }
                             else { 
-                                // Log ALL skips for invalid range (for the first 20 entries)
                                 debugWriter.WriteLine($"    Skipped MSUR Entry {entryIndex} due to invalid MSVI range (FirstIndex={firstIndex}, IndexCount={indexCount}, Total MSVI Indices={pm4File.MSVI!.Indices.Count}).");
-                                summaryWriter.WriteLine($"    Skipped MSUR Entry {entryIndex} due to invalid MSVI range (FirstIndex={firstIndex}, IndexCount={indexCount}, Total MSVI Indices={pm4File.MSVI!.Indices.Count})."); // ADDED Summary Log
+                                summaryWriter.WriteLine($"    Skipped MSUR Entry {entryIndex} due to invalid MSVI range (FirstIndex={firstIndex}, IndexCount={indexCount}, Total MSVI Indices={pm4File.MSVI!.Indices.Count}).");
                             }
                         }
                         if (entriesToProcess > 20)
                         {
                             debugWriter.WriteLine($"  ... Log truncated after first 20 MSUR entries ...");
-                            summaryWriter.WriteLine("  ... (Log limited to first 20 entries) ..."); // ADDED Summary Truncation
+                            summaryWriter.WriteLine("  ... (Log limited to first 20 entries) ...");
                         }
-                        debugWriter.WriteLine("--- Finished Processing MSUR -> MSVI Links ---"); // Updated description
-                        // msvtWriter.WriteLine(); // No longer writing faces, so no newline needed here
+                        debugWriter.WriteLine("--- Finished Processing MSUR -> MSVI Links ---");
                         debugWriter.Flush();
                     }
-                    else { debugWriter.WriteLine("\nSkipping MSUR->MSVI Link processing (missing data or source vertices)."); } // Updated description
+                    else { debugWriter.WriteLine("\nSkipping MSUR->MSVI Link processing (missing data or source vertices)."); }
                 } else {
-                    // debugWriter.WriteLine("\nSkipping MSUR Face export (Flag False)."); // Original line
-                    debugWriter.WriteLine("\n--- Skipping MSUR->MSVI Link processing (Flag 'processMsurEntries' is False) ---"); // Updated description and flag name
+                    debugWriter.WriteLine("\n--- Skipping MSUR->MSVI Link processing (Flag 'processMsurEntries' is False) ---");
                 }
 
                  // --- 7. Export MPRR pairs -> mprlWriter ONLY ---
@@ -707,24 +684,20 @@ namespace WoWToolbox.Tests.Navigation.PM4
                  {
                      if (pm4File.MPRR != null && pm4File.MPRL != null && mprlFileVertexCount > 0)
                      {
-                        debugWriter.WriteLine($"\n--- Processing MPRR -> MPRL Chain -> _mprl.obj ---"); // Reverted
-                        summaryWriter.WriteLine("\n--- MPRR Lines (First 10 Valid) ---"); // ADDED Summary Header
+                        debugWriter.WriteLine($"\n--- Processing MPRR -> MPRL Chain -> _mprl.obj ---");
+                        summaryWriter.WriteLine("\n--- MPRR Lines (First 10 Valid) ---");
                          int logCounterMprr = 0;
-                         int validMprrLogged = 0; // Counter for summary log limit
+                         int validMprrLogged = 0;
  
                          foreach (var mprrEntry in pm4File.MPRR.Entries)
                          {
-                             // Read the raw ushort values
                              ushort rawIndex1 = mprrEntry.Unknown_0x00;
                              ushort rawIndex2 = mprrEntry.Unknown_0x02;
  
-                             // bool shouldLogDebug = logCounterMprr < 10; // REMOVED - Debug logs all
-                             bool shouldLogSummary = validMprrLogged < 10; // Summary log limit
+                             bool shouldLogSummary = validMprrLogged < 10;
  
-                             // Log ALL processing attempts to debugWriter
                              debugWriter.WriteLine($"  Processing MPRR Entry {logCounterMprr}: RawIdx1={rawIndex1}, RawIdx2={rawIndex2}"); 
                              
-                             // Sentinel/Identical skips - log to both (conditionally for summary)
                              if (rawIndex1 == 65535 || rawIndex2 == 65535) { 
                                  debugWriter.WriteLine("    Skipping: Sentinel index (65535).");
                                  if (shouldLogSummary) { summaryWriter.WriteLine($"  MPRR Entry {logCounterMprr}: Skip Sentinel"); }
@@ -738,59 +711,99 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                  continue;
                              }
 
-                            // Bounds check
-                             if (rawIndex1 < mprlFileVertexCount && rawIndex2 < mprlFileVertexCount) 
-                             {
-                                 // Indices seem valid relative to the vertices we exported, proceed
-                                 uint relativeObjIndex1 = 1 + (uint)rawIndex1;
-                                 uint relativeObjIndex2 = 1 + (uint)rawIndex2;
+                            if (rawIndex1 < mprlFileVertexCount && rawIndex2 < mprlFileVertexCount) 
+                            {
+                                uint relativeObjIndex1 = 1 + (uint)rawIndex1;
+                                uint relativeObjIndex2 = 1 + (uint)rawIndex2;
  
-                                 // Write group header (only once) and line to separate file
-                                 bool firstProcessedEntry = !pm4File.MPRR.Entries
-                                     .Take(pm4File.MPRR.Entries.IndexOf(mprrEntry))
-                                     .Any(e => e.Unknown_0x00 != 65535 && e.Unknown_0x02 != 65535 && e.Unknown_0x00 != e.Unknown_0x02 && e.Unknown_0x00 < mprlFileVertexCount && e.Unknown_0x02 < mprlFileVertexCount);
-                                 if (firstProcessedEntry) { 
-                                     mprlWriter.WriteLine("g MPRR_Lines"); 
-                                     // Only write group header once to summary too
-                                     if(shouldLogSummary) { summaryWriter.WriteLine("  (Group MPRR_Lines)"); }
-                                 }
+                                bool firstProcessedEntry = !pm4File.MPRR.Entries
+                                    .Take(pm4File.MPRR.Entries.IndexOf(mprrEntry))
+                                    .Any(e => e.Unknown_0x00 != 65535 && e.Unknown_0x02 != 65535 && e.Unknown_0x00 != e.Unknown_0x02 && e.Unknown_0x00 < mprlFileVertexCount && e.Unknown_0x02 < mprlFileVertexCount);
+                                if (firstProcessedEntry) { 
+                                    mprlWriter.WriteLine("g MPRR_Lines"); 
+                                    if(shouldLogSummary) { summaryWriter.WriteLine("  (Group MPRR_Lines)"); }
+                                }
  
-                                 // Log valid line to BOTH (conditionally for summary)
-                                 debugWriter.WriteLine($"    Writing SEPARATE OBJ Line {relativeObjIndex1} -> {relativeObjIndex2} (From Raw MPRL Indices: {rawIndex1}, {rawIndex2})"); 
-                                 if (shouldLogSummary) {
-                                     summaryWriter.WriteLine($"  MPRR Entry {logCounterMprr}: Line {relativeObjIndex1} -> {relativeObjIndex2} (Raw: {rawIndex1}, {rawIndex2})");
-                                     validMprrLogged++;
-                                 }
-                             }
-                             else { 
-                                   // Log invalid index skip to BOTH (conditionally for summary)
-                                   debugWriter.WriteLine($"    Skipping: Indices out of bounds (RawIdx1={rawIndex1}, RawIdx2={rawIndex2}, File MPRL Count={mprlFileVertexCount}). CHECK MPRR ASSERTION."); 
-                                   if (shouldLogSummary) {
-                                       summaryWriter.WriteLine($"  MPRR Entry {logCounterMprr}: Skip Invalid Index (Raw: {rawIndex1}, {rawIndex2} / Max: {mprlFileVertexCount - 1})");
-                                       validMprrLogged++; // Count skips too for summary limit
-                                   }
-                             }
-                             logCounterMprr++;
+                                debugWriter.WriteLine($"    Writing SEPARATE OBJ Line {relativeObjIndex1} -> {relativeObjIndex2} (From Raw MPRL Indices: {rawIndex1}, {rawIndex2})"); 
+                                if (shouldLogSummary) {
+                                    summaryWriter.WriteLine($"  MPRR Entry {logCounterMprr}: Line {relativeObjIndex1} -> {relativeObjIndex2} (Raw: {rawIndex1}, {rawIndex2})");
+                                    validMprrLogged++;
+                                }
+                            }
+                            else { 
+                                  debugWriter.WriteLine($"    Skipping: Indices out of bounds (RawIdx1={rawIndex1}, RawIdx2={rawIndex2}, File MPRL Count={mprlFileVertexCount}). CHECK MPRR ASSERTION."); 
+                                  if (shouldLogSummary) {
+                                      summaryWriter.WriteLine($"  MPRR Entry {logCounterMprr}: Skip Invalid Index (Raw: {rawIndex1}, {rawIndex2} / Max: {mprlFileVertexCount - 1})");
+                                      validMprrLogged++;
+                                  }
+                            }
+                            logCounterMprr++;
                          }
-                         // Add truncation messages
-                         // if (pm4File.MPRR.Entries.Count > 10 && logCounterMprr >= 10) { debugWriter.WriteLine("  ... MPRR debug log truncated ..."); } // No truncation for debug log
                          if (validMprrLogged >= 10) { summaryWriter.WriteLine("  ... (Summary log limited to first 10 processed entries/skips) ..."); }
-                         debugWriter.WriteLine("--- Finished Processing MPRR Chain for separate file ---"); // Reverted log
-                         mprlWriter.WriteLine(); // Reverted: Add newline to mprlWriter
+                         debugWriter.WriteLine("--- Finished Processing MPRR Chain for separate file ---");
+                         mprlWriter.WriteLine();
                          debugWriter.Flush();
                      }
                      else { debugWriter.WriteLine("\nSkipping MPRR Chain processing (missing data or source vertices)."); }
                  } else {
                       debugWriter.WriteLine("\nSkipping MPRR Line export (Flag False)."); 
-                      debugWriter.WriteLine("\n--- Skipping MPRR Line export (Flag 'exportMprrLines' is False) ---"); // Enhanced Log
+                      debugWriter.WriteLine("\n--- Skipping MPRR Line export (Flag 'exportMprrLines' is False) ---");
                  }
 
-                 // --- 8. Export MDSF faces (Reverted: Disabled) ---
-                 if (exportMdsfFaces) { /* ... Disabled ... */ } else { 
-                     debugWriter.WriteLine("\n--- Skipping MDSF Face export (Flag 'exportMdsfFaces' is False) ---"); // Enhanced Log
+                 // --- 8. Log MDSF -> MDOS Links ---
+                 if (logMdsfLinks)
+                 {
+                     if (pm4File.MDSF != null && pm4File.MDOS != null && pm4File.MDSF.Entries.Any())
+                     {
+                         debugWriter.WriteLine($"\n--- Logging MDSF -> MDOS Links and collecting Building IDs ---");
+                         summaryWriter.WriteLine($"\n--- MDSF -> MDOS Links (First 20) ---");
+                         int mdsfLoggedCount = 0;
+                         int totalMdsfEntries = pm4File.MDSF.Entries.Count;
+
+                         for (int mdsfIndex = 0; mdsfIndex < totalMdsfEntries; mdsfIndex++)
+                         {
+                             var mdsfEntry = pm4File.MDSF.Entries[mdsfIndex];
+                             string logLineBase = $"  MDSF[{mdsfIndex}]: MSUR_Idx={mdsfEntry.msur_index}, MDOS_Idx={mdsfEntry.mdos_index}";
+                             string logLineDetails = "";
+
+                             if (mdsfEntry.mdos_index < mdosEntryCount)
+                             {
+                                 var mdosEntry = pm4File.MDOS.Entries[(int)mdsfEntry.mdos_index];
+                                 logLineDetails = $" -> MDOS[DestState={mdosEntry.destruction_state}, BldgIdx={mdosEntry.m_destructible_building_index}]";
+                                 uniqueBuildingIds.Add(mdosEntry.m_destructible_building_index);
+                             }
+                             else
+                             {
+                                 logLineDetails = $" -> MDOS Index {mdsfEntry.mdos_index} OUT OF BOUNDS (Count: {mdosEntryCount})";
+                             }
+
+                             debugWriter.WriteLine(logLineBase + logLineDetails);
+
+                             if (mdsfLoggedCount < 20)
+                             {
+                                 summaryWriter.WriteLine(logLineBase + logLineDetails);
+                                 mdsfLoggedCount++;
+                             }
+                         }
+
+                         if (totalMdsfEntries > 20)
+                         {
+                             summaryWriter.WriteLine("  ... (Summary log limited to first 20 entries) ...");
+                         }
+                         debugWriter.WriteLine($"--- Finished logging MDSF Links ({totalMdsfEntries} total) ---");
+                         debugWriter.Flush();
+                     }
+                     else
+                     {
+                         debugWriter.WriteLine("\n--- Skipping MDSF Link logging (MDSF or MDOS chunk missing or empty) ---");
+                     }
+                 }
+                 else
+                 {
+                     debugWriter.WriteLine("\n--- Skipping MDSF Link logging (Flag 'logMdsfLinks' is False) ---");
                  }
 
-                 // --- ADDED: Generate MSLK Hierarchical JSON ---
+                 // --- 9. Generate MSLK Hierarchical JSON ---
                  if (pm4File.MSLK != null && pm4File.MSLK.Entries.Any())
                  {
                      debugWriter.WriteLine("\n--- Generating MSLK Hierarchy JSON ---");
@@ -806,7 +819,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                              groupedMslkData[groupId] = new MslkGroupDto();
                          }
 
-                         if (entry.MspiFirstIndex == -1) // Node Entry
+                         if (entry.MspiFirstIndex == -1)
                          {
                              groupedMslkData[groupId].Nodes.Add(new MslkNodeEntryDto
                              {
@@ -819,7 +832,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                  Unk12 = entry.Unknown_0x12
                              });
                          }
-                         else // Geometry Entry
+                         else
                          {
                              groupedMslkData[groupId].Geometry.Add(new MslkGeometryEntryDto
                              {
@@ -845,44 +858,82 @@ namespace WoWToolbox.Tests.Navigation.PM4
                  {
                       debugWriter.WriteLine("\n--- Skipping MSLK Hierarchy JSON generation (MSLK chunk is null or empty) ---");
                  }
+
                  // --- END: Generate MSLK Hierarchical JSON ---
 
-                 // Reverted: Original Completion Message
-                 Console.WriteLine($"Successfully wrote split OBJ files to directory: {Path.GetDirectoryName(outputMsvtFilePath)}"); 
-                 debugWriter.WriteLine($"Split OBJ export complete."); 
+                 Console.WriteLine($"Successfully prepared data for writing split files.");
+                 debugWriter.WriteLine($"Split data preparation complete.");
+
+                 // Log count before closing writers in finally block
+                 debugWriter.WriteLine($"\nTotal unique building IDs collected: {uniqueBuildingIds.Count}");
+                 summaryWriter.WriteLine($"\nTotal unique building IDs collected: {uniqueBuildingIds.Count}");
              }
-             // Reverted: Catch block remains the same conceptually
              catch (Exception ex)
              {
-                  Console.WriteLine($"Error writing split OBJ data: {ex.ToString()}"); 
-                  try { 
-                      debugWriter?.WriteLine($"### EXCEPTION DURING SPLIT WRITE: {ex.ToString()} ###"); 
-                      debugWriter?.Flush(); 
-                  } catch { /* Ignore */ }
+                  Console.WriteLine($"Error during data processing/preparation: {ex.ToString()}");
+                  try { debugWriter?.WriteLine($"### EXCEPTION DURING DATA PROCESSING: {ex.ToString()} ###"); } catch { /* Ignore */ }
              }
             finally
             {
-                // Close all writers (Reverted)
+                // Close all writers
                 debugWriter?.Close();
-                summaryWriter?.Close(); // ADDED Close Summary Writer
-                // combinedWriter?.Close(); // Reverted: Removed Combined
+                summaryWriter?.Close();
                 msvtWriter?.Close();
                 mspvWriter?.Close();
                 mprlWriter?.Close();
-                mscnWriter?.Close(); // ADDED close call
-                mslkWriter?.Close(); // Close MSLK writer
-                skippedMslkWriter?.Close(); // Close skipped MSLK writer
-                // mscnWriter?.Close(); // REMOVED close call
+                mscnWriter?.Close();
+                mslkWriter?.Close();
+                skippedMslkWriter?.Close();
+                mslkNodesWriter?.Close();
             }
 
-             // Reverted: Original Asserts
-             Assert.True(File.Exists(outputMsvtFilePath), $"MSVT OBJ file was not created at {outputMsvtFilePath}");
-             Assert.True(File.Exists(outputMspvFilePath), $"MSPV OBJ file was not created at {outputMspvFilePath}");
-             Assert.True(File.Exists(outputMprlFilePath), $"MPRL OBJ file was not created at {outputMprlFilePath}");
-             Assert.True(File.Exists(outputMscnFilePath), $"MSCN OBJ file was not created at {outputMscnFilePath}"); // ADDED Assert
-             Assert.True(File.Exists(outputMslkFilePath), $"MSLK OBJ file should exist at {outputMslkFilePath}"); // Assert MSLK file
-             Assert.True(File.Exists(outputMslkJsonPath), $"MSLK JSON file should exist at {outputMslkJsonPath}"); // Assert MSLK JSON file
-             Assert.True(File.Exists(summaryLogPath), $"Summary log file was not created at {summaryLogPath}"); // ADDED Summary Assert
+            // --- Write Unique Building IDs Log (Moved outside main try/finally) ---
+            Console.WriteLine($"\nAttempting to write {uniqueBuildingIds.Count} unique building IDs to {outputBuildingIdsPath}");
+
+            if (uniqueBuildingIds.Any())
+            {
+                StreamWriter? buildingIdWriter = null;
+                try
+                {
+                    buildingIdWriter = new StreamWriter(outputBuildingIdsPath, false);
+                    buildingIdWriter.WriteLine("# Unique Building IDs (m_destructible_building_index from MDOS via MDSF)");
+                    buildingIdWriter.WriteLine($"# Total Found: {uniqueBuildingIds.Count}");
+                    foreach (uint id in uniqueBuildingIds.OrderBy(id => id))
+                    {
+                        buildingIdWriter.WriteLine(id);
+                    }
+                    Console.WriteLine($"Successfully wrote unique building IDs to {outputBuildingIdsPath}");
+                }
+                catch (Exception ex)
+                {
+                    // Log detailed exception
+                    Console.WriteLine($"Error writing unique building IDs log to {outputBuildingIdsPath}: {ex.ToString()}");
+                    // Attempt to log to debug log if possible (might fail if path issue exists)
+                    try { File.AppendAllText(debugLogPath, $"\n### ERROR WRITING BUILDING IDS LOG: {ex.ToString()} ###\n"); }
+                    catch { /* Best effort */ }
+                }
+                finally
+                {
+                    buildingIdWriter?.Close();
+                }
+            }
+            else
+            {
+                Console.WriteLine("No unique building IDs found to write.");
+                 try { File.AppendAllText(debugLogPath, "\nNo unique building IDs found to write.\n"); } catch { /* Best effort */ }
+            }
+            // --- END: Write Unique Building IDs Log ---
+
+            Assert.True(File.Exists(outputMsvtFilePath), $"MSVT OBJ file was not created at {outputMsvtFilePath}");
+            Assert.True(File.Exists(outputMspvFilePath), $"MSPV OBJ file was not created at {outputMspvFilePath}");
+            Assert.True(File.Exists(outputMprlFilePath), $"MPRL OBJ file was not created at {outputMprlFilePath}");
+            Assert.True(File.Exists(outputMscnFilePath), $"MSCN OBJ file was not created at {outputMscnFilePath}");
+            Assert.True(File.Exists(outputMslkFilePath), $"MSLK OBJ file should exist at {outputMslkFilePath}");
+            Assert.True(File.Exists(outputMslkJsonPath), $"MSLK JSON file should exist at {outputMslkJsonPath}");
+            Assert.True(File.Exists(outputSkippedMslkLogPath), $"Skipped MSLK log file should exist at {outputSkippedMslkLogPath}");
+            Assert.True(File.Exists(outputPm4MslkNodesFilePath), $"PM4 MSLK Nodes OBJ file should exist at {outputPm4MslkNodesFilePath}");
+            Assert.True(File.Exists(summaryLogPath), $"Summary log file was not created at {summaryLogPath}");
+            Assert.True(File.Exists(outputBuildingIdsPath), $"Building IDs log file was not created at {outputBuildingIdsPath}");
 
             Console.WriteLine("--- LoadPM4File_ShouldLoadChunks END ---");
         }

@@ -12,27 +12,30 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     /// </summary>
     public class MdsfEntry
     {
-        // Reverting to 8-byte structure based on PM4 documentation
-        public uint Value_0x00 { get; set; }
-        public uint Value_0x04 { get; set; }
+        // Renamed fields based on struct info
+        public uint msur_index { get; set; }
+        public uint mdos_index { get; set; }
 
         public const int Size = 8; // Bytes (uint32 + uint32)
 
         public void Load(BinaryReader br)
         {
-            Value_0x00 = br.ReadUInt32();
-            Value_0x04 = br.ReadUInt32();
+            // Read into renamed fields
+            msur_index = br.ReadUInt32();
+            mdos_index = br.ReadUInt32();
         }
 
         public void Write(BinaryWriter bw)
         {
-            bw.Write(Value_0x00);
-            bw.Write(Value_0x04);
+            // Write from renamed fields
+            bw.Write(msur_index);
+            bw.Write(mdos_index);
         }
 
         public override string ToString()
         {
-            return $"MDSF Entry [Val0: 0x{Value_0x00:X8}, Val4: 0x{Value_0x04:X8}]";
+            // Update ToString to use renamed fields
+            return $"MDSF Entry [MSUR Index: {msur_index}, MDOS Index: {mdos_index}]";
         }
     }
 

@@ -86,12 +86,6 @@ namespace WoWToolbox.Core.Navigation.PM4
         public MDSFChunk? MDSF { get; private set; }
 
         /// <summary>
-        /// Gets or sets the MSRN chunk (Referenced Normals).
-        /// </summary>
-        [ChunkOptional]
-        public MSRNChunk? MSRN { get; set; }
-
-        /// <summary>
         /// Initializes a new instance of the <see cref="PM4File"/> class.
         /// </summary>
         public PM4File() { }

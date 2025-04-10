@@ -15,7 +15,6 @@ namespace WoWToolbox.Core.Legacy.Liquid
         private readonly IDBCProvider? dbcProvider;
         private readonly string? dbcPath;
         private Dictionary<uint, bool> validatedEntries;
-        private bool isInitialized;
 
         /// <summary>
         /// Creates a new instance of the LiquidTypeValidator class
@@ -78,7 +77,6 @@ namespace WoWToolbox.Core.Legacy.Liquid
         private void Initialize()
         {
             validatedEntries = new Dictionary<uint, bool>();
-            isInitialized = true;
         }
 
         /// <summary>

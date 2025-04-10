@@ -11,16 +11,16 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     /// </summary>
     public class MdosEntry
     {
-        public uint Value_0x00 { get; set; }
-        public uint Value_0x04 { get; set; }
+        public uint m_destructible_building_index { get; set; }
+        public uint destruction_state { get; set; }
         // public uint[] Values { get; private set; } = new uint[32]; // Reverted
 
         public const int Size = 8; // Bytes (uint32 + uint32) - Reverted to PM4 docs
 
         public void Load(BinaryReader br)
         {
-            Value_0x00 = br.ReadUInt32();
-            Value_0x04 = br.ReadUInt32();
+            m_destructible_building_index = br.ReadUInt32();
+            destruction_state = br.ReadUInt32();
             /* Reverted
             for (int j = 0; j < 32; j++)
             {
@@ -31,8 +31,8 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
 
         public void Write(BinaryWriter bw)
         {
-            bw.Write(Value_0x00);
-            bw.Write(Value_0x04);
+            bw.Write(m_destructible_building_index);
+            bw.Write(destruction_state);
             /* Reverted
             for (int j = 0; j < 32; j++)
             {
@@ -43,7 +43,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
 
         public override string ToString()
         {
-            return $"MDOS Entry [Val0: 0x{Value_0x00:X8}, Val4: 0x{Value_0x04:X8}]"; // Reverted
+            return $"MDOS Entry [Index: {m_destructible_building_index}, State: {destruction_state}]";
         }
     }
 

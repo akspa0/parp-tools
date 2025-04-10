@@ -62,20 +62,27 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             string baseOutputPath = Path.Combine(Path.GetDirectoryName(relativeTestDataPath) ?? AppDomain.CurrentDomain.BaseDirectory, Path.GetFileNameWithoutExtension(relativeTestDataPath));
             string debugLogPath = baseOutputPath + ".debug.log";
             string summaryLogPath = baseOutputPath + ".summary.log";
-            // Add OBJ output paths
+            // Re-introduce individual OBJ paths
             string outputMspvFilePath = baseOutputPath + "_mspv.obj";
             string outputMsvtFilePath = baseOutputPath + "_msvt.obj";
-            string outputMscnFilePath = baseOutputPath + "_mscn.obj"; // Added MSCN path
-            string outputMslkFilePath = baseOutputPath + "_mslk.obj"; // Added MSLK path
-            string outputMslkNodesFilePath = baseOutputPath + "_mslk_nodes.obj"; // ADDED MSLK Node Anchors path
+            string outputMscnFilePath = baseOutputPath + "_mscn.obj";
+            string outputMslkFilePath = baseOutputPath + "_mslk.obj"; // Kept for MSLK paths/points
+            string outputMslkNodesFilePath = baseOutputPath + "_mslk_nodes.obj"; // Kept for MSLK Node Anchors
+            string mslkLoopLogPath = baseOutputPath + "_mslk_loop.log";
+            // Remove combined geometry OBJ path
+            // string outputCombinedGeometryFilePath = baseOutputPath + "_combined_geometry.obj";
 
             Console.WriteLine($"Debug Log: {debugLogPath}");
             Console.WriteLine($"Summary Log: {summaryLogPath}");
+            // Re-introduce individual OBJ path logs
             Console.WriteLine($"Output MSPV OBJ: {outputMspvFilePath}");
             Console.WriteLine($"Output MSVT OBJ: {outputMsvtFilePath}");
-            Console.WriteLine($"Output MSCN OBJ: {outputMscnFilePath}"); // Added log for MSCN path
-            Console.WriteLine($"Output MSLK OBJ: {outputMslkFilePath}"); // Added log for MSLK path
-            Console.WriteLine($"Output MSLK Nodes OBJ: {outputMslkNodesFilePath}"); // ADDED log for MSLK Nodes path
+            Console.WriteLine($"Output MSCN OBJ: {outputMscnFilePath}");
+            Console.WriteLine($"Output MSLK OBJ: {outputMslkFilePath}"); // Keep MSLK path log
+            Console.WriteLine($"Output MSLK Nodes OBJ: {outputMslkNodesFilePath}"); // Keep MSLK Nodes path log
+            Console.WriteLine($"MSLK Loop Log: {mslkLoopLogPath}");
+            // Remove combined geometry path log
+            // Console.WriteLine($"Output Combined Geometry OBJ: {outputCombinedGeometryFilePath}");
 
             // Check if file exists before attempting to load
             if (!File.Exists(inputFilePath))
@@ -89,32 +96,46 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             PD4File? pd4File = null;
             StreamWriter? debugWriter = null;
             StreamWriter? summaryWriter = null;
-            // Add OBJ writers
+            // Re-introduce individual OBJ writers
             StreamWriter? mspvWriter = null;
             StreamWriter? msvtWriter = null;
-            StreamWriter? mscnWriter = null; // Added MSCN writer
-            StreamWriter? mslkWriter = null; // Added MSLK writer
-            StreamWriter? skippedMslkWriter = null; // ADDED writer for skipped MSLK entries
-            StreamWriter? mslkNodesWriter = null; // ADDED writer for MSLK nodes
+            StreamWriter? mscnWriter = null;
+            StreamWriter? mslkWriter = null; // Keep MSLK writer
+            StreamWriter? skippedMslkWriter = null; // Keep skipped MSLK writer
+            StreamWriter? mslkNodesWriter = null; // Keep MSLK nodes writer
+            StreamWriter? mslkLoopWriter = null;
+            // Remove combined geometry writer
+            // StreamWriter? combinedGeometryWriter = null;
 
             try
             {
                 // Initialize writers
                 debugWriter = new StreamWriter(debugLogPath, false);
                 summaryWriter = new StreamWriter(summaryLogPath, false);
+                mslkLoopWriter = new StreamWriter(mslkLoopLogPath, false); // MOVED UP - ADDED init for loop log writer
+                mslkLoopWriter.WriteLine($"--- MSLK LOOP DIAGNOSTIC LOG FOR {relativeTestDataPath} ---"); // MOVED UP - ADDED header
                 // Initialize OBJ writers
-                mspvWriter = new StreamWriter(outputMspvFilePath, false);
-                msvtWriter = new StreamWriter(outputMsvtFilePath, false);
-                mscnWriter = new StreamWriter(outputMscnFilePath, false);
                 mslkWriter = new StreamWriter(outputMslkFilePath, false); // Initialized MSLK writer
                 skippedMslkWriter = new StreamWriter(baseOutputPath + "_skipped_mslk.log", false); // ADDED skipped writer init
                 mslkNodesWriter = new StreamWriter(outputMslkNodesFilePath, false); // ADDED init for nodes writer
+                // Re-introduce individual writer init
+                mspvWriter = new StreamWriter(outputMspvFilePath, false);
+                msvtWriter = new StreamWriter(outputMsvtFilePath, false);
+                mscnWriter = new StreamWriter(outputMscnFilePath, false);
 
                 debugWriter.WriteLine($"--- DEBUG LOG FOR {relativeTestDataPath} ---");
                 summaryWriter.WriteLine($"--- SUMMARY LOG FOR {relativeTestDataPath} ---");
+                // mslkLoopWriter.WriteLine($"--- MSLK LOOP DIAGNOSTIC LOG FOR {relativeTestDataPath} ---"); // REMOVED - Moved up
                 // Write header to skipped log
                 skippedMslkWriter.WriteLine($"# PD4 Skipped/Invalid MSLK Entries Log ({DateTime.Now})");
                 mslkNodesWriter.WriteLine($"# PD4 MSLK Node Anchor Points (from Unk10 -> MSVI -> MSVT)"); // ADDED header for nodes
+                // Remove combined geometry header
+                // combinedGeometryWriter.WriteLine($"# PD4 Combined Geometry (MSPV, MSVT, MSCN) for {Path.GetFileName(relativeTestDataPath)}");
+                // combinedGeometryWriter.WriteLine($"# Generated on {DateTime.Now}");
+                // Add individual headers
+                mspvWriter.WriteLine($"# PD4 MSPV Geometry (Direct X, Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
+                msvtWriter.WriteLine($"# PD4 MSVT Geometry (Transformed: offset-X, offset-Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
+                mscnWriter.WriteLine($"# PD4 MSCN Geometry (Direct X, Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
 
                 // Logging before FromFile call
                 Console.WriteLine("DEBUG: About to call PD4File.FromFile...");
@@ -168,23 +189,22 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 summaryWriter.WriteLine("\n--- Exporting OBJ Geometry ---");
 
                 // Write OBJ Headers
-                mspvWriter.WriteLine("# PD4 MSPV Geometry (Direct X, Y, Z)");
-                msvtWriter.WriteLine("# PD4 MSVT Geometry (Transformed)");
-                mscnWriter.WriteLine("# PD4 MSCN Vectors (Direct X, Y, Z)");
                 mslkWriter.WriteLine("# PD4 MSLK Paths referencing MSPV Vertices");
-                mslkNodesWriter.WriteLine("# PD4 MSLK Node Anchor Points (from Unk10 -> MSVI -> MSVT)"); // ADDED header for nodes
+                mslkNodesWriter.WriteLine("# PD4 MSLK Node Anchor Points (from Unk10 -> MSVI -> MSVT)");
 
-                // --- Export MSPV (Vertices needed for MSLK) ---
+                // --- Export MSPV (Vertices needed for MSLK and Combined) ---
                 if (pd4File.MSPV?.Vertices != null && pd4File.MSPV.Vertices.Count > 0)
                 {
-                    debugWriter.WriteLine($"Exporting {pd4File.MSPV.Vertices.Count} MSPV vertices (for MSPV and MSLK OBJs)...");
-                    // Write to both MSPV and MSLK obj files
+                    debugWriter.WriteLine($"Exporting {pd4File.MSPV.Vertices.Count} MSPV vertices to _mspv.obj and _mslk.obj..."); // Updated log message
+                    mspvWriter.WriteLine("o MSPV_Geometry"); // Add object directive for MSPV to its own file
+                    // Write vertices to both MSLK and MSPV obj files
                     for (int i = 0; i < pd4File.MSPV.Vertices.Count; i++)
                     {
                         var vertex = pd4File.MSPV.Vertices[i];
+                        // MSPV uses direct coords
                         string line = $"v {vertex.X.ToString(CultureInfo.InvariantCulture)} {vertex.Y.ToString(CultureInfo.InvariantCulture)} {vertex.Z.ToString(CultureInfo.InvariantCulture)}";
-                        mspvWriter.WriteLine(line);
-                        mslkWriter.WriteLine(line); // Write vertices to MSLK file too
+                        mspvWriter.WriteLine(line); // Write to MSPV file
+                        mslkWriter.WriteLine(line); // Write vertices to MSLK file too (needed for 'l'/'p' elements)
                     }
                     debugWriter.WriteLine("MSPV vertex export complete.");
                 }
@@ -197,12 +217,15 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 // --- Export MSVT --- 
                 if (pd4File.MSVT?.Vertices != null)
                 {
-                    debugWriter.WriteLine($"Exporting {pd4File.MSVT.Vertices.Count} MSVT vertices with transformation...");
+                    debugWriter.WriteLine($"Exporting {pd4File.MSVT.Vertices.Count} MSVT vertices with transformation to _msvt.obj..."); // Updated log message
+                    msvtWriter.WriteLine("o MSVT_Geometry"); // Add object directive for MSVT to its own file
+                    int msvtFileIndex = 0; // Initialize counter for 1-based OBJ index
                     foreach (var vertex in pd4File.MSVT.Vertices)
                     {
-                        // Apply PD4 specific transformation
+                        msvtFileIndex++; // Increment for 1-based OBJ index
+                        // Apply PD4 specific transformation (offset-X, offset-Y, Z)
                         Vector3 worldPos = MsvtToWorld_PD4(vertex);
-                        // Write transformed vertex
+                        // Write transformed vertex to MSVT file
                         msvtWriter.WriteLine($"v {worldPos.X.ToString(CultureInfo.InvariantCulture)} {worldPos.Y.ToString(CultureInfo.InvariantCulture)} {worldPos.Z.ToString(CultureInfo.InvariantCulture)}");
                     }
                     debugWriter.WriteLine("MSVT export complete.");
@@ -216,10 +239,11 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 // --- Export MSCN --- 
                 if (pd4File.MSCN?.Vectors != null)
                 {
-                    debugWriter.WriteLine($"Exporting {pd4File.MSCN.Vectors.Count} MSCN vectors...");
+                    debugWriter.WriteLine($"Exporting {pd4File.MSCN.Vectors.Count} MSCN vectors to _mscn.obj..."); // Updated log message
+                    mscnWriter.WriteLine("o MSCN_Geometry"); // Add object directive for MSCN to its own file
                     foreach (var vec in pd4File.MSCN.Vectors)
                     {
-                        // Write vector directly (assuming X, Y, Z)
+                        // Write vector directly (assuming X, Y, Z) to MSCN file
                         mscnWriter.WriteLine($"v {vec.X.ToString(CultureInfo.InvariantCulture)} {vec.Y.ToString(CultureInfo.InvariantCulture)} {vec.Z.ToString(CultureInfo.InvariantCulture)}");
                     }
                     debugWriter.WriteLine("MSCN export complete.");
@@ -242,8 +266,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                     debugWriter.WriteLine($"Processing {mslkEntryCount} MSLK entries...");
                     
                     // ADDED: Log message immediately before the loop starts
-                    debugWriter.WriteLine($"  Attempting to start MSLK entry loop (i=0 to {mslkEntryCount - 1})...");
-                    Console.WriteLine($"  Attempting to start MSLK entry loop (i=0 to {mslkEntryCount - 1})..."); // CONSOLE LOG
+                    mslkLoopWriter.WriteLine($"  Attempting to start MSLK entry loop (i=0 to {mslkEntryCount - 1})..."); // MOVED TO DEDICATED LOG
 
                     for(int i = 0; i < mslkEntryCount; i++)
                     {
@@ -254,16 +277,16 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
 
                         // Log entry details in PARSABLE format for AnalysisTool
                         debugWriter.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                            "Processing MSLK Entry {0}: FirstIndex={1}, Count={2}, Unk00=0x{3:X2}, Unk01=0x{4:X2}, Unk04=0x{5:X8}, Unk10=0x{6:X4}",
-                             i, mslkEntry.MspiFirstIndex, mslkEntry.MspiIndexCount, mslkEntry.Unknown_0x00, mslkEntry.Unknown_0x01, mslkEntry.Unknown_0x04, mslkEntry.Unknown_0x10));
+                            "Processing MSLK Entry {0}: FirstIndex={1}, Count={2}, Unk00=0x{3:X2}, Unk01=0x{4:X2}, Unk04=0x{5:X8}, Unk10=0x{6:X4}, Unk12=0x{7:X4}",
+                             i, mslkEntry.MspiFirstIndex, mslkEntry.MspiIndexCount, mslkEntry.Unknown_0x00, mslkEntry.Unknown_0x01, mslkEntry.Unknown_0x04, mslkEntry.Unknown_0x10, mslkEntry.Unknown_0x12));
 
                         // --- Start Skipped Entry Checks ---
-                        bool skipped = false;
-                        string skipReason = "";
+                        // Removed unused variables 'skipped' and 'skipReason'
+                        // bool skipped = false;
+                        // string skipReason = "";
 
                         // ADDED: Log values for the node condition check
-                        debugWriter.WriteLine($"  Checking Node Condition for Entry {i}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}");
-                        Console.WriteLine($"  Checking Node Condition for Entry {i}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}"); // CONSOLE LOG
+                        mslkLoopWriter.WriteLine($"  Checking Node Condition for Entry {i}: FirstIndex={mslkEntry.MspiFirstIndex}, Count={mslkEntry.MspiIndexCount}"); // MOVED TO DEDICATED LOG
 
                         if (mslkEntry.MspiIndexCount == 0 && mslkEntry.MspiFirstIndex == -1) 
                         { 
@@ -272,11 +295,11 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                             {
                                 debugWriter.WriteLine($"  [WARN] Entry {i} looks like a Node (FirstIdx=-1, Count=0) but Unk00 is not 0x01 (Value=0x{mslkEntry.Unknown_0x00:X2}). Treating as Node anyway.");
                                 Console.WriteLine($"  [WARN] Entry {i} looks like a Node (FirstIdx=-1, Count=0) but Unk00 is not 0x01 (Value=0x{mslkEntry.Unknown_0x00:X2}). Treating as Node anyway."); // CONSOLE LOG
+                                mslkLoopWriter.WriteLine($"  [WARN] Entry {i} looks like a Node (FirstIdx=-1, Count=0) but Unk00 is not 0x01 (Value=0x{mslkEntry.Unknown_0x00:X2}). Treating as Node anyway."); // MOVED TO DEDICATED LOG
                             }
 
                             // --- ADDED: Process Node Anchor Point ---
-                            debugWriter.WriteLine($"  Attempting to process anchor point for Node {i}..."); // ADDED PRE-TRY LOG
-                            Console.WriteLine($"  Attempting to process anchor point for Node {i}..."); // CONSOLE LOG
+                            mslkLoopWriter.WriteLine($"  Attempting to process anchor point for Node {i}..."); // MOVED TO DEDICATED LOG
                             if (mslkNodesWriter != null && pd4File.MSVI?.Indices != null && pd4File.MSVT?.Vertices != null) 
                             {
                                 try 
@@ -292,27 +315,32 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                                             mslkNodesWriter.WriteLine($"v {worldPos.X.ToString(CultureInfo.InvariantCulture)} {worldPos.Y.ToString(CultureInfo.InvariantCulture)} {worldPos.Z.ToString(CultureInfo.InvariantCulture)} # Node Idx:{i} Unk01:0x{mslkEntry.Unknown_0x01:X2} Unk10:0x{mslkEntry.Unknown_0x10:X4} MSVI:{msviIndex} MSVT:{msvtIndex}");
                                             debugWriter.WriteLine($"  Node {i} (Unk01=0x{mslkEntry.Unknown_0x01:X2}) anchored via Unk10=0x{mslkEntry.Unknown_0x10:X4} -> MSVI[{msviIndex}] -> MSVT[{msvtIndex}] -> World({worldPos.X:F3}, {worldPos.Y:F3}, {worldPos.Z:F3})");
                                             Console.WriteLine($"  Node {i} (Unk01=0x{mslkEntry.Unknown_0x01:X2}) anchored via Unk10=0x{mslkEntry.Unknown_0x10:X4} -> MSVI[{msviIndex}] -> MSVT[{msvtIndex}] -> World({worldPos.X:F3}, {worldPos.Y:F3}, {worldPos.Z:F3})"); // CONSOLE LOG
+                                            mslkLoopWriter.WriteLine($"  Node {i} (Unk01=0x{mslkEntry.Unknown_0x01:X2}) anchored via Unk10=0x{mslkEntry.Unknown_0x10:X4} -> MSVI[{msviIndex}] -> MSVT[{msvtIndex}] -> World({worldPos.X:F3}, {worldPos.Y:F3}, {worldPos.Z:F3})"); // MOVED TO DEDICATED LOG
                                         }
                                         else 
                                         {
                                             debugWriter.WriteLine($"  [WARN] Node {i} MSVI index {msviIndex} yielded invalid MSVT index {msvtIndex} (>= {msvtVertexCount}). Cannot get anchor point.");
                                             Console.WriteLine($"  [WARN] Node {i} MSVI index {msviIndex} yielded invalid MSVT index {msvtIndex} (>= {msvtVertexCount}). Cannot get anchor point."); // CONSOLE LOG
+                                            mslkLoopWriter.WriteLine($"  [WARN] Node {i} MSVI index {msviIndex} yielded invalid MSVT index {msvtIndex} (>= {msvtVertexCount}). Cannot get anchor point."); // MOVED TO DEDICATED LOG
                                         }
                                     }
                                     else 
                                     {
                                          debugWriter.WriteLine($"  [WARN] Node {i} Unk10 value 0x{mslkEntry.Unknown_0x10:X4} (={msviIndex}) is out of bounds for MSVI count {msviIndexCount}. Cannot get anchor point.");
                                          Console.WriteLine($"  [WARN] Node {i} Unk10 value 0x{mslkEntry.Unknown_0x10:X4} (={msviIndex}) is out of bounds for MSVI count {msviIndexCount}. Cannot get anchor point."); // CONSOLE LOG
+                                         mslkLoopWriter.WriteLine($"  [WARN] Node {i} Unk10 value 0x{mslkEntry.Unknown_0x10:X4} (={msviIndex}) is out of bounds for MSVI count {msviIndexCount}. Cannot get anchor point."); // MOVED TO DEDICATED LOG
                                     }
                                 } catch (Exception ex) {
                                      debugWriter.WriteLine($"  [ERROR] Exception processing node {i} anchor point: {ex.Message}");
                                      Console.WriteLine($"  [ERROR] Exception processing node {i} anchor point: {ex.Message}"); // CONSOLE LOG
+                                     mslkLoopWriter.WriteLine($"  [ERROR] Exception processing node {i} anchor point: {ex.Message}"); // MOVED TO DEDICATED LOG
                                 }
                             }
                             else
                             {
                                 debugWriter.WriteLine($"  [WARN] Cannot process node {i} anchor point because MSVI or MSVT data is missing.");
                                 Console.WriteLine($"  [WARN] Cannot process node {i} anchor point because MSVI or MSVT data is missing."); // CONSOLE LOG
+                                mslkLoopWriter.WriteLine($"  [WARN] Cannot process node {i} anchor point because MSVI or MSVT data is missing."); // MOVED TO DEDICATED LOG
                             }
                             // --- END: Process Node Anchor Point ---
                         } 
@@ -384,8 +412,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                     } // End for loop iterating through MSLK entries
 
                     // ADDED: Log message immediately after the loop finishes
-                    debugWriter.WriteLine($"  Finished MSLK entry loop.");
-                    Console.WriteLine($"  Finished MSLK entry loop."); // CONSOLE LOG
+                    mslkLoopWriter.WriteLine($"  Finished MSLK entry loop.");
 
                     summaryWriter.WriteLine($"MSLK Paths Exported: {exportedMslkPaths}");
                     summaryWriter.WriteLine($"MSLK Entries Skipped: {skippedMslkEntries}");
@@ -395,6 +422,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 {
                     debugWriter.WriteLine("Skipping MSLK processing (MSLK, MSPI, or MSPV data missing or empty).");
                     Console.WriteLine("Skipping MSLK processing (MSLK, MSPI, or MSPV data missing or empty)."); // CONSOLE LOG
+                    mslkLoopWriter.WriteLine("Skipping MSLK processing (MSLK, MSPI, or MSPV data missing or empty)."); // MOVED TO DEDICATED LOG
                 }
                 // --- End MSLK Path Export ---
 
@@ -423,6 +451,10 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                                 debugWriter.WriteLine($"    MSVI Range: [{msviFirstIndex}..{rangeEndExclusive - 1}] (Count: {msviIndexCountLocal}) - Valid Range.");
                                 List<uint> msviIndicesFromRange = new List<uint>();
                                 List<int> invalidMsvtIndices = new List<int>();
+                                
+                                // --- ADDED: Face Generation Logic ---
+                                bool faceIsValid = true;
+                                List<int> objFaceIndices = new List<int>(msviIndexCountLocal);
 
                                 // Retrieve and validate indices within the range
                                 for (int j = 0; j < msviIndexCountLocal; j++)
@@ -431,12 +463,33 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                                     uint msvtIndex = pd4File.MSVI.Indices[currentMsviListIndex]; // Get index into MSVT
                                     msviIndicesFromRange.Add(msvtIndex); // Store the index from MSVI
 
-                                    // Validate the MSVT index itself
-                                    if (msvtIndex >= msvtVertexCount)
+                                    // Validate the MSVT index against the count *written to the OBJ file*
+                                    if (msvtIndex < msvtVertexCount) // Use msvtVertexCount (total vertices in MSVT chunk)
+                                    {
+                                         objFaceIndices.Add((int)msvtIndex + 1); // Add 1 for 1-based index
+                                    }
+                                    else
                                     {
                                         invalidMsvtIndices.Add((int)msvtIndex);
+                                        faceIsValid = false; // Mark face invalid if any index is bad
                                     }
                                 }
+                                
+                                // Write face if valid and enough vertices
+                                if (faceIsValid && objFaceIndices.Count >= 3)
+                                {
+                                    msvtWriter.WriteLine("f " + string.Join(" ", objFaceIndices));
+                                    debugWriter.WriteLine($"      Wrote face with {objFaceIndices.Count} vertices to _msvt.obj.");
+                                }
+                                else if (faceIsValid) // Valid indices, but not enough vertices
+                                {
+                                    debugWriter.WriteLine($"      Skipping face: Not enough valid vertices ({objFaceIndices.Count}) after validation.");
+                                }
+                                else // Face invalid due to out-of-bounds MSVT indices
+                                {
+                                     debugWriter.WriteLine($"      Skipping face: Contained invalid MSVT indices.");
+                                }
+                                // --- END: Face Generation Logic ---
                                 
                                 // Log the retrieved MSVI indices (first few for brevity)
                                 int maxLog = Math.Min(msviIndicesFromRange.Count, 10);
@@ -523,25 +576,27 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 // Close all writers
                 debugWriter?.Close();
                 summaryWriter?.Close();
+                mslkLoopWriter?.Close(); // ADDED dispose for loop log writer
+                // Remove individual OBJ writer disposals
+                mslkWriter?.Close(); // Keep MSLK writer disposal
+                skippedMslkWriter?.Close(); // Keep skipped MSLK writer disposal
+                mslkNodesWriter?.Close(); // Keep MSLK nodes writer disposal
+                // Re-add individual writer disposal
                 mspvWriter?.Close();
                 msvtWriter?.Close();
                 mscnWriter?.Close();
-                mslkWriter?.Close();
-                skippedMslkWriter?.Close(); // ADDED close skipped writer
-                mslkNodesWriter?.Close(); // ADDED Dispose for nodes writer
                 Console.WriteLine($"--- Finished processing {relativeTestDataPath} ---");
             }
 
             // Final Assertions (check if files were created)
             Assert.True(File.Exists(debugLogPath), $"Debug log file was not created at {debugLogPath}");
             Assert.True(File.Exists(summaryLogPath), $"Summary log file was not created at {summaryLogPath}");
-            Assert.True(File.Exists(outputMspvFilePath), $"MSPV OBJ file was not created at {outputMspvFilePath}");
-            Assert.True(File.Exists(outputMsvtFilePath), $"MSVT OBJ file was not created at {outputMsvtFilePath}");
-            Assert.True(File.Exists(outputMscnFilePath), $"MSCN OBJ file was not created at {outputMscnFilePath}");
             Assert.True(File.Exists(outputMslkFilePath), $"MSLK OBJ file was not created at {outputMslkFilePath}");
-            // Assert skipped log exists
-             Assert.True(File.Exists(baseOutputPath + "_skipped_mslk.log"), $"Skipped MSLK log file was not created at {baseOutputPath}_skipped_mslk.log");
-            Assert.True(File.Exists(outputMslkNodesFilePath), $"MSLK Nodes OBJ file should exist at {outputMslkNodesFilePath}"); // ADDED Assert for nodes OBJ
+            Assert.True(File.Exists(outputMslkNodesFilePath), $"MSLK Nodes OBJ file should exist at {outputMslkNodesFilePath}");
+            Assert.True(File.Exists(mslkLoopLogPath), $"MSLK Loop Log file should exist at {mslkLoopLogPath}");
+            Assert.True(File.Exists(outputMspvFilePath), $"MSPV OBJ file should exist at {outputMspvFilePath}");
+            Assert.True(File.Exists(outputMsvtFilePath), $"MSVT OBJ file should exist at {outputMsvtFilePath}");
+            Assert.True(File.Exists(outputMscnFilePath), $"MSCN OBJ file should exist at {outputMscnFilePath}");
 
             Console.WriteLine($"--- Finished Processing: {relativeTestDataPath} ---");
         }

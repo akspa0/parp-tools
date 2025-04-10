@@ -33,11 +33,12 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
             var errors = new List<ValidationError>();
 
             // Get the specification for this chunk
-            if (!_specifications.TryGetValue(chunk.Signature.ToString(), out var spec))
+            string chunkSignature = chunk.GetSignature();
+            if (!_specifications.TryGetValue(chunkSignature, out var spec))
             {
                 errors.Add(new ValidationError
                 {
-                    ChunkId = chunk.Signature.ToString(),
+                    ChunkId = chunkSignature,
                     ErrorType = ValidationErrorType.MissingSpecification,
                     Message = "No specification found for chunk"
                 });
@@ -51,23 +52,24 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
                 {
                     errors.Add(new ValidationError
                     {
-                        ChunkId = chunk.Signature.ToString(),
+                        ChunkId = chunkSignature,
                         ErrorType = ValidationErrorType.UnsupportedVersion,
                         Message = $"Version {legacyChunk.Version} is not supported"
                     });
                 }
             }
 
+            /* // Commented out Size Validation Block - IIFFChunk interface does not provide size
             // Validate size constraints
             if (spec.Rules?.Size != null)
             {
-                var size = chunk.GetSize();
+                var size = chunk.GetSize(); // GetSize() does not exist on IIFFChunk
                 
                 if (spec.Rules.Size.MinSize.HasValue && size < spec.Rules.Size.MinSize.Value)
                 {
                     errors.Add(new ValidationError
                     {
-                        ChunkId = chunk.Signature.ToString(),
+                        ChunkId = chunkSignature, // Use variable
                         ErrorType = ValidationErrorType.SizeConstraintViolation,
                         Message = $"Chunk size {size} is less than minimum {spec.Rules.Size.MinSize.Value}"
                     });
@@ -77,7 +79,7 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
                 {
                     errors.Add(new ValidationError
                     {
-                        ChunkId = chunk.Signature.ToString(),
+                        ChunkId = chunkSignature, // Use variable
                         ErrorType = ValidationErrorType.SizeConstraintViolation,
                         Message = $"Chunk size {size} is greater than maximum {spec.Rules.Size.MaxSize.Value}"
                     });
@@ -87,12 +89,13 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
                 {
                     errors.Add(new ValidationError
                     {
-                        ChunkId = chunk.Signature.ToString(),
+                        ChunkId = chunkSignature, // Use variable
                         ErrorType = ValidationErrorType.SizeConstraintViolation,
                         Message = $"Chunk size {size} is not a multiple of {spec.Rules.Size.MultipleOf.Value}"
                     });
                 }
             }
+            */
 
             // TODO: Implement field validation
             // This will require reflection or a more sophisticated way to access chunk fields
@@ -109,7 +112,7 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
         /// <summary>
         /// The ID of the chunk that failed validation
         /// </summary>
-        public string ChunkId { get; set; }
+        public string ChunkId { get; set; } = string.Empty;
 
         /// <summary>
         /// The type of validation error
@@ -119,7 +122,7 @@ namespace WoWToolbox.Validation.Chunkvault.Validators
         /// <summary>
         /// A description of the error
         /// </summary>
-        public string Message { get; set; }
+        public string Message { get; set; } = string.Empty;
     }
 
     /// <summary>

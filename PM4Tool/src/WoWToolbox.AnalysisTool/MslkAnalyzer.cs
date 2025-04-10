@@ -17,6 +17,7 @@ namespace WoWToolbox.AnalysisTool
         public byte Unknown_0x01 { get; set; }
         public uint Unknown_0x04 { get; set; }
         public ushort Unknown_0x10 { get; set; }
+        public ushort Unknown_0x12 { get; set; }
         public string SourceLog { get; set; } // "debug" or "skipped"
         public string? SkipReason { get; set; } // Only for skipped log
     }
@@ -24,16 +25,15 @@ namespace WoWToolbox.AnalysisTool
     public static class MslkAnalyzer
     {
         // Regex patterns to capture data from log lines
-        // Debug Log: "Processing MSLK Entry 3: FirstIndex=-1, Count=0, Unk00=0x11, Unk01=0x00, Unk04=0x00000001, Unk10=0x004D"
+        // Debug Log: "Processing MSLK Entry 3: FirstIndex=-1, Count=0, Unk00=0x11, Unk01=0x00, Unk04=0x00000001, Unk10=0x004D, Unk12=0x8000"
         private static readonly Regex DebugLogRegex = new Regex(
-            @"Processing MSLK Entry (?<index>\d+): FirstIndex=(?<first>-?\d+), Count=(?<count>\d+), Unk00=0x(?<unk00>[0-9A-Fa-f]{2}), Unk01=0x(?<unk01>[0-9A-Fa-f]{2}), Unk04=0x(?<unk04>[0-9A-Fa-f]{8}), Unk10=0x(?<unk10>[0-9A-Fa-f]{4})",
+            @"Processing MSLK Entry (?<index>\d+): FirstIndex=(?<first>-?\d+), Count=(?<count>\d+), Unk00=0x(?<unk00>[0-9A-Fa-f]{2}), Unk01=0x(?<unk01>[0-9A-Fa-f]{2}), Unk04=0x(?<unk04>[0-9A-Fa-f]{8}), Unk10=0x(?<unk10>[0-9A-Fa-f]{4}), Unk12=0x(?<unk12>[0-9A-Fa-f]{4})",
             RegexOptions.Compiled);
 
-        // Skipped Log: "Skipped (Reason): Index=X, FirstIndex=Y, Count=Z, Unk00=..., Unk01=..., Unk04=..., Unk10=..."
-        // Need a flexible pattern as the ToString() format might vary slightly. Let's assume key=value pairs.
-        // Example: "Skipped (Count=0 or FirstIndex<0): Index=0, FirstIndex=-1, Count=0, Unk00=0x01, Unk01=0x00, Unk04=0x00000000, Unk10=0x003C"
+        // Skipped Log: "Skipped (Reason): Index=X, FirstIndex=Y, Count=Z, Unk00=..., Unk01=..., Unk04=..., Unk10=..., Unk12=..."
+        // Assuming Unk12 might be added to the ToString() or log format
         private static readonly Regex SkippedLogRegex = new Regex(
-             @"Skipped \((?<reason>[^)]+)\):.*Index=(?<index>\d+), FirstIndex=(?<first>-?\d+), Count=(?<count>\d+), Unk00=0x(?<unk00>[0-9A-Fa-f]+), Unk01=0x(?<unk01>[0-9A-Fa-f]+), Unk04=0x(?<unk04>[0-9A-Fa-f]+), Unk10=0x(?<unk10>[0-9A-Fa-f]+)",
+             @"Skipped \((?<reason>[^)]+)\):.*Index=(?<index>\d+), FirstIndex=(?<first>-?\d+), Count=(?<count>\d+), Unk00=0x(?<unk00>[0-9A-Fa-f]+), Unk01=0x(?<unk01>[0-9A-Fa-f]+), Unk04=0x(?<unk04>[0-9A-Fa-f]+), Unk10=0x(?<unk10>[0-9A-Fa-f]+)(, Unk12=0x(?<unk12>[0-9A-Fa-f]+))?",
              RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
 
@@ -148,7 +148,7 @@ namespace WoWToolbox.AnalysisTool
                     foreach(var entry in nodeEntries)
                     {
                         string skipInfo = entry.SkipReason != null ? $" (Skipped: {entry.SkipReason})" : "";
-                        Log($"      Entry {entry.EntryIndex}: Unk00=0x{entry.Unknown_0x00:X2}, Unk01=0x{entry.Unknown_0x01:X2}, Unk10=0x{entry.Unknown_0x10:X4} (Source: {entry.SourceLog}{skipInfo})");
+                        Log($"      Entry {entry.EntryIndex}: Unk00=0x{entry.Unknown_0x00:X2}, Unk01=0x{entry.Unknown_0x01:X2}, Unk10=0x{entry.Unknown_0x10:X4}, Unk12=0x{entry.Unknown_0x12:X4} (Source: {entry.SourceLog}{skipInfo})");
                     }
                 }
                 if (geometryEntries.Any())
@@ -157,7 +157,7 @@ namespace WoWToolbox.AnalysisTool
                     foreach(var entry in geometryEntries)
                     {
                         string skipInfo = entry.SkipReason != null ? $" (Skipped: {entry.SkipReason})" : "";
-                        Log($"      Entry {entry.EntryIndex}: First={entry.MspiFirstIndex}, Cnt={entry.MspiIndexCount}, Unk00=0x{entry.Unknown_0x00:X2}, Unk01=0x{entry.Unknown_0x01:X2}, Unk10=0x{entry.Unknown_0x10:X4} (Source: {entry.SourceLog}{skipInfo})");
+                        Log($"      Entry {entry.EntryIndex}: First={entry.MspiFirstIndex}, Cnt={entry.MspiIndexCount}, Unk00=0x{entry.Unknown_0x00:X2}, Unk01=0x{entry.Unknown_0x01:X2}, Unk10=0x{entry.Unknown_0x10:X4}, Unk12=0x{entry.Unknown_0x12:X4} (Source: {entry.SourceLog}{skipInfo})");
                     }
                 }
                 // --- END: Log details ---
@@ -227,7 +227,8 @@ namespace WoWToolbox.AnalysisTool
         {
             entry = default;
             var match = DebugLogRegex.Match(line);
-            if (!match.Success) return false;
+            if (!match.Success)
+                return false;
 
             try
             {
@@ -235,11 +236,12 @@ namespace WoWToolbox.AnalysisTool
                 {
                     EntryIndex = int.Parse(match.Groups["index"].Value),
                     MspiFirstIndex = int.Parse(match.Groups["first"].Value),
-                    MspiIndexCount = byte.Parse(match.Groups["count"].Value),
+                    MspiIndexCount = uint.Parse(match.Groups["count"].Value),
                     Unknown_0x00 = byte.Parse(match.Groups["unk00"].Value, NumberStyles.HexNumber),
                     Unknown_0x01 = byte.Parse(match.Groups["unk01"].Value, NumberStyles.HexNumber),
                     Unknown_0x04 = uint.Parse(match.Groups["unk04"].Value, NumberStyles.HexNumber),
                     Unknown_0x10 = ushort.Parse(match.Groups["unk10"].Value, NumberStyles.HexNumber),
+                    Unknown_0x12 = ushort.Parse(match.Groups["unk12"].Value, NumberStyles.HexNumber),
                     SourceLog = "debug",
                     SkipReason = null
                 };
@@ -247,7 +249,7 @@ namespace WoWToolbox.AnalysisTool
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  [WARN] Exception parsing matched debug line: {ex.Message} | Line: {line}");
+                Console.WriteLine($"[ERROR] Failed to parse debug log match: {line} - {ex.Message}");
                 return false;
             }
         }
@@ -256,15 +258,17 @@ namespace WoWToolbox.AnalysisTool
         {
             entry = default;
             var match = SkippedLogRegex.Match(line);
-            if (!match.Success) return false;
+            if (!match.Success)
+                return false;
 
-             try
+            try
             {
+                // Parse mandatory fields
                 entry = new MslkEntryData
                 {
                     EntryIndex = int.Parse(match.Groups["index"].Value),
                     MspiFirstIndex = int.Parse(match.Groups["first"].Value),
-                    MspiIndexCount = byte.Parse(match.Groups["count"].Value),
+                    MspiIndexCount = uint.Parse(match.Groups["count"].Value),
                     Unknown_0x00 = byte.Parse(match.Groups["unk00"].Value, NumberStyles.HexNumber),
                     Unknown_0x01 = byte.Parse(match.Groups["unk01"].Value, NumberStyles.HexNumber),
                     Unknown_0x04 = uint.Parse(match.Groups["unk04"].Value, NumberStyles.HexNumber),
@@ -272,11 +276,22 @@ namespace WoWToolbox.AnalysisTool
                     SourceLog = "skipped",
                     SkipReason = match.Groups["reason"].Value.Trim()
                 };
-                 return true;
+
+                // Parse optional Unk12
+                if (match.Groups["unk12"].Success)
+                {
+                    entry.Unknown_0x12 = ushort.Parse(match.Groups["unk12"].Value, NumberStyles.HexNumber);
+                }
+                else
+                {
+                    entry.Unknown_0x12 = 0; // Default value if not found
+                }
+
+                return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  [WARN] Exception parsing matched skipped line: {ex.Message} | Line: {line}");
+                Console.WriteLine($"[ERROR] Failed to parse skipped log match: {line} - {ex.Message}");
                 return false;
             }
         }

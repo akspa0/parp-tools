@@ -8,12 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="Warcraft.NET">
-      <HintPath>..\lib\Warcraft.NET\Warcraft.NET\bin\Debug\net8.0\Warcraft.NET.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
 
 </Project>
