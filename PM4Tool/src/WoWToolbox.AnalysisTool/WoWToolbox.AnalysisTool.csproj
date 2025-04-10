@@ -11,6 +11,7 @@
   
   <ItemGroup>
     <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" /> 
+    <PackageReference Include="YamlDotNet" Version="15.1.2" /> 
   </ItemGroup>
   
 

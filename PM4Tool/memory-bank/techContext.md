@@ -20,31 +20,30 @@
    
    // Concrete File Types
    PM4File // Handles PM4 structure
-   PD4File // Handles PD4 structure (New)
+   PD4File // Handles PD4 structure
+   ADTFile // Handles ADT structure (New)
 
-   // Concrete Chunk Types (Examples)
-   MVER // Shared MVER class (likely in Warcraft.NET or common place)
+   // Concrete Chunk Types (Examples - Not exhaustive)
+   MVER // Shared MVER class 
    MSHDChunk
    MSPVChunk
-   MCRCChunk // PD4 Specific (New)
+   MCRCChunk // PD4 Specific
+   MDDFChunk // ADT Specific (via Warcraft.NET)
+   MODFChunk // ADT Specific (via Warcraft.NET)
    // ... many others reused between PM4/PD4
    
+   // Core Models (New ADT)
+   Placement
+   ModelPlacement
+   WmoPlacement
+
    // Extension Methods
    ChunkedFileExtensions
    ```
 
-2. Validation System
+2. Validation System (Removed from solution)
    ```csharp
-   // Models
-   ChunkSpecification
-   FieldSpecification
-   ValidationRules
-   
-   // Parsers
-   MarkdownSpecParser
-   
-   // Validators
-   ChunkValidator
+   // ... (Classes exist but project not built)
    ```
 
 ## Technical Constraints
@@ -92,6 +91,12 @@
      <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" />
      <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
      <!-- PackageReference for Microsoft.NET.Test.Sdk, xunit, etc. -->
+   </ItemGroup>
+
+   <!-- WoWToolbox.AnalysisTool -->
+   <ItemGroup>
+     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+     <!-- YamlDotNet (To be added) -->
    </ItemGroup>
    ```
 
@@ -179,12 +184,18 @@
   - `int MspiFirstIndex`: Index into `MSPI` chunk for geometry entries, `-1` for node entries. (Note: 24-bit signed integer).
   - `byte MspiIndexCount`: Number of points in `MSPI` chunk associated with a geometry entry, `0` for node entries.
   - `uint Unk0C`: Consistently `0xFFFFFFFF` observed.
-  - `ushort Unk10`: Variable. **Likely MSVI index.** Confirmed present in both node and geometry entries in PM4/PD4. Purpose TBD, potentially links to specific vertex data/metadata.
-  - `ushort Unk12`: Consistently `0x8000` observed. Potential flag or bitmask.
-- **Dependencies:** `MSPI` (directly indexed by geometry entries), potentially `MSVI` (via `Unk10`). Possible indirect links via nodes (TBD).
-- **Analysis:** Export logic implemented (geometry points/lines). **Grouping difference (Mixed vs Node/Geom Only) confirmed via `MslkAnalyzer` and linked to PM4(multi-object) vs PD4(single-object) scope.** Preliminary PD4 node analysis shows consistent `Unk00=0x01`, variable `Unk01`. `MslkAnalyzer` updated to log detailed entry info.
-- **Open Questions:**
-    - Precise meaning of different node types/flags (`Unk00`/`Unk01`) in both formats.
-    - Purpose of the `MSVI` entry potentially linked via `Unk10` (especially for nodes).
-    - Meaning of the `Unk12` flag (`0x8000`).
-    - Relationship between MSLK groups/nodes and other chunks (`MSUR`, `MSCN`, `MDOS`) beyond direct indices.
+  - `ushort Unknown_0x10`: Variable. **Confirmed MSVI index providing Node anchor for both PM4 and PD4.** Links MSLK Node entries to a specific vertex via `MSVI[Unknown_0x10] -> MSVT[index]`, defining the node's location. Also present in geometry entries (purpose TBD).
+  - `ushort Unknown_0x12`: Consistently `0x8000` observed. Potential flag or bitmask.
+- **Dependencies:** `MSPI` (geometry), `MSVI` (nodes via `Unknown_0x10`, potentially geometry), `MSVT` (nodes via `Unknown_0x10`/`MSVI`).
+- **Analysis:**
+  - **Node Identification (`Unk00`):** PM4 uses `0x11`; PD4 uses `0x01`.
+  - **Geometry Identification (`Unk00`, PM4):** PM4 seems to use `0x12`, `0x14` for geometry entries.
+  - **Node Sub-Types (`Unk01`):** Varies in both formats (PM4: `0x00-0x03`, `0x06` seen; PD4: `0x00-0x04` seen). Exact meaning TBD (likely via visualization).
+  - **Node Anchor (`Unknown_0x10`):** Confirmed link to MSVI->MSVT for nodes in both PM4/PD4. Export logic implemented.
+  - **Grouping (`Unk04`):** PM4 uses "Mixed" groups linking nodes/geometry; PD4 uses separate "Node Only" / "Geometry Only" groups. Difference likely due to file scope (multi- vs single-object).
+  - **Data Integrity:** Some PD4 node entries show invalid `Unknown_0x10` links in logs.
+- **Open Questions (MSLK):**
+  - Precise meaning of different node sub-types/flags (`Unk00`, `Unk01`) based on anchor visualization (PM4 & PD4).
+  - Purpose of `Unknown_0x10` link for *geometry* entries.
+  - Meaning of the `Unk12` flag (`0x8000`).
+  - Relationship between MSLK groups/nodes and other chunks (`MSUR`, `MSCN`, `MDOS`) beyond direct indices.

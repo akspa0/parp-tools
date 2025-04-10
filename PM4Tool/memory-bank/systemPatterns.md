@@ -30,7 +30,7 @@
    ```
 
 4. Chunked File Loading Pattern
-   - Specific file format classes (e.g., `PM4File`, `PD4File`) inherit from `Warcraft.NET.Files.ChunkedFile`.
+   - Specific file format classes (e.g., `PM4File`, `PD4File`, `ADTFile`) inherit from `Warcraft.NET.Files.ChunkedFile`.
    - Derived classes define properties for expected chunks (e.g., `public MVERChunk? MVER { get; }`).
    - The base `ChunkedFile` constructor uses reflection to find these properties and attempts to load corresponding chunks from the provided byte data.
    - Chunk properties can be marked `[ChunkOptional]` if their presence is not guaranteed.
@@ -98,10 +98,13 @@
          - MVERChunk.cs
          - MSHDChunk.cs
          - // ... (other PM4 chunk classes)
-     /PD4   // <-- New
+     /PD4
        - PD4File.cs
        /Chunks
          - MCRCChunk.cs
+     /ADT
+       - ADTFile.cs
+       - Placement.cs
    ```
 
 2. Validation Library (WoWToolbox.Validation)
@@ -153,22 +156,30 @@
 *   **MSLK Hierarchical Structure (PM4 Confirmed, PD4 Different - Tied to File Scope):**
     *   **Context:** PM4 files represent multi-object map tiles, while the tested PD4 files represent single WMO objects.
     *   **PM4 (Multi-Object):** Analysis using `WoWToolbox.AnalysisTool` on PM4 log data confirmed `Unknown_0x04` acts as a group/object identifier. It creates **"Mixed Groups"** linking metadata node entries (`MspiFirstIndex == -1`) directly to their corresponding geometry path entries (`MspiFirstIndex >= 0`) for a specific object within the collection. Different node types (`Unk00`/`Unk01`) were identified.
-    *   **PD4 (Single Object):** Analysis of tested PD4 files (`6or_garrison...`) showed `Unknown_0x04` still acts as a group ID, but *not* to link nodes and geometry directly. It creates separate **"Node Only"** and **"Geometry Only"** groups. This structure is likely sufficient because the file represents a single object, so explicit node-geometry linking within the group ID isn't required. The group ID likely categorizes related paths or related nodes pertinent to that single object.
+    *   **PD4 (Single Object):** Analysis of tested PD4 files (`6or_garrison...`) showed `Unknown_0x04` still acts as a group ID, but *not* to link nodes and geometry directly. It creates separate **"Node Only"** and **"Geometry Only"** groups.
+*   **ADT/PM4 Correlation:** PM4 data (`m_destructible_building_index` in `MDOS` via `MDSF`) can be linked to ADT object placements via **Unique IDs** (`UniqueID` field in `MDDFEntry`/`MODFEntry`). This is key for understanding PM4/MSLK context.
+*   **Surface Definition (Hypothesis -> Confirmed Links):** `MSUR` defines surface geometry using indices from `MSVI` (which point to `MSVT` vertices). `MDSF` acts as a mapping layer, linking `MSUR` surfaces (`msur_index`) to `MDOS` destructible object states (`mdos_index`).
 
-## Chunk Correlations (Investigated)
+## Chunk Correlations (Investigated & Updated)
 
-Based on analysis of chunk structures (`MSLKEntry`, `MsurEntry`, `MSCNChunk`) and codebase searches:
+Based on analysis of chunk structures, codebase searches, and recent discoveries:
 
-*   **Direct Implemented Links:**
+*   **Direct Implemented/Confirmed Links:**
     *   `MSLK` -> `MSPI` (via `MspiFirstIndex`): Used for defining geometry paths/points.
-    *   `MSUR` -> `MSVI` (via `MsviFirstIndex`, `IndexCount`): Used for defining surfaces via vertex indices.
-    *   `MSUR` -> `MDOS` (via `MdosIndex`): Explicitly links surfaces to `MDOS` entries.
-*   **Likely Unused Links:**
-    *   `MSLK` -> `MSVI` (via `Unknown_0x10`): This field likely indexes `MSVI`, but its purpose is currently unclear and not explicitly used in the examined code (tests/export logic). It might associate metadata or properties from `MSVI` to `MSLK` nodes or paths.
+    *   `MSUR` -> `MSVI` (via `MsviFirstIndex`, `IndexCount`): Defines surface indices.
+    *   `MSUR` -> `MDOS` (via `MdosIndex`): Was listed, now understood to be via MDSF.
+    *   `MDSF` -> `MSUR` (via `msur_index`): **NEW** Links destruction data to specific surfaces.
+    *   `MDSF` -> `MDOS` (via `mdos_index`): **NEW** Links destruction data to specific destructible object state entries.
+*   **Confirmed Node Links:**
+    *   `MSLK` -> `MSVI` (via `Unknown_0x10`): Anchors nodes to vertices via MSVI->MSVT (PM4 & PD4).
+*   **External Links:**
+    *   `PM4 Data` <-> `ADT Object Placement` (via **UniqueID**): **NEW** Allows correlating PM4 structures (e.g., MSLK groups) to world objects.
+*   **Unknown/Unused Links:**
+    *   `MSLK` -> `MSVI` (via `Unknown_0x10` for *Geometry* entries): Purpose still TBD.
 *   **No Implemented Direct Links Found:**
-    *   `MSLK` <-> `MSCN`: No code found directly correlating `MSLK` entries with the `Vector3` data in `MSCN`.
-    *   `MSLK` <-> `MSUR`: No code found directly correlating `MSLK` entries with `MSUR` surface definitions.
+    *   `MSLK` <-> `MSCN`: No code found directly correlating.
+    *   `MSLK` <-> `MSUR`: No direct code link found (but potentially linked logically via MSLK group ID / ADT UniqueID).
 *   **Potential Semantic Links (Requires Further Research):**
-    *   The `MSLK.Unk04` Group ID (especially in PM4) might logically group related `MSUR` surfaces or `MSCN` objects, even if not directly coded.
-    *   `MSLK` node types (`Unk00`/`Unk01` in PM4) might signify relationships to other chunk data.
-    *   `MSCN` vectors might provide normal data for vertices used by `MSUR` or `MSLK`, but the indexing mechanism isn't immediately clear from the structures alone.
+    *   The `MSLK.Unk04` Group ID / ADT UniqueID might logically group related `MSUR` surfaces (via MDSF/MDOS?) or `MSCN` objects.
+    *   `MSLK` node types (`Unk00`/`Unk01`) might signify relationships to other chunk data (pending visualization).
+    *   `MSCN` vectors might provide normal data for vertices used by `MSUR` or `MSLK`, but the indexing mechanism isn't immediately clear.

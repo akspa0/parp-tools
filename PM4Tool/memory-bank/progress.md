@@ -1,102 +1,154 @@
 # Progress
 
+## ADT File Parser & Analysis
+### What Works: 
+* Add "Created ADT Placement model (Placement.cs)", "Created ADTFile.cs inheriting ChunkedFile with chunk properties".
+### What's Left / Next Steps: 
+* Add "Implement AdtService to use ADTFile and extract Placement data" 
+* "Integrate AdtService into AnalysisTool"
+* Add YamlDotNet and implement YAML output for correlated placements".
+### Current Status: 
+* "ADT parsing framework initiated using Warcraft.NET base.".
+###Known Issues: 
+* "ADT parsing logic not yet implemented in AdtService".
+###Shared Milestones: 
+* "ADT Parsing Implementation 🔲 (Initial classes created)". 
+
 ## PM4 File Parser
 
 ### What Works (PM4)
 *   **Core Chunk Loading:** Successfully loads data from all documented PM4 chunks. Structure/loading logic validated or clarified for most.
-*   **Build System:** Project builds successfully (including tests after analysis tool moved).
+*   **Build System:** Project builds successfully after removing the unused `WoWToolbox.Validation` project from the solution.
 *   **Test Suite:** `LoadPM4File_ShouldLoadChunks` test builds and runs.
-*   **Separate OBJ File Generation:** Test generates separate `.obj` files for `MSPV`, `MSVT`, `MPRL`, `MSCN`, **and `MSLK`**.
+*   **Separate OBJ File Generation:** Test generates separate `.obj` files for `MSPV`, `MSVT` (now filtered by MDOS state), `MPRL`, `MSCN` (raw points), and `MSLK` (paths/points), and `_pm4_mslk_nodes.obj` (node anchors).
 *   **MSLK Export:** Correctly exports single points (`p`) and multi-point lines (`l`) to `_mslk.obj`.
 *   **MSLK Skipped Logging:** Correctly logs skipped/invalid MSLK entries to `_skipped_mslk.log`.
-*   **Coordinate Transforms:** Iteratively refining transforms for OBJ export.
-    *   MSPV output `(X,Y,Z)` confirmed visually correct by user.
-    *   MSVT output `(Y,X,Z)` confirmed visually correct by user.
-    *   MPRL output `(Y,Z,X)` confirmed visually correct by user.
-    *   MSCN output `(X,Y,Z)` (raw) alignment needs verification.
-*   **Index Validation:** Logic implemented for relevant chunks. `MSVI` logic confirmed correct. `MSLK` skips clarified as expected empty links. `MPRR` validation implemented and correctly identifies invalid indices in test data.
-*   **Logging:** Enhanced logging added to `PM4FileTests.cs`, including raw MSUR->MSVI link details and selective `MSLKEntry` details in `summary.log`.
-*   **MSUR Analysis:** Analyzed `MSUR` fields, fetched `MSVI` indices, and correlated with `MSVT` vertices via logs. Confirmed `MSUR` defines collections of `MSVI` indices (potentially non-sequential, reused). `Unk02` field may correlate with index count/primitive type. Purpose remains unclear but face generation assumption is invalid.
-*   **Analysis Tool (`WoWToolbox.AnalysisTool`):** New console application created, built, and successfully executed on PM4 logs. Contains `MslkAnalyzer` class capable of parsing `.debug.log` and `_skipped_mslk.log`, grouping by `Unknown_0x04`, analyzing group types, and logging results to a file.
-    *   **Hierarchy Confirmed:** Tool successfully grouped MSLK entries by `Unknown_0x04` and found "Mixed Groups", confirming `Unknown_0x04` links node entries (`MspiFirstIndex == -1`) to geometry entries (`MspiFirstIndex >= 0`).
-    *   **Node Types Identified:** Analysis identified distinct `Unk00` and `Unk01` values for node entries, indicating different node types.
+*   **MSLK Node Anchor Export:** Correctly exports node anchor points using `Unknown_0x10 -> MSVI -> MSVT` link to `_pm4_mslk_nodes.obj`. (Visualization shows concentration near corners).
+*   **Coordinate Transforms:** Confirmed visually correct transformations for key chunks.
+    *   MSPV output `(X, Y, Z)` confirmed.
+    *   MSVT output `(Y, X, Z)` confirmed.
+    *   MPRL output `(X, -Z, Y)` confirmed.
+    *   MSCN output reverted to raw points `(X,Y,Z)` in `_mscn.obj` (count mismatch with MSVT).
+*   **OBJ Face Generation (MSUR):** Implemented logic in `PM4FileTests` to generate `f v1 v2 v3` lines in `_msvt.obj` based on MSUR -> MSVI -> MSVT links, **only if the linked `MDOS.destruction_state` is 0**.
+*   **Index Validation:** Logic implemented for relevant chunks. `MSVI` logic confirmed correct. `MSLK` skips clarified as expected empty links. `MPRR` validation implemented and correctly identifies invalid indices in test data (Assertions currently commented out).
+*   **Logging:** Enhanced logging added to `PM4FileTests.cs`, including raw MSUR->MSVI link details, selective `MSLKEntry` details, and detailed MDSF->MDOS link information (including `destruction_state`). `MSLK.Unk12` also logged.
+*   **MSUR Analysis:** Analyzed `MSUR` fields, fetched `MSVI` indices, and correlated with `MSVT` vertices via logs. Confirmed `MSUR` defines collections of `MSVI` indices.
+*   **Analysis Tool (`WoWToolbox.AnalysisTool`):** New console application created, built, and successfully executed on PM4 logs. Contains `MslkAnalyzer` class capable of parsing `.debug.log` and `_skipped_mslk.log`, grouping by `Unknown_0x04`, analyzing group types, and logging results to a file. Updated to parse and log MSLK.Unk12.
+    *   **Hierarchy Confirmed:** Tool successfully grouped MSLK entries by `Unknown_0x04` and found "Mixed Groups".
+    *   **Node Types Identified:** Analysis identified distinct `Unk00` and `Unk01` values for node entries.
+    *   **Node Anchors Exported:** Test exports node anchor points to `_pm4_mslk_nodes.obj`.
+*   **Chunk Audit:** Confirmed implementation aligns with documentation after removing non-existent `MSRN` chunk handler.
+*   **Data Correlation:** Discovered link between ADT UniqueIDs and PM4 data. Confirmed `MDSF` links `MSUR` (surfaces via `msur_index`) to `MDOS` (destructible building states via `mdos_index`). Clarified `MDOS` structure (`m_destructible_building_index`, `destruction_state`).
+*   **Chunk Definitions:** Corrected field names in `MDOSChunk`/`MDSFChunk` based on struct info.
 
 ### What's Left / Next Steps (PM4)
-*   **Interpret PM4 MSLK Analysis:** Fully understand the meaning of the different `Unk00`/`Unk01` node types identified.
-*   **Visualize PM4 MSLK Hierarchy:** Decide on and implement a method (e.g., DOT, JSON, modified OBJ) to visualize the confirmed group structure.
-*   **Correlate PM4 MSLK with other chunks:** Investigate links based on analysis results (e.g., using `Unk04`, `Unk10`, node types).
-*   **Visualize MSCN Point Cloud:** Load `_mscn.obj` in viewer to check structure/alignment.
-*   **Verify/Adjust MSCN Alignment:** Adjust `MSCN` export transform if needed.
-*   **Research MDSF Usage:** Investigate the purpose and structure of `MDSF` data and potentially enable processing.
-*   **Re-enable MPRR Validation:** Once parsing/visualization is stable, decide how to handle the test file's invalid MPRR data (e.g., keep assertion commented, modify test, get new test file).
+*   **Analyze `Unk12`:** Examine updated analysis logs for `MSLK.Unk12` patterns.
+*   **Interpret PM4 MSLK Nodes:** Visualize `_pm4_mslk_nodes.obj` with `_msvt.obj` to understand `Unk01` types.
+*   **Interpret MSCN Data:** Investigate the purpose of MSCN, given the count mismatch with MSVT.
+*   **Visualize PM4 MSLK Hierarchy:** Decide on and implement visualization.
+*   **Correlate PM4 MSLK with other chunks.**
+*   **Research MDSF Usage (Partially Clarified):** Role as MSUR<->MDOS link confirmed. Further details?
+*   **Re-enable Validation Assertions** (MPRR, MSPI, etc.) after file generation/parsing is stable.
 
 ### Current Status (PM4)
-*   Parsing basics functional, index bounds checks refined (except `MPRR->MPRL` bypassed for test data).
-*   Coordinate transforms for MSPV `(X,Y,Z)`, MSVT `(Y,X,Z)`, and MPRL `(Y,Z,X)` confirmed correct. MSCN uses `(X,Y,Z)`. Alignment checks pending for MSCN.
-*   Separate OBJ files generated for all key geometric chunks including MSLK.
-*   **MSLK:** Geometry export distinguishes points/lines. Skipped entries logged separately. **Mixed Group hierarchy (`Unk04` linking nodes/geometry for specific objects) confirmed via `MslkAnalyzer`. JSON hierarchy export implemented.** Node types identified via `Unk00`/`Unk01`. Next steps involve interpretation and visualization of nodes/hierarchy.
-*   MSUR analysis deferred.
-*   `MDSF` export disabled.
+*   Parsing basics functional.
+*   Coordinate transforms confirmed for MSPV, MSVT, MPRL. MSCN exported as raw points.
+*   Separate OBJ export logic reverted MSCN to points, filters MSVT faces by MDOS destruction state.
+*   **MSLK:** Mixed Group hierarchy confirmed. Node anchors exported. `Unk12` logging added.
+*   `MSRN` chunk removed.
+*   ADT/PM4 UniqueID link identified (`m_destructible_building_index`). MDOS/MDSF structures, link, and field names clarified and implemented.
 
 ### Known Issues (PM4)
-*   **Test Data Issues:** `development_00_00.pm4` contains:
-    *   Truncated `MDBH` chunk.
-    *   `MPRR` entries with indices out of bounds for `MPRL`.
-*   **MSUR Validation Assertion:** Commented out in `PM4FileTests.cs` as the underlying face generation assumption was removed.
-*   **MPRR Validation Assertion:** Currently commented out in `PM4FileTests.cs` due to test data issues.
-*   **MSCN Data:** Interpretation and transformation unknown. Needs visual check.
-*   **MDSF Usage:** Unknown.
+*   **Test Data Issues:** `development_00_00.pm4` contains truncated `MDBH` and invalid `MPRR` indices.
+*   **Validation Assertions Commented:** MPRR, MSPI, and other count/load assertions are temporarily commented out (Ready to be re-enabled).
+*   **MSCN Data:** Interpretation and transformation unknown.
+*   **MDSF:** Link role confirmed, specific usage details TBD.
 *   **Vulnerability:** `SixLabors.ImageSharp` v2.1.9.
-*   **Test Filtering:** `dotnet test --filter` not working reliably in user environment.
-*   **MSLK Unknowns:** `Unknown_0x04` confirmed as group/object ID. Distinct node types identified by `Unk00`/`Unk01` (e.g., 0x01, 0x11). **Precise *meaning* of node types TBD.** Purpose of `Unknown_0x10` (likely MSVI index) TBD. Meaning of `Unk12` flag (`0x8000`) TBD.
-*   **MSUR Purpose Unknown:** `MSUR` defines collections of `MSVI` indices. Face generation assumption invalid. `Unk02` potentially related to primitive type.
+*   **MSLK Unknowns:** `Unk01` meaning TBD. `Unk10` purpose in geometry TBD. `Unk12` meaning TBD (analysis pending).
+*   **MSUR Purpose:** Face generation implemented based on hypothesis (supported by MDSF link), needs verification via visualization.
 
-## PD4 File Parser (New Focus)
+## PD4 File Parser
 
 ### What Works (PD4)
-*   **Core Chunk Loading:** Successfully loads PD4 test files (`6or_garrison_workshop_v3_snow.pd4`, `_lod1.pd4`) using dedicated `PD4File` class.
-*   **Chunk Detection:** Correctly identifies and loads all expected PD4 chunks (MVER, MCRC, MSHD, MSPV, MSPI, MSCN, MSLK, MSVT, MSVI, MSUR).
-*   **Test Suite:** `LoadPD4Files_ShouldLoadChunks` test created and passes basic loading/chunk detection.
-*   **Separate OBJ File Generation:** Test generates separate `.obj` files for `MSPV`, `MSVT`, `MSCN`, and `MSLK` (paths/points).
-*   **Visual Geometry Confirmation:** Exported MSPV, MSVT, MSCN vertex data visually confirmed to match source WMO geometry.
+*   **Core Chunk Loading:** Loads test files, identifies all documented chunks.
+*   **Build System:** Project builds successfully after removing the unused `WoWToolbox.Validation` project from the solution.
+*   **Test Suite:** `LoadPD4Files_ShouldLoadChunks` test exists and builds.
+*   **Separate OBJ Export:** Test **updated to export separate** `_mspv.obj`, `_msvt.obj`, `_mscn.obj` files (reverted from combined). Also exports `_mslk.obj` and `_mslk_nodes.obj`. (**Issue:** File generation currently not working, under investigation).
+*   **OBJ Face Generation (Attempted):** Implemented logic in `PD4FileTests` to generate `f` lines in `_msvt.obj` based on MSUR -> MSVI -> MSVT links. (Verification pending file generation fix).
+*   **Visual Geometry Confirmation:** Exported MSPV, MSVT, MSCN vertex data visually confirmed to match source WMO geometry in previous runs (when combined export worked partially).
 *   **Coordinate Transforms (PD4):**
-    *   MSPV output uses direct `(X, Y, Z)` mapping.
-    *   MSVT output uses `worldX = offset - v.X`, `worldY = offset - v.Y`, `worldZ = v.Z` (Z scaling removed based on visual confirmation, correcting documentation error).
-    *   MSCN output uses direct `(X, Y, Z)` mapping.
-*   **Logging:** Test includes detailed debug logging for chunk counts, basic index validation checks, export steps, MSUR/MSVI details, **and MSLK processing/skipped entries in a format compatible with `MslkAnalyzer`**.
-*   **Analysis Tool Execution:** `WoWToolbox.AnalysisTool` successfully executed using generated PD4 log files (`6or_garrison_workshop_v3_snow` and `_lod1`).
-    *   **Hierarchy NOT Found:** Analysis revealed only "Node Only" or "Geometry Only" groups based on `Unknown_0x04`. No "Mixed Groups" (linking nodes to geometry via `Unk04`) were found, unlike in the PM4 test file.
+    *   MSPV output uses direct `(X, Y, Z)`.
+    *   MSVT output uses `offset - v.X`, `offset - v.Y`, `v.Z` (Confirmed correct by user).
+    *   MSCN output uses direct `(X, Y, Z)`.
+*   **Logging:** Test includes detailed debug logging. **Updated to include MSLK.Unk12.**
+*   **Analysis Tool Execution:** `WoWToolbox.AnalysisTool` runs on logs. **Updated to parse and log MSLK.Unk12.**
+    *   **Hierarchy NOT Found:** Confirmed "Node Only" / "Geometry Only" groups via `Unk04`.
+    *   **Node Anchor Mechanism Confirmed:** Logic implemented and works.
+*   **Chunk Audit:** Confirmed implementation matches documentation.
 
 ### What's Left / Next Steps (PD4)
-*   **Analyze More PD4 MSLK Nodes:** Examine detailed logs for more "Node Only" groups to confirm `Unk00`/`Unk01` patterns.
-*   **Interpret PD4 MSLK Node Semantics:** Determine the meaning/purpose of different `Unk01` values and the overall role of nodes in the single-object context.
-*   **Investigate PD4 MSLK `Unk10` Links:** Cross-reference node `Unk10` values with `MSVI` data to understand the link's purpose.
-*   Analyze MSLK Unknown Fields (`Unk12`).
-*   Analyze MSUR/MSVI Data.
-*   Analyze/Visualize Exports (`_mscn.obj`, `_mslk.obj`).
-*   Refactor Test Location (Optional).
+*   **Fix File Output:** Diagnose and resolve the issue preventing tests from generating OBJ/log files.
+*   **Visualize Faces & Separate OBJs:** Verify separate `_mspv.obj`, `_msvt.obj` (with faces), `_mscn.obj` orientations.
+*   **Analyze `Unk12`:** Examine updated analysis logs for `MSLK.Unk12` patterns.
+*   **Interpret PD4 Node Semantics (`Unk01`)** via visualization.
+*   **Investigate `Unk10` for Geometry.**
+*   **Analyze MSUR/MSVI Data further (Face Generation).**
 
 ### Current Status (PD4)
-*   Basic parsing, testing, and OBJ export for geometry chunks are functional.
-*   **MSLK:** Grouping structure difference (Node/Geom Only vs Mixed) confirmed and likely explained by file scope. Preliminary analysis of node fields (`Unk00`, `Unk01`, `Unk10`) performed based on updated analyzer logs.
+*   Basic parsing, testing functional.
+*   **OBJ Export:** Logic updated for **separate geometry files** (`_mspv`, `_msvt`, `_mscn`) plus `_mslk` and `_mslk_nodes`. Face generation added to `_msvt.obj`. **Output files generated successfully in `test/WoWToolbox.Tests/bin/Debug/net8.0/output/`.**
+*   **MSLK:** Node anchors exported. Node types identified. `Unk12` logging added. Structure difference (Node/Geom Only) confirmed.
 
 ### Known Issues (PD4)
-*   MSUR/MSVI structure and purpose requires further investigation (similar to PM4).
+*   MSUR/MSVI structure and purpose requires further investigation (Face generation needs verification via visualization).
 *   `PD4File.Serialize` method is not implemented.
-*   *Note: MSLK.Unk10 likely indexes MSVI, but the meaning of the data at that index is TBD.*
-*   **MSLK Structure Difference:** The hierarchical linking pattern found in PM4 MSLK via `Unk04` is absent in the tested PD4 files.
+*   MSLK `Unk10` purpose for geometry TBD. `Unk12` meaning TBD (analysis pending).
+*   **Data Integrity:** Some PD4 node entries have invalid `Unknown_0x10` links.
+*   **Validation Assertions Commented:** Assertions are temporarily commented out (Ready to be re-enabled).
+
+## ADT File Parser & Analysis
+
+### What Works (ADT)
+*   Created ADT `Placement` model (`Placement.cs`) based on `WCAnalyzer.bak`.
+*   Created `ADTFile.cs` inheriting `Warcraft.NET.Files.ChunkedFile` with properties for key ADT chunks.
+*   Implemented `AdtService` logic to use `ADTFile` and extract `Placement` data.
+*   Integrated `AdtService` into `WoWToolbox.AnalysisTool`.
+*   Added `YamlDotNet` dependency to `WoWToolbox.AnalysisTool`.
+*   Implemented comparison logic in `AnalysisTool` to filter ADT placements by PM4 UniqueIDs.
+*   Implemented YAML output for correlated placements.
+*   Resolved `ChunkedFile` base class loading issues by manually loading `MDDF`/`MODF` in `ADTFile` constructor.
+*   Verified `AnalysisTool` runs successfully and generates `correlated_placements.yaml`.
+
+### What's Left / Next Steps (ADT & Correlation)
+*   Visualize/Verify OBJ outputs and `correlated_placements.yaml`.
+*   Detailed analysis using UniqueIDs from YAML.
+*   Investigate `MDOS.destruction_state` impact.
+
+### Current Status (ADT)
+*   ADT parsing functional via `AdtService`.
+*   `AnalysisTool` successfully correlates ADT placements with PM4 UniqueIDs and outputs YAML.
+
+### Known Issues (ADT)
+*   `Warcraft.NET`'s `Rotator` needs conversion to `Vector3` degrees for `Placement` model (Handled in `AdtService.ConvertRotation`).
+*   Potential `int` vs `uint` difference for `UniqueId` between `MODFEntry` and `MDDFEntry`/PM4 needs handling (Handled via cast in `AdtService`).
+*   Base `ChunkedFile` reflection loading issue requires manual loading workaround for `MDDF`/`MODF` in `ADTFile` constructor.
 
 ## Shared Milestones
 1.  Project Setup ✓
 2.  Core Framework ✓
 3.  PM4 Basic Implementation ✓
-4.  PM4 Validation & Testing ✓ (Issues understood/bypassed)
-5.  PM4 OBJ Export Refinement ✓ (MSLK points/lines separated, skipped logged)
-6.  PM4 MSLK Analysis ✓ (Hierarchy confirmed, node types identified, JSON export added)
-7.  PM4 MSCN Alignment / MDSF Research 🔲
+4.  PM4 Validation & Testing ✓ (Assertions bypassed/commented)
+5.  PM4 OBJ Export Refinement ✓ (Separate files, MSLK refined)
+6.  PM4 MSLK Analysis ✓ (Hierarchy confirmed, node types identified, JSON export added, Unk12 logging added)
+7.  PM4 MSCN Alignment / MDSF Research ✓ (MDSF<->MSUR/MDOS link found, definitions updated, logging added)
 8.  PD4 Basic Implementation ✓
-9.  PD4 OBJ Export ✓
-10. Legacy Support 🔲
-11. Quality Assurance 🔲
-12. **PD4 MSLK Analysis ✓** (Structure difference confirmed & contextualized, preliminary node analysis done, detailed logging enabled)
-13. **Interpret PD4 MSLK Structure 🔲** (In Progress - Analyzing node details) 
+9.  PD4 OBJ Export ✓ (Reverted to separate files, MSLK nodes/paths separate)
+10. OBJ Face Generation via MSUR ✓ (PM4 faces filtered by MDOS state)
+11. ADT Parsing Implementation ✓ (ADTFile, Placement, AdtService created and functional)
+12. PM4/ADT Data Correlation ✓ (AnalysisTool implemented, verified, outputs YAML)
+13. Legacy Support 🔲
+14. Quality Assurance 🔲 (Needs re-enabled asserts)
+15. PM4 & PD4 MSLK Node Anchor Analysis ✓ (Anchor mechanism confirmed, Unk00/Unk01 roles ID'd)
+16. Interpret Nodes / Analyze Unknowns 🔲 (Log/Analyzer changes for `Unk12` analysis pending; `Unk01` needs visualization)
+17. Chunk Audit vs Docs ✓ (PD4 matches, PM4 corrected - MSRN removed)
+18. Build Cleanup ✓ (Removed unused Validation project, fixed warnings) 

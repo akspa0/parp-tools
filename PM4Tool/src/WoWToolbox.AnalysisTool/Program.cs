@@ -1,90 +1,167 @@
 // Program.cs in WoWToolbox.AnalysisTool
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
 using WoWToolbox.Core; // Use the core project namespace
-using WoWToolbox.AnalysisTool; // Add namespace for MslkAnalyzer
+using WoWToolbox.Core.ADT; // Added for AdtService, ADTFile, Placement
+using WoWToolbox.Core.Navigation.PM4; // Added for PM4File
+using WoWToolbox.Core.Navigation.PM4.Chunks; // Added for MDSFChunk
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 public class Program
 {
     public static void Main(string[] args)
     {
-        Console.WriteLine("WoWToolbox MSLK Analysis Tool");
-        Console.WriteLine("=============================");
+        Console.WriteLine("WoWToolbox ADT/PM4 Correlation Tool");
+        Console.WriteLine("===================================");
 
-        string? skippedLog = null;
-        string? debugLog = null;
+        string? adtFilePath = null;
+        string? pm4FilePath = null;
+
+        // --- Default Hardcoded Paths --- 
+        // Use specific paths provided by user as defaults
+        string defaultAdtPath = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\test_data\development\development_0_0.adt";
+        string defaultPm4Path = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\test_data\development\development_00_00.pm4";
+        // --- End Default Paths ---
 
         // Basic argument parsing
         if (args.Length >= 2)
         {
-            skippedLog = args[0];
-            debugLog = args[1];
+            adtFilePath = args[0];
+            pm4FilePath = args[1];
             Console.WriteLine("Using paths from command line arguments.");
         }
         else if (args.Length == 1 && (args[0] == "-h" || args[0] == "--help"))
         {
-            Console.WriteLine("Usage: dotnet run --project <csproj_path> -- <skipped_log_path> <debug_log_path>");
-            Console.WriteLine("Example: dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- test_data/pm4/dev_00_00_skipped.log test_data/pm4/dev_00_00.debug.log");
-             Console.WriteLine("If no arguments are provided, it defaults to hardcoded PM4 paths.");
+            Console.WriteLine("Usage: dotnet run --project <csproj_path> -- <adt_file_path> <pm4_file_path>");
+            Console.WriteLine($"Example: dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- \"{defaultAdtPath}\" \"{defaultPm4Path}\"");
+            Console.WriteLine("If no arguments are provided, it defaults to hardcoded ADT/PM4 paths.");
             return;
         }
         else
         {
-             Console.WriteLine("No paths provided via arguments, using default hardcoded paths...");
-            // --- Default Hardcoded Paths (Fallback) ---
-            string defaultTestOutputBasePath = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\test_data\development"; 
-            skippedLog = Path.Combine(defaultTestOutputBasePath, "development_00_00_skipped_mslk.log");
-            debugLog = Path.Combine(defaultTestOutputBasePath, "development_00_00.debug.log");
-             // --- End Default Paths ---
+            Console.WriteLine("No paths provided via arguments, using default hardcoded paths...");
+            adtFilePath = defaultAdtPath;
+            pm4FilePath = defaultPm4Path;
         }
 
-        Console.WriteLine($"Using Skipped Log: {skippedLog}");
-        Console.WriteLine($"Using Debug Log:   {debugLog}");
+        Console.WriteLine($"Using ADT File: {adtFilePath}");
+        Console.WriteLine($"Using PM4 File: {pm4FilePath}");
 
-        // Check if log files exist before running analysis
-        if (string.IsNullOrEmpty(skippedLog) || !System.IO.File.Exists(skippedLog)) 
+        // Check if files exist before running analysis
+        if (string.IsNullOrEmpty(adtFilePath) || !System.IO.File.Exists(adtFilePath))
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\nError: Skipped log not found or path invalid!");
-            Console.WriteLine($"Path: {skippedLog ?? "(null)"}");
-            Console.WriteLine("Please ensure the path is correct and the file exists.");
-            Console.ResetColor();
-            Console.WriteLine("\nPress Enter to exit.");
-            Console.ReadLine();
+            WriteError($"ADT file not found or path invalid! Path: {adtFilePath ?? "(null)"}");
             return;
         }
-         if (string.IsNullOrEmpty(debugLog) || !System.IO.File.Exists(debugLog)) 
-         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\nError: Debug log not found or path invalid!");
-             Console.WriteLine($"Path: {debugLog ?? "(null)"}");
-            Console.WriteLine("Please ensure the path is correct and the file exists.");
-            Console.ResetColor();
-            Console.WriteLine("\nPress Enter to exit.");
-            Console.ReadLine();
+        if (string.IsNullOrEmpty(pm4FilePath) || !System.IO.File.Exists(pm4FilePath))
+        {
+            WriteError($"PM4 file not found or path invalid! Path: {pm4FilePath ?? "(null)"}");
             return;
         }
 
-        Console.WriteLine("\nStarting analysis...");
-        // Call the analyzer from the (now local) MslkAnalyzer class
+        Console.WriteLine("\nStarting correlation analysis...");
         try
         {
-            // Define output log path based on input base name
-            string baseName = Path.GetFileNameWithoutExtension(skippedLog).Replace("_skipped_mslk", ""); // e.g., development_00_00
-            string outputLogPath = Path.Combine(Path.GetDirectoryName(skippedLog) ?? ".", $"{baseName}_mslk_analysis.log");
+            // 1. Load Files
+            Console.WriteLine("Loading ADT file...");
+            byte[] adtBytes = File.ReadAllBytes(adtFilePath);
+            var adtFile = new ADTFile(adtBytes);
+            Console.WriteLine("ADT file loaded.");
 
-            MslkAnalyzer.AnalyzeMslkData(skippedLog, debugLog, outputLogPath); // Pass output path
+            Console.WriteLine("Loading PM4 file...");
+            byte[] pm4Bytes = File.ReadAllBytes(pm4FilePath);
+            var pm4File = new PM4File(pm4Bytes);
+            Console.WriteLine("PM4 file loaded.");
+
+            // 2. Extract ADT Placements
+            var adtService = new AdtService();
+            var adtPlacements = adtService.ExtractPlacements(adtFile).ToList();
+            Console.WriteLine($"Extracted {adtPlacements.Count} placements from ADT.");
+
+            // 3. Extract PM4 UniqueIDs
+            var pm4UniqueIds = new HashSet<uint>();
+            if (pm4File.MDSF != null && pm4File.MDSF.Entries != null && pm4File.MDOS != null && pm4File.MDOS.Entries != null)
+            {
+                Console.WriteLine("Extracting UniqueIDs from PM4 MDSF/MDOS...");
+                foreach (var mdsfEntry in pm4File.MDSF.Entries)
+                {
+                    uint mdosIndex = mdsfEntry.mdos_index; // Correct field name from MDSFChunk definition
+                    // Check index bounds
+                    if (mdosIndex < pm4File.MDOS.Entries.Count)
+                    {
+                        uint uniqueId = pm4File.MDOS.Entries[(int)mdosIndex].m_destructible_building_index; // Cast mdosIndex to int
+                        pm4UniqueIds.Add(uniqueId);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Warning: MDSF entry references out-of-bounds MDOS index ({mdosIndex}). Skipping.");
+                    }
+                }
+                Console.WriteLine($"Extracted {pm4UniqueIds.Count} unique IDs from PM4.");
+            }
+            else
+            {
+                Console.WriteLine("Warning: PM4 file missing MDSF or MDOS chunk, cannot extract UniqueIDs.");
+            }
+
+            // 4. Filter ADT Placements
+            var correlatedPlacements = adtPlacements.Where(p => pm4UniqueIds.Contains(p.UniqueId)).ToList();
+
+            // 5. Output Results
+            Console.WriteLine("\n--- Correlation Results ---");
+            Console.WriteLine($"Found {correlatedPlacements.Count} placements in ADT that match UniqueIDs in PM4.");
+
+            // Implement YAML output
+            if (correlatedPlacements.Any())
+            {
+                string outputYamlPath = Path.Combine(Path.GetDirectoryName(adtFilePath) ?? ".", "correlated_placements.yaml");
+                Console.WriteLine($"Serializing correlated placements to: {outputYamlPath}");
+
+                var serializer = new SerializerBuilder()
+                    .WithNamingConvention(PascalCaseNamingConvention.Instance) // Match C# property names
+                    .Build();
+
+                string yamlOutput = serializer.Serialize(correlatedPlacements);
+                File.WriteAllText(outputYamlPath, yamlOutput);
+                Console.WriteLine("YAML file written successfully.");
+            }
+            else
+            {
+                Console.WriteLine("No correlated placements found to serialize.");
+            }
+
+            // Optional console output for debugging can be kept or removed
+            /*
+            if (correlatedPlacements.Any())
+            {
+                Console.WriteLine("\nCorrelated Placement Details:");
+                foreach (var placement in correlatedPlacements)
+                {
+                    Console.WriteLine($"  - UniqueID: {placement.UniqueId}, NameID: {placement.NameId}, Position: {placement.Position}");
+                }
+            }
+            */
+
         }
         catch (Exception ex)
         {
-             Console.ForegroundColor = ConsoleColor.Red;
-             Console.WriteLine($"\nAn error occurred during analysis: {ex.Message}");
-             Console.WriteLine(ex.StackTrace); // Optional: include stack trace for debugging
-             Console.ResetColor();
+            WriteError($"An error occurred during analysis: {ex.Message}\n{ex.StackTrace}");
         }
-       
 
-        Console.WriteLine("\nAnalysis attempt complete. Press Enter to exit.");
+        Console.WriteLine("\nCorrelation analysis complete. Press Enter to exit.");
+        Console.ReadLine();
+    }
+
+    private static void WriteError(string message)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"\nError: {message}");
+        Console.ResetColor();
+        Console.WriteLine("\nPress Enter to exit.");
         Console.ReadLine();
     }
 }
