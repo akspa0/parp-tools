@@ -109,29 +109,31 @@
 ## ADT File Parser & Analysis
 
 ### What Works (ADT)
-*   Created ADT `Placement` model (`Placement.cs`) based on `WCAnalyzer.bak`.
-*   Created `ADTFile.cs` inheriting `Warcraft.NET.Files.ChunkedFile` with properties for key ADT chunks.
-*   Implemented `AdtService` logic to use `ADTFile` and extract `Placement` data.
-*   Integrated `AdtService` into `WoWToolbox.AnalysisTool`.
+*   Created ADT `Placement` model (`Placement.cs`).
+*   Implemented `AdtService` logic to extract `Placement` data, correctly handling split ADT files by using `Warcraft.NET` classes (`Terrain` for base `.adt` containing MMDX/MWMO, `TerrainObjectZero` for `_obj0.adt` containing MDDF/MODF).
+*   Integrated `AdtService` into `WoWToolbox.AnalysisTool` using the correct `Warcraft.NET` ADT objects.
 *   Added `YamlDotNet` dependency to `WoWToolbox.AnalysisTool`.
 *   Implemented comparison logic in `AnalysisTool` to filter ADT placements by PM4 UniqueIDs.
 *   Implemented YAML output for correlated placements.
-*   Resolved `ChunkedFile` base class loading issues by manually loading `MDDF`/`MODF` in `ADTFile` constructor.
-*   Verified `AnalysisTool` runs successfully and generates `correlated_placements.yaml`.
+*   Added `FilePath` property to `Placement` model and updated `AdtService` to populate it from `MMDX`/`MWMO` chunks (via `Terrain` object).
+*   Implemented listfile loading in `AnalysisTool`.
+*   Implemented `FileDataId` lookup in `AdtService` using `NameIdIsFiledataId` flag or reverse path matching (case/slash insensitive) against listfile.
+*   Populated obsolete `Name` property from `Path.GetFileName(FilePath)`.
+*   Verified `AnalysisTool` runs successfully (on single files) and generates `correlated_placements.yaml` with `FilePath`, `FileDataId`, `UsesFileDataId`, `Name`, and human-readable `FlagNames`.
 
 ### What's Left / Next Steps (ADT & Correlation)
-*   Visualize/Verify OBJ outputs and `correlated_placements.yaml`.
-*   Detailed analysis using UniqueIDs from YAML.
-*   Investigate `MDOS.destruction_state` impact.
+*   Implement directory processing in `AnalysisTool` to handle bulk analysis of ADT/PM4 pairs and PM4-only files.
+*   Visualize/Verify `correlated_placements.yaml` output from directory processing.
+*   Detailed analysis using UniqueIDs and `FilePath`/`FileDataId` from YAML.
+*   Investigate `MDOS.destruction_state` impact on PM4 data/correlation.
 
 ### Current Status (ADT)
-*   ADT parsing functional via `AdtService`.
-*   `AnalysisTool` successfully correlates ADT placements with PM4 UniqueIDs and outputs YAML.
+*   ADT parsing functional via `AdtService` using `Warcraft.NET` native classes for split file handling.
+*   `AnalysisTool` successfully correlates ADT placements (including `FilePath`, `FileDataId`, and human-readable `FlagNames`) with PM4 UniqueIDs and outputs YAML (for single files).
 
 ### Known Issues (ADT)
-*   `Warcraft.NET`'s `Rotator` needs conversion to `Vector3` degrees for `Placement` model (Handled in `AdtService.ConvertRotation`).
-*   Potential `int` vs `uint` difference for `UniqueId` between `MODFEntry` and `MDDFEntry`/PM4 needs handling (Handled via cast in `AdtService`).
-*   Base `ChunkedFile` reflection loading issue requires manual loading workaround for `MDDF`/`MODF` in `ADTFile` constructor.
+*   `Warcraft.NET`'s `Rotator` conversion handled in `AdtService.ConvertRotation`.
+*   `MODFEntry`/`MDDFEntry` `UniqueId` casting handled in `AdtService`.
 
 ## Shared Milestones
 1.  Project Setup ✓
@@ -144,8 +146,8 @@
 8.  PD4 Basic Implementation ✓
 9.  PD4 OBJ Export ✓ (Reverted to separate files, MSLK nodes/paths separate)
 10. OBJ Face Generation via MSUR ✓ (PM4 faces filtered by MDOS state)
-11. ADT Parsing Implementation ✓ (ADTFile, Placement, AdtService created and functional)
-12. PM4/ADT Data Correlation ✓ (AnalysisTool implemented, verified, outputs YAML)
+11. ADT Parsing Implementation ✓ (ADT Placement model created, AdtService functional using Warcraft.NET split file classes)
+12. PM4/ADT Data Correlation ✓ (AnalysisTool implemented for single files, verified, outputs YAML with FilePath, FileDataId, and human-readable Flags via listfile)
 13. Legacy Support 🔲
 14. Quality Assurance 🔲 (Needs re-enabled asserts)
 15. PM4 & PD4 MSLK Node Anchor Analysis ✓ (Anchor mechanism confirmed, Unk00/Unk01 roles ID'd)

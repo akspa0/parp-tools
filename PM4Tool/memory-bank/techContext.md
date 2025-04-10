@@ -21,7 +21,10 @@
    // Concrete File Types
    PM4File // Handles PM4 structure
    PD4File // Handles PD4 structure
-   ADTFile // Handles ADT structure (New)
+   // ADT is handled by loading specific Warcraft.NET classes for each split file:
+   Warcraft.NET.Files.ADT.Terrain.Wotlk.Terrain // Example: Base .adt file
+   Warcraft.NET.Files.ADT.TerrainObject.Zero.TerrainObjectZero // Example: _obj0.adt file
+   // ... potentially others like TerrainTexture, TerrainLOD ...
 
    // Concrete Chunk Types (Examples - Not exhaustive)
    MVER // Shared MVER class 

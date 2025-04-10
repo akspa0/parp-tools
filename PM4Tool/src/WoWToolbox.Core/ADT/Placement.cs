@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Warcraft.NET.Files.Structures; // For BoundingBox
+using System.Collections.Generic;
 
 namespace WoWToolbox.Core.ADT // Adjusted namespace
 {
@@ -22,8 +23,15 @@ namespace WoWToolbox.Core.ADT // Adjusted namespace
 
         /// <summary>
         /// Gets or sets the name of the model/WMO (looked up via NameId).
+        /// DEPRECATED: Use FilePath instead. Kept for potential compatibility, but prefer FilePath.
         /// </summary>
+        [Obsolete("Use FilePath instead.")]
         public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the actual file path of the model/WMO asset.
+        /// </summary>
+        public string FilePath { get; set; } = string.Empty;
 
         /// <summary>
         /// Gets or sets the position of the placement.
@@ -49,6 +57,11 @@ namespace WoWToolbox.Core.ADT // Adjusted namespace
         /// Gets or sets whether this placement uses a FileDataID in the NameId field.
         /// </summary>
         public bool UsesFileDataId { get; set; }
+
+        /// <summary>
+        /// Gets or sets a list of human-readable flag names based on the Flags property.
+        /// </summary>
+        public List<string> FlagNames { get; set; } = new List<string>();
     }
 
     /// <summary>

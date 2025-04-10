@@ -30,12 +30,13 @@
    ```
 
 4. Chunked File Loading Pattern
-   - Specific file format classes (e.g., `PM4File`, `PD4File`, `ADTFile`) inherit from `Warcraft.NET.Files.ChunkedFile`.
-   - Derived classes define properties for expected chunks (e.g., `public MVERChunk? MVER { get; }`).
-   - The base `ChunkedFile` constructor uses reflection to find these properties and attempts to load corresponding chunks from the provided byte data.
+   - Specific file format classes (e.g., `PM4File`, `PD4File`, `Warcraft.NET.Files.ADT.TerrainObject.Zero.TerrainObjectZero`, `Warcraft.NET.Files.ADT.Terrain.Wotlk.Terrain`) inherit from `Warcraft.NET.Files.ChunkedFile` (directly or via intermediate base classes).
+   - These specific classes represent individual physical files (like `.pm4`, `.pd4`, `.adt`, `_obj0.adt`).
+   - Derived classes define properties for expected chunks within that *specific file* (e.g., `TerrainObjectZero` has `ModelPlacementInfo` for `MDDF`).
+   - The base `ChunkedFile` constructor uses reflection to find these properties and attempts to load corresponding chunks from the byte data provided for *that file*.
    - Chunk properties can be marked `[ChunkOptional]` if their presence is not guaranteed.
-   - Chunk definitions (`IIFFChunk` implementations like `MVERChunk`, `MSPVChunk`, `MCRCChunk`) handle their own internal data parsing via `LoadBinaryData`.
-   - This pattern relies on the base class handling the overall file structure and chunk discovery, while specific chunk classes handle their internal structure.
+   - Chunk definitions (`IIFFChunk` implementations) handle their own internal data parsing.
+   - Handling composite file formats like ADT (which consists of multiple physical files) requires loading each relevant split file into its corresponding `Warcraft.NET` class (e.g., `Terrain`, `TerrainObjectZero`) and then combining the data logically in services like `AdtService`.
 
 ## Architecture
 
@@ -103,8 +104,8 @@
        /Chunks
          - MCRCChunk.cs
      /ADT
-       - ADTFile.cs
        - Placement.cs
+       - AdtService.cs
    ```
 
 2. Validation Library (WoWToolbox.Validation)

@@ -16,11 +16,13 @@ namespace WoWToolbox.Core.Navigation.PM4
         /// <summary>
         /// Gets or sets the MVER chunk
         /// </summary>
+        [ChunkOptional]
         public MVER? MVER { get; set; }
 
         /// <summary>
         /// Gets or sets the MSHD chunk (Header).
         /// </summary>
+        [ChunkOptional]
         public MSHDChunk? MSHD { get; private set; }
 
         /// <summary>

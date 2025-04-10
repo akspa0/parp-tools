@@ -1,14 +1,16 @@
-# Active Context: Implement ADT Parsing Service
+# Active Context: ADT/PM4 Correlation & Analysis
 
-**Goal:** Accurately parse PD4 and PM4 files, understand their structure, **integrate ADT parsing to correlate PM4/ADT UniqueIDs and extract object placement data,** resolve discrepancies, and export usable OBJ files and analysis reports.
+**Goal:** Accurately parse PD4 and PM4 files, understand their structure, integrate ADT parsing (correctly handling split files like `_obj0.adt` using `Warcraft.NET`) to correlate PM4/ADT UniqueIDs and extract object placement data (including FilePath, FileDataId, readable Flags), resolve discrepancies, and export usable OBJ files and analysis reports.
 
-**Current Focus:** ~~Implement `AdtService`~~ **Completed.** ~~Integrate into `AnalysisTool`.~~ **Completed.** ~~Add YAML output.~~ **Completed.** Next: Visualize & Test OBJ/logs, Analyze `Unk01`, `MDOS.destruction_state`, refine faces, re-enable asserts.
+**Current Focus:** Implement directory-based processing in `AnalysisTool` to handle the `development` dataset, generating `pm4_unique_ids.txt` for all PM4s and `correlated_placements.yaml` for ADT/PM4 pairs.
 
 **Discoveries Since Last Update:**
 *   **ADT/PM4 Link:** Identified `m_destructible_building_index` from MDOS (via MDSF) as the UniqueID linking PM4 data to ADT object placements.
-*   **`Warcraft.NET` ADT Support:** Confirmed `Warcraft.NET` provides necessary chunk definitions (`MDDFChunk`, `MODFChunk`) and entry structures (`MDDFEntry`, `MODFEntry`) for parsing ADT placements.
-*   **Old Parser (`WCAnalyzer.bak`):** Found relevant models (`Placement.cs`) but determined its manual parsing logic shouldn't be used; decided to build new service on `Warcraft.NET`.
-*   **ChunkedFile Loading Issue:** Encountered and resolved `Property set method not found` error in `Warcraft.NET`'s `ChunkedFile` base class by manually loading `MDDF` and `MODF` chunks in the `ADTFile` constructor using `BinaryReader` extensions (`SeekChunk`/`ReadIFFChunk`). Required adding `using Warcraft.NET.Extensions;`.
+*   **`Warcraft.NET` ADT Split File Handling:** Confirmed `Warcraft.NET` uses separate classes for ADT split files (e.g., `TerrainObjectZero` for `_obj0.adt`, `Terrain` for base `.adt`). Our previous custom `ADTFile` was incompatible with this structure.
+*   **Old Parser (`WCAnalyzer.bak`):** Found relevant models (`Placement.cs`) but decided to build new service on `Warcraft.NET`.
+*   **Warcraft.NET Property Names:** Corrected usage to `Filenames` for `MMDXChunk`/`MWMOChunk`.
+*   **Listfile Pathing:** Determined correct relative path from `AnalysisTool` output directory to listfile location.
+*   **YAML Rotation Anchors:** Confirmed `*o0` syntax is standard YAML optimization for zero rotation, not a data error.
 
 **Preliminary Visualization Insights (User Observation - From previous runs):**
 *   Combining PD4 geometry chunks into one OBJ caused misalignment.
@@ -16,33 +18,34 @@
 *   MSLK nodes often near geometric corners.
 
 **Recent Changes:**
-*   **ADT Framework:** Created `WoWToolbox.Core/ADT/Placement.cs` model based on old project.
-*   **ADT Framework:** Created `WoWToolbox.Core/ADT/ADTFile.cs` inheriting `Warcraft.NET.Files.ChunkedFile` with properties for ADT chunks.
-*   **Build Fix:** Removed the unused `WoWToolbox.Validation` project from the solution.
-*   **Chunk Definitions:** Updated `MDOSChunk.cs` and `MDSFChunk.cs` with correct field names.
-*   **Logging:** Enhanced `PM4FileTests.cs` logging with MDSF->MDOS details and setup collection/output for unique building IDs.
-*   **Build Warnings:** Fixed several minor build warnings.
-*   **Troubleshooting:** Temporarily commented out most `Assert` statements in `PM4FileTests.cs`.
-*   **PD4 Export:** Reverted `PD4FileTests.cs` to separate OBJs.
-*   **PM4 MPRL Transform:** Corrected transform in `PM4FileTests.cs`.
-*   **OBJ Face Generation:** Added logic to `PM4FileTests.cs` and `PD4FileTests.cs`.
-*   **Unk12 Logging:** Updated `MslkAnalyzer.cs` and test logs.
-*   **Chunk Audit:** Removed unused `MSRN`.
-*   **`AdtService` Implementation:** Verified existing implementation was correct.
-*   **`AnalysisTool` Implementation:** Verified existing implementation for loading ADT/PM4, extracting placements/IDs, filtering, and adding YAML output.
-*   **`AnalysisTool` Fixes:** Corrected build errors (`Subchunks` namespace, `List.Length` vs `.Count`, `uint` vs `int` indexer).
-*   **`ADTFile` Fix:** Resolved `Property set method not found` runtime error by manually loading `MDDF`/`MODF` chunks in constructor using `BinaryReader` extensions and adding `using Warcraft.NET.Extensions;`.
+*   **ADT Loading Refactor:**
+    *   Removed custom `WoWToolbox.Core/ADT/ADTFile.cs`.
+    *   Updated `AnalysisTool/Program.cs` to load base `.adt` files into `Warcraft.NET.Files.ADT.Terrain.Wotlk.Terrain` and `_obj0.adt` files into `Warcraft.NET.Files.ADT.TerrainObject.Zero.TerrainObjectZero`.
+    *   Updated `AdtService.ExtractPlacements` to accept these `Warcraft.NET` objects and access `MDDF`/`MODF` from `TerrainObjectZero` and `MMDX`/`MWMO` from `Terrain`.
+*   **Placement `FilePath` Added:** Populated `FilePath` via MMDX/MWMO lookup.
+*   **Listfile Integration:** Implemented loading (`Program.cs`) and usage (`AdtService.cs`) of community listfile (`community-listfile-withcapitals.csv`).
+*   **FileDataId Lookup:** Added logic to `AdtService` to determine `FileDataId` based on `NameIdIsFiledataId` flag (direct lookup) or reverse path matching against listfile (case/slash insensitive).
+*   **Placement `Name` Populated:** Set obsolete `Name` property from `Path.GetFileName(FilePath)`.
+*   **Flag Decoding:** Added `FlagNames` list to `Placement` model and implemented logic in `AdtService` to populate it based on `MDDFFlags`/`MODFFlags` enums.
+*   **Added Missing MDDF Flags:** Added definitions for `Unk4`, `Unk8`, `Unk10`, `Unk100`, `AcceptProjTextures` to the `MDDFFlags` enum in `Warcraft.NET` and updated `AdtService` to check and report them.
+*   *(Older changes for PM4/PD4/Build listed in previous versions)*
 
 **Next Steps:**
 1.  ~~Implement `AdtService.cs`~~ (Done)
 2.  ~~Integrate into AnalysisTool~~ (Done)
 3.  ~~Add YAML Output~~ (Done)
-4.  **Visualize & Test:** Verify OBJ outputs (including faces) and analyze logs from the `test/WoWToolbox.Tests/bin/Debug/net8.0/output/` directory. Check `correlated_placements.yaml`.
-5.  **Analyze Logs:** Examine `_mslk_analysis.log` and MDSF logs (focus on `Unk12`).
-6.  **Interpret `Unk01`:** Analyze node anchor visualization.
-7.  **Leverage ADT/PM4 Link:** Perform detailed analysis using UniqueIDs from YAML.
-8.  **Investigate Destruction:** Analyze `MDOS.destruction_state` correlation with PM4 face generation.
-9.  **Investigate Faces:** Refine face generation if needed.
-10. **Re-enable Asserts:** Gradually re-enable commented assertions in tests.
+4.  ~~Add FilePath Lookup~~ (Done)
+5.  ~~Add Listfile Integration & FileDataId Reverse Lookup~~ (Done)
+6.  ~~Add Flag Name Decoding~~ ✓ (Completed)
+7.  ~~Refactor ADT Loading for Split Files~~ ✓ (Completed using `Warcraft.NET` native classes)
+8.  **Implement Directory Processing:** Modify `AnalysisTool` to scan input directory, process all PM4s (outputting `pm4_unique_ids.txt`), process ADT/PM4 pairs (outputting `correlated_placements.yaml`), and generate a summary report. Target: `I:\parp-scripts\WoWToolbox_v3\original_development\development`.
+9.  **Visualize & Test:** Verify outputs from directory processing (`correlated_placements.yaml`, `pm4_unique_ids.txt`, summary report) and OBJ outputs (PM4/PD4).
+10. **Analyze Logs:** Examine MSLK analysis logs, MDSF logs (focus on `Unk12`).
+11. **Interpret `Unk01`:** Analyze node anchor visualization.
+12. **Leverage ADT/PM4 Link:** Perform detailed analysis using UniqueIDs and FilePaths/FileDataIds from YAML.
+13. **Investigate Destruction:** Analyze `MDOS.destruction_state` correlation with PM4 face generation.
+14. **Investigate Faces:** Refine face generation if needed.
+15. **Re-enable Asserts:** Gradually re-enable commented assertions in tests.
+16. **(Future Goal) WMO Geometry Parsing & Matching:** Investigate using `Warcraft.NET` to parse WMO geometry and compare against PM4 geometry to identify assets.
 
-**--- (Context Updated: ADT Parsing & Correlation Tool implemented and verified) ---**
+**--- (Context Updated: ADT loading refactored for split files; Next: Directory processing) ---**

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using System.Reflection;
 // using WoWToolbox.Tests.Analysis; // REMOVED
 using System.Text.Json; // ADDED for JSON Serialization
+// REMOVED: using WoWToolbox.AnalysisTool; 
 
 namespace WoWToolbox.Tests.Navigation.PM4
 {
@@ -752,8 +753,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                          uint mdosIdx = mdsfEntry.mdos_index;
                          string linkInfo;
                          if (mdosIdx < mdosEntryCount) {
-                             var mdosEntry = pm4File.MDOS.Entries[(int)mdosIdx];
-                             linkInfo = $"MDSF Entry (MSUR:{mdsfEntry.msur_index}) -> MDOS Index {mdosIdx} -> MDOS Entry [ID:0x{mdosEntry.m_destructible_building_index:X8}, State:{mdosEntry.destruction_state}]";
+                             var linkedMdosEntry = pm4File.MDOS.Entries[(int)mdosIdx];
+                             linkInfo = $"MDSF Entry (MSUR:{mdsfEntry.msur_index}) -> MDOS Index {mdosIdx} -> MDOS Entry [ID:0x{linkedMdosEntry.m_destructible_building_index:X8}, State:{linkedMdosEntry.destruction_state}]";
                          } else {
                               linkInfo = $"MDSF Entry (MSUR:{mdsfEntry.msur_index}) -> Invalid MDOS Index {mdosIdx}";
                          }
@@ -791,7 +792,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                      }
                  }
 
-
+                summaryWriter.WriteLine("--- End PM4 File Summary ---");
+                debugWriter.WriteLine("--- End PM4 File Debug Log ---");
             }
             catch (Exception ex)
             {
