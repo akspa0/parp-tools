@@ -68,7 +68,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // --- Path Construction (Input Directory) ---
             var baseDir = AppDomain.CurrentDomain.BaseDirectory;
             // Use Path.Combine for robust path handling across OS
-            var testDataRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "test_data")); // Go up from bin/Debug/netX.0
+            // Corrected path: Go up 5 levels from bin/Debug/netX.0 to reach solution root
+            var testDataRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "test_data"));
             var inputDirectoryPath = Path.Combine(testDataRoot, "development");
 
             // --- Path Construction (Output Directory) ---
