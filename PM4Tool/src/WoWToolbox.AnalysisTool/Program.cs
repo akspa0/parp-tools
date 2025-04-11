@@ -12,7 +12,18 @@ using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using WoWToolbox.AnalysisTool; // Added for MslkAnalyzer
 using Warcraft.NET.Files.ADT.TerrainObject.Zero; // Added for TerrainObjectZero
+using Warcraft.NET.Files.ADT.Terrain.BfA; // ADDED: For modern base ADT
 using System.Text; // For StringBuilder in summary report
+
+// ADDED: Data structure for consolidated output
+public class Pm4AnalysisResult
+{
+    public string Pm4Name { get; set; } = ""; // PM4 base name (e.g., development_XX_YY)
+    public List<uint> Pm4UniqueIds { get; set; } = new List<uint>(); // IDs from PM4
+    public List<uint>? AdtUniqueIds { get; set; } = null; // IDs from _obj0.adt (null if N/A)
+    public List<Placement>? CorrelatedPlacements { get; set; } = null; // Correlated ADT Placements (null if N/A or none found)
+    public string? ProcessingError { get; set; } = null; // Record specific file errors
+}
 
 public class Program
 {
@@ -153,208 +164,133 @@ public class Program
 
         Console.WriteLine("\nScanning input directory for ADT and PM4 files...");
 
-        Console.WriteLine($"DEBUG: Attempting to enumerate files in: {inputDirectory}"); // DEBUG
-        var allFiles = Directory.EnumerateFiles(inputDirectory, "*.*", SearchOption.TopDirectoryOnly)
-                                .Where(f => f.EndsWith(".adt", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pm4", StringComparison.OrdinalIgnoreCase))
-                                .ToList();
-        Console.WriteLine($"DEBUG: Found {allFiles.Count} total .adt/.pm4 files."); // DEBUG
-        if (allFiles.Any())
-        {
-            Console.WriteLine($"DEBUG: First few files found: {string.Join(", ", allFiles.Take(5).Select(Path.GetFileName))}"); // DEBUG
-        }
+        // Only need PM4 files for the main loop now
+        var pm4Files = Directory.EnumerateFiles(inputDirectory, "*.pm4", SearchOption.TopDirectoryOnly).ToList();
 
-        var pm4Files = allFiles.Where(f => f.EndsWith(".pm4", StringComparison.OrdinalIgnoreCase)).ToList();
-        // Identify base ADT files (e.g., map_xx_yy.adt, NOT map_xx_yy_obj0.adt)
-        var baseAdtFiles = allFiles.Where(f => f.EndsWith(".adt", StringComparison.OrdinalIgnoreCase) && 
-                                               !Path.GetFileNameWithoutExtension(f).EndsWith("_obj0", StringComparison.OrdinalIgnoreCase) &&
-                                               !Path.GetFileNameWithoutExtension(f).EndsWith("_tex0", StringComparison.OrdinalIgnoreCase) && // Add other split types if needed
-                                               !Path.GetFileNameWithoutExtension(f).EndsWith("_lod", StringComparison.OrdinalIgnoreCase)) 
-                                     .ToList();
-        Console.WriteLine($"DEBUG: Filtered {baseAdtFiles.Count} base ADT files and {pm4Files.Count} PM4 files."); // DEBUG
+        Console.WriteLine($"Found {pm4Files.Count} PM4 files.");
 
-        // Console.WriteLine($"Found {baseAdtFiles.Count} base ADT files and {pm4Files.Count} PM4 files."); // Replaced by DEBUG line
-
-        var adtPm4Pairs = new Dictionary<string, string>(); // Key: base ADT path, Value: PM4 path
-        var pm4OnlyFiles = new List<string>(pm4Files);
-        var adtOnlyFiles = new List<string>(baseAdtFiles);
-        var pm4UniqueIdCache = new Dictionary<string, HashSet<uint>>(); // Cache extracted IDs
-        var errorsEncountered = new List<string>();
         int skippedZeroByteFiles = 0; // Counter for skipped empty files
-        var globalUniqueIds = new HashSet<uint>(); // Set to store all unique IDs globally
+        var adtService = new AdtService(); // Instantiate service once
+        var allResults = new List<Pm4AnalysisResult>(); // List to hold all results
 
-        // --- Match Pairs ---
-        foreach (var adtPath in baseAdtFiles)
-        {
-            string adtFileName = Path.GetFileName(adtPath);
-            string adtBaseNameNoExt = Path.GetFileNameWithoutExtension(adtPath);
-            string[] nameParts = adtBaseNameNoExt.Split('_');
-
-            // Expecting format like "development_X_Y"
-            if (nameParts.Length >= 3 && 
-                int.TryParse(nameParts[nameParts.Length - 2], out int coordX) && 
-                int.TryParse(nameParts[nameParts.Length - 1], out int coordY))
-            {
-                // Format expected PM4 name with zero-padding
-                string expectedPm4BaseName = $"{nameParts[0]}_{coordX:D2}_{coordY:D2}"; // e.g., development_00_00
-                string expectedPm4FileName = expectedPm4BaseName + ".pm4";
-
-                // Find matching PM4 file
-                string? matchingPm4 = pm4Files.FirstOrDefault(p => Path.GetFileName(p).Equals(expectedPm4FileName, StringComparison.OrdinalIgnoreCase));
-
-                if (matchingPm4 != null)
-                {
-                    adtPm4Pairs.Add(adtPath, matchingPm4);
-                    pm4OnlyFiles.Remove(matchingPm4);
-                    adtOnlyFiles.Remove(adtPath);
-                }
-            }
-            else
-            {
-                // Log if ADT filename format is unexpected
-                Console.WriteLine($"Warning: Could not parse coordinates from ADT filename: {adtFileName}. Skipping pairing for this file.");
-                // This file will remain in adtOnlyFiles list
-            }
-        }
-        Console.WriteLine($"DEBUG: Matched {adtPm4Pairs.Count} ADT/PM4 pairs."); // DEBUG
-
-        // --- Process All PM4 Files ---
-        Console.WriteLine("\nProcessing all PM4 files to extract UniqueIDs...");
+        // --- Main Processing Loop (PM4-centric) ---
+        Console.WriteLine("\nProcessing PM4 files and checking for corresponding _obj0.adt...");
         foreach (var pm4FilePath in pm4Files)
         {
-            // Check for 0-byte file
-            if (new FileInfo(pm4FilePath).Length == 0)
+            string pm4FileName = Path.GetFileName(pm4FilePath);
+
+            // Restore skipping 00_00 - it has known issues unrelated to this investigation
+            if (pm4FileName.Equals("development_00_00.pm4", StringComparison.OrdinalIgnoreCase))
             {
-                Console.WriteLine($"  Skipping 0-byte PM4 file: {Path.GetFileName(pm4FilePath)}");
-                skippedZeroByteFiles++;
-                continue;
+                 Console.WriteLine($"  Skipping known problematic file: {pm4FileName}"); // Keep minimal skip message
+                 continue;
             }
 
-            string pm4FileName = Path.GetFileNameWithoutExtension(pm4FilePath);
-            string fileOutputDir = Path.Combine(outputDirectory, pm4FileName);
-            Directory.CreateDirectory(fileOutputDir); // Ensure subdirectory exists
-            // string uniqueIdOutputPath = Path.Combine(fileOutputDir, "pm4_unique_ids.txt"); // REMOVED Per-file output path
-
+            // --- Start of new try block ---
             try
             {
-                Console.WriteLine($"  Processing {Path.GetFileName(pm4FilePath)}...");
-                byte[] pm4Bytes = File.ReadAllBytes(pm4FilePath);
-                var pm4File = new PM4File(pm4Bytes);
+                // --- Basic File Handling & PM4 Loading ---
+                string pm4BaseName = Path.GetFileNameWithoutExtension(pm4FilePath);
+                var currentResult = new Pm4AnalysisResult { Pm4Name = pm4BaseName };
 
-                var uniqueIds = ExtractPm4UniqueIds(pm4File);
-                pm4UniqueIdCache[pm4FilePath] = uniqueIds; // Cache for correlation step
-                globalUniqueIds.UnionWith(uniqueIds); // Add to global set
+                // Skip 0-byte PM4
+                if (new FileInfo(pm4FilePath).Length == 0)
+                {
+                    Console.WriteLine($"  Skipping 0-byte PM4 file: {pm4FileName}");
+                    skippedZeroByteFiles++;
+                    continue; // Skip this iteration within the try block
+                }
+                
+                HashSet<uint> currentPm4UniqueIds = new HashSet<uint>(); // Initialize here
+                bool pm4LoadSuccess = false;
+                PM4File? pm4File = null; 
+                try
+                {
+                    byte[] pm4Bytes = File.ReadAllBytes(pm4FilePath);
+                    pm4File = new PM4File(pm4Bytes); 
 
-                // Write UniqueIDs to file // REMOVED Per-file write
-                // File.WriteAllLines(uniqueIdOutputPath, uniqueIds.Select(id => id.ToString()));
-                // Console.WriteLine($"    -> Extracted {uniqueIds.Count} UniqueIDs. Saved to {Path.GetFileName(uniqueIdOutputPath)}");
-                Console.WriteLine($"    -> Extracted {uniqueIds.Count} UniqueIDs."); // Updated log message
+                    // Check and Log MDSF Chunk Status - Keep this minimal check?
+                    bool hasMdsfData = pm4File.MDSF != null && pm4File.MDSF.Entries.Count > 0;
+
+                    currentPm4UniqueIds = ExtractPm4UniqueIds(pm4File);
+                    currentResult.Pm4UniqueIds = currentPm4UniqueIds.OrderBy(id => id).ToList();
+                    pm4LoadSuccess = true; // Mark PM4 load as successful
+                }
+                catch (Exception ex)
+                {
+                    currentResult.ProcessingError = $"PM4 Loading/Parsing Error: {ex.Message}";
+                }
+
+                // --- Check for and Process _obj0.adt (only if PM4 loaded successfully) ---
+                if (pm4LoadSuccess)
+                {
+                    string obj0FilePath = Path.Combine(inputDirectory, pm4BaseName + "_obj0.adt");
+
+                    if (File.Exists(obj0FilePath))
+                    {
+                        if (new FileInfo(obj0FilePath).Length == 0)
+                        {
+                            Console.WriteLine($"    Found 0-byte _obj0.adt for {pm4FileName}. No correlation possible.");
+                            skippedZeroByteFiles++;
+                        }
+                        else
+                        {
+                            try
+                            {
+                                // Uncomment ADT loading and ID extraction
+                                byte[] obj0Bytes = File.ReadAllBytes(obj0FilePath);
+                                var adtObj0Data = new TerrainObjectZero(obj0Bytes);
+
+                                currentResult.AdtUniqueIds = ExtractAdtUniqueIds(adtObj0Data).OrderBy(id => id).ToList();
+
+                                // Uncomment placement extraction
+                                var placements = adtService.ExtractPlacements(adtObj0Data, _listfileData); // Extract to variable first
+
+                                // Restore original correlation logic
+                                currentResult.CorrelatedPlacements = placements
+                                    .Where(p => currentPm4UniqueIds.Contains(p.UniqueId)) 
+                                    .OrderBy(p => p.UniqueId)
+                                    .ToList(); 
+                                
+                                // Restore commented out WriteLine
+                                Console.WriteLine($"      -> Found {currentResult.CorrelatedPlacements?.Count ?? 0} correlated placements."); // Restore logging (with null check)
+                            }
+                            catch (Exception ex)
+                            {
+                                currentResult.ProcessingError = (currentResult.ProcessingError ?? "") + $"; ADT Error: {ex.Message}";
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                string errorMsg = $"Error processing PM4 file '{Path.GetFileName(pm4FilePath)}': {ex.Message}";
-                Console.WriteLine($"    -> Error: {ex.Message}");
-                errorsEncountered.Add(errorMsg);
-                // Optionally write an error file in the subdirectory
-                File.WriteAllText(Path.Combine(fileOutputDir, "error.log"), errorMsg + "\n" + ex.StackTrace);
+                // Catch errors in the outer block (e.g., file access issues before inner try)
+                Console.WriteLine($"  !!! Outer loop error processing {pm4FileName}: {ex.GetType().Name} - {ex.Message}");
+                // Optionally add an error result here if needed, though most errors should be caught inside
+                 var errorResult = new Pm4AnalysisResult { Pm4Name = Path.GetFileNameWithoutExtension(pm4FilePath), ProcessingError = $"Outer Loop Error: {ex.Message}" };
+                 allResults.Add(errorResult);
             }
-        }
+        } // End of foreach loop
 
-        // --- Write Global Unique ID File ---
-        string globalUniqueIdPath = Path.Combine(outputDirectory, "global_pm4_unique_ids.txt");
-        Console.WriteLine($"\nWriting {globalUniqueIds.Count} unique PM4 IDs globally to {globalUniqueIdPath}...");
+        // --- Serialize Final Results to YAML ---
+        string finalYamlPath = Path.Combine(outputDirectory, "analysis_results.yaml");
+        Console.WriteLine($"\nSerializing {allResults.Count} results to {finalYamlPath}...");
         try
         {
-            // Sort IDs before writing for consistency
-            File.WriteAllLines(globalUniqueIdPath, globalUniqueIds.OrderBy(id => id).Select(id => id.ToString()));
-            Console.WriteLine("Global unique ID file written successfully.");
+            var serializer = new SerializerBuilder()
+                .WithNamingConvention(PascalCaseNamingConvention.Instance)
+                .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull) // Omit null lists/errors
+                .Build();
+            string finalYamlOutput = serializer.Serialize(allResults);
+            File.WriteAllText(finalYamlPath, finalYamlOutput);
+            Console.WriteLine("Final YAML report written successfully.");
         }
-        catch (Exception ex)
+         catch (Exception ex)
         {
-            string errorMsg = $"Error writing global unique ID file: {ex.Message}";
-            Console.WriteLine($"    -> Error: {ex.Message}");
-            errorsEncountered.Add(errorMsg);
+            // Log error writing final YAML
+            WriteError($"FATAL: Error writing final analysis results YAML: {ex.Message}");
         }
-
-        // --- Process ADT/PM4 Pairs ---
-        Console.WriteLine("\nProcessing ADT/PM4 pairs for correlation...");
-        var adtService = new AdtService();
-        foreach (var pair in adtPm4Pairs)
-        {
-            string baseAdtFilePath = pair.Key;
-            string pm4FilePath = pair.Value;
-            string pm4BaseFileName = Path.GetFileNameWithoutExtension(pm4FilePath); // Guaranteed XX_YY format
-            string fileOutputDir = Path.Combine(outputDirectory, pm4BaseFileName); // Use PM4 name for dir
-            // Subdirectory should already exist from PM4 processing
-            string correlationOutputPath = Path.Combine(fileOutputDir, "correlated_placements.yaml");
-
-            Console.WriteLine($"  Processing pair {pm4BaseFileName}..."); // Log consistent name
-            try
-            {
-                // Load Obj0 ADT (Required for placements and filenames)
-                string obj0FilePath = Path.ChangeExtension(baseAdtFilePath, null) + "_obj0.adt";
-                TerrainObjectZero? adtObj0Data = null;
-                if (File.Exists(obj0FilePath))
-                {
-                    // Check for 0-byte obj0 ADT
-                    if (new FileInfo(obj0FilePath).Length == 0)
-                    {
-                        Console.WriteLine($"    Skipping pair: _obj0 ADT is 0 bytes ({Path.GetFileName(obj0FilePath)})");
-                        errorsEncountered.Add($"Skipped pair {pm4BaseFileName}: _obj0 ADT is 0 bytes");
-                        skippedZeroByteFiles++;
-                        continue;
-                    }
-                    byte[] obj0Bytes = File.ReadAllBytes(obj0FilePath);
-                    adtObj0Data = new TerrainObjectZero(obj0Bytes);
-                }
-                else
-                {
-                    Console.WriteLine($"    Warning: _obj0 file not found for {pm4BaseFileName}. Cannot extract placements or filenames. Skipping pair.");
-                    errorsEncountered.Add($"Skipped pair {pm4BaseFileName}: _obj0 ADT not found");
-                    continue; 
-                }
-
-                // Get cached PM4 UniqueIDs
-                if (!pm4UniqueIdCache.TryGetValue(pm4FilePath, out var pm4UniqueIds))
-                {
-                    // Should not happen if PM4 processing was successful, but handle defensively
-                    Console.WriteLine($"    Error: Could not find cached UniqueIDs for {Path.GetFileName(pm4FilePath)}. Skipping correlation.");
-                    errorsEncountered.Add($"Missing cached UniqueIDs for {Path.GetFileName(pm4FilePath)}");
-                    continue;
-                }
-
-                // Extract ADT Placements (Requires _obj0 data)
-                var adtPlacements = adtService.ExtractPlacements(adtObj0Data, _listfileData).ToList(); // Pass only obj0Data
-
-                // Filter ADT Placements
-                var correlatedPlacements = adtPlacements.Where(p => pm4UniqueIds.Contains(p.UniqueId)).ToList();
-
-                Console.WriteLine($"    -> Found {correlatedPlacements.Count} correlated placements.");
-
-                // Serialize to YAML
-                if (correlatedPlacements.Any())
-                {
-                    var serializer = new SerializerBuilder()
-                        .WithNamingConvention(PascalCaseNamingConvention.Instance)
-                        .Build();
-                    string yamlOutput = serializer.Serialize(correlatedPlacements);
-                    File.WriteAllText(correlationOutputPath, yamlOutput);
-                    Console.WriteLine($"    -> Saved correlation to {Path.GetFileName(correlationOutputPath)}");
-                }
-            }
-            catch (Exception ex)
-            {
-                 string errorMsg = $"Error processing ADT/PM4 pair '{pm4BaseFileName}': {ex.Message}"; // Use consistent name
-                Console.WriteLine($"    -> Error: {ex.Message}");
-                errorsEncountered.Add(errorMsg);
-                // Ensure writing error log uses the correct (PM4-based) directory path
-                File.WriteAllText(Path.Combine(fileOutputDir, "error.log"), errorMsg + "\n" + ex.StackTrace);
-            }
-        }
-
-        // --- Generate Summary Report ---
-        Console.WriteLine("\nGenerating summary report...");
-        GenerateSummaryReport(outputDirectory, baseAdtFiles.Count, pm4Files.Count, adtPm4Pairs, pm4OnlyFiles, adtOnlyFiles, errorsEncountered, skippedZeroByteFiles);
-        Console.WriteLine("Summary report generated.");
     }
 
     // --- Helper to Extract PM4 UniqueIDs ---
@@ -363,6 +299,7 @@ public class Program
         var pm4UniqueIds = new HashSet<uint>();
         if (pm4File.MDSF != null && pm4File.MDSF.Entries != null && pm4File.MDOS != null && pm4File.MDOS.Entries != null)
         {
+            Console.WriteLine($"    DEBUG: Extracting IDs from MDSF ({pm4File.MDSF.Entries.Count} entries) and MDOS ({pm4File.MDOS.Entries.Count} entries)."); // DEBUG
             foreach (var mdsfEntry in pm4File.MDSF.Entries)
             {
                 uint mdosIndex = mdsfEntry.mdos_index;
@@ -374,78 +311,101 @@ public class Program
                 // else { Log warning if needed }
             }
         }
+        else 
+        {
+            Console.WriteLine("    DEBUG: MDSF or MDOS chunk (or their Entries) missing/null. Cannot extract PM4 UniqueIDs."); // DEBUG
+        }
         // else { Log warning if chunks missing }
         return pm4UniqueIds;
     }
 
-    // --- Helper to Generate Summary Report ---
-    private static void GenerateSummaryReport(string outputDir, int totalAdt, int totalPm4, 
-                                            Dictionary<string, string> pairs, List<string> pm4Only, List<string> adtOnly, 
-                                            List<string> errors, int skippedZeroByte)
+    // --- Helper to Extract ADT UniqueIDs ---
+    private static HashSet<uint> ExtractAdtUniqueIds(TerrainObjectZero adtData)
     {
-        string reportPath = Path.Combine(outputDir, "summary_report.txt");
-        var sb = new StringBuilder();
-
-        sb.AppendLine("WoWToolbox Analysis Tool - Summary Report");
-        sb.AppendLine("=========================================");
-        sb.AppendLine($"Timestamp: {DateTime.Now}");
-        sb.AppendLine($"Output Directory: {outputDir}");
-        sb.AppendLine();
-        sb.AppendLine("--- Counts ---");
-        sb.AppendLine($"Total Base ADT Files Found: {totalAdt}");
-        sb.AppendLine($"Total PM4 Files Found:    {totalPm4}");
-        sb.AppendLine($"Processed ADT/PM4 Pairs:  {pairs.Count}");
-        sb.AppendLine($"Processed PM4-Only Files: {pm4Only.Count}");
-        sb.AppendLine($"Found ADT-Only Files:     {adtOnly.Count}");
-        sb.AppendLine($"Errors Encountered:       {errors.Count}");
-        sb.AppendLine($"Skipped 0-Byte Files:   {skippedZeroByte}");
-        sb.AppendLine();
-
-        sb.AppendLine("--- Processed ADT/PM4 Pairs ---");
-        if (pairs.Any())
+        var adtUniqueIds = new HashSet<uint>();
+        // From MDDF
+        if (adtData.ModelPlacementInfo?.MDDFEntries != null)
         {
-            foreach (var pair in pairs)
+            foreach (var entry in adtData.ModelPlacementInfo.MDDFEntries)
             {
-                sb.AppendLine($"  {Path.GetFileNameWithoutExtension(pair.Key)}");
+                adtUniqueIds.Add(entry.UniqueID);
             }
         }
-        else { sb.AppendLine("  None"); }
-        sb.AppendLine();
-
-        sb.AppendLine("--- Processed PM4-Only Files ---");
-         if (pm4Only.Any())
+        // From MODF
+        if (adtData.WorldModelObjectPlacementInfo?.MODFEntries != null)
         {
-            foreach (var file in pm4Only)
+            foreach (var entry in adtData.WorldModelObjectPlacementInfo.MODFEntries)
             {
-                sb.AppendLine($"  {Path.GetFileName(file)}");
+                adtUniqueIds.Add((uint)entry.UniqueId); // Cast needed
             }
         }
-        else { sb.AppendLine("  None"); }
-        sb.AppendLine();
+        return adtUniqueIds;
+    }
 
-        sb.AppendLine("--- Found ADT-Only Files (No PM4 Match) ---");
-         if (adtOnly.Any())
+    // --- Helper Method for Printing Usage ---
+    private static void PrintHelp()
+    {
+         Console.WriteLine("Usage: dotnet run --project <csproj_path> -- [options]");
+         Console.WriteLine("\nOptions:");
+         // Corrected help text for directory mode
+         Console.WriteLine("  Directory Correlation (Default Mode):");
+         Console.WriteLine("    -d, --directory <input_path>    Directory containing PM4/ADT files (default: see code).");
+         Console.WriteLine("    -o, --output <output_path>      Output directory for consolidated YAML report (default: ./analysis_output).");
+         Console.WriteLine("\n  MSLK Log Analysis:");
+         Console.WriteLine("    --analyze-mslk <debug_log> [skip_log] Run analysis on existing PM4 test debug/skipped logs.");
+         Console.WriteLine("                                            Outputs summary to <debug_log_name>.debug_mslk_summary.txt.");
+         Console.WriteLine("\n  General:");
+         Console.WriteLine("    -h, --help                          Show this help message.");
+         Console.WriteLine("\nExamples:");
+         string defaultInputDir = @"I:\parp-scripts\WoWToolbox_v3\original_development\development"; // Example input dir
+         string defaultOutputDir = Path.Combine(Directory.GetCurrentDirectory(), "analysis_output"); // Example output dir
+         string defaultDebugLog = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\output\development\development_00_00.debug.log"; // Example log path
+         Console.WriteLine($"  Correlation:     dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- -d \"{defaultInputDir}\" -o \"{defaultOutputDir}\"");
+         Console.WriteLine($"  MSLK Analysis:   dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- --analyze-mslk \"{defaultDebugLog}\"");
+    }
+
+    // --- LoadListfile (Restore) ---
+    private static Dictionary<uint, string> LoadListfile(string filePath)
+    {
+        var data = new Dictionary<uint, string>();
+        if (!File.Exists(filePath))
         {
-            foreach (var file in adtOnly)
+            // Changed to warning instead of throwing exception
+            Console.WriteLine($"Warning: Listfile not found at '{filePath}'. Proceeding without listfile data.");
+            return data; // Return empty dictionary
+        }
+
+        // Using ReadLines for potentially large file
+        try 
+        { 
+            foreach (var line in File.ReadLines(filePath))
             {
-                sb.AppendLine($"  {Path.GetFileName(file)}");
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                var parts = line.Split(';');
+                if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileDataId) && !string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    // Use TryAdd to handle potential duplicate FileDataIds gracefully (keep first encountered)
+                    data.TryAdd(fileDataId, parts[1].Trim()); 
+                }
+                // else { // Optional: Log malformed lines }
             }
         }
-        else { sb.AppendLine("  None"); }
-        sb.AppendLine();
-
-        sb.AppendLine("--- Errors Encountered During Processing ---");
-        if (errors.Any())
+        catch (Exception ex)
         {
-            foreach (var error in errors)
-            {
-                sb.AppendLine($"  - {error}");
-            }
+            Console.WriteLine($"Warning: Error reading listfile '{filePath}': {ex.Message}. Proceeding without listfile data.");
+            data.Clear(); // Clear any partially read data on error
         }
-        else { sb.AppendLine("  None"); }
-        sb.AppendLine();
+        return data;
+    }
 
-        File.WriteAllText(reportPath, sb.ToString());
+    // --- Error Writer (Restore) ---
+    private static void WriteError(string message)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"\nError: {message}");
+        Console.ResetColor();
+        // No automatic exit here, let the calling method decide
     }
 
     // --- New Method for MSLK Analysis ---
@@ -487,57 +447,5 @@ public class Program
 
         // Console.WriteLine("\nMSLK analysis finished. Press Enter to exit.");
         // Console.ReadLine(); // Removed - Wait is now in AnalyzeMslkAndSummarizeToFile
-    }
-
-    // --- Helper Method for Printing Usage ---
-    private static void PrintHelp()
-    {
-         Console.WriteLine("Usage: dotnet run --project <csproj_path> -- [options]");
-         Console.WriteLine("\nOptions:");
-         Console.WriteLine("  <adt_file_path> <pm4_file_path>   Run ADT/PM4 correlation (Default mode).");
-         Console.WriteLine("                                      Uses hardcoded paths if none provided.");
-         Console.WriteLine("  --analyze-mslk <debug_log> [skip_log] Run MSLK log analysis.");
-         Console.WriteLine("  -h, --help                          Show this help message.");
-         Console.WriteLine("\nExamples:");
-         string defaultAdtPath = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\test_data\development\development_0_0.adt"; // Re-declare for example
-         string defaultPm4Path = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\test_data\development\development_00_00.pm4"; // Re-declare for example
-         string defaultDebugLog = @"I:\parp-scripts\WoWToolbox_v3\test\WoWToolbox.Tests\bin\Debug\net8.0\output\development\development_00_00.debug.log"; // Example log path
-         Console.WriteLine($"  Correlation (Default): dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- \"{defaultAdtPath}\" \"{defaultPm4Path}\"");
-         Console.WriteLine($"  MSLK Analysis:       dotnet run --project src/WoWToolbox.AnalysisTool/WoWToolbox.AnalysisTool.csproj -- --analyze-mslk \"{defaultDebugLog}\"");
-    }
-
-    private static Dictionary<uint, string> LoadListfile(string filePath)
-    {
-        var data = new Dictionary<uint, string>();
-        if (!File.Exists(filePath))
-        {
-            throw new FileNotFoundException("Listfile not found", filePath);
-        }
-
-        // Using ReadLines for potentially large file
-        foreach (var line in File.ReadLines(filePath))
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-
-            var parts = line.Split(';');
-            if (parts.Length >= 2 && uint.TryParse(parts[0], out uint fileDataId) && !string.IsNullOrWhiteSpace(parts[1]))
-            {
-                // Use TryAdd to handle potential duplicate FileDataIds gracefully (keep first encountered)
-                data.TryAdd(fileDataId, parts[1].Trim()); 
-            }
-            // else { // Optional: Log malformed lines }
-        }
-        return data;
-    }
-
-    // --- Error Writer (Restored) ---
-    private static void WriteError(string message)
-    {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"\nError: {message}");
-        Console.ResetColor();
-        // No automatic exit here, let the calling method decide
-        // Console.WriteLine("\nPress Enter to exit.");
-        // Console.ReadLine();
     }
 } // End of Program class

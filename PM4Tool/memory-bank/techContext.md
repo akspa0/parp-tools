@@ -81,6 +81,7 @@
    - SixLabors.ImageSharp (via Warcraft.NET dependency)
 
 2. Project Dependencies
+   *The main solution file (`src/WoWToolbox.sln`) now includes `WoWToolbox.Core`, `WoWToolbox.AnalysisTool`, and `WoWToolbox.Tests`.*
    ```xml
    <!-- WoWToolbox.Core -->
    <ItemGroup>
@@ -108,9 +109,15 @@
 - Git for version control
 - xUnit for testing
 - Markdown support for documentation
+- **Batch Scripts:**
+  - `build.bat`: Located in the workspace root. Runs `dotnet build src/WoWToolbox.sln` to compile the entire solution.
+  - `clean.bat`: Located in the workspace root. Runs `dotnet clean src/WoWToolbox.sln` to clean build artifacts.
+  - `test.bat`: Located in the workspace root. Runs `dotnet test src/WoWToolbox.sln`.
+  - `run_all.bat`: Located in the workspace root. Runs clean, build, and test sequentially.
 
 ## New Development Tools/Components
-*   **WoWToolbox.AnalysisTool:** Separate console application project for running data analysis tasks (e.g., MSLK log parsing and grouping).
+*   **WoWToolbox.AnalysisTool:** Separate console application project for running data analysis tasks (e.g., PM4/ADT correlation, MSLK log analysis).
+*   **WoWToolbox.FileDumper:** (NEW) Console application for detailed YAML dumping of PM4/ADT (`_obj0.adt`) file structures. Uses `WoWToolbox.Core`, `Warcraft.NET`, and `YamlDotNet`.
 
 ## Technical Debt
 
@@ -176,29 +183,23 @@
 - Confirmation and details of `Unk10`'s relationship to `MSUR`/`MSVI`. -> **Confirmed: Likely MSVI index. Purpose TBD.**
 
 #### MSLK Chunk (Map SiLiK - Map Sill K?)
-- Contains entries defining paths (`MSPICount >= 2`), single points (`MSPICount == 1`), or structural/metadata nodes (`MSPICount == 0`, `MSPIFirst == -1`).
+- Contains entries defining paths (`MSPICount >= 2`), single points (`MSPICount == 1`), or **Doodad placements** (`MSPICount == 0`, `MSPIFirst == -1`, representing nodes/metadata for M2/MDX models).
 - **Structure:** `MSLKEntry` (Defined in `WoWToolbox.Core/Navigation/PM4/Chunks/MSLK.cs`)
-  - `byte Unk00`: Node type indicator? Observed: `0x01`, `0x11` in PM4 nodes; consistently `0x01` in preliminary PD4 node analysis. Geometry entries often `0x02`, `0x04`, `0x0A`, `0x0C`.
-  - `byte Unk01`: Node sub-type/flag? Observed: `0x00`, `0x01`, `0x02`, `0x03`, `0x04` in nodes (PM4/PD4). Geometry often `0x00`-`0x03` or `0xFF`.
+  - `byte Unk00`: **Doodad Type/Flags?** Observed: `0x01`, `0x11` in PM4 nodes; consistently `0x01` in preliminary PD4 node analysis. Geometry entries often `0x02`, `0x04`, `0x0A`, `0x0C`. Likely encodes part of the Doodad's properties or identity.
+  - `byte Unk01`: **Doodad Sub-type/Flags?** Observed: `0x00`, `0x01`, `0x02`, `0x03`, `0x04`, `0x06` in nodes (PM4/PD4). Geometry often `0x00`-`0x03` or `0xFF`. Likely encodes part of the Doodad's properties (e.g., rotation, scale flags).
   - `ushort Unk02`: Consistently `0x0000` observed.
-  - `uint Unk04`: **Group ID (Behaviour differs PM4 vs PD4 due to file scope):**
-    - **PM4 (Multi-Object):** Creates **"Mixed Groups"** linking node entries (`MSPIFirst == -1`) with their corresponding geometry entries (`MSPIFirst >= 0`) for a specific object/group within the map tile.
-    - **PD4 (Single Object):** Creates separate **"Node Only"** and **"Geometry Only"** groups. The ID likely categorizes related nodes or paths for the single WMO object.
-  - `int MspiFirstIndex`: Index into `MSPI` chunk for geometry entries, `-1` for node entries. (Note: 24-bit signed integer).
-  - `byte MspiIndexCount`: Number of points in `MSPI` chunk associated with a geometry entry, `0` for node entries.
+  - `uint Unk04`: **Group ID / Doodad Identifier?** (Behaviour differs PM4 vs PD4 due to file scope):
+    - **PM4 (Multi-Object):** Creates **"Mixed Groups"** linking Doodad node entries with their corresponding geometry path entries (if any) for a specific object/group within the map tile. May also link to the Doodad model's ID (e.g., via `MDBH`).
+    - **PD4 (Single Object):** Creates separate **"Node Only"** (Doodad) and **"Geometry Only"** groups. The ID likely categorizes related Doodads or paths for the single WMO object.
+  - `int MspiFirstIndex`: Index into `MSPI` chunk for geometry entries, `-1` for Doodad node entries. (Note: 24-bit signed integer).
+  - `byte MspiIndexCount`: Number of points in `MSPI` chunk associated with a geometry entry, `0` for Doodad node entries.
   - `uint Unk0C`: Consistently `0xFFFFFFFF` observed.
-  - `ushort Unknown_0x10`: Variable. **Confirmed MSVI index providing Node anchor for both PM4 and PD4.** Links MSLK Node entries to a specific vertex via `MSVI[Unknown_0x10] -> MSVT[index]`, defining the node's location. Also present in geometry entries (purpose TBD).
-  - `ushort Unknown_0x12`: Consistently `0x8000` observed. Potential flag or bitmask.
-- **Dependencies:** `MSPI` (geometry), `MSVI` (nodes via `Unknown_0x10`, potentially geometry), `MSVT` (nodes via `Unknown_0x10`/`MSVI`).
+  - `ushort Unknown_0x10`: **Anchor Point Vertex Index.** Confirmed MSVI index providing Doodad anchor position for both PM4 and PD4. Links MSLK Node entries to a specific vertex via `MSVI[Unknown_0x10] -> MSVT[index]`. Also present in geometry entries (purpose TBD).
+  - `ushort Unknown_0x12`: Consistently `0x8000` observed. **Potential Doodad Property/Flag?** (e.g., scaling, rotation bitmask).
+- **Dependencies:** `MSPI` (geometry), `MSVI` (Doodad anchor via `Unknown_0x10`, potentially geometry), `MSVT` (Doodad anchor via `Unknown_0x10`/`MSVI`), **potentially `MDBH` (for Doodad filenames/IDs via `Unk04` or other fields).**
 - **Analysis:**
-  - **Node Identification (`Unk00`):** PM4 uses `0x11`; PD4 uses `0x01`.
+  - **Doodad Identification (`Unk00`, `Unk01`, `Unk04`):** These fields likely combine to identify the specific Doodad model (potentially linking to `MDBH`) and its properties (type, rotation, scale). Further investigation needed. PM4 uses `0x11`; PD4 uses `0x01` for `Unk00` in nodes.
   - **Geometry Identification (`Unk00`, PM4):** PM4 seems to use `0x12`, `0x14` for geometry entries.
-  - **Node Sub-Types (`Unk01`):** Varies in both formats (PM4: `0x00-0x03`, `0x06` seen; PD4: `0x00-0x04` seen). Exact meaning TBD (likely via visualization).
-  - **Node Anchor (`Unknown_0x10`):** Confirmed link to MSVI->MSVT for nodes in both PM4/PD4. Export logic implemented.
-  - **Grouping (`Unk04`):** PM4 uses "Mixed" groups linking nodes/geometry; PD4 uses separate "Node Only" / "Geometry Only" groups. Difference likely due to file scope (multi- vs single-object).
+  - **Doodad Anchor (`Unknown_0x10`):** Confirmed link to MSVI->MSVT for Doodad placement anchor point in both PM4/PD4. Export logic implemented.
+  - **Grouping (`Unk04`):** PM4 uses "Mixed" groups linking Doodad nodes/geometry; PD4 uses separate "Node Only" / "Geometry Only" groups. Difference likely due to file scope (multi- vs single-object).
   - **Data Integrity:** Some PD4 node entries show invalid `Unknown_0x10` links in logs.
-- **Open Questions (MSLK):**
-  - Precise meaning of different node sub-types/flags (`Unk00`, `Unk01`) based on anchor visualization (PM4 & PD4).
-  - Purpose of `Unknown_0x10` link for *geometry* entries.
-  - Meaning of the `Unk12` flag (`0x8000`).
-  - Relationship between MSLK groups/nodes and other chunks (`MSUR`, `MSCN`, `MDOS`) beyond direct indices.

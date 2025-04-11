@@ -1,12 +1,12 @@
 # WoWToolbox v3
 
 ## Project Overview
-A comprehensive toolkit for parsing and working with World of Warcraft ADT (terrain) files and related data formats. Built in C# targeting .NET 8.0, this project provides libraries for chunk decoding and manipulation of complex packed data.
+A comprehensive toolkit for parsing and working with World of Warcraft ADT (terrain) files and related data formats. Built in C# targeting .NET 8.0, this project provides libraries for chunk decoding and manipulation of complex packed data, along with specialized tools for analysis and data extraction.
 
 ## Core Goals
 1. Create efficient and reliable chunk decoders for WoW ADT files
 2. Build reusable libraries for each numbered chunk type
-3. Develop a foundation for future parsers and exporters
+3. Develop a foundation including specialized tools for future parsers and exporters
 4. Maintain compatibility with modern WoW file formats
 
 ## Core Strategy

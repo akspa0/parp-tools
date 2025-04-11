@@ -90,6 +90,12 @@ WoWToolbox provides:
    }
    ```
 
+5. Detailed File Inspection (NEW)
+   ```bash
+   # Generate detailed YAML dumps of PM4/ADT files for debugging/analysis
+   dotnet WoWToolbox.FileDumper.dll -d <input_dir> -o <output_dir>
+   ```
+
 ## Integration Points
 
 1. Warcraft.NET Integration

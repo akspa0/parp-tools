@@ -11,8 +11,8 @@ namespace WoWToolbox.Tests.AnalysisTool
 {
     public class ProgramTests
     {
-        private const string TestAdtPath = "test_data/development/development_0_0.adt";
-        private const string TestPm4Path = "test_data/development/development_00_00.pm4";
+        private const string TestAdtPath = "test_data/development/development_22_18.adt";
+        private const string TestPm4Path = "test_data/development/development_22_18.pm4";
 
         [Fact]
         public void RunCorrelation_ShouldProduceCorrectYaml()

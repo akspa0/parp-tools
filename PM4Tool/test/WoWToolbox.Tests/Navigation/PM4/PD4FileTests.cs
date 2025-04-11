@@ -69,8 +69,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             string outputMslkFilePath = baseOutputPath + "_mslk.obj"; // Kept for MSLK paths/points
             string outputMslkNodesFilePath = baseOutputPath + "_mslk_nodes.obj"; // Kept for MSLK Node Anchors
             string mslkLoopLogPath = baseOutputPath + "_mslk_loop.log";
-            // Remove combined geometry OBJ path
-            // string outputCombinedGeometryFilePath = baseOutputPath + "_combined_geometry.obj";
+            string outputMsurCentroidsPath = baseOutputPath + "_msur_centroids.obj"; // ADDED: Centroid output path
 
             Console.WriteLine($"Debug Log: {debugLogPath}");
             Console.WriteLine($"Summary Log: {summaryLogPath}");
@@ -81,6 +80,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             Console.WriteLine($"Output MSLK OBJ: {outputMslkFilePath}"); // Keep MSLK path log
             Console.WriteLine($"Output MSLK Nodes OBJ: {outputMslkNodesFilePath}"); // Keep MSLK Nodes path log
             Console.WriteLine($"MSLK Loop Log: {mslkLoopLogPath}");
+            Console.WriteLine($"MSUR Centroids OBJ: {outputMsurCentroidsPath}"); // ADDED: Log centroid path
             // Remove combined geometry path log
             // Console.WriteLine($"Output Combined Geometry OBJ: {outputCombinedGeometryFilePath}");
 
@@ -104,6 +104,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             StreamWriter? skippedMslkWriter = null; // Keep skipped MSLK writer
             StreamWriter? mslkNodesWriter = null; // Keep MSLK nodes writer
             StreamWriter? mslkLoopWriter = null;
+            StreamWriter? msurCentroidsWriter = null; // ADDED: Centroid writer
             // Remove combined geometry writer
             // StreamWriter? combinedGeometryWriter = null;
 
@@ -122,6 +123,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 mspvWriter = new StreamWriter(outputMspvFilePath, false);
                 msvtWriter = new StreamWriter(outputMsvtFilePath, false);
                 mscnWriter = new StreamWriter(outputMscnFilePath, false);
+                msurCentroidsWriter = new StreamWriter(outputMsurCentroidsPath, false); // ADDED: Initialize centroid writer
 
                 debugWriter.WriteLine($"--- DEBUG LOG FOR {relativeTestDataPath} ---");
                 summaryWriter.WriteLine($"--- SUMMARY LOG FOR {relativeTestDataPath} ---");
@@ -136,6 +138,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 mspvWriter.WriteLine($"# PD4 MSPV Geometry (Direct X, Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
                 msvtWriter.WriteLine($"# PD4 MSVT Geometry (Transformed: offset-X, offset-Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
                 mscnWriter.WriteLine($"# PD4 MSCN Geometry (Direct X, Y, Z) for {Path.GetFileName(relativeTestDataPath)}");
+                msurCentroidsWriter.WriteLine("# PD4 MSUR Face Centroids (Transformed: offset-X, offset-Y, Z)"); // ADDED: Header for centroids
 
                 // Logging before FromFile call
                 Console.WriteLine("DEBUG: About to call PD4File.FromFile...");
@@ -243,7 +246,6 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                     mscnWriter.WriteLine("o MSCN_Geometry"); // Add object directive for MSCN to its own file
                     foreach (var vec in pd4File.MSCN.Vectors)
                     {
-                        // Write vector directly (assuming X, Y, Z) to MSCN file
                         mscnWriter.WriteLine($"v {vec.X.ToString(CultureInfo.InvariantCulture)} {vec.Y.ToString(CultureInfo.InvariantCulture)} {vec.Z.ToString(CultureInfo.InvariantCulture)}");
                     }
                     debugWriter.WriteLine("MSCN export complete.");
@@ -475,11 +477,47 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                                     }
                                 }
                                 
+                                // --- Calculate Centroid (PD4 Specific Transform) --- 
+                                Vector3 centroid = Vector3.Zero;
+                                bool centroidCalculated = false;
+                                if (pd4File.MSVT?.Vertices != null) 
+                                {
+                                    List<Vector3> faceVertices = new List<Vector3>();
+                                    foreach (int objIndex in objFaceIndices)
+                                    {
+                                        int zeroBasedMsvtIndex = objIndex - 1; // Convert back to 0-based
+                                        if (zeroBasedMsvtIndex >= 0 && zeroBasedMsvtIndex < pd4File.MSVT.Vertices.Count)
+                                        {
+                                            var rawVertex = pd4File.MSVT.Vertices[zeroBasedMsvtIndex];
+                                            // Apply PD4 MSVT Transform
+                                            faceVertices.Add(MsvtToWorld_PD4(rawVertex)); 
+                                        }
+                                    }
+
+                                    if (faceVertices.Count > 0)
+                                    {
+                                        foreach (var v in faceVertices)
+                                        {
+                                            centroid += v;
+                                        }
+                                        centroid /= faceVertices.Count;
+                                        centroidCalculated = true;
+                                    }
+                                }
+                                // --- End Calculate Centroid ---
+                                
                                 // Write face if valid and enough vertices
                                 if (faceIsValid && objFaceIndices.Count >= 3)
                                 {
                                     msvtWriter.WriteLine("f " + string.Join(" ", objFaceIndices));
                                     debugWriter.WriteLine($"      Wrote face with {objFaceIndices.Count} vertices to _msvt.obj.");
+
+                                    // --- Write Centroid --- 
+                                    if (centroidCalculated)
+                                    {
+                                        msurCentroidsWriter!.WriteLine(FormattableString.Invariant($"v {centroid.X:F6} {centroid.Y:F6} {centroid.Z:F6} # Face from MSUR[{i}]"));
+                                    }
+                                    // --- End Write Centroid ---
                                 }
                                 else if (faceIsValid) // Valid indices, but not enough vertices
                                 {
@@ -581,6 +619,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 mslkWriter?.Close(); // Keep MSLK writer disposal
                 skippedMslkWriter?.Close(); // Keep skipped MSLK writer disposal
                 mslkNodesWriter?.Close(); // Keep MSLK nodes writer disposal
+                msurCentroidsWriter?.Close(); // ADDED: Dispose centroid writer
                 // Re-add individual writer disposal
                 mspvWriter?.Close();
                 msvtWriter?.Close();
@@ -597,6 +636,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
             Assert.True(File.Exists(outputMspvFilePath), $"MSPV OBJ file should exist at {outputMspvFilePath}");
             Assert.True(File.Exists(outputMsvtFilePath), $"MSVT OBJ file should exist at {outputMsvtFilePath}");
             Assert.True(File.Exists(outputMscnFilePath), $"MSCN OBJ file should exist at {outputMscnFilePath}");
+            Assert.True(File.Exists(outputMsurCentroidsPath), $"MSUR Centroids OBJ file should exist at {outputMsurCentroidsPath}");
 
             Console.WriteLine($"--- Finished Processing: {relativeTestDataPath} ---");
         }

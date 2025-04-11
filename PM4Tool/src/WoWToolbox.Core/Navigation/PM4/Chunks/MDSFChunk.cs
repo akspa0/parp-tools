@@ -71,18 +71,22 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             long startPosition = br.BaseStream.Position;
             long endPosition = br.BaseStream.Length; // Assuming the reader is positioned at the start of the chunk data
             long size = endPosition - startPosition;
+            Console.WriteLine($"    DEBUG: MDSFChunk.Load entered. Stream Position={startPosition}, Stream Length={endPosition}, Calculated Size={size}"); // DEBUG
 
             if (size < 0) throw new InvalidDataException("Stream size is negative.");
 
             // Use the corrected Entry Size from the documentation
             if (size % MdsfEntry.Size != 0)
             {
+                Console.WriteLine($"    DEBUG: MDSF Size {size} is not multiple of {MdsfEntry.Size}. Adjusting..."); // DEBUG
                 // Log a warning, but continue processing based on the number of full entries
                 Console.WriteLine($"Warning: MDSF chunk size {size} is not a multiple of the documented entry size {MdsfEntry.Size}. Possible padding or corruption.");
                 size -= (size % MdsfEntry.Size); // Process only complete entries
+                 Console.WriteLine($"    DEBUG: MDSF Adjusted Size = {size}"); // DEBUG
             }
 
             int entryCount = (int)(size / MdsfEntry.Size);
+             Console.WriteLine($"    DEBUG: MDSF Calculated Entry Count = {entryCount}"); // DEBUG
             Entries = new List<MdsfEntry>(entryCount);
 
             for (int i = 0; i < entryCount; i++)
