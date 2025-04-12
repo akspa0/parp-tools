@@ -101,16 +101,51 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Assert.True(pm4Files.Any(), "No PM4 files found in the input directory."); // Optional: Fail if no files found
             }
 
+            // --- Combined Output File Setup ---
+            var combinedOutputPath = Path.Combine(outputDir, "combined_render_mesh_transformed.obj");
+            Console.WriteLine($"Combined Output OBJ: {combinedOutputPath}");
+            using var combinedRenderMeshWriter = new StreamWriter(combinedOutputPath);
+            combinedRenderMeshWriter.WriteLine($"# Combined PM4 Render Mesh (Transformed: X+={CoordinateOffset:F3}, Y+={CoordinateOffset:F3}, Z) (Generated: {DateTime.Now})");
+            combinedRenderMeshWriter.WriteLine("o CombinedMesh");
+            int totalVerticesOffset = 0; // Track vertex offset for combined file
+
             // --- Loop Through Files ---
             foreach (var inputFilePath in pm4Files)
             {
                 var fileName = Path.GetFileName(inputFilePath);
                 Console.WriteLine($"\n==================== Processing File: {fileName} ====================");
+
+                // Check for zero-byte files before trying to process
                 try
                 {
-                    ProcessSinglePm4File(inputFilePath, outputDir); // Call the helper method
+                    var fileInfo = new FileInfo(inputFilePath);
+                    if (fileInfo.Length == 0)
+                    {
+                        Console.WriteLine($"!!!!!!!!!!!! SKIPPING Zero-byte file: {fileName} !!!!!!!!!!!!");
+                        // Optionally increment a separate skip counter if needed
+                        continue; // Move to the next file
+                    }
+                }
+                catch (FileNotFoundException)
+                {
+                    Console.WriteLine($"!!!!!!!!!!!! ERROR: File not found during size check: {fileName} !!!!!!!!!!!!");
+                    errorCount++; // Count this as an error
+                    continue; // Move to the next file
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"!!!!!!!!!!!! ERROR checking file size for {fileName}: {ex.Message} !!!!!!!!!!!!");
+                    errorCount++; // Count this as an error
+                    continue; // Move to the next file
+                }
+
+                try
+                {
+                    // Call the helper method, passing the combined writer and current offset
+                    int verticesInCurrentFile = ProcessSinglePm4File(inputFilePath, outputDir, combinedRenderMeshWriter, totalVerticesOffset);
                     processedCount++;
-                    Console.WriteLine($"-------------------- Successfully processed: {fileName} --------------------");
+                    totalVerticesOffset += verticesInCurrentFile; // Update the offset for the next file
+                    Console.WriteLine($"-------------------- Successfully processed: {fileName} (Added {verticesInCurrentFile} vertices) --------------------");
                 }
                 catch (Exception ex)
                 {
@@ -141,7 +176,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
 
         // --- Helper Method for Single File Processing ---
-        private void ProcessSinglePm4File(string inputFilePath, string outputDir)
+        // Updated signature to accept combined writer and vertex offset, and return vertex count
+        private int ProcessSinglePm4File(string inputFilePath, string outputDir, StreamWriter combinedTransformedWriter, int vertexOffset)
         {
              // 1. Derive baseOutputName from inputFilePath
             var baseOutputName = Path.GetFileNameWithoutExtension(inputFilePath);
@@ -158,6 +194,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             var outputSkippedMslkLogPath = baseOutputPath + "_skipped_mslk.log";
             var outputPm4MslkNodesFilePath = baseOutputPath + "_pm4_mslk_nodes.obj";
             var outputRenderMeshPath = baseOutputPath + "_render_mesh.obj";
+            var outputRenderMeshTransformedPath = baseOutputPath + "_render_mesh_transformed.obj"; // New path for transformed OBJ
             string debugLogPath = baseOutputPath + ".debug.log";
             string summaryLogPath = baseOutputPath + ".summary.log";
             var outputBuildingIdsPath = baseOutputPath + "_building_ids.log";
@@ -172,6 +209,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Console.WriteLine($"  Output Skipped MSLK Log: {outputSkippedMslkLogPath}");
             Console.WriteLine($"  Output PM4 MSLK Nodes OBJ: {outputPm4MslkNodesFilePath}");
             Console.WriteLine($"  Output RENDER MESH OBJ: {outputRenderMeshPath}");
+            Console.WriteLine($"  Output RENDER MESH TRANSFORMED OBJ: {outputRenderMeshTransformedPath}"); // Log new path
             Console.WriteLine($"  Debug Log: {debugLogPath}");
             Console.WriteLine($"  Summary Log: {summaryLogPath}");
             Console.WriteLine($"  Building IDs Log: {outputBuildingIdsPath}");
@@ -224,7 +262,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
             using var mslkWriter = new StreamWriter(outputMslkFilePath);
             using var skippedMslkWriter = new StreamWriter(outputSkippedMslkLogPath);
             using var mslkNodesWriter = new StreamWriter(outputPm4MslkNodesFilePath, false);
+            using var renderMeshTransformedWriter = new StreamWriter(outputRenderMeshTransformedPath, false); // Initialize writer for transformed OBJ
             // using var mscnWriter = exportMscnPoints ? new StreamWriter(baseOutputPath + "_mscn.obj") : null; // Conditional writer example
+
+            int msvtFileVertexCount = 0; // Declare variable here for correct scope
 
             try // Keep inner try for logging/resource cleanup context if needed, though outer one catches errors
             {
@@ -252,6 +293,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Write headers for non-MPRL files
                 renderMeshWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 renderMeshWriter.WriteLine("# Vertices Transform: Y, X, Z");
+                renderMeshTransformedWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) - TRANSFORMED (X+{CoordinateOffset:F3}, Y+{CoordinateOffset:F3}, Z) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
+                renderMeshTransformedWriter.WriteLine("# Vertices Transform: Y, X, Z THEN X+=Offset, Y+=Offset");
                 mspvWriter.WriteLine($"# PM4 MSPV/MSLK Geometry (X, Y, Z) - File: {Path.GetFileName(inputFilePath)}");
                 mslkWriter.WriteLine($"# PM4 MSLK Geometry (Points 'p' and Lines 'l') (Exported: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 skippedMslkWriter.WriteLine($"# PM4 Skipped/Invalid MSLK Entries Log (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
@@ -323,7 +366,6 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 debugWriter.WriteLine("MSUR Index Range validation will occur during MSUR processing.");
 
                 // Counters for exported vertices (can be useful for verification)
-                int msvtFileVertexCount = 0;
                 int mspvFileVertexCount = 0;
                 int mprlFileVertexCount = 0; // For the single MPRL file
                 int facesWrittenToRenderMesh = 0; // ADDED: Counter for faces written to the render mesh
@@ -377,24 +419,39 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     if (pm4File.MSVT != null && pm4File.MSVT.Vertices.Count > 0)
                     {
                         debugWriter.WriteLine("\n--- Exporting MSVT Vertices (Y, X, Z) -> _render_mesh.obj ---");
-                        summaryWriter.WriteLine($"\n--- MSVT Vertices ({Path.GetFileNameWithoutExtension(inputFilePath)}) (First 10) -> Render Mesh ---");
+                        debugWriter.WriteLine($"--- Exporting TRANSFORMED MSVT Vertices -> _render_mesh_transformed.obj AND combined_render_mesh_transformed.obj ---");
+                        summaryWriter.WriteLine($"\n--- MSVT Vertices ({Path.GetFileNameWithoutExtension(inputFilePath)}) (First 10) -> Render Mesh --- (Original & Transformed)");
                         int logCounterMsvt = 0;
+                        renderMeshTransformedWriter.WriteLine($"o Render_Mesh_{baseOutputName}"); // Object name for individual transformed file
+
                         foreach (var vertex in pm4File.MSVT.Vertices)
                         {
-                            msvtFileVertexCount++;
-                            // Apply Y, X, Z transform
+                            // Apply Y, X, Z transform for original export
                             float worldX = vertex.Y;
                             float worldY = vertex.X;
                             float worldZ = vertex.Z;
 
+                            // Write original vertex
+                            renderMeshWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
+
+                            // Apply transformation (X + Offset, Y + Offset, Z)
+                            float transformedX = worldX + CoordinateOffset;
+                            float transformedY = worldY + CoordinateOffset;
+                            float transformedZ = worldZ; // Z remains unchanged
+
+                            msvtFileVertexCount++; // Increment counter *after* calculations, before writing
+
+                            // Write transformed vertex to individual transformed file
+                            renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"v {transformedX:F6} {transformedY:F6} {transformedZ:F6}"));
+                            // Write transformed vertex to the combined file
+                            combinedTransformedWriter.WriteLine(FormattableString.Invariant($"v {transformedX:F6} {transformedY:F6} {transformedZ:F6}"));
+
                             // Reduced verbosity for batch processing debug log
-                            // debugWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount - 1}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Exported v ({worldX:F3}, {worldY:F3}, {worldZ:F3})"));
                             if (logCounterMsvt < 10)
                             {
-                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount - 1}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Exported v ({worldX:F3}, {worldY:F3}, {worldZ:F3})"));
-                                debugWriter.WriteLine(FormattableString.Invariant($"  MSVT Vertex {msvtFileVertexCount - 1}: Exp=({worldX:F3}, {worldY:F3}, {worldZ:F3})")); // Shorter debug log
+                                summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vert {msvtFileVertexCount - 1}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Orig v ({worldX:F3}, {worldY:F3}, {worldZ:F3}) -> Trans v ({transformedX:F3}, {transformedY:F3}, {transformedZ:F3})"));
+                                debugWriter.WriteLine(FormattableString.Invariant($"  MSVT V {msvtFileVertexCount - 1}: Orig=({worldX:F3}, {worldY:F3}, {worldZ:F3}) Trans=({transformedX:F3}, {transformedY:F3}, {transformedZ:F3})")); // Shorter debug log
                             }
-                            renderMeshWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
                             logCounterMsvt++;
                         }
                         if (pm4File.MSVT.Vertices.Count > 10)
@@ -785,6 +842,16 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     string faceLine = "f " + string.Join(" ", objFaceIndices);
                                     renderMeshWriter!.WriteLine($"g {groupName}");
                                     renderMeshWriter!.WriteLine(faceLine);
+                                    renderMeshTransformedWriter!.WriteLine($"g {groupName}"); // Write group to individual transformed too
+                                    renderMeshTransformedWriter!.WriteLine(faceLine);
+                                    // Write adjusted face to combined file
+                                    List<int> adjustedFaceIndices = objFaceIndices.Select(idx => idx + vertexOffset).ToList();
+                                    string adjustedFaceLine = "f " + string.Join(" ", adjustedFaceIndices);
+                                    // --- Added Debug Logging for Combined Face ---
+                                    debugWriter.WriteLine($"    COMBINED FACE: Offset={vertexOffset}, OrigIndices=[{string.Join(",", objFaceIndices)}], AdjIndices=[{string.Join(",", adjustedFaceIndices)}], Group={baseOutputName}_{groupName}");
+                                    // --- End Debug Logging ---
+                                    combinedTransformedWriter.WriteLine($"g {baseOutputName}_{groupName}"); // Add file prefix to group name in combined file
+                                    combinedTransformedWriter.WriteLine(adjustedFaceLine);
                                     facesWrittenToRenderMesh++;
                                 }
                                 else // Invalid MSVI range
@@ -875,6 +942,16 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     string faceLine = "f " + string.Join(" ", objFaceIndices);
                                     renderMeshWriter!.WriteLine($"g {groupName}"); // Group by MSUR index and linked MDOS info via MDSF
                                     renderMeshWriter!.WriteLine(faceLine);
+                                    renderMeshTransformedWriter!.WriteLine($"g {groupName}"); // Write group to individual transformed too
+                                    renderMeshTransformedWriter!.WriteLine(faceLine);
+                                    // Write adjusted face to combined file
+                                    List<int> adjustedFaceIndices = objFaceIndices.Select(idx => idx + vertexOffset).ToList();
+                                    string adjustedFaceLine = "f " + string.Join(" ", adjustedFaceIndices);
+                                    // --- Added Debug Logging for Combined Face ---
+                                    debugWriter.WriteLine($"    COMBINED FACE: Offset={vertexOffset}, OrigIndices=[{string.Join(",", objFaceIndices)}], AdjIndices=[{string.Join(",", adjustedFaceIndices)}], Group={baseOutputName}_{groupName}");
+                                    // --- End Debug Logging ---
+                                    combinedTransformedWriter.WriteLine($"g {baseOutputName}_{groupName}"); // Add file prefix to group name in combined file
+                                    combinedTransformedWriter.WriteLine(adjustedFaceLine);
                                     facesWrittenToRenderMesh++; // Ensure this is INSIDE the if(State == 0) block
                                 }
                                 else // State != 0
@@ -1006,6 +1083,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 throw;
             }
             // No finally needed here as 'using' handles disposal
+
+            return msvtFileVertexCount; // Return the count of vertices written for this file
 
         } // End ProcessSinglePm4File
 

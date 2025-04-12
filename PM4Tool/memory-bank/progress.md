@@ -10,14 +10,15 @@
 *   **Vertex/Index Export:** Test code (`PM4FileTests`/`PD4FileTests`) successfully exports raw `MSVT` vertices (transformed Y,X,Z for OBJ) and `MSVI` indices.
 *   **Path Node Linking:** Logic correctly links `MSPV` entries to `MSVT` vertex coordinates via the `MSLK`/`MSPI`/`MSVI` chain.
 *   **Face Generation Logic (MSUR -> MDSF -> MDOS):**
-    *   `PM4FileTests` now correctly uses `MDSF` to map `MSUR` surfaces to `MDOS` states.
+    *   `PM4FileTests` correctly uses `MDSF` to map `MSUR` surfaces to `MDOS` states.
     *   Filters faces based on `MDOS.destruction_state == 0` for linked entries.
-    *   **Includes faces from `MSUR` entries that LACK an `MDSF` link**, assuming they represent the default state (0).
-*   **OBJ Export:** Tests generate `_render_mesh.obj` containing filtered faces (including unlinked ones) and `_mspv.obj`/`_pm4_mslk_nodes.obj` for structural/Doodad visualization.
+    *   Includes faces from `MSUR` entries that LACK an `MDSF` link, assuming they represent the default state (0).
+*   **OBJ Export:** Tests generate `_render_mesh.obj`, `_mspv.obj`, `_pm4_mslk_nodes.obj`, etc. for visualization.
+*   **Batch Processing (`PM4FileTests`):** The test `LoadAndProcessPm4FilesInDirectory_ShouldGenerateOutputs` now iterates through all `.pm4` files in a specified directory (`test_data/development`), skips zero-byte files, and processes valid files, generating individual output sets.
 *   **Chunk Documentation:** `docs/pm4_pd4_chunks.md` created and populated with current chunk understanding.
 
 ### What's Left / Next Steps
-*   **Visual Verification:** Verify the latest `_render_mesh.obj` in MeshLab to confirm the face generation logic yields the expected geometry.
+*   **Visual Verification (Batch):** Verify **multiple** `_render_mesh.obj` files from the batch test run in MeshLab to confirm the face generation logic yields expected geometry across different inputs.
 *   **Doodad Assembly:**
     *   Decode `MSLK` unknown fields (`Unk00`, `Unk01`, `Unk04`, `Unk12`) to extract Doodad properties (Model ID, rotation, scale).
     *   Investigate the link between `MSLK` and `MDBH` for specific model identification.
@@ -35,15 +36,17 @@
 *   **Testing/Verification:** Ongoing review of YAML output.
 
 ## Overall Status
-*   Core focus is on **verifying render geometry assembly** and then moving to **Doodad decoding**.
-*   `PM4FileTests` correctly implements `MSUR` -> `MDSF` -> `MDOS` linking and handles unlinked faces.
+*   Core focus is on **verifying render geometry assembly (batch)** and then moving to **Doodad decoding**.
+*   `PM4FileTests` correctly implements `MSUR` -> `MDSF` -> `MDOS` linking, handles unlinked faces, and **supports batch processing of valid files**.
 *   Chunk documentation created.
 *   `WoWToolbox.FileDumper` is stable for current data structures.
 *   `AnalysisTool` remains de-prioritized.
 
 ### Known Issues
 *   **AnalysisTool Termination (De-prioritized):** Exits after processing only the first file in directory mode.
-*   **Test Data Issues (`development_00_00.pm4`):** Contains truncated `MDBH` and invalid `MPRR` indices (currently skipped).
+*   **Test Data Issues (`development_00_00.pm4`):** Contains truncated `MDBH` and invalid `MPRR` indices (currently skipped/logged in tests).
+*   **Zero-Byte Test Files:** Several `.pm4` files in `test_data/development` are zero bytes and are skipped by the batch test.
+*   **Missing Chunks in Some PM4s:** Some non-zero-byte PM4 files cause `Chunk "MSLK" not found` errors in the base loader (previously caused test failures, now handled by `try-catch` in batch test).
 *   **Validation Assertions Commented:** Need re-enabling for QA.
 *   **Interpretation/Use of MSCN, some MSLK `Unk*` fields TBD.**
 *   **Vulnerability:** `SixLabors.ImageSharp` (dependency).
@@ -53,8 +56,8 @@
 *   Project Setup ✓
 *   Core Framework ✓
 *   PM4 Basic Implementation ✓
-*   PM4 Validation & Testing ✓ *(Assertions bypassed)*
-*   PM4 OBJ Export Refinement ✓ *(Geometry assembly focus)*
+*   PM4 Validation & Testing ✓ *(Assertions bypassed, Batch processing added)*
+*   PM4 OBJ Export Refinement ✓ *(Geometry assembly focus, Batch export added)*
 *   PM4 MSLK Analysis ✓ *(Hierarchy, Node Types, Doodad Anchors ID'd)*
 *   PM4 MSCN/MDSF Research ✓ *(MDSF link implemented, MSCN analysis paused)*
 *   PD4 Basic Implementation ✓
@@ -64,7 +67,7 @@
 *   **New Tool:** File Dumper (`WoWToolbox.FileDumper`) ✓
 *   PM4/ADT Data Correlation ✓
 *   **New Documentation:** Chunk Guide (`docs/pm4_pd4_chunks.md`) ✓
-*   **Assemble Render Geometry (MSVT/MSVI/MSUR)** ⏳ *(Logic implemented, needs visual verification)*
+*   **Assemble Render Geometry (MSVT/MSVI/MSUR)** ⏳ *(Logic implemented, needs batch visual verification)*
 *   **Decode Doodad Data (MSLK/MDBH)** 🔲 *(Next major step after verification)*
 *   Assemble Structure Geometry (MSPV/MSLK paths) 🔲
 *   Legacy Support 🔲
