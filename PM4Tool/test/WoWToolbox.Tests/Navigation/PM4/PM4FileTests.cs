@@ -105,7 +105,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             var combinedOutputPath = Path.Combine(outputDir, "combined_render_mesh_transformed.obj");
             Console.WriteLine($"Combined Output OBJ: {combinedOutputPath}");
             using var combinedRenderMeshWriter = new StreamWriter(combinedOutputPath);
-            combinedRenderMeshWriter.WriteLine($"# Combined PM4 Render Mesh (Transformed: X+={CoordinateOffset:F3}, Y+={CoordinateOffset:F3}, Z) (Generated: {DateTime.Now})");
+            combinedRenderMeshWriter.WriteLine($"# Combined PM4 Render Mesh (Transformed: X={CoordinateOffset:F3}-X, Y={CoordinateOffset:F3}-Y, Z) (Generated: {DateTime.Now})");
             combinedRenderMeshWriter.WriteLine("o CombinedMesh");
             int totalVerticesOffset = 0; // Track vertex offset for combined file
 
@@ -221,49 +221,67 @@ namespace WoWToolbox.Tests.Navigation.PM4
             var pm4File = PM4File.FromFile(inputFilePath);
             Assert.NotNull(pm4File); // Basic assertion per file
 
-            // Log first few MPRR entries for debugging index issue
-            Console.WriteLine("\n  --- Dumping MPRR Entries 60-75 (if they exist) ---");
-            if (pm4File.MPRR != null && pm4File.MPRR.Entries.Count > 60)
+            // Enhanced MPRR Logging (Moved Before other processing that might depend on it)
+            debugWriter.WriteLine("\n--- Detailed MPRR Chunk Analysis ---");
+            if (pm4File.MPRR != null && pm4File.MPRL != null && pm4File.MPRL.Entries.Count > 0)
             {
-                int startIndex = 60;
-                int endIndex = Math.Min(startIndex + 16, pm4File.MPRR.Entries.Count); // Log around 16 entries
-                for (int i = startIndex; i < endIndex; i++)
+                int mprlCount = pm4File.MPRL.Entries.Count;
+                debugWriter.WriteLine($"  MPRL Count: {mprlCount}");
+                int maxEntriesToLog = Math.Min(pm4File.MPRR.Entries.Count, 50); // Log up to 50 entries
+                debugWriter.WriteLine($"  Logging first {maxEntriesToLog} of {pm4File.MPRR.Entries.Count} MPRR entries:");
+
+                for (int i = 0; i < maxEntriesToLog; i++)
                 {
                     var entry = pm4File.MPRR.Entries[i];
-                    // Update to use new MprrEntry fields (ushort Unknown_0x00, ushort Unknown_0x02)
-                    Console.WriteLine($"    Entry {i}: Unk0=0x{entry.Unknown_0x00:X4}({entry.Unknown_0x00}), Unk2=0x{entry.Unknown_0x02:X4}({entry.Unknown_0x02})");
+                    string logLine = $"    Entry {i}: Unk0=0x{entry.Unknown_0x00:X4}({entry.Unknown_0x00}), Unk2=0x{entry.Unknown_0x02:X4}({entry.Unknown_0x02})";
+
+                    // Check if indices are valid MPRL indices and append MPRL data if so
+                    bool unk0Valid = entry.Unknown_0x00 < mprlCount;
+                    bool unk2Valid = entry.Unknown_0x02 < mprlCount;
+                    string mprlInfo = string.Empty;
+
+                    if (unk0Valid)
+                    {
+                        var mprl0 = pm4File.MPRL.Entries[entry.Unknown_0x00];
+                        mprlInfo += $" -> MPRL[{entry.Unknown_0x00}]={mprl0.Position.ToString("F3")}";
+                    } else {
+                        mprlInfo += $" -> MPRL[{entry.Unknown_0x00}]=INVALID";
+                    }
+                    if (unk2Valid)
+                    {
+                        var mprl2 = pm4File.MPRL.Entries[entry.Unknown_0x02];
+                         // Only add a separator if previous info was added
+                        mprlInfo += (unk0Valid ? "; " : " -> ") + $"MPRL[{entry.Unknown_0x02}]={mprl2.Position.ToString("F3")}";
+                    } else {
+                        mprlInfo += (unk0Valid ? "; " : " -> ") + $"MPRL[{entry.Unknown_0x02}]=INVALID";
+                    }
+
+                    debugWriter.WriteLine(logLine + mprlInfo);
+                }
+                if (pm4File.MPRR.Entries.Count > maxEntriesToLog)
+                {
+                     debugWriter.WriteLine($"    ... (rest omitted)");
                 }
             } else {
-                 Console.WriteLine("    MPRR chunk missing or has less than 60 entries.");
+                 debugWriter.WriteLine("  MPRR chunk, MPRL chunk, or MPRL entries missing. Cannot perform detailed logging.");
             }
-            Console.WriteLine("  --- End MPRR Dump ---\n");
+            debugWriter.WriteLine("--- End Detailed MPRR Chunk Analysis ---\n");
 
 
             // --- Export Configuration Flags ---
-            // These could potentially be parameters to the helper method if needed
-            bool exportMspvVertices = true; // Keep for structure
-            bool exportMsvtVertices = true; // Need vertices for render mesh
-            bool exportMprlPoints = true; // Keep as separate point cloud
-            bool exportMslkPaths = true; // Keep for structure/Doodads
+            bool exportMspvVertices = true;
+            bool exportMsvtVertices = true;
+            bool exportMprlPoints = true;
+            bool exportMslkPaths = true;
             bool exportOnlyFirstMslk = false;
-            bool processMsurEntries = true; // Need MSUR for render mesh faces
+            bool processMsurEntries = true;
             bool exportOnlyFirstMsur = false;
             bool logMdsfLinks = true;
-            bool exportMscnPoints = false; // Disable MSCN point export
+            bool exportMscnPoints = false;
 
-            // --- Initialize Writers ---
-            // Use 'using' statements for automatic disposal
-            using var debugWriter = new StreamWriter(debugLogPath, false);
-            using var summaryWriter = new StreamWriter(summaryLogPath, false);
-            using var buildingIdWriter = new StreamWriter(outputBuildingIdsPath, false);
-            using var renderMeshWriter = new StreamWriter(outputRenderMeshPath, false);
-            using var mspvWriter = new StreamWriter(outputMspvFilePath);
-            using var mprlWriter = new StreamWriter(outputMprlFilePath);
-            using var mslkWriter = new StreamWriter(outputMslkFilePath);
-            using var skippedMslkWriter = new StreamWriter(outputSkippedMslkLogPath);
-            using var mslkNodesWriter = new StreamWriter(outputPm4MslkNodesFilePath, false);
-            using var renderMeshTransformedWriter = new StreamWriter(outputRenderMeshTransformedPath, false); // Initialize writer for transformed OBJ
-            // using var mscnWriter = exportMscnPoints ? new StreamWriter(baseOutputPath + "_mscn.obj") : null; // Conditional writer example
+            // --- Initialize Writers --- (Moved up before MPRR logging)
+            // using var debugWriter = new StreamWriter(debugLogPath, false);
+            // ... other writers ...
 
             int msvtFileVertexCount = 0; // Declare variable here for correct scope
 
@@ -293,8 +311,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Write headers for non-MPRL files
                 renderMeshWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 renderMeshWriter.WriteLine("# Vertices Transform: Y, X, Z");
-                renderMeshTransformedWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) - TRANSFORMED (X+{CoordinateOffset:F3}, Y+{CoordinateOffset:F3}, Z) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
-                renderMeshTransformedWriter.WriteLine("# Vertices Transform: Y, X, Z THEN X+=Offset, Y+=Offset");
+                renderMeshTransformedWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) - TRANSFORMED (X={CoordinateOffset:F3}-X, Y={CoordinateOffset:F3}-Y, Z) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
+                renderMeshTransformedWriter.WriteLine("# Vertices Transform: Y, X, Z THEN X=Offset-X, Y=Offset-Y");
                 mspvWriter.WriteLine($"# PM4 MSPV/MSLK Geometry (X, Y, Z) - File: {Path.GetFileName(inputFilePath)}");
                 mslkWriter.WriteLine($"# PM4 MSLK Geometry (Points 'p' and Lines 'l') (Exported: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 skippedMslkWriter.WriteLine($"# PM4 Skipped/Invalid MSLK Entries Log (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
@@ -305,17 +323,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 debugWriter.WriteLine($"\n--- Validating MPRR Indices against MPRL Vertex Count: {mprlVertexCount} ---");
                 if (pm4File.MPRR != null)
                 {
-                    // Log MPRR validation attempts - don't assert for batch processing
-                    bool mprrIndicesValid = true;
-                    for(int i = 0; i < pm4File.MPRR.Entries.Count; i++) {
-                         var entry = pm4File.MPRR.Entries[i];
-                         // Example validation logic (adjust if fields change)
-                         // if (entry.SomeIndexField >= mprlVertexCount) {
-                         //    debugWriter.WriteLine($"  WARN: MPRR Entry {i} has invalid index {entry.SomeIndexField} (MPRL Count: {mprlVertexCount})");
-                         //    mprrIndicesValid = false;
-                         // }
-                    }
-                     debugWriter.WriteLine(mprrIndicesValid ? "MPRR Indices appear valid within MPRL bounds (basic check)." : "MPRR Indices validation logged potential issues.");
+                    bool mprrIndicesValid = pm4File.MPRR.ValidateIndices(mprlVertexCount); // Use the chunk's validation
+                    debugWriter.WriteLine(mprrIndicesValid ? "MPRR Indices appear valid within MPRL bounds (basic check)." : "MPRR Indices validation logged potential issues OR FAILED.");
                 } else {
                      debugWriter.WriteLine("MPRR Chunk not present, skipping validation.");
                 }
@@ -434,9 +443,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             // Write original vertex
                             renderMeshWriter.WriteLine(FormattableString.Invariant($"v {worldX:F6} {worldY:F6} {worldZ:F6}"));
 
-                            // Apply transformation (X + Offset, Y + Offset, Z)
-                            float transformedX = worldX + CoordinateOffset;
-                            float transformedY = worldY + CoordinateOffset;
+                            // Apply transformation (Offset - X, Offset - Y, Z)
+                            float transformedX = CoordinateOffset - worldX;
+                            float transformedY = CoordinateOffset - worldY;
                             float transformedZ = worldZ; // Z remains unchanged
 
                             msvtFileVertexCount++; // Increment counter *after* calculations, before writing
@@ -744,7 +753,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         debugWriter.WriteLine("Skipping MSLK path/node export (MSLK, MSPI, or MSPV data missing or invalid).");
                     }
                 } else { // Flag false
-                    debugWriter.WriteLine("\nSkipping MSLK Path/Node/JSON export (Flag 'exportMslkPaths' is False).");
+                    debugWriter.WriteLine("\nSkipping MSLK Path/Node export (Flag 'exportMslkPaths' is False).");
                 }
 
 
