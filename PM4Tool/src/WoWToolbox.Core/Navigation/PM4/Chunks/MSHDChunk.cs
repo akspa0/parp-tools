@@ -13,14 +13,14 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public const string ExpectedSignature = "MSHD";
         public string GetSignature() => ExpectedSignature;
 
-        public uint Unknown_0x00 { get; set; }
-        public uint Unknown_0x04 { get; set; }
-        public uint Unknown_0x08 { get; set; }
-        public uint Unknown_0x0C { get; set; }
-        public uint Unknown_0x10 { get; set; }
-        public uint Unknown_0x14 { get; set; }
-        public uint Unknown_0x18 { get; set; }
-        public uint Unknown_0x1C { get; set; }
+        public uint Unknown_0x00 { get; set; } // Meaning TBD.
+        public uint Unknown_0x04 { get; set; } // Meaning TBD.
+        public uint Unknown_0x08 { get; set; } // Meaning TBD.
+        public uint Unknown_0x0C { get; set; } // Meaning TBD.
+        public uint Unknown_0x10 { get; set; } // Meaning TBD.
+        public uint Unknown_0x14 { get; set; } // Meaning TBD.
+        public uint Unknown_0x18 { get; set; } // Meaning TBD.
+        public uint Unknown_0x1C { get; set; } // Meaning TBD.
 
         public const uint ExpectedSize = 32;
 

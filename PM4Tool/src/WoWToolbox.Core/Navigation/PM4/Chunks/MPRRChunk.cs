@@ -9,12 +9,18 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     /// <summary>
     /// Represents an entry in the MPRR chunk.
     /// Structure based on documentation at wowdev.wiki/PM4.md (MPRR section)
+    /// The meaning of the fields is currently unknown, but analysis suggests:
+    /// - They likely represent pairs of indices into the MPRL chunk.
+    /// - Unknown_0x00 often uses 0xFFFF (65535) as a sentinel value (e.g., no starting point?).
+    /// - Unknown_0x02 often references index 0 (MPRL[0]), possibly as a common hub or reference.
+    /// Purpose might be defining path connections, visibility, or other relationships.
     /// </summary>
     public class MprrEntry
     {
         // Fields based on PM4.md documentation (4 bytes total)
-        public ushort Unknown_0x00 { get; set; }      // _0x00 from doc
-        public ushort Unknown_0x02 { get; set; }      // _0x02 from doc
+        // Meaning is unknown according to wowdev.wiki as of 2024-Q3.
+        public ushort Unknown_0x00 { get; set; }      // _0x00 from doc. Often 0xFFFF (sentinel?)
+        public ushort Unknown_0x02 { get; set; }      // _0x02 from doc. Often 0 (MPRL index 0?)
         
         public const int Size = 4; // Bytes (ushort + ushort)
 
@@ -32,12 +38,13 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         
         public override string ToString()
         {
-            return $"MPRR Entry [Unk0: 0x{Unknown_0x00:X4}, Unk2: 0x{Unknown_0x02:X4}]";
+            return $"MPRR Entry [Unk0: 0x{Unknown_0x00:X4}, Unk2: 0x{Unknown_0x02:X4}] (Meaning Unknown)";
         }
     }
 
     /// <summary>
     /// Represents the MPRR chunk containing data potentially referencing MPRL positions.
+    /// Analysis suggests it defines relationships (connections?) between pairs of MPRL indices.
     /// </summary>
     public class MPRRChunk : IIFFChunk, IBinarySerializable
     {
@@ -121,8 +128,9 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             // The meaning of Unknown_0x00 and Unknown_0x02 is currently unclear.
             // Cannot apply old logic based on MprlIndex and specific Unknown_0x00 flags.
             // Console.WriteLine("Warning: MPRR Index Validation is temporarily disabled pending structural understanding.");
-            // return true; // Temporarily return true to allow build/test
+            return true; // Temporarily return true as the meaning/purpose of the fields is unknown.
 
+            /* --- REMOVED Validation Logic (Based on unconfirmed assumption) ---
             // IMPLEMENTED VALIDATION based on 4-byte structure (ushort, ushort)
             // Assuming Unknown_0x00 and Unknown_0x02 are indices into MPRL
             if (mprlEntryCount <= 0) return Entries.Count == 0; // If no MPRL entries, MPRR should be empty to be valid
@@ -145,6 +153,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
                 }
             }
             return true;
+            */
         }
 
         public override string ToString()

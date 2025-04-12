@@ -18,13 +18,13 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     /// </summary>
     public class MprlEntry
     {
-        public ushort Unknown_0x00 { get; set; }          // _0x00 in doc
-        public short Unknown_0x02 { get; set; }           // _0x02 in doc
-        public ushort Unknown_0x04 { get; set; }          // _0x04 in doc
-        public ushort Unknown_0x06 { get; set; }          // _0x06 in doc
-        public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Reverted to C3Vector (float)
-        public short Unknown_0x14 { get; set; }           // _0x14 in doc
-        public ushort Unknown_0x16 { get; set; }          // _0x16 in doc
+        public ushort Unknown_0x00 { get; set; }          // _0x00 in doc - Meaning TBD (Wowdev says "Always 0"?)
+        public short Unknown_0x02 { get; set; }           // _0x02 in doc - Meaning TBD (Wowdev says "Always -1"?)
+        public ushort Unknown_0x04 { get; set; }          // _0x04 in doc - Meaning TBD.
+        public ushort Unknown_0x06 { get; set; }          // _0x06 in doc - Meaning TBD.
+        public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Vertex position (float).
+        public short Unknown_0x14 { get; set; }           // _0x14 in doc - Meaning TBD.
+        public ushort Unknown_0x16 { get; set; }          // _0x16 in doc - Meaning TBD.
         // Removed old UnknownFloat fields
 
         public const int Size = 24; // Bytes (2+2+2+2 + C3Vector(12) + 2+2)

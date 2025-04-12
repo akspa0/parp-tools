@@ -15,17 +15,34 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     public class MSLKEntry : IBinarySerializable
     {
         // Fields based on PD4.md documentation (24 bytes total)
-        public byte Unknown_0x00 { get; set; } // Flags?
-        public byte Unknown_0x01 { get; set; }
-        public ushort Unknown_0x02 { get; set; } // Padding? Always 0?
-        public uint Unknown_0x04 { get; set; } // An index somewhere?
-        public int MspiFirstIndex { get; set; } // int24_t - Stored as int, requires special handling
-        public byte MspiIndexCount { get; set; } // uint8_t
-        public uint Unknown_0x0C { get; set; } // Always 0xffffffff?
-        public ushort Unknown_0x10 { get; set; }
-        public ushort Unknown_0x12 { get; set; } // Always 0x8000?
+        // Based on WMO MODD chunk, Unk00/Unk01/Unk12 might encode Quaternion orientation and Scale.
+        public byte Unknown_0x00 { get; set; } // Flags? (Likely part of Doodad orientation/scale or flags. Observed 0x01 in PM4 node sample)
+        public byte Unknown_0x01 { get; set; } // (Likely part of Doodad orientation/scale or flags. Observed 0x00-0x07 in PM4 node sample)
+        public ushort Unknown_0x02 { get; set; } // Padding? (Assumed 0x0000, needs verification)
+        public uint Unknown_0x04 { get; set; } // Group ID / Doodad Identifier (Link to MDBH unclear; WMO uses nameIndex in MODD)
+        public int MspiFirstIndex { get; set; } // int24_t - Stored as int, requires special handling. Index into MSPI for geometry, -1 for Doodad nodes.
+        public byte MspiIndexCount { get; set; } // uint8_t - Number of points in MSPI for geometry, 0 for Doodad nodes.
+        public uint Unknown_0x0C { get; set; } // (Assumed 0xFFFFFFFF, needs verification)
+        public ushort Unknown_0x10 { get; set; } // Confirmed: Anchor Point MSVI Index for Doodad nodes. Purpose in geometry entries TBD.
+        public ushort Unknown_0x12 { get; set; } // (Likely part of Doodad orientation/scale or flags. Assumed 0x8000 in PM4 node sample, needs verification)
 
         public const int StructSize = 20; // Total size in bytes (1+1+2+4+3+1+4+2+2 = 20)
+
+        // --- Speculative Properties (Decoding Logic Unknown) ---
+        
+        /// <summary>
+        /// SPECULATIVE: Potential scale factor. Actual decoding logic is unknown.
+        /// This is a placeholder based on the simplest possible interpretation.
+        /// </summary>
+        public float? SpeculativeScale => null; // Placeholder - No clear candidate field identified yet.
+
+        /// <summary>
+        /// SPECULATIVE: Represents potential packed quaternion orientation data.
+        /// Actual decoding logic is unknown. Likely involves Unk00, Unk01, Unk12.
+        /// </summary>
+        public object SpeculativeOrientationData => new { U00 = Unknown_0x00, U01 = Unknown_0x01, U12 = Unknown_0x12 }; // Placeholder
+
+        // --- End Speculative Properties ---
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MSLKEntry"/> class

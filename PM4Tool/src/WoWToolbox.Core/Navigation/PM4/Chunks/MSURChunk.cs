@@ -11,17 +11,17 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     /// </summary>
     public class MsurEntry
     {
-        public byte FlagsOrUnknown_0x00 { get; set; }          // _0x00
-        public byte IndexCount { get; set; }          // _0x01
-        public byte Unknown_0x02 { get; set; }            // _0x02
-        public byte Padding_0x03 { get; set; }             // _0x03
-        public float UnknownFloat_0x04 { get; set; }             // _0x04
-        public float UnknownFloat_0x08 { get; set; }             // _0x08
-        public float UnknownFloat_0x0C { get; set; }             // _0x0C
-        public float UnknownFloat_0x10 { get; set; }             // _0x10
-        public uint MsviFirstIndex { get; set; }      // _0x14
-        public uint MdosIndex { get; set; }            // _0x18 - Renamed from Unknown_0x18
-        public uint Unknown_0x1C { get; set; }            // _0x1C
+        public byte FlagsOrUnknown_0x00 { get; set; }          // _0x00 - Meaning TBD. Might be flags.
+        public byte IndexCount { get; set; }          // _0x01 - Number of indices in MSVI used by this surface.
+        public byte Unknown_0x02 { get; set; }            // _0x02 - Meaning TBD.
+        public byte Padding_0x03 { get; set; }             // _0x03 - Likely padding.
+        public float UnknownFloat_0x04 { get; set; }             // _0x04 - Meaning TBD.
+        public float UnknownFloat_0x08 { get; set; }             // _0x08 - Meaning TBD.
+        public float UnknownFloat_0x0C { get; set; }             // _0x0C - Meaning TBD.
+        public float UnknownFloat_0x10 { get; set; }             // _0x10 - Meaning TBD.
+        public uint MsviFirstIndex { get; set; }      // _0x14 - Starting index in MSVI for this surface.
+        public uint MdosIndex { get; set; }            // _0x18 - Index into MDOS (Destructible Object States). Note: This field is NOT directly present in PM4 docs but is implied by MDSF link.
+        public uint Unknown_0x1C { get; set; }            // _0x1C - Meaning TBD.
 
         public const int Size = 32; // Bytes
 
