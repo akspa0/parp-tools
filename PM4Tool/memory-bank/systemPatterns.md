@@ -185,7 +185,9 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
 *   **No Implemented Direct Links Found:**
     *   `MSLK` <-> `MSCN`: No code found directly correlating.
     *   `MSLK` <-> `MSUR`: No direct code link found (but potentially linked logically via MSLK group ID / ADT UniqueID).
+    *   `MPRR` -> ???: Indices within MPRR sequences are likely *not* into MPRL.
 *   **Potential Semantic Links (Requires Further Research):**
     *   The `MSLK.Unk04` Group ID / ADT UniqueID might logically group related `MSUR` surfaces (via MDSF/MDOS?) or `MSCN` objects.
     *   `MSLK` Doodad properties (`Unk00`/`Unk01`/`Unk12`) might signify relationships to other chunk data (pending decoding).
     *   `MSCN` vectors might provide normal data for vertices used by `MSUR` or `MSLK`, but the indexing mechanism isn't immediately clear.
+    *   `MPRR` flag value (before 0xFFFF) might indicate type or target of sequence indices.

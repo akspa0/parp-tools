@@ -97,13 +97,14 @@
 *   **Export Raw Doodad Node Data** ✓
 *   **Export Raw MPRR Data** ✓
 *   **Analyze MPRR Structure** ✓ (Paired indices, sentinel identified, visualization enabled)
+*   **Analyze MPRR Structure (Revised)** ✓ (Confirmed 0xFFFF-terminated sequences, flag before terminator, indices likely *not* MPRL)
 *   **Handle High-MPRR/MPRL-Ratio Files** ✓ (Specialized processor implemented)
 *   **Standardize Coordinate Transformations** ✓ (Scale and offset constants aligned)
 *   **Decode Doodad Data (MSLK/MDBH)** 🚧 *(Blocked - Needs manual analysis/research)*
 *   Assemble Structure Geometry (MSPV/MSLK paths) 🔲
-*   MPRR Decoding ⏳ (Structure known, visualization available, purpose/links TBD, ID hypothesis pending manual verification)
+*   MPRR Index Target Identification ⏳ (Sequence structure known, indices target TBD)
 *   Other Unknown Field Decoding 🔲
 *   Legacy Support 🔲
 *   Quality Assurance 🔲 *(Needs re-enabled asserts)*
-*   Interpret Nodes / Analyze Unknowns 🚧 *(Blocked for Doodads)*
+*   Interpret Nodes / Analyze Unknowns �� *(Blocked for Doodad properties, MSLK.Unk10 confirmed as anchor index)*
 *   Build Cleanup ✓ 

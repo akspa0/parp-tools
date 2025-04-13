@@ -41,6 +41,7 @@ public class Program
         string? mslkDebugLogPath = null;
         string? mslkSkippedLogPath = null;
         bool runMslkAnalysis = false;
+        bool runHypothesisAnalysis = false; // ADDED: Flag for new analysis mode
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -86,6 +87,9 @@ public class Program
                         return;
                     }
                     break;
+                case "--analyze-hypotheses": // ADDED: New argument
+                    runHypothesisAnalysis = true;
+                    break;
                 case "-h":
                 case "--help":
                     PrintHelp();
@@ -106,6 +110,12 @@ public class Program
                  return;
             }
             RunMslkAnalysis(mslkDebugLogPath, mslkSkippedLogPath);
+        }
+        else if (runHypothesisAnalysis) // ADDED: Check for new mode
+        {
+            // Instantiate and run the new analyzer
+            var hypothesisAnalyzer = new MprrHypothesisAnalyzer();
+            hypothesisAnalyzer.Analyze(inputDirectory, outputDirectory);
         }
         else
         {
@@ -354,6 +364,8 @@ public class Program
          Console.WriteLine("\n  MSLK Log Analysis:");
          Console.WriteLine("    --analyze-mslk <debug_log> [skip_log] Run analysis on existing PM4 test debug/skipped logs.");
          Console.WriteLine("                                            Outputs summary to <debug_log_name>.debug_mslk_summary.txt.");
+         Console.WriteLine("\n  MPRR/MSLK/MPRL Hypothesis Analysis:");
+         Console.WriteLine("    --analyze-hypotheses               Run MPRR/MSLK/MPRL hypothesis validation analysis.");
          Console.WriteLine("\n  General:");
          Console.WriteLine("    -h, --help                          Show this help message.");
          Console.WriteLine("\nExamples:");

@@ -1060,6 +1060,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                 if (msviIndices != null && msvtVertices != null && msviCount > 0 && msvtCount > 0)
                                 {
                                     ushort msviLookupIndex = mslkEntry.Unknown_0x10;
+                                    // ADDED: Log the specific Unk10 value for this node entry
+                                    debugWriter.WriteLine($"    MSLK Node Entry {entryIndex} - Unknown_0x10 Value: 0x{mslkEntry.Unknown_0x10:X4}");
+
                                     if (msviLookupIndex < msviCount)
                                     {
                                         uint msvtLookupIndex = msviIndices[msviLookupIndex];

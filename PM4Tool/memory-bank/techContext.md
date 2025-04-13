@@ -194,12 +194,27 @@
   - `int MspiFirstIndex`: Index into `MSPI` chunk for geometry entries, `-1` for Doodad node entries. (Note: 24-bit signed integer).
   - `byte MspiIndexCount`: Number of points in `MSPI` chunk associated with a geometry entry, `0` for Doodad node entries.
   - `uint Unk0C`: Consistently `0xFFFFFFFF` observed.
-  - `ushort Unknown_0x10`: **Anchor Point Vertex Index.** Confirmed MSVI index providing Doodad anchor position for both PM4 and PD4. Links MSLK Node entries to a specific vertex via `MSVI[Unknown_0x10] -> MSVT[index]`. Also present in geometry entries (purpose TBD).
+  - `ushort Unknown_0x10`: **Anchor Point Vertex Index.** Confirmed MSVI index providing Doodad anchor position for both PM4 and PD4. Links MSLK Node entries to a specific vertex via `MSVI[Unknown_0x10] -> MSVT[index]`. Also present in geometry entries (purpose TBD). **Hypothesis that this is always 0xFFFF is REJECTED.**
   - `ushort Unknown_0x12`: Consistently `0x8000` observed. **Potential Doodad Property/Flag?** (e.g., scaling, rotation bitmask).
 - **Dependencies:** `MSPI` (geometry), `MSVI` (Doodad anchor via `Unknown_0x10`, potentially geometry), `MSVT` (Doodad anchor via `Unknown_0x10`/`MSVI`), **potentially `MDBH` (for Doodad filenames/IDs via `Unk04` or other fields).**
-- **Analysis:**
+- **Analysis (Updated):**
   - **Doodad Identification (`Unk00`, `Unk01`, `Unk04`):** These fields likely combine to identify the specific Doodad model (potentially linking to `MDBH`) and its properties (type, rotation, scale). Further investigation needed. PM4 uses `0x11`; PD4 uses `0x01` for `Unk00` in nodes.
   - **Geometry Identification (`Unk00`, PM4):** PM4 seems to use `0x12`, `0x14` for geometry entries.
   - **Doodad Anchor (`Unknown_0x10`):** Confirmed link to MSVI->MSVT for Doodad placement anchor point in both PM4/PD4. Export logic implemented.
   - **Grouping (`Unk04`):** PM4 uses "Mixed" groups linking Doodad nodes/geometry; PD4 uses separate "Node Only" / "Geometry Only" groups. Difference likely due to file scope (multi- vs single-object).
   - **Data Integrity:** Some PD4 node entries show invalid `Unknown_0x10` links in logs.
+  - **Field Constraints:** `Unk00` < 32 observed. `Unk01` usually < 12 (or 0xFF), few violations seen. `Unk02` confirmed `0x0000`. `Unk0C` confirmed `0xFFFFFFFF`. `Unk12` confirmed `0x8000`.
+
+#### MPRL Chunk
+- **Structure:** `MPRLEntry` (Defined in `WoWToolbox.Core/Navigation/PM4/Chunks/MPRLChunk.cs`)
+  - `ushort Unk00`: **Group ID?** No direct correlation found with `MSLK.Unk0C` in naive checks.
+  - `short Unk02`: **Confirmed Constant:** `-1` (0xFFFF as ushort).
+  - `ushort Unk04`: Variable.
+  - `ushort Unk06`: **Confirmed Constant:** `0x8000`.
+  - `C3Vector Position`: Vertex position.
+  - `short Unk14`: Variable, small range (-1 to 15 observed).
+  - `ushort Unk16`: Variable (0x0 or 0x3FFF observed).
+
+#### MPRR Chunk
+- **Structure:** Variable length sequences of `ushort`, each terminated by `0xFFFF`. The `ushort` immediately before the terminator is a potential flag/type (values like 0x300, 0x1100 seen). The preceding `ushort` values are indices, but their target is **unknown** (likely *not* MPRL based on observed index ranges).
+- **Current Implementation:** `MPRRChunk.cs` still uses the *old* fixed-pair structure (`MprrEntry`). Refactoring needed.
