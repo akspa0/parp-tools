@@ -196,14 +196,11 @@ namespace WoWToolbox.Core.ADT
 
             if ((flags & MDDFFlags.Biodome) != 0) names.Add(nameof(MDDFFlags.Biodome));
             if ((flags & MDDFFlags.Shrubbery) != 0) names.Add(nameof(MDDFFlags.Shrubbery));
-            if ((flags & MDDFFlags.Unk4) != 0) names.Add(nameof(MDDFFlags.Unk4));
-            if ((flags & MDDFFlags.Unk8) != 0) names.Add(nameof(MDDFFlags.Unk8));
-            if ((flags & MDDFFlags.Unk10) != 0) names.Add(nameof(MDDFFlags.Unk10));
+            if ((flags & MDDFFlags.Unknown4) != 0) names.Add(nameof(MDDFFlags.Unknown4));
+            if ((flags & MDDFFlags.Unknown8) != 0) names.Add(nameof(MDDFFlags.Unknown8));
             if ((flags & MDDFFlags.LiquidKnown) != 0) names.Add(nameof(MDDFFlags.LiquidKnown));
             if ((flags & MDDFFlags.NameIdIsFiledataId) != 0) names.Add(nameof(MDDFFlags.NameIdIsFiledataId));
-            if ((flags & MDDFFlags.Unk100) != 0) names.Add(nameof(MDDFFlags.Unk100));
-            if ((flags & MDDFFlags.AcceptProjTextures) != 0) names.Add(nameof(MDDFFlags.AcceptProjTextures));
-            // Add checks for other known flags if needed, ignore Unknown ones for now
+            if ((flags & MDDFFlags.Unknown100) != 0) names.Add(nameof(MDDFFlags.Unknown100));
 
             return names;
         }

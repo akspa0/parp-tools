@@ -61,7 +61,15 @@ namespace WoWToolbox.Tests.Navigation.PM4
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data"));
         private static class TestContext
         {
-            public static string TestResultsDirectory => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestResults");
+            // Calculate Workspace Root (assuming tests run from bin/Debug/netX.0)
+            private static string WorkspaceRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", ".."));
+            // Generate a timestamp for this test run
+            private static string Timestamp => DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            // Define the root output directory with timestamp
+            public static string TimestampedOutputRoot => Path.Combine(WorkspaceRoot, "output", Timestamp);
+
+            // Original TestResultsDirectory - Keep for reference or potential future use, but prefer TimestampedOutputRoot
+            public static string OriginalTestResultsDirectory => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestResults");
         }
 
         // Removed ApplyMprlTransform helper function
@@ -83,12 +91,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Use Path.Combine for robust path handling across OS
             // Corrected path: Go up 5 levels from bin/Debug/netX.0 to reach solution root
             var testDataRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "test_data"));
-            var inputDirectoryPath = Path.Combine(testDataRoot, "development");
-
-            // --- Path Construction (Output Directory) ---
-            // Place output relative to the test execution directory for clarity
-            var outputSubDir = Path.Combine("output", "development");
-            var outputDir = Path.Combine(baseDir, outputSubDir);
+            var inputDirectoryPath = Path.Combine(testDataRoot, "original_development", "development"); // Added intermediate 'development' directory
+            
+            // --- Use Timestamped Output --- 
+            var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "PM4_BatchOutput");
             Directory.CreateDirectory(outputDir); // Ensure the output directory exists
 
             Console.WriteLine($"Input Directory: {inputDirectoryPath}");
@@ -1737,8 +1743,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
         public void TestDevelopment49_28_WithSpecializedHandling()
         {
             // Arrange
-            string testFilePath = Path.Combine(TestDataRoot, "development", "development_49_28.pm4");
-            string outputDir = Path.Combine(TestContext.TestResultsDirectory, "PM4_HighRatio");
+            string testFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_49_28.pm4"); // Added intermediate 'development' directory
+            
+            // --- Use Timestamped Output --- 
+            string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "PM4_HighRatio");
             Directory.CreateDirectory(outputDir);
             string logPath = Path.Combine(outputDir, "processing_results.log");
             
