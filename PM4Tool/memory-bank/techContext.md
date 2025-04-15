@@ -218,3 +218,9 @@
 #### MPRR Chunk
 - **Structure:** Variable length sequences of `ushort`, each terminated by `0xFFFF`. The `ushort` immediately before the terminator is a potential flag/type (values like 0x300, 0x1100 seen). The preceding `ushort` values are indices, but their target is **unknown** (likely *not* MPRL based on observed index ranges).
 - **Current Implementation:** `MPRRChunk.cs` still uses the *old* fixed-pair structure (`MprrEntry`). Refactoring needed.
+
+## Recent Technical Context (2024-04-15)
+
+- Code now supports type/object-centric analysis and OBJ export (by unk00, unk01, object id).
+- Most OBJ exports are points/lines; mesh connectivity is missing.
+- MSUR (for faces/surfaces) and MSCN (for normals) are the next targets for analysis and integration.

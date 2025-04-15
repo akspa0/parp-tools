@@ -1,62 +1,37 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq; // Added for Sum()
 using Warcraft.NET.Files.Interfaces;
-using WoWToolbox.Core.Vectors; // Keep C3Vectori for potential future use, though not directly in MprrEntry now
+// Removed unused WoWToolbox.Core.Vectors using
 
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
-    /// <summary>
-    /// Represents an entry in the MPRR chunk.
-    /// Structure based on documentation at wowdev.wiki/PM4.md (MPRR section)
-    /// The meaning of the fields is currently unknown, but analysis suggests:
-    /// - They likely represent pairs of indices into the MPRL chunk.
-    /// - Unknown_0x00 often uses 0xFFFF (65535) as a sentinel value (e.g., no starting point?).
-    /// - Unknown_0x02 often references index 0 (MPRL[0]), possibly as a common hub or reference.
-    /// Purpose might be defining path connections, visibility, or other relationships.
-    /// </summary>
-    public class MprrEntry
-    {
-        // Fields based on PM4.md documentation (4 bytes total)
-        // Meaning is unknown according to wowdev.wiki as of 2024-Q3.
-        public ushort Unknown_0x00 { get; set; }      // _0x00 from doc. Often 0xFFFF (sentinel?)
-        public ushort Unknown_0x02 { get; set; }      // _0x02 from doc. Often 0 (MPRL index 0?)
-        
-        public const int Size = 4; // Bytes (ushort + ushort)
-
-        public void Load(BinaryReader br)
-        {
-            Unknown_0x00 = br.ReadUInt16();
-            Unknown_0x02 = br.ReadUInt16();
-        }
-
-        public void Write(BinaryWriter bw)
-        {
-            bw.Write(Unknown_0x00);
-            bw.Write(Unknown_0x02);
-        }
-        
-        public override string ToString()
-        {
-            return $"MPRR Entry [Unk0: 0x{Unknown_0x00:X4}, Unk2: 0x{Unknown_0x02:X4}] (Meaning Unknown)";
-        }
-    }
+    // Removed MprrEntry class entirely as the fixed-pair structure was incorrect.
 
     /// <summary>
-    /// Represents the MPRR chunk containing data potentially referencing MPRL positions.
-    /// Analysis suggests it defines relationships (connections?) between pairs of MPRL indices.
+    /// Represents the MPRR chunk containing sequences of unsigned short values.
+    /// Structure analysis (2024-Q3) indicates it's composed of variable-length sequences,
+    /// each terminated by the value 0xFFFF (65535).
+    /// The meaning of the values within the sequences (especially those before the terminator)
+    /// and the target they index into (if any) is currently unknown. It's likely *not* MPRL indices.
     /// </summary>
     public class MPRRChunk : IIFFChunk, IBinarySerializable
     {
         public const string ExpectedSignature = "MPRR";
         public string GetSignature() => ExpectedSignature;
 
-        public List<MprrEntry> Entries { get; private set; } = new List<MprrEntry>();
+        /// <summary>
+        /// List of sequences found in the chunk. Each inner list is a sequence of ushorts,
+        /// including the terminating 0xFFFF.
+        /// </summary>
+        public List<List<ushort>> Sequences { get; private set; } = new List<List<ushort>>();
 
         /// <inheritdoc/>
         public uint GetSize()
         {
-            return (uint)(Entries.Count * MprrEntry.Size); // Use updated Size
+            // Calculate total size based on the number of ushorts in all sequences.
+            return (uint)(Sequences.Sum(seq => seq.Count) * sizeof(ushort));
         }
 
         /// <inheritdoc/>
@@ -72,93 +47,95 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         /// <inheritdoc/>
         public void Load(BinaryReader br)
         {
+            Sequences.Clear();
             long startPosition = br.BaseStream.Position;
-            long endPosition = br.BaseStream.Length;
-            long size = endPosition - startPosition;
+            long endPosition = br.BaseStream.Length; // Assuming Load is called with a stream containing ONLY this chunk's data.
 
-            // Use updated Size
-            if (size % MprrEntry.Size != 0)
+            while (br.BaseStream.Position < endPosition)
             {
-                Entries.Clear();
-                Console.WriteLine($"Warning: MPRR chunk size {size} is not a multiple of {MprrEntry.Size} bytes. Entry data might be corrupt.");
-                return; // Or throw
+                var currentSequence = new List<ushort>();
+                try
+                {
+                    while (true) // Loop until terminator or end of stream
+                    {
+                        if (br.BaseStream.Position >= endPosition)
+                        {
+                             Console.WriteLine($"Warning: MPRR chunk ended unexpectedly while reading a sequence. Processed {Sequences.Count} complete sequences.");
+                             // Optionally add the incomplete sequence if needed: if (currentSequence.Count > 0) Sequences.Add(currentSequence);
+                             goto EndLoad; // Exit outer loop
+                        }
+
+                        ushort value = br.ReadUInt16();
+                        currentSequence.Add(value);
+
+                        if (value == 0xFFFF)
+                        {
+                            break; // End of this sequence
+                        }
+                    }
+                    Sequences.Add(currentSequence);
+                }
+                catch (EndOfStreamException)
+                {
+                     Console.WriteLine($"Warning: MPRR chunk ended unexpectedly (EndOfStreamException) while reading a sequence. Processed {Sequences.Count} complete sequences.");
+                    // Optionally add the incomplete sequence if needed: if (currentSequence.Count > 0) Sequences.Add(currentSequence);
+                    break; // Exit outer loop
+                }
             }
 
-            // Use updated Size
-            int entryCount = (int)(size / MprrEntry.Size);
-            Entries = new List<MprrEntry>(entryCount);
-
-            for (int i = 0; i < entryCount; i++)
-            {
-                var entry = new MprrEntry();
-                entry.Load(br);
-                Entries.Add(entry);
-            }
-            
+        EndLoad:
             long bytesRead = br.BaseStream.Position - startPosition;
-            if (bytesRead != size)
+            long expectedSize = endPosition - startPosition;
+            if (bytesRead != expectedSize)
             {
-                 Console.WriteLine($"Warning: MPRR chunk read {bytesRead} bytes, expected {size} bytes.");
+                 Console.WriteLine($"Warning: MPRR chunk read {bytesRead} bytes, but expected chunk size was {expectedSize}. Data might be incomplete or reader positioning issue.");
             }
         }
 
         /// <inheritdoc/>
         public byte[] Serialize(long offset = 0)
         {
+            // Use GetSize() which now calculates based on sequence content.
             using var ms = new MemoryStream((int)GetSize());
             using var bw = new BinaryWriter(ms);
 
-            foreach (var entry in Entries)
+            foreach (var sequence in Sequences)
             {
-                entry.Write(bw);
+                foreach (var value in sequence)
+                {
+                    bw.Write(value);
+                }
             }
 
             return ms.ToArray();
         }
-        
+
         /// <summary>
-        /// Validates indices based on the *old* structure. Needs complete re-evaluation.
-        /// Temporarily disabled - returns true.
+        /// Validates indices based on the *old* structure assumption (pairs indexing MPRL).
+        /// This logic is no longer valid due to the variable-length sequence structure
+        /// and the unknown target of the indices.
+        /// Method is disabled pending further understanding of MPRR data.
         /// </summary>
-        /// <param name="mprlEntryCount">The total number of entries available in the corresponding MPRL chunk.</param>
-        /// <returns>True (temporarily).</returns>
+        /// <param name="mprlEntryCount">The total number of entries previously assumed to be available in MPRL.</param>
+        /// <returns>Always true (validation disabled).</returns>
         public bool ValidateIndices(int mprlEntryCount)
         {
-            // TODO: Re-evaluate MPRR validation based on the new 4-byte structure.
-            // The meaning of Unknown_0x00 and Unknown_0x02 is currently unclear.
-            // Cannot apply old logic based on MprlIndex and specific Unknown_0x00 flags.
-            // Console.WriteLine("Warning: MPRR Index Validation is temporarily disabled pending structural understanding.");
-            return true; // Temporarily return true as the meaning/purpose of the fields is unknown.
-
-            /* --- REMOVED Validation Logic (Based on unconfirmed assumption) ---
-            // IMPLEMENTED VALIDATION based on 4-byte structure (ushort, ushort)
-            // Assuming Unknown_0x00 and Unknown_0x02 are indices into MPRL
-            if (mprlEntryCount <= 0) return Entries.Count == 0; // If no MPRL entries, MPRR should be empty to be valid
-
-            for (int i = 0; i < Entries.Count; i++)
-            {
-                var entry = Entries[i];
-                ushort index1 = entry.Unknown_0x00;
-                ushort index2 = entry.Unknown_0x02;
-
-                // Skip sentinel check (65535 is invalid anyway if >= mprlEntryCount)
-                // if (index1 == 65535 || index2 == 65535) continue;
-
-                // Check if either index is out of bounds
-                if (index1 >= mprlEntryCount || index2 >= mprlEntryCount)
-                {
-                    Console.WriteLine($">>> FAIL: MPRR Validation Failed. Entry {i} has index out of bounds.");
-                    Console.WriteLine($"    Raw Indices: Idx1={index1}, Idx2={index2}. MPRL Count: {mprlEntryCount}.");
-                    return false;
-                }
-            }
-            return true;
+            /* --- VALIDATION DISABLED ---
+               Reason: The previous implementation assumed MPRR contained pairs of ushorts
+               indexing into the MPRL chunk. Analysis revealed MPRR consists of variable-length
+               sequences terminated by 0xFFFF, and the indices likely do *not* target MPRL.
+               Therefore, this validation logic is incorrect and cannot be applied.
+               Re-evaluation is needed once the true meaning and target of the MPRR sequence
+               values are understood.
             */
+            // Console.WriteLine("Warning: MPRR Index Validation is disabled due to structural changes and unknown index targets.");
+            return true;
         }
 
         public override string ToString()
         {
-            return $"MPRR Chunk [{Entries.Count} Entries]";
+            // Updated to reflect the new sequence structure.
+            return $"MPRR Chunk [{Sequences.Count} Sequences]";
         }
     }
 } 

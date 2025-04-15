@@ -191,3 +191,10 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
     *   `MSLK` Doodad properties (`Unk00`/`Unk01`/`Unk12`) might signify relationships to other chunk data (pending decoding).
     *   `MSCN` vectors might provide normal data for vertices used by `MSUR` or `MSLK`, but the indexing mechanism isn't immediately clear.
     *   `MPRR` flag value (before 0xFFFF) might indicate type or target of sequence indices.
+
+## PM4/PD4 Mesh and Node Patterns (2024-04-15)
+
+- The most promising mapping for mesh faces is via MSUR → MSVI → MSVT.
+- MSLK/MPRR are likely the semantic glue between logical/semantic structure and mesh data.
+- Unk10 is confirmed as an anchor for node-to-vertex mapping, but not for faces.
+- Full mesh connectivity (faces) is not present in node/object groupings alone; must analyze MSUR for surface/face data.

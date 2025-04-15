@@ -10,7 +10,7 @@ namespace WoWToolbox.Tests.ADT
 {
     public class AdtServiceTests
     {
-        private const string TestAdtPath = "test_data/development/development_0_0.adt";
+        private const string TestAdtPath = "test_data/original_development/development_0_0.adt";
 
         [Fact]
         public void ExtractPlacements_ShouldExtractDataCorrectly()
