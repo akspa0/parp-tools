@@ -157,6 +157,11 @@
 
 ## Emerging Patterns / Discoveries
 *   **MSLK Doodad Placement (Confirmed):** **NEW/Significant:** Visualization and analysis confirm that `MSLK` entries (specifically those with `MspiFirstIndex == -1`, previously termed "nodes") represent **Doodad placements** (M2/MDX models). The `Unknown_*` fields (`Unk00`, `Unk01`, `Unk04`, `Unk12`) likely encode the specific model ID (potentially linking to `MDBH`), rotation, scale, and other properties. `Unknown_0x10` provides the vertex index for the placement anchor point via `MSVI`->`MSVT`.
+*   **MSCN Chunk (Clarified):**
+    *   The MSCN chunk is now confirmed to be an array of Vector3 (float) values, not int32/C3Vectori.
+    *   All MSCN vectors have been exported as OBJ points for visualization.
+    *   The semantic purpose of MSCN remains unclear, but the data is now accessible for further analysis and visual inspection.
+    *   Previous hypotheses about MSCN being normals or int32 vectors are incorrect for the current data.
 *   **MSLK Hierarchical Structure (PM4 Confirmed, PD4 Different - Tied to File Scope):**
     *   **Context:** PM4 files represent multi-object map tiles, while the tested PD4 files represent single WMO objects.
     *   **PM4 (Multi-Object):** Analysis using `WoWToolbox.AnalysisTool` on PM4 log data confirmed `Unknown_0x04` acts as a group/object identifier. It creates **"Mixed Groups"** linking Doodad placement entries (`MspiFirstIndex == -1`) directly to their corresponding geometry path entries (`MspiFirstIndex >= 0`) for a specific object within the collection.
@@ -183,7 +188,7 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
 *   **Unknown/Unused Links:**
     *   `MSLK` -> `MSVI` (via `Unknown_0x10` for *Geometry* entries): Purpose still TBD.
 *   **No Implemented Direct Links Found:**
-    *   `MSLK` <-> `MSCN`: No code found directly correlating.
+    *   `MSLK` <-> `MSCN`: No code found directly correlating. MSCN is now confirmed to be an array of Vector3 (float) values, exported as OBJ points for visualization. Semantic purpose remains unclear.
     *   `MSLK` <-> `MSUR`: No direct code link found (but potentially linked logically via MSLK group ID / ADT UniqueID).
     *   `MPRR` -> ???: Indices within MPRR sequences are likely *not* into MPRL.
 *   **Potential Semantic Links (Requires Further Research):**
@@ -191,6 +196,15 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
     *   `MSLK` Doodad properties (`Unk00`/`Unk01`/`Unk12`) might signify relationships to other chunk data (pending decoding).
     *   `MSCN` vectors might provide normal data for vertices used by `MSUR` or `MSLK`, but the indexing mechanism isn't immediately clear.
     *   `MPRR` flag value (before 0xFFFF) might indicate type or target of sequence indices.
+*   **WMO Group File Handling (2024-06):**
+    *   WMO files are split into a root file and multiple group files (e.g., _000.wmo, _001.wmo, etc.).
+    *   **Do NOT concatenate root and group files for parsing.** The WMO format does not support monolithic concatenation; the root references group files, but does not embed their data.
+    *   The correct approach is:
+        1. Parse the root file for group count and metadata.
+        2. Parse each group file individually for geometry.
+        3. Merge the resulting meshes for analysis or export.
+    *   Loader and tools have been updated to follow this pattern. Previous attempts to concatenate files led to invalid parsing and must be avoided.
+    *   This pattern is now canonical for all WMO parsing and analysis in WoWToolbox.
 
 ## PM4/PD4 Mesh and Node Patterns (2024-04-15)
 
@@ -198,3 +212,24 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
 - MSLK/MPRR are likely the semantic glue between logical/semantic structure and mesh data.
 - Unk10 is confirmed as an anchor for node-to-vertex mapping, but not for faces.
 - Full mesh connectivity (faces) is not present in node/object groupings alone; must analyze MSUR for surface/face data.
+
+## PM4/PD4 Mesh Extraction Pattern (New - 2024-06)
+- **Pattern:** Renderable mesh geometry is constructed using data from multiple chunks:
+  - `MSVT`: Contains vertex positions (often needing transformation).
+  - `MSVI`: Contains indices into the `MSVT` chunk.
+  - `MSUR`: Defines surfaces (triangles) by specifying start index and count for `MSVI`.
+- **Implementation:** Logic currently exists within `WoWToolbox.Tests` (`PM4FileTests.cs`/`PD4FileTests.cs`) primarily for OBJ export.
+- **Refactoring Plan:** Extract this logic into a dedicated component (`Pm4MeshExtractor`) within the `WoWToolbox.MSCNExplorer` project (temporarily, outside `WoWToolbox.Core` as per user request) to enable reuse for comparison tasks.
+
+## Key Design Patterns & Decisions
+
+*   **Chunk-Based File Parsing:** Both WMO and PM4 files are parsed based on their chunk structure (4-byte name, size, data). `ChunkReader` utility helps manage this.
+*   **Little-Endian Chunk Names:** Chunk names are read as 4 bytes and reversed (e.g., 'TVOM' -> 'MOVT') as per WoW file format specifications.
+*   **Lazy Loading:** Data chunks are typically loaded on demand or when the main file object is instantiated.
+*   **Separation of Concerns:**
+    *   Core library (`WoWToolbox.Core`) handles file format parsing and data structures.
+    *   Specific tools (`WoWToolbox.MSCNExplorer`) use the Core library to implement higher-level logic (e.g., mesh extraction, comparison).
+    *   Tests (`WoWToolbox.Tests`, `WoWToolbox.MSCNExplorer.Tests`) verify the functionality of Core and tool components.
+*   **OBJ Export for Visualization:** Using the simple OBJ format as a common ground for visually inspecting extracted mesh geometry from different sources (PM4, WMO).
+*   **Common Mesh Data Structure (`MeshData`):** Introduced `WoWToolbox.Core.Models.MeshData` (`List<Vector3> Vertices`, `List<int> Indices`) as a standardized intermediate representation for extracted mesh geometry, replacing previous ad-hoc or format-specific structures like `WmoGroupMesh` for this purpose. This facilitates comparison.
+*   **Coordinate System Transformation:** Specific transformations are applied during mesh extraction to convert from file-local coordinates to a consistent world coordinate system suitable for visualization/comparison (e.g., `MsvtToWorld_PM4` in `Pm4MeshExtractor`, potential similar logic in `WmoGroupMesh`).

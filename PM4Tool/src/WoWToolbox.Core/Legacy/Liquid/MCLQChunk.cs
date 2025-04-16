@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using Warcraft.NET;
 using Warcraft.NET.Files.Interfaces;
-using DBCD;
+// using DBCD; // Removed reference
 
 namespace WoWToolbox.Core.Legacy.Liquid
 {
@@ -16,7 +16,7 @@ namespace WoWToolbox.Core.Legacy.Liquid
         public const int HEIGHT_MAP_SIZE = 9;
         public const int ALPHA_MAP_SIZE = 8;
 
-        private static IDBCDStorage? liquidTypeStorage;
+        // private static IDBCDStorage? liquidTypeStorage; // Removed reference
 
         #region Properties
 
@@ -100,6 +100,12 @@ namespace WoWToolbox.Core.Legacy.Liquid
         /// </summary>
         public byte[,] AlphaMap { get; set; } = new byte[ALPHA_MAP_SIZE, ALPHA_MAP_SIZE];
 
+        /// <summary>
+        /// Gets whether the liquid entry is valid according to LiquidType.dbc
+        /// Returns true if validation is disabled
+        /// </summary>
+        public bool IsValidLiquidEntry => true; // Assume valid if DBCD is not used
+
         #endregion
 
         #region Computed Properties
@@ -108,12 +114,6 @@ namespace WoWToolbox.Core.Legacy.Liquid
         /// Gets whether this chunk has an alpha map
         /// </summary>
         public bool HasAlphaMap => (Flags & MCLQFlags.HasAlpha) != 0;
-
-        /// <summary>
-        /// Gets whether the liquid entry is valid according to LiquidType.dbc
-        /// Returns true if validation is disabled
-        /// </summary>
-        public bool IsValidLiquidEntry => liquidTypeStorage?.ContainsKey(LiquidEntry) ?? true;
 
         #endregion
 
@@ -163,18 +163,22 @@ namespace WoWToolbox.Core.Legacy.Liquid
         /// Configures the LiquidType.dbc validator
         /// </summary>
         /// <param name="storage">The IDBCDStorage to use</param>
+        /* // Removed reference
         public static void ConfigureValidator(IDBCDStorage storage)
         {
             liquidTypeStorage = storage;
         }
+        */
 
         /// <summary>
         /// Disables LiquidType.dbc validation
         /// </summary>
+        /* // Removed reference
         public static void DisableValidation()
         {
             liquidTypeStorage = null;
         }
+        */
 
         #endregion
 

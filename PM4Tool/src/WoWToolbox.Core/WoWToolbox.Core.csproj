@@ -1,23 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
-    <ProjectReference Include="..\..\lib\DBCD\DBCD\DBCD.csproj" />
-    <ProjectReference Include="..\..\lib\DBCD\DBCD.IO\DBCD.IO.csproj" />
+    <!-- Removed DBCD references -->
+    <!-- <ProjectReference Include="..\..\lib\DBCD\DBCD\DBCD.csproj" /> -->
+    <!-- <ProjectReference Include="..\..\lib\DBCD\DBCD.IO\DBCD.IO.csproj" /> -->
   </ItemGroup>
 
   <ItemGroup>
     <!-- Keep Default Includes disabled, but explicitly add necessary files -->
     <!-- <Compile Include="Navigation\PM4\Chunks\Entries\MSLKEntry.cs" /> --> <!-- Removed as file is deleted -->
     <!-- <Compile Include="Navigation\PM4\Chunks\MSLK.cs" /> --> <!-- Using wildcard instead -->
-    <Compile Include="**/*.cs" /> <!-- Explicitly include all CS files -->
+    <Compile Include="**/*.cs" Exclude="obj\**\*.cs;bin\**\*.cs" /> <!-- Explicitly include CS files, excluding obj/bin -->
     <!-- We might need to add ALL other .cs files here if this works -->
   </ItemGroup>
 

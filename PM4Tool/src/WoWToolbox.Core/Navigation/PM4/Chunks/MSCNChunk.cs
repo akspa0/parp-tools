@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
 using System.Numerics;
-using WoWToolbox.Core.Vectors; // Keep for C3Vectori if used elsewhere, remove if not
 
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
@@ -15,12 +14,10 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
     {
         public const string Signature = "MSCN";
 
-        // Changed from C3Vectori to Vector3 (float-based)
         public List<Vector3> Vectors { get; private set; }
 
         public MSCNChunk()
         {
-            // Initialize with Vector3 list
             Vectors = new List<Vector3>();
         }
 
@@ -33,10 +30,10 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             Read(br, (uint)inData.Length);
         }
 
-        // Updated to read floats (Vector3)
+        // Read as Vector3 (float)
         public void Read(BinaryReader reader, uint size)
         {
-            const int vectorSize = sizeof(float) * 3; // Size of Vector3 (3 * float)
+            const int vectorSize = sizeof(float) * 3; // 12 bytes
             if (size % vectorSize != 0)
             {
                 throw new InvalidDataException($"MSCN chunk size ({size}) must be a multiple of {vectorSize}.");
@@ -47,7 +44,6 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
 
             for (int i = 0; i < vectorCount; i++)
             {
-                // Read X, Y, Z as floats
                 Vector3 vector = new Vector3
                 {
                     X = reader.ReadSingle(),
@@ -66,7 +62,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             return ms.ToArray();
         }
 
-        // Updated to write floats (Vector3)
+        // Write as Vector3 (float)
         public void Write(BinaryWriter writer)
         {
             foreach (var vector in Vectors)
@@ -77,7 +73,6 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             }
         }
 
-        // Updated to use Vector3 size
         public uint GetSize()
         {
             const int vectorSize = sizeof(float) * 3;
@@ -86,7 +81,6 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
 
         public override string ToString()
         {
-            // Update type in string
             return $"MSCN Chunk [{Vectors.Count} Vectors (Vector3)]";
         }
     }

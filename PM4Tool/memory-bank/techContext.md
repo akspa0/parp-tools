@@ -1,9 +1,73 @@
 # Technical Context
 
+## Core Technologies
+-   **Language:** C#
+-   **Framework:** .NET 9.0 (across all projects: `Core`, `Common`, `Mpq`, `Tests`, `MSCNExplorer`)
+-   **Build System:** .NET SDK (using `dotnet` CLI)
+-   **Testing:** xUnit
+-   **Logging:** Basic `Debug.WriteLine` for now.
+
+## Project Structure
+-   `WoWToolbox.Core`: Core data structures (`MeshGeometry`), WMO parsing logic (`WmoRootFile`, `WmoGroupFile`, `WmoGroupMesh`).
+-   `WoWToolbox.Common`: Shared utilities, chunk reading (`ChunkReader`), low-level data types, PM4 parsing logic (`PM4File`, chunk definitions like `MSVTChunk`, `MSVIChunk` etc.).
+-   `WoWToolbox.Mpq`: MPQ archive handling (likely used for accessing game files, dependency for tests).
+-   `WoWToolbox.MSCNExplorer`: Contains the `Pm4MeshExtractor` for converting PM4 data to `MeshGeometry`.
+-   `WoWToolbox.Tests`: Consolidated xUnit tests for all projects, including WMO and PM4 mesh extraction/export.
+
+## Development Setup
+-   Requires .NET 9.0 SDK.
+-   Standard `dotnet build`, `dotnet test` commands.
+-   Test data stored in `test_data` directory (needs population).
+-   Output artifacts (like generated OBJ files) typically go into `bin/Debug/net9.0/TestOutput` directories within the respective test project's build output.
+
+## Technical Constraints & Decisions
+-   **Endianness:** Chunk names are little-endian (reversed 4-char codes), chunk data is native endian (handled by `ChunkReader`).
+-   **Coordinate Systems:** WMO and PM4 use different coordinate systems/scales. Transformation logic is required (e.g., `MsvtToWorld_PM4`).
+-   **Target Framework:** Standardized on .NET 9.0 for modern features.
+-   **Testing Strategy:** Unit tests verify loading and export functionalities. Visual inspection of OBJ files provides qualitative validation.
+
+## Dependencies
+-   **External:** xUnit (for testing).
+-   **Internal:** Projects depend on each other (e.g., `Tests` depends on `Core`, `Common`, `Mpq`, `MSCNExplorer`; `MSCNExplorer` depends on `Common`, `Core`).
+
+## Key Projects & Dependencies
+
+- `WoWToolbox.Core`:
+    - **Purpose:** Foundational library for WoW data structures, file parsing (ADT, WMO, M2, etc.), and common utilities.
+    - **Status:** Actively developed. Aligned to .NET 9.0. DBCD dependency removed.
+    - **Key Classes:** `ADTFile`, `WmoRootLoader`, `WmoGroupMesh`, `ChunkReader`, `PM4File`, `Vector3`, `Quaternion`.
+- `WoWToolbox.Tests`:
+    - **Purpose:** Unit and integration tests for `Core` and other libraries.
+    - **Status:** Actively developed. Aligned to .NET 9.0. Contains tests for WMO group loading/saving (`WmoGroupMeshTests`) and PM4 extraction (`Pm4MeshExtractorTests` - moved from MSCNExplorer).
+- `WoWToolbox.MSCNExplorer`:
+    - **Purpose:** Library focused on parsing and analysing MSCN/PM4/PD4 navigation data.
+    - **Status:** Under development. Aligned to .NET 9.0. Contains `Pm4MeshExtractor` for render mesh extraction (currently facing build errors).
+    - **Key Classes:** `Pm4MeshExtractor`, `PM4File` (likely uses `Core`'s version), potentially others for MSCN/PD4.
+- `WoWToolbox.MPRRExplorer`:
+    - **Purpose:** Library focused on parsing and analysing MPRR pathfinding data.
+    - **Status:** Existing, likely stable. Aligned to .NET 9.0.
+- `WoWToolbox.AnalysisTool`:
+    - **Purpose:** Command-line tool for running various analyses on WoW data, potentially integrating functionality from other libraries.
+    - **Status:** Existing, likely stable. Aligned to .NET 9.0.
+
+## Development Setup
+- **Prerequisites:** .NET 9.0 SDK.
+- **Build:** `dotnet build` in the root or specific project directories.
+- **Testing:** `dotnet test` in the root or specific project directories. Filtering can be used (e.g., `--filter FullyQualifiedName~<Namespace.ClassName>`).
+- **Test Data:** Located in `test_data/` directory, potentially with subdirectories for specific data types (e.g., `335_wmo`). Tests reference files relative to this structure or via absolute paths.
+- **Output:** Test outputs (like generated OBJ files) are typically placed in `bin/Debug/net9.0/TestOutput/` within the respective test project directory.
+
+## Technical Constraints & Considerations
+- **Endianness:** WoW file chunks often use specific endianness (e.g., chunk names are little-endian). Parsers must handle this correctly.
+- **Data Formats:** Strict adherence to Blizzard's binary file formats is required.
+- **Performance:** Parsing large game files can be resource-intensive.
+- **Coordinate Systems:** WoW uses different coordinate systems. Transformations (like `MsvtToWorld_PM4`) are crucial.
+- **Data Interdependencies:** Chunks within files often reference each other (e.g., `MSUR` indices into `MSVI`). Robust index validation is necessary.
+- **Build Errors:** Current build errors in `Pm4MeshExtractor` related to `UInt32` vs `Int32` index types need resolution.
+
 ## Technology Stack
-- C# (.NET 8.0)
+- C# (.NET 9.0)
 - Warcraft.NET for base file handling (including `ChunkedFile` base class)
-- DBCD for DBC/DB2 operations
 
 ## Implementation Status
 
@@ -75,32 +139,46 @@
    - Warcraft.NET (latest)
      - Location: lib/Warcraft.NET/Warcraft.NET
      - Usage: Base chunk handling, `ChunkedFile` base class, `IIFFChunk` interface, various attributes.
-   - DBCD (latest)
-     - Location: lib/DBCD
-     - Usage: DBC/DB2 operations
-   - SixLabors.ImageSharp (via Warcraft.NET dependency)
 
 2. Project Dependencies
-   *The main solution file (`src/WoWToolbox.sln`) now includes `WoWToolbox.Core`, `WoWToolbox.AnalysisTool`, and `WoWToolbox.Tests`.*
+   *The main solution file (`src/WoWToolbox.sln`) now includes `WoWToolbox.Core`, `WoWToolbox.AnalysisTool`, `WoWToolbox.MPRRExplorer`, `WoWToolbox.MSCNExplorer`, and `WoWToolbox.Tests`.*
    ```xml
-   <!-- WoWToolbox.Core -->
+   <!-- WoWToolbox.Core (Targets net9.0) -->
+   <ItemGroup>
+     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+     <!-- Removed DBCD references -->
+     <!-- <ProjectReference Include="..\..\lib\DBCD\DBCD\DBCD.csproj" /> -->
+     <!-- <ProjectReference Include="..\..\lib\DBCD\DBCD.IO\DBCD.IO.csproj" /> -->
+   </ItemGroup>
+
+   <!-- WoWToolbox.Tests (Targets net9.0) -->
+   <ItemGroup>
+     <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+     <ProjectReference Include="..\..\src\WoWToolbox.MSCNExplorer\WoWToolbox.MSCNExplorer.csproj" />
+     <!-- PackageReference for Microsoft.NET.Test.Sdk, xunit, etc. -->
+   </ItemGroup>
+
+   <!-- WoWToolbox.AnalysisTool (Targets net9.0) -->
+   <ItemGroup>
+     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+     <!-- YamlDotNet -->
+     <PackageReference Include="YamlDotNet" Version="15.1.2" /> 
+   </ItemGroup>
+
+   <!-- WoWToolbox.MSCNExplorer (Targets net9.0) -->
+   <ItemGroup>
+     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+     <!-- System.CommandLine -->
+     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" /> 
+   </ItemGroup>
+
+   <!-- WoWToolbox.MPRRExplorer (Targets net9.0) -->
    <ItemGroup>
      <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
      <ProjectReference Include="..\..\lib\DBCD\DBCD\DBCD.csproj" />
      <ProjectReference Include="..\..\lib\DBCD\DBCD.IO\DBCD.IO.csproj" />
-   </ItemGroup>
-
-   <!-- WoWToolbox.Tests -->
-   <ItemGroup>
      <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" />
-     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
-     <!-- PackageReference for Microsoft.NET.Test.Sdk, xunit, etc. -->
-   </ItemGroup>
-
-   <!-- WoWToolbox.AnalysisTool -->
-   <ItemGroup>
-     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
-     <!-- YamlDotNet (To be added) -->
    </ItemGroup>
    ```
 
@@ -224,3 +302,18 @@
 - Code now supports type/object-centric analysis and OBJ export (by unk00, unk01, object id).
 - Most OBJ exports are points/lines; mesh connectivity is missing.
 - MSUR (for faces/surfaces) and MSCN (for normals) are the next targets for analysis and integration.
+
+## Planned Components (2024-06)
+*   **WoWToolbox.MSCNExplorer.Pm4MeshExtractor:** (Implemented) A new class within the MSCNExplorer tool project. Encapsulates the logic for extracting renderable meshes (vertices, triangles) from PM4/PD4 files using MSVT, MSVI, and MSUR chunks. Logic was refactored from `WoWToolbox.Tests`.
+*   **WoWToolbox.Tests.Navigation.Pm4MeshExtractorTests:** (Implemented) Tests for `Pm4MeshExtractor`, moved from `MSCNExplorer` project to the main `WoWToolbox.Tests` project.
+*   **WoWToolbox.MSCNExplorer Comparison Logic:** (Planned) Implementation of mesh comparison algorithms within the MSCNExplorer tool to compare meshes extracted from PM4 and WMO files.
+
+### Core Data Structures
+
+*   `WoWToolbox.Core.PM4File`: Represents the loaded PM4/PD4 file, containing various chunk data (MSVT, MSVI, MSUR, MDOS, MDSF, MSCN, etc.).
+*   `WoWToolbox.Core.WMO.WmoRoot`: Represents the root WMO file, containing header info, materials, doodad sets, and group information.
+*   `WoWToolbox.Core.WMO.WmoGroup`: Represents a single WMO group file, containing geometry chunks (MOVT, MOVB, MONR, MOCV, etc.).
+*   `WoWToolbox.Core.WMO.WmoGroupMesh`: (Being phased out for direct `MeshData` return) Currently used to hold processed mesh data (vertices, triangles) from a WMO group.
+*   `WoWToolbox.Core.Models.MeshData`: New common structure to hold extracted mesh geometry. Contains `List<Vector3> Vertices` and `List<int> Indices`.
+*   Chunk Classes (e.g., `MSVTChunk`, `MOVTChunk`, `MVERChunk`): Specific classes within `WoWToolbox.Core` namespaces representing the structure and data of individual file chunks.
+*   `System.Numerics.Vector3`, `Vector2`: Used for coordinates, normals, and UVs.
