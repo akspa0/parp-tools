@@ -3,15 +3,19 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using WoWToolbox.Core.WMO;
+using WoWToolbox.Core.Models;
 
 namespace WoWToolbox.AnalysisTool
 {
     public class MscnMeshComparisonAnalyzer
     {
         public List<Vector3> MscnPoints { get; private set; } = new();
-        public WmoGroupMesh Mesh { get; private set; }
+        public MeshData? Mesh { get; private set; }
 
-        public MscnMeshComparisonAnalyzer() { }
+        public MscnMeshComparisonAnalyzer()
+        {
+            Mesh = null;
+        }
 
         public void LoadMscnPoints(string filePath)
         {
@@ -36,7 +40,7 @@ namespace WoWToolbox.AnalysisTool
         public void LoadWmoMesh(string wmoGroupFilePath)
         {
             using var stream = File.OpenRead(wmoGroupFilePath);
-            Mesh = WmoGroupMesh.LoadFromStream(stream);
+            Mesh = WmoGroupMesh.LoadFromStream(stream, wmoGroupFilePath);
         }
 
         public void AnalyzeProximity(float threshold = 0.1f)

@@ -2,6 +2,7 @@ using Xunit;
 using WoWToolbox.Core;
 using WoWToolbox.Core.Navigation.PM4;
 using WoWToolbox.Core.Models; // For MeshData
+using WoWToolbox.Common.Analysis; // Added for MeshAnalysisUtils
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -37,6 +38,8 @@ namespace WoWToolbox.MSCNExplorer.Tests
             string testPm4FullPath = Path.Combine(TestDataRoot, TestPm4FileRelativePath);
             // Use a distinct name for the unfiltered output
             string outputUnfilteredObjPath = Path.Combine(TestOutputRoot, "extracted_pm4_mesh_unfiltered_dev0000.obj");
+            // New name for the largest component output
+            string outputLargestComponentObjPath = Path.Combine(TestOutputRoot, "extracted_pm4_mesh_largest_component_dev0000.obj");
 
             Assert.True(File.Exists(testPm4FullPath), $"Test PM4 file not found: {testPm4FullPath}");
 
@@ -54,14 +57,31 @@ namespace WoWToolbox.MSCNExplorer.Tests
             Assert.True(meshDataUnfiltered.Indices.Count > 0, "Unfiltered MeshData should contain indices.");
             Assert.True(meshDataUnfiltered.Indices.Count % 3 == 0, "Unfiltered Index count should be divisible by 3 for triangles.");
 
-            // Act - Save unfiltered to OBJ
+            // Act - Save unfiltered to OBJ (Optional - can be removed if only largest component is needed)
             SaveMeshDataToObj(meshDataUnfiltered, outputUnfilteredObjPath);
-
-            // Assert - Check unfiltered OBJ file
             Assert.True(File.Exists(outputUnfilteredObjPath), $"Unfiltered Output OBJ file was not created: {outputUnfilteredObjPath}");
-            Assert.True(new FileInfo(outputUnfilteredObjPath).Length > 0, "Unfiltered Output OBJ file should not be empty.");
+            Console.WriteLine($"Successfully extracted unfiltered mesh and saved to: {outputUnfilteredObjPath}"); // Keep log for unfiltered
 
-            Console.WriteLine($"Successfully extracted unfiltered mesh and saved to: {outputUnfilteredObjPath}");
+            // --- New: Analyze for Largest Component ---
+            Console.WriteLine("Analyzing unfiltered mesh for largest connected component...");
+            var largestComponent = MeshAnalysisUtils.GetLargestComponent(meshDataUnfiltered);
+
+            // Assert - Check largest component
+            Assert.NotNull(largestComponent); // Expecting dev_00_00 to have geometry
+            Assert.True(largestComponent.Vertices.Count > 0, "Largest component should have vertices.");
+            Assert.True(largestComponent.Indices.Count > 0, "Largest component should have indices.");
+            Assert.True(largestComponent.Indices.Count % 3 == 0, "Largest component index count should be divisible by 3.");
+            // Optionally, assert that largest component is smaller than the unfiltered mesh if multiple components are expected
+            // Assert.True(largestComponent.Indices.Count < meshDataUnfiltered.Indices.Count, "Largest component should be smaller than the full mesh if multiple components exist.");
+
+            // Act - Save LARGEST COMPONENT to OBJ
+            SaveMeshDataToObj(largestComponent, outputLargestComponentObjPath);
+
+            // Assert - Check LARGEST COMPONENT OBJ file
+            Assert.True(File.Exists(outputLargestComponentObjPath), $"Largest Component Output OBJ file was not created: {outputLargestComponentObjPath}");
+            Assert.True(new FileInfo(outputLargestComponentObjPath).Length > 0, "Largest Component Output OBJ file should not be empty.");
+
+            Console.WriteLine($"Successfully extracted largest component ({largestComponent.Indices.Count / 3} triangles) and saved to: {outputLargestComponentObjPath}");
         }
 
         [Fact]
@@ -103,6 +123,43 @@ namespace WoWToolbox.MSCNExplorer.Tests
             Assert.True(new FileInfo(outputFilteredObjPath).Length > 0, "Filtered Output OBJ file should not be empty.");
 
             Console.WriteLine($"Successfully extracted filtered mesh for {TargetWmoFilename} and saved to: {outputFilteredObjPath}");
+        }
+
+        [Fact]
+        public void ExtractMeshesByUniqueId_ShouldReturnMeshesForEachUniqueId_AndSaveObjs()
+        {
+            // Arrange
+            string testPm4FullPath = Path.Combine(TestDataRoot, TestPm4FileRelativePath);
+            Assert.True(File.Exists(testPm4FullPath), $"Test PM4 file not found: {testPm4FullPath}");
+
+            var pm4File = PM4File.FromFile(testPm4FullPath);
+            Assert.NotNull(pm4File);
+
+            var extractor = new Pm4MeshExtractor();
+
+            // Act
+            var meshesByUniqueId = extractor.ExtractMeshesByUniqueId(pm4File);
+
+            // Assert
+            Assert.NotNull(meshesByUniqueId);
+            Assert.True(meshesByUniqueId.Count > 0, "Should extract at least one mesh by uniqueID.");
+
+            int objCount = 0;
+            foreach (var kvp in meshesByUniqueId)
+            {
+                uint uniqueId = kvp.Key;
+                var meshData = kvp.Value;
+                Assert.NotNull(meshData);
+                Assert.True(meshData.Vertices.Count > 0, $"Mesh for uniqueID {uniqueId} should have vertices.");
+                Assert.True(meshData.Indices.Count > 0, $"Mesh for uniqueID {uniqueId} should have indices.");
+                Assert.True(meshData.Indices.Count % 3 == 0, $"Mesh for uniqueID {uniqueId} should have triangle indices.");
+
+                string objPath = Path.Combine(TestOutputRoot, $"extracted_pm4_mesh_uniqueid_{uniqueId:X8}.obj");
+                SaveMeshDataToObj(meshData, objPath);
+                Assert.True(File.Exists(objPath), $"OBJ file for uniqueID {uniqueId} was not created: {objPath}");
+                objCount++;
+            }
+            Console.WriteLine($"Extracted {meshesByUniqueId.Count} meshes by uniqueID and saved {objCount} OBJ files.");
         }
 
         // --- Helper Method ---

@@ -2,6 +2,10 @@
 
 A comprehensive toolkit for parsing and working with World of Warcraft ADT (terrain) files and related data formats. Built in C# targeting .NET 8.0, this project provides libraries for chunk decoding and manipulation of complex packed data, along with specialized tools for analysis and data extraction.
 
+## Requirements
+clone to lib/ folder:
+Warcraft.NET
+
 ## Features
 
 - **PM4/PD4 File Parsing**

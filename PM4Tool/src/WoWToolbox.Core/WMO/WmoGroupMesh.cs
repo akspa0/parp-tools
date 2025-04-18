@@ -6,6 +6,7 @@ using System.Text;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Globalization;
+using WoWToolbox.Core.Models; // Added for MeshData
 
 namespace WoWToolbox.Core.WMO
 {
@@ -41,6 +42,13 @@ namespace WoWToolbox.Core.WMO
         public List<WmoVertex> Vertices { get; set; } = new();
         public List<WmoTriangle> Triangles { get; set; } = new();
         public List<WmoBatch> Batches { get; set; } = new();
+
+        // --- Internal lists used during loading ---
+        // Kept separate to potentially preserve Normal/UV if needed elsewhere later
+        private List<Vector3> _loadedPositions = new();
+        private List<Vector3> _loadedNormals = new();
+        private List<Vector2> _loadedUVs = new();
+        private List<(int i0, int i1, int i2)> _loadedIndices = new(); // Store indices directly
 
         public static void ListChunks(string filePath)
         {
@@ -351,21 +359,13 @@ namespace WoWToolbox.Core.WMO
              // Convert MOBA to WmoBatch (adjust based on actual MOBA structure)
             foreach (var batch in moba)
             {
-                // This conversion assumes MOBA structure matches WmoBatch needs.
-                // You might need to adjust fields based on the actual MOBA definition.
                 mesh.Batches.Add(new WmoBatch
                 {
-                    // Example mapping - ADJUST AS NEEDED based on MOBA struct definition
-                    // Assuming MOBA contains necessary indices and counts directly or indirectly.
-                    // The current MOBA struct in WmoChunks seems basic.
-                    // We might need to look at the RenderBatchCount from MOGP here? Or does MOBA contain counts?
-                    // Placeholder values for now:
-                    StartIndex = (int)batch.MinIndex, // Example - VERIFY THIS MAPPING
-                    IndexCount = (int)(batch.MaxIndex - batch.MinIndex +1 ), // Example - VERIFY THIS MAPPING
-                    MinVertex = (int)batch.MinIndex, // Example - VERIFY THIS MAPPING
-                    MaxVertex = (int)batch.MaxIndex, // Example - VERIFY THIS MAPPING
-                    MaterialId = (byte)(batch.Flags & 0xFF) // Example - VERIFY THIS MAPPING
-
+                    StartIndex = (int)batch.StartIndex,
+                    IndexCount = batch.Count,
+                    MinVertex = batch.MinVertexIndex,
+                    MaxVertex = batch.MaxVertexIndex,
+                    MaterialId = batch.MaterialId
                 });
             }
 
@@ -408,8 +408,8 @@ namespace WoWToolbox.Core.WMO
                 // Write Vertices (v x y z)
                 foreach (var vertex in mesh.Vertices)
                 {
-                    // Use InvariantCulture for consistent decimal formatting
-                    writer.WriteLine(string.Format(CultureInfo.InvariantCulture, "v {0:F6} {1:F6} {2:F6}", vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
+                    // Convert from WoW (X, Y, Z) to OBJ (X, Z, -Y) so +Z is up
+                    writer.WriteLine(string.Format(CultureInfo.InvariantCulture, "v {0:F6} {1:F6} {2:F6}", vertex.Position.X, vertex.Position.Z, -vertex.Position.Y));
                 }
 
                 // Write Normals (vn x y z)
@@ -419,7 +419,8 @@ namespace WoWToolbox.Core.WMO
                 {
                     foreach (var vertex in mesh.Vertices)
                     {
-                        writer.WriteLine(string.Format(CultureInfo.InvariantCulture, "vn {0:F6} {1:F6} {2:F6}", vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
+                        // Convert normal from (X, Y, Z) to (X, Z, -Y)
+                        writer.WriteLine(string.Format(CultureInfo.InvariantCulture, "vn {0:F6} {1:F6} {2:F6}", vertex.Normal.X, vertex.Normal.Z, -vertex.Normal.Y));
                     }
                 }
 

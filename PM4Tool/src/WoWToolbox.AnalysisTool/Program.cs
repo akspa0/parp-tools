@@ -14,6 +14,24 @@ using WoWToolbox.AnalysisTool; // Added for MslkAnalyzer
 using Warcraft.NET.Files.ADT.TerrainObject.Zero; // Added for TerrainObjectZero
 using Warcraft.NET.Files.ADT.Terrain.BfA; // ADDED: For modern base ADT
 using System.Text; // For StringBuilder in summary report
+using WoWToolbox.Core.WMO; // Ensure WMO namespace is present
+using WoWToolbox.Core.Models; // Ensure Models namespace is present
+using System.Globalization; // For CultureInfo in helper
+
+// +++ ADDED: MeshDataExtensions class for IsValid() +++
+public static class MeshDataExtensions
+{
+    public static bool IsValid(this MeshData? meshData) // Made parameter nullable
+    {
+        return meshData != null 
+            && meshData.Vertices != null 
+            && meshData.Indices != null 
+            && meshData.Vertices.Count > 0 
+            && meshData.Indices.Count > 0 
+            && meshData.Indices.Count % 3 == 0;
+    }
+} 
+// +++ END: MeshDataExtensions +++
 
 // ADDED: Data structure for consolidated output
 public class Pm4AnalysisResult
@@ -94,6 +112,20 @@ public class Program
                 case "--help":
                     PrintHelp();
                     return;
+                case "convert-v14-ironforge":
+                    ConvertV14Ironforge(args);
+                    return;
+                case "dump-wmo-meshes":
+                    if (i + 1 < args.Length)
+                    {
+                        DumpWmoMeshes(args[++i]);
+                        return;
+                    }
+                    else
+                    {
+                        WriteError("Missing value for root WMO path argument (dump-wmo-meshes).\nUsage: dump-wmo-meshes <rootWmoPath>");
+                        return;
+                    }
                 default:
                     WriteError($"Unknown argument: {args[i]}");
                     PrintHelp();
@@ -460,4 +492,254 @@ public class Program
         // Console.WriteLine("\nMSLK analysis finished. Press Enter to exit.");
         // Console.ReadLine(); // Removed - Wait is now in AnalyzeMslkAndSummarizeToFile
     }
+
+    // --- v14 WMO to v17 conversion (hardcoded for Ironforge_053.wmo) ---
+    private static void ConvertV14Ironforge(string[] args)
+    {
+        string inputPath = "test_data/053_wmo/Ironforge_053.wmo";
+        string assetName = "Ironforge_053";
+        string outputDir = Path.Combine("outputs", "wmo", assetName);
+        Directory.CreateDirectory(outputDir);
+        string outputRootPath = Path.Combine(outputDir, assetName + ".wmo");
+
+        Console.WriteLine($"[WMOv14->v17] Loading v14 WMO: {inputPath}");
+        // REVERTED: Assuming LoadGroupInfo primarily returns count. Handle groupNames if available/needed.
+        (int groupCount, List<string> groupNames) = WoWToolbox.Core.WMO.WmoRootLoader.LoadGroupInfo(inputPath);
+        if (groupCount <= 0)
+        {
+            Console.WriteLine($"[WMOv14->v17] Failed to load group info from {inputPath}");
+            return;
+        }
+        Console.WriteLine($"[WMOv14->v17] Found {groupCount} groups");
+
+        // Load and convert each group file (assume group files are named Ironforge_053_000.wmo, etc.)
+        // FIX CS1503: Change list type
+        var groupMeshes = new List<MeshData>(); // CHANGED from WmoGroupMesh
+        for (int i = 0; i < groupCount; i++)
+        {
+            // Use groupName if available, otherwise default naming
+             string groupFile = (groupNames != null && i < groupNames.Count && !string.IsNullOrEmpty(groupNames[i]))
+                 ? Path.Combine(Path.GetDirectoryName(inputPath) ?? ".", groupNames[i])
+                 : inputPath.Replace(".wmo", $"_{i:D3}.wmo");
+                 
+            if (!File.Exists(groupFile))
+            {
+                Console.WriteLine($"[WMOv14->v17] Group file missing: {groupFile}");
+                continue;
+            }
+            using var groupStream = File.OpenRead(groupFile);
+            // Ensure type matches return type (MeshData?)
+            var mesh = WoWToolbox.Core.WMO.WmoGroupMesh.LoadFromStream(groupStream, groupFile);
+            // Add null check before adding to list
+            if (mesh != null) 
+            {
+                 groupMeshes.Add(mesh);
+            }
+            else
+            {
+                 Console.WriteLine($"[WMOv14->v17] Failed to load mesh data from group file: {groupFile}");
+            }
+        }
+
+        // TODO: Implement v14->v17 conversion logic here
+        // For now, just re-save the meshes as a proof of concept
+        for (int i = 0; i < groupMeshes.Count; i++)
+        {
+            string outGroupFile = Path.Combine(outputDir, $"{assetName}_{i:D3}.wmo");
+            // Optionally, implement a SaveToWmoGroupFile method for v17 format
+            // For now, just save as OBJ for visual validation
+            string outObjFile = outGroupFile + ".obj";
+            // FIX CS0117: Call helper instead of static method
+            SaveMeshDataToObjHelper(groupMeshes[i], outObjFile); // Use the helper
+            Console.WriteLine($"[WMOv14->v17] Saved OBJ: {outObjFile}");
+        }
+        Console.WriteLine($"[WMOv14->v17] Conversion complete. Output in: {outputDir}");
+        return;
+    }
+
+    private static void DumpWmoMeshes(string rootWmoPath)
+    {
+        Console.WriteLine($"\nMode: Dump WMO Meshes");
+        Console.WriteLine($"----------------------");
+        Console.WriteLine($"Root WMO Path: {rootWmoPath}");
+
+        if (!File.Exists(rootWmoPath))
+        {
+            WriteError($"Root WMO file not found: {rootWmoPath}");
+            return;
+        }
+
+        string baseOutputPath = Path.Combine(Directory.GetCurrentDirectory(), "output", "wmo", Path.GetFileNameWithoutExtension(rootWmoPath));
+        Directory.CreateDirectory(baseOutputPath);
+        string logFilePath = Path.Combine(baseOutputPath, $"{Path.GetFileNameWithoutExtension(rootWmoPath)}_mesh_log.txt");
+
+        using (var logWriter = new StreamWriter(logFilePath, false)) // Overwrite log file
+        {
+            logWriter.WriteLine($"[WMO Mesh Dump] Loading root WMO: {rootWmoPath}");
+            Console.WriteLine($"[WMO Mesh Dump] Loading root WMO: {rootWmoPath}");
+
+            try
+            {
+                // REVERTED: Load group info first, assuming method primarily returns count.
+                // Remove dependency on WmoRootLoadResult (CS0246)
+                (int groupCount, _) = WmoRootLoader.LoadGroupInfo(rootWmoPath);
+                logWriter.WriteLine($"[WMO Mesh Dump] Found {groupCount} group(s) referenced.");
+                Console.WriteLine($"[WMO Mesh Dump] Found {groupCount} group(s) referenced.");
+
+                // Removed check for WmoRootLoadResult (CS0103)
+                
+                if (groupCount == 0)
+                {
+                     logWriter.WriteLine($"[WMO Mesh Dump] WMO has no groups (groupCount = 0). No meshes to dump.");
+                     Console.WriteLine($"[WMO Mesh Dump] WMO has no groups (groupCount = 0). No meshes to dump.");
+                     return; // Exit if no groups
+                }
+
+                List<MeshData> allGroupMeshes = new List<MeshData>();
+                string wmoDir = Path.GetDirectoryName(rootWmoPath) ?? ".";
+                string wmoBaseName = Path.GetFileNameWithoutExtension(rootWmoPath);
+
+                for (int i = 0; i < groupCount; i++)
+                {
+                    string groupPath = Path.Combine(wmoDir, $"{wmoBaseName}_{i:000}.wmo");
+                    logWriter.WriteLine($"[WMO Mesh Dump] Attempting to load group {i}: {groupPath}");
+                    Console.WriteLine($"[WMO Mesh Dump] Attempting to load group {i}: {groupPath}");
+
+                    if (!File.Exists(groupPath))
+                    {
+                        logWriter.WriteLine($"  -> Group file not found. Skipping.");
+                        Console.WriteLine($"  -> Group file not found. Skipping.");
+                        continue;
+                    }
+
+                    try
+                    {
+                        using var stream = File.OpenRead(groupPath);
+                        MeshData? groupMesh = WmoGroupMesh.LoadFromStream(stream, groupPath); 
+
+                        // FIX CS1061: Use the added IsValid() extension method
+                        if (groupMesh.IsValid()) // Extension method call
+                        {
+                            logWriter.WriteLine($"  -> Successfully loaded group {i}. Vertices: {groupMesh.Vertices.Count}, Triangles: {groupMesh.Indices.Count / 3}"); 
+                             Console.WriteLine($"  -> Successfully loaded group {i}. Vertices: {groupMesh.Vertices.Count}, Triangles: {groupMesh.Indices.Count / 3}");
+                            allGroupMeshes.Add(groupMesh); 
+
+                            // Save individual group mesh
+                            string objOutputPath = Path.Combine(baseOutputPath, $"{wmoBaseName}_{i:000}.obj");
+                            logWriter.WriteLine($"  -> Saving group {i} mesh to: {objOutputPath}");
+                            Console.WriteLine($"  -> Saving group {i} mesh to: {objOutputPath}");
+                            SaveMeshDataToObjHelper(groupMesh, objOutputPath); 
+                        }
+                        else
+                        {
+                            logWriter.WriteLine($"  -> Failed to load or mesh data invalid for group {i}.");
+                             Console.WriteLine($"  -> Failed to load or mesh data invalid for group {i}.");
+                        }
+                    }
+                    catch (Exception groupEx)
+                    {
+                        logWriter.WriteLine($"  -> ERROR loading group {i}: {groupEx.Message}");
+                        logWriter.WriteLine($"     StackTrace: {groupEx.StackTrace}");
+                         Console.WriteLine($"  -> ERROR loading group {i}: {groupEx.Message}");
+                        // Continue to next group
+                    }
+                }
+
+                // Merge and save combined mesh if any groups were loaded
+                if (allGroupMeshes.Any())
+                {
+                    logWriter.WriteLine($"[WMO Mesh Dump] Merging {allGroupMeshes.Count} loaded group meshes...");
+                    Console.WriteLine($"[WMO Mesh Dump] Merging {allGroupMeshes.Count} loaded group meshes...");
+                    MeshData? combinedMesh = WmoGroupMesh.MergeMeshes(allGroupMeshes);
+
+                    // FIX CS1061: Use the added IsValid() extension method
+                    if (combinedMesh.IsValid()) // Extension method call
+                    {
+                        string combinedObjPath = Path.Combine(baseOutputPath, $"{wmoBaseName}_combined.obj");
+                        logWriter.WriteLine($"[WMO Mesh Dump] Saving combined mesh (Vertices: {combinedMesh.Vertices.Count}, Triangles: {combinedMesh.Indices.Count / 3}) to: {combinedObjPath}"); 
+                        Console.WriteLine($"[WMO Mesh Dump] Saving combined mesh (Vertices: {combinedMesh.Vertices.Count}, Triangles: {combinedMesh.Indices.Count / 3}) to: {combinedObjPath}");
+                        SaveMeshDataToObjHelper(combinedMesh, combinedObjPath);
+                    }
+                     else
+                    {
+                         logWriter.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
+                          Console.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
+                    }
+                }
+                 else
+                {
+                     logWriter.WriteLine($"[WMO Mesh Dump] No valid group meshes were loaded. Cannot create combined mesh.");
+                      Console.WriteLine($"[WMO Mesh Dump] No valid group meshes were loaded. Cannot create combined mesh.");
+                }
+
+            }
+            catch (Exception ex)
+            {
+                logWriter.WriteLine($"[WMO Mesh Dump] UNHANDLED ERROR processing {rootWmoPath}: {ex.Message}");
+                logWriter.WriteLine($"   StackTrace: {ex.StackTrace}");
+                Console.WriteLine($"[WMO Mesh Dump] UNHANDLED ERROR processing {rootWmoPath}: {ex.Message}");
+            }
+            finally
+            {
+                 logWriter.WriteLine($"[WMO Mesh Dump] Finished processing {rootWmoPath}. Log saved to: {logFilePath}");
+                  Console.WriteLine($"[WMO Mesh Dump] Finished processing {rootWmoPath}. Log saved to: {logFilePath}");
+            }
+        } // using logWriter
+    }
+
+    // +++ ADDED HELPER METHOD (Copied from ComparisonTests.cs) +++
+    private static void SaveMeshDataToObjHelper(MeshData meshData, string outputPath)
+    {
+         if (meshData == null)
+        {
+            Console.WriteLine($"[WARN] MeshData is null, cannot save OBJ.");
+            return;
+        }
+        try
+        {
+             string? directoryPath = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(directoryPath) && !Directory.Exists(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+            using (var writer = new StreamWriter(outputPath, false))
+            {
+                CultureInfo culture = CultureInfo.InvariantCulture;
+                writer.WriteLine($"# Mesh saved by WoWToolbox.AnalysisTool"); // Updated comment source
+                writer.WriteLine($"# Vertices: {meshData.Vertices.Count}");
+                // FIX CS1061 reference (originally here too)
+                writer.WriteLine($"# Triangles: {meshData.Indices.Count / 3}"); 
+                writer.WriteLine($"# Generated: {DateTime.Now}");
+                writer.WriteLine();
+                if (meshData.Vertices.Count > 0)
+                {
+                    writer.WriteLine("# Vertex Definitions");
+                    foreach (var vertex in meshData.Vertices)
+                    {
+                        writer.WriteLine(string.Format(culture, "v {0} {1} {2}", vertex.X, vertex.Y, vertex.Z));
+                    }
+                    writer.WriteLine();
+                }
+                if (meshData.Indices.Count > 0)
+                {
+                    writer.WriteLine("# Face Definitions");
+                    for (int i = 0; i < meshData.Indices.Count; i += 3)
+                    {
+                        // OBJ indices are 1-based
+                        int idx0 = meshData.Indices[i + 0] + 1;
+                        int idx1 = meshData.Indices[i + 1] + 1;
+                        int idx2 = meshData.Indices[i + 2] + 1;
+                        writer.WriteLine($"f {idx0} {idx1} {idx2}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERR] Failed to save MeshData to OBJ file '{outputPath}': {ex.Message}");
+            // Optionally re-throw or handle differently
+            // throw; 
+        }
+    }
+    // +++ END HELPER METHOD +++
 } // End of Program class

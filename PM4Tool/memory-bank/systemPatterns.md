@@ -205,6 +205,13 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
         3. Merge the resulting meshes for analysis or export.
     *   Loader and tools have been updated to follow this pattern. Previous attempts to concatenate files led to invalid parsing and must be avoided.
     *   This pattern is now canonical for all WMO parsing and analysis in WoWToolbox.
+*   **ADT/PM4 UniqueID Correlation (2024-07-21):**
+    *   Implemented and tested in `AdtServiceTests.CorrelatePm4MeshesWithAdtPlacements_ByUniqueId`.
+    *   For a given PM4/ADT pair, mesh groups extracted from the PM4 (by uniqueID) are matched to placements extracted from the ADT _obj0 file.
+    *   The test asserts that each mesh uniqueID has a corresponding placement, confirming the mapping logic is robust and correct for the provided data.
+    *   This pattern is now covered by automated tests and is a core part of the analysis pipeline.
+*   **UniqueID Correlation Limitation (2024-07-21):**
+    *   UniqueID-based mesh extraction and ADT correlation is ONLY possible for development_00_00.pm4. For all other PM4 files, uniqueID data and ADT correlation are NOT available—only baseline or chunk-based mesh exports are possible. This limitation is fundamental and should guide all future analysis, tests, and tooling. Do NOT attempt to generalize uniqueID grouping or ADT correlation beyond this special case.
 
 ## PM4/PD4 Mesh and Node Patterns (2024-04-15)
 
@@ -233,3 +240,33 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
 *   **OBJ Export for Visualization:** Using the simple OBJ format as a common ground for visually inspecting extracted mesh geometry from different sources (PM4, WMO).
 *   **Common Mesh Data Structure (`MeshData`):** Introduced `WoWToolbox.Core.Models.MeshData` (`List<Vector3> Vertices`, `List<int> Indices`) as a standardized intermediate representation for extracted mesh geometry, replacing previous ad-hoc or format-specific structures like `WmoGroupMesh` for this purpose. This facilitates comparison.
 *   **Coordinate System Transformation:** Specific transformations are applied during mesh extraction to convert from file-local coordinates to a consistent world coordinate system suitable for visualization/comparison (e.g., `MsvtToWorld_PM4` in `Pm4MeshExtractor`, potential similar logic in `WmoGroupMesh`).
+
+## Mesh Comparison Utility Pattern (Planned, 2024-07-21)
+
+### Intent
+Provide a robust, extensible utility for comparing 3D meshes (MeshData) extracted from PM4 and WMO files. Move beyond simple vertex/triangle count checks to geometric and shape-based analysis.
+
+### API Design
+- Static utility class or interface: `MeshComparisonUtils.CompareMeshes(MeshData a, MeshData b) : MeshComparisonResult`
+- Result object includes: match/mismatch, similarity score, detailed diagnostics (e.g., vertex/triangle differences, bounding box overlap, centroid distance).
+
+### Comparison Metrics
+- Vertex/triangle count
+- Bounding box overlap/intersection
+- Centroid distance
+- Surface area comparison
+- (Optional) Hausdorff or other shape similarity metrics
+- Tolerance for translation, rotation, and scale differences
+
+### Diagnostic Output
+- Detailed report of mismatches (which vertices/triangles differ, by how much)
+- Summary statistics (counts, scores, pass/fail)
+
+### Integration
+- Used in test project to compare PM4 and WMO meshes for validation and regression testing.
+- Can be extended for future mesh analysis needs.
+
+### Broader Vision
+- Mesh comparison and matching logic will be used to reconstruct WMO placements from PM4 data, enabling the recreation and preservation of historical game worlds.
+- Placement data will be output as YAML for now, supporting transparency, review, and future extensibility (e.g., chunk creation/export).
+- The system is designed to inspire and empower others to explore, understand, and preserve digital history.

@@ -16,7 +16,7 @@ namespace WoWToolbox.MSCNExplorer.Analysis
     public class MscnMeshComparisonAnalyzer
     {
         public List<Vector3> MscnPoints { get; private set; } = new();
-        public WmoGroupMesh Mesh { get; set; } = null!;
+        public WmoGroupMesh? Mesh { get; set; } = null;
         public List<ProximityResult> Results { get; private set; } = new();
 
         public MscnMeshComparisonAnalyzer() { }
@@ -44,13 +44,13 @@ namespace WoWToolbox.MSCNExplorer.Analysis
         public void LoadWmoMesh(string wmoGroupFilePath)
         {
             using var stream = File.OpenRead(wmoGroupFilePath);
-            Mesh = WmoGroupMesh.LoadFromStream(stream);
+            Mesh = WmoGroupMesh.LoadFromStream(stream, wmoGroupFilePath);
         }
 
         public void AnalyzeProximity(float threshold = 0.1f)
         {
-            if (Mesh == null || Mesh.Vertices.Count == 0)
-                throw new InvalidOperationException("Mesh must be loaded before analysis.");
+            if (Mesh == null || Mesh.Vertices == null || Mesh.Vertices.Count == 0)
+                throw new InvalidOperationException("Mesh must be loaded and valid before analysis.");
             Results.Clear();
             float minDist = float.MaxValue, maxDist = float.MinValue, sumDist = 0;
             int withinThreshold = 0;

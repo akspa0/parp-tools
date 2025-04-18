@@ -1,3 +1,16 @@
+# Project Vision & Immediate Technical Goal (2024-07-21)
+
+## Vision
+- Inspire others to explore, understand, and preserve digital history, especially game worlds.
+- Use technical skill to liberate hidden or lost data, making it accessible and reusable for future creators and historians.
+
+## Immediate Technical Goal
+- Use PM4 files to infer and reconstruct WMO placements in 3D space for ADT chunks.
+- Match PM4 mesh components to WMO meshes, deduce model placements, and generate placement data.
+- Output reconstructed placement data as YAML for now, with plans for a chunk creator/exporter in the future.
+
+---
+
 # Progress
 
 ## PM4 Mesh Extraction Pipeline
@@ -209,3 +222,51 @@
 ### Known Issues / Blockers
 
 *   None currently identified after resolving the `RenderableMesh` issue by creating `MeshData`. 
+
+# PM4/ADT UniqueID Correlation Progress (2024-07-21)
+
+### What Works
+- Added and executed `AdtServiceTests.CorrelatePm4MeshesWithAdtPlacements_ByUniqueId`.
+- The test loads a PM4 file and its corresponding ADT _obj0 file, extracts meshes by uniqueID from the PM4, and placements from the ADT.
+- For each uniqueID in the PM4, the test asserts a matching placement exists in the ADT and prints asset path and mesh stats.
+- The test passes for the provided sample data, confirming the uniqueID correlation logic is correct and robust.
+
+### Next Steps
+- Expand test coverage with additional PM4/ADT pairs and edge cases.
+- Integrate this correlation logic into higher-level workflows or tools as needed.
+- Maintain and document this pattern as a core part of the analysis pipeline.
+
+### Status
+- UniqueID correlation between PM4 mesh groups and ADT placements is now covered by automated tests.
+- Codebase is healthy and stable for this feature.
+
+---
+
+# UniqueID Correlation Limitation (2024-07-21)
+
+**NOTE:** UniqueID-based mesh extraction and ADT correlation is ONLY possible for development_00_00.pm4. For all other PM4 files, uniqueID data and ADT correlation are NOT available—only baseline or chunk-based mesh exports are possible. This limitation is fundamental and should guide all future analysis, tests, and tooling. Do NOT attempt to generalize uniqueID grouping or ADT correlation beyond this special case.
+
+---
+
+# Mesh Analysis and Comparison Focus (2024-07-21)
+
+**Note:** Mesh analysis and comparison is now the primary active work area. Previous blockers related to mesh extraction are resolved; the focus is on implementing robust comparison logic and diagnostics.
+
+## What Works
+- Mesh extraction from PM4 and WMO files is robust and validated in the test project.
+
+## What's Left to Build
+- No dedicated mesh analysis or comparison logic exists yet.
+- Need to define what constitutes a mesh match (geometry, shape, bounding box, centroid, etc.).
+- Need to implement comparison metrics: vertex/triangle count, bounding box, centroid, surface area, and advanced shape similarity as needed.
+- Need to support tolerance for translation, rotation, and scale differences.
+- Need to provide detailed diagnostic output for mismatches.
+
+## Next Steps
+1. Design a mesh comparison API/interface (input: two MeshData objects, output: result object with match/mismatch, score, diagnostics).
+2. Implement basic geometric comparisons (vertex/triangle count, bounding box, centroid).
+3. Add advanced shape similarity metrics as needed.
+4. Integrate with test project and validate on real data.
+5. Document rationale and design in memory bank.
+
+--- 

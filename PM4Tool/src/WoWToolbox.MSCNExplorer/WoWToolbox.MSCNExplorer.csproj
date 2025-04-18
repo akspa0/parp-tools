@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+    <ProjectReference Include="..\WoWToolbox.Common\WoWToolbox.Common.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

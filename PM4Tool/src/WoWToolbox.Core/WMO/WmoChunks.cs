@@ -432,28 +432,63 @@ namespace WoWToolbox.Core.WMO
         public static MDAL FromBinaryReader(BinaryReader br) => new MDAL { AmbientColor = br.ReadUInt32() };
     }
 
-    // MOBA chunk: Bounding box/area info (commonly 3 uint32 fields)
+    // MOBA chunk: Render Batches (24 bytes per batch)
+    // Structure based on wowdev wiki for SMOBatch (post 0.5.5)
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct MOBA
     {
-        public uint MinIndex;
-        public uint MaxIndex;
-        public uint Flags;
+        // Offsets relative to start of MOBA struct data
+        // uint16 bx, by, bz; // 0x00 - 0x05 (Bounding box - often ignored)
+        // uint16 tx, ty, tz; // 0x06 - 0x0B
+        // For simplicity, we read these as unknowns for now, matching common implementations.
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 12)]
+        public byte[] UnknownBoxData; // 0x00 - 0x0B
+
+        public uint StartIndex;         // 0x0C - index of the first face index used in MOVI
+        public ushort Count;            // 0x10 - number of MOVI indices used
+        public ushort MinVertexIndex;   // 0x12 - index of the first vertex used in MOVT
+        public ushort MaxVertexIndex;   // 0x14 - index of the last vertex used (inclusive)
+        public byte Flags;              // 0x16 - Contains flags like use_material_id_large
+        public byte MaterialId;         // 0x17 - index in MOMT
+
+        // Total size should be 12 + 4 + 2 + 2 + 2 + 1 + 1 = 24 bytes
+
         public static MOBA FromBinaryReader(BinaryReader br)
         {
-            return new MOBA
+            var moba = new MOBA
             {
-                MinIndex = br.ReadUInt32(),
-                MaxIndex = br.ReadUInt32(),
-                Flags = br.ReadUInt32()
+                UnknownBoxData = br.ReadBytes(12),
+                StartIndex = br.ReadUInt32(),
+                Count = br.ReadUInt16(),
+                MinVertexIndex = br.ReadUInt16(),
+                MaxVertexIndex = br.ReadUInt16(),
+                Flags = br.ReadByte(),
+                MaterialId = br.ReadByte()
             };
+            // TODO: Check Flags for use_material_id_large if needed later
+            return moba;
         }
 
         public static List<MOBA> ReadArray(BinaryReader br, int count)
         {
             var list = new List<MOBA>(count);
+            int expectedSize = 24; // Marshal.SizeOf<MOBA>(); - Use constant to ensure correct reading
             for (int i = 0; i < count; i++)
-                list.Add(FromBinaryReader(br));
+            {
+                // Read manually to ensure correct size handling if struct packing is tricky
+                var moba = new MOBA
+                {
+                    UnknownBoxData = br.ReadBytes(12),
+                    StartIndex = br.ReadUInt32(),
+                    Count = br.ReadUInt16(),
+                    MinVertexIndex = br.ReadUInt16(),
+                    MaxVertexIndex = br.ReadUInt16(),
+                    Flags = br.ReadByte(),
+                    MaterialId = br.ReadByte()
+                };
+                list.Add(moba);
+                // Potential check: if (Marshal.SizeOf(moba) != expectedSize) { /* Log warning */ }
+            }
             return list;
         }
     }
