@@ -4,6 +4,9 @@ using System.Text;
 using System.Collections.Generic;
 using System.Numerics;
 using WoWToolbox.Core.WMO; // For WmoGroupMesh, WmoRootLoader, etc.
+using Warcraft.NET.Files.BLP;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Formats.Png;
 
 namespace WoWToolbox.WmoV14Converter
 {
@@ -163,7 +166,7 @@ namespace WoWToolbox.WmoV14Converter
             }
             var mogpHeader = br.ReadBytes(MOGP_HEADER_SIZE);
             // --- Scan forward for the first valid subchunk header ---
-            string[] validSubchunks = { "MOPY", "MOVT", "MONR", "MOTV", "MOVI", "MOBA", "MLIQ", "MOCV", "MOTX", "MOGN", "MOMT" };
+            string[] validSubchunks = { "MOPY", "MOVT", "MONR", "MOTV", "MOVI", "MOBA", "MLIQ", "MOCV", "MOTX", "MOGN", "MOMT", "MOLV", "MOIN", "MODR", "MOBN", "MOBR", "MOCV", "MOLM", "MOLD" };
             int scanOffset = MOGP_HEADER_SIZE;
             int foundOffset = -1;
             string foundId = "";
@@ -193,6 +196,24 @@ namespace WoWToolbox.WmoV14Converter
             int chunkIdx = 0;
             while (ms.Position + 8 <= groupLen)
             {
+                // --- End-of-region checks ---
+                long bytesLeft = groupLen - ms.Position;
+                if (bytesLeft < 8)
+                {
+                    Log($"[v14][END] Fewer than 8 bytes left in group region (bytesLeft={bytesLeft}). Ending subchunk parse cleanly.");
+                    break;
+                }
+                // Peek next 4 bytes
+                long peekPos = ms.Position;
+                var peekBytes = br.ReadBytes(4);
+                ms.Position = peekPos; // reset
+                bool allZero = peekBytes.All(b => b == 0);
+                bool allNonPrintable = peekBytes.All(b => b < 0x20 || b > 0x7E);
+                if (allZero || allNonPrintable)
+                {
+                    Log($"[v14][END] Next 4 bytes at 0x{peekPos:X} are all zero or non-printable (likely padding). Ending subchunk parse cleanly.");
+                    break;
+                }
                 long subChunkStart = ms.Position;
                 var subChunkIdBytes = br.ReadBytes(4);
                 if (subChunkIdBytes.Length < 4) break;
@@ -230,12 +251,56 @@ namespace WoWToolbox.WmoV14Converter
                     }
                 }
                 ms.Position = subChunkEnd;
-                // 4-byte alignment: skip padding if needed
-                if (ms.Position % 4 != 0)
+                // CONDITIONAL padding: only skip if next 4 bytes are all zero or all non-printable
+                long afterSubChunk = ms.Position;
+                if (ms.Position + 4 <= groupLen) {
+                    var padPeekBytes = br.ReadBytes(4);
+                    ms.Position = afterSubChunk; // reset
+                    bool padAllZero = padPeekBytes.All(b => b == 0);
+                    bool padAllNonPrintable = padPeekBytes.All(b => b < 0x20 || b > 0x7E);
+                    if (padAllZero || padAllNonPrintable) {
+                        Log($"[v14][PAD-ODDITY] Conditional padding detected after chunk '{subChunkIdStr}' at 0x{afterSubChunk:X}: next 4 bytes are all zero or non-printable. Skipping 4 bytes. This may indicate a hidden flag or undocumented structure in the WMO format.");
+                        ms.Position += 4;
+                    } else {
+                        Log($"[v14][PAD-ODDITY] No padding after chunk '{subChunkIdStr}' at 0x{afterSubChunk:X}: next subchunk starts immediately. This may indicate a hidden flag or undocumented structure in the WMO format.");
+                    }
+                }
+                // Dynamic chunk header search if next 4 bytes are not a valid chunk ID
+                long searchStart = ms.Position;
+                if (ms.Position + 4 <= groupLen)
                 {
-                    long pad = 4 - (ms.Position % 4);
-                    Log($"[v14] Skipping {pad} padding byte(s) after chunk '{subChunkIdStr}'");
-                    ms.Position += pad;
+                    ms.Position = searchStart;
+                    var nextIdBytes = br.ReadBytes(4);
+                    ms.Position = searchStart; // reset
+                    string nextId = new string(nextIdBytes.Reverse().Select(b => (char)b).ToArray());
+                    if (!validSubchunks.Contains(nextId))
+                    {
+                        // Only attempt realignment if enough bytes left
+                        if (ms.Position + 4 + 1 <= groupLen)
+                        {
+                            Log($"[v14][REALIGN] Next 4 bytes at 0x{searchStart:X} do not match a valid chunk ID ('{nextId}'). Scanning forward for valid chunk header...");
+                            bool found = false;
+                            for (int scan = 1; scan <= 16 && searchStart + scan + 4 <= groupLen; scan++)
+                            {
+                                ms.Position = searchStart + scan;
+                                var scanIdBytes = br.ReadBytes(4);
+                                ms.Position = searchStart + scan; // reset
+                                string scanId = new string(scanIdBytes.Reverse().Select(b => (char)b).ToArray());
+                                if (validSubchunks.Contains(scanId))
+                                {
+                                    Log($"[v14][REALIGN] Found valid chunk ID '{scanId}' at 0x{searchStart + scan:X} (skipped {scan} byte(s)). Realigning.");
+                                    ms.Position = searchStart + scan;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found)
+                            {
+                                ms.Position = searchStart;
+                                Log($"[v14][REALIGN] No valid chunk header found within 16 bytes after 0x{searchStart:X}. Continuing as before.");
+                            }
+                        }
+                    }
                 }
                 chunkIdx++;
             }
@@ -243,6 +308,11 @@ namespace WoWToolbox.WmoV14Converter
             Log("[v14] Subchunks found in group:");
             foreach (var (id, offset, size) in subchunkList)
                 Log($"  ID='{id}' Offset=0x{offset:X} Size={size}");
+            // Log group end summary
+            if (ms.Position >= groupLen)
+                Log($"[v14][END] Reached end of group region at 0x{ms.Position:X} (groupLen=0x{groupLen:X})");
+            else
+                Log($"[v14][END] Stopped subchunk parse at 0x{ms.Position:X} (groupLen=0x{groupLen:X})");
             // Parse geometry subchunks
             // MOVT: Vertices
             if (subchunks.TryGetValue("MOVT", out var movt))
@@ -335,6 +405,8 @@ namespace WoWToolbox.WmoV14Converter
 
         public static void ExportAllGroupsAsObj(string inputWmo, string outputPrefix)
         {
+            // Extract and convert textures before exporting meshes
+            ExtractAndConvertTextures(inputWmo, "test_data/053_textures", "output/053_textures_png");
             Log($"[OBJ] Opening v14 WMO: {inputWmo}");
             using var stream = File.OpenRead(inputWmo);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
@@ -418,6 +490,8 @@ namespace WoWToolbox.WmoV14Converter
 
         public static void ExportMergedGroupsAsObj(string inputWmo, string outputObj)
         {
+            // Extract and convert textures before exporting meshes
+            ExtractAndConvertTextures(inputWmo, "test_data/053_textures", "output/053_textures_png");
             Log($"[OBJ] Opening v14 WMO: {inputWmo}");
             using var stream = File.OpenRead(inputWmo);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
@@ -526,6 +600,161 @@ namespace WoWToolbox.WmoV14Converter
             {
                 Log($"[OBJ] ERROR: Failed to export merged OBJ: {ex.Message}\n{ex.StackTrace}");
             }
+        }
+
+        public static void ExtractAndConvertTextures(string inputWmo, string blpRoot, string pngOutDir)
+        {
+            Log($"[TEX][START] ExtractAndConvertTextures: inputWmo={inputWmo}, blpRoot={blpRoot}, pngOutDir={pngOutDir}");
+            if (!Directory.Exists(pngOutDir)) Directory.CreateDirectory(pngOutDir);
+            using var stream = File.OpenRead(inputWmo);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
+            long fileLen = stream.Length;
+            stream.Position = 0;
+            // Log all top-level chunk IDs, offsets, and sizes
+            Log($"[TEX][SCAN] Scanning all top-level chunks in {inputWmo}");
+            var chunkHeaders = new List<(string id, long offset, uint size)>();
+            while (stream.Position + 8 <= fileLen)
+            {
+                long chunkStart = stream.Position;
+                var chunkIdBytes = reader.ReadBytes(4);
+                if (chunkIdBytes.Length < 4) break;
+                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                uint chunkSize = reader.ReadUInt32();
+                chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
+                Log($"[TEX][CHUNK] ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
+                // If not MOTX or MOMT, log first 32 bytes as hex dump for unknowns
+                if (chunkIdStr != "MOTX" && chunkIdStr != "MOMT") {
+                    long savePos = stream.Position;
+                    stream.Position = chunkStart + 8;
+                    byte[] dump = reader.ReadBytes((int)Math.Min(32, chunkSize));
+                    var hex = string.Join(" ", dump.Select(b => b.ToString("X2")));
+                    Log($"[TEX][CHUNK][DUMP] ID='{chunkIdStr}' First 32 bytes: {hex}");
+                    stream.Position = savePos;
+                }
+                stream.Position = chunkStart + 8 + chunkSize;
+            }
+            // Find MOTX and MOMT chunks
+            List<string> motxStrings = new();
+            List<int> momtTextureOffsets = new();
+            long motxOffset = -1, momtOffset = -1;
+            uint motxSize = 0, momtSize = 0;
+            foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
+            {
+                if (chunkIdStr == "MOTX") { motxOffset = chunkStart + 8; motxSize = chunkSize; }
+                if (chunkIdStr == "MOMT") { momtOffset = chunkStart + 8; momtSize = chunkSize; }
+            }
+            Log($"[TEX][DEBUG] MOTX offset={motxOffset}, size={motxSize}; MOMT offset={momtOffset}, size={momtSize}");
+            if (motxOffset == -1 || momtOffset == -1)
+            {
+                Log($"[TEX][WARN] MOTX or MOMT chunk not found in {inputWmo}. No textures will be processed.");
+                return;
+            }
+            // Parse MOTX: null-terminated strings
+            stream.Position = motxOffset;
+            byte[] motxData = reader.ReadBytes((int)motxSize);
+            int idx = 0;
+            while (idx < motxData.Length)
+            {
+                int start = idx;
+                while (idx < motxData.Length && motxData[idx] != 0) idx++;
+                string tex = Encoding.ASCII.GetString(motxData, start, idx - start);
+                if (!string.IsNullOrWhiteSpace(tex)) motxStrings.Add(tex);
+                while (idx < motxData.Length && motxData[idx] == 0) idx++; // skip padding
+            }
+            Log($"[TEX][DEBUG] Found {motxStrings.Count} texture paths in MOTX:");
+            foreach (var s in motxStrings) Log($"[TEX][MOTX] {s}");
+            // Parse MOMT: each material is 44 bytes, texture1 offset at +0xC
+            stream.Position = momtOffset;
+            int nMaterials = (int)(momtSize / 44);
+            for (int i = 0; i < nMaterials; i++)
+            {
+                stream.Position = momtOffset + i * 44 + 0xC;
+                int texOffset = reader.ReadInt32();
+                momtTextureOffsets.Add(texOffset);
+            }
+            // Build set of referenced textures
+            HashSet<string> referencedBlps = new();
+            foreach (int offset in momtTextureOffsets)
+            {
+                int runningOffset = 0;
+                foreach (var tex in motxStrings)
+                {
+                    if (runningOffset == offset)
+                    {
+                        referencedBlps.Add(tex);
+                        break;
+                    }
+                    runningOffset += tex.Length + 1; // null terminator
+                    while (runningOffset % 4 != 0) runningOffset++;
+                }
+            }
+            Log($"[TEX][DEBUG] {referencedBlps.Count} unique BLPs referenced by materials:");
+            foreach (var blp in referencedBlps) Log($"[TEX][REF] {blp}");
+            // --- Recursive BLP search helper ---
+            static string FindBlpRecursive(string blpRoot, string relPath)
+            {
+                // Normalize path separators
+                string searchName = Path.GetFileName(relPath).ToLowerInvariant();
+                var files = Directory.GetFiles(blpRoot, "*.blp", SearchOption.AllDirectories);
+                foreach (var file in files)
+                {
+                    if (Path.GetFileName(file).ToLowerInvariant() == searchName)
+                        return file;
+                }
+                return null;
+            }
+            int pngWritten = 0;
+            int blpsFound = 0, blpsMissing = 0;
+            foreach (var blpRelPath in referencedBlps)
+            {
+                string assetString = blpRelPath;
+                string expectedRelPath = blpRelPath.Replace("/", "\\");
+                string blpPath = Path.Combine(blpRoot, expectedRelPath);
+                string foundBlpPath = null;
+                if (File.Exists(blpPath))
+                {
+                    foundBlpPath = blpPath;
+                    Log($"[TEX][BLP] Found (direct): {assetString} -> {blpPath}");
+                }
+                else
+                {
+                    foundBlpPath = FindBlpRecursive(blpRoot, blpRelPath);
+                    if (foundBlpPath != null)
+                        Log($"[TEX][BLP] Found (recursive): {assetString} -> {foundBlpPath}");
+                    else {
+                        Log($"[TEX][WARN] BLP not found: {assetString} (searched for {Path.GetFileName(blpRelPath)} recursively under {blpRoot})");
+                        blpsMissing++;
+                    }
+                }
+                if (foundBlpPath == null) continue;
+                blpsFound++;
+                string pngPath = Path.Combine(pngOutDir, Path.GetFileNameWithoutExtension(blpRelPath) + ".png");
+                Log($"[TEX][PNG] Attempting to write PNG: {pngPath}");
+                if (File.Exists(pngPath))
+                {
+                    Log($"[TEX] PNG already exists: {pngPath}");
+                    continue;
+                }
+                try
+                {
+                    byte[] blpBytes = File.ReadAllBytes(foundBlpPath);
+                    var blp = new BLP(blpBytes);
+                    var image = blp.GetMipMap(0); // Image<Rgba32>
+                    using (var fs = File.OpenWrite(pngPath))
+                    {
+                        image.Save(fs, new PngEncoder());
+                    }
+                    Log($"[TEX] Converted {assetString} to {pngPath}");
+                    pngWritten++;
+                }
+                catch (Exception ex)
+                {
+                    Log($"[TEX][ERR] Failed to convert {assetString}: {ex.Message}");
+                }
+            }
+            if (referencedBlps.Count == 0)
+                Log($"[TEX][FATAL] No referenced BLPs found in MOTX/MOMT. Check chunk parsing and input file integrity.");
+            Log($"[TEX][SUMMARY] BLPs found: {blpsFound}, missing: {blpsMissing}, PNGs written: {pngWritten}");
         }
     }
 } 
