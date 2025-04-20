@@ -499,6 +499,80 @@ namespace WoWToolbox.Core.WMO
             }
         }
 
+        // New: Save OBJ and MTL with material mapping
+        public static void SaveToObjAndMtl(WmoGroupMesh mesh, string objPath, string mtlPath, Dictionary<byte, string> materialIdToPng)
+        {
+            // Write MTL file
+            using (var mtlWriter = new StreamWriter(mtlPath))
+            {
+                mtlWriter.WriteLine("# WoWToolbox WMO Materials");
+                foreach (var kvp in materialIdToPng.OrderBy(kvp => kvp.Key))
+                {
+                    mtlWriter.WriteLine($"newmtl Material_{kvp.Key}");
+                    mtlWriter.WriteLine($"map_Kd {kvp.Value}");
+                    mtlWriter.WriteLine();
+                }
+            }
+
+            // Write OBJ file
+            using (var writer = new StreamWriter(objPath))
+            {
+                writer.WriteLine($"# WoWToolbox WMO Group Mesh Export");
+                writer.WriteLine($"# Exported: {DateTime.Now}");
+                writer.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+                writer.WriteLine($"# Vertices: {mesh.Vertices.Count}");
+                writer.WriteLine($"# Triangles: {mesh.Triangles.Count}");
+                writer.WriteLine($"# Batches: {mesh.Batches?.Count ?? 0}");
+                if (mesh.Vertices.Count == 0)
+                {
+                    writer.WriteLine("# WARNING: No vertices found in mesh.");
+                    return;
+                }
+                writer.WriteLine("o WmoGroupMesh");
+                // Write Vertices
+                foreach (var vertex in mesh.Vertices)
+                    writer.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "v {0:F6} {1:F6} {2:F6}", vertex.Position.X, vertex.Position.Z, -vertex.Position.Y));
+                // Write Normals
+                bool hasNormals = mesh.Vertices.Any(v => v.Normal != Vector3.UnitY && v.Normal != Vector3.Zero);
+                if (hasNormals)
+                    foreach (var vertex in mesh.Vertices)
+                        writer.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "vn {0:F6} {1:F6} {2:F6}", vertex.Normal.X, vertex.Normal.Z, -vertex.Normal.Y));
+                // Write UVs
+                bool hasUVs = mesh.Vertices.Any(v => v.UV != Vector2.Zero);
+                if (hasUVs)
+                    foreach (var vertex in mesh.Vertices)
+                        writer.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "vt {0:F6} {1:F6}", vertex.UV.X, 1.0f - vertex.UV.Y));
+                if (mesh.Triangles.Count == 0)
+                {
+                    writer.WriteLine("# WARNING: No triangles found in mesh.");
+                    return;
+                }
+                // Write Faces grouped by MaterialId
+                var groupedTriangles = mesh.Triangles.GroupBy(t => t.MaterialId).OrderBy(g => g.Key);
+                foreach (var group in groupedTriangles)
+                {
+                    writer.WriteLine($"g Material_{group.Key}");
+                    writer.WriteLine($"usemtl Material_{group.Key}");
+                    foreach (var tri in group)
+                    {
+                        int v1 = tri.Index0 + 1;
+                        int v2 = tri.Index1 + 1;
+                        int v3 = tri.Index2 + 1;
+                        string fStr;
+                        if (hasUVs && hasNormals)
+                            fStr = $"f {v1}/{v1}/{v1} {v2}/{v2}/{v2} {v3}/{v3}/{v3}";
+                        else if (hasUVs)
+                            fStr = $"f {v1}/{v1} {v2}/{v2} {v3}/{v3}";
+                        else if (hasNormals)
+                            fStr = $"f {v1}//{v1} {v2}//{v2} {v3}//{v3}";
+                        else
+                            fStr = $"f {v1} {v2} {v3}";
+                        writer.WriteLine(fStr);
+                    }
+                }
+            }
+        }
+
         public static WmoGroupMesh MergeMeshes(IEnumerable<WmoGroupMesh> meshes)
         {
             var merged = new WmoGroupMesh();

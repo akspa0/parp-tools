@@ -56,11 +56,36 @@ namespace WoWToolbox.WmoV14Converter
                 long chunkStart = stream.Position;
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
-                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
                 uint chunkSize = reader.ReadUInt32();
-                chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
                 Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
-                stream.Position = chunkStart + 8 + chunkSize;
+                chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
+                if (chunkIdStr == "MOMO")
+                {
+                    // Parse subchunks inside MOMO
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
+                        // Optionally: add to chunkHeaders or process as needed
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                    // After parsing MOMO, move stream to the end of the chunk
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
+                else
+                {
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
             }
 
             // --- Step 2: Find the first group region (MOGP header + subchunks) ---
@@ -175,7 +200,7 @@ namespace WoWToolbox.WmoV14Converter
                 ms.Position = off;
                 var idBytes = br.ReadBytes(4);
                 if (idBytes.Length < 4) break;
-                string id = new string(idBytes.Reverse().Select(b => (char)b).ToArray());
+                string id = Encoding.ASCII.GetString(idBytes.Reverse().ToArray());
                 if (validSubchunks.Contains(id))
                 {
                     foundOffset = off;
@@ -217,7 +242,7 @@ namespace WoWToolbox.WmoV14Converter
                 long subChunkStart = ms.Position;
                 var subChunkIdBytes = br.ReadBytes(4);
                 if (subChunkIdBytes.Length < 4) break;
-                string subChunkIdStr = new string(subChunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
                 uint subChunkSize = br.ReadUInt32();
                 long subChunkDataPos = ms.Position;
                 long subChunkEnd = subChunkDataPos + subChunkSize;
@@ -272,7 +297,7 @@ namespace WoWToolbox.WmoV14Converter
                     ms.Position = searchStart;
                     var nextIdBytes = br.ReadBytes(4);
                     ms.Position = searchStart; // reset
-                    string nextId = new string(nextIdBytes.Reverse().Select(b => (char)b).ToArray());
+                    string nextId = Encoding.ASCII.GetString(nextIdBytes.Reverse().ToArray());
                     if (!validSubchunks.Contains(nextId))
                     {
                         // Only attempt realignment if enough bytes left
@@ -285,7 +310,7 @@ namespace WoWToolbox.WmoV14Converter
                                 ms.Position = searchStart + scan;
                                 var scanIdBytes = br.ReadBytes(4);
                                 ms.Position = searchStart + scan; // reset
-                                string scanId = new string(scanIdBytes.Reverse().Select(b => (char)b).ToArray());
+                                string scanId = Encoding.ASCII.GetString(scanIdBytes.Reverse().ToArray());
                                 if (validSubchunks.Contains(scanId))
                                 {
                                     Log($"[v14][REALIGN] Found valid chunk ID '{scanId}' at 0x{searchStart + scan:X} (skipped {scan} byte(s)). Realigning.");
@@ -421,10 +446,36 @@ namespace WoWToolbox.WmoV14Converter
                 long chunkStart = stream.Position;
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
-                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
+                Log($"[DEBUG] Raw chunk ID bytes: {BitConverter.ToString(chunkIdBytes)} String: '{chunkIdStr}'");
                 uint chunkSize = reader.ReadUInt32();
                 chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
-                stream.Position = chunkStart + 8 + chunkSize;
+                Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
+                if (chunkIdStr == "MOMO")
+                {
+                    // Parse subchunks inside MOMO
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                    // After parsing MOMO, move stream to the end of the chunk
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
+                else
+                {
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
             }
 
             // --- Step 2: Find all MOGP group regions ---
@@ -465,6 +516,65 @@ namespace WoWToolbox.WmoV14Converter
                 }
             }
             Log($"[OBJ] Found {groupRegions.Count} group(s) in WMO");
+
+            // --- Step 3: Build materialId-to-PNG mapping from MOTX/MOMT ---
+            // (This logic is adapted from ExtractAndConvertTextures)
+            // Find MOTX and MOMT chunks
+            long motxOffset = -1, momtOffset = -1;
+            uint motxSize = 0, momtSize = 0;
+            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
+            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
+            foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
+            {
+                if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMT") RecordMomt(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMO")
+                {
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
+                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                }
+            }
+            Dictionary<byte, string> materialIdToPng = new();
+            if (motxOffset != -1 && momtOffset != -1)
+            {
+                stream.Position = motxOffset;
+                byte[] motxData = reader.ReadBytes((int)motxSize);
+                stream.Position = momtOffset;
+                int nMaterials = (int)(momtSize / 44);
+                for (int i = 0; i < nMaterials && i < 256; i++) // byte MaterialId max 255
+                {
+                    stream.Position = momtOffset + i * 44 + 0xC;
+                    int texOffset = reader.ReadInt32();
+                    string tex = null;
+                    if (texOffset >= 0 && texOffset < motxData.Length)
+                    {
+                        int end = texOffset;
+                        while (end < motxData.Length && motxData[end] != 0) end++;
+                        tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
+                    }
+                    if (!string.IsNullOrWhiteSpace(tex))
+                    {
+                        // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
+                        string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
+                        materialIdToPng[(byte)i] = Path.Combine("output/053_textures_png", pngFile);
+                    }
+                }
+            }
+
             int exported = 0;
             foreach (var (groupIdx, groupStart, groupEnd) in groupRegions)
             {
@@ -472,12 +582,13 @@ namespace WoWToolbox.WmoV14Converter
                 stream.Position = groupStart;
                 byte[] groupData = reader.ReadBytes((int)groupLen);
                 string outFile = $"{outputPrefix}-group-{groupIdx:D3}.obj";
-                Log($"[OBJ] Exporting group {groupIdx} (offset=0x{groupStart:X}, len={groupLen}) to {outFile}");
+                string mtlFile = Path.ChangeExtension(outFile, ".mtl");
+                Log($"[OBJ] Exporting group {groupIdx} (offset=0x{groupStart:X}, len={groupLen}) to {outFile} and {mtlFile}");
                 try
                 {
                     var mesh = LoadFromV14GroupChunk(groupData);
-                    WmoGroupMesh.SaveToObj(mesh, outFile);
-                    Log($"[OBJ] Wrote OBJ file: {outFile}");
+                    WmoGroupMesh.SaveToObjAndMtl(mesh, outFile, mtlFile, materialIdToPng);
+                    Log($"[OBJ] Wrote OBJ file: {outFile} and MTL file: {mtlFile}");
                     exported++;
                 }
                 catch (Exception ex)
@@ -485,7 +596,7 @@ namespace WoWToolbox.WmoV14Converter
                     Log($"[OBJ] ERROR: Failed to export group {groupIdx}: {ex.Message}");
                 }
             }
-            Log($"[OBJ] Exported {exported}/{groupRegions.Count} group(s) to OBJ files with prefix '{outputPrefix}-group-'.");
+            Log($"[OBJ] Exported {exported}/{groupRegions.Count} group(s) to OBJ+MTL files with prefix '{outputPrefix}-group-'.");
         }
 
         public static void ExportMergedGroupsAsObj(string inputWmo, string outputObj)
@@ -506,10 +617,36 @@ namespace WoWToolbox.WmoV14Converter
                 long chunkStart = stream.Position;
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
-                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
+                Log($"[DEBUG] Raw chunk ID bytes: {BitConverter.ToString(chunkIdBytes)} String: '{chunkIdStr}'");
                 uint chunkSize = reader.ReadUInt32();
                 chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
-                stream.Position = chunkStart + 8 + chunkSize;
+                Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
+                if (chunkIdStr == "MOMO")
+                {
+                    // Parse subchunks inside MOMO
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                    // After parsing MOMO, move stream to the end of the chunk
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
+                else
+                {
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
             }
 
             // --- Step 2: Find all MOGP group regions ---
@@ -590,15 +727,71 @@ namespace WoWToolbox.WmoV14Converter
             {
                 Log($"[OBJ][WARN] Merged mesh is empty (vertices: {mergedMesh.Vertices.Count}, triangles: {mergedMesh.Triangles.Count}). Writing file anyway for debugging.");
             }
-            // --- Step 4: Export merged mesh as OBJ ---
+            // --- Step 4: Build materialId-to-PNG mapping from MOTX/MOMT (same as in ExportAllGroupsAsObj) ---
+            long motxOffset = -1, momtOffset = -1;
+            uint motxSize = 0, momtSize = 0;
+            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
+            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
+            foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
+            {
+                if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMT") RecordMomt(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMO")
+                {
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
+                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                }
+            }
+            Dictionary<byte, string> materialIdToPng = new();
+            if (motxOffset != -1 && momtOffset != -1)
+            {
+                stream.Position = motxOffset;
+                byte[] motxData = reader.ReadBytes((int)motxSize);
+                stream.Position = momtOffset;
+                int nMaterials = (int)(momtSize / 44);
+                for (int i = 0; i < nMaterials && i < 256; i++) // byte MaterialId max 255
+                {
+                    stream.Position = momtOffset + i * 44 + 0xC;
+                    int texOffset = reader.ReadInt32();
+                    string tex = null;
+                    if (texOffset >= 0 && texOffset < motxData.Length)
+                    {
+                        int end = texOffset;
+                        while (end < motxData.Length && motxData[end] != 0) end++;
+                        tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
+                    }
+                    if (!string.IsNullOrWhiteSpace(tex))
+                    {
+                        // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
+                        string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
+                        materialIdToPng[(byte)i] = Path.Combine("output/053_textures_png", pngFile);
+                    }
+                }
+            }
+            // --- Step 5: Export merged mesh as OBJ+MTL ---
+            string mtlFile = Path.ChangeExtension(outputObj, ".mtl");
             try
             {
-                WoWToolbox.Core.WMO.WmoGroupMesh.SaveToObj(mergedMesh, outputObj);
-                Log($"[OBJ] Wrote merged OBJ file: {outputObj}");
+                WoWToolbox.Core.WMO.WmoGroupMesh.SaveToObjAndMtl(mergedMesh, outputObj, mtlFile, materialIdToPng);
+                Log($"[OBJ] Wrote merged OBJ file: {outputObj} and MTL file: {mtlFile}");
             }
             catch (Exception ex)
             {
-                Log($"[OBJ] ERROR: Failed to export merged OBJ: {ex.Message}\n{ex.StackTrace}");
+                Log($"[OBJ] ERROR: Failed to export merged OBJ+MTL: {ex.Message}\n{ex.StackTrace}");
             }
         }
 
@@ -618,8 +811,10 @@ namespace WoWToolbox.WmoV14Converter
                 long chunkStart = stream.Position;
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
-                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
+                Log($"[DEBUG] Raw chunk ID bytes: {BitConverter.ToString(chunkIdBytes)} String: '{chunkIdStr}'");
                 uint chunkSize = reader.ReadUInt32();
+                Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
                 chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
                 Log($"[TEX][CHUNK] ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
                 // If not MOTX or MOMT, log first 32 bytes as hex dump for unknowns
@@ -631,64 +826,93 @@ namespace WoWToolbox.WmoV14Converter
                     Log($"[TEX][CHUNK][DUMP] ID='{chunkIdStr}' First 32 bytes: {hex}");
                     stream.Position = savePos;
                 }
-                stream.Position = chunkStart + 8 + chunkSize;
+                if (chunkIdStr == "MOMO")
+                {
+                    // Parse subchunks inside MOMO
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
+                        // Optionally: add to chunkHeaders or process as needed
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                    // After parsing MOMO, move stream to the end of the chunk
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
+                else
+                {
+                    stream.Position = chunkStart + 8 + chunkSize;
+                }
             }
             // Find MOTX and MOMT chunks
             List<string> motxStrings = new();
             List<int> momtTextureOffsets = new();
             long motxOffset = -1, momtOffset = -1;
             uint motxSize = 0, momtSize = 0;
+            // Helper to record found MOTX/MOMT
+            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
+            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
             foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
             {
-                if (chunkIdStr == "MOTX") { motxOffset = chunkStart + 8; motxSize = chunkSize; }
-                if (chunkIdStr == "MOMT") { momtOffset = chunkStart + 8; momtSize = chunkSize; }
+                if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMT") RecordMomt(chunkStart + 8, chunkSize);
+                if (chunkIdStr == "MOMO")
+                {
+                    // Parse subchunks inside MOMO
+                    long momoDataStart = chunkStart + 8;
+                    stream.Position = momoDataStart;
+                    byte[] momoData = reader.ReadBytes((int)chunkSize);
+                    using var momoStream = new MemoryStream(momoData);
+                    using var momoReader = new BinaryReader(momoStream);
+                    while (momoStream.Position + 8 <= momoStream.Length)
+                    {
+                        long subChunkStart = momoStream.Position;
+                        var subChunkIdBytes = momoReader.ReadBytes(4);
+                        if (subChunkIdBytes.Length < 4) break;
+                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
+                        uint subChunkSize = momoReader.ReadUInt32();
+                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
+                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
+                        momoStream.Position = subChunkStart + 8 + subChunkSize;
+                    }
+                }
             }
-            Log($"[TEX][DEBUG] MOTX offset={motxOffset}, size={motxSize}; MOMT offset={momtOffset}, size={momtSize}");
             if (motxOffset == -1 || momtOffset == -1)
             {
                 Log($"[TEX][WARN] MOTX or MOMT chunk not found in {inputWmo}. No textures will be processed.");
                 return;
             }
-            // Parse MOTX: null-terminated strings
+            // Parse MOTX: keep as raw byte array
             stream.Position = motxOffset;
             byte[] motxData = reader.ReadBytes((int)motxSize);
-            int idx = 0;
-            while (idx < motxData.Length)
-            {
-                int start = idx;
-                while (idx < motxData.Length && motxData[idx] != 0) idx++;
-                string tex = Encoding.ASCII.GetString(motxData, start, idx - start);
-                if (!string.IsNullOrWhiteSpace(tex)) motxStrings.Add(tex);
-                while (idx < motxData.Length && motxData[idx] == 0) idx++; // skip padding
-            }
-            Log($"[TEX][DEBUG] Found {motxStrings.Count} texture paths in MOTX:");
-            foreach (var s in motxStrings) Log($"[TEX][MOTX] {s}");
             // Parse MOMT: each material is 44 bytes, texture1 offset at +0xC
             stream.Position = momtOffset;
             int nMaterials = (int)(momtSize / 44);
+            List<string> referencedBlps = new();
             for (int i = 0; i < nMaterials; i++)
             {
                 stream.Position = momtOffset + i * 44 + 0xC;
                 int texOffset = reader.ReadInt32();
-                momtTextureOffsets.Add(texOffset);
-            }
-            // Build set of referenced textures
-            HashSet<string> referencedBlps = new();
-            foreach (int offset in momtTextureOffsets)
-            {
-                int runningOffset = 0;
-                foreach (var tex in motxStrings)
+                // Extract string directly from MOTX using offset
+                if (texOffset >= 0 && texOffset < motxData.Length)
                 {
-                    if (runningOffset == offset)
-                    {
+                    int end = texOffset;
+                    while (end < motxData.Length && motxData[end] != 0) end++;
+                    string tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
+                    if (!string.IsNullOrWhiteSpace(tex) && !referencedBlps.Contains(tex))
                         referencedBlps.Add(tex);
-                        break;
-                    }
-                    runningOffset += tex.Length + 1; // null terminator
-                    while (runningOffset % 4 != 0) runningOffset++;
                 }
             }
-            Log($"[TEX][DEBUG] {referencedBlps.Count} unique BLPs referenced by materials:");
+            Log($"[TEX][DEBUG] {referencedBlps.Count} unique BLPs referenced by materials (direct offset extraction):");
             foreach (var blp in referencedBlps) Log($"[TEX][REF] {blp}");
             // --- Recursive BLP search helper ---
             static string FindBlpRecursive(string blpRoot, string relPath)
