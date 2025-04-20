@@ -68,7 +68,7 @@ namespace WoWToolbox.MSCNExplorer
                 }
 
                 var analyzer = new MscnMeshComparisonAnalyzer();
-                analyzer.MscnPoints.AddRange(mscnChunk.Vectors.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)));
+                analyzer.MscnPoints.AddRange(mscnChunk.ExteriorVertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)));
                 analyzer.Mesh = mergedMesh;
                 if (analyzer.Mesh == null || analyzer.Mesh.Vertices.Count == 0)
                 {
@@ -87,7 +87,7 @@ namespace WoWToolbox.MSCNExplorer
                 using (var objWriter = new StreamWriter(mscnObjPath))
                 {
                     objWriter.WriteLine("o MSCN_Points");
-                    foreach (var v in mscnChunk.Vectors)
+                    foreach (var v in mscnChunk.ExteriorVertices)
                     {
                         objWriter.WriteLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6}");
                     }
@@ -103,6 +103,21 @@ namespace WoWToolbox.MSCNExplorer
 
             // If no specific command matched and it wasn't a single file dump
             Console.WriteLine("Invalid arguments or command not recognized. Use -h or --help for options.");
+        }
+
+        private static MeshData WmoGroupMeshToMeshData(WmoGroupMesh mesh)
+        {
+            var md = new MeshData();
+            if (mesh == null) return md;
+            foreach (var v in mesh.Vertices)
+                md.Vertices.Add(v.Position);
+            foreach (var tri in mesh.Triangles)
+            {
+                md.Indices.Add(tri.Index0);
+                md.Indices.Add(tri.Index1);
+                md.Indices.Add(tri.Index2);
+            }
+            return md;
         }
     }
 }

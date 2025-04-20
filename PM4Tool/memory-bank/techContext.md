@@ -113,6 +113,11 @@
    // ... (Classes exist but project not built)
    ```
 
+3. Mesh+MSCN Boundary Test (2024-07-21)
+   - New test for mesh extraction and MSCN boundary output writes OBJ and diagnostics files for key PM4 files.
+   - All build errors related to type mismatches (`uint` vs `int`, `MsvtVertex` to `Vector3`) have been resolved.
+   - **Current Issue:** The test process hangs after outputting files; process does not exit and must be manually cancelled. Emphasizes the need for robust resource management and test completion in test automation.
+
 ## Technical Constraints
 
 1. Performance Requirements
@@ -297,6 +302,9 @@
 - **Structure:** Variable length sequences of `ushort`, each terminated by `0xFFFF`. The `ushort` immediately before the terminator is a potential flag/type (values like 0x300, 0x1100 seen). The preceding `ushort` values are indices, but their target is **unknown** (likely *not* MPRL based on observed index ranges).
 - **Current Implementation:** `MPRRChunk.cs` still uses the *old* fixed-pair structure (`MprrEntry`). Refactoring needed.
 
+## Recent Technical Developments (2025-04-19)
+- v14 WMOs require mesh assembly from chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.), not just parsing. A new v14-specific parser has been implemented to decode these subchunks and assemble mesh structures for OBJ export, supporting legacy formats that do not store explicit mesh data.
+
 ## Recent Technical Context (2024-04-15)
 
 - Code now supports type/object-centric analysis and OBJ export (by unk00, unk01, object id).
@@ -317,3 +325,6 @@
 *   `WoWToolbox.Core.Models.MeshData`: New common structure to hold extracted mesh geometry. Contains `List<Vector3> Vertices` and `List<int> Indices`.
 *   Chunk Classes (e.g., `MSVTChunk`, `MOVTChunk`, `MVERChunk`): Specific classes within `WoWToolbox.Core` namespaces representing the structure and data of individual file chunks.
 *   `System.Numerics.Vector3`, `Vector2`: Used for coordinates, normals, and UVs.
+
+## Known Issues
+- **Test process hang after mesh+MSCN boundary output.** The process does not exit and must be manually cancelled. Need to ensure all resources are disposed and the test method completes.

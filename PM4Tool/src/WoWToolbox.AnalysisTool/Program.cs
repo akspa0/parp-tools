@@ -514,7 +514,7 @@ public class Program
 
         // Load and convert each group file (assume group files are named Ironforge_053_000.wmo, etc.)
         // FIX CS1503: Change list type
-        var groupMeshes = new List<MeshData>(); // CHANGED from WmoGroupMesh
+        var groupMeshes = new List<WmoGroupMesh>(); // CHANGED from MeshData
         for (int i = 0; i < groupCount; i++)
         {
             // Use groupName if available, otherwise default naming
@@ -528,7 +528,7 @@ public class Program
                 continue;
             }
             using var groupStream = File.OpenRead(groupFile);
-            // Ensure type matches return type (MeshData?)
+            // Ensure type matches return type (WmoGroupMesh?)
             var mesh = WoWToolbox.Core.WMO.WmoGroupMesh.LoadFromStream(groupStream, groupFile);
             // Add null check before adding to list
             if (mesh != null) 
@@ -549,8 +549,8 @@ public class Program
             // Optionally, implement a SaveToWmoGroupFile method for v17 format
             // For now, just save as OBJ for visual validation
             string outObjFile = outGroupFile + ".obj";
-            // FIX CS0117: Call helper instead of static method
-            SaveMeshDataToObjHelper(groupMeshes[i], outObjFile); // Use the helper
+            // FIX: Convert WmoGroupMesh to MeshData before saving
+            SaveMeshDataToObjHelper(WmoGroupMeshToMeshData(groupMeshes[i]), outObjFile);
             Console.WriteLine($"[WMOv14->v17] Saved OBJ: {outObjFile}");
         }
         Console.WriteLine($"[WMOv14->v17] Conversion complete. Output in: {outputDir}");
@@ -615,32 +615,31 @@ public class Program
                     try
                     {
                         using var stream = File.OpenRead(groupPath);
-                        MeshData? groupMesh = WmoGroupMesh.LoadFromStream(stream, groupPath); 
-
-                        // FIX CS1061: Use the added IsValid() extension method
-                        if (groupMesh.IsValid()) // Extension method call
+                        var groupMesh = WmoGroupMesh.LoadFromStream(stream, groupPath);
+                        var meshData = WmoGroupMeshToMeshData(groupMesh);
+                        if (meshData.IsValid())
                         {
-                            logWriter.WriteLine($"  -> Successfully loaded group {i}. Vertices: {groupMesh.Vertices.Count}, Triangles: {groupMesh.Indices.Count / 3}"); 
-                             Console.WriteLine($"  -> Successfully loaded group {i}. Vertices: {groupMesh.Vertices.Count}, Triangles: {groupMesh.Indices.Count / 3}");
-                            allGroupMeshes.Add(groupMesh); 
+                            logWriter.WriteLine($"  -> Successfully loaded group {i}. Vertices: {meshData.Vertices.Count}, Triangles: {meshData.Indices.Count / 3}");
+                            Console.WriteLine($"  -> Successfully loaded group {i}. Vertices: {meshData.Vertices.Count}, Triangles: {meshData.Indices.Count / 3}");
+                            allGroupMeshes.Add(meshData);
 
                             // Save individual group mesh
                             string objOutputPath = Path.Combine(baseOutputPath, $"{wmoBaseName}_{i:000}.obj");
                             logWriter.WriteLine($"  -> Saving group {i} mesh to: {objOutputPath}");
                             Console.WriteLine($"  -> Saving group {i} mesh to: {objOutputPath}");
-                            SaveMeshDataToObjHelper(groupMesh, objOutputPath); 
+                            SaveMeshDataToObjHelper(meshData, objOutputPath);
                         }
                         else
                         {
                             logWriter.WriteLine($"  -> Failed to load or mesh data invalid for group {i}.");
-                             Console.WriteLine($"  -> Failed to load or mesh data invalid for group {i}.");
+                            Console.WriteLine($"  -> Failed to load or mesh data invalid for group {i}.");
                         }
                     }
                     catch (Exception groupEx)
                     {
                         logWriter.WriteLine($"  -> ERROR loading group {i}: {groupEx.Message}");
                         logWriter.WriteLine($"     StackTrace: {groupEx.StackTrace}");
-                         Console.WriteLine($"  -> ERROR loading group {i}: {groupEx.Message}");
+                        Console.WriteLine($"  -> ERROR loading group {i}: {groupEx.Message}");
                         // Continue to next group
                     }
                 }
@@ -650,20 +649,20 @@ public class Program
                 {
                     logWriter.WriteLine($"[WMO Mesh Dump] Merging {allGroupMeshes.Count} loaded group meshes...");
                     Console.WriteLine($"[WMO Mesh Dump] Merging {allGroupMeshes.Count} loaded group meshes...");
-                    MeshData? combinedMesh = WmoGroupMesh.MergeMeshes(allGroupMeshes);
+                    // FIX: Use custom merge utility for MeshData
+                    MeshData? combinedMesh = MergeMeshDataList(allGroupMeshes);
 
-                    // FIX CS1061: Use the added IsValid() extension method
-                    if (combinedMesh.IsValid()) // Extension method call
+                    if (combinedMesh.IsValid())
                     {
                         string combinedObjPath = Path.Combine(baseOutputPath, $"{wmoBaseName}_combined.obj");
-                        logWriter.WriteLine($"[WMO Mesh Dump] Saving combined mesh (Vertices: {combinedMesh.Vertices.Count}, Triangles: {combinedMesh.Indices.Count / 3}) to: {combinedObjPath}"); 
+                        logWriter.WriteLine($"[WMO Mesh Dump] Saving combined mesh (Vertices: {combinedMesh.Vertices.Count}, Triangles: {combinedMesh.Indices.Count / 3}) to: {combinedObjPath}");
                         Console.WriteLine($"[WMO Mesh Dump] Saving combined mesh (Vertices: {combinedMesh.Vertices.Count}, Triangles: {combinedMesh.Indices.Count / 3}) to: {combinedObjPath}");
                         SaveMeshDataToObjHelper(combinedMesh, combinedObjPath);
                     }
-                     else
+                    else
                     {
-                         logWriter.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
-                          Console.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
+                        logWriter.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
+                        Console.WriteLine($"[WMO Mesh Dump] Combined mesh is invalid or null after merging.");
                     }
                 }
                  else
@@ -742,4 +741,39 @@ public class Program
         }
     }
     // +++ END HELPER METHOD +++
+
+    // Add a helper to convert WmoGroupMesh to MeshData
+    private static MeshData WmoGroupMeshToMeshData(WmoGroupMesh mesh)
+    {
+        var md = new MeshData();
+        if (mesh == null) return md;
+        foreach (var v in mesh.Vertices)
+            md.Vertices.Add(v.Position);
+        foreach (var tri in mesh.Triangles)
+        {
+            md.Indices.Add(tri.Index0);
+            md.Indices.Add(tri.Index1);
+            md.Indices.Add(tri.Index2);
+        }
+        return md;
+    }
+
+    // +++ ADDED: MeshData merge utility +++
+    private static MeshData MergeMeshDataList(List<MeshData> meshes)
+    {
+        var merged = new MeshData();
+        int vertexOffset = 0;
+        foreach (var mesh in meshes)
+        {
+            // Copy vertices
+            merged.Vertices.AddRange(mesh.Vertices);
+            // Copy indices with offset
+            foreach (var idx in mesh.Indices)
+            {
+                merged.Indices.Add(idx + vertexOffset);
+            }
+            vertexOffset += mesh.Vertices.Count;
+        }
+        return merged;
+    }
 } // End of Program class

@@ -344,18 +344,9 @@ namespace WoWToolbox.FileDumper
             }
 
             // Map MSCN (Corrected: Just a list of Vector3)
-            if (source.MSCN != null && source.MSCN.Vectors != null)
+            if (source.MSCN != null && source.MSCN.ExteriorVertices != null)
             {
-                //dto.MSCN = new MscnChunkDto(); // Removed specific DTO
-                // foreach (var vectorData in source.MSCN.Vectors) // No longer iterating complex struct
-                // {
-                //     dto.MSCN.Vectors.Add(new MscnVectorDataDto {
-                //         X = vectorData.X, Y = vectorData.Y, Z = vectorData.Z,
-                //         NX = vectorData.NX, NY = vectorData.NY, NZ = vectorData.NZ // These don't exist here
-                //     });
-                // }
-                // If we want to store the raw Vector3 list:
-                 dto.MSCN = new MscnChunkDto { Vectors = new List<Vector3>(source.MSCN.Vectors) }; 
+                dto.MSCN = new MscnChunkDto { ExteriorVertices = new List<Vector3>(source.MSCN.ExteriorVertices) };
             }
 
              // Map MDBH

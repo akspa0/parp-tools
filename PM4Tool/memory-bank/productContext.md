@@ -134,4 +134,12 @@ WoWToolbox provides:
    - Spec generation
    - Validation reporting
    - Relationship visualization
-   - Version tracking 
+   - Version tracking
+
+## Recent Developments (2024-07-21)
+- New test for mesh extraction and MSCN boundary output writes OBJ and diagnostics files for key PM4 files.
+- All build errors related to type mismatches have been resolved.
+- Current focus is on robust test automation and resource management, as a recent process hang after file output highlighted the need for proper cleanup and test completion.
+
+## Recent Developments (2025-04-19)
+- Implemented a new mesh assembly workflow for v14 WMOs: geometry is now assembled directly from chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.), demonstrating the toolkit's adaptability to legacy formats that do not store explicit mesh data. 

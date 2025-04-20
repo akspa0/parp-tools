@@ -40,7 +40,23 @@ namespace WoWToolbox.AnalysisTool
         public void LoadWmoMesh(string wmoGroupFilePath)
         {
             using var stream = File.OpenRead(wmoGroupFilePath);
-            Mesh = WmoGroupMesh.LoadFromStream(stream, wmoGroupFilePath);
+            var wmoGroupMesh = WmoGroupMesh.LoadFromStream(stream, wmoGroupFilePath);
+            Mesh = WmoGroupMeshToMeshData(wmoGroupMesh);
+        }
+
+        private static MeshData WmoGroupMeshToMeshData(WmoGroupMesh mesh)
+        {
+            var md = new MeshData();
+            if (mesh == null) return md;
+            foreach (var v in mesh.Vertices)
+                md.Vertices.Add(v.Position);
+            foreach (var tri in mesh.Triangles)
+            {
+                md.Indices.Add(tri.Index0);
+                md.Indices.Add(tri.Index1);
+                md.Indices.Add(tri.Index2);
+            }
+            return md;
         }
 
         public void AnalyzeProximity(float threshold = 0.1f)

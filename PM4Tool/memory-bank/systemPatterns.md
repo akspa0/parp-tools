@@ -155,12 +155,17 @@
    - Markdown parsing
    - Relationship validation
 
+4. **Resource Management in Test Automation (NEW, 2024-07-21)**
+   - All file and stream resources in tests must be properly disposed to prevent process hangs after test completion.
+   - Recent experience: A test for mesh+MSCN boundary output wrote all files successfully but the process hung, requiring manual cancellation. Emphasizes the need for robust cleanup and test method completion.
+
 ## Emerging Patterns / Discoveries
 *   **MSLK Doodad Placement (Confirmed):** **NEW/Significant:** Visualization and analysis confirm that `MSLK` entries (specifically those with `MspiFirstIndex == -1`, previously termed "nodes") represent **Doodad placements** (M2/MDX models). The `Unknown_*` fields (`Unk00`, `Unk01`, `Unk04`, `Unk12`) likely encode the specific model ID (potentially linking to `MDBH`), rotation, scale, and other properties. `Unknown_0x10` provides the vertex index for the placement anchor point via `MSVI`->`MSVT`.
 *   **MSCN Chunk (Clarified):**
     *   The MSCN chunk is now confirmed to be an array of Vector3 (float) values, not int32/C3Vectori.
     *   All MSCN vectors have been exported as OBJ points for visualization.
-    *   The semantic purpose of MSCN remains unclear, but the data is now accessible for further analysis and visual inspection.
+    *   The semantic purpose of MSCN is now confirmed by visual inspection: it represents the exterior (boundary) vertices for each object in PM4 files.
+    *   Plan: Update the PM4 exporter to annotate/export MSCN points as "exterior vertices" for further validation and analysis.
     *   Previous hypotheses about MSCN being normals or int32 vectors are incorrect for the current data.
 *   **MSLK Hierarchical Structure (PM4 Confirmed, PD4 Different - Tied to File Scope):**
     *   **Context:** PM4 files represent multi-object map tiles, while the tested PD4 files represent single WMO objects.
@@ -211,7 +216,14 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
     *   The test asserts that each mesh uniqueID has a corresponding placement, confirming the mapping logic is robust and correct for the provided data.
     *   This pattern is now covered by automated tests and is a core part of the analysis pipeline.
 *   **UniqueID Correlation Limitation (2024-07-21):**
-    *   UniqueID-based mesh extraction and ADT correlation is ONLY possible for development_00_00.pm4. For all other PM4 files, uniqueID data and ADT correlation are NOT available—only baseline or chunk-based mesh exports are possible. This limitation is fundamental and should guide all future analysis, tests, and tooling. Do NOT attempt to generalize uniqueID grouping or ADT correlation beyond this special case.
+    *   UniqueID-based mesh extraction and ADT correlation are ONLY possible for development_00_00.pm4. For all other PM4 files, uniqueID data and ADT correlation are NOT available—only baseline or chunk-based mesh exports are possible. This limitation is fundamental and should guide all future analysis, tests, and tooling. Do NOT attempt to generalize uniqueID grouping or ADT correlation beyond this special case.
+*   **Decoupled Batch Analysis Tool Pattern (2024-07-21):**
+    *   Placement extraction and matching logic is now implemented in a standalone tool (OBJ-to-WMO matcher), not in the main mesh extraction/conversion pipeline.
+    *   This tool batch-compares PM4 OBJ clusters to WMO assets using rigid registration (translation + rotation, scale=1), outputs placement/match data for restoration and archival.
+    *   **Rationale:** Avoids breaking or complicating the main extraction/conversion code, enables robust, automated, and archival-focused workflows, and allows for rapid iteration and validation without impacting core logic.
+*   **Mesh+MSCN Boundary Output Pattern (2024-07-21):**
+    - New test pattern outputs both mesh geometry and MSCN boundary points for PM4 files, writing multiple OBJ and diagnostics files.
+    - All build errors were resolved, but a process hang after output highlighted the importance of resource management in test automation.
 
 ## PM4/PD4 Mesh and Node Patterns (2024-04-15)
 
@@ -270,3 +282,9 @@ Provide a robust, extensible utility for comparing 3D meshes (MeshData) extracte
 - Mesh comparison and matching logic will be used to reconstruct WMO placements from PM4 data, enabling the recreation and preservation of historical game worlds.
 - Placement data will be output as YAML for now, supporting transparency, review, and future extensibility (e.g., chunk creation/export).
 - The system is designed to inspire and empower others to explore, understand, and preserve digital history.
+
+## New Pattern: Direct Chunk Assembly (2025-04-19)
+- For legacy formats (e.g., WMO v14) that do not store explicit mesh data, implement a 'Direct Chunk Assembly' pattern:
+  - Parse all relevant geometry subchunks (MOVT, MONR, MOTV, MOPY, MOVI, etc.) directly from the group data.
+  - Assemble mesh structures (vertices, normals, UVs, triangles, materials) from the decoded arrays.
+  - This approach bypasses legacy group file parsing and enables geometry extraction from raw chunk data.

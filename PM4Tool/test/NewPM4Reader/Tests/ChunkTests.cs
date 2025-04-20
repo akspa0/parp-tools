@@ -339,11 +339,11 @@ namespace NewPM4Reader.Tests
                     var chunk = new NVSM(reader);
                     
                     // Verify parsing
-                    Console.WriteLine($"Vector count: {chunk.Vectors.Count} (Expected: 5)");
+                    Console.WriteLine($"Vector count: {chunk.ExteriorVertices.Count} (Expected: 5)");
                     
-                    for (int i = 0; i < Math.Min(3, chunk.Vectors.Count); i++)
+                    for (int i = 0; i < Math.Min(3, chunk.ExteriorVertices.Count); i++)
                     {
-                        var vector = chunk.Vectors[i];
+                        var vector = chunk.ExteriorVertices[i];
                         Console.WriteLine($"Vector[{i}]: X={vector.X} (Expected: {i * 1.0f}), Y={vector.Y} (Expected: {i * 0.5f}), Z={vector.Z} (Expected: {i * 0.1f})");
                     }
                     

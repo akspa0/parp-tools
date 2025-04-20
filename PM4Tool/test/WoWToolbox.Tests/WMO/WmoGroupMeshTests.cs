@@ -55,7 +55,7 @@ namespace WoWToolbox.Tests.WMO
             Assert.True(groupCount >= 0, $"Failed to read group count from root WMO (LoadGroupInfo returned {groupCount}).");
             Assert.True(groupCount > 0, "Root WMO reported 0 groups.");
 
-            List<MeshData> loadedMeshes = new List<MeshData>();
+            List<WmoGroupMesh> loadedMeshes = new List<WmoGroupMesh>();
             string rootWmoDirectory = Path.GetDirectoryName(rootWmoPath) ?? ".";
 
             // Act - Load all groups
@@ -64,55 +64,31 @@ namespace WoWToolbox.Tests.WMO
             {
                 string groupFileName = Path.GetFileNameWithoutExtension(rootWmoPath) + $"_{groupIndex:000}.wmo";
                 string groupFilePath = Path.Combine(rootWmoDirectory, groupFileName);
-
-                Console.WriteLine($"  Attempting to load group {groupIndex}: {groupFilePath}");
-                if (!File.Exists(groupFilePath))
-                {
-                    Console.WriteLine($"  [WARN] Group file not found, skipping: {groupFilePath}");
-                    continue;
-                }
-
-                try
+                if (File.Exists(groupFilePath))
                 {
                     using var stream = File.OpenRead(groupFilePath);
-                    MeshData? loadedMesh = WmoGroupMesh.LoadFromStream(stream, groupFilePath);
-                    if (loadedMesh != null && loadedMesh.Vertices.Count > 0 && loadedMesh.Indices.Count > 0)
-                    {
-                        Console.WriteLine($"    -> Loaded group {groupIndex} successfully ({loadedMesh.Vertices.Count} verts, {loadedMesh.Indices.Count / 3} tris).");
-                        loadedMeshes.Add(loadedMesh);
-                    }
-                    else
-                    {
-                        Console.WriteLine($"    -> Loading group {groupIndex} returned null.");
-                    }
+                    var groupMesh = WmoGroupMesh.LoadFromStream(stream, groupFilePath);
+                    var meshData = WmoGroupMeshToMeshData(groupMesh);
+                    if (meshData.IsValid()) loadedMeshes.Add(groupMesh);
                 }
-                catch (Exception ex)
-                {
-                    // Log warning but continue trying other groups
-                    Console.WriteLine($"  [WARN] Failed to load WMO group file {groupIndex}: {ex.Message}");
-                }
-            } // End group loop
+            }
+            var mergedMesh = WmoGroupMesh.MergeMeshes(loadedMeshes);
 
-            Assert.True(loadedMeshes.Count > 0, "Failed to load any WMO groups.");
-            Console.WriteLine($"Successfully loaded {loadedMeshes.Count} WMO groups.");
-
-            // Save the loaded mesh
-            Console.WriteLine("Merging loaded meshes...");
-            MeshData mergedMesh = WmoGroupMesh.MergeMeshes(loadedMeshes);
             Assert.NotNull(mergedMesh); // Ensure merge succeeded
-            Assert.True(mergedMesh.Vertices.Count > 0, "Merged mesh should have vertices.");
-            Assert.True(mergedMesh.Indices.Count > 0, "Merged mesh should have indices.");
+            var mergedMeshData = WmoGroupMeshToMeshData(mergedMesh);
+            Assert.True(mergedMeshData.Vertices.Count > 0, "Merged mesh should have vertices.");
+            Assert.True(mergedMeshData.Indices.Count > 0, "Merged mesh should have indices.");
 
             Console.WriteLine("Saving merged mesh...");
-            SaveMeshDataToObj(mergedMesh, outputMergedObjPath);
+            SaveMeshDataToObj(mergedMeshData, outputMergedObjPath);
 
             // Assert
             Assert.True(File.Exists(outputMergedObjPath), $"Expected merged WMO OBJ file was not created at: {outputMergedObjPath}");
             Assert.True(new FileInfo(outputMergedObjPath).Length > 100, $"Expected merged WMO OBJ file appears empty: {outputMergedObjPath}"); // Basic size check
 
             Console.WriteLine($"Successfully merged {loadedMeshes.Count} WMO groups and saved to {outputMergedObjPath}");
-            Console.WriteLine($"  Total Vertices: {mergedMesh.Vertices.Count}");
-            Console.WriteLine($"  Total Triangles: {mergedMesh.Indices.Count / 3}");
+            Console.WriteLine($"  Total Vertices: {mergedMeshData.Vertices.Count}");
+            Console.WriteLine($"  Total Triangles: {mergedMeshData.Indices.Count / 3}");
         }
 
         // --- Added Helper Method (copied from Pm4MeshExtractorTests) ---
@@ -178,6 +154,34 @@ namespace WoWToolbox.Tests.WMO
                 // Optionally rethrow or handle differently
                 throw;
             }
+        }
+
+        private static MeshData WmoGroupMeshToMeshData(WmoGroupMesh mesh)
+        {
+            var md = new MeshData();
+            if (mesh == null) return md;
+            foreach (var v in mesh.Vertices)
+                md.Vertices.Add(v.Position);
+            foreach (var tri in mesh.Triangles)
+            {
+                md.Indices.Add(tri.Index0);
+                md.Indices.Add(tri.Index1);
+                md.Indices.Add(tri.Index2);
+            }
+            return md;
+        }
+    }
+
+    public static class MeshDataExtensions
+    {
+        public static bool IsValid(this MeshData? meshData)
+        {
+            return meshData != null
+                && meshData.Vertices != null
+                && meshData.Indices != null
+                && meshData.Vertices.Count > 0
+                && meshData.Indices.Count > 0
+                && meshData.Indices.Count % 3 == 0;
         }
     }
 } 

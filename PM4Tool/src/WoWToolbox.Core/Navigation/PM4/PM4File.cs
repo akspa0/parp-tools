@@ -56,7 +56,7 @@ namespace WoWToolbox.Core.Navigation.PM4
         public MSURChunk? MSUR { get; set; }
 
         /// <summary>
-        /// Gets or sets the MSCN chunk (Normal Vectors).
+        /// Gets or sets the MSCN chunk (Exterior Vertices; previously misinterpreted as normals).
         /// </summary>
         public MSCNChunk? MSCN { get; set; }
 

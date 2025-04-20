@@ -16,6 +16,7 @@ using System.Reflection;
 // using WoWToolbox.Tests.Analysis; // REMOVED
 using System.Text.Json; // ADDED for JSON Serialization
 // REMOVED: using WoWToolbox.AnalysisTool; 
+using WoWToolbox.Core.Models;
 
 namespace WoWToolbox.Tests.Navigation.PM4
 {
@@ -658,10 +659,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
             // Check if MSCN data is available and matches MSVT count
             // CORRECTED: Use .Vectors.Count
-            bool mscnAvailable = pm4File.MSCN != null && pm4File.MSVT != null && pm4File.MSCN.Vectors.Count == pm4File.MSVT.Vertices.Count;
+            bool mscnAvailable = pm4File.MSCN != null && pm4File.MSVT != null && pm4File.MSCN.ExteriorVertices.Count == pm4File.MSVT.Vertices.Count;
             if (!mscnAvailable && pm4File.MSCN != null && pm4File.MSVT != null) // Log mismatch if MSCN exists but count differs
             {
-                debugWriter.WriteLine($"WARN: MSCN chunk present but vector count ({pm4File.MSCN.Vectors.Count}) does not match MSVT vertex count ({pm4File.MSVT.Vertices.Count}). Normals will not be exported.");
+                debugWriter.WriteLine($"WARN: MSCN chunk present but vector count ({pm4File.MSCN.ExteriorVertices.Count}) does not match MSVT vertex count ({pm4File.MSVT.Vertices.Count}). Normals will not be exported.");
             }
             else if(pm4File.MSCN == null)
             {
@@ -811,7 +812,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         if (mscnAvailable)
                         {
                             // CORRECTED: Access .Vectors
-                            var normal = pm4File.MSCN!.Vectors[msvtIndex];
+                            var normal = pm4File.MSCN!.ExteriorVertices[msvtIndex];
 
                             // Original Normal (Y, X, Z)
                             renderMeshWriter.WriteLine(FormattableString.Invariant($"vn {normal.Y:F6} {normal.X:F6} {normal.Z:F6}"));
@@ -1921,6 +1922,82 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Assert.Contains("Skipped processing MPRR links due to high MPRR/MPRL ratio", debugLogContent);
             
             Console.WriteLine($"Test completed successfully. Check output in: {outputDir}");
+        }
+
+        [Fact]
+        public void ExportRenderMeshAndMscnBoundary_WithSnapping_ForKeyPm4Files()
+        {
+            var testFiles = new[]
+            {
+                Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4"),
+                Path.Combine(TestDataRoot, "original_development", "development_22_18.pm4")
+            };
+            float snapThreshold = 0.01f; // Units for snapping
+
+            foreach (var pm4Path in testFiles)
+            {
+                Assert.True(File.Exists(pm4Path), $"Test PM4 file not found: {pm4Path}");
+                var pm4File = PM4File.FromFile(pm4Path);
+                Assert.NotNull(pm4File);
+
+                // --- Extract Render Mesh ---
+                var meshData = new MeshData();
+                if (pm4File.MSVT != null && pm4File.MSVI != null && pm4File.MSUR != null)
+                {
+                    meshData.Vertices.AddRange(pm4File.MSVT.Vertices.Select(v => v.ToWorldCoordinates()));
+                    foreach (var msur in pm4File.MSUR.Entries)
+                    {
+                        for (int i = 0; i < msur.IndexCount - 2; i++)
+                        {
+                            if (msur.MsviFirstIndex > int.MaxValue)
+                                throw new OverflowException($"MSUR.MsviFirstIndex {msur.MsviFirstIndex} exceeds int.MaxValue");
+                            int baseIdx = (int)msur.MsviFirstIndex;
+                            uint idx0 = pm4File.MSVI.Indices[baseIdx];
+                            uint idx1 = pm4File.MSVI.Indices[baseIdx + i + 1];
+                            uint idx2 = pm4File.MSVI.Indices[baseIdx + i + 2];
+                            if (idx0 > int.MaxValue || idx1 > int.MaxValue || idx2 > int.MaxValue)
+                                throw new OverflowException($"MSVI index exceeds int.MaxValue: {idx0}, {idx1}, {idx2}");
+                            int i0 = (int)idx0;
+                            int i1 = (int)idx1;
+                            int i2 = (int)idx2;
+                            meshData.Indices.Add(i0);
+                            meshData.Indices.Add(i1);
+                            meshData.Indices.Add(i2);
+                        }
+                    }
+                }
+                Assert.True(meshData.Vertices.Count > 0, "No vertices in render mesh");
+                Assert.True(meshData.Indices.Count > 0, "No indices in render mesh");
+
+                // --- Extract MSCN Points ---
+                var mscnPoints = pm4File.MSCN?.ExteriorVertices ?? new List<Vector3>();
+                string baseOut = Path.Combine(TestContext.TimestampedOutputRoot, Path.GetFileNameWithoutExtension(pm4Path));
+                Directory.CreateDirectory(baseOut);
+
+                // --- Output Render Mesh OBJ ---
+                string meshObjPath = Path.Combine(baseOut, "render_mesh.obj");
+                using (var writer = new StreamWriter(meshObjPath))
+                {
+                    writer.WriteLine("o RenderMesh");
+                    foreach (var v in meshData.Vertices)
+                        writer.WriteLine($"v {v.X} {v.Y} {v.Z}");
+                    for (int i = 0; i < meshData.Indices.Count; i += 3)
+                        writer.WriteLine($"f {meshData.Indices[i] + 1} {meshData.Indices[i + 1] + 1} {meshData.Indices[i + 2] + 1}");
+                }
+
+                // --- Output MSCN Points OBJ ---
+                string mscnObjPath = Path.Combine(baseOut, "mscn_points.obj");
+                using (var writer = new StreamWriter(mscnObjPath))
+                {
+                    writer.WriteLine("o MSCN_Boundary");
+                    foreach (var v in mscnPoints)
+                        writer.WriteLine($"v {v.X} {v.Y} {v.Z}");
+                }
+
+                // --- Merged OBJ output is disabled ---
+                // MeshLab and other tools do not handle multiple overlapping meshes in the same file well.
+                // Until all unknowns are resolved, merged OBJ output is not produced.
+            }
         }
     } // End PM4FileTests class
 

@@ -25,6 +25,7 @@ namespace WoWToolbox.FileDumper.DTOs
         public McrrChunkDto? MCRR { get; set; } // From Pd4? Check if relevant here or only in Core PM4File
         public MprrChunkDto? MPRR { get; set; } // From Pd4? Check if relevant here
         // Add other chunks if present in Core.PM4File (MCNK is usually ADT)
+        public List<Vector3> ExteriorVertices { get; set; } = new();
     }
 
     // --- DTOs for individual chunk types ---

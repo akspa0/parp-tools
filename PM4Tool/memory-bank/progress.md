@@ -21,6 +21,7 @@
 * Core PM4/PD4 loading, chunk definitions, and OBJ export logic are stable.
 * MSCN chunk is now confirmed to be an array of Vector3 (float) values, not int32/C3Vectori.
 * All MSCN vectors have been exported as OBJ points for visualization.
+* Visual inspection now confirms that the MSCN chunk in PM4 files represents the exterior (boundary) vertices for each object.
 
 ### Next Steps
 * Visually analyze OBJ output of MSCN points.
@@ -28,6 +29,7 @@
 * Continue research into the semantic meaning and usage of MSCN data.
 * Refine grouping logic as more is learned.
 * Automate mapping of unk00/unk01 to WMO filenames.
+* Update the PM4 exporter to annotate/export MSCN points as "exterior vertices" and validate this in future exports.
 
 ### Known Issues
 * Some geometry is still missing, likely defined in MSCN/MSLK.
@@ -197,76 +199,48 @@
 
 ### Completed
 
-*   **WMO Root/Group Loading:** Core logic exists to load WMO root (`.wmo`) and group (`_###.wmo`) files, parsing major chunks.
-*   **PM4/PD4 Loading:** Core logic exists to load PM4/PD4 files, parsing various chunks including MSVT, MSVI, MSUR, MDOS, MDSF, MSCN, etc.
-*   **WMO Group Mesh Extraction (Initial):** `WmoGroupMesh.LoadFromStream` implemented to extract vertices, normals, UVs, and triangles from WMO group chunks.
-*   **WMO Group OBJ Export:** `WmoGroupMesh.SaveToObj` implemented to save extracted WMO group mesh to OBJ format.
-*   **WMO Group OBJ Export Test:** Test `LoadAndExportWmoGroup_ShouldCreateObjFile` in `WmoGroupMeshTests.cs` verifies OBJ creation.
-*   **PM4 Mesh Extraction Refactoring (Initial):**
-    *   Created `WoWToolbox.MSCNExplorer.Pm4MeshExtractor` class.
-    *   Identified and moved basic vertex transformation logic (`MsvtToWorld_PM4`) from `PM4FileTests.cs`.
-    *   Identified and moved face extraction logic (processing MSUR, MSVI, filtering by MDOS/MDSF) from `PM4FileTests.cs`.
-*   **Common Mesh Data Structure (`MeshData`):** Created `WoWToolbox.Core.Models.MeshData` (`List<Vector3> Vertices`, `List<int> Indices`) to standardize extracted mesh representation.
-*   **`Pm4MeshExtractor` Update:** Refactored `ExtractMesh` method to use and return `MeshData`, removing dependency on `WmoGroupMesh`.
-*   **PM4 Mesh Extraction Test:** Created `Pm4MeshExtractorTests.cs` with test `ExtractMesh_ValidPm4_ShouldReturnMeshDataAndSaveObj` that verifies extraction and saves result to OBJ.
+*   **WMO Root/Group Loading:** Core logic exists to load WMO root (`.wmo`) and group (`
 
-### In Progress / Next Steps
-
-1.  **Build & Verify:** Build the solution to confirm recent changes compile.
-2.  **Run Tests:** Run `Pm4MeshExtractorTests` and `WmoGroupMeshTests` to generate OBJ files.
-3.  **Visual Inspection:** Visually compare the generated OBJ files.
-4.  **Refactor `WmoGroupMesh`:** Update `WmoGroupMesh.LoadFromStream` to return `MeshData`.
-5.  **Update `WmoGroupMeshTests`:** Update tests to use `MeshData` and the common OBJ saving helper.
-6.  **Implement Mesh Comparison Logic:** Develop algorithms and tests to compare the `MeshData` from PM4 and WMO sources.
-
-### Known Issues / Blockers
-
-*   None currently identified after resolving the `RenderableMesh` issue by creating `MeshData`. 
-
-# PM4/ADT UniqueID Correlation Progress (2024-07-21)
+## Mesh+MSCN Boundary Test Progress (2024-07-21)
 
 ### What Works
-- Added and executed `AdtServiceTests.CorrelatePm4MeshesWithAdtPlacements_ByUniqueId`.
-- The test loads a PM4 file and its corresponding ADT _obj0 file, extracts meshes by uniqueID from the PM4, and placements from the ADT.
-- For each uniqueID in the PM4, the test asserts a matching placement exists in the ADT and prints asset path and mesh stats.
-- The test passes for the provided sample data, confirming the uniqueID correlation logic is correct and robust.
+- New test for mesh extraction and MSCN boundary output successfully writes OBJ and diagnostics files for key PM4 files.
+- All build errors related to type mismatches (`uint` vs `int`, `MsvtVertex` to `Vector3`) have been resolved.
 
-### Next Steps
-- Expand test coverage with additional PM4/ADT pairs and edge cases.
-- Integrate this correlation logic into higher-level workflows or tools as needed.
-- Maintain and document this pattern as a core part of the analysis pipeline.
+### Current Issue
+- The test process hangs after outputting the mesh and MSCN boundary files. The process does not exit and must be manually cancelled.
+- All file streams appear to be closed, and no exceptions are reported, but the test method does not return.
 
-### Status
-- UniqueID correlation between PM4 mesh groups and ADT placements is now covered by automated tests.
-- Codebase is healthy and stable for this feature.
+### What's Left to Build / In Progress
+- Debug and resolve the test process hang after mesh+MSCN boundary output.
+- Once resolved, proceed with mesh comparison and placement inference.
 
----
+### Known Issues
+- Test automation is currently blocked by the process hang after mesh+MSCN boundary output.
+- Further investigation is needed to ensure all resources are disposed and the test method completes as expected.
 
-# UniqueID Correlation Limitation (2024-07-21)
+## Batch WMO-to-OBJ Exporter Progress (2025-04-18)
 
-**NOTE:** UniqueID-based mesh extraction and ADT correlation is ONLY possible for development_00_00.pm4. For all other PM4 files, uniqueID data and ADT correlation are NOT available—only baseline or chunk-based mesh exports are possible. This limitation is fundamental and should guide all future analysis, tests, and tooling. Do NOT attempt to generalize uniqueID grouping or ADT correlation beyond this special case.
+- Successfully implemented and validated a batch WMO-to-OBJ exporter as an xUnit test (`WmoBatchObjExportTests`).
+- Recursively processes WMO binaries, exports each to OBJ, and writes to `/output/wmo/` with preserved folder structure.
+- Uses caching: skips export if OBJ already exists, making repeated test runs efficient.
+- This exporter is now the canonical workflow for generating OBJ caches for mesh comparison and analysis.
+- Unblocks robust, repeatable PM4/WMO mesh analysis and placement inference workflows.
 
----
+## WMO v14 Group Mesh Extraction Progress (2025-04-19)
 
-# Mesh Analysis and Comparison Focus (2024-07-21)
+### What Works
+- v14-specific group chunk parser implemented: parses MOVT, MONR, MOTV, MOPY, MOVI, and assembles mesh data into mesh structures.
+- OBJ export now works for v14 WMOs if all required subchunks are present and correctly parsed.
+- Logging and error handling improved; missing geometry is now traceable to missing or malformed subchunks.
 
-**Note:** Mesh analysis and comparison is now the primary active work area. Previous blockers related to mesh extraction are resolved; the focus is on implementing robust comparison logic and diagnostics.
+### What's Left to Build / In Progress
+- Refine mesh assembly logic for edge cases and additional subchunks (MOBA, MLIQ, etc.).
+- Add batch/group export support for multiple groups per WMO.
+- Further improve error handling and debug output.
+- Test and validate on a wider range of v14 WMOs.
 
-## What Works
-- Mesh extraction from PM4 and WMO files is robust and validated in the test project.
-
-## What's Left to Build
-- No dedicated mesh analysis or comparison logic exists yet.
-- Need to define what constitutes a mesh match (geometry, shape, bounding box, centroid, etc.).
-- Need to implement comparison metrics: vertex/triangle count, bounding box, centroid, surface area, and advanced shape similarity as needed.
-- Need to support tolerance for translation, rotation, and scale differences.
-- Need to provide detailed diagnostic output for mismatches.
-
-## Next Steps
-1. Design a mesh comparison API/interface (input: two MeshData objects, output: result object with match/mismatch, score, diagnostics).
-2. Implement basic geometric comparisons (vertex/triangle count, bounding box, centroid).
-3. Add advanced shape similarity metrics as needed.
-4. Integrate with test project and validate on real data.
-5. Document rationale and design in memory bank.
-
---- 
+### Known Issues
+- Some geometry may still be missing due to incomplete chunk parsing or undocumented subchunk formats.
+- Need for robust handling of optional/missing subchunks.
+- Further research required for less common subchunks and edge cases.

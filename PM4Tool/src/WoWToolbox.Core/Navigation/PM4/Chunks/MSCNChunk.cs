@@ -7,18 +7,21 @@ using System.Numerics;
 namespace WoWToolbox.Core.Navigation.PM4.Chunks
 {
     /// <summary>
-    /// Represents the MSCN chunk, containing normal vectors (read as floats).
-    /// Documentation notes 'n != normals', but treating as floats for export.
+    /// Represents the MSCN chunk, containing exterior vertices (previously misinterpreted as normals).
+    /// These vertices define the exterior boundary of the object in the PM4 file.
     /// </summary>
     public class MSCNChunk : IIFFChunk, IBinarySerializable
     {
         public const string Signature = "MSCN";
 
-        public List<Vector3> Vectors { get; private set; }
+        /// <summary>
+        /// The exterior vertices for the object, as defined by the MSCN chunk.
+        /// </summary>
+        public List<Vector3> ExteriorVertices { get; private set; }
 
         public MSCNChunk()
         {
-            Vectors = new List<Vector3>();
+            ExteriorVertices = new List<Vector3>();
         }
 
         public string GetSignature() => Signature;
@@ -40,17 +43,17 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
             }
 
             int vectorCount = (int)(size / vectorSize);
-            Vectors = new List<Vector3>(vectorCount);
+            ExteriorVertices = new List<Vector3>(vectorCount);
 
             for (int i = 0; i < vectorCount; i++)
             {
-                Vector3 vector = new Vector3
+                Vector3 vertex = new Vector3
                 {
                     X = reader.ReadSingle(),
                     Y = reader.ReadSingle(),
                     Z = reader.ReadSingle()
                 };
-                Vectors.Add(vector);
+                ExteriorVertices.Add(vertex);
             }
         }
 
@@ -65,23 +68,23 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         // Write as Vector3 (float)
         public void Write(BinaryWriter writer)
         {
-            foreach (var vector in Vectors)
+            foreach (var vertex in ExteriorVertices)
             {
-                writer.Write(vector.X);
-                writer.Write(vector.Y);
-                writer.Write(vector.Z);
+                writer.Write(vertex.X);
+                writer.Write(vertex.Y);
+                writer.Write(vertex.Z);
             }
         }
 
         public uint GetSize()
         {
             const int vectorSize = sizeof(float) * 3;
-            return (uint)Vectors.Count * vectorSize;
+            return (uint)ExteriorVertices.Count * vectorSize;
         }
 
         public override string ToString()
         {
-            return $"MSCN Chunk [{Vectors.Count} Vectors (Vector3)]";
+            return $"MSCN Chunk [{ExteriorVertices.Count} Exterior Vertices (Vector3)]";
         }
     }
 } 

@@ -163,7 +163,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 debugWriter.WriteLine($"MSHD Fields: {pd4File.MSHD?.ToString() ?? "null"}");
                 debugWriter.WriteLine($"MSPV Vertices: {pd4File.MSPV?.Vertices.Count ?? -1}");
                 debugWriter.WriteLine($"MSPI Indices: {pd4File.MSPI?.Indices.Count ?? -1}");
-                debugWriter.WriteLine($"MSCN Vectors: {pd4File.MSCN?.Vectors.Count ?? -1}");
+                debugWriter.WriteLine($"MSCN ExteriorVertices: {pd4File.MSCN?.ExteriorVertices.Count ?? -1}");
                 debugWriter.WriteLine($"MSLK Entries: {pd4File.MSLK?.Entries.Count ?? -1}");
                 debugWriter.WriteLine($"MSVT Vertices: {pd4File.MSVT?.Vertices.Count ?? -1}");
                 debugWriter.WriteLine($"MSVI Indices: {pd4File.MSVI?.Indices.Count ?? -1}");
@@ -240,11 +240,11 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 // --- End MSVT Export ---
 
                 // --- Export MSCN --- 
-                if (pd4File.MSCN?.Vectors != null)
+                if (pd4File.MSCN?.ExteriorVertices != null)
                 {
-                    debugWriter.WriteLine($"Exporting {pd4File.MSCN.Vectors.Count} MSCN vectors to _mscn.obj..."); // Updated log message
+                    debugWriter.WriteLine($"Exporting {pd4File.MSCN.ExteriorVertices.Count} MSCN exterior vertices to _mscn.obj..."); // Updated log message
                     mscnWriter.WriteLine("o MSCN_Geometry"); // Add object directive for MSCN to its own file
-                    foreach (var vec in pd4File.MSCN.Vectors)
+                    foreach (var vec in pd4File.MSCN.ExteriorVertices)
                     {
                         mscnWriter.WriteLine($"v {vec.X.ToString(CultureInfo.InvariantCulture)} {vec.Y.ToString(CultureInfo.InvariantCulture)} {vec.Z.ToString(CultureInfo.InvariantCulture)}");
                     }
@@ -252,7 +252,7 @@ namespace WoWToolbox.Tests.Navigation.PM4 // Keep the same namespace for now
                 }
                 else
                 {
-                    debugWriter.WriteLine("No MSCN vectors to export.");
+                    debugWriter.WriteLine("No MSCN exterior vertices to export.");
                 }
                 // --- End MSCN Export ---
                 
