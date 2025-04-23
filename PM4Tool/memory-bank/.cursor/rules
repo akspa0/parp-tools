@@ -1,3 +1,4 @@
 # Rules Update (2024-07-21)
 - Always map all texturing-related chunk data and string fields for both v14 and v17, supporting full WMO/OBJ+MTL reconstruction with correct texturing.
-- Liquid handling is out of scope for this project and should not be included; any such code or dependencies (e.g., DBCD) must be removed or excluded. 
+- Liquid handling is out of scope for this project and should not be included; any such code or dependencies (e.g., DBCD) must be removed or excluded.
+- Before making any changes to WMO v14 texturing or OBJ/MTL export logic, always perform a deep-dive review of the canonical mapping from chunk data (MOTX, MOMT, MOPY, MOTV, etc.) to OBJ/MTL, referencing both wow.export and mirrormachine. Document the mapping and test with a minimal WMO before refactoring. 

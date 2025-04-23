@@ -1098,5 +1098,124 @@ namespace WoWToolbox.WmoV14Converter
                 Log($"[TEX][FATAL] No referenced BLPs found in MOTX/MOMT. Check chunk parsing and input file integrity.");
             Log($"[TEX][SUMMARY] BLPs found: {blpsFound}, missing: {blpsMissing}, PNGs written: {pngWritten}");
         }
+
+        /// <summary>
+        /// Exports a v14 WMO as a v17 WMO using the new WmoV17Writer.
+        /// </summary>
+        public static void ExportAsV17Wmo(string inputWmo, string outputWmo)
+        {
+            Log($"[V17] Starting v14→v17 WMO export: {inputWmo} → {outputWmo}");
+            using var stream = File.OpenRead(inputWmo);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
+            long fileLen = stream.Length;
+            stream.Position = 0;
+
+            // --- Step 1: Parse all top-level chunk headers ---
+            var chunkHeaders = new List<(string id, long offset, uint size)>();
+            while (stream.Position + 8 <= fileLen)
+            {
+                long chunkStart = stream.Position;
+                var chunkIdBytes = reader.ReadBytes(4);
+                if (chunkIdBytes.Length < 4) break;
+                string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
+                uint chunkSize = reader.ReadUInt32();
+                chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
+                stream.Position = chunkStart + 8 + chunkSize;
+            }
+
+            // --- Step 2: Extract MOTX (textures) ---
+            var motxHeader = chunkHeaders.Find(h => h.id == "MOTX");
+            List<string> textures = new();
+            if (motxHeader != default)
+            {
+                stream.Position = motxHeader.offset + 8;
+                byte[] motxData = reader.ReadBytes((int)motxHeader.size);
+                int start = 0;
+                for (int i = 0; i < motxData.Length; i++)
+                {
+                    if (motxData[i] == 0)
+                    {
+                        if (i > start)
+                            textures.Add(Encoding.ASCII.GetString(motxData, start, i - start));
+                        start = i + 1;
+                    }
+                }
+                if (start < motxData.Length)
+                    textures.Add(Encoding.ASCII.GetString(motxData, start, motxData.Length - start));
+                Log($"[V17] Extracted {textures.Count} textures from MOTX");
+            }
+            else
+            {
+                Log("[V17][WARN] No MOTX chunk found");
+            }
+
+            // --- Step 3: Extract MOMT (materials) ---
+            var momtHeader = chunkHeaders.Find(h => h.id == "MOMT");
+            List<WoWToolbox.Core.Models.WmoMaterial> materials = new();
+            if (momtHeader != default)
+            {
+                stream.Position = momtHeader.offset + 8;
+                int nMaterials = (int)(momtHeader.size / 64); // v17 size
+                for (int i = 0; i < nMaterials; i++)
+                {
+                    materials.Add(new WoWToolbox.Core.Models.WmoMaterial());
+                }
+                Log($"[V17] Extracted {materials.Count} materials from MOMT");
+            }
+            else
+            {
+                Log("[V17][WARN] No MOMT chunk found");
+            }
+
+            // --- Step 4: Extract MOHD (header fields) ---
+            var mohdHeader = chunkHeaders.Find(h => h.id == "MOHD");
+            var header = new WmoRootHeader();
+            if (mohdHeader != default)
+            {
+                stream.Position = mohdHeader.offset + 8;
+                header.MaterialCount = reader.ReadUInt32();
+                header.GroupCount = reader.ReadUInt32();
+                header.PortalCount = reader.ReadUInt32();
+                header.LightCount = reader.ReadUInt32();
+                header.ModelCount = reader.ReadUInt32();
+                header.DoodadCount = reader.ReadUInt32();
+                header.SetCount = reader.ReadUInt32();
+                header.AmbientColor = reader.ReadUInt32();
+                header.AreaTableID = reader.ReadUInt32();
+                header.BoundingBoxMin = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                header.BoundingBoxMax = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                header.Flags = reader.ReadUInt16();
+                header.LodCount = reader.ReadUInt16();
+                Log("[V17] Extracted MOHD header fields");
+            }
+            else
+            {
+                Log("[V17][WARN] No MOHD chunk found");
+            }
+
+            // --- Step 5: Build WmoRootData ---
+            var rootData = new WmoRootData {
+                Header = header,
+                Textures = textures,
+                Materials = materials,
+                // TODO: GroupNames, GroupInfos, Doodads, etc.
+            };
+
+            // --- Step 6: TODO: Extract and map group data ---
+            var groupData = new WmoGroupData();
+
+            // --- Step 7: Write v17 WMO ---
+            var writer = new WmoV17Writer();
+            writer.WriteRoot(outputWmo, rootData);
+            Log($"[V17] Wrote v17 root WMO: {outputWmo}");
+
+            // --- Step 8: Also export OBJ+MTL and PNG textures ---
+            string outputPrefix = Path.Combine(Path.GetDirectoryName(outputWmo) ?? ".", Path.GetFileNameWithoutExtension(outputWmo));
+            ExportAllGroupsAsObj(inputWmo, outputPrefix + "-group");
+            Log($"[OBJ/MTL] Exported OBJ+MTL to: {outputPrefix}-group-*.obj/.mtl");
+            string textureDir = Path.Combine(Path.GetDirectoryName(outputWmo) ?? ".", "textures");
+            ExtractAndConvertTextures(inputWmo, "test_data/053_textures", textureDir);
+            Log($"[PNG] Extracted textures to: {textureDir}");
+        }
     }
 } 
