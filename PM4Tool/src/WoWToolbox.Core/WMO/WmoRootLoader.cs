@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq; // Added for Reverse
 using System.Text;
+using WoWToolbox.Core.Models;
 
 namespace WoWToolbox.Core.WMO
 {
@@ -359,6 +360,138 @@ namespace WoWToolbox.Core.WMO
                 stream.Position = chunkEnd;
             }
             Console.WriteLine($"[RootChunkLister] End of chunk listing at offset 0x{stream.Position:X6}");
+        }
+
+        /// <summary>
+        /// Loads the unified WMO texturing model (textures, materials, group names, group info) from a root WMO file (v14 or v17+).
+        /// </summary>
+        public static (WmoTextureBlock textures, WmoMaterialBlock materials, WmoGroupNameBlock groupNames, WmoGroupInfoBlock groupInfo)
+            LoadTexturingModel(string rootWmoPath)
+        {
+            byte[] motxData = null;
+            List<MOMT> momtList = new();
+            byte[] mognData = null;
+            List<MOGI> mogiList = new();
+
+            using var stream = File.OpenRead(rootWmoPath);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+            long fileLen = stream.Length;
+
+            // --- Step 1: Detect version ---
+            uint version = 0;
+            stream.Position = 0;
+            while (stream.Position + 8 <= fileLen)
+            {
+                var chunkIdBytes = reader.ReadBytes(4);
+                if (chunkIdBytes.Length < 4) break;
+                uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
+                uint chunkSize = reader.ReadUInt32();
+                long chunkEnd = stream.Position + chunkSize;
+                if (chunkId == 0x5245564D) // 'MVER'
+                {
+                    if (chunkSize == 4)
+                        version = reader.ReadUInt32();
+                    stream.Position = chunkEnd;
+                    break;
+                }
+                else
+                {
+                    stream.Position = chunkEnd;
+                }
+            }
+            bool isV14 = (version == 14);
+
+            // --- Step 2: Scan for relevant chunks ---
+            stream.Position = 0;
+            if (isV14)
+            {
+                // v14: scan MOMO subchunks
+                while (stream.Position + 8 <= fileLen)
+                {
+                    var chunkIdBytes = reader.ReadBytes(4);
+                    if (chunkIdBytes.Length < 4) break;
+                    uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
+                    uint chunkSize = reader.ReadUInt32();
+                    long chunkDataPos = stream.Position;
+                    long chunkEnd = chunkDataPos + chunkSize;
+                    if (chunkId == 0x4F4D4F4D) // 'MOMO'
+                    {
+                        long momoEnd = chunkDataPos + chunkSize;
+                        while (stream.Position + 8 <= momoEnd)
+                        {
+                            var subChunkIdBytes = reader.ReadBytes(4);
+                            if (subChunkIdBytes.Length < 4) break;
+                            uint subChunkId = BitConverter.ToUInt32(subChunkIdBytes, 0);
+                            uint subChunkSize = reader.ReadUInt32();
+                            long subChunkDataPos = stream.Position;
+                            long subChunkEnd = subChunkDataPos + subChunkSize;
+                            if (subChunkId == 0x4D4F5458) // 'MOTX'
+                                motxData = reader.ReadBytes((int)subChunkSize);
+                            else if (subChunkId == 0x4D4F4D54) // 'MOMT'
+                            {
+                                int count = (int)(subChunkSize / 64);
+                                for (int i = 0; i < count; i++)
+                                    momtList.Add(MOMT.FromBinaryReader(reader));
+                            }
+                            else if (subChunkId == 0x4E474F4D) // 'MOGN'
+                                mognData = reader.ReadBytes((int)subChunkSize);
+                            else if (subChunkId == 0x4D4F4749) // 'MOGI'
+                            {
+                                int count = (int)(subChunkSize / 32);
+                                for (int i = 0; i < count; i++)
+                                    mogiList.Add(MOGI.FromBinaryReader(reader));
+                            }
+                            else
+                                stream.Position = subChunkEnd;
+                            if (stream.Position < subChunkEnd)
+                                stream.Position = subChunkEnd;
+                        }
+                        break; // Only one MOMO
+                    }
+                    else
+                        stream.Position = chunkEnd;
+                }
+            }
+            else
+            {
+                // v17+: scan top-level chunks
+                while (stream.Position + 8 <= fileLen)
+                {
+                    var chunkIdBytes = reader.ReadBytes(4);
+                    if (chunkIdBytes.Length < 4) break;
+                    uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
+                    uint chunkSize = reader.ReadUInt32();
+                    long chunkDataPos = stream.Position;
+                    long chunkEnd = chunkDataPos + chunkSize;
+                    if (chunkId == 0x4D4F5458) // 'MOTX'
+                        motxData = reader.ReadBytes((int)chunkSize);
+                    else if (chunkId == 0x4D4F4D54) // 'MOMT'
+                    {
+                        int count = (int)(chunkSize / 64);
+                        for (int i = 0; i < count; i++)
+                            momtList.Add(MOMT.FromBinaryReader(reader));
+                    }
+                    else if (chunkId == 0x4E474F4D) // 'MOGN'
+                        mognData = reader.ReadBytes((int)chunkSize);
+                    else if (chunkId == 0x4D4F4749) // 'MOGI'
+                    {
+                        int count = (int)(chunkSize / 32);
+                        for (int i = 0; i < count; i++)
+                            mogiList.Add(MOGI.FromBinaryReader(reader));
+                    }
+                    else
+                        stream.Position = chunkEnd;
+                    if (stream.Position < chunkEnd)
+                        stream.Position = chunkEnd;
+                }
+            }
+
+            // --- Step 3: Build model ---
+            var textures = motxData != null ? WmoTexturingModelFactory.FromMotx(motxData) : new WmoTextureBlock();
+            var materials = WmoTexturingModelFactory.FromMomt(momtList);
+            var groupNames = mognData != null ? WmoTexturingModelFactory.FromMogn(mognData) : new WmoGroupNameBlock();
+            var groupInfo = WmoTexturingModelFactory.FromMogi(mogiList);
+            return (textures, materials, groupNames, groupInfo);
         }
     }
 } 

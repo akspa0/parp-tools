@@ -141,5 +141,11 @@ WoWToolbox provides:
 - All build errors related to type mismatches have been resolved.
 - Current focus is on robust test automation and resource management, as a recent process hang after file output highlighted the need for proper cleanup and test completion.
 
+## Out of Scope (2024-07-21)
+- Liquid handling and DBCD dependency have been removed from this project and will be implemented separately.
+
+## New Technical Focus (2024-07-21)
+- Robust handling of WMO chunk data for texturing, with unified support for v14 (mirrormachine) and v17 (wow.export) formats, enabling full WMO/OBJ+MTL reconstruction with correct texturing.
+
 ## Recent Developments (2025-04-19)
 - Implemented a new mesh assembly workflow for v14 WMOs: geometry is now assembled directly from chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.), demonstrating the toolkit's adaptability to legacy formats that do not store explicit mesh data. 

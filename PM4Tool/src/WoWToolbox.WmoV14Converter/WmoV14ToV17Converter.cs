@@ -359,8 +359,58 @@ namespace WoWToolbox.WmoV14Converter
             {
                 Log("[v14] No MOVT (vertices) found in group");
             }
+            
+            // MOTV: Texture coordinates
+            if (subchunks.TryGetValue("MOTV", out var motv))
+            {
+                int uvCount = motv.data.Length / 8; // Each UV is 2 floats (8 bytes)
+                Log($"[v14][UVs] Found {uvCount} texture coordinates in MOTV chunk");
+                
+                // If we have vertices but no UVs assigned yet, create temporary storage
+                if (mesh.Vertices.Count > 0)
+                {
+                    // Read all UVs
+                    var uvs = new List<Vector2>(uvCount);
+                    using var uvms = new MemoryStream(motv.data);
+                    using var uvbr = new BinaryReader(uvms);
+                    
+                    for (int u = 0; u < uvCount; u++)
+                    {
+                        float u1 = uvbr.ReadSingle();
+                        float v1 = uvbr.ReadSingle();
+                        uvs.Add(new Vector2(u1, v1));
+                        
+                        if (u < 10 || u > uvCount - 10) // Log first and last 10 UVs
+                        {
+                            Log($"[v14][UVs] UV[{u}]: ({u1:F6}, {v1:F6})");
+                        }
+                    }
+                    
+                    // Assign UVs to vertices (assuming 1:1 mapping)
+                    int assignCount = Math.Min(mesh.Vertices.Count, uvs.Count);
+                    for (int i = 0; i < assignCount; i++)
+                    {
+                        var vertex = mesh.Vertices[i];
+                        vertex.UV = uvs[i];
+                        mesh.Vertices[i] = vertex; // Struct reassignment
+                    }
+                    
+                    Log($"[v14][UVs] Assigned {assignCount} UVs to vertices");
+                    if (assignCount < mesh.Vertices.Count)
+                    {
+                        Log($"[v14][UVs] WARNING: Not enough UVs for all vertices. Some vertices will have default (0,0) UVs.");
+                    }
+                }
+            }
+            else
+            {
+                Log("[v14][UVs] No MOTV (texture coordinates) found in group");
+            }
+            
             // MOPY: Material indices and flags
             List<byte> materialIds = new();
+            Dictionary<ushort, int> flagCounts = new(); // To count occurrences of each flag value
+            
             if (subchunks.TryGetValue("MOPY", out var mopy))
             {
                 int faceCount = mopy.data.Length / 2;
@@ -371,13 +421,28 @@ namespace WoWToolbox.WmoV14Converter
                     byte flags = mbr.ReadByte();
                     byte matId = mbr.ReadByte();
                     materialIds.Add(matId);
+                    
+                    // For detailed flag analysis
+                    ushort combinedFlags = flags;
+                    if (!flagCounts.ContainsKey(combinedFlags))
+                        flagCounts[combinedFlags] = 0;
+                    flagCounts[combinedFlags]++;
                 }
                 Log($"[v14] Parsed {faceCount} faces from MOPY");
+                
+                // Log flag statistics
+                Log($"[v14][FLAGS] Triangle flag statistics:");
+                foreach (var kvp in flagCounts.OrderBy(kvp => kvp.Key))
+                {
+                    string binaryFlags = Convert.ToString(kvp.Key, 2).PadLeft(8, '0');
+                    Log($"[v14][FLAGS] Flag value 0x{kvp.Key:X2} ({binaryFlags}): {kvp.Value} triangles");
+                }
             }
             else
             {
                 Log("[v14] No MOPY (material indices) found in group");
             }
+            
             // MOVI: Indices
             if (subchunks.TryGetValue("MOVI", out var movi))
             {
@@ -396,7 +461,14 @@ namespace WoWToolbox.WmoV14Converter
                     int i1 = indices[t * 3 + 1];
                     int i2 = indices[t * 3 + 2];
                     byte matId = (materialIds.Count > t) ? materialIds[t] : (byte)0;
-                    mesh.Triangles.Add(new WmoTriangle { Index0 = i0, Index1 = i1, Index2 = i2, MaterialId = matId });
+                    
+                    mesh.Triangles.Add(new WmoTriangle { 
+                        Index0 = i0, 
+                        Index1 = i1, 
+                        Index2 = i2, 
+                        MaterialId = matId,
+                        Flags = 0
+                    });
                 }
                 Log($"[v14] Parsed {triCount} triangles from MOVI");
             }
@@ -414,7 +486,14 @@ namespace WoWToolbox.WmoV14Converter
                     int i2 = t * 3 + 2;
                     if (i2 >= mesh.Vertices.Count) break;
                     byte matId = materialIds[t];
-                    mesh.Triangles.Add(new WmoTriangle { Index0 = i0, Index1 = i1, Index2 = i2, MaterialId = matId });
+                    
+                    mesh.Triangles.Add(new WmoTriangle { 
+                        Index0 = i0, 
+                        Index1 = i1, 
+                        Index2 = i2, 
+                        MaterialId = matId,
+                        Flags = 0
+                    });
                 }
                 Log($"[v14] Assembled {triCount} triangles from sequential vertex triples (reference impl)");
             }
@@ -422,16 +501,34 @@ namespace WoWToolbox.WmoV14Converter
             {
                 Log("[v14] WARNING: No MOVI (indices) found in group and cannot assemble triangles from MOPY/materials. No triangles will be assembled.");
             }
+            
+            // Count triangles by flag type
+            var trianglesByFlag = mesh.Triangles
+                .GroupBy(t => t.Flags)
+                .OrderBy(g => g.Key)
+                .ToDictionary(g => g.Key, g => g.Count());
+            
+            Log($"[v14][ANALYSIS] Triangle count by flag value:");
+            foreach (var kvp in trianglesByFlag)
+            {
+                string binaryFlags = Convert.ToString(kvp.Key, 2).PadLeft(8, '0');
+                Log($"[v14][ANALYSIS] Flag 0x{kvp.Key:X2} ({binaryFlags}): {kvp.Value} triangles");
+            }
+            
             // Log triangle count
             Log($"[v14] Assembled {mesh.Triangles.Count} triangles in group");
-            // TODO: Parse MOBA, MLIQ, and other subchunks as needed
             return mesh;
         }
 
         public static void ExportAllGroupsAsObj(string inputWmo, string outputPrefix)
         {
             // Extract and convert textures before exporting meshes
-            ExtractAndConvertTextures(inputWmo, "test_data/053_textures", "output/053_textures_png");
+            var outputDir = Path.GetDirectoryName(outputPrefix);
+            var textureDirName = "textures"; // Relative folder for textures
+            var textureDir = Path.Combine(outputDir, textureDirName);
+            
+            // Extract textures to the texture directory next to the output files
+            ExtractAndConvertTextures(inputWmo, "test_data/053_textures", textureDir);
             Log($"[OBJ] Opening v14 WMO: {inputWmo}");
             using var stream = File.OpenRead(inputWmo);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
@@ -440,6 +537,13 @@ namespace WoWToolbox.WmoV14Converter
 
             // --- Step 1: Log all top-level chunk IDs, offsets, and sizes ---
             var chunkHeaders = new List<(string id, long offset, uint size)>();
+            
+            // --- Setup MOTX/MOMT recording helpers ---
+            long motxOffset = -1, momtOffset = -1;
+            uint motxSize = 0, momtSize = 0;
+            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
+            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
+            
             stream.Position = 0;
             while (stream.Position + 8 <= fileLen)
             {
@@ -466,11 +570,10 @@ namespace WoWToolbox.WmoV14Converter
                         if (subChunkIdBytes.Length < 4) break;
                         string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
                         uint subChunkSize = momoReader.ReadUInt32();
-                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
+                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
+                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
                         momoStream.Position = subChunkStart + 8 + subChunkSize;
                     }
-                    // After parsing MOMO, move stream to the end of the chunk
-                    stream.Position = chunkStart + 8 + chunkSize;
                 }
                 else
                 {
@@ -520,10 +623,6 @@ namespace WoWToolbox.WmoV14Converter
             // --- Step 3: Build materialId-to-PNG mapping from MOTX/MOMT ---
             // (This logic is adapted from ExtractAndConvertTextures)
             // Find MOTX and MOMT chunks
-            long motxOffset = -1, momtOffset = -1;
-            uint motxSize = 0, momtSize = 0;
-            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
-            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
             foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
             {
                 if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
@@ -570,7 +669,8 @@ namespace WoWToolbox.WmoV14Converter
                     {
                         // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
                         string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
-                        materialIdToPng[(byte)i] = Path.Combine("output/053_textures_png", pngFile);
+                        // Store just the relative path from MTL to PNG
+                        materialIdToPng[(byte)i] = Path.Combine(textureDirName, pngFile);
                     }
                 }
             }
@@ -589,6 +689,7 @@ namespace WoWToolbox.WmoV14Converter
                     var mesh = LoadFromV14GroupChunk(groupData);
                     WmoGroupMesh.SaveToObjAndMtl(mesh, outFile, mtlFile, materialIdToPng);
                     Log($"[OBJ] Wrote OBJ file: {outFile} and MTL file: {mtlFile}");
+                    
                     exported++;
                 }
                 catch (Exception ex)
@@ -601,9 +702,10 @@ namespace WoWToolbox.WmoV14Converter
 
         public static void ExportMergedGroupsAsObj(string inputWmo, string outputObj)
         {
+            Log($"[INFO] Converting all groups in {inputWmo} to a single merged OBJ: {outputObj}");
             // Extract and convert textures before exporting meshes
             ExtractAndConvertTextures(inputWmo, "test_data/053_textures", "output/053_textures_png");
-            Log($"[OBJ] Opening v14 WMO: {inputWmo}");
+            
             using var stream = File.OpenRead(inputWmo);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
             long fileLen = stream.Length;
@@ -611,6 +713,7 @@ namespace WoWToolbox.WmoV14Converter
 
             // --- Step 1: Log all top-level chunk IDs, offsets, and sizes ---
             var chunkHeaders = new List<(string id, long offset, uint size)>();
+            
             stream.Position = 0;
             while (stream.Position + 8 <= fileLen)
             {
@@ -618,35 +721,10 @@ namespace WoWToolbox.WmoV14Converter
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
                 string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
-                Log($"[DEBUG] Raw chunk ID bytes: {BitConverter.ToString(chunkIdBytes)} String: '{chunkIdStr}'");
                 uint chunkSize = reader.ReadUInt32();
                 chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
                 Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
-                if (chunkIdStr == "MOMO")
-                {
-                    // Parse subchunks inside MOMO
-                    long momoDataStart = chunkStart + 8;
-                    stream.Position = momoDataStart;
-                    byte[] momoData = reader.ReadBytes((int)chunkSize);
-                    using var momoStream = new MemoryStream(momoData);
-                    using var momoReader = new BinaryReader(momoStream);
-                    while (momoStream.Position + 8 <= momoStream.Length)
-                    {
-                        long subChunkStart = momoStream.Position;
-                        var subChunkIdBytes = momoReader.ReadBytes(4);
-                        if (subChunkIdBytes.Length < 4) break;
-                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
-                        uint subChunkSize = momoReader.ReadUInt32();
-                        Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
-                        momoStream.Position = subChunkStart + 8 + subChunkSize;
-                    }
-                    // After parsing MOMO, move stream to the end of the chunk
-                    stream.Position = chunkStart + 8 + chunkSize;
-                }
-                else
-                {
-                    stream.Position = chunkStart + 8 + chunkSize;
-                }
+                stream.Position = chunkStart + 8 + chunkSize;
             }
 
             // --- Step 2: Find all MOGP group regions ---
@@ -687,75 +765,17 @@ namespace WoWToolbox.WmoV14Converter
                 }
             }
             Log($"[OBJ] Found {groupRegions.Count} group(s) in WMO");
-            // --- Step 3: Parse and merge all groups ---
-            var mergedMesh = new WoWToolbox.Core.WMO.WmoGroupMesh();
-            int totalVertices = 0, totalTriangles = 0, mergedGroups = 0;
-            foreach (var (groupIdx, groupStart, groupEnd) in groupRegions)
-            {
-                long groupLen = groupEnd - groupStart;
-                stream.Position = groupStart;
-                byte[] groupData = reader.ReadBytes((int)groupLen);
-                try
-                {
-                    var mesh = LoadFromV14GroupChunk(groupData);
-                    int vertOffset = mergedMesh.Vertices.Count;
-                    // Merge vertices
-                    mergedMesh.Vertices.AddRange(mesh.Vertices);
-                    // Merge triangles (adjust indices)
-                    foreach (var tri in mesh.Triangles)
-                    {
-                        mergedMesh.Triangles.Add(new WoWToolbox.Core.WMO.WmoTriangle
-                        {
-                            Index0 = tri.Index0 + vertOffset,
-                            Index1 = tri.Index1 + vertOffset,
-                            Index2 = tri.Index2 + vertOffset,
-                            MaterialId = tri.MaterialId
-                        });
-                    }
-                    mergedGroups++;
-                    totalVertices += mesh.Vertices.Count;
-                    totalTriangles += mesh.Triangles.Count;
-                }
-                catch (Exception ex)
-                {
-                    Log($"[OBJ] ERROR: Failed to parse/merge group {groupIdx}: {ex.Message}\n{ex.StackTrace}");
-                }
-            }
-            Log($"[OBJ] Merged {mergedGroups} group(s): {totalVertices} vertices, {totalTriangles} triangles");
-            Log($"[OBJ] Attempting to write merged OBJ file: {outputObj}");
-            if (mergedMesh.Vertices.Count == 0 || mergedMesh.Triangles.Count == 0)
-            {
-                Log($"[OBJ][WARN] Merged mesh is empty (vertices: {mergedMesh.Vertices.Count}, triangles: {mergedMesh.Triangles.Count}). Writing file anyway for debugging.");
-            }
-            // --- Step 4: Build materialId-to-PNG mapping from MOTX/MOMT (same as in ExportAllGroupsAsObj) ---
+            
+            // --- Step 3: Build materialId-to-PNG mapping from MOTX/MOMT ---
             long motxOffset = -1, momtOffset = -1;
             uint motxSize = 0, momtSize = 0;
-            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
-            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
+            
             foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
             {
-                if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
-                if (chunkIdStr == "MOMT") RecordMomt(chunkStart + 8, chunkSize);
-                if (chunkIdStr == "MOMO")
-                {
-                    long momoDataStart = chunkStart + 8;
-                    stream.Position = momoDataStart;
-                    byte[] momoData = reader.ReadBytes((int)chunkSize);
-                    using var momoStream = new MemoryStream(momoData);
-                    using var momoReader = new BinaryReader(momoStream);
-                    while (momoStream.Position + 8 <= momoStream.Length)
-                    {
-                        long subChunkStart = momoStream.Position;
-                        var subChunkIdBytes = momoReader.ReadBytes(4);
-                        if (subChunkIdBytes.Length < 4) break;
-                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
-                        uint subChunkSize = momoReader.ReadUInt32();
-                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
-                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
-                        momoStream.Position = subChunkStart + 8 + subChunkSize;
-                    }
-                }
+                if (chunkIdStr == "MOTX") { motxOffset = chunkStart + 8; motxSize = chunkSize; }
+                if (chunkIdStr == "MOMT") { momtOffset = chunkStart + 8; momtSize = chunkSize; }
             }
+            
             Dictionary<byte, string> materialIdToPng = new();
             if (motxOffset != -1 && momtOffset != -1)
             {
@@ -778,10 +798,61 @@ namespace WoWToolbox.WmoV14Converter
                     {
                         // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
                         string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
-                        materialIdToPng[(byte)i] = Path.Combine("output/053_textures_png", pngFile);
+                        // Use fixed path for materials
+                        materialIdToPng[(byte)i] = Path.Combine("053_textures_png", pngFile);
                     }
                 }
             }
+            
+            // --- Step 4: Parse and merge all groups ---
+            var mergedMesh = new WoWToolbox.Core.WMO.WmoGroupMesh();
+            int totalVertices = 0, totalTriangles = 0, mergedGroups = 0;
+            foreach (var (groupIdx, groupStart, groupEnd) in groupRegions)
+            {
+                long groupLen = groupEnd - groupStart;
+                stream.Position = groupStart;
+                byte[] groupData = reader.ReadBytes((int)groupLen);
+                try
+                {
+                    var mesh = LoadFromV14GroupChunk(groupData);
+                    if (mesh.Vertices.Count == 0 || mesh.Triangles.Count == 0)
+                    {
+                        Log($"[OBJ] Skipping empty group {groupIdx} (vertices: {mesh.Vertices.Count}, triangles: {mesh.Triangles.Count})");
+                        continue;
+                    }
+                    
+                    int vertOffset = mergedMesh.Vertices.Count;
+                    mergedMesh.Vertices.AddRange(mesh.Vertices);
+                    
+                    foreach (var tri in mesh.Triangles)
+                    {
+                        mergedMesh.Triangles.Add(new WoWToolbox.Core.WMO.WmoTriangle
+                        {
+                            Index0 = tri.Index0 + vertOffset,
+                            Index1 = tri.Index1 + vertOffset,
+                            Index2 = tri.Index2 + vertOffset,
+                            MaterialId = tri.MaterialId,
+                            Flags = 0 // Ignore flags
+                        });
+                    }
+                    mergedGroups++;
+                    totalVertices += mesh.Vertices.Count;
+                    totalTriangles += mesh.Triangles.Count;
+                }
+                catch (Exception ex)
+                {
+                    Log($"[OBJ] ERROR: Failed to parse/merge group {groupIdx}: {ex.Message}\n{ex.StackTrace}");
+                }
+            }
+            Log($"[OBJ] Merged {mergedGroups} group(s): {totalVertices} vertices, {totalTriangles} triangles");
+            Log($"[OBJ] Attempting to write merged OBJ file: {outputObj}");
+            
+            if (mergedMesh.Vertices.Count == 0 || mergedMesh.Triangles.Count == 0)
+            {
+                Log($"[OBJ][WARN] Merged mesh is empty (vertices: {mergedMesh.Vertices.Count}, triangles: {mergedMesh.Triangles.Count}). Cannot export.");
+                return;
+            }
+            
             // --- Step 5: Export merged mesh as OBJ+MTL ---
             string mtlFile = Path.ChangeExtension(outputObj, ".mtl");
             try
@@ -961,21 +1032,68 @@ namespace WoWToolbox.WmoV14Converter
                 }
                 try
                 {
+                    // Create the directory if it doesn't exist (for nested paths)
+                    Directory.CreateDirectory(Path.GetDirectoryName(pngPath));
+                    
                     byte[] blpBytes = File.ReadAllBytes(foundBlpPath);
                     var blp = new BLP(blpBytes);
                     var image = blp.GetMipMap(0); // Image<Rgba32>
-                    using (var fs = File.OpenWrite(pngPath))
+                    
+                    // Ensure image is not null
+                    if (image != null)
                     {
-                        image.Save(fs, new PngEncoder());
+                        using (var fs = File.OpenWrite(pngPath))
+                        {
+                            image.Save(fs, new PngEncoder());
+                        }
+                        Log($"[TEX] Converted {assetString} to {pngPath}");
+                        pngWritten++;
                     }
-                    Log($"[TEX] Converted {assetString} to {pngPath}");
-                    pngWritten++;
+                    else
+                    {
+                        Log($"[TEX][ERR] Failed to get image data from BLP: {foundBlpPath}");
+                    }
                 }
                 catch (Exception ex)
                 {
                     Log($"[TEX][ERR] Failed to convert {assetString}: {ex.Message}");
                 }
             }
+            
+            // Create a fallback texture for missing materials
+            var fallbackPath = Path.Combine(pngOutDir, "missing.png");
+            if (!File.Exists(fallbackPath))
+            {
+                try
+                {
+                    // Create a simple 64x64 checkerboard pattern for missing textures
+                    var fallbackImage = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(64, 64);
+                    
+                    // Fill with a checkerboard pattern
+                    for (int y = 0; y < 64; y++)
+                    {
+                        for (int x = 0; x < 64; x++)
+                        {
+                            bool isEvenTile = ((x / 8) + (y / 8)) % 2 == 0;
+                            if (isEvenTile)
+                                fallbackImage[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(255, 0, 255, 255); // Magenta
+                            else
+                                fallbackImage[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(0, 0, 0, 255); // Black
+                        }
+                    }
+                    
+                    using (var fs = File.OpenWrite(fallbackPath))
+                    {
+                        fallbackImage.Save(fs, new PngEncoder());
+                    }
+                    Log($"[TEX] Created fallback texture: {fallbackPath}");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[TEX][ERR] Failed to create fallback texture: {ex.Message}");
+                }
+            }
+            
             if (referencedBlps.Count == 0)
                 Log($"[TEX][FATAL] No referenced BLPs found in MOTX/MOMT. Check chunk parsing and input file integrity.");
             Log($"[TEX][SUMMARY] BLPs found: {blpsFound}, missing: {blpsMissing}, PNGs written: {pngWritten}");

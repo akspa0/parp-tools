@@ -244,3 +244,71 @@
 - Some geometry may still be missing due to incomplete chunk parsing or undocumented subchunk formats.
 - Need for robust handling of optional/missing subchunks.
 - Further research required for less common subchunks and edge cases.
+
+## Completed Tasks (2024-07-21)
+- Removed all liquid handling code and DBCD dependency from the project. Liquid support will be implemented in a separate project.
+
+## New Focus: WMO Texturing Investigation (2024-07-21)
+- Current focus is on robust handling of WMO chunk data for texturing, supporting both v14 (mirrormachine) and v17 (wow.export) formats.
+- Next steps:
+  - Review wow.export for v17 chunk/texturing support.
+  - Crosswalk v14 (mirrormachine) knowledge to v17 structures.
+  - Enumerate all relevant chunks and string fields.
+  - Design a unified data model for texturing.
+  - Update parsers and export logic accordingly.
+- Goal: Enable full WMO/OBJ+MTL reconstruction with correct texturing for both legacy and modern formats.
+
+## Progress Update (2024-07-21): WMO Texturing Model Integration
+- Persistent CS0149 error ('Method name expected') was resolved by introducing a local alias for MOTX (MOTXStruct) in the factory.
+- The unified texturing model and loader now work for both v14 and v17+ WMO files, and are integrated into the converter pipeline.
+
+## WMO v14 Converter Progress (2025-04-22)
+
+### What Works
+- Parsing of v14 WMO file structure and identification of all groups within the monolithic file.
+- Correct assembly of mesh geometry (vertices, indices, triangles) from raw chunk data.
+- Triangle handling fixes to prevent index truncation when merging groups.
+- Successful export of merged geometry from all groups to OBJ format.
+- Basic material ID mapping is being created from MOTX/MOMT chunks.
+
+### What's Left to Build / In Progress
+- Texture mapping is not working correctly - exported OBJ/MTL files show correct geometry but no textures.
+- Need to verify texture extraction and conversion from BLP to PNG.
+- Material ID to PNG mapping may need correction to ensure proper paths in the MTL file.
+- Further refinement of the ExtractAndConvertTextures method.
+
+### Current Status
+- The converter successfully merges and exports geometry from all groups in v14 WMO files.
+- Significant progress has been made on fixing triangle index handling in the ExportMergedGroupsAsObj method.
+- Texture issues remain the primary focus for improvement.
+
+### Known Issues
+- Textures are missing in the exported OBJ/MTL files.
+- Material ID to PNG mapping may not be correctly linked or may use incorrect paths.
+- Need to analyze the MTL file to ensure it correctly references the exported textures.
+
+### Plan for Texture Fixes
+1. **Investigate Texture Directories:**
+   - Confirm the output textures are being extracted to the correct location
+   - Check if BLP to PNG conversion is successful
+   - Verify the file existence and accessibility
+
+2. **Debug materialIdToPng Mapping:**
+   - Add detailed logging of the materialIdToPng dictionary creation
+   - Verify each material ID is being correctly mapped to its corresponding PNG
+   - Check path construction for texture references in the MTL file
+
+3. **Examine MTL File Generation:**
+   - Review WmoGroupMesh.SaveToObjAndMtl to verify proper material handling
+   - Add logging of material definitions written to the MTL file
+   - Test with absolute paths for textures to rule out path resolution issues
+
+4. **Test BLP Extraction In Isolation:**
+   - Create a standalone test for ExtractAndConvertTextures
+   - Verify each step in the texture processing pipeline
+   - Fix any issues in the conversion process
+
+5. **Implement Improvements:**
+   - Update path handling in ExtractAndConvertTextures and material ID mapping
+   - Add error recovery for missing textures (fallback to default)
+   - Enhance logging of the texture extraction process for better debugging

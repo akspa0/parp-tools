@@ -164,7 +164,7 @@ namespace WoWToolbox.Core.WMO
     }
 
     // MOTX chunk: Texture names (null-terminated string block)
-    public struct MOTX
+    public struct WmoMotxChunk
     {
         // Helper to read all null-terminated strings from a byte array
         public static List<string> ReadStrings(byte[] data)

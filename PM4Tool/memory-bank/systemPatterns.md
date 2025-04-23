@@ -288,3 +288,25 @@ Provide a robust, extensible utility for comparing 3D meshes (MeshData) extracte
   - Parse all relevant geometry subchunks (MOVT, MONR, MOTV, MOPY, MOVI, etc.) directly from the group data.
   - Assemble mesh structures (vertices, normals, UVs, triangles, materials) from the decoded arrays.
   - This approach bypasses legacy group file parsing and enables geometry extraction from raw chunk data.
+
+## Patterns Update (2024-07-21)
+
+### Liquid Handling Removal
+- All code and dependencies related to liquid handling (including DBCD) have been removed from the project. Liquid support is out of scope and will be handled in a separate project.
+
+### WMO Texturing Data Handling (v14/v17)
+- All WMO chunk data related to texturing (including all string fields such as texture names, material names, etc.) must be mapped and unified for both v14 (mirrormachine) and v17 (wow.export) formats.
+- The data model and export logic must support full WMO/OBJ+MTL reconstruction with correct texturing for both legacy and modern formats.
+- String extraction and encoding must be robust and support all relevant chunk types (e.g., MATS, MOGN, MOGI, MOPY, MODS, etc.).
+- Crosswalks between v14 and v17 chunk structures should be documented and implemented.
+
+### Investigation Plan for Texturing Chunk Handling
+- Review wow.export for v17 chunk/texturing support and data structures.
+- Crosswalk v14 (mirrormachine) knowledge to v17 structures.
+- Enumerate all relevant chunks and string fields for texturing.
+- Design a unified data model for texturing.
+- Update parsers and export logic accordingly.
+
+### Pattern: Local Alias for Static Chunk Struct Methods (2024-07-21)
+- When calling static methods on chunk structs (e.g., MOTX.ReadStrings) from model factories, use a local alias (e.g., using MOTXStruct = WoWToolbox.Core.WMO.MOTX;) to avoid ambiguity and ensure correct method resolution.
+- This pattern resolved a persistent CS0149 error and should be considered best practice for future chunk struct integrations.

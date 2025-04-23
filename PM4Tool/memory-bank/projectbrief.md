@@ -46,4 +46,10 @@ A comprehensive toolkit for parsing and working with World of Warcraft ADT (terr
 - Added a new test for mesh extraction and MSCN boundary output, which writes OBJ and diagnostics files for key PM4 files.
 - All build errors related to type mismatches have been resolved.
 - Current focus is on ensuring robust test automation and resource management, as a recent process hang after file output highlighted the importance of proper cleanup and test completion.
-- Implemented direct parsing and mesh assembly for v14 WMO group chunks, enabling geometry extraction from raw chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.) instead of relying on legacy group file parsing. This breakthrough supports legacy formats that do not store explicit mesh data. 
+- Implemented direct parsing and mesh assembly for v14 WMO group chunks, enabling geometry extraction from raw chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.) instead of relying on legacy group file parsing. This breakthrough supports legacy formats that do not store explicit mesh data.
+
+## Out of Scope (2024-07-21)
+- Liquid handling and DBCD dependency have been removed from this project and will be implemented separately.
+
+## New Technical Focus (2024-07-21)
+- Robust handling of WMO chunk data for texturing, with unified support for v14 (mirrormachine) and v17 (wow.export) formats, enabling full WMO/OBJ+MTL reconstruction with correct texturing. 

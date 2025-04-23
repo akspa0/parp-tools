@@ -18,7 +18,7 @@ namespace WoWToolbox.Core.WMO
         public Vector2 UV;
     }
 
-    // Represents a triangle in the mesh
+    // Structure to store a triangle
     public struct WmoTriangle
     {
         public int Index0, Index1, Index2;
@@ -39,6 +39,17 @@ namespace WoWToolbox.Core.WMO
     // Main mesh container for a WMO group
     public class WmoGroupMesh
     {
+        // Triangle flag constants
+        // These flags control how WoW renders and uses each triangle in the environment
+        public const ushort FLAG_RENDER = 0x0008;       // Triangle should be rendered visually
+        public const ushort FLAG_COLLISION = 0x0010;    // Triangle participates in collision detection (characters, objects)
+        public const ushort FLAG_DETAIL = 0x0020;       // Triangle is a detail object (small decorative element)
+        public const ushort FLAG_COLLIDE_HIT = 0x0040;  // Triangle registers hit events when collided with
+        public const ushort FLAG_HINT = 0x0080;         // Triangle is a hint - guides AI pathing
+        public const ushort FLAG_NOCAMCOLLIDE = 0x0100; // Camera should not collide with this triangle (prevents clipping)
+        public const ushort FLAG_CULL_OBJECTS = 0x0200; // Culls doodads/objects behind this triangle (typically portals)
+        public const ushort FLAG_UNK_0x01 = 0x0001;     // Unknown usage - possibly material transition marker
+        
         public List<WmoVertex> Vertices { get; set; } = new();
         public List<WmoTriangle> Triangles { get; set; } = new();
         public List<WmoBatch> Batches { get; set; } = new();

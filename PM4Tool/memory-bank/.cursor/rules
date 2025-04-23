@@ -1,0 +1,3 @@
+# Rules Update (2024-07-21)
+- Always map all texturing-related chunk data and string fields for both v14 and v17, supporting full WMO/OBJ+MTL reconstruction with correct texturing.
+- Liquid handling is out of scope for this project and should not be included; any such code or dependencies (e.g., DBCD) must be removed or excluded. 
