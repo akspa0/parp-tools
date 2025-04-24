@@ -611,5 +611,44 @@ namespace WoWToolbox.Core.WMO
             }
             return merged;
         }
+
+        // Extract a point cloud from triangles filtered by MOPY flags/materialId
+        /// <summary>
+        /// Extracts a point cloud from triangles filtered by flags and/or materialId.
+        /// </summary>
+        /// <param name="flagsMask">If nonzero, only triangles with (Flags & flagsMask) != 0 are included.</param>
+        /// <param name="materialId">If not null, only triangles with this MaterialId are included.</param>
+        /// <param name="useCentroid">If true, use triangle centroids; otherwise, use all triangle vertices.</param>
+        /// <returns>List of Vector3 points (optionally with annotation in the future).</returns>
+        public List<Vector3> ExtractPointCloud(ushort flagsMask = 0, byte? materialId = null, bool useCentroid = false)
+        {
+            var points = new List<Vector3>();
+            foreach (var tri in Triangles)
+            {
+                if ((flagsMask != 0 && (tri.Flags & flagsMask) == 0))
+                    continue;
+                if (materialId.HasValue && tri.MaterialId != materialId.Value)
+                    continue;
+                var v0 = Vertices[tri.Index0].Position;
+                var v1 = Vertices[tri.Index1].Position;
+                var v2 = Vertices[tri.Index2].Position;
+                if (useCentroid)
+                {
+                    var centroid = new Vector3(
+                        (v0.X + v1.X + v2.X) / 3f,
+                        (v0.Y + v1.Y + v2.Y) / 3f,
+                        (v0.Z + v1.Z + v2.Z) / 3f
+                    );
+                    points.Add(centroid);
+                }
+                else
+                {
+                    points.Add(v0);
+                    points.Add(v1);
+                    points.Add(v2);
+                }
+            }
+            return points;
+        }
     }
 } 
