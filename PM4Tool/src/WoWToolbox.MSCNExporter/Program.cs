@@ -55,16 +55,24 @@ namespace WoWToolbox.MSCNExporter
                         Console.WriteLine($"No MSCN data in {Path.GetFileName(pm4File)}");
                         continue;
                     }
+
+                    // Canonical transform for MSCN: (X, Y, Z) -> (Y, -X, Z)
                     var outPath = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(pm4File) + "_mscn.obj");
                     using (var writer = new StreamWriter(outPath))
                     {
                         writer.WriteLine($"# MSCN Points OBJ Export for {Path.GetFileName(pm4File)}");
                         writer.WriteLine($"# Generated: {DateTime.Now}");
+                        writer.WriteLine("# Vertex Transform: (X, Y, Z) -> (Y, -X, Z) [Canonical WoW map orientation]");
                         writer.WriteLine("o MSCN_Boundary");
                         foreach (var v in pm4.MSCN.ExteriorVertices)
-                            writer.WriteLine($"v {v.X} {v.Y} {v.Z}");
+                        {
+                            float tx = v.Y;
+                            float ty = -v.X;
+                            float tz = v.Z;
+                            writer.WriteLine($"v {tx} {ty} {tz}");
+                        }
                     }
-                    Console.WriteLine($"Exported {pm4.MSCN.ExteriorVertices.Count} MSCN points to {outPath}");
+                    Console.WriteLine($"Exported {pm4.MSCN.ExteriorVertices.Count} MSCN points (canonical orientation) to {outPath}");
                 }
                 catch (Exception ex)
                 {

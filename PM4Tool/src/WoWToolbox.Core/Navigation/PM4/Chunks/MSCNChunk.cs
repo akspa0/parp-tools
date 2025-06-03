@@ -86,5 +86,16 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         {
             return $"MSCN Chunk [{ExteriorVertices.Count} Exterior Vertices (Vector3)]";
         }
+
+        /// <summary>
+        /// Converts an MSCN vertex from file coordinates (X, Y, Z) to canonical world coordinates (Y, -X, Z).
+        /// This matches the WoW map tile orientation as seen in the game/editor (see docs/knowledge/chunk_xyz_transform_audit.md).
+        /// </summary>
+        /// <param name="vertex">The MSCN vertex in file coordinates.</param>
+        /// <returns>The vertex in canonical world coordinates.</returns>
+        public static Vector3 ToCanonicalWorldCoordinates(Vector3 vertex)
+        {
+            return new Vector3(vertex.Y, -vertex.X, vertex.Z);
+        }
     }
 } 
