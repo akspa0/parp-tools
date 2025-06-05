@@ -137,108 +137,21 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // --- Combined Output File Setup ---
             var combinedOutputPath = Path.Combine(outputDir, "combined_render_mesh_transformed.obj");
             var combinedWithMscnPath = Path.Combine(outputDir, "combined_render_mesh_with_mscn.obj");
-            var combinedWithMscnAndMslkPath = Path.Combine(outputDir, "combined_render_mesh_with_mscn_and_mslk.obj");
+            var combinedAllChunksPath = Path.Combine(outputDir, "combined_all_chunks_aligned.obj");
             Console.WriteLine($"Combined Output OBJ: {combinedOutputPath}");
+            Console.WriteLine($"Combined All Chunks (Aligned): {combinedAllChunksPath}");
             using var combinedRenderMeshWriter = new StreamWriter(combinedOutputPath);
             using var combinedWithMscnWriter = new StreamWriter(combinedWithMscnPath);
-            using (var combinedWithMscnAndMslkWriter = new StreamWriter(combinedWithMscnAndMslkPath))
-            {
-                combinedWithMscnAndMslkWriter.WriteLine($"# Combined PM4 Render Mesh WITH MSCN Points AND MSLK Anchors (Generated: {DateTime.Now})");
-                                        combinedWithMscnAndMslkWriter.WriteLine($"# Vertex Transform: ({Pm4CoordinateTransforms.CoordinateOffset} - X), ({Pm4CoordinateTransforms.CoordinateOffset} - Y), Z");
-                combinedWithMscnAndMslkWriter.WriteLine("# NOTE: Mesh vertices, MSCN points, and MSLK anchors are all included for spatial analysis.");
-                combinedWithMscnAndMslkWriter.WriteLine("o CombinedMesh_MSVT");
+            using var combinedAllChunksWriter = new StreamWriter(combinedAllChunksPath);
 
-                // Write mesh vertices (MSVT) as before
-                foreach (var inputFilePath in pm4Files)
-                {
-                    PM4File pm4File;
-                    try
-                    {
-                        pm4File = PM4File.FromFile(inputFilePath);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[SKIP] {inputFilePath}: {ex.Message}");
-                        continue;
-                    }
-                    var fileName = Path.GetFileName(inputFilePath);
-                    if (pm4File.MSVT != null)
-                    {
-                        foreach (var v in pm4File.MSVT.Vertices)
-                        {
-                            var world = v.ToWorldCoordinates();
-                            combinedWithMscnAndMslkWriter.WriteLine(FormattableString.Invariant($"v {world.X:F6} {world.Y:F6} {world.Z:F6} # MSVT (File: {fileName})"));
-                        }
-                    }
-                }
-
-                // Write MSCN points
-                combinedWithMscnAndMslkWriter.WriteLine("o CombinedMesh_MSCN");
-                foreach (var inputFilePath in pm4Files)
-                {
-                    PM4File pm4File;
-                    try
-                    {
-                        pm4File = PM4File.FromFile(inputFilePath);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[SKIP] {inputFilePath}: {ex.Message}");
-                        continue;
-                    }
-                    var fileName = Path.GetFileName(inputFilePath);
-                    if (pm4File.MSCN != null && pm4File.MSCN.ExteriorVertices.Count > 0)
-                    {
-                        foreach (var point in pm4File.MSCN.ExteriorVertices)
-                        {
-                            var world = Pm4CoordinateTransforms.FromMscnVertex(point); // [Centralized] Coordinate transform via Pm4CoordinateTransforms
-                            combinedWithMscnAndMslkWriter.WriteLine(FormattableString.Invariant($"v {world.X:F6} {world.Y:F6} {world.Z:F6} # MSCN (File: {fileName})"));
-                        }
-                    }
-                }
-
-                // Write MSLK anchor points
-                combinedWithMscnAndMslkWriter.WriteLine("o CombinedMesh_MSLK");
-                foreach (var inputFilePath in pm4Files)
-                {
-                    PM4File pm4File;
-                    try
-                    {
-                        pm4File = PM4File.FromFile(inputFilePath);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[SKIP] {inputFilePath}: {ex.Message}");
-                        continue;
-                    }
-                    var fileName = Path.GetFileName(inputFilePath);
-                    if (pm4File.MSLK != null && pm4File.MSVI != null && pm4File.MSVT != null)
-                    {
-                        foreach (var entry in pm4File.MSLK.Entries)
-                        {
-                            // Only process doodad nodes (MspiFirstIndex == -1)
-                            if (entry.MspiFirstIndex == -1)
-                            {
-                                ushort msviIndex = entry.Unknown_0x10;
-                                if (msviIndex < pm4File.MSVI.Indices.Count)
-                                {
-                                    uint msvtIndex = pm4File.MSVI.Indices[msviIndex];
-                                    if (msvtIndex < pm4File.MSVT.Vertices.Count)
-                                    {
-                                        var v = pm4File.MSVT.Vertices[(int)msvtIndex];
-                                        var world = v.ToWorldCoordinates();
-                                        combinedWithMscnAndMslkWriter.WriteLine(FormattableString.Invariant($"v {world.X:F6} {world.Y:F6} {world.Z:F6} # MSLK Anchor (File: {fileName}, Entry: {entry.ToString()})"));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // If pm4File.MSLK is null, skip writing MSLK anchors for this file.
-                }
-
-                // Add the new line for MSCN, MSVT, and MSLK distinct sets comment
-                combinedWithMscnAndMslkWriter.WriteLine("# NOTE: MSCN, MSVT, and MSLK are distinct sets and not directly mappable. Merged outputs are for exploratory analysis only.");
-            }
+            // Initialize comprehensive combined file
+            combinedAllChunksWriter.WriteLine($"# PM4 All Chunks Combined - Properly Aligned (Generated: {DateTime.Now})");
+            combinedAllChunksWriter.WriteLine("# This file contains all chunk types with correct coordinate transformations:");
+            combinedAllChunksWriter.WriteLine("#   MSVT: Render mesh vertices (Y, X, Z)");
+            combinedAllChunksWriter.WriteLine("#   MSCN: Collision boundaries (X, Y, Z - with geometric transform)");
+            combinedAllChunksWriter.WriteLine("#   MSLK/MSPV: Geometric structure (X, Y, Z)");
+            combinedAllChunksWriter.WriteLine("#   MPRL: Reference points (X, -Z, Y)");
+            combinedAllChunksWriter.WriteLine("# Now that alignment is correct, spatial relationships should be meaningful.");
 
             int totalVerticesOffset = 0; // Track vertex offset for combined file
             int totalMscnOffset = 0; // Track MSCN point offset for combined file
@@ -323,15 +236,68 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             // Write all MSCN points to the combined file
                             foreach (var point in pm4File.MSCN.ExteriorVertices)
                             {
-                                // Apply the offset-based transformation for consistent spatial relationship
-                                                            var mapCoords = Pm4CoordinateTransforms.FromMscnVertexToMapProjection(point);
+                                // Apply PM4-relative transformation
+                                var pm4Coords = Pm4CoordinateTransforms.FromMscnVertex(point);
                             combinedWithMscnWriter.WriteLine(FormattableString.Invariant(
-                                $"v {mapCoords.X:F6} {mapCoords.Y:F6} {mapCoords.Z:F6} # MSCN (File: {fileNameForMscn})"));
+                                $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSCN (File: {fileNameForMscn})"));
                                 totalMscnOffset++;
                             }
                             
                             Console.WriteLine($"  Added {pm4File.MSCN.ExteriorVertices.Count} MSCN points to combined MSCN file from {fileNameForMscn}");
                         }
+                        
+                        // --- Write ALL chunk types to comprehensive combined file ---
+                        combinedAllChunksWriter.WriteLine($"# === {fileNameForMscn} ===");
+                        
+                        // 1. MSVT render vertices
+                        if (pm4File.MSVT != null && pm4File.MSVT.Vertices.Count > 0)
+                        {
+                            combinedAllChunksWriter.WriteLine($"# MSVT Render Vertices ({pm4File.MSVT.Vertices.Count})");
+                            foreach (var vertex in pm4File.MSVT.Vertices)
+                            {
+                                var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                                combinedAllChunksWriter.WriteLine(FormattableString.Invariant(
+                                    $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSVT {fileNameForMscn}"));
+                            }
+                        }
+                        
+                        // 2. MSCN collision boundaries
+                        if (pm4File.MSCN != null && pm4File.MSCN.ExteriorVertices.Count > 0)
+                        {
+                            combinedAllChunksWriter.WriteLine($"# MSCN Collision Boundaries ({pm4File.MSCN.ExteriorVertices.Count})");
+                            foreach (var point in pm4File.MSCN.ExteriorVertices)
+                            {
+                                var pm4Coords = Pm4CoordinateTransforms.FromMscnVertex(point);
+                                combinedAllChunksWriter.WriteLine(FormattableString.Invariant(
+                                    $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSCN {fileNameForMscn}"));
+                            }
+                        }
+                        
+                        // 3. MSPV geometry vertices
+                        if (pm4File.MSPV != null && pm4File.MSPV.Vertices.Count > 0)
+                        {
+                            combinedAllChunksWriter.WriteLine($"# MSPV Geometry Vertices ({pm4File.MSPV.Vertices.Count})");
+                            foreach (var vertex in pm4File.MSPV.Vertices)
+                            {
+                                var pm4Coords = Pm4CoordinateTransforms.FromMspvVertex(vertex);
+                                combinedAllChunksWriter.WriteLine(FormattableString.Invariant(
+                                    $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSPV {fileNameForMscn}"));
+                            }
+                        }
+                        
+                        // 4. MPRL reference points
+                        if (pm4File.MPRL != null && pm4File.MPRL.Entries.Count > 0)
+                        {
+                            combinedAllChunksWriter.WriteLine($"# MPRL Reference Points ({pm4File.MPRL.Entries.Count})");
+                            foreach (var entry in pm4File.MPRL.Entries)
+                            {
+                                var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(entry);
+                                combinedAllChunksWriter.WriteLine(FormattableString.Invariant(
+                                    $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MPRL {fileNameForMscn}"));
+                            }
+                        }
+                        
+                        combinedAllChunksWriter.WriteLine(); // Blank line between files
                     }
                     
                     processedCount++;
@@ -717,9 +683,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Write headers for non-MPRL files
                 renderMeshWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 renderMeshWriter.WriteLine("# Vertices Transform: Y, X, Z");
-                // REVERTED: Header for transformed render mesh (MSVT/MSUR only)
-                                        renderMeshTransformedWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) - TRANSFORMED (X={Pm4CoordinateTransforms.CoordinateOffset:F3}-X, Y={Pm4CoordinateTransforms.CoordinateOffset:F3}-Y, Z) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
-                renderMeshTransformedWriter.WriteLine("# Vertices Transform: Y, X, Z THEN X=Offset-X, Y=Offset-Y");
+                // Header for PM4-relative transformed render mesh (MSVT/MSUR only)
+                renderMeshTransformedWriter.WriteLine($"# PM4 Render Mesh (MSVT/MSVI/MSUR) - PM4-RELATIVE (Y, X, Z) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
+                renderMeshTransformedWriter.WriteLine("# Vertices Transform: Y, X, Z (PM4-relative coordinates)");
                 // RE-ADDED: Header for standalone MSLK file
                 mslkWriter.WriteLine($"# PM4 MSLK Geometry (Vertices, Faces 'f', Lines 'l', Points 'p') (Exported: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
                 mslkWriter.WriteLine("# Vertices (v) Transform: X, Y, Z (Standard)");
@@ -813,15 +779,15 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         // Write original vertex
                         renderMeshWriter.WriteLine(FormattableString.Invariant($"v {originalX:F6} {originalY:F6} {originalZ:F6}"));
 
-                        // Apply centralized map projection transformation
-                        var mapCoords = Pm4CoordinateTransforms.FromMsvtVertexToMapProjection(vertex);
+                        // Apply PM4-relative transformation
+                        var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
 
                         msvtFileVertexCount++; // Increment counter
 
-                        // Write transformed vertex to individual transformed file
-                        renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"v {mapCoords.X:F6} {mapCoords.Y:F6} {mapCoords.Z:F6} # MSVT {msvtIndex}"));
-                        // Use the same offset-based transformation for global combined mesh
-                        combinedTransformedWriter.WriteLine(FormattableString.Invariant($"v {mapCoords.X:F6} {mapCoords.Y:F6} {mapCoords.Z:F6} # MSVT {msvtIndex} (File: {baseOutputName})"));
+                        // Write PM4-relative vertex to individual transformed file
+                        renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSVT {msvtIndex}"));
+                        // Use the same PM4-relative transformation for global combined mesh
+                        combinedTransformedWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSVT {msvtIndex} (File: {baseOutputName})"));
 
                         // --- Write Normals if available ---
                         if (mscnAvailable)
@@ -842,8 +808,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
                         if (logCounterMsvt < 10)
                         {
-                            summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vert {msvtIndex}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Orig v ({originalX:F3}, {originalY:F3}, {originalZ:F3}) -> Trans v ({mapCoords.X:F3}, {mapCoords.Y:F3}, {mapCoords.Z:F3})"));
-                            debugWriter.WriteLine(FormattableString.Invariant($"  MSVT V {msvtIndex}: Orig=({originalX:F3}, {originalY:F3}, {originalZ:F3}) Trans=({mapCoords.X:F3}, {mapCoords.Y:F3}, {mapCoords.Z:F3})"));
+                            summaryWriter.WriteLine(FormattableString.Invariant($"  MSVT Vert {msvtIndex}: Raw=(Y:{vertex.Y:F3}, X:{vertex.X:F3}, Z:{vertex.Z:F3}) -> Orig v ({originalX:F3}, {originalY:F3}, {originalZ:F3}) -> PM4 v ({pm4Coords.X:F3}, {pm4Coords.Y:F3}, {pm4Coords.Z:F3})"));
+                            debugWriter.WriteLine(FormattableString.Invariant($"  MSVT V {msvtIndex}: Orig=({originalX:F3}, {originalY:F3}, {originalZ:F3}) PM4=({pm4Coords.X:F3}, {pm4Coords.Y:F3}, {pm4Coords.Z:F3})"));
                         }
                         logCounterMsvt++;
                         msvtIndex++; // Increment index for next vertex/normal
@@ -853,7 +819,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         summaryWriter.WriteLine("  ... (Summary log limited to first 10 Vertices) ...");
                     }
                     debugWriter.WriteLine($"Wrote {msvtFileVertexCount} MSVT vertices (v) to _render_mesh.obj.");
-                    debugWriter.WriteLine($"Wrote {msvtFileVertexCount} transformed MSVT vertices (v) to transformed OBJ files.");
+                    debugWriter.WriteLine($"Wrote {msvtFileVertexCount} PM4-relative MSVT vertices (v) to transformed OBJ files.");
                     renderMeshWriter.WriteLine(); // Blank line after vertices in original render mesh
                     renderMeshTransformedWriter.WriteLine(); // Blank line after vertices in individual transformed file
                 }
@@ -878,8 +844,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         int logCounterMprl = 0;
                         foreach (var entry in pm4File.MPRL.Entries)
                         {
-                            // Apply centralized MPRL transformation
-                            var worldCoords = Pm4CoordinateTransforms.FromMprlEntrySimple(entry);
+                            // Apply PM4-relative MPRL transformation
+                            var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(entry);
 
                             // ADDED: Include Unknown fields in comment
                             string comment = $"# MPRLIdx=[{mprlFileVertexCount}] " +
@@ -889,11 +855,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
                             if (logCounterMprl < 10) {
                                 summaryWriter.WriteLine(FormattableString.Invariant(
-                                    $"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> Exported=({worldCoords.X:F3}, {worldCoords.Y:F3}, {worldCoords.Z:F3}) {comment}" // Added comment to summary log too
+                                    $"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> PM4=({pm4Coords.X:F3}, {pm4Coords.Y:F3}, {pm4Coords.Z:F3}) {comment}" // Added comment to summary log too
                                 ));
-                                debugWriter.WriteLine(FormattableString.Invariant($"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> Exported=({worldCoords.X:F3}, {worldCoords.Y:F3}, {worldCoords.Z:F3}) {comment}")); // Log full details now
+                                debugWriter.WriteLine(FormattableString.Invariant($"  MPRL Vertex {mprlFileVertexCount}: Raw=({entry.Position.X:F3}, {entry.Position.Y:F3}, {entry.Position.Z:F3}) -> PM4=({pm4Coords.X:F3}, {pm4Coords.Y:F3}, {pm4Coords.Z:F3}) {comment}")); // Log full details now
                             }
-                            mprlWriter.WriteLine(FormattableString.Invariant($"v {worldCoords.X:F6} {worldCoords.Y:F6} {worldCoords.Z:F6} {comment}")); // ADDED comment to OBJ output
+                            mprlWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} {comment}")); // ADDED comment to OBJ output
                             mprlFileVertexCount++;
                             logCounterMprl++;
                         }
@@ -911,174 +877,137 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 }
 
 
-                 // --- 4. Process MSCN Data (Output as Points to separate file) ---
+                 // --- 4. Export Individual Chunk OBJ Files for Analysis ---
                  if (exportMscnPoints)
                  {
-                    string outputMscnObjPath = Path.Combine(outputDir, $"{baseOutputName}_mscn_points.obj");
-                    string integratedMeshPath = Path.Combine(outputDir, $"{baseOutputName}_integrated_mesh.obj");
+                    debugWriter.WriteLine($"\n--- Exporting Individual Chunk OBJ Files for Analysis ---");
                     
+                    // 4.1 MSCN Collision Boundaries
+                    string outputMscnObjPath = Path.Combine(outputDir, $"{baseOutputName}_chunk_mscn.obj");
                     if (pm4File.MSCN != null && pm4File.MSCN.ExteriorVertices.Count > 0)
                     {
-                        debugWriter.WriteLine($"\n--- Exporting MSCN Points -> {Path.GetFileName(outputMscnObjPath)} ---");
                         using var mscnWriter = new StreamWriter(outputMscnObjPath, false);
-                        
-                        // Add header
-                        mscnWriter.WriteLine($"# PM4 MSCN Points (Boundary Vertices) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
-                        mscnWriter.WriteLine("# Format: v x y z (Raw MSCN coordinates)");
-                        mscnWriter.WriteLine("o MSCN_Boundary");
+                        mscnWriter.WriteLine($"# PM4 MSCN Chunk - Collision Boundaries (Generated: {DateTime.Now})");
+                        mscnWriter.WriteLine($"# File: {Path.GetFileName(inputFilePath)}");
+                        mscnWriter.WriteLine($"# Transform: Y-axis correction + 180° rotation around X-axis");
+                        mscnWriter.WriteLine("o MSCN_Collision_Boundaries");
                         
                         int mscnPointsExported = 0;
                         foreach (var point in pm4File.MSCN.ExteriorVertices)
                         {
-                            mscnWriter.WriteLine(FormattableString.Invariant($"v {point.X:F6} {point.Y:F6} {point.Z:F6}"));
+                            var pm4Coords = Pm4CoordinateTransforms.FromMscnVertex(point);
+                            mscnWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
                             mscnPointsExported++;
                         }
-                        
-                        debugWriter.WriteLine($"  Exported {mscnPointsExported} MSCN points to {Path.GetFileName(outputMscnObjPath)}");
-                        
-                        // Create integrated mesh with both MSVT and MSCN data - SIMPLIFIED APPROACH
-                        using var integratedWriter = new StreamWriter(integratedMeshPath, false);
-                        integratedWriter.WriteLine($"# PM4 Integrated Mesh (MSVT + MSCN) (Generated: {DateTime.Now}) - File: {Path.GetFileName(inputFilePath)}");
-                        integratedWriter.WriteLine("# This mesh contains MSVT vertices and (separately) MSCN vertices");
-                        integratedWriter.WriteLine("# It uses simplified topology to avoid crashing 3D viewers");
-                        integratedWriter.WriteLine($"# Transformation: X={Pm4CoordinateTransforms.CoordinateOffset}-X, Y={Pm4CoordinateTransforms.CoordinateOffset}-Y, Z unchanged");
-                        integratedWriter.WriteLine("o Integrated_Mesh");
-                        
-                        // Step 1: Write all MSVT vertices first
-                        int integratedMsvtVertexCount = 0;
-                        if (pm4File.MSVT != null && pm4File.MSVT.Vertices.Count > 0)
-                        {
-                            integratedWriter.WriteLine("# MSVT vertices start here");
-                            foreach (var vertex in pm4File.MSVT.Vertices)
-                            {
-                                // Apply the same transformation as in the main render mesh
-                                var mapCoords = Pm4CoordinateTransforms.FromMsvtVertexToMapProjection(vertex);
-                                integratedWriter.WriteLine(FormattableString.Invariant($"v {mapCoords.X:F6} {mapCoords.Y:F6} {mapCoords.Z:F6}"));
-                                integratedMsvtVertexCount++;
-                            }
-                        }
-                        
-                        // Step 2: Write all MSCN vertices as a separate set (clearly marked)
-                        int mscnVertexStartIndex = integratedMsvtVertexCount + 1; // OBJ is 1-indexed
-                        int mscnVertexCount = 0;
-                        
-                        if (pm4File.MSCN.ExteriorVertices.Count > 0)
-                        {
-                            integratedWriter.WriteLine("# MSCN vertices start here");
-                            foreach (var point in pm4File.MSCN.ExteriorVertices)
-                            {
-                                // Apply the same transformation as the mesh vertices for consistency
-                                var mapCoords = Pm4CoordinateTransforms.FromMscnVertexToMapProjection(point);
-                                integratedWriter.WriteLine(FormattableString.Invariant($"v {mapCoords.X:F6} {mapCoords.Y:F6} {mapCoords.Z:F6}"));
-                                mscnVertexCount++;
-                            }
-                        }
-                        
-                        // Step 3: Generate standard faces from MSUR using only MSVT vertices for stability
-                        int facesWritten = 0;
-                        
-                        if (pm4File.MSUR != null && pm4File.MSVI != null && integratedMsvtVertexCount > 0)
-                        {
-                            integratedWriter.WriteLine("\n# Faces from MSUR/MSVI data (MSVT vertices only)");
-                            integratedWriter.WriteLine("g MSVT_Faces");
-                            
-                            // Process MSUR entries to generate faces (simplified version without experimental faces)
-                            foreach (var msur in pm4File.MSUR.Entries)
-                            {
-                                if (msur.MsviFirstIndex >= 0 && msur.IndexCount >= 3 && 
-                                    msur.MsviFirstIndex + msur.IndexCount <= pm4File.MSVI.Indices.Count)
-                                {
-                                    // The indices form triangle fans where idx0 is the central vertex
-                                    // Use a standard triangle fan pattern
-                                    uint centralIdx = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex];
-                                    
-                                    // Only process if central vertex is valid
-                                    if (centralIdx < integratedMsvtVertexCount)
-                                    {
-                                        for (int i = 1; i < msur.IndexCount - 1; i++)
-                                        {
-                                            uint idx1 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i];
-                                            uint idx2 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i + 1];
-                                            
-                                            // Check if all indices are within MSVT bounds
-                                            if (idx1 < integratedMsvtVertexCount && idx2 < integratedMsvtVertexCount)
-                                            {
-                                                // All vertices are in MSVT, use them directly (add 1 for OBJ's 1-based indexing)
-                                                integratedWriter.WriteLine($"f {centralIdx + 1} {idx1 + 1} {idx2 + 1}");
-                                                facesWritten++;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Step 4: Add MSCN points representation (but not linked to MSVT to avoid mesh issues)
-                        // Just output the MSCN points as a separate point cloud within the same file
-                        if (mscnVertexCount > 0)
-                        {
-                            integratedWriter.WriteLine("\n# MSCN Points (separate from mesh topology)");
-                            integratedWriter.WriteLine("g MSCN_Points");
-                            
-                            // Output each MSCN point as a single point entity
-                            for (int i = 0; i < mscnVertexCount; i++)
-                            {
-                                int pointIdx = mscnVertexStartIndex + i;
-                                integratedWriter.WriteLine($"p {pointIdx}");
-                            }
-                            
-                            // Optional: Generate MSCN faces if there's a direct mapping (same count as MSVT)
-                            // This is kept separate from the main mesh to avoid any issues
-                            if (pm4File.MSCN != null && pm4File.MSVT != null && 
-                                pm4File.MSCN.ExteriorVertices.Count == pm4File.MSVT.Vertices.Count && 
-                                pm4File.MSUR != null && pm4File.MSVI != null)
-                            {
-                                integratedWriter.WriteLine("\n# Optional MSCN faces (only generated when MSCN count = MSVT count)");
-                                integratedWriter.WriteLine("g MSCN_Faces");
-                                
-                                int mscnFacesWritten = 0;
-                                foreach (var msur in pm4File.MSUR.Entries)
-                                {
-                                    if (msur.MsviFirstIndex >= 0 && msur.IndexCount >= 3 && 
-                                        msur.MsviFirstIndex + msur.IndexCount <= pm4File.MSVI.Indices.Count)
-                                    {
-                                        // Use a standard triangle fan pattern - same logic as for MSVT but with offset indices
-                                        uint centralIdx = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex];
-                                        
-                                        // Only process if central vertex is valid for MSCN
-                                        if (centralIdx < mscnVertexCount)
-                                        {
-                                            for (int i = 1; i < msur.IndexCount - 1; i++)
-                                            {
-                                                uint idx1 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i];
-                                                uint idx2 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i + 1];
-                                                
-                                                // Check if all indices are within MSCN bounds
-                                                if (idx1 < mscnVertexCount && idx2 < mscnVertexCount)
-                                                {
-                                                    // Convert to OBJ indices (1-based and offset by MSVT count)
-                                                    int mscnIdx0 = (int)centralIdx + mscnVertexStartIndex;
-                                                    int mscnIdx1 = (int)idx1 + mscnVertexStartIndex;
-                                                    int mscnIdx2 = (int)idx2 + mscnVertexStartIndex;
-                                                    
-                                                    integratedWriter.WriteLine($"f {mscnIdx0} {mscnIdx1} {mscnIdx2}");
-                                                    mscnFacesWritten++;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                debugWriter.WriteLine($"  Added {mscnFacesWritten} optional MSCN faces to the integrated mesh");
-                            }
-                        }
-                        
-                        debugWriter.WriteLine($"  Created integrated mesh with {integratedMsvtVertexCount} MSVT vertices, {mscnVertexCount} MSCN vertices, and {facesWritten} faces");
+                        debugWriter.WriteLine($"  MSCN: {mscnPointsExported} collision boundary points -> {Path.GetFileName(outputMscnObjPath)}");
                     }
-                    else
+                    
+                    // 4.2 MSVT Render Mesh Vertices (clean, no faces)
+                    string outputMsvtObjPath = Path.Combine(outputDir, $"{baseOutputName}_chunk_msvt.obj");
+                    if (pm4File.MSVT != null && pm4File.MSVT.Vertices.Count > 0)
                     {
-                        debugWriter.WriteLine("\n--- No MSCN points to export ---");
+                        using var msvtWriter = new StreamWriter(outputMsvtObjPath, false);
+                        msvtWriter.WriteLine($"# PM4 MSVT Chunk - Render Mesh Vertices (Generated: {DateTime.Now})");
+                        msvtWriter.WriteLine($"# File: {Path.GetFileName(inputFilePath)}");
+                        msvtWriter.WriteLine($"# Transform: PM4-relative coordinates (Y, X, Z)");
+                        msvtWriter.WriteLine("o MSVT_Render_Vertices");
+                        
+                        int msvtVerticesExported = 0;
+                        foreach (var vertex in pm4File.MSVT.Vertices)
+                        {
+                            var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                            msvtWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
+                            msvtVerticesExported++;
+                        }
+                        debugWriter.WriteLine($"  MSVT: {msvtVerticesExported} render mesh vertices -> {Path.GetFileName(outputMsvtObjPath)}");
                     }
+                    
+                    // 4.3 MSLK/MSPV Geometric Structure
+                    string outputMslkObjPath = Path.Combine(outputDir, $"{baseOutputName}_chunk_mslk_mspv.obj");
+                    if (pm4File.MSLK != null && pm4File.MSPV != null && pm4File.MSPV.Vertices.Count > 0)
+                    {
+                        using var mslkChunkWriter = new StreamWriter(outputMslkObjPath, false);
+                        mslkChunkWriter.WriteLine($"# PM4 MSLK/MSPV Chunk - Geometric Structure (Generated: {DateTime.Now})");
+                        mslkChunkWriter.WriteLine($"# File: {Path.GetFileName(inputFilePath)}");
+                        mslkChunkWriter.WriteLine($"# Transform: PM4-relative coordinates (X, Y, Z)");
+                        mslkChunkWriter.WriteLine("o MSLK_Geometric_Structure");
+                        
+                        // Write MSPV vertices
+                        int mspvVerticesExported = 0;
+                        foreach (var vertex in pm4File.MSPV.Vertices)
+                        {
+                            var pm4Coords = Pm4CoordinateTransforms.FromMspvVertex(vertex);
+                            mslkChunkWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
+                            mspvVerticesExported++;
+                        }
+                        
+                        // Add MSLK geometry as lines/faces
+                        int mslkGeometryExported = 0;
+                        if (pm4File.MSPI != null)
+                        {
+                            mslkChunkWriter.WriteLine("\n# MSLK geometry elements");
+                            foreach (var mslkEntry in pm4File.MSLK.Entries)
+                            {
+                                if (mslkEntry.MspiFirstIndex >= 0 && mslkEntry.MspiIndexCount >= 2 && 
+                                    mslkEntry.MspiFirstIndex + mslkEntry.MspiIndexCount <= pm4File.MSPI.Indices.Count)
+                                {
+                                    List<uint> validIndices = new List<uint>();
+                                    for (int i = 0; i < mslkEntry.MspiIndexCount; i++)
+                                    {
+                                        uint mspiIdx = pm4File.MSPI.Indices[mslkEntry.MspiFirstIndex + i];
+                                        if (mspiIdx < mspvVerticesExported)
+                                        {
+                                            validIndices.Add(mspiIdx + 1); // OBJ is 1-based
+                                        }
+                                    }
+                                    
+                                    if (validIndices.Count >= 3)
+                                    {
+                                        // Create faces using triangle fan
+                                        for (int i = 1; i < validIndices.Count - 1; i++)
+                                        {
+                                            mslkChunkWriter.WriteLine($"f {validIndices[0]} {validIndices[i]} {validIndices[i + 1]}");
+                                            mslkGeometryExported++;
+                                        }
+                                    }
+                                    else if (validIndices.Count == 2)
+                                    {
+                                        // Create line
+                                        mslkChunkWriter.WriteLine($"l {validIndices[0]} {validIndices[1]}");
+                                        mslkGeometryExported++;
+                                    }
+                                }
+                            }
+                        }
+                        debugWriter.WriteLine($"  MSLK/MSPV: {mspvVerticesExported} vertices, {mslkGeometryExported} geometry elements -> {Path.GetFileName(outputMslkObjPath)}");
+                    }
+                    
+                    // 4.4 MPRL Points
+                    string outputMprlChunkObjPath = Path.Combine(outputDir, $"{baseOutputName}_chunk_mprl.obj");
+                    if (pm4File.MPRL != null && pm4File.MPRL.Entries.Count > 0)
+                    {
+                        using var mprlChunkWriter = new StreamWriter(outputMprlChunkObjPath, false);
+                        mprlChunkWriter.WriteLine($"# PM4 MPRL Chunk - Path/Reference Points (Generated: {DateTime.Now})");
+                        mprlChunkWriter.WriteLine($"# File: {Path.GetFileName(inputFilePath)}");
+                        mprlChunkWriter.WriteLine($"# Transform: PM4-relative coordinates (X, -Z, Y)");
+                        mprlChunkWriter.WriteLine("o MPRL_Reference_Points");
+                        
+                        int mprlPointsExported = 0;
+                        foreach (var entry in pm4File.MPRL.Entries)
+                        {
+                            var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(entry);
+                            mprlChunkWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
+                            mprlPointsExported++;
+                        }
+                        debugWriter.WriteLine($"  MPRL: {mprlPointsExported} reference points -> {Path.GetFileName(outputMprlChunkObjPath)}");
+                    }
+                    
+                    Console.WriteLine($"  > Generated individual chunk OBJ files for analysis:");
+                    Console.WriteLine($"      - MSCN collision boundaries: {Path.GetFileName(outputMscnObjPath)}");
+                    Console.WriteLine($"      - MSVT render vertices: {Path.GetFileName(outputMsvtObjPath)}");
+                    Console.WriteLine($"      - MSLK/MSPV geometry: {Path.GetFileName(outputMslkObjPath)}");
+                    Console.WriteLine($"      - MPRL reference points: {Path.GetFileName(outputMprlChunkObjPath)}");
+                    debugWriter.WriteLine($"--- Finished exporting individual chunk OBJ files for analysis ---");
                  } 
                  else 
                  { 
@@ -1910,14 +1839,12 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     msvtObjWriter.WriteLine($"# WoW PM4 MSVT vertices from {fileName}");
                     msvtObjWriter.WriteLine($"# Generated {DateTime.Now}");
 
-                    // Process vertices
+                    // Process vertices using PM4-relative coordinates
                     foreach (var vertex in pm4File.MSVT.Vertices)
                     {
-                        // Apply transformations using centralized constants
-                        float x = vertex.X * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset;
-                        float y = vertex.Y * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset;
-                        float z = vertex.Z * Pm4CoordinateTransforms.ScaleFactor;
-                        msvtObjWriter.WriteLine($"v {x} {z} {y}");
+                        // Apply PM4-relative transformation (Y, X, Z)
+                        var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                        msvtObjWriter.WriteLine($"v {pm4Coords.X} {pm4Coords.Y} {pm4Coords.Z}");
                     }
 
                     int msvtVertexCount = pm4File.MSVT.Vertices.Count;
@@ -1939,7 +1866,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     // Add header
                     mprlPointsObjWriter.WriteLine($"# WoW PM4 MPRL points from {fileName}");
                     mprlPointsObjWriter.WriteLine($"# Generated {DateTime.Now}");
-                    mprlPointsObjWriter.WriteLine($"# Format: v x y z, Pre-Transform: (X, -Z, Y), Scale: {Pm4CoordinateTransforms.ScaleFactor}, Offset: -{Pm4CoordinateTransforms.CoordinateOffset} on X/Y");
+                    mprlPointsObjWriter.WriteLine($"# Format: v x y z, PM4-relative transform: (X, -Z, Y)");
 
                     // Add points
                     int validPointCount = 0;
@@ -1958,19 +1885,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             continue;
                         }
 
-                        // UPDATED: Apply transformation consistent with ProcessSinglePm4File
-                        // 1. Apply (X, -Z, Y) mapping
-                        float tempX = point.Position.X;
-                        float tempY = -point.Position.Z; // Negate Z for Y
-                        float tempZ = point.Position.Y;
+                        // Apply PM4-relative MPRL transformation
+                        var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(point);
 
-                        // 2. Apply Scale/Offset to mapped coordinates using centralized constants
-                        float finalX = tempX * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset;
-                        float finalY = tempY * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset; // Apply to mapped Y
-                        float finalZ = tempZ * Pm4CoordinateTransforms.ScaleFactor;
-
-                        // 3. Write final coordinates
-                        mprlPointsObjWriter.WriteLine(FormattableString.Invariant($"v {finalX:F6} {finalY:F6} {finalZ:F6}"));
+                        // Write PM4-relative coordinates
+                        mprlPointsObjWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
                         validPointCount++;
                     }
 
@@ -2273,14 +2192,12 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     msvtObjWriter.WriteLine($"# WoW PM4 MSVT vertices from {fileName}");
                     msvtObjWriter.WriteLine($"# Generated {DateTime.Now}");
                     
-                    // Process vertices using centralized constants
+                    // Process vertices using PM4-relative coordinates
                     foreach (var vertex in pm4File.MSVT.Vertices)
                     {
-                        // Apply transformations using centralized constants
-                        float x = vertex.X * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset;
-                        float y = vertex.Y * Pm4CoordinateTransforms.ScaleFactor - Pm4CoordinateTransforms.CoordinateOffset;
-                        float z = vertex.Z * Pm4CoordinateTransforms.ScaleFactor;
-                        msvtObjWriter.WriteLine($"v {x} {z} {y}");
+                        // Apply PM4-relative transformation (Y, X, Z)
+                        var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                        msvtObjWriter.WriteLine($"v {pm4Coords.X} {pm4Coords.Y} {pm4Coords.Z}");
                     }
                     
                     int msvtVertexCount = pm4File.MSVT.Vertices.Count;
@@ -2302,9 +2219,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     // Add header
                     mprlPointsObjWriter.WriteLine($"# WoW PM4 MPRL points from {fileName}");
                     mprlPointsObjWriter.WriteLine($"# Generated {DateTime.Now}");
-                    mprlPointsObjWriter.WriteLine($"# Format: v x y z, using centralized MPRL transform with scale/offset");
+                    mprlPointsObjWriter.WriteLine($"# Format: v x y z, PM4-relative transform: (X, -Z, Y)");
                     
-                    // Add points using centralized transformation
+                    // Add points using PM4-relative transformation
                     int validPointCount = 0;
                     foreach (var point in pm4File.MPRL.Entries)
                     {
@@ -2321,11 +2238,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             continue;
                         }
                         
-                        // Use centralized MPRL transformation (with scale/offset)
-                        var transformedCoords = Pm4CoordinateTransforms.FromMprlEntry(point);
+                        // Use PM4-relative MPRL transformation
+                        var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(point);
 
-                        // Write final coordinates
-                        mprlPointsObjWriter.WriteLine(FormattableString.Invariant($"v {transformedCoords.X:F6} {transformedCoords.Y:F6} {transformedCoords.Z:F6}"));
+                        // Write PM4-relative coordinates
+                        mprlPointsObjWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6}"));
                         validPointCount++;
                     }
                     

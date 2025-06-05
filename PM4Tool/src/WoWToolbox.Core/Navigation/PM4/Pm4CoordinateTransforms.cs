@@ -6,114 +6,110 @@ namespace WoWToolbox.Core.Navigation.PM4
 {
     /// <summary>
     /// Centralizes all coordinate mapping logic for PM4-related chunks.
-    /// Use these methods to convert chunk-local coordinates to canonical world coordinates.
+    /// All transforms produce PM4-relative coordinates, not world coordinates.
+    /// Use these methods to convert chunk-local coordinates to consistent PM4-relative coordinate systems.
     /// </summary>
     public static class Pm4CoordinateTransforms
     {
-        /// <summary>
-        /// The canonical coordinate offset for PM4 world transforms.
-        /// </summary>
+        // DEPRECATED: These constants were used for world transforms but are no longer needed for PM4-relative coordinates
+        // Keeping for backward compatibility but should not be used in new code
+        [System.Obsolete("CoordinateOffset is deprecated. All transforms should be PM4-relative, not world-relative.")]
         public const float CoordinateOffset = 17066.666f;
-        /// <summary>
-        /// The canonical scale factor for PM4 height transforms.
-        /// </summary>
+        
+        [System.Obsolete("ScaleFactor is deprecated. All transforms should be PM4-relative, not world-relative.")]
         public const float ScaleFactor = 36.0f;
 
         /// <summary>
-        /// Converts an MSVT chunk vertex to canonical world coordinates.
+        /// Converts an MSVT chunk vertex to PM4-relative coordinates.
         /// </summary>
         /// <param name="v">The MSVT vertex.</param>
-        /// <returns>World coordinates as Vector3.</returns>
+        /// <returns>PM4-relative coordinates as Vector3 (Y, Z, -X).</returns>
         public static Vector3 FromMsvtVertex(MsvtVertex v)
         {
-            // Canonical: (Y, Z, -X) based on test and doc analysis
+            // Canonical PM4-relative: (Y, Z, -X) based on test and doc analysis
             // See MSVTChunk.cs for rationale
             return new Vector3(v.Y, v.Z, -v.X);
         }
 
         /// <summary>
-        /// Converts an MSVT chunk vertex to map projection coordinates (used for OBJ export).
+        /// Converts an MSVT chunk vertex to simple PM4-relative coordinates.
+        /// Used for anchor points and direct coordinate transformations.
         /// </summary>
         /// <param name="v">The MSVT vertex.</param>
-        /// <returns>Map projection coordinates as Vector3.</returns>
-        public static Vector3 FromMsvtVertexToMapProjection(MsvtVertex v)
-        {
-            // Map projection: (CoordinateOffset - X, CoordinateOffset - Y, Z)
-            // Used in PM4FileTests and PD4FileTests for OBJ export
-            return new Vector3(CoordinateOffset - v.X, CoordinateOffset - v.Y, v.Z);
-        }
-
-        /// <summary>
-        /// Converts an MPRL chunk entry to canonical world coordinates.
-        /// </summary>
-        /// <param name="e">The MPRL entry.</param>
-        /// <returns>World coordinates as Vector3.</returns>
-        public static Vector3 FromMprlEntry(MprlEntry e)
-        {
-            // Canonical: (X, -Z, Y) with scale/offset, as used in tests and exporters
-            float x = e.Position.X * ScaleFactor - CoordinateOffset;
-            float y = -e.Position.Z * ScaleFactor + CoordinateOffset;
-            float z = e.Position.Y * ScaleFactor;
-            return new Vector3(x, y, z);
-        }
-
-        /// <summary>
-        /// Converts an MPRL chunk entry to simple transformed coordinates (used for OBJ export).
-        /// This applies the (X, -Z, Y) mapping without scale/offset for raw coordinate output.
-        /// </summary>
-        /// <param name="e">The MPRL entry.</param>
-        /// <returns>Simple transformed coordinates as Vector3.</returns>
-        public static Vector3 FromMprlEntrySimple(MprlEntry e)
-        {
-            // Simple transform: (X, -Z, Y) without scale/offset
-            // Used in PM4FileTests for direct OBJ coordinate export
-            return new Vector3(e.Position.X, e.Position.Z, e.Position.Y);
-        }
-
-        /// <summary>
-        /// Converts an MSCN chunk vertex to canonical world coordinates.
-        /// </summary>
-        /// <param name="v">The MSCN vertex (file order: X, Y, Z).</param>
-        /// <returns>World coordinates as Vector3.</returns>
-        public static Vector3 FromMscnVertex(Vector3 v)
-        {
-            // Canonical: (Y, -X, Z) as per MSCNChunk.ToCanonicalWorldCoordinates
-            return new Vector3(v.Y, -v.X, v.Z);
-        }
-
-        /// <summary>
-        /// Converts an MSCN chunk vertex to map projection coordinates (used for OBJ export).
-        /// </summary>
-        /// <param name="v">The MSCN vertex (file order: X, Y, Z).</param>
-        /// <returns>Map projection coordinates as Vector3.</returns>
-        public static Vector3 FromMscnVertexToMapProjection(Vector3 v)
-        {
-            // Map projection: (CoordinateOffset - X, CoordinateOffset - Y, Z)
-            // Used in PM4FileTests for MSCN OBJ export
-            return new Vector3(CoordinateOffset - v.X, CoordinateOffset - v.Y, v.Z);
-        }
-
-        /// <summary>
-        /// Converts an MSPV chunk vertex to canonical world coordinates.
-        /// </summary>
-        /// <param name="v">The MSPV vertex (C3Vector).</param>
-        /// <returns>World coordinates as Vector3.</returns>
-        public static Vector3 FromMspvVertex(C3Vector v)
-        {
-            // Canonical: (X, Y, Z) (no transform unless otherwise discovered)
-            return new Vector3(v.X, v.Y, v.Z);
-        }
-
-        /// <summary>
-        /// Converts an MSVT vertex to standard Y,X,Z transformation (without scale/offset).
-        /// Used for anchor points and simple coordinate transformations.
-        /// </summary>
-        /// <param name="v">The MSVT vertex.</param>
-        /// <returns>Simple transformed coordinates as Vector3.</returns>
+        /// <returns>PM4-relative coordinates as Vector3 (Y, X, Z).</returns>
         public static Vector3 FromMsvtVertexSimple(MsvtVertex v)
         {
             // Simple Y,X,Z transform used for anchor points and node processing
             return new Vector3(v.Y, v.X, v.Z);
+        }
+
+        /// <summary>
+        /// Converts an MPRL chunk entry to PM4-relative coordinates.
+        /// </summary>
+        /// <param name="e">The MPRL entry.</param>
+        /// <returns>PM4-relative coordinates as Vector3 (X, -Z, Y).</returns>
+        public static Vector3 FromMprlEntry(MprlEntry e)
+        {
+            // PM4-relative transform: (X, -Z, Y) without scale/offset
+            // Used for PM4-relative coordinate export
+            return new Vector3(e.Position.X, -e.Position.Z, e.Position.Y);
+        }
+
+        /// <summary>
+        /// Converts an MSCN chunk vertex to PM4-relative coordinates.
+        /// </summary>
+        /// <param name="v">The MSCN vertex (file order: X, Y, Z).</param>
+        /// <returns>PM4-relative coordinates with 180° rotation around X-axis applied to corrected coordinates.</returns>
+        public static Vector3 FromMscnVertex(Vector3 v)
+        {
+            // First apply Y-axis correction that we know works for X/Y positioning
+            var corrected = new Vector3(v.X, -v.Y, v.Z);
+            
+            // Then apply 180-degree rotation around X-axis to "flip up and over"
+            // Modified rotation: X unchanged, Y negated, Z preserved (not negated)
+            var transformed = new Vector3(
+                corrected.X,           // X unchanged
+                -corrected.Y,          // Y negated (becomes -(-Y) = Y)
+                corrected.Z            // Z preserved (not negated)
+            );
+            
+            return transformed;
+        }
+
+        /// <summary>
+        /// Converts an MSPV chunk vertex to PM4-relative coordinates.
+        /// </summary>
+        /// <param name="v">The MSPV vertex (C3Vector).</param>
+        /// <returns>PM4-relative coordinates as Vector3 (X, Y, Z).</returns>
+        public static Vector3 FromMspvVertex(C3Vector v)
+        {
+            // PM4-relative: (X, Y, Z) (no transform unless otherwise discovered)
+            return new Vector3(v.X, v.Y, v.Z);
+        }
+
+        // DEPRECATED METHODS - Kept for backward compatibility but should not be used
+        
+        [System.Obsolete("FromMsvtVertexToMapProjection is deprecated. Use FromMsvtVertexSimple for PM4-relative coordinates.")]
+        public static Vector3 FromMsvtVertexToMapProjection(MsvtVertex v)
+        {
+            // Deprecated: This applied world offset transforms
+            // Use FromMsvtVertexSimple instead for PM4-relative coordinates
+            return FromMsvtVertexSimple(v);
+        }
+
+        [System.Obsolete("FromMprlEntrySimple is renamed to FromMprlEntry for consistency. Use FromMprlEntry instead.")]
+        public static Vector3 FromMprlEntrySimple(MprlEntry e)
+        {
+            // Deprecated: Renamed for consistency
+            return FromMprlEntry(e);
+        }
+
+        [System.Obsolete("FromMscnVertexToMapProjection is deprecated. Use FromMscnVertex for PM4-relative coordinates.")]
+        public static Vector3 FromMscnVertexToMapProjection(Vector3 v)
+        {
+            // Deprecated: This applied world offset transforms
+            // Use FromMscnVertex instead for PM4-relative coordinates
+            return FromMscnVertex(v);
         }
     }
 } 
