@@ -310,3 +310,10 @@ Provide a robust, extensible utility for comparing 3D meshes (MeshData) extracte
 ### Pattern: Local Alias for Static Chunk Struct Methods (2024-07-21)
 - When calling static methods on chunk structs (e.g., MOTX.ReadStrings) from model factories, use a local alias (e.g., using MOTXStruct = WoWToolbox.Core.WMO.MOTX;) to avoid ambiguity and ensure correct method resolution.
 - This pattern resolved a persistent CS0149 error and should be considered best practice for future chunk struct integrations.
+
+## Pattern: Unconditional MSCN Export in Mesh OBJs (2024-07-21)
+- All mesh OBJ exports (combined and per-file) must always include MSCN points.
+- MSCN points must use the (X, -Y, Z) transform to match mesh orientation.
+- MSCN points should be labeled as a separate object/group in the OBJ file for clarity.
+- No conditional flags (such as exportMscnPoints) should prevent MSCN export; it must always happen.
+- This is now a standard for mesh export in the project.

@@ -265,3 +265,19 @@
 - Next steps: implement real serialization for MOHD (root header), MOBA (batch info), MOGP (group header), and integrate the writer into the v14→v17 conversion pipeline.
 - Deep-dive analysis of chunk mapping and reference implementations is ongoing.
 - Validation with wow.export, mirrormachine, and noggit-red is planned.
+
+## Pending Implementation (2024-07-21)
+- Unconditional export of MSCN points to all OBJ outputs (combined and per-file) is not yet implemented.
+- The plan is to always include MSCN points with the (X, -Y, Z) transform and clear labeling, with no conditional flags.
+- This will be retried in a new session.
+
+## Progress Update: PM4 Test/Export Refactor v2
+
+- **What works:** Existing test suite exports all mesh and chunk data, but with much duplicated logic and scattered coordinate conventions.
+- **What's next:** Begin modularization:
+  1. Implement `Pm4CoordinateTransforms` and migrate all coordinate logic.
+  2. Refactor export logic into `ObjExportUtil`.
+  3. Standardize validation with `ChunkValidator`.
+  4. Update test flows and documentation.
+- **Known issues:** High risk of errors when updating transforms or adding new chunk types due to code duplication.
+- **Current status:** Refactor plan approved and mapped; implementation to begin.

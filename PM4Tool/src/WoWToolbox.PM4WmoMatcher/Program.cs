@@ -662,8 +662,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 {
                     foreach (var v in pm4.MSVT.Vertices)
                     {
-                        var w = v.ToWorldCoordinates(); 
-                        AddPoint((w.X, -w.Y, w.Z), "mesh"); // Apply X, -Y, Z transform to MSVT only
+                        var worldPos = ToUnifiedWorld(v.ToWorldCoordinates());
+                        AddPoint(worldPos, "mesh");
                     }
                 }
                 // MSCN (exterior)
@@ -671,7 +671,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 {
                     foreach (var v in pm4.MSCN.ExteriorVertices)
                     {
-                        AddPoint((v.X, v.Y, v.Z), "exterior"); // Revert: Use original coords
+                        var worldPos = ToUnifiedWorld(v);
+                        AddPoint(worldPos, "exterior");
                     }
                 }
                 // MSPV (path vertices)
@@ -679,7 +680,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 {
                     foreach (var v in pm4.MSPV.Vertices)
                     {
-                         AddPoint((v.X, v.Y, v.Z), "path"); // Revert: Use original coords
+                        var worldPos = ToUnifiedWorld(v);
+                        AddPoint(worldPos, "path");
                     }
                 }
                 // MPRL (reference points)
@@ -688,7 +690,8 @@ namespace WoWToolbox.PM4WmoMatcher
                     foreach (var entry in pm4.MPRL.Entries)
                     {
                         var v = entry.Position;
-                        AddPoint((v.X, v.Y, v.Z), "reference"); // Use original coords
+                        var worldPos = ToUnifiedWorld(v);
+                        AddPoint(worldPos, "reference");
                     }
                 }
                 // Output OBJ
@@ -722,10 +725,8 @@ namespace WoWToolbox.PM4WmoMatcher
 
                 foreach (var v in verts)
                 {
-                    // Convert to world coordinates using the specific method
-                    var worldPos = v.ToWorldCoordinates();
-                    // Export the calculated world coordinates as the base reference
-                    sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}"); 
+                    var worldPos = ToUnifiedWorld(v.ToWorldCoordinates());
+                    sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}");
                 }
 
                 sw.WriteLine("# Faces");
@@ -762,8 +763,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 int count = 0;
                 foreach (var p in points)
                 {
-                    // Apply MSCN/MSPV specific transform to align with MSVT: (X, -Y, -Z)
-                    sw.WriteLine($"v {p.X} {-p.Y} {-p.Z}"); 
+                    var worldPos = ToUnifiedWorld(p);
+                    sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}"); 
                     count++;
                 }
                 // Log count for this specific appended chunk
@@ -786,8 +787,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 int count = 0;
                 foreach (var p in points)
                 {
-                    // Export MPRL points with original coordinates (X, Y, Z) without transformation
-                    sw.WriteLine($"v {p.X} {p.Y} {p.Z}"); 
+                    var worldPos = ToUnifiedWorld(p);
+                    sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}"); 
                     count++;
                 }
                 sw.WriteLine($"# Total points: {count}");
@@ -826,7 +827,7 @@ namespace WoWToolbox.PM4WmoMatcher
                 sw.WriteLine("# MSVT Vertices");
                 foreach (var v in pm4Data.MSVT.Vertices)
                 {
-                    var worldPos = v.ToWorldCoordinates();
+                    var worldPos = ToUnifiedWorld(v.ToWorldCoordinates());
                     allVertices.Add((worldPos.X, worldPos.Y, worldPos.Z, "MSVT"));
                 }
                 
@@ -837,8 +838,8 @@ namespace WoWToolbox.PM4WmoMatcher
                     sw.WriteLine($"# MSCN Exterior Vertices");
                     foreach (var v in pm4Data.MSCN.ExteriorVertices)
                     {
-                        // Add MSCN vertices with original coordinates (no transformation)
-                        allVertices.Add((v.X, v.Y, v.Z, "MSCN"));
+                        var worldPos = ToUnifiedWorld(v);
+                        allVertices.Add((worldPos.X, worldPos.Y, worldPos.Z, "MSCN"));
                     }
                 }
                 
@@ -907,6 +908,14 @@ namespace WoWToolbox.PM4WmoMatcher
             {
                 Logger.Log($"[ERROR] Failed to export complete PM4 mesh for {Path.GetFileName(pm4Path)}: {ex.Message}");
             }
+        }
+
+        // Add helper function near other helpers:
+        private static Vector3 ToUnifiedWorld(Vector3 v)
+        {
+            // Apply: X' = -Y, Y' = -Z, Z' = X
+            // This corrects horizontal mirroring and Z inversion for combined mesh exports.
+            return new Vector3(-v.Y, -v.Z, v.X);
         }
     }
 
