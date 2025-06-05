@@ -145,13 +145,13 @@ namespace WoWToolbox.Tests.Navigation.PM4
             using var combinedAllChunksWriter = new StreamWriter(combinedAllChunksPath);
 
             // Initialize comprehensive combined file
-            combinedAllChunksWriter.WriteLine($"# PM4 All Chunks Combined - Properly Aligned (Generated: {DateTime.Now})");
-            combinedAllChunksWriter.WriteLine("# This file contains all chunk types with correct coordinate transformations:");
+            combinedAllChunksWriter.WriteLine($"# PM4 Geometry Chunks Combined - Properly Aligned (Generated: {DateTime.Now})");
+            combinedAllChunksWriter.WriteLine("# This file contains ONLY the local geometry chunk types with correct coordinate transformations:");
             combinedAllChunksWriter.WriteLine("#   MSVT: Render mesh vertices (Y, X, Z)");
             combinedAllChunksWriter.WriteLine("#   MSCN: Collision boundaries (X, Y, Z - with geometric transform)");
             combinedAllChunksWriter.WriteLine("#   MSLK/MSPV: Geometric structure (X, Y, Z)");
-            combinedAllChunksWriter.WriteLine("#   MPRL: Reference points (X, -Z, Y)");
-            combinedAllChunksWriter.WriteLine("# Now that alignment is correct, spatial relationships should be meaningful.");
+            combinedAllChunksWriter.WriteLine("# MPRL chunks are EXCLUDED - they are map positioning data, not local geometry.");
+            combinedAllChunksWriter.WriteLine("# All included chunks are now spatially aligned for meaningful visualization.");
 
             int totalVerticesOffset = 0; // Track vertex offset for combined file
             int totalMscnOffset = 0; // Track MSCN point offset for combined file
@@ -285,17 +285,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             }
                         }
                         
-                        // 4. MPRL reference points
-                        if (pm4File.MPRL != null && pm4File.MPRL.Entries.Count > 0)
-                        {
-                            combinedAllChunksWriter.WriteLine($"# MPRL Reference Points ({pm4File.MPRL.Entries.Count})");
-                            foreach (var entry in pm4File.MPRL.Entries)
-                            {
-                                var pm4Coords = Pm4CoordinateTransforms.FromMprlEntry(entry);
-                                combinedAllChunksWriter.WriteLine(FormattableString.Invariant(
-                                    $"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MPRL {fileNameForMscn}"));
-                            }
-                        }
+                        // NOTE: MPRL chunks are intentionally EXCLUDED from combined file
+                        // MPRL = Map positioning reference points (separate from local geometry)
+                        // These mark where the structure sits in the world map, not local coordinates
+                        // Including them causes spatial separation in visualization tools like MeshLab
                         
                         combinedAllChunksWriter.WriteLine(); // Blank line between files
                     }

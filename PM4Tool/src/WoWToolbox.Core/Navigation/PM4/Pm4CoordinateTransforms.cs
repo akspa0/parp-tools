@@ -1,6 +1,10 @@
 using System.Numerics;
 using WoWToolbox.Core.Navigation.PM4.Chunks;
 using Warcraft.NET.Files.Structures;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System;
 
 namespace WoWToolbox.Core.Navigation.PM4
 {
@@ -47,12 +51,13 @@ namespace WoWToolbox.Core.Navigation.PM4
         /// Converts an MPRL chunk entry to PM4-relative coordinates.
         /// </summary>
         /// <param name="e">The MPRL entry.</param>
-        /// <returns>PM4-relative coordinates as Vector3 (X, -Z, Y).</returns>
+        /// <returns>PM4-relative coordinates as Vector3 (-Z, Y, X).</returns>
         public static Vector3 FromMprlEntry(MprlEntry e)
         {
-            // PM4-relative transform: (X, -Z, Y) without scale/offset
-            // Used for PM4-relative coordinate export
-            return new Vector3(e.Position.X, -e.Position.Z, e.Position.Y);
+            // PM4-relative transform: Rotate 90 degrees counter-clockwise to align with other chunks
+            // Previous transform (X, -Z, Y) was rotated 90 degrees clockwise
+            // New transform (-Z, Y, X) should align with MSVT/MSCN/MSPV data
+            return new Vector3(-e.Position.Z, e.Position.Y, e.Position.X);
         }
 
         /// <summary>
@@ -110,6 +115,79 @@ namespace WoWToolbox.Core.Navigation.PM4
             // Deprecated: This applied world offset transforms
             // Use FromMscnVertex instead for PM4-relative coordinates
             return FromMscnVertex(v);
+        }
+
+        /// <summary>
+        /// Creates a unified point cloud from all aligned PM4 chunks.
+        /// All chunks are now properly spatially aligned in the same coordinate system.
+        /// </summary>
+        /// <param name="pm4File">The PM4 file containing chunk data.</param>
+        /// <returns>A dictionary mapping point types to their aligned coordinates.</returns>
+        public static Dictionary<string, List<Vector3>> CreateUnifiedPointCloud(PM4File pm4File)
+        {
+            var pointCloud = new Dictionary<string, List<Vector3>>();
+
+            // MSVT - Render mesh vertices
+            if (pm4File.MSVT?.Vertices != null)
+            {
+                pointCloud["MSVT_Render"] = pm4File.MSVT.Vertices
+                    .Select(v => FromMsvtVertexSimple(v))
+                    .ToList();
+            }
+
+            // MSCN - Collision boundaries
+            if (pm4File.MSCN?.ExteriorVertices != null)
+            {
+                pointCloud["MSCN_Collision"] = pm4File.MSCN.ExteriorVertices
+                    .Select(v => FromMscnVertex(v))
+                    .ToList();
+            }
+
+            // MSPV - Geometric structure
+            if (pm4File.MSPV?.Vertices != null)
+            {
+                pointCloud["MSPV_Geometry"] = pm4File.MSPV.Vertices
+                    .Select(v => FromMspvVertex(v))
+                    .ToList();
+            }
+
+            // MPRL - Reference points (now aligned)
+            if (pm4File.MPRL?.Entries != null)
+            {
+                pointCloud["MPRL_Reference"] = pm4File.MPRL.Entries
+                    .Select(e => FromMprlEntry(e))
+                    .ToList();
+            }
+
+            return pointCloud;
+        }
+
+        /// <summary>
+        /// Exports a unified point cloud to OBJ format with all chunk types properly aligned.
+        /// </summary>
+        /// <param name="pm4File">The PM4 file containing chunk data.</param>
+        /// <param name="outputPath">The output OBJ file path.</param>
+        public static void ExportUnifiedPointCloudToObj(PM4File pm4File, string outputPath)
+        {
+            var pointCloud = CreateUnifiedPointCloud(pm4File);
+            
+            using var writer = new StreamWriter(outputPath);
+            writer.WriteLine($"# Unified PM4 Point Cloud - All Chunks Aligned");
+            writer.WriteLine($"# Generated: {DateTime.Now}");
+            writer.WriteLine($"# File: {pm4File.GetType().Name}");
+            writer.WriteLine();
+
+            foreach (var chunkType in pointCloud.Keys)
+            {
+                writer.WriteLine($"# {chunkType} Points: {pointCloud[chunkType].Count}");
+                writer.WriteLine($"o {chunkType}");
+                
+                foreach (var point in pointCloud[chunkType])
+                {
+                    writer.WriteLine($"v {point.X:F6} {point.Y:F6} {point.Z:F6}");
+                }
+                writer.WriteLine();
+            }
         }
     }
 } 
