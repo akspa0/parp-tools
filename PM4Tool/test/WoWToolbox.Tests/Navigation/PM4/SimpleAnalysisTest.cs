@@ -277,6 +277,175 @@ namespace WoWToolbox.Tests.Navigation.PM4
             }
         }
 
+        [Fact]
+        public void AnalyzeMsurMsviVertexMapping()
+        {
+            Console.WriteLine("=== MSUR→MSVI→Vertex Mapping Analysis ===");
+            
+            Directory.CreateDirectory(OutputRoot);
+            
+            var testFile = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
+            
+            if (!File.Exists(testFile))
+            {
+                Console.WriteLine($"⚠️  Test file not found: {testFile}");
+                return;
+            }
+
+            try
+            {
+                var pm4File = PM4File.FromFile(testFile);
+                
+                Console.WriteLine($"📊 Analyzing vertex mapping for: {Path.GetFileName(testFile)}");
+                Console.WriteLine($"  • MSVT vertices: {pm4File.MSVT?.Vertices.Count ?? 0:N0}");
+                Console.WriteLine($"  • MSPV vertices: {pm4File.MSPV?.Vertices.Count ?? 0:N0}");
+                Console.WriteLine($"  • MSVI indices: {pm4File.MSVI?.Indices.Count ?? 0:N0}");
+                Console.WriteLine($"  • MSUR surfaces: {pm4File.MSUR?.Entries.Count ?? 0:N0}");
+                
+                var analysisPath = Path.Combine(OutputRoot, "msur_msvi_mapping_analysis.log");
+                using var writer = new StreamWriter(analysisPath);
+                
+                writer.WriteLine("=== MSUR→MSVI→Vertex Mapping Analysis ===");
+                writer.WriteLine($"File: {Path.GetFileName(testFile)}");
+                writer.WriteLine($"MSVT vertices: {pm4File.MSVT?.Vertices.Count ?? 0:N0}");
+                writer.WriteLine($"MSPV vertices: {pm4File.MSPV?.Vertices.Count ?? 0:N0}");
+                writer.WriteLine($"MSVI indices: {pm4File.MSVI?.Indices.Count ?? 0:N0}");
+                writer.WriteLine($"MSUR surfaces: {pm4File.MSUR?.Entries.Count ?? 0:N0}");
+                writer.WriteLine();
+
+                if (pm4File.MSUR?.Entries != null && pm4File.MSVI?.Indices != null)
+                {
+                    writer.WriteLine("=== MSUR Surface Analysis ===");
+                    
+                    int validSurfaces = 0;
+                    int invalidSurfaces = 0;
+                    int totalTriangles = 0;
+                    var indexStats = new List<uint>();
+                    
+                    for (int i = 0; i < pm4File.MSUR.Entries.Count && i < 20; i++) // Analyze first 20 surfaces
+                    {
+                        var msur = pm4File.MSUR.Entries[i];
+                        writer.WriteLine($"\nSurface {i}:");
+                        writer.WriteLine($"  MsviFirstIndex: {msur.MsviFirstIndex}");
+                        writer.WriteLine($"  IndexCount: {msur.IndexCount}");
+                        writer.WriteLine($"  Range: [{msur.MsviFirstIndex}, {msur.MsviFirstIndex + msur.IndexCount - 1}]");
+                        
+                        bool isValidRange = msur.MsviFirstIndex >= 0 && 
+                                          msur.MsviFirstIndex + msur.IndexCount <= pm4File.MSVI.Indices.Count;
+                        
+                        if (isValidRange)
+                        {
+                            validSurfaces++;
+                            
+                            // Analyze the actual indices in this surface
+                            var surfaceIndices = new List<uint>();
+                            for (int j = 0; j < msur.IndexCount; j++)
+                            {
+                                var index = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + j];
+                                surfaceIndices.Add(index);
+                                indexStats.Add(index);
+                            }
+                            
+                            writer.WriteLine($"  Indices: [{string.Join(", ", surfaceIndices.Take(10))}" + 
+                                           (surfaceIndices.Count > 10 ? "..." : "") + "]");
+                            writer.WriteLine($"  Index range in surface: {surfaceIndices.Min()} - {surfaceIndices.Max()}");
+                            
+                            // Check if indices are valid for MSVT
+                            var msvtVertexCount = pm4File.MSVT?.Vertices.Count ?? 0;
+                            var mspvVertexCount = pm4File.MSPV?.Vertices.Count ?? 0;
+                            
+                            bool validForMsvt = surfaceIndices.All(idx => idx < msvtVertexCount);
+                            bool validForMspv = surfaceIndices.All(idx => idx < mspvVertexCount);
+                            
+                            writer.WriteLine($"  Valid for MSVT ({msvtVertexCount} vertices): {validForMsvt}");
+                            writer.WriteLine($"  Valid for MSPV ({mspvVertexCount} vertices): {validForMspv}");
+                            
+                            if (!validForMsvt && !validForMspv)
+                            {
+                                writer.WriteLine($"  ⚠️  INDICES OUT OF BOUNDS FOR BOTH VERTEX BUFFERS!");
+                                var maxIndex = surfaceIndices.Max();
+                                writer.WriteLine($"      Max index: {maxIndex}, MSVT count: {msvtVertexCount}, MSPV count: {mspvVertexCount}");
+                            }
+                            
+                            // Calculate potential triangles from this surface (triangle fan)
+                            if (msur.IndexCount >= 3)
+                            {
+                                int trianglesFromSurface = (int)msur.IndexCount - 2;
+                                totalTriangles += trianglesFromSurface;
+                                writer.WriteLine($"  Potential triangles (fan): {trianglesFromSurface}");
+                            }
+                        }
+                        else
+                        {
+                            invalidSurfaces++;
+                            writer.WriteLine($"  ⚠️  INVALID RANGE: exceeds MSVI bounds");
+                        }
+                    }
+                    
+                    writer.WriteLine($"\n=== Summary ===");
+                    writer.WriteLine($"Valid surfaces: {validSurfaces}");
+                    writer.WriteLine($"Invalid surfaces: {invalidSurfaces}");
+                    writer.WriteLine($"Total potential triangles: {totalTriangles}");
+                    
+                    if (indexStats.Count > 0)
+                    {
+                        writer.WriteLine($"Overall index statistics:");
+                        writer.WriteLine($"  Min index: {indexStats.Min()}");
+                        writer.WriteLine($"  Max index: {indexStats.Max()}");
+                        writer.WriteLine($"  Unique indices: {indexStats.Distinct().Count()}");
+                        
+                        // Check index distribution
+                        var indexGroups = indexStats.GroupBy(i => i / 100).OrderBy(g => g.Key).ToList();
+                        writer.WriteLine($"  Index distribution (by hundreds):");
+                        foreach (var group in indexGroups.Take(10))
+                        {
+                            writer.WriteLine($"    {group.Key * 100}-{(group.Key + 1) * 100 - 1}: {group.Count()} indices");
+                        }
+                    }
+                }
+                
+                // Additional check: Compare coordinate ranges
+                if (pm4File.MSVT?.Vertices != null && pm4File.MSPV?.Vertices != null)
+                {
+                    writer.WriteLine($"\n=== Coordinate Range Comparison ===");
+                    
+                    // MSVT coordinate analysis
+                    var msvtCoords = pm4File.MSVT.Vertices.Select(v => Pm4CoordinateTransforms.FromMsvtVertexSimple(v)).ToList();
+                    if (msvtCoords.Any())
+                    {
+                        writer.WriteLine($"MSVT coordinate ranges:");
+                        writer.WriteLine($"  X: {msvtCoords.Min(c => c.X):F2} to {msvtCoords.Max(c => c.X):F2}");
+                        writer.WriteLine($"  Y: {msvtCoords.Min(c => c.Y):F2} to {msvtCoords.Max(c => c.Y):F2}");
+                        writer.WriteLine($"  Z: {msvtCoords.Min(c => c.Z):F2} to {msvtCoords.Max(c => c.Z):F2}");
+                    }
+                    
+                    // MSPV coordinate analysis
+                    var mspvCoords = pm4File.MSPV.Vertices.Select(v => Pm4CoordinateTransforms.FromMspvVertex(v)).ToList();
+                    if (mspvCoords.Any())
+                    {
+                        writer.WriteLine($"MSPV coordinate ranges:");
+                        writer.WriteLine($"  X: {mspvCoords.Min(c => c.X):F2} to {mspvCoords.Max(c => c.X):F2}");
+                        writer.WriteLine($"  Y: {mspvCoords.Min(c => c.Y):F2} to {mspvCoords.Max(c => c.Y):F2}");
+                        writer.WriteLine($"  Z: {mspvCoords.Min(c => c.Z):F2} to {mspvCoords.Max(c => c.Z):F2}");
+                    }
+                }
+
+                Console.WriteLine($"📁 Detailed analysis written to: {analysisPath}");
+                Console.WriteLine("\n🔍 KEY FINDINGS will be in the analysis file - check for:");
+                Console.WriteLine("  • Index bounds violations");
+                Console.WriteLine("  • MSVT vs MSPV vertex count mismatches");
+                Console.WriteLine("  • Coordinate range differences");
+                Console.WriteLine("  • Invalid surface definitions");
+                
+                Assert.True(pm4File != null, "Should successfully load PM4 file");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error during vertex mapping analysis: {ex.Message}");
+                throw;
+            }
+        }
+
         private static string CalculateBounds(List<Vector3> coords)
         {
             if (!coords.Any()) return "No coordinates";

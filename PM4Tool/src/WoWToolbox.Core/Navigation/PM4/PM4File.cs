@@ -64,6 +64,12 @@ namespace WoWToolbox.Core.Navigation.PM4
         public MSCNChunk? MSCN { get; set; }
 
         /// <summary>
+        /// Gets or sets the MSRN chunk (Mesh Surface Referenced Normals).
+        /// </summary>
+        [ChunkOptional]
+        public MSRNChunk? MSRN { get; set; }
+
+        /// <summary>
         /// Gets or sets the MPRL chunk (Position Data).
         /// </summary>
         public MPRLChunk? MPRL { get; private set; }
