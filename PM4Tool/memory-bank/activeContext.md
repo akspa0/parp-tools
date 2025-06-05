@@ -1,4 +1,4 @@
-# Project Vision & Immediate Technical Goal (2024-07-21)
+# Project Vision & Immediate Technical Goal (2025-01-15)
 
 ## Vision
 - Build tools that inspire others to explore, understand, and preserve digital history, especially game worlds.
@@ -11,250 +11,126 @@
 
 ---
 
-# Mode: ACT
+# Mode: PLAN
 
-# Active Context: PM4 Coordinate Transformation Mastery & Complete Combined Mesh Export BREAKTHROUGH (2025-01-15)
+# Active Context: PM4 3D Structural Analysis Tool Enhancement
 
-## 🎯 MAJOR BREAKTHROUGH ACHIEVED: PM4 Coordinate System Fix + Complete Combined Mesh Export
+## Current Status: ✅ **3D Viewer Successfully Built & Tested**
 
-We have successfully resolved critical coordinate transformation issues in PM4 processing and achieved **complete combined mesh export** with proper face generation across all PM4 files.
+### **Major Achievement: Working PM4 3D Viewer**
+**Tool**: `src/WoWToolbox.PM4Viewer/` (WPF + HelixToolkit.Wpf + .NET 9.0)
 
-### Final Breakthrough: Coordinate Transformation Fix ✅
+#### **✅ Working Features:**
+- **3D Visualization**: Successfully displays PM4 geometry with proper coordinate transformations
+  - **Blue dots**: MSVT render vertices with `(Y, X, Z)` transform
+  - **Red dots**: MSCN collision points with Y-axis correction + 180° rotation  
+  - **Green dots**: MSPV structure vertices with direct `(X, Y, Z)` coordinates
+  - **Ground plane reference**: Grid lines for spatial orientation
+  - **Camera controls**: Mouse navigation (rotate, pan, zoom)
+- **File Loading**: PM4 file browser and loading functionality
+- **Chunk Visualization**: Real-time display of vertex counts and chunk presence
+- **Interactive Controls**: Toggle visibility of different geometry types
+- **Export Capability**: Analysis report export to text files
 
-#### **Root Problem Identified & Resolved**
-- **Problem**: Using incorrect `ToUnifiedWorld()` transformation causing geometry in "polar opposite corners" 
-- **MSVT Issues**: Data arranged as `(-Z, X, Y)` instead of proper coordinates
-- **MSCN Issues**: Data encoded as `(-X, -Z, Y)` causing misalignment
-- **MSPV Issues**: Data arranged as `(-X, -Z, Y)` instead of proper coordinates
-- **Result**: Invalid faces and completely misaligned geometry clusters
+#### **⚠️ Needs Enhancement:**
+- **Analysis Logic**: Structure analysis features not fully functional
+- **Button Interactions**: Menu items and analysis controls need proper implementation
+- **Error Handling**: Analysis pipeline requires debugging and stabilization
+- **Pattern Recognition**: Unknown field analysis needs refinement
+- **Hierarchical Visualization**: Node relationship display needs development
 
-#### **Solution: Proper PM4 Coordinate Transforms** ✅
-```csharp
-// CORRECT transformations from working coordinate system
-- MSVT: FromMsvtVertexSimple(v) → (v.Y, v.X, v.Z)      // Proper render mesh
-- MSCN: FromMscnVertex(v) → (v.X, -v.Y, v.Z) + 180° rotation  // Collision alignment
-- MSPV: FromMspvVertex(v) → (v.X, v.Y, v.Z)           // Direct coordinates
+## Current Investigation Focus
 
-// REMOVED incorrect ToUnifiedWorld() transformation entirely
-// - ToUnifiedWorld: (X,Y,Z) → (-Y,-Z,X)  // ❌ WRONG - caused polar opposite placement
+### **PM4 Structural Mysteries to Explore**
+Using the 3D viewer as our exploration platform:
+
+1. **Node-Based Hierarchies**: 
+   - **Unknown_0x04 as internal indices** rather than group identifiers
+   - **Padding as metadata**: Non-zero bytes between chunks may contain node information
+   - **MSLK hierarchical patterns**: Group analysis via Unknown_0x04 values
+
+2. **Missing Connectivity Data**:
+   - **MSRN/MPRR chunks**: Potential additional structural information
+   - **Cross-chunk relationships**: Hidden references between geometry types
+   - **Material/metadata fields**: Unknown_0x0C and other mysterious values
+
+3. **Enhanced 3D Analysis**:
+   - **Pattern visualization**: Display discovered hierarchical connections in 3D space
+   - **Interactive field exploration**: Click vertices to inspect unknown field values
+   - **Comparative analysis**: Multi-file pattern validation
+
+## Next Steps (Immediate Priority)
+
+### **Phase 1: Fix Analysis Pipeline** 🔧
+1. **Debug analysis functionality**: Identify why structural analysis isn't populating UI
+2. **Enhance error handling**: Make analysis failures visible and actionable
+3. **Implement missing button logic**: Connect menu items to actual functionality
+4. **Test field pattern recognition**: Validate Unknown_0x04 grouping theories
+
+### **Phase 2: Enhanced Structural Investigation** 🔍
+1. **Padding investigation tool**: Analyze non-zero padding for hidden metadata
+2. **Interactive field inspector**: Click geometry to see unknown field values
+3. **Hierarchical visualization**: Display node connections in 3D space
+4. **Pattern correlation engine**: Compare structures across multiple PM4 files
+
+### **Phase 3: Advanced Analysis Features** 🚀
+1. **MSRN/MPRR investigation**: Decode additional navigation chunks
+2. **Cross-reference validation**: Verify structural theories across dataset
+3. **WMO preparation pipeline**: Bridge PM4 analysis to WMO reconstruction
+4. **Batch analysis capabilities**: Process entire development dataset
+
+## Technical Architecture Insights
+
+### **PM4 3D Viewer Design Pattern**
+```
+WPF MainWindow → ViewModel (MVVM) → StructuralAnalyzer → PM4File
+     ↓                ↓                    ↓              ↓
+HelixViewport3D → ObservableCollections → Analysis → Chunk Data
 ```
 
-#### **Face Generation Logic Fix** ✅
-- **MSVI Face Generation**: Fixed to use **MSUR triangle fan patterns** instead of incorrect linear reading
-- **MSLK Structure Faces**: Simplified to properly reference **MSPV vertices only** (not MSCN+MSPV)
-- **Vertex Offset Tracking**: Implemented proper **global cumulative vertex offset** for combined mesh files
-- **Result**: Proper face connectivity with 120,139 faces (24% increase from 97,044)
-
-### Complete Combined Mesh Export Achievement ✅
-
-#### **Combined Mesh Statistics - MASSIVE SUCCESS**
-- **Total Vertices: 3,738,253** (1,544% increase from single-file tests!)
-- **Total Faces: 2,114,403** (1,760% increase!)
-- **Files Processed: 502** out of 616 PM4 files successfully
-- **Files with Errors: 114** (mostly missing MSVT chunks - expected)
-- **Output File Size: ~139 MB** of complete geometric data
-
-#### **Global Vertex Offset Fix** ✅
-```csharp
-// FIXED: Proper cumulative vertex offset tracking
-int globalVertexOffset = 1; // Tracks position in combined vertex list
-
-foreach (var pm4File in pm4Files) {
-    // Calculate local offsets within this file
-    int mscnStartOffset = globalVertexOffset + msvtCount;
-    int mspvStartOffset = globalVertexOffset + msvtCount + mscnCount;
-    
-    // Generate faces with global offsets
-    uint adjustedIdx = (uint)(globalVertexOffset + localIdx);
-    
-    // Update for next file
-    globalVertexOffset += msvtCount + mscnCount + mspvCount;
+### **Analysis Pipeline (Needs Debugging)**
+```
+PM4File → StructuralAnalyzer → {
+  - PaddingAnalysis: Detect non-zero padding metadata
+  - UnknownFieldAnalysis: Pattern recognition in mysterious fields  
+  - HierarchicalRelationships: Parent-child chunk connections
+  - NodeStructureAnalysis: MSLK grouping via Unknown_0x04
 }
 ```
 
-#### **Face Index Validation** ✅
-- **Beginning**: Face indices 1-10 (first file vertices)
-- **Middle**: Face indices 170,000+ (cumulative from multiple files)  
-- **End**: Face indices 3,738,253 (matches total vertex count exactly)
-- **Result**: Perfect vertex-face connectivity across entire combined mesh
+### **Key Technical Discoveries**
+- **Coordinate transformation mastery**: Fixed "polar opposite corners" with proper PM4 transforms
+- **Face generation understanding**: MSUR triangle fans vs linear triangles
+- **MSCN design pattern**: Point cloud collision (not mesh) confirmed
+- **MSLK master controller**: Links all geometry types via MSPI indices
 
-### Technical Implementation Details ✅
+## Strategic Value
 
-#### **Coordinate System Correction**
-- **Eliminated**: Incorrect `ToUnifiedWorld()` causing `(-Y,-Z,X)` scrambling
-- **Implemented**: Proper PM4 coordinate transforms from `Pm4CoordinateTransforms.cs`
-- **Aligned**: All geometry types now sit on same ground plane
-- **Verified**: Visual confirmation of proper spatial relationships
+The **PM4 3D Structural Analysis Tool** represents a breakthrough in PM4 understanding because:
 
-#### **Face Generation Enhancement**
-```csharp
-// CORRECT: MSUR triangle fan generation
-for (uint centerIdx = firstIdx; centerIdx < firstIdx + indexCount - 2; centerIdx++) {
-    uint idx1 = centerIdx;
-    uint idx2 = centerIdx + 1; 
-    uint idx3 = centerIdx + 2;
-    
-    // Apply global vertex offset for combined mesh
-    sw.WriteLine($"f {idx1 + globalOffset} {idx2 + globalOffset} {idx3 + globalOffset}");
-}
+1. **Visual-guided investigation**: 3D context makes structural patterns obvious
+2. **Interactive exploration**: Real-time analysis while viewing geometry
+3. **Pattern validation**: Cross-reference discoveries across multiple files
+4. **Hidden data detection**: Systematic investigation of unknown fields and padding
+5. **Foundation for WMO reconstruction**: Direct bridge to placement data generation
 
-// CORRECT: MSLK→MSPV structure faces only
-foreach (var mslkEntry in pm4Data.MSLK.Entries) {
-    // Generate faces for MSPV vertices with proper offset
-    uint adjustedIdx = (uint)(globalVertexOffset + mspvStartOffset + mspiIdx);
-}
-```
+The tool transforms PM4 investigation from **blind data analysis** to **guided 3D exploration**, enabling discovery of hierarchical patterns that would be invisible in text-based analysis.
 
-### Complete Mesh Export Capabilities ✅
+## Success Metrics
 
-#### **Individual File Processing**
-- **242,142 vertices** per complex file (865% increase from previous attempts)
-- **120,139 faces** with proper triangle fan generation
-- **All geometry types**: MSVT render + MSCN collision + MSPV structure
-- **Perfect alignment**: All chunks spatially coordinated
+### **Short-term (This Session)**
+- ✅ Analysis pipeline functional and populating UI
+- ✅ Button interactions working as expected  
+- ✅ Unknown field patterns clearly displayed
+- ✅ Error handling robust and informative
 
-#### **Combined Dataset Processing**
-- **502 files processed** successfully from development dataset
-- **3.7M+ vertices** with consistent coordinate transformations
-- **2.1M+ faces** with proper global indexing
-- **139MB output file** with complete geometric data
-- **Zero orphaned geometry**: All vertices properly referenced by faces
+### **Medium-term (Next Sessions)**
+- ✅ Hierarchical node connections visualized in 3D
+- ✅ Padding metadata patterns discovered and documented
+- ✅ Cross-file structural validation completed
+- ✅ Enhanced export formats (WMO preparation data)
 
-### Quality Assurance ✅
-
-#### **Coordinate Validation**
-- **Ground plane alignment**: All geometry types properly aligned
-- **No polar opposites**: Eliminated coordinate system scrambling
-- **Spatial coherence**: MSCN collision boundaries align with MSVT render mesh
-- **Transform consistency**: Same coordinate system across all 502 files
-
-#### **Face Generation Validation**
-- **Triangle fan correctness**: MSUR surfaces properly triangulated
-- **Index bounds checking**: All face indices within vertex count
-- **Global offset accuracy**: Combined mesh faces reference correct vertices
-- **Connectivity verification**: No orphaned vertices or invalid faces
-
-## 🚀 Impact & Significance
-
-### Technical Achievement
-- **🎯 COMPLETE PM4 COORDINATE MASTERY**: All chunk types properly transformed and aligned
-- **🎯 MASSIVE SCALE SUCCESS**: 502 files, 3.7M vertices, 2.1M faces processed successfully  
-- **🎯 PRODUCTION QUALITY**: 139MB combined mesh with perfect face connectivity
-- **🎯 ROBUST PIPELINE**: Handles missing chunks and error conditions gracefully
-
-### Foundation for Advanced Work
-- **WMO Asset Matching**: Production-ready PM4 meshes for geometric comparison
-- **Spatial Analysis**: Complete datasets for connected component analysis
-- **Historical Research**: Comprehensive geometric data for development map analysis
-- **Placement Reconstruction**: Accurate mesh data for automated WMO placement inference
-
-### Data Completeness
-- **Render Geometry**: Complete MSVT mesh data with proper face generation
-- **Collision Data**: Full MSCN boundary information aligned with render mesh
-- **Structure Data**: Complete MSPV geometric framework for analysis
-- **Combined Output**: Single 139MB file containing all development map geometry
-
-This represents the **complete breakthrough** in PM4 coordinate system understanding and establishes a production-ready foundation for advanced spatial analysis and WMO matching work in the WoWToolbox project.
-
----
-
-# Previous Context: Complete PM4 Understanding & Enhanced Output Implementation (2025-01-15)
-
-## 🎯 COMPLETE ACHIEVEMENT: Total PM4 Understanding with Enhanced Output Implementation
-
-We achieved **complete PM4 understanding** and successfully **implemented all decoded fields** in production-ready enhanced OBJ export with surface normals, material information, and spatial organization.
-
-### Complete PM4 Understanding Achieved ✅
-
-#### All Major Chunks Decoded (100% Core Understanding)
-1. **MSVT**: Render mesh vertices with perfect coordinate transformation ✅
-2. **MSVI**: Index arrays with proper face generation ✅
-3. **MSCN**: Collision boundaries with spatial alignment ✅  
-4. **MSPV**: Geometric structure points ✅
-5. **MPRL**: Map positioning references ✅
-6. **MSUR**: Surface definitions + **normals + height** (DECODED) ✅
-7. **MSLK**: Object metadata + **complete flag system** (DECODED) ✅
-8. **MSHD**: Header + **chunk navigation** (DECODED) ✅
-9. **MPRR**: Navigation connectivity data ✅
-
-#### Statistical Validation Complete ✅
-- **76+ Files Analyzed**: 100% pattern consistency across all files
-- **Surface Normals**: 100% of MSUR normals properly normalized (magnitude ~1.0)
-- **Material IDs**: Consistent 0xFFFF#### pattern across all MSLK entries
-- **File Structure**: 100% of MSHD offsets within valid boundaries
-
-### Production Impact & Capabilities ✅
-
-#### Enhanced Export Features Now Available
-- **Complete Geometry**: Render mesh + collision + navigation data
-- **Surface Lighting**: Proper normal vectors for accurate lighting and visualization
-- **Material Information**: Object classification and material references for texturing
-- **Spatial Organization**: Height-based and type-based mesh grouping for analysis
-- **Quality Assurance**: Comprehensive validation with zero topology errors
-
-#### Real Output Examples
-```obj
-# Enhanced PM4 OBJ Export with Decoded Fields
-# Generated: 6/5/2025 4:58:48 AM
-# Features: Surface normals, materials, height organization
-mtllib development_00_00_enhanced.mtl
-
-v 324.639343 153.594528 5.359779  # MSVT vertices with coordinate transform
-vn 0.089573 0.017428 0.995828     # MSUR surface normals (decoded)
-
-# Height Level: -400 units            # MSUR height organization
-g height_level_-400
-f 1//1 2//1 3//1                     # Faces with surface normals
-```
-
-```mtl
-newmtl material_FFFF0000_type_18     # MSLK decoded material + object type
-# Material ID: 0xFFFF0000, Object Type: 18
-Kd 1.000 0.000 0.000               # Generated colors from material ID
-Ka 0.1 0.1 0.1
-Ks 0.3 0.3 0.3
-Ns 10.0
-```
-
-### Project Status: COMPLETE MASTERY ACHIEVED
-
-#### Technical Mastery ✅
-- **100% Core Understanding**: All major PM4 chunks completely decoded and implemented
-- **Perfect Face Generation**: 884,915+ valid faces with clean connectivity  
-- **Enhanced Output**: Surface normals, materials, and spatial organization implemented
-- **Production Pipeline**: Robust processing with comprehensive validation
-- **Software Compatibility**: Clean output for MeshLab, Blender, and all major 3D tools
-
-#### Research Achievements ✅
-- **Unknown Field Decoding**: MSUR surface normals, MSLK metadata, MSHD navigation
-- **Statistical Validation**: Comprehensive analysis across 76+ files with 100% consistency
-- **Coordinate Systems**: All transformation matrices working perfectly
-- **Data Relationships**: Complete understanding of chunk interdependencies
-
-This represents the **complete mastery and implementation** of PM4 file format analysis with all decoded fields successfully integrated into production-ready enhanced output. The WoWToolbox project now has total PM4 understanding and can extract every piece of available geometric, material, and organizational data from PM4 files.
-
----
-
-# Next Phase: Advanced Applications (Future Work)
-
-With complete PM4 mastery achieved, advanced applications are now possible:
-
-## WMO Integration & Asset Matching
-- **Geometric Signatures**: Use surface normals for precise shape matching with WMO files
-- **Material Correlation**: Cross-reference MSLK material IDs with WoW texture databases  
-- **Height Correlation**: Match elevation patterns between PM4 and WMO data
-- **Placement Reconstruction**: Automated inference of WMO placements from PM4 geometry
-
-## Advanced Spatial Analysis
-- **Connected Components**: Analyze mesh topology with perfect face connectivity
-- **Spatial Indexing**: Height-based spatial queries and analysis using decoded data
-- **Object Recognition**: Automated classification using complete MSLK metadata
-- **Quality Metrics**: Surface normal validation for mesh quality assessment
-
-## Production Optimization  
-- **Batch Processing**: Scale to hundreds of PM4 files with consistent enhanced output
-- **Export Formats**: Multiple output options (OBJ, PLY, STL) with full metadata
-- **Performance**: Optimized processing pipeline for large datasets
-- **Documentation**: Complete API documentation for production integration
-
-The foundation for all advanced PM4 analysis and reconstruction work is now complete and production-ready.
+### **Long-term (Project Goals)**
+- ✅ Complete PM4 → WMO reconstruction pipeline
+- ✅ Unknown field mysteries decoded and documented
+- ✅ Digital preservation system for WoW map data

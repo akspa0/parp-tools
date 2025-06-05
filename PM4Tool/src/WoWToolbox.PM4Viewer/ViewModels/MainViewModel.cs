@@ -14,6 +14,7 @@ using HelixToolkit.Wpf;
 using WoWToolbox.Core.Navigation.PM4;
 using WoWToolbox.Core.Navigation.PM4.Chunks;
 using WoWToolbox.PM4Viewer.Services;
+using System.Threading;
 
 namespace WoWToolbox.PM4Viewer.ViewModels
 {
@@ -53,6 +54,50 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         
         [ObservableProperty]
         private bool _showNodeHierarchy = false;
+        
+        [ObservableProperty]
+        private bool _colorByUnknown0x04 = false;
+        
+        [ObservableProperty]
+        private ObservableCollection<Unknown0x04Group> _unknown0x04Groups = new();
+        
+        [ObservableProperty]
+        private Unknown0x04Group? _selectedUnknown0x04Group;
+        
+        [ObservableProperty]
+        private bool _showOnlySelectedGroup = false;
+
+        [ObservableProperty]
+        private bool _isLoading = false;
+        
+        [ObservableProperty]
+        private double _loadingProgress = 0;
+        
+        [ObservableProperty]
+        private string _loadingOperation = string.Empty;
+        
+        [ObservableProperty]
+        private string _loadingSubOperation = string.Empty;
+        
+        [ObservableProperty]
+        private bool _canCancelLoading = true;
+        
+        private CancellationTokenSource? _loadingCancellationTokenSource;
+
+        [ObservableProperty]
+        private ObservableCollection<Unknown0x04Group> _filteredUnknown0x04Groups = new();
+        
+        [ObservableProperty]
+        private int _maxGroupsToShow = 50;
+        
+        [ObservableProperty]
+        private string _groupsFilterText = string.Empty;
+        
+        [ObservableProperty]
+        private bool _showAllGroups = false;
+        
+        [ObservableProperty]
+        private string _groupsSummary = string.Empty;
 
         public MainViewModel()
         {
@@ -60,11 +105,40 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             LoadFileCommand = new AsyncRelayCommand(LoadFileAsync);
             ExportAnalysisCommand = new AsyncRelayCommand(ExportAnalysisAsync);
             ToggleChunkVisibilityCommand = new RelayCommand<string>(ToggleChunkVisibility);
+            SelectGroupCommand = new RelayCommand<Unknown0x04Group>(SelectGroup);
+            CancelLoadingCommand = new RelayCommand(CancelLoading);
         }
 
         public IAsyncRelayCommand LoadFileCommand { get; }
         public IAsyncRelayCommand ExportAnalysisCommand { get; }
         public IRelayCommand<string> ToggleChunkVisibilityCommand { get; }
+        public IRelayCommand<Unknown0x04Group> SelectGroupCommand { get; }
+        public IRelayCommand CancelLoadingCommand { get; }
+
+        partial void OnGroupsFilterTextChanged(string value)
+        {
+            FilterUnknown0x04Groups();
+        }
+        
+        partial void OnShowAllGroupsChanged(bool value)
+        {
+            FilterUnknown0x04Groups();
+        }
+        
+        partial void OnMaxGroupsToShowChanged(int value)
+        {
+            FilterUnknown0x04Groups();
+        }
+        
+        partial void OnColorByUnknown0x04Changed(bool value)
+        {
+            UpdateVisualization();
+        }
+        
+        partial void OnShowOnlySelectedGroupChanged(bool value)
+        {
+            UpdateVisualization();
+        }
 
         private async Task LoadFileAsync()
         {
@@ -76,30 +150,88 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
             if (dialog.ShowDialog() == true)
             {
+                _loadingCancellationTokenSource?.Cancel();
+                _loadingCancellationTokenSource = new CancellationTokenSource();
+                
+                IsLoading = true;
+                LoadingProgress = 0;
+                LoadingOperation = "Starting...";
+                LoadingSubOperation = "";
+                
                 try
                 {
-                    await LoadPM4FileAsync(dialog.FileName);
+                    await LoadPM4FileAsync(dialog.FileName, _loadingCancellationTokenSource.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    LoadingOperation = "Cancelled";
+                    LoadingSubOperation = "";
                 }
                 catch (Exception ex)
                 {
+                    LoadingOperation = "Error";
+                    LoadingSubOperation = ex.Message;
                     MessageBox.Show($"Error loading file: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    IsLoading = false;
+                    LoadingProgress = 0;
                 }
             }
         }
 
-        private async Task LoadPM4FileAsync(string filePath)
+        private async Task LoadPM4FileAsync(string filePath, CancellationToken cancellationToken = default)
         {
             LoadedFileName = Path.GetFileName(filePath);
             
             try
             {
-                // Load PM4 file
-                Pm4File = PM4File.FromFile(filePath);
+                // Stage 1: Initial file reading (5%)
+                LoadingProgress = 5;
+                LoadingOperation = "Reading PM4 file";
+                LoadingSubOperation = $"Loading {Path.GetFileName(filePath)} ({new FileInfo(filePath).Length / 1024:N0} KB)";
+                await Task.Delay(100, cancellationToken);
                 
-                // Update visualization first
+                // Stage 2: Parse PM4 structure with detailed progress (40%)
+                LoadingProgress = 10;
+                LoadingOperation = "Parsing PM4 structure";
+                LoadingSubOperation = "Detecting chunk headers...";
+                await Task.Delay(100, cancellationToken);
+                
+                Pm4File = await Task.Run(() => PM4File.FromFile(filePath), cancellationToken);
+                
+                // Report what we found
+                LoadingProgress = 25;
+                LoadingSubOperation = $"Found chunks: {GetChunkSummary(Pm4File)}";
+                await Task.Delay(100, cancellationToken);
+                
+                // Stage 3: Detailed chunk analysis (25%)
+                LoadingProgress = 50;
+                LoadingOperation = "Analyzing PM4 chunks";
+                LoadingSubOperation = await AnalyzeChunksAsync(cancellationToken);
+                await Task.Delay(100, cancellationToken);
+                
+                // Stage 4: Build 3D visualization (15%)
+                LoadingProgress = 70;
+                LoadingOperation = "Building 3D visualization";
+                LoadingSubOperation = "Processing vertex data...";
+                await Task.Delay(100, cancellationToken);
+                
+                // Update visualization on UI thread
                 UpdateVisualization();
                 
-                // Perform structural analysis with error handling
+                LoadingProgress = 75;
+                LoadingSubOperation = $"Rendered {GetVisualizationSummary()} geometry";
+                await Task.Delay(100, cancellationToken);
+                
+                // Stage 5: Structural analysis (10%)
+                LoadingProgress = 85;
+                LoadingOperation = "Running structural analysis";
+                LoadingSubOperation = "Analyzing unknown fields and patterns...";
+                await Task.Delay(100, cancellationToken);
+                
+                // Run analysis in background but capture result
                 var analysisResult = await Task.Run(() => 
                 {
                     try
@@ -108,7 +240,6 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                     }
                     catch (Exception ex)
                     {
-                        // Create error result for debugging
                         var errorResult = new PM4StructuralAnalyzer.StructuralAnalysisResult
                         {
                             FileName = Path.GetFileName(filePath)
@@ -117,17 +248,26 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                         errorResult.Metadata["StackTrace"] = ex.StackTrace ?? "No stack trace";
                         return errorResult;
                     }
-                });
+                }, cancellationToken);
                 
-                // Update analysis insights
+                // Stage 6: Generate insights on UI thread (5%)
+                LoadingProgress = 95;
+                LoadingOperation = "Generating insights";
+                LoadingSubOperation = "Creating analysis reports...";
+                await Task.Delay(100, cancellationToken);
+                
+                // Update UI collections on UI thread
                 UpdateStructuralInsights(analysisResult);
-                
-                // Generate analysis report
                 GenerateAnalysisReport(analysisResult);
+                
+                // Final completion
+                LoadingProgress = 100;
+                LoadingOperation = "Analysis complete";
+                LoadingSubOperation = $"Ready! {Unknown0x04Groups.Count} groups • {StructuralInsights.Count} insights • {GetFinalSummary()}";
+                await Task.Delay(750, cancellationToken); // Show completion longer
             }
             catch (Exception ex)
             {
-                // Create basic analysis with error info
                 var errorResult = new PM4StructuralAnalyzer.StructuralAnalysisResult
                 {
                     FileName = Path.GetFileName(filePath)
@@ -136,7 +276,84 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 
                 UpdateStructuralInsights(errorResult);
                 GenerateAnalysisReport(errorResult);
+                
+                LoadingOperation = "Error occurred";
+                LoadingSubOperation = ex.Message;
             }
+        }
+        
+        private string GetChunkSummary(PM4File pm4)
+        {
+            var chunks = new List<string>();
+            if (pm4.MSLK?.Entries?.Count > 0) chunks.Add($"MSLK({pm4.MSLK.Entries.Count})");
+            if (pm4.MSVT?.Vertices?.Count > 0) chunks.Add($"MSVT({pm4.MSVT.Vertices.Count})");
+            if (pm4.MSCN?.ExteriorVertices?.Count > 0) chunks.Add($"MSCN({pm4.MSCN.ExteriorVertices.Count})");
+            if (pm4.MSPV?.Vertices?.Count > 0) chunks.Add($"MSPV({pm4.MSPV.Vertices.Count})");
+            if (pm4.MSVI?.Indices?.Count > 0) chunks.Add($"MSVI({pm4.MSVI.Indices.Count})");
+            if (pm4.MSPI?.Indices?.Count > 0) chunks.Add($"MSPI({pm4.MSPI.Indices.Count})");
+            if (pm4.MSUR?.Entries?.Count > 0) chunks.Add($"MSUR({pm4.MSUR.Entries.Count})");
+            
+            return chunks.Count > 0 ? string.Join(", ", chunks.ToArray()) : "No recognized chunks";
+        }
+        
+        private async Task<string> AnalyzeChunksAsync(CancellationToken cancellationToken)
+        {
+            if (Pm4File == null) return "No PM4 data";
+            
+            var details = new List<string>();
+            
+            // Analyze MSLK (navigation links)
+            if (Pm4File.MSLK?.Entries?.Count > 0)
+            {
+                details.Add($"MSLK: {Pm4File.MSLK.Entries.Count} nav entries");
+                await Task.Delay(50, cancellationToken);
+            }
+            
+            // Analyze vertex chunks
+            var totalVertices = 0;
+            if (Pm4File.MSVT?.Vertices?.Count > 0) totalVertices += Pm4File.MSVT.Vertices.Count;
+            if (Pm4File.MSCN?.ExteriorVertices?.Count > 0) totalVertices += Pm4File.MSCN.ExteriorVertices.Count;
+            if (Pm4File.MSPV?.Vertices?.Count > 0) totalVertices += Pm4File.MSPV.Vertices.Count;
+            
+            if (totalVertices > 0)
+            {
+                details.Add($"{totalVertices:N0} total vertices");
+                await Task.Delay(50, cancellationToken);
+            }
+            
+            // Analyze face data
+            var totalFaces = 0;
+            if (Pm4File.MSVI?.Indices?.Count > 0) totalFaces += Pm4File.MSVI.Indices.Count / 3;
+            if (totalFaces > 0)
+            {
+                details.Add($"{totalFaces:N0} faces");
+                await Task.Delay(50, cancellationToken);
+            }
+            
+            return details.Count > 0 ? string.Join(" • ", details.ToArray()) : "Basic structure detected";
+        }
+        
+        private string GetVisualizationSummary()
+        {
+            var parts = new List<string>();
+            
+            if (Pm4File?.MSVT?.Vertices?.Count > 0) parts.Add($"{Pm4File.MSVT.Vertices.Count} render vertices");
+            if (Pm4File?.MSCN?.ExteriorVertices?.Count > 0) parts.Add($"{Pm4File.MSCN.ExteriorVertices.Count} collision points");
+            if (Pm4File?.MSPV?.Vertices?.Count > 0) parts.Add($"{Pm4File.MSPV.Vertices.Count} structure vertices");
+            
+            return parts.Count > 0 ? string.Join(" • ", parts.ToArray()) : "No geometry";
+        }
+        
+        private string GetFinalSummary()
+        {
+            var summary = new List<string>();
+            
+            if (ChunkItems.Count > 0) summary.Add($"{ChunkItems.Count} chunk types");
+            
+            var totalVertices = ChunkItems.Sum(c => c.Count);
+            if (totalVertices > 0) summary.Add($"{totalVertices:N0} vertices");
+            
+            return summary.Count > 0 ? string.Join(" • ", summary.ToArray()) : "Analysis complete";
         }
 
         private void UpdateVisualization()
@@ -146,12 +363,16 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             var newScene = new Model3DGroup();
             ChunkItems.Clear();
 
+            // Analyze Unknown_0x04 groups first
+            AnalyzeUnknown0x04Groups();
+
             // Visualize MSVT render vertices
             if (Pm4File.MSVT?.Vertices != null && ShowMSVTVertices)
             {
+                var msvtColor = ColorByUnknown0x04 ? Colors.LightBlue : Colors.Blue;
                 var msvtModel = CreateVertexVisualization(
                     Pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)),
-                    Colors.Blue,
+                    msvtColor,
                     "MSVT Render Vertices"
                 );
                 newScene.Children.Add(msvtModel);
@@ -160,7 +381,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 {
                     Name = "MSVT Render Vertices",
                     Count = Pm4File.MSVT.Vertices.Count,
-                    Color = Colors.Blue,
+                    Color = msvtColor,
                     IsVisible = true
                 });
             }
@@ -221,6 +442,12 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 {
                     newScene.Children.Add(hierarchyModel);
                 }
+            }
+
+            // Visualize Unknown_0x04 groups if enabled
+            if (ColorByUnknown0x04 || ShowOnlySelectedGroup)
+            {
+                CreateUnknown0x04GroupVisualization(newScene);
             }
 
             SceneModel = newScene;
@@ -411,7 +638,88 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             geometry.TriangleIndices.Add(baseIndex + 3);
         }
 
+        private void CreateUnknown0x04GroupVisualization(Model3DGroup scene)
+        {
+            if (Pm4File?.MSLK?.Entries == null) return;
+
+            var groupsToShow = Unknown0x04Groups.AsEnumerable();
+            
+            // Filter to only selected group if that option is enabled
+            if (ShowOnlySelectedGroup && SelectedUnknown0x04Group != null)
+            {
+                groupsToShow = groupsToShow.Where(g => g.GroupValue == SelectedUnknown0x04Group.GroupValue);
+            }
+
+            foreach (var group in groupsToShow)
+            {
+                // Get MSLK entries for this group
+                var groupEntries = group.EntryIndices
+                    .Where(idx => idx < Pm4File.MSLK.Entries.Count)
+                    .Select(idx => Pm4File.MSLK.Entries[idx])
+                    .ToList();
+
+                if (!groupEntries.Any()) continue;
+
+                // Create visualization for group vertices
+                var groupVertices = ExtractGroupVerticesAsPoints(groupEntries);
+                if (groupVertices.Any())
+                {
+                    var groupModel = CreateVertexVisualization(groupVertices, group.Color, $"Group 0x{group.GroupValue:X8}");
+                    scene.Children.Add(groupModel);
+                    
+                    // Add to chunk items for visibility control
+                    ChunkItems.Add(new ChunkVisualizationItem
+                    {
+                        Name = $"Group 0x{group.GroupValue:X8} ({group.EntryCount} entries)",
+                        Count = groupVertices.Count(),
+                        Color = group.Color,
+                        IsVisible = true
+                    });
+                }
+            }
+        }
+
+        private IEnumerable<Point3D> ExtractGroupVerticesAsPoints(List<MSLKEntry> entries)
+        {
+            var points = new List<Point3D>();
+            
+            if (Pm4File?.MSPI?.Indices == null || Pm4File.MSPV?.Vertices == null)
+                return points;
+
+            foreach (var entry in entries)
+            {
+                if (entry.MspiFirstIndex >= 0 && 
+                    entry.MspiFirstIndex + entry.MspiIndexCount <= Pm4File.MSPI.Indices.Count)
+                {
+                    for (int i = 0; i < entry.MspiIndexCount; i++)
+                    {
+                        var mspiIndex = Pm4File.MSPI.Indices[entry.MspiFirstIndex + i];
+                        if (mspiIndex < Pm4File.MSPV.Vertices.Count)
+                        {
+                            var vertex = Pm4File.MSPV.Vertices[(int)mspiIndex];
+                            points.Add(new Point3D(vertex.X, vertex.Y, vertex.Z));
+                        }
+                    }
+                }
+            }
+            
+            return points;
+        }
+
         private void UpdateStructuralInsights(PM4StructuralAnalyzer.StructuralAnalysisResult result)
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                UpdateStructuralInsightsImpl(result);
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() => UpdateStructuralInsightsImpl(result));
+            }
+        }
+        
+        private void UpdateStructuralInsightsImpl(PM4StructuralAnalyzer.StructuralAnalysisResult result)
         {
             StructuralInsights.Clear();
 
@@ -595,6 +903,220 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
+
+        private void AnalyzeUnknown0x04Groups()
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                AnalyzeUnknown0x04GroupsImpl();
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(AnalyzeUnknown0x04GroupsImpl);
+            }
+        }
+        
+        private void AnalyzeUnknown0x04GroupsImpl()
+        {
+            Unknown0x04Groups.Clear();
+            
+            if (Pm4File?.MSLK?.Entries == null || Pm4File.MSLK.Entries.Count == 0)
+            {
+                GroupsSummary = "No MSLK data available";
+                FilterUnknown0x04Groups();
+                return;
+            }
+
+            // Group MSLK entries by Unknown_0x04 value
+            var groupedEntries = Pm4File.MSLK.Entries
+                .Select((entry, index) => new { Entry = entry, Index = index })
+                .GroupBy(x => x.Entry.Unknown_0x04)
+                .OrderByDescending(g => g.Count()) // Show largest groups first
+                .ToList();
+
+            // Generate distinct colors for the groups we'll actually show
+            var maxColors = Math.Min(groupedEntries.Count, 100); // Limit color generation
+            var colors = GenerateDistinctColors(maxColors);
+            
+            for (int i = 0; i < groupedEntries.Count; i++)
+            {
+                var group = groupedEntries[i];
+                var entries = group.Select(x => x.Entry).ToList();
+                var color = i < maxColors ? colors[i] : Colors.Gray;
+                
+                var groupInfo = new Unknown0x04Group
+                {
+                    GroupValue = group.Key,
+                    EntryCount = group.Count(),
+                    EntryIndices = group.Select(x => x.Index).ToList(),
+                    GroupColor = color,
+                    Color = color,
+                    Description = AnalyzeGroupPattern(entries),
+                    AssociatedVertices = ExtractGroupVertices(entries),
+                    AverageUnknown0x0C = entries.Count > 0 ? (float)entries.Average(e => e.Unknown_0x0C) : 0f,
+                    MinUnknown0x0C = entries.Count > 0 ? entries.Min(e => e.Unknown_0x0C) : 0f,
+                    MaxUnknown0x0C = entries.Count > 0 ? entries.Max(e => e.Unknown_0x0C) : 0f
+                };
+                
+                Unknown0x04Groups.Add(groupInfo);
+            }
+            
+            // Update summary
+            var totalEntries = groupedEntries.Sum(g => g.Count());
+            var topGroups = groupedEntries.Take(5).ToList();
+            var topGroupsInfo = string.Join(", ", topGroups.Select(g => $"0x{g.Key:X8}({g.Count()})"));
+            
+            GroupsSummary = $"Total: {groupedEntries.Count} groups, {totalEntries} entries. Top: {topGroupsInfo}";
+            
+            // Apply filtering
+            FilterUnknown0x04Groups();
+        }
+        
+        private void FilterUnknown0x04Groups()
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                FilterUnknown0x04GroupsImpl();
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(FilterUnknown0x04GroupsImpl);
+            }
+        }
+        
+        private void FilterUnknown0x04GroupsImpl()
+        {
+            if (Unknown0x04Groups.Count == 0)
+            {
+                FilteredUnknown0x04Groups.Clear();
+                return;
+            }
+            
+            var filtered = Unknown0x04Groups.AsEnumerable();
+            
+            // Apply text filter
+            if (!string.IsNullOrWhiteSpace(GroupsFilterText))
+            {
+                var filterLower = GroupsFilterText.ToLower();
+                filtered = filtered.Where(g => 
+                    g.GroupValue.ToString("X8").ToLower().Contains(filterLower) ||
+                    g.Description.ToLower().Contains(filterLower) ||
+                    g.EntryCount.ToString().Contains(filterLower));
+            }
+            
+            // Apply count limit
+            if (!ShowAllGroups)
+            {
+                filtered = filtered.Take(MaxGroupsToShow);
+            }
+            
+            FilteredUnknown0x04Groups.Clear();
+            foreach (var group in filtered)
+            {
+                FilteredUnknown0x04Groups.Add(group);
+            }
+        }
+
+        private List<Color> GenerateDistinctColors(int count)
+        {
+            var colors = new List<Color>();
+            if (count == 0) return colors;
+
+            for (int i = 0; i < count; i++)
+            {
+                float hue = (float)i / count * 360f;
+                var color = HSVToRGB(hue, 0.8f, 0.9f);
+                colors.Add(color);
+            }
+            
+            return colors;
+        }
+
+        private Color HSVToRGB(float h, float s, float v)
+        {
+            h = h / 60f;
+            int i = (int)Math.Floor(h);
+            float f = h - i;
+            float p = v * (1 - s);
+            float q = v * (1 - s * f);
+            float t = v * (1 - s * (1 - f));
+
+            float r, g, b;
+            switch (i % 6)
+            {
+                case 0: r = v; g = t; b = p; break;
+                case 1: r = q; g = v; b = p; break;
+                case 2: r = p; g = v; b = t; break;
+                case 3: r = p; g = q; b = v; break;
+                case 4: r = t; g = p; b = v; break;
+                default: r = v; g = p; b = q; break;
+            }
+
+            return Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+        }
+
+        private string AnalyzeGroupPattern(List<MSLKEntry> entries)
+        {
+            if (entries.Count == 1)
+                return "Single entry";
+                
+            // Analyze patterns in the group
+            var hasGeometry = entries.Any(e => e.MspiFirstIndex >= 0 && e.MspiIndexCount > 0);
+            var hasDoodads = entries.Any(e => e.MspiFirstIndex == -1);
+            var avgUnknown0x0C = entries.Average(e => e.Unknown_0x0C);
+            
+            var pattern = new List<string>();
+            if (hasGeometry) pattern.Add("Geometry");
+            if (hasDoodads) pattern.Add("Doodads");
+            
+            var description = pattern.Count > 0 ? string.Join(" + ", pattern) : "Unknown";
+            return $"{description} (avg 0x0C: {avgUnknown0x0C:F1})";
+        }
+
+        private List<Vector3> ExtractGroupVertices(List<MSLKEntry> entries)
+        {
+            var vertices = new List<Vector3>();
+            
+            if (Pm4File?.MSPI?.Indices == null || Pm4File.MSPV?.Vertices == null)
+                return vertices;
+
+            foreach (var entry in entries)
+            {
+                if (entry.MspiFirstIndex >= 0 && 
+                    entry.MspiFirstIndex + entry.MspiIndexCount <= Pm4File.MSPI.Indices.Count)
+                {
+                    for (int i = 0; i < entry.MspiIndexCount; i++)
+                    {
+                        var mspiIndex = Pm4File.MSPI.Indices[entry.MspiFirstIndex + i];
+                        if (mspiIndex < Pm4File.MSPV.Vertices.Count)
+                        {
+                            var vertex = Pm4File.MSPV.Vertices[(int)mspiIndex];
+                            vertices.Add(new Vector3(vertex.X, vertex.Y, vertex.Z));
+                        }
+                    }
+                }
+            }
+            
+            return vertices;
+        }
+
+        private void SelectGroup(Unknown0x04Group? group)
+        {
+            SelectedUnknown0x04Group = group;
+            
+            // Update visualization when group is selected
+            if (ShowOnlySelectedGroup || ColorByUnknown0x04)
+            {
+                UpdateVisualization();
+            }
+        }
+
+        private void CancelLoading()
+        {
+            _loadingCancellationTokenSource?.Cancel();
+        }
     }
 
     public class ChunkVisualizationItem
@@ -611,5 +1133,36 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public string Description { get; set; } = string.Empty;
         public string Significance { get; set; } = string.Empty;
         public string DataPreview { get; set; } = string.Empty;
+    }
+
+    public class Unknown0x04Group
+    {
+        public uint GroupValue { get; set; }
+        public int EntryCount { get; set; }
+        public List<int> EntryIndices { get; set; } = new();
+        public Color GroupColor { get; set; }
+        public Color Color { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public List<Vector3> AssociatedVertices { get; set; } = new();
+        public float AverageUnknown0x0C { get; set; }
+        public float MinUnknown0x0C { get; set; }
+        public float MaxUnknown0x0C { get; set; }
+    }
+
+    public class LoadingProgress
+    {
+        public double Percentage { get; set; }
+        public string CurrentOperation { get; set; } = string.Empty;
+        public string SubOperation { get; set; } = string.Empty;
+        public bool IsIndeterminate { get; set; }
+        public bool CanCancel { get; set; } = true;
+    }
+
+    public class PM4AnalysisResult
+    {
+        public List<Unknown0x04Group> Groups { get; set; } = new();
+        public List<StructuralInsight> Insights { get; set; } = new();
+        public Dictionary<string, object> RawAnalysis { get; set; } = new();
+        public string Summary { get; set; } = string.Empty;
     }
 } 
