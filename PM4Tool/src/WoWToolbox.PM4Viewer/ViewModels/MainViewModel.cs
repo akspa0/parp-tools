@@ -22,6 +22,11 @@ namespace WoWToolbox.PM4Viewer.ViewModels
     {
         private readonly PM4StructuralAnalyzer _analyzer;
         
+        // PM4 Coordinate System Constants
+        private const float PM4_COORDINATE_BOUND = 17066.666f;
+        private const float PM4_MIN_COORDINATE = -PM4_COORDINATE_BOUND;
+        private const float PM4_MAX_COORDINATE = PM4_COORDINATE_BOUND;
+        
         [ObservableProperty]
         private string? _loadedFileName;
         
@@ -97,7 +102,56 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         private bool _showAllGroups = false;
         
         [ObservableProperty]
-        private string _groupsSummary = string.Empty;
+        private string _groupsSummary = "No analysis available";
+
+        [ObservableProperty]
+        private bool _colorByUnknown0x0C = false;
+        
+        [ObservableProperty]
+        private ObservableCollection<Unknown0x0CGroup> _unknown0x0CGroups = new();
+        
+        [ObservableProperty]
+        private ObservableCollection<Unknown0x0CGroup> _filteredUnknown0x0CGroups = new();
+
+        // Enhanced Visualization Controls
+        [ObservableProperty]
+        private bool _showGroundGrid = true;
+        
+        [ObservableProperty]
+        private bool _showCoordinateBounds = true;
+        
+        [ObservableProperty]
+        private bool _showCoordinateAxes = true;
+        
+        [ObservableProperty]
+        private bool _showVertexIndices = false;
+        
+        [ObservableProperty]
+        private bool _showGroupConnections = false;
+        
+        [ObservableProperty]
+        private bool _showHierarchyLines = false;
+        
+        // Legend System
+        [ObservableProperty]
+        private ObservableCollection<LegendItem> _legendItems = new();
+        
+        // Camera Controls
+        [ObservableProperty]
+        private Point3D _cameraPosition = new(100, 100, 100);
+        
+        [ObservableProperty]
+        private Vector3D _cameraLookDirection = new(-1, -1, -1);
+        
+        [ObservableProperty]
+        private string _cameraInfo = "Position: (100, 100, 100)";
+        
+        // Data Navigation
+        [ObservableProperty]
+        private string _selectedDataInfo = "No data selected";
+        
+        [ObservableProperty]
+        private bool _autoFitCamera = true;
 
         public MainViewModel()
         {
@@ -118,19 +172,27 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         partial void OnGroupsFilterTextChanged(string value)
         {
             FilterUnknown0x04Groups();
-        }
-        
-        partial void OnShowAllGroupsChanged(bool value)
-        {
-            FilterUnknown0x04Groups();
+            FilterUnknown0x0CGroups();
         }
         
         partial void OnMaxGroupsToShowChanged(int value)
         {
             FilterUnknown0x04Groups();
+            FilterUnknown0x0CGroups();
+        }
+        
+        partial void OnShowAllGroupsChanged(bool value)
+        {
+            FilterUnknown0x04Groups();
+            FilterUnknown0x0CGroups();
         }
         
         partial void OnColorByUnknown0x04Changed(bool value)
+        {
+            UpdateVisualization();
+        }
+        
+        partial void OnColorByUnknown0x0CChanged(bool value)
         {
             UpdateVisualization();
         }
@@ -227,9 +289,18 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 
                 // Stage 5: Structural analysis (10%)
                 LoadingProgress = 85;
-                LoadingOperation = "Running structural analysis";
-                LoadingSubOperation = "Analyzing unknown fields and patterns...";
+                LoadingOperation = "Structural analysis";
+                LoadingSubOperation = "Analyzing Unknown_0x04 patterns...";
                 await Task.Delay(100, cancellationToken);
+                
+                AnalyzeUnknown0x0CGroups();
+                AnalyzeUnknown0x04Groups();
+                
+                LoadingProgress = 90;
+                LoadingSubOperation = "Analyzing Unknown_0x0C patterns...";
+                await Task.Delay(100, cancellationToken);
+                
+                AnalyzeUnknown0x0CGroups();
                 
                 // Run analysis in background but capture result
                 var analysisResult = await Task.Run(() => 
@@ -363,6 +434,9 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             var newScene = new Model3DGroup();
             ChunkItems.Clear();
 
+            // Add coordinate system visualization first
+            AddCoordinateSystemVisualization(newScene);
+
             // Analyze Unknown_0x04 groups first
             AnalyzeUnknown0x04Groups();
 
@@ -370,16 +444,15 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             if (Pm4File.MSVT?.Vertices != null && ShowMSVTVertices)
             {
                 var msvtColor = ColorByUnknown0x04 ? Colors.LightBlue : Colors.Blue;
-                var msvtModel = CreateVertexVisualization(
-                    Pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)),
-                    msvtColor,
-                    "MSVT Render Vertices"
-                );
+                var msvtPoints = Pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)).ToList();
+                var boundsInfo = ValidateCoordinateBounds(msvtPoints, "MSVT");
+                
+                var msvtModel = CreateVertexVisualization(msvtPoints, msvtColor, "MSVT Render Vertices");
                 newScene.Children.Add(msvtModel);
                 
                 ChunkItems.Add(new ChunkVisualizationItem
                 {
-                    Name = "MSVT Render Vertices",
+                    Name = $"MSVT Render Vertices{boundsInfo}",
                     Count = Pm4File.MSVT.Vertices.Count,
                     Color = msvtColor,
                     IsVisible = true
@@ -389,16 +462,15 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             // Visualize MSCN collision points
             if (Pm4File.MSCN?.ExteriorVertices != null && ShowMSCNPoints)
             {
-                var mscnModel = CreateVertexVisualization(
-                    Pm4File.MSCN.ExteriorVertices.Select(v => new Point3D(v.X, -v.Y, v.Z)),
-                    Colors.Red,
-                    "MSCN Collision Points"
-                );
+                var mscnPoints = Pm4File.MSCN.ExteriorVertices.Select(v => new Point3D(v.X, -v.Y, v.Z)).ToList();
+                var boundsInfo = ValidateCoordinateBounds(mscnPoints, "MSCN");
+                
+                var mscnModel = CreateVertexVisualization(mscnPoints, Colors.Red, "MSCN Collision Points");
                 newScene.Children.Add(mscnModel);
                 
                 ChunkItems.Add(new ChunkVisualizationItem
                 {
-                    Name = "MSCN Collision Points", 
+                    Name = $"MSCN Collision Points{boundsInfo}", 
                     Count = Pm4File.MSCN.ExteriorVertices.Count,
                     Color = Colors.Red,
                     IsVisible = true
@@ -408,16 +480,15 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             // Visualize MSPV structure vertices
             if (Pm4File.MSPV?.Vertices != null && ShowMSPVVertices)
             {
-                var mspvModel = CreateVertexVisualization(
-                    Pm4File.MSPV.Vertices.Select(v => new Point3D(v.X, v.Y, v.Z)),
-                    Colors.Green,
-                    "MSPV Structure Vertices"
-                );
+                var mspvPoints = Pm4File.MSPV.Vertices.Select(v => new Point3D(v.X, v.Y, v.Z)).ToList();
+                var boundsInfo = ValidateCoordinateBounds(mspvPoints, "MSPV");
+                
+                var mspvModel = CreateVertexVisualization(mspvPoints, Colors.Green, "MSPV Structure Vertices");
                 newScene.Children.Add(mspvModel);
                 
                 ChunkItems.Add(new ChunkVisualizationItem
                 {
-                    Name = "MSPV Structure Vertices",
+                    Name = $"MSPV Structure Vertices{boundsInfo}",
                     Count = Pm4File.MSPV.Vertices.Count,
                     Color = Colors.Green,
                     IsVisible = true
@@ -449,8 +520,195 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             {
                 CreateUnknown0x04GroupVisualization(newScene);
             }
+            
+            // Visualize Unknown_0x0C groups if enabled
+            if (ColorByUnknown0x0C)
+            {
+                CreateUnknown0x0CGroupVisualization(newScene);
+            }
 
             SceneModel = newScene;
+        }
+
+        private void AddCoordinateSystemVisualization(Model3DGroup scene)
+        {
+            // Add ground plane grid at Y=0 within PM4 coordinate bounds
+            var groundPlane = CreateGroundPlaneGrid();
+            scene.Children.Add(groundPlane);
+            
+            // Add coordinate boundary visualization
+            var coordinateBounds = CreateCoordinateBounds();
+            scene.Children.Add(coordinateBounds);
+            
+            // Add coordinate axes
+            var coordinateAxes = CreateCoordinateAxes();
+            scene.Children.Add(coordinateAxes);
+        }
+
+        private GeometryModel3D CreateGroundPlaneGrid()
+        {
+            var geometry = new MeshGeometry3D();
+            var material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(64, 128, 128, 128))); // Semi-transparent gray
+
+            var gridSize = PM4_COORDINATE_BOUND;
+            var gridSpacing = gridSize / 20f; // 20 divisions
+            
+            // Create grid lines parallel to X-axis (running in Z direction)
+            for (int i = 0; i <= 40; i++)
+            {
+                var x = PM4_MIN_COORDINATE + (i * gridSpacing);
+                AddGridLine(geometry, 
+                    new Point3D(x, 0, PM4_MIN_COORDINATE), 
+                    new Point3D(x, 0, PM4_MAX_COORDINATE));
+            }
+            
+            // Create grid lines parallel to Z-axis (running in X direction)
+            for (int i = 0; i <= 40; i++)
+            {
+                var z = PM4_MIN_COORDINATE + (i * gridSpacing);
+                AddGridLine(geometry, 
+                    new Point3D(PM4_MIN_COORDINATE, 0, z), 
+                    new Point3D(PM4_MAX_COORDINATE, 0, z));
+            }
+
+            return new GeometryModel3D(geometry, material);
+        }
+
+        private GeometryModel3D CreateCoordinateBounds()
+        {
+            var geometry = new MeshGeometry3D();
+            var material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(128, 255, 255, 0))); // Semi-transparent yellow
+
+            // Create wireframe bounding box at PM4 coordinate limits
+            var corners = new Point3D[]
+            {
+                // Bottom face
+                new(PM4_MIN_COORDINATE, PM4_MIN_COORDINATE, PM4_MIN_COORDINATE),
+                new(PM4_MAX_COORDINATE, PM4_MIN_COORDINATE, PM4_MIN_COORDINATE),
+                new(PM4_MAX_COORDINATE, PM4_MIN_COORDINATE, PM4_MAX_COORDINATE),
+                new(PM4_MIN_COORDINATE, PM4_MIN_COORDINATE, PM4_MAX_COORDINATE),
+                // Top face
+                new(PM4_MIN_COORDINATE, PM4_MAX_COORDINATE, PM4_MIN_COORDINATE),
+                new(PM4_MAX_COORDINATE, PM4_MAX_COORDINATE, PM4_MIN_COORDINATE),
+                new(PM4_MAX_COORDINATE, PM4_MAX_COORDINATE, PM4_MAX_COORDINATE),
+                new(PM4_MIN_COORDINATE, PM4_MAX_COORDINATE, PM4_MAX_COORDINATE)
+            };
+
+            // Add wireframe edges
+            var wireframeEdges = new (int start, int end)[]
+            {
+                // Bottom face edges
+                (0, 1), (1, 2), (2, 3), (3, 0),
+                // Top face edges
+                (4, 5), (5, 6), (6, 7), (7, 4),
+                // Vertical edges
+                (0, 4), (1, 5), (2, 6), (3, 7)
+            };
+
+            foreach (var (start, end) in wireframeEdges)
+            {
+                AddWireframeLine(geometry, corners[start], corners[end]);
+            }
+
+            return new GeometryModel3D(geometry, material);
+        }
+
+        private GeometryModel3D CreateCoordinateAxes()
+        {
+            var geometry = new MeshGeometry3D();
+            var material = new DiffuseMaterial(new SolidColorBrush(Colors.White));
+
+            var axisLength = PM4_COORDINATE_BOUND * 0.1f; // 10% of coordinate space for axis length
+            var origin = new Point3D(0, 0, 0);
+
+            // X-axis (Red)
+            AddAxisLine(geometry, origin, new Point3D(axisLength, 0, 0), Colors.Red);
+            // Y-axis (Green) 
+            AddAxisLine(geometry, origin, new Point3D(0, axisLength, 0), Colors.Green);
+            // Z-axis (Blue)
+            AddAxisLine(geometry, origin, new Point3D(0, 0, axisLength), Colors.Blue);
+
+            return new GeometryModel3D(geometry, material);
+        }
+
+        private void AddGridLine(MeshGeometry3D geometry, Point3D start, Point3D end)
+        {
+            var thickness = 1.0f;
+            var baseIndex = geometry.Positions.Count;
+
+            // Create thin line as a rectangle
+            var direction = new Vector3D(end.X - start.X, end.Y - start.Y, end.Z - start.Z);
+            direction.Normalize();
+            
+            var perpendicular = new Vector3D(-direction.Y, direction.X, 0);
+            if (perpendicular.Length < 0.01) perpendicular = new Vector3D(0, 0, 1);
+            perpendicular.Normalize();
+            perpendicular *= thickness;
+
+            geometry.Positions.Add(new Point3D(start.X - perpendicular.X, start.Y - perpendicular.Y, start.Z - perpendicular.Z));
+            geometry.Positions.Add(new Point3D(start.X + perpendicular.X, start.Y + perpendicular.Y, start.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X + perpendicular.X, end.Y + perpendicular.Y, end.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X - perpendicular.X, end.Y - perpendicular.Y, end.Z - perpendicular.Z));
+
+            // Add triangle indices for the line quad
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 1);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex + 3);
+        }
+
+        private void AddWireframeLine(MeshGeometry3D geometry, Point3D start, Point3D end)
+        {
+            var thickness = 10.0f; // Thicker for visibility
+            var baseIndex = geometry.Positions.Count;
+
+            var direction = new Vector3D(end.X - start.X, end.Y - start.Y, end.Z - start.Z);
+            direction.Normalize();
+            
+            var perpendicular = new Vector3D(-direction.Y, direction.X, 0);
+            if (perpendicular.Length < 0.01) perpendicular = new Vector3D(0, 0, 1);
+            perpendicular.Normalize();
+            perpendicular *= thickness;
+
+            geometry.Positions.Add(new Point3D(start.X - perpendicular.X, start.Y - perpendicular.Y, start.Z - perpendicular.Z));
+            geometry.Positions.Add(new Point3D(start.X + perpendicular.X, start.Y + perpendicular.Y, start.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X + perpendicular.X, end.Y + perpendicular.Y, end.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X - perpendicular.X, end.Y - perpendicular.Y, end.Z - perpendicular.Z));
+
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 1);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex + 3);
+        }
+
+        private void AddAxisLine(MeshGeometry3D geometry, Point3D start, Point3D end, Color color)
+        {
+            var thickness = 20.0f; // Thick for visibility
+            var baseIndex = geometry.Positions.Count;
+
+            var direction = new Vector3D(end.X - start.X, end.Y - start.Y, end.Z - start.Z);
+            direction.Normalize();
+            
+            var perpendicular = new Vector3D(-direction.Y, direction.X, 0);
+            if (perpendicular.Length < 0.01) perpendicular = new Vector3D(0, 0, 1);
+            perpendicular.Normalize();
+            perpendicular *= thickness;
+
+            geometry.Positions.Add(new Point3D(start.X - perpendicular.X, start.Y - perpendicular.Y, start.Z - perpendicular.Z));
+            geometry.Positions.Add(new Point3D(start.X + perpendicular.X, start.Y + perpendicular.Y, start.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X + perpendicular.X, end.Y + perpendicular.Y, end.Z + perpendicular.Z));
+            geometry.Positions.Add(new Point3D(end.X - perpendicular.X, end.Y - perpendicular.Y, end.Z - perpendicular.Z));
+
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 1);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex);
+            geometry.TriangleIndices.Add(baseIndex + 2);
+            geometry.TriangleIndices.Add(baseIndex + 3);
         }
 
         private GeometryModel3D CreateVertexVisualization(IEnumerable<Point3D> points, Color color, string name)
@@ -640,70 +898,97 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
         private void CreateUnknown0x04GroupVisualization(Model3DGroup scene)
         {
-            if (Pm4File?.MSLK?.Entries == null) return;
+            if (Pm4File?.MSLK?.Entries == null || Unknown0x04Groups.Count == 0)
+                return;
 
-            var groupsToShow = Unknown0x04Groups.AsEnumerable();
-            
-            // Filter to only selected group if that option is enabled
-            if (ShowOnlySelectedGroup && SelectedUnknown0x04Group != null)
+            foreach (var group in Unknown0x04Groups.Take(100)) // Limit for performance
             {
-                groupsToShow = groupsToShow.Where(g => g.GroupValue == SelectedUnknown0x04Group.GroupValue);
-            }
+                var vertices = ExtractGroupVerticesAsPoints(group.AssociatedVertices);
+                if (vertices.Count() == 0) continue;
 
-            foreach (var group in groupsToShow)
-            {
-                // Get MSLK entries for this group
-                var groupEntries = group.EntryIndices
-                    .Where(idx => idx < Pm4File.MSLK.Entries.Count)
-                    .Select(idx => Pm4File.MSLK.Entries[idx])
-                    .ToList();
-
-                if (!groupEntries.Any()) continue;
-
-                // Create visualization for group vertices
-                var groupVertices = ExtractGroupVerticesAsPoints(groupEntries);
-                if (groupVertices.Any())
+                var geometry = new MeshGeometry3D();
+                
+                foreach (var vertex in vertices)
                 {
-                    var groupModel = CreateVertexVisualization(groupVertices, group.Color, $"Group 0x{group.GroupValue:X8}");
-                    scene.Children.Add(groupModel);
-                    
-                    // Add to chunk items for visibility control
-                    ChunkItems.Add(new ChunkVisualizationItem
-                    {
-                        Name = $"Group 0x{group.GroupValue:X8} ({group.EntryCount} entries)",
-                        Count = groupVertices.Count(),
-                        Color = group.Color,
-                        IsVisible = true
-                    });
+                    AddVertexCube(geometry, vertex, 1.0);
                 }
+
+                var material = new DiffuseMaterial(new SolidColorBrush(group.Color));
+                var model = new GeometryModel3D(geometry, material);
+                
+                scene.Children.Add(model);
+            }
+        }
+        
+        private void CreateUnknown0x0CGroupVisualization(Model3DGroup scene)
+        {
+            if (Pm4File?.MSLK?.Entries == null || Unknown0x0CGroups.Count == 0)
+                return;
+
+            foreach (var group in Unknown0x0CGroups.Take(100)) // Limit for performance
+            {
+                var vertices = ExtractGroupVerticesAsPoints(group.AssociatedVertices);
+                if (vertices.Count() == 0) continue;
+
+                var geometry = new MeshGeometry3D();
+                
+                foreach (var vertex in vertices)
+                {
+                    AddVertexCube(geometry, vertex, 0.8); // Slightly smaller to distinguish
+                }
+
+                var material = new DiffuseMaterial(new SolidColorBrush(group.Color));
+                var model = new GeometryModel3D(geometry, material);
+                
+                scene.Children.Add(model);
             }
         }
 
-        private IEnumerable<Point3D> ExtractGroupVerticesAsPoints(List<MSLKEntry> entries)
+        private void AddVertexCube(MeshGeometry3D geometry, Point3D point, double size)
         {
-            var points = new List<Point3D>();
-            
-            if (Pm4File?.MSPI?.Indices == null || Pm4File.MSPV?.Vertices == null)
-                return points;
-
-            foreach (var entry in entries)
+            var half = size / 2;
+            var positions = new Point3D[]
             {
-                if (entry.MspiFirstIndex >= 0 && 
-                    entry.MspiFirstIndex + entry.MspiIndexCount <= Pm4File.MSPI.Indices.Count)
-                {
-                    for (int i = 0; i < entry.MspiIndexCount; i++)
-                    {
-                        var mspiIndex = Pm4File.MSPI.Indices[entry.MspiFirstIndex + i];
-                        if (mspiIndex < Pm4File.MSPV.Vertices.Count)
-                        {
-                            var vertex = Pm4File.MSPV.Vertices[(int)mspiIndex];
-                            points.Add(new Point3D(vertex.X, vertex.Y, vertex.Z));
-                        }
-                    }
-                }
+                new(point.X - half, point.Y - half, point.Z - half),
+                new(point.X + half, point.Y - half, point.Z - half),
+                new(point.X + half, point.Y + half, point.Z - half),
+                new(point.X - half, point.Y + half, point.Z - half),
+                new(point.X - half, point.Y - half, point.Z + half),
+                new(point.X + half, point.Y - half, point.Z + half),
+                new(point.X + half, point.Y + half, point.Z + half),
+                new(point.X - half, point.Y + half, point.Z + half)
+            };
+
+            var indices = new int[]
+            {
+                // Front face
+                0, 1, 2, 0, 2, 3,
+                // Back face  
+                4, 6, 5, 4, 7, 6,
+                // Left face
+                0, 3, 7, 0, 7, 4,
+                // Right face
+                1, 5, 6, 1, 6, 2,
+                // Top face
+                3, 2, 6, 3, 6, 7,
+                // Bottom face
+                0, 4, 5, 0, 5, 1
+            };
+
+            foreach (var position in positions)
+            {
+                geometry.Positions.Add(position);
             }
-            
-            return points;
+
+            foreach (var index in indices)
+            {
+                geometry.TriangleIndices.Add(index);
+            }
+        }
+
+        private IEnumerable<Point3D> ExtractGroupVerticesAsPoints(List<Vector3> vertices)
+        {
+            return vertices.Select(v => new Point3D(v.X, v.Y, v.Z));
         }
 
         private void UpdateStructuralInsights(PM4StructuralAnalyzer.StructuralAnalysisResult result)
@@ -917,6 +1202,19 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
         
+        private void AnalyzeUnknown0x0CGroups()
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                AnalyzeUnknown0x0CGroupsImpl();
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(AnalyzeUnknown0x0CGroupsImpl);
+            }
+        }
+        
         private void AnalyzeUnknown0x04GroupsImpl()
         {
             Unknown0x04Groups.Clear();
@@ -932,47 +1230,116 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             var groupedEntries = Pm4File.MSLK.Entries
                 .Select((entry, index) => new { Entry = entry, Index = index })
                 .GroupBy(x => x.Entry.Unknown_0x04)
-                .OrderByDescending(g => g.Count()) // Show largest groups first
+                .OrderByDescending(g => g.Count())
                 .ToList();
 
-            // Generate distinct colors for the groups we'll actually show
-            var maxColors = Math.Min(groupedEntries.Count, 100); // Limit color generation
+            // Perform deep hierarchical analysis
+            var hierarchyAnalysis = PerformDeepHierarchicalAnalysis(groupedEntries.Cast<IGrouping<uint, dynamic>>().ToList());
+
+            // Generate distinct colors for groups using HSV
+            int maxColors = Math.Min(groupedEntries.Count, 360); // One color per degree
             var colors = GenerateDistinctColors(maxColors);
             
             for (int i = 0; i < groupedEntries.Count; i++)
             {
                 var group = groupedEntries[i];
                 var entries = group.Select(x => x.Entry).ToList();
-                var color = i < maxColors ? colors[i] : Colors.Gray;
+                
+                // Calculate Unknown_0x0C statistics for this group
+                var unknown0x0CValues = entries.Select(e => (float)e.Unknown_0x0C).ToList();
+                var avgUnknown0x0C = unknown0x0CValues.Count > 0 ? unknown0x0CValues.Average() : 0f;
+                var minUnknown0x0C = unknown0x0CValues.Count > 0 ? unknown0x0CValues.Min() : 0f;
+                var maxUnknown0x0C = unknown0x0CValues.Count > 0 ? unknown0x0CValues.Max() : 0f;
+                
+                // Get hierarchical info for this group
+                var hierarchyInfo = hierarchyAnalysis.GroupHierarchy.GetValueOrDefault(group.Key, new GroupHierarchyInfo());
                 
                 var groupInfo = new Unknown0x04Group
                 {
                     GroupValue = group.Key,
                     EntryCount = group.Count(),
                     EntryIndices = group.Select(x => x.Index).ToList(),
-                    GroupColor = color,
-                    Color = color,
-                    Description = AnalyzeGroupPattern(entries),
+                    GroupColor = i < maxColors ? colors[i] : Colors.Gray,
+                    Color = i < maxColors ? colors[i] : Colors.Gray,
+                    Description = AnalyzeGroupPattern(entries, hierarchyInfo),
                     AssociatedVertices = ExtractGroupVertices(entries),
-                    AverageUnknown0x0C = entries.Count > 0 ? (float)entries.Average(e => e.Unknown_0x0C) : 0f,
-                    MinUnknown0x0C = entries.Count > 0 ? entries.Min(e => e.Unknown_0x0C) : 0f,
-                    MaxUnknown0x0C = entries.Count > 0 ? entries.Max(e => e.Unknown_0x0C) : 0f
+                    AverageUnknown0x0C = avgUnknown0x0C,
+                    MinUnknown0x0C = minUnknown0x0C,
+                    MaxUnknown0x0C = maxUnknown0x0C,
+                    HierarchyInfo = hierarchyInfo,
+                    ChunkOwnership = AnalyzeChunkOwnership(entries)
                 };
                 
                 Unknown0x04Groups.Add(groupInfo);
             }
+
+            // Generate enhanced summary with hierarchy insights
+            var topGroups = Unknown0x04Groups.Take(5).ToList();
+            var hierarchyDepth = hierarchyAnalysis.MaxHierarchyDepth;
+            var totalConnections = hierarchyAnalysis.TotalConnections;
             
-            // Update summary
-            var totalEntries = groupedEntries.Sum(g => g.Count());
-            var topGroups = groupedEntries.Take(5).ToList();
-            var topGroupsInfo = string.Join(", ", topGroups.Select(g => $"0x{g.Key:X8}({g.Count()})"));
-            
-            GroupsSummary = $"Total: {groupedEntries.Count} groups, {totalEntries} entries. Top: {topGroupsInfo}";
-            
-            // Apply filtering
+            var summary = $"Found {Unknown0x04Groups.Count} groups (depth: {hierarchyDepth}, connections: {totalConnections}). " +
+                $"Top 5: {string.Join(", ", topGroups.Select(g => $"0x{g.GroupValue:X8}({g.EntryCount})"))}";
+            GroupsSummary = summary;
+
+            // Add hierarchy insights to structural insights
+            AddHierarchyInsights(hierarchyAnalysis);
+
             FilterUnknown0x04Groups();
         }
         
+        private void AnalyzeUnknown0x0CGroupsImpl()
+        {
+            Unknown0x0CGroups.Clear();
+            
+            if (Pm4File?.MSLK?.Entries == null || Pm4File.MSLK.Entries.Count == 0)
+            {
+                FilterUnknown0x0CGroups();
+                return;
+            }
+
+            // Group MSLK entries by Unknown_0x0C value
+            var groupedEntries = Pm4File.MSLK.Entries
+                .Select((entry, index) => new { Entry = entry, Index = index })
+                .GroupBy(x => x.Entry.Unknown_0x0C)
+                .OrderByDescending(g => g.Count())
+                .ToList();
+
+            // Generate distinct colors for groups using HSV
+            int maxColors = Math.Min(groupedEntries.Count, 360); // One color per degree
+            var colors = GenerateDistinctColors(maxColors);
+            
+            for (int i = 0; i < groupedEntries.Count; i++)
+            {
+                var group = groupedEntries[i];
+                var entries = group.Select(x => x.Entry).ToList();
+                
+                // Calculate Unknown_0x04 statistics for this group
+                var unknown0x04Values = entries.Select(e => (float)e.Unknown_0x04).ToList();
+                var avgUnknown0x04 = unknown0x04Values.Count > 0 ? unknown0x04Values.Average() : 0f;
+                var minUnknown0x04 = unknown0x04Values.Count > 0 ? unknown0x04Values.Min() : 0f;
+                var maxUnknown0x04 = unknown0x04Values.Count > 0 ? unknown0x04Values.Max() : 0f;
+                
+                var groupInfo = new Unknown0x0CGroup
+                {
+                    GroupValue = group.Key,
+                    EntryCount = group.Count(),
+                    EntryIndices = group.Select(x => x.Index).ToList(),
+                    GroupColor = i < maxColors ? colors[i] : Colors.Gray,
+                    Color = i < maxColors ? colors[i] : Colors.Gray,
+                    Description = AnalyzeGroupPattern(entries, new GroupHierarchyInfo()), // Use empty hierarchy info for 0x0C groups
+                    AssociatedVertices = ExtractGroupVertices(entries),
+                    AverageUnknown0x04 = avgUnknown0x04,
+                    MinUnknown0x04 = minUnknown0x04,
+                    MaxUnknown0x04 = maxUnknown0x04
+                };
+                
+                Unknown0x0CGroups.Add(groupInfo);
+            }
+
+            FilterUnknown0x0CGroups();
+        }
+
         private void FilterUnknown0x04Groups()
         {
             // Ensure we're on the UI thread for collection updates
@@ -986,6 +1353,19 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
         
+        private void FilterUnknown0x0CGroups()
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                FilterUnknown0x0CGroupsImpl();
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(FilterUnknown0x0CGroupsImpl);
+            }
+        }
+
         private void FilterUnknown0x04GroupsImpl()
         {
             if (Unknown0x04Groups.Count == 0)
@@ -1016,6 +1396,39 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             foreach (var group in filtered)
             {
                 FilteredUnknown0x04Groups.Add(group);
+            }
+        }
+        
+        private void FilterUnknown0x0CGroupsImpl()
+        {
+            if (Unknown0x0CGroups.Count == 0)
+            {
+                FilteredUnknown0x0CGroups.Clear();
+                return;
+            }
+            
+            var filtered = Unknown0x0CGroups.AsEnumerable();
+            
+            // Apply text filter
+            if (!string.IsNullOrWhiteSpace(GroupsFilterText))
+            {
+                var filterLower = GroupsFilterText.ToLower();
+                filtered = filtered.Where(g => 
+                    g.GroupValue.ToString("X8").ToLower().Contains(filterLower) ||
+                    g.Description.ToLower().Contains(filterLower) ||
+                    g.EntryCount.ToString().Contains(filterLower));
+            }
+            
+            // Apply count limit
+            if (!ShowAllGroups)
+            {
+                filtered = filtered.Take(MaxGroupsToShow);
+            }
+            
+            FilteredUnknown0x0CGroups.Clear();
+            foreach (var group in filtered)
+            {
+                FilteredUnknown0x0CGroups.Add(group);
             }
         }
 
@@ -1057,10 +1470,10 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             return Color.FromRgb((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
         }
 
-        private string AnalyzeGroupPattern(List<MSLKEntry> entries)
+        private string AnalyzeGroupPattern(List<MSLKEntry> entries, GroupHierarchyInfo hierarchyInfo)
         {
             if (entries.Count == 1)
-                return "Single entry";
+                return $"Single entry{(hierarchyInfo.IsLeafNode ? " [Leaf]" : "")}{(hierarchyInfo.IsRootNode ? " [Root]" : "")}";
                 
             // Analyze patterns in the group
             var hasGeometry = entries.Any(e => e.MspiFirstIndex >= 0 && e.MspiIndexCount > 0);
@@ -1071,8 +1484,17 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             if (hasGeometry) pattern.Add("Geometry");
             if (hasDoodads) pattern.Add("Doodads");
             
+            // Add hierarchy information
+            var hierarchyTags = new List<string>();
+            if (hierarchyInfo.IsRootNode) hierarchyTags.Add("Root");
+            if (hierarchyInfo.IsLeafNode) hierarchyTags.Add("Leaf");
+            if (hierarchyInfo.ChildCount > 0) hierarchyTags.Add($"{hierarchyInfo.ChildCount} children");
+            if (hierarchyInfo.HierarchyLevel > 0) hierarchyTags.Add($"L{hierarchyInfo.HierarchyLevel}");
+            
             var description = pattern.Count > 0 ? string.Join(" + ", pattern) : "Unknown";
-            return $"{description} (avg 0x0C: {avgUnknown0x0C:F1})";
+            var hierarchyDesc = hierarchyTags.Count > 0 ? $" [{string.Join(", ", hierarchyTags)}]" : "";
+            
+            return $"{description} (avg 0x0C: {avgUnknown0x0C:F1}){hierarchyDesc}";
         }
 
         private List<Vector3> ExtractGroupVertices(List<MSLKEntry> entries)
@@ -1117,6 +1539,369 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         {
             _loadingCancellationTokenSource?.Cancel();
         }
+
+        #region Deep Hierarchical Analysis
+
+        private HierarchyAnalysisResult PerformDeepHierarchicalAnalysis(List<IGrouping<uint, dynamic>> groupedEntries)
+        {
+            var result = new HierarchyAnalysisResult();
+            
+            if (Pm4File?.MSLK?.Entries == null)
+                return result;
+
+            // 1. Analyze numerical hierarchy patterns in Unknown_0x04 values
+            AnalyzeNumericalHierarchy(groupedEntries, result);
+            
+            // 2. Analyze Unknown_0x10 cross-reference relationships
+            AnalyzeUnknown0x10Relationships(result);
+            
+            // 3. Analyze chunk ownership patterns
+            AnalyzeChunkOwnershipHierarchy(groupedEntries, result);
+            
+            // 4. Analyze spatial hierarchy patterns
+            AnalyzeSpatialHierarchy(groupedEntries, result);
+            
+            // 5. Calculate hierarchy metrics
+            CalculateHierarchyMetrics(result);
+            
+            return result;
+        }
+
+        private void AnalyzeNumericalHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        {
+            var groupValues = groupedEntries.Select(g => g.Key).OrderBy(x => x).ToList();
+            
+            foreach (var groupValue in groupValues)
+            {
+                var hierarchyInfo = new GroupHierarchyInfo
+                {
+                    GroupValue = groupValue,
+                    IsRootNode = true,
+                    IsLeafNode = true,
+                    HierarchyLevel = 0
+                };
+
+                // Check for numerical parent-child relationships
+                // Pattern 1: Bit masking hierarchy (0x1000 parent of 0x1001, 0x1002, etc.)
+                var potentialParents = groupValues.Where(v => v < groupValue && (groupValue & v) == v).ToList();
+                if (potentialParents.Any())
+                {
+                    var closestParent = potentialParents.Max();
+                    hierarchyInfo.ParentValue = closestParent;
+                    hierarchyInfo.IsRootNode = false;
+                    
+                    if (result.GroupHierarchy.ContainsKey(closestParent))
+                    {
+                        result.GroupHierarchy[closestParent].IsLeafNode = false;
+                        result.GroupHierarchy[closestParent].ChildCount++;
+                    }
+                }
+                
+                // Pattern 2: Sequential hierarchy (0x1000, 0x1100, 0x1200 as siblings under common parent)
+                var baseValue = groupValue & 0xFFF00000; // Check upper bits
+                if (baseValue != 0 && baseValue != groupValue)
+                {
+                    var sequentialParents = groupValues.Where(v => (v & 0xFFF00000) == baseValue && v < groupValue).ToList();
+                    if (sequentialParents.Any() && !hierarchyInfo.ParentValue.HasValue)
+                    {
+                        hierarchyInfo.ParentValue = baseValue;
+                        hierarchyInfo.IsRootNode = false;
+                    }
+                }
+
+                result.GroupHierarchy[groupValue] = hierarchyInfo;
+            }
+        }
+
+        private void AnalyzeUnknown0x10Relationships(HierarchyAnalysisResult result)
+        {
+            if (Pm4File?.MSLK?.Entries == null) return;
+
+            // Analyze Unknown_0x10 as potential cross-references creating hierarchies
+            var unknown0x10References = new Dictionary<uint, List<uint>>();
+            
+            foreach (var entry in Pm4File.MSLK.Entries)
+            {
+                // Check if Unknown_0x10 points to valid indices in other structures
+                if (entry.Unknown_0x10 < Pm4File.MSLK.Entries.Count)
+                {
+                    var referencedEntry = Pm4File.MSLK.Entries[entry.Unknown_0x10];
+                    var sourceGroup = entry.Unknown_0x04;
+                    var targetGroup = referencedEntry.Unknown_0x04;
+                    
+                    if (sourceGroup != targetGroup)
+                    {
+                        if (!unknown0x10References.ContainsKey(sourceGroup))
+                            unknown0x10References[sourceGroup] = new List<uint>();
+                        
+                        unknown0x10References[sourceGroup].Add(targetGroup);
+                        result.TotalConnections++;
+                        
+                        // Update hierarchy info with cross-references
+                        if (result.GroupHierarchy.ContainsKey(sourceGroup))
+                        {
+                            result.GroupHierarchy[sourceGroup].CrossReferences.Add(targetGroup);
+                        }
+                    }
+                }
+            }
+
+            result.CrossReferenceNetwork = unknown0x10References;
+        }
+
+        private void AnalyzeChunkOwnershipHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        {
+            if (Pm4File?.MSUR?.Entries == null || Pm4File?.MSVI?.Indices == null) return;
+
+            // Analyze which groups "own" which MSUR surfaces and vertex ranges
+            foreach (var group in groupedEntries)
+            {
+                var entries = group.Select(x => x.Entry).Cast<MSLKEntry>().ToList();
+                var ownership = new ChunkOwnershipInfo();
+                
+                // Analyze MSVI index ownership
+                var msviIndices = new HashSet<uint>();
+                foreach (var entry in entries)
+                {
+                    if (entry.Unknown_0x10 < (Pm4File.MSVI?.Indices.Count ?? 0))
+                    {
+                        msviIndices.Add((uint)entry.Unknown_0x10);
+                    }
+                }
+                ownership.OwnedMSVIIndices = msviIndices.ToList();
+                
+                // Analyze MSVT vertex range ownership through MSVI
+                var msvtVertices = new HashSet<uint>();
+                foreach (var msviIndex in msviIndices)
+                {
+                    if (msviIndex < (Pm4File.MSVI?.Indices.Count ?? 0))
+                    {
+                        var vertexIndex = Pm4File.MSVI.Indices[(int)msviIndex];
+                        if (vertexIndex < (Pm4File.MSVT?.Vertices.Count ?? 0))
+                        {
+                            msvtVertices.Add(vertexIndex);
+                        }
+                    }
+                }
+                ownership.OwnedMSVTVertices = msvtVertices.ToList();
+                
+                // Calculate ownership statistics
+                ownership.VertexRangeStart = msvtVertices.Count > 0 ? msvtVertices.Min() : 0;
+                ownership.VertexRangeEnd = msvtVertices.Count > 0 ? msvtVertices.Max() : 0;
+                ownership.VertexRangeSize = msvtVertices.Count;
+                
+                result.ChunkOwnership[group.Key] = ownership;
+            }
+        }
+
+        private void AnalyzeSpatialHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        {
+            // Analyze spatial clustering to detect hierarchical patterns
+            foreach (var group in groupedEntries)
+            {
+                var entries = group.Select(x => x.Entry).Cast<MSLKEntry>().ToList();
+                var vertices = ExtractGroupVertices(entries);
+                
+                if (vertices.Count > 0)
+                {
+                    // Calculate spatial statistics
+                    var centerX = vertices.Average(v => v.X);
+                    var centerY = vertices.Average(v => v.Y);
+                    var centerZ = vertices.Average(v => v.Z);
+                    
+                    var maxDistance = vertices.Max(v => 
+                        Math.Sqrt(Math.Pow(v.X - centerX, 2) + Math.Pow(v.Y - centerY, 2) + Math.Pow(v.Z - centerZ, 2)));
+                    
+                    if (result.GroupHierarchy.ContainsKey(group.Key))
+                    {
+                        result.GroupHierarchy[group.Key].SpatialCenter = new Vector3((float)centerX, (float)centerY, (float)centerZ);
+                        result.GroupHierarchy[group.Key].SpatialRadius = (float)maxDistance;
+                    }
+                }
+            }
+        }
+
+        private void CalculateHierarchyMetrics(HierarchyAnalysisResult result)
+        {
+            // Calculate hierarchy depth
+            foreach (var group in result.GroupHierarchy.Values)
+            {
+                CalculateHierarchyLevel(group, result.GroupHierarchy);
+            }
+            
+            result.MaxHierarchyDepth = result.GroupHierarchy.Values.Any() ? result.GroupHierarchy.Values.Max(g => g.HierarchyLevel) : 0;
+            result.RootNodes = result.GroupHierarchy.Values.Count(g => g.IsRootNode);
+            result.LeafNodes = result.GroupHierarchy.Values.Count(g => g.IsLeafNode);
+        }
+
+        private void CalculateHierarchyLevel(GroupHierarchyInfo group, Dictionary<uint, GroupHierarchyInfo> hierarchy)
+        {
+            if (group.HierarchyLevel > 0) return; // Already calculated
+            
+            if (group.IsRootNode)
+            {
+                group.HierarchyLevel = 1;
+            }
+            else if (group.ParentValue.HasValue && hierarchy.ContainsKey(group.ParentValue.Value))
+            {
+                var parent = hierarchy[group.ParentValue.Value];
+                CalculateHierarchyLevel(parent, hierarchy);
+                group.HierarchyLevel = parent.HierarchyLevel + 1;
+            }
+            else
+            {
+                group.HierarchyLevel = 1; // Treat as root if parent not found
+            }
+        }
+
+        private ChunkOwnershipInfo AnalyzeChunkOwnership(List<MSLKEntry> entries)
+        {
+            var ownership = new ChunkOwnershipInfo();
+            
+            if (Pm4File?.MSVI?.Indices == null) return ownership;
+            
+            // Analyze what chunks this group references
+            var msviIndices = new HashSet<uint>();
+            var msvtVertices = new HashSet<uint>();
+            
+            foreach (var entry in entries)
+            {
+                if (entry.Unknown_0x10 < Pm4File.MSVI.Indices.Count)
+                {
+                    msviIndices.Add((uint)entry.Unknown_0x10);
+                    
+                    var vertexIndex = Pm4File.MSVI.Indices[entry.Unknown_0x10];
+                    if (vertexIndex < (Pm4File.MSVT?.Vertices.Count ?? 0))
+                    {
+                        msvtVertices.Add(vertexIndex);
+                    }
+                }
+            }
+            
+            ownership.OwnedMSVIIndices = msviIndices.ToList();
+            ownership.OwnedMSVTVertices = msvtVertices.ToList();
+            ownership.VertexRangeSize = msvtVertices.Count;
+            
+            if (msvtVertices.Count > 0)
+            {
+                ownership.VertexRangeStart = msvtVertices.Min();
+                ownership.VertexRangeEnd = msvtVertices.Max();
+            }
+            
+            return ownership;
+        }
+
+        private void AddHierarchyInsights(HierarchyAnalysisResult analysis)
+        {
+            // Add hierarchy insights to structural insights collection
+            StructuralInsights.Add(new StructuralInsight
+            {
+                Type = "Hierarchy Analysis",
+                Description = $"Detected {analysis.GroupHierarchy.Count} groups with {analysis.MaxHierarchyDepth} levels deep",
+                Significance = $"Root nodes: {analysis.RootNodes}, Leaf nodes: {analysis.LeafNodes}, Cross-connections: {analysis.TotalConnections}",
+                DataPreview = $"Max spatial radius: {(analysis.GroupHierarchy.Values.Where(g => g.SpatialRadius > 0).Any() ? analysis.GroupHierarchy.Values.Where(g => g.SpatialRadius > 0).Max(g => g.SpatialRadius) : 0):F1}"
+            });
+
+            // Add numerical hierarchy patterns
+            var numericalPatterns = analysis.GroupHierarchy.Values.Where(g => g.ParentValue.HasValue).ToList();
+            if (numericalPatterns.Any())
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Numerical Hierarchy",
+                    Description = $"Found {numericalPatterns.Count} parent-child relationships in Unknown_0x04 values",
+                    Significance = "Bit masking or sequential hierarchy patterns detected",
+                    DataPreview = string.Join(", ", numericalPatterns.Take(3).Select(p => $"0x{p.GroupValue:X8}→0x{p.ParentValue:X8}"))
+                });
+            }
+
+            // Add cross-reference insights
+            if (analysis.CrossReferenceNetwork.Any())
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Cross-Reference Network",
+                    Description = $"Unknown_0x10 creates {analysis.TotalConnections} cross-group connections",
+                    Significance = "Potential navigation or dependency relationships",
+                    DataPreview = string.Join(", ", analysis.CrossReferenceNetwork.Take(3).Select(kvp => $"0x{kvp.Key:X8}→[{kvp.Value.Count} refs]"))
+                });
+            }
+
+            // Add chunk ownership insights
+            var exclusiveOwnership = analysis.ChunkOwnership.Values.Where(o => o.VertexRangeSize > 0).ToList();
+            if (exclusiveOwnership.Any())
+            {
+                var totalVerticesOwned = exclusiveOwnership.Sum(o => o.VertexRangeSize);
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Chunk Ownership",
+                    Description = $"Groups have exclusive ownership of {totalVerticesOwned} vertices across {exclusiveOwnership.Count} ranges",
+                    Significance = "Groups control distinct geometry regions",
+                    DataPreview = $"Largest range: {exclusiveOwnership.Max(o => o.VertexRangeSize)} vertices"
+                });
+            }
+        }
+
+        #endregion
+
+        #region Coordinate Bounds Validation
+
+        private string ValidateCoordinateBounds(List<Point3D> points, string chunkType)
+        {
+            if (!points.Any()) return "";
+
+            var outOfBounds = points.Where(p => 
+                p.X < PM4_MIN_COORDINATE || p.X > PM4_MAX_COORDINATE ||
+                p.Y < PM4_MIN_COORDINATE || p.Y > PM4_MAX_COORDINATE ||
+                p.Z < PM4_MIN_COORDINATE || p.Z > PM4_MAX_COORDINATE).ToList();
+
+            if (outOfBounds.Any())
+            {
+                var percentage = (outOfBounds.Count * 100.0) / points.Count;
+                
+                // Add insight about out-of-bounds vertices
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Coordinate Bounds",
+                    Description = $"{chunkType} has {outOfBounds.Count} vertices outside PM4 coordinate bounds",
+                    Significance = $"{percentage:F1}% of vertices exceed ±{PM4_COORDINATE_BOUND:F0} limits",
+                    DataPreview = $"Range: X[{points.Min(p => p.X):F0}, {points.Max(p => p.X):F0}] Y[{points.Min(p => p.Y):F0}, {points.Max(p => p.Y):F0}] Z[{points.Min(p => p.Z):F0}, {points.Max(p => p.Z):F0}]"
+                });
+
+                return $" ⚠️{outOfBounds.Count}OOB";
+            }
+
+            // Calculate actual bounds for information
+            var minX = points.Min(p => p.X);
+            var maxX = points.Max(p => p.X);
+            var minY = points.Min(p => p.Y);
+            var maxY = points.Max(p => p.Y);
+            var minZ = points.Min(p => p.Z);
+            var maxZ = points.Max(p => p.Z);
+
+            // Add insight about coordinate usage
+            var rangeX = maxX - minX;
+            var rangeY = maxY - minY;
+            var rangeZ = maxZ - minZ;
+            var percentageUsedX = (rangeX / (2 * PM4_COORDINATE_BOUND)) * 100;
+            var percentageUsedY = (rangeY / (2 * PM4_COORDINATE_BOUND)) * 100;
+            var percentageUsedZ = (rangeZ / (2 * PM4_COORDINATE_BOUND)) * 100;
+
+            if (points.Count > 100) // Only add insight for significant chunks
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Coordinate Usage",
+                    Description = $"{chunkType} uses {percentageUsedX:F1}%×{percentageUsedY:F1}%×{percentageUsedZ:F1}% of PM4 coordinate space",
+                    Significance = $"Spatial distribution across coordinate bounds",
+                    DataPreview = $"Center: ({(minX + maxX) / 2:F0}, {(minY + maxY) / 2:F0}, {(minZ + maxZ) / 2:F0})"
+                });
+            }
+
+            return " ✓";
+        }
+
+        #endregion
     }
 
     public class ChunkVisualizationItem
@@ -1147,6 +1932,22 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public float AverageUnknown0x0C { get; set; }
         public float MinUnknown0x0C { get; set; }
         public float MaxUnknown0x0C { get; set; }
+        public GroupHierarchyInfo HierarchyInfo { get; set; } = new();
+        public ChunkOwnershipInfo ChunkOwnership { get; set; } = new();
+    }
+
+    public class Unknown0x0CGroup
+    {
+        public uint GroupValue { get; set; }
+        public int EntryCount { get; set; }
+        public List<int> EntryIndices { get; set; } = new();
+        public Color GroupColor { get; set; }
+        public Color Color { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public List<Vector3> AssociatedVertices { get; set; } = new();
+        public float AverageUnknown0x04 { get; set; }
+        public float MinUnknown0x04 { get; set; }
+        public float MaxUnknown0x04 { get; set; }
     }
 
     public class LoadingProgress
@@ -1164,5 +1965,42 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public List<StructuralInsight> Insights { get; set; } = new();
         public Dictionary<string, object> RawAnalysis { get; set; } = new();
         public string Summary { get; set; } = string.Empty;
+    }
+
+    public class HierarchyAnalysisResult
+    {
+        public Dictionary<uint, GroupHierarchyInfo> GroupHierarchy { get; set; } = new();
+        public Dictionary<uint, List<uint>> CrossReferenceNetwork { get; set; } = new();
+        public Dictionary<uint, ChunkOwnershipInfo> ChunkOwnership { get; set; } = new();
+        public int MaxHierarchyDepth { get; set; }
+        public int RootNodes { get; set; }
+        public int LeafNodes { get; set; }
+        public int TotalConnections { get; set; }
+    }
+
+    public class GroupHierarchyInfo
+    {
+        public uint GroupValue { get; set; }
+        public uint? ParentValue { get; set; }
+        public List<uint> ChildValues { get; set; } = new();
+        public List<uint> CrossReferences { get; set; } = new();
+        public bool IsRootNode { get; set; }
+        public bool IsLeafNode { get; set; }
+        public int HierarchyLevel { get; set; }
+        public int ChildCount { get; set; }
+        public Vector3? SpatialCenter { get; set; }
+        public float SpatialRadius { get; set; }
+    }
+
+    public class ChunkOwnershipInfo
+    {
+        public List<uint> OwnedMSVIIndices { get; set; } = new();
+        public List<uint> OwnedMSVTVertices { get; set; } = new();
+        public List<uint> OwnedMSURSurfaces { get; set; } = new();
+        public uint VertexRangeStart { get; set; }
+        public uint VertexRangeEnd { get; set; }
+        public int VertexRangeSize { get; set; }
+        public bool HasExclusiveGeometry { get; set; }
+        public float GeometryComplexity { get; set; }
     }
 } 
