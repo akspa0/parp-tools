@@ -189,5 +189,84 @@ namespace WoWToolbox.Core.Navigation.PM4
                 writer.WriteLine();
             }
         }
+
+        /// <summary>
+        /// Computes a normal vector from three vertices of a triangle using the cross product.
+        /// </summary>
+        /// <param name="v1">First vertex of the triangle.</param>
+        /// <param name="v2">Second vertex of the triangle.</param>
+        /// <param name="v3">Third vertex of the triangle.</param>
+        /// <returns>Normalized normal vector pointing outward from the triangle.</returns>
+        public static Vector3 ComputeTriangleNormal(Vector3 v1, Vector3 v2, Vector3 v3)
+        {
+            // Compute two edge vectors
+            var edge1 = v2 - v1;
+            var edge2 = v3 - v1;
+            
+            // Compute cross product (right-hand rule for outward-facing normal)
+            var normal = Vector3.Cross(edge1, edge2);
+            
+            // Normalize the result
+            var length = normal.Length();
+            if (length > 0.0001f) // Avoid division by zero for degenerate triangles
+            {
+                return normal / length;
+            }
+            
+            // Return up vector for degenerate triangles
+            return Vector3.UnitY;
+        }
+
+        /// <summary>
+        /// Computes per-vertex normals from triangle data using face normal averaging.
+        /// </summary>
+        /// <param name="vertices">List of vertices.</param>
+        /// <param name="triangleIndices">List of triangle indices (groups of 3).</param>
+        /// <returns>List of normalized vertex normals.</returns>
+        public static List<Vector3> ComputeVertexNormals(List<Vector3> vertices, List<int> triangleIndices)
+        {
+            var vertexNormals = new Vector3[vertices.Count];
+            
+            // Accumulate face normals for each vertex
+            for (int i = 0; i < triangleIndices.Count; i += 3)
+            {
+                int idx1 = triangleIndices[i];
+                int idx2 = triangleIndices[i + 1];
+                int idx3 = triangleIndices[i + 2];
+                
+                // Validate indices
+                if (idx1 >= vertices.Count || idx2 >= vertices.Count || idx3 >= vertices.Count)
+                    continue;
+                
+                var v1 = vertices[idx1];
+                var v2 = vertices[idx2];
+                var v3 = vertices[idx3];
+                
+                var faceNormal = ComputeTriangleNormal(v1, v2, v3);
+                
+                // Add face normal to each vertex of the triangle
+                vertexNormals[idx1] += faceNormal;
+                vertexNormals[idx2] += faceNormal;
+                vertexNormals[idx3] += faceNormal;
+            }
+            
+            // Normalize all vertex normals
+            var normalizedNormals = new List<Vector3>();
+            for (int i = 0; i < vertexNormals.Length; i++)
+            {
+                var normal = vertexNormals[i];
+                var length = normal.Length();
+                if (length > 0.0001f)
+                {
+                    normalizedNormals.Add(normal / length);
+                }
+                else
+                {
+                    normalizedNormals.Add(Vector3.UnitY); // Default up vector
+                }
+            }
+            
+            return normalizedNormals;
+        }
     }
 } 

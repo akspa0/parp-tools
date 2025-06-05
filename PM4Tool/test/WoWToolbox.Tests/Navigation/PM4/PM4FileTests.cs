@@ -144,6 +144,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
             using var combinedWithMscnWriter = new StreamWriter(combinedWithMscnPath);
             using var combinedAllChunksWriter = new StreamWriter(combinedAllChunksPath);
 
+            // Initialize combined render mesh file with header
+            combinedRenderMeshWriter.WriteLine($"# PM4 Combined Render Mesh - With Faces and Normals (Generated: {DateTime.Now})");
+            combinedRenderMeshWriter.WriteLine("# Contains MSVT render mesh vertices with computed normals and triangle faces");
+            combinedRenderMeshWriter.WriteLine("# All coordinates are PM4-relative for proper spatial alignment");
+
             // Initialize comprehensive combined file
             combinedAllChunksWriter.WriteLine($"# PM4 Geometry Chunks Combined - Properly Aligned (Generated: {DateTime.Now})");
             combinedAllChunksWriter.WriteLine("# This file contains ONLY the local geometry chunk types with correct coordinate transformations:");
@@ -155,6 +160,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
             int totalVerticesOffset = 0; // Track vertex offset for combined file
             int totalMscnOffset = 0; // Track MSCN point offset for combined file
+            
+            // Track combined mesh data for normals and faces generation
+            var combinedVertices = new List<Vector3>();
+            var combinedTriangleIndices = new List<int>();
+            var combinedFileInfo = new List<(string fileName, int vertexCount, int faceCount)>();
 
             // --- Loop Through Files ---
             foreach (var inputFilePath in pm4Files)
@@ -222,7 +232,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 try
                 {
                     // Call the helper method, passing the combined writer and current offset
-                    int verticesInCurrentFile = ProcessSinglePm4File(inputFilePath, outputDir, combinedRenderMeshWriter, totalVerticesOffset);
+                    var processResult = ProcessSinglePm4FileWithData(inputFilePath, outputDir, combinedRenderMeshWriter, totalVerticesOffset);
+                    int verticesInCurrentFile = processResult.vertexCount;
                     
                     // Write MSCN points to the combined with MSCN file
                     if (verticesInCurrentFile > 0) // Only if we successfully processed vertices
@@ -293,10 +304,26 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         combinedAllChunksWriter.WriteLine(); // Blank line between files
                     }
                     
+                    // Collect vertex and face data for combined mesh
+                    if (processResult.vertices != null && processResult.vertices.Count > 0)
+                    {
+                        // Add vertices to combined mesh with offset
+                        combinedVertices.AddRange(processResult.vertices);
+                        
+                        // Add triangle indices with offset
+                        foreach (var index in processResult.triangleIndices)
+                        {
+                            combinedTriangleIndices.Add(index + totalVerticesOffset);
+                        }
+                        
+                        // Track file info
+                        combinedFileInfo.Add((fileName, processResult.vertexCount, processResult.triangleIndices.Count / 3));
+                    }
+                    
                     processedCount++;
                     totalVerticesOffset += verticesInCurrentFile; // Update the offset for the next file
-                    Console.WriteLine($"-------------------- Successfully processed: {fileName} (Added {verticesInCurrentFile} vertices) --------------------");
-                    errorLogWriter.WriteLine($"SUCCESS: Processed {fileName} (Added {verticesInCurrentFile} vertices)");
+                    Console.WriteLine($"-------------------- Successfully processed: {fileName} (Added {verticesInCurrentFile} vertices, {processResult.triangleIndices.Count / 3} faces) --------------------");
+                    errorLogWriter.WriteLine($"SUCCESS: Processed {fileName} (Added {verticesInCurrentFile} vertices, {processResult.triangleIndices.Count / 3} faces)");
                 }
                 catch (Exception ex)
                 {
@@ -405,6 +432,49 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             Console.WriteLine("--- Finished Writing Faces to Combined OBJ with MSCN ---");
 
+            // --- Generate Combined Render Mesh Normals and Faces ---
+            Console.WriteLine("\n--- Generating Combined Render Mesh Normals and Faces ---");
+            if (combinedVertices.Count > 0 && combinedTriangleIndices.Count >= 3)
+            {
+                // Compute combined normals from all geometry
+                var combinedNormals = Pm4CoordinateTransforms.ComputeVertexNormals(combinedVertices, combinedTriangleIndices);
+                Console.WriteLine($"  Computed {combinedNormals.Count} normals from {combinedVertices.Count} vertices and {combinedTriangleIndices.Count / 3} faces");
+                
+                // Write normals to combined render mesh file
+                combinedRenderMeshWriter.WriteLine("# Combined vertex normals computed from all PM4 files");
+                foreach (var normal in combinedNormals)
+                {
+                    combinedRenderMeshWriter.WriteLine(FormattableString.Invariant($"vn {normal.X:F6} {normal.Y:F6} {normal.Z:F6}"));
+                }
+                
+                // Write faces with normals to combined render mesh file
+                combinedRenderMeshWriter.WriteLine("# Combined faces with normals (v//vn)");
+                int combinedFacesWritten = 0;
+                for (int i = 0; i + 2 < combinedTriangleIndices.Count; i += 3)
+                {
+                    int idx1 = combinedTriangleIndices[i] + 1; // OBJ 1-based indexing
+                    int idx2 = combinedTriangleIndices[i + 1] + 1;
+                    int idx3 = combinedTriangleIndices[i + 2] + 1;
+                    
+                    combinedRenderMeshWriter.WriteLine($"f {idx1}//{idx1} {idx2}//{idx2} {idx3}//{idx3}");
+                    combinedFacesWritten++;
+                }
+                
+                Console.WriteLine($"  Written {combinedFacesWritten} faces to combined render mesh");
+                
+                // Write summary of files included
+                combinedRenderMeshWriter.WriteLine($"\n# Combined from {combinedFileInfo.Count} PM4 files:");
+                foreach (var (fileName, vertexCount, faceCount) in combinedFileInfo)
+                {
+                    combinedRenderMeshWriter.WriteLine($"#   {fileName}: {vertexCount} vertices, {faceCount} faces");
+                }
+            }
+            else
+            {
+                Console.WriteLine("  No valid geometry data found for combined render mesh");
+            }
+            Console.WriteLine("--- Finished Combined Render Mesh Generation ---");
+
             errorLogWriter.WriteLine($"\n--- Batch Processing Summary ---");
             errorLogWriter.WriteLine($"Total Files:     {pm4Files.Count}");
             errorLogWriter.WriteLine($"Processed:       {processedCount}");
@@ -501,16 +571,28 @@ namespace WoWToolbox.Tests.Navigation.PM4
         // Updated signature to accept combined writer and vertex offset, and return vertex count
         private int ProcessSinglePm4File(string inputFilePath, string outputDir, StreamWriter combinedTransformedWriter, int vertexOffset)
         {
+            var result = ProcessSinglePm4FileWithData(inputFilePath, outputDir, combinedTransformedWriter, vertexOffset);
+            return result.vertexCount;
+        }
+        
+        // Enhanced version that returns geometry data for combined mesh generation
+        private (int vertexCount, List<Vector3> vertices, List<int> triangleIndices) ProcessSinglePm4FileWithData(string inputFilePath, string outputDir, StreamWriter combinedTransformedWriter, int vertexOffset)
+        {
             // MOVED UP: Define fileBaseName earlier
             var fileName = Path.GetFileName(inputFilePath);
             var fileBaseName = Path.GetFileNameWithoutExtension(inputFilePath);
+
+            // Initialize return data
+            var vertices = new List<Vector3>();
+            var triangleIndices = new List<int>();
 
             // Check if this is a known problematic file that needs special handling
             if (fileName.Equals("development_49_28.pm4", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine($"  * Detected known problematic file with high MPRR/MPRL ratio: {fileName}");
                 Console.WriteLine($"  * Using specialized processing approach...");
-                return ProcessHighRatioPm4File(inputFilePath, outputDir, combinedTransformedWriter, vertexOffset);
+                int vertexCount = ProcessHighRatioPm4File(inputFilePath, outputDir, combinedTransformedWriter, vertexOffset);
+                return (vertexCount, vertices, triangleIndices); // Note: high ratio processing doesn't return geometry data yet
             }
             
             // ... rest of the existing method ...
@@ -634,16 +716,17 @@ namespace WoWToolbox.Tests.Navigation.PM4
 
             int msvtFileVertexCount = 0; // Declare variable here for correct scope
 
-            // Check if MSCN data is available and matches MSVT count
-            // CORRECTED: Use .Vectors.Count
-            bool mscnAvailable = pm4File.MSCN != null && pm4File.MSVT != null && pm4File.MSCN.ExteriorVertices.Count == pm4File.MSVT.Vertices.Count;
-            if (!mscnAvailable && pm4File.MSCN != null && pm4File.MSVT != null) // Log mismatch if MSCN exists but count differs
+            // MSCN is collision boundary geometry, NOT normals - they naturally have different vertex counts
+            // Real normals should be calculated from face geometry using MSVI indices
+            bool generateFaces = pm4File.MSVT != null && pm4File.MSVI != null && pm4File.MSVI.Indices.Count >= 3;
+            
+            if (pm4File.MSCN != null && pm4File.MSVT != null) 
             {
-                debugWriter.WriteLine($"WARN: MSCN chunk present but vector count ({pm4File.MSCN.ExteriorVertices.Count}) does not match MSVT vertex count ({pm4File.MSVT.Vertices.Count}). Normals will not be exported.");
+                debugWriter.WriteLine($"INFO: MSCN contains {pm4File.MSCN.ExteriorVertices.Count} collision boundary vertices, MSVT has {pm4File.MSVT.Vertices.Count} render vertices. These are separate geometry types with different purposes.");
             }
             else if(pm4File.MSCN == null)
             {
-                debugWriter.WriteLine("INFO: MSCN chunk not found. Normals will not be exported.");
+                debugWriter.WriteLine("INFO: MSCN chunk not found. No collision boundary data available.");
             }
 
             try // Keep inner try for logging/resource cleanup context if needed, though outer one catches errors
@@ -781,23 +864,15 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSVT {msvtIndex}"));
                         // Use the same PM4-relative transformation for global combined mesh
                         combinedTransformedWriter.WriteLine(FormattableString.Invariant($"v {pm4Coords.X:F6} {pm4Coords.Y:F6} {pm4Coords.Z:F6} # MSVT {msvtIndex} (File: {baseOutputName})"));
-
-                        // --- Write Normals if available ---
-                        if (mscnAvailable)
+                        
+                        // Always collect vertices for combined mesh (even if face generation is disabled)
+                        if (!generateFaces)
                         {
-                            // CORRECTED: Access .Vectors
-                            var normal = pm4File.MSCN!.ExteriorVertices[msvtIndex];
-
-                            // Original Normal (Y, X, Z)
-                            renderMeshWriter.WriteLine(FormattableString.Invariant($"vn {normal.Y:F6} {normal.X:F6} {normal.Z:F6}"));
-
-                            // Transformed Normal - should be in same coordinate system as vertices
-                            renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"vn {normal.X:F6} {normal.Y:F6} {normal.Z:F6}"));
-
-                            // Use same transformation for combined file
-                            combinedTransformedWriter.WriteLine(FormattableString.Invariant($"vn {normal.X:F6} {normal.Y:F6} {normal.Z:F6}"));
+                            vertices.Add(pm4Coords);
                         }
-                        // --- End Normals ---
+
+                        // NOTE: Normals should be calculated from face geometry, not from MSCN
+                        // MSCN contains collision boundary vertices, not vertex normals
 
                         if (logCounterMsvt < 10)
                         {
@@ -813,8 +888,97 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     }
                     debugWriter.WriteLine($"Wrote {msvtFileVertexCount} MSVT vertices (v) to _render_mesh.obj.");
                     debugWriter.WriteLine($"Wrote {msvtFileVertexCount} PM4-relative MSVT vertices (v) to transformed OBJ files.");
-                    renderMeshWriter.WriteLine(); // Blank line after vertices in original render mesh
-                    renderMeshTransformedWriter.WriteLine(); // Blank line after vertices in individual transformed file
+                    
+                    // --- Collect triangle indices for combined mesh (regardless of face generation) ---
+                    if (!generateFaces && pm4File.MSVI != null && pm4File.MSVI.Indices.Count >= 3)
+                    {
+                        for (int i = 0; i + 2 < pm4File.MSVI.Indices.Count; i += 3)
+                        {
+                            uint idx1 = pm4File.MSVI.Indices[i];
+                            uint idx2 = pm4File.MSVI.Indices[i + 1];
+                            uint idx3 = pm4File.MSVI.Indices[i + 2];
+                            
+                            // Validate indices against vertex count
+                            if (idx1 < msvtFileVertexCount && idx2 < msvtFileVertexCount && idx3 < msvtFileVertexCount)
+                            {
+                                triangleIndices.Add((int)idx1);
+                                triangleIndices.Add((int)idx2);
+                                triangleIndices.Add((int)idx3);
+                            }
+                        }
+                        debugWriter.WriteLine($"Collected {triangleIndices.Count / 3} triangle indices for combined mesh");
+                    }
+                    
+                    // --- Generate Faces and Normals from MSVI indices ---
+                    if (generateFaces && pm4File.MSVI!.Indices.Count >= 3)
+                    {
+                        debugWriter.WriteLine($"\n--- Generating Faces and Computed Normals from MSVI indices ---");
+                        
+                        // First, collect all vertices in PM4-relative coordinates
+                        var localVertices = new List<Vector3>();
+                        foreach (var vertex in pm4File.MSVT.Vertices)
+                        {
+                            var pm4Coords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                            localVertices.Add(pm4Coords);
+                            vertices.Add(pm4Coords); // Add to return list for combined mesh
+                        }
+                        
+                        // Collect all triangle indices
+                        var localTriangleIndices = new List<int>();
+                        for (int i = 0; i + 2 < pm4File.MSVI.Indices.Count; i += 3)
+                        {
+                            uint idx1 = pm4File.MSVI.Indices[i];
+                            uint idx2 = pm4File.MSVI.Indices[i + 1];
+                            uint idx3 = pm4File.MSVI.Indices[i + 2];
+                            
+                            // Validate indices against vertex count
+                            if (idx1 < msvtFileVertexCount && idx2 < msvtFileVertexCount && idx3 < msvtFileVertexCount)
+                            {
+                                localTriangleIndices.Add((int)idx1);
+                                localTriangleIndices.Add((int)idx2);
+                                localTriangleIndices.Add((int)idx3);
+                                
+                                // Add to return list for combined mesh (will be adjusted with vertex offset later)
+                                triangleIndices.Add((int)idx1);
+                                triangleIndices.Add((int)idx2);
+                                triangleIndices.Add((int)idx3);
+                            }
+                        }
+                        
+                        // Compute proper vertex normals from face geometry
+                        var normals = Pm4CoordinateTransforms.ComputeVertexNormals(localVertices, localTriangleIndices);
+                        debugWriter.WriteLine($"Computed {normals.Count} vertex normals from {localTriangleIndices.Count / 3} triangles");
+                        
+                        // Write computed normals to OBJ files
+                        renderMeshWriter.WriteLine("# Computed vertex normals from face geometry");
+                        renderMeshTransformedWriter.WriteLine("# Computed vertex normals from face geometry");
+                        for (int i = 0; i < normals.Count; i++)
+                        {
+                            var normal = normals[i];
+                            renderMeshWriter.WriteLine(FormattableString.Invariant($"vn {normal.X:F6} {normal.Y:F6} {normal.Z:F6}"));
+                            renderMeshTransformedWriter.WriteLine(FormattableString.Invariant($"vn {normal.X:F6} {normal.Y:F6} {normal.Z:F6}"));
+                        }
+                        
+                        // Write faces with normals (v//vn format)
+                        renderMeshWriter.WriteLine("# Faces with computed normals (v//vn)");
+                        renderMeshTransformedWriter.WriteLine("# Faces with computed normals (v//vn)");
+                        int facesWritten = 0;
+                        for (int i = 0; i + 2 < localTriangleIndices.Count; i += 3)
+                        {
+                            int idx1 = localTriangleIndices[i];
+                            int idx2 = localTriangleIndices[i + 1];
+                            int idx3 = localTriangleIndices[i + 2];
+                            
+                            // OBJ uses 1-based indexing for both vertices and normals
+                            renderMeshWriter.WriteLine($"f {idx1 + 1}//{idx1 + 1} {idx2 + 1}//{idx2 + 1} {idx3 + 1}//{idx3 + 1}");
+                            renderMeshTransformedWriter.WriteLine($"f {idx1 + 1}//{idx1 + 1} {idx2 + 1}//{idx2 + 1} {idx3 + 1}//{idx3 + 1}");
+                            facesWritten++;
+                        }
+                        debugWriter.WriteLine($"Generated {facesWritten} faces with computed normals from MSVI indices");
+                    }
+                    
+                    renderMeshWriter.WriteLine(); // Blank line after vertices/faces
+                    renderMeshTransformedWriter.WriteLine(); // Blank line after vertices/faces
                 }
                 else { debugWriter.WriteLine("\nNo MSVT vertex data found or export skipped."); }
 
@@ -1412,22 +1576,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                             int adjustedSecondVertexIdx = secondVertexIdx + vertexOffset;
                                             int adjustedThirdVertexIdx = thirdVertexIdx + vertexOffset;
 
-                                            // REVERTED & MODIFIED: Write faces, include normals (v//vn) if available
-                                            string faceStr;
-                                            string adjFaceStr;
-                                            
-                                            if (mscnAvailable)
-                                            {
-                                                // With normals
-                                                faceStr = $"f {centralVertexIdx}//{centralVertexIdx} {secondVertexIdx}//{secondVertexIdx} {thirdVertexIdx}//{thirdVertexIdx}";
-                                                adjFaceStr = $"f {adjustedCentralVertexIdx}//{adjustedCentralVertexIdx} {adjustedSecondVertexIdx}//{adjustedSecondVertexIdx} {adjustedThirdVertexIdx}//{adjustedThirdVertexIdx}";
-                                            }
-                                            else
-                                            {
-                                                // Without normals
-                                                faceStr = $"f {centralVertexIdx} {secondVertexIdx} {thirdVertexIdx}";
-                                                adjFaceStr = $"f {adjustedCentralVertexIdx} {adjustedSecondVertexIdx} {adjustedThirdVertexIdx}";
-                                            }
+                                            // Generate faces without normals (proper normals can be computed from geometry)
+                                            string faceStr = $"f {centralVertexIdx} {secondVertexIdx} {thirdVertexIdx}";
+                                            string adjFaceStr = $"f {adjustedCentralVertexIdx} {adjustedSecondVertexIdx} {adjustedThirdVertexIdx}";
                                             
                                             renderMeshWriter!.WriteLine(faceStr);
                                             renderMeshTransformedWriter!.WriteLine(faceStr);
@@ -1546,22 +1697,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                             int adjustedSecondVertexIdx = secondVertexIdx + vertexOffset;
                                             int adjustedThirdVertexIdx = thirdVertexIdx + vertexOffset;
                                             
-                                            // REVERTED & MODIFIED: Write faces, include normals (v//vn) if available
-                                            string faceStr;
-                                            string adjFaceStr;
-                                            
-                                            if (mscnAvailable)
-                                            {
-                                                // With normals
-                                                faceStr = $"f {centralVertexIdx}//{centralVertexIdx} {secondVertexIdx}//{secondVertexIdx} {thirdVertexIdx}//{thirdVertexIdx}";
-                                                adjFaceStr = $"f {adjustedCentralVertexIdx}//{adjustedCentralVertexIdx} {adjustedSecondVertexIdx}//{adjustedSecondVertexIdx} {adjustedThirdVertexIdx}//{adjustedThirdVertexIdx}";
-                                            }
-                                            else
-                                            {
-                                                // Without normals
-                                                faceStr = $"f {centralVertexIdx} {secondVertexIdx} {thirdVertexIdx}";
-                                                adjFaceStr = $"f {adjustedCentralVertexIdx} {adjustedSecondVertexIdx} {adjustedThirdVertexIdx}";
-                                            }
+                                            // Generate faces without normals (proper normals can be computed from geometry)
+                                            string faceStr = $"f {centralVertexIdx} {secondVertexIdx} {thirdVertexIdx}";
+                                            string adjFaceStr = $"f {adjustedCentralVertexIdx} {adjustedSecondVertexIdx} {adjustedThirdVertexIdx}";
                                             
                                             renderMeshWriter!.WriteLine(faceStr);
                                             renderMeshTransformedWriter!.WriteLine(faceStr);
@@ -1606,7 +1744,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         if (exportOnlyFirstMsur && pm4File.MSUR.Entries.Count > 1) {
                               debugWriter.WriteLine("Note: MSUR processing was limited to the first entry by 'exportOnlyFirstMsur' flag.");
                         }
-                        summaryWriter.WriteLine($"--- Finished MSUR Processing (Processed: {msurEntriesProcessed}, Vertex Groups Written: {facesWrittenToRenderMesh}{(mscnAvailable ? " with Normals" : "")}) ---"); // Updated summary log
+                        summaryWriter.WriteLine($"--- Finished MSUR Processing (Processed: {msurEntriesProcessed}, Vertex Groups Written: {facesWrittenToRenderMesh}) ---"); // Updated summary log
                     }
                     else // Required chunks missing or no vertices exported
                     {
@@ -1776,9 +1914,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
             }
             // No finally needed here as 'using' handles disposal -> Moved sequence writing to finally
 
-            return msvtFileVertexCount; // Return the count of vertices written for the RENDER MESH files
+            return (msvtFileVertexCount, vertices, triangleIndices); // Return vertex count and geometry data
 
-        } // End ProcessSinglePm4File
+        } // End ProcessSinglePm4FileWithData
 
         /// <summary>
         /// Specialized processor for PM4 files with extremely high MPRR/MPRL ratios
