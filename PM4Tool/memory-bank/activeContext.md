@@ -13,7 +13,102 @@
 
 # Mode: PLAN
 
-# Active Context: WMO v14 Converter Texture Issues (2025-04-22)
+# Active Context: PM4 Coordinate System Mastery & Alignment (2025-01-14)
+
+## Major Breakthrough: Complete PM4 Coordinate System Understanding
+
+We have achieved a comprehensive understanding of PM4 coordinate systems and successfully aligned all chunk types for meaningful spatial relationship analysis.
+
+### Key Discoveries & Achievements
+
+#### 1. MSCN Coordinate Transformation Resolution
+- **Problem Solved**: Through iterative visual feedback using MeshLab, determined the correct geometric transformation for MSCN collision boundaries
+- **Final Transform**: Complex geometric correction involving Y-axis correction `(v.X, -v.Y, v.Z)` followed by modified 180° rotation around X-axis
+- **Result**: MSCN collision boundaries now perfectly align with MSVT render meshes in 3D space
+- **Method**: Used systematic coordinate permutation testing with visual validation in MeshLab
+
+#### 2. Centralized Coordinate Transform System
+- **Created**: `Pm4CoordinateTransforms.cs` - centralized coordinate transformation system
+- **Eliminates**: Scattered coordinate constants (8+ different locations) and inconsistent transformations
+- **Provides**: Single source of truth for all PM4 chunk coordinate transformations
+- **Methods Included**:
+  - `FromMsvtVertexSimple()` - Render mesh vertices (Y, X, Z)
+  - `FromMscnVertex()` - Collision boundaries (complex geometric transform)
+  - `FromMspvVertex()` - Geometry structure (X, Y, Z)
+  - `FromMprlEntry()` - Reference points (X, -Z, Y)
+
+#### 3. PM4-Relative Coordinate System
+- **Converted**: All coordinate transforms to PM4-relative coordinates (removed world offset `17066.666f`)
+- **Benefit**: All chunks now use consistent local coordinate system for analysis
+- **Impact**: Enables meaningful spatial relationship analysis between different chunk types
+
+#### 4. Individual Chunk Analysis Capability
+- **Generated**: Clean, separate OBJ files for each chunk type for detailed analysis:
+  - `{filename}_chunk_mscn.obj` - Collision boundaries
+  - `{filename}_chunk_msvt.obj` - Render mesh vertices
+  - `{filename}_chunk_mslk_mspv.obj` - Geometric structure
+  - `{filename}_chunk_mprl.obj` - Reference points
+- **Purpose**: Enables individual chunk visualization and MeshLab analysis
+
+#### 5. Comprehensive Combined Output
+- **Created**: `combined_all_chunks_aligned.obj` - all chunk types properly aligned
+- **Contains**: MSVT render vertices, MSCN collision boundaries, MSLK/MSPV geometry, MPRL reference points
+- **Achievement**: First time all PM4 chunk types are spatially aligned for meaningful analysis
+
+### Current Understanding: Chunk Spatial Relationships
+
+#### MSLK (Geometric Structure)
+- **Role**: Defines polygons for vertical faces/polygons in WMO (building wireframes)
+- **Coordinates**: Standard PM4-relative (X, Y, Z)
+- **Usage**: Provides geometric framework for building structures
+
+#### MSCN (Collision Boundaries) - MAJOR BREAKTHROUGH
+- **Role**: Exterior collision boundaries (purple point cloud in visualizations)
+- **Coordinates**: Complex geometric transform - Y-axis correction + rotation
+- **Discovery**: These boundaries perfectly outline MSVT render meshes when properly transformed
+- **Alignment**: Now perfectly aligned with MSVT vertices for spatial analysis
+
+#### MSVT (Render Mesh Vertices)
+- **Role**: Primary mesh vertices for rendering
+- **Coordinates**: PM4-relative (Y, X, Z) transformation
+- **Status**: Foundation coordinate system for spatial alignment
+
+#### MPRL (Reference Points)
+- **Role**: Path/navigation reference points
+- **Coordinates**: PM4-relative (X, -Z, Y) transformation
+- **Usage**: Navigation and pathfinding references
+
+### Technical Implementation
+
+#### Iterative Coordinate Discovery Process
+1. **Visual Feedback Loop**: Used MeshLab screenshots to iteratively correct MSCN transformations
+2. **Systematic Testing**: Applied coordinate permutations and rotations until perfect alignment
+3. **Validation**: Confirmed alignment across multiple PM4 files and chunk combinations
+
+#### Coordinate Transform Testing Sequence (MSCN)
+1. Original: `(Y, X, Z)` → 90° clockwise rotation issue
+2. Attempt 1: `(-X, Y, Z)` → Fixed rotation, introduced X-axis mirroring
+3. Attempt 2: `(X, Y, Z)` → Fixed X-axis, Y-axis mirroring remained
+4. Attempt 3: `(X, -Y, Z)` → Fixed Y-axis, Z-axis inverted
+5. Attempt 4: `(X, -Y, -Z)` → Over-corrected
+6. **Final Success**: Complex geometric transform with Y-axis correction + rotation
+
+### Next Steps
+1. **Validate** coordinate alignment across wider PM4 dataset
+2. **Document** coordinate relationships for spatial analysis algorithms
+3. **Implement** spatial correlation analysis between chunk types
+4. **Develop** automated spatial relationship detection tools
+5. **Create** comprehensive PM4 spatial analysis framework
+
+### Impact & Significance
+- **First Complete PM4 Coordinate Understanding**: All chunk types now properly aligned
+- **Enables Advanced Analysis**: Spatial relationships between collision, render, and navigation data
+- **Foundation for Reconstruction**: Proper coordinate alignment enables WMO placement inference
+- **Tool Development**: Creates foundation for sophisticated PM4 analysis tools
+
+---
+
+# Previous Context: WMO v14 Converter Texture Issues (2025-04-22)
 
 ## Problem
 - While the geometry conversion from v14 to v17 WMO format is working correctly, textures are not being properly applied in the exported OBJ/MTL files.
@@ -40,7 +135,7 @@
 
 ---
 
-# Active Context: WMO v14 Group Mesh Extraction (2025-04-19)
+# Previous Context: WMO v14 Group Mesh Extraction (2025-04-19)
 
 ## Problem
 - v14 monolithic WMOs (e.g., Ironforge) do not store explicit mesh data in group files. Instead, geometry must be assembled from raw chunk data (MOVT, MONR, MOTV, MOPY, MOVI, etc.).
