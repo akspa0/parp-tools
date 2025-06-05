@@ -663,7 +663,7 @@ namespace WoWToolbox.PM4WmoMatcher
                     foreach (var v in pm4.MSVT.Vertices)
                     {
                         var worldPos = ToUnifiedWorld(v.ToWorldCoordinates());
-                        AddPoint(worldPos, "mesh");
+                        AddPoint((worldPos.X, worldPos.Y, worldPos.Z), "mesh");
                     }
                 }
                 // MSCN (exterior)
@@ -671,8 +671,9 @@ namespace WoWToolbox.PM4WmoMatcher
                 {
                     foreach (var v in pm4.MSCN.ExteriorVertices)
                     {
-                        var worldPos = ToUnifiedWorld(v);
-                        AddPoint(worldPos, "exterior");
+                        var vector3 = new Vector3(v.X, v.Y, v.Z);
+                        var worldPos = ToUnifiedWorld(vector3);
+                        AddPoint((worldPos.X, worldPos.Y, worldPos.Z), "exterior");
                     }
                 }
                 // MSPV (path vertices)
@@ -680,8 +681,9 @@ namespace WoWToolbox.PM4WmoMatcher
                 {
                     foreach (var v in pm4.MSPV.Vertices)
                     {
-                        var worldPos = ToUnifiedWorld(v);
-                        AddPoint(worldPos, "path");
+                        var vector3 = new Vector3(v.X, v.Y, v.Z);
+                        var worldPos = ToUnifiedWorld(vector3);
+                        AddPoint((worldPos.X, worldPos.Y, worldPos.Z), "path");
                     }
                 }
                 // MPRL (reference points)
@@ -690,8 +692,9 @@ namespace WoWToolbox.PM4WmoMatcher
                     foreach (var entry in pm4.MPRL.Entries)
                     {
                         var v = entry.Position;
-                        var worldPos = ToUnifiedWorld(v);
-                        AddPoint(worldPos, "reference");
+                        var vector3 = new Vector3(v.X, v.Y, v.Z);
+                        var worldPos = ToUnifiedWorld(vector3);
+                        AddPoint((worldPos.X, worldPos.Y, worldPos.Z), "reference");
                     }
                 }
                 // Output OBJ
@@ -763,7 +766,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 int count = 0;
                 foreach (var p in points)
                 {
-                    var worldPos = ToUnifiedWorld(p);
+                    var vector3 = new Vector3(p.X, p.Y, p.Z);
+                    var worldPos = ToUnifiedWorld(vector3);
                     sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}"); 
                     count++;
                 }
@@ -787,7 +791,8 @@ namespace WoWToolbox.PM4WmoMatcher
                 int count = 0;
                 foreach (var p in points)
                 {
-                    var worldPos = ToUnifiedWorld(p);
+                    var vector3 = new Vector3(p.X, p.Y, p.Z);
+                    var worldPos = ToUnifiedWorld(vector3);
                     sw.WriteLine($"v {worldPos.X} {worldPos.Y} {worldPos.Z}"); 
                     count++;
                 }
@@ -809,100 +814,175 @@ namespace WoWToolbox.PM4WmoMatcher
                 string basename = Path.GetFileNameWithoutExtension(pm4Path);
                 string objPath = Path.Combine(outputDir, $"{basename}_complete_mesh.obj");
                 
-                // Only proceed if we have both MSVT and MSVI (for the mesh geometry)
-                if (pm4Data.MSVT == null || pm4Data.MSVI == null)
+                // Only proceed if we have MSVT
+                if (pm4Data.MSVT == null)
                 {
-                    Logger.Log($"[ERROR] Cannot export complete mesh: {basename} is missing MSVT or MSVI chunks");
+                    Logger.Log($"[ERROR] Cannot export complete mesh: {basename} is missing MSVT chunk");
                     return;
                 }
                 
                 using var sw = new StreamWriter(objPath, false, Encoding.UTF8);
-                sw.WriteLine($"# Complete PM4 Mesh for {basename}");
+                sw.WriteLine($"# Complete PM4 Mesh for {basename} - All Geometry with Proper Faces");
                 sw.WriteLine($"# Exported: {DateTime.Now}");
+                sw.WriteLine($"# Features: MSVT render mesh + MSCN collision + MSPV structure with MSLK linking");
                 
-                // List to track all vertices (MSVT + MSCN if available)
+                // Track all vertices with their source chunk and vertex offsets
                 var allVertices = new List<(float X, float Y, float Z, string Source)>();
+                int msvtVertexOffset = 0;
+                int mscnVertexOffset = 0;
+                int mspvVertexOffset = 0;
                 
-                // 1. First add all MSVT vertices (with world coordinates transformation)
-                sw.WriteLine("# MSVT Vertices");
+                // 1. Add all MSVT vertices (render mesh)
+                sw.WriteLine("# MSVT Render Vertices");
                 foreach (var v in pm4Data.MSVT.Vertices)
                 {
                     var worldPos = ToUnifiedWorld(v.ToWorldCoordinates());
                     allVertices.Add((worldPos.X, worldPos.Y, worldPos.Z, "MSVT"));
                 }
+                mscnVertexOffset = allVertices.Count; // MSCN vertices start after MSVT
                 
-                // 2. Add MSCN exterior vertices if available
-                int msvtCount = allVertices.Count;
+                // 2. Add MSCN collision vertices if available
                 if (pm4Data.MSCN != null && pm4Data.MSCN.ExteriorVertices.Count > 0)
                 {
-                    sw.WriteLine($"# MSCN Exterior Vertices");
+                    sw.WriteLine($"# MSCN Collision Vertices");
                     foreach (var v in pm4Data.MSCN.ExteriorVertices)
                     {
-                        var worldPos = ToUnifiedWorld(v);
+                        // Convert C3Vector to Vector3 for coordinate transformation
+                        var vector3 = new Vector3(v.X, v.Y, v.Z);
+                        var worldPos = ToUnifiedWorld(vector3);
                         allVertices.Add((worldPos.X, worldPos.Y, worldPos.Z, "MSCN"));
+                    }
+                }
+                mspvVertexOffset = allVertices.Count; // MSPV vertices start after MSCN
+                
+                // 3. Add MSPV structure vertices if available
+                if (pm4Data.MSPV != null && pm4Data.MSPV.Vertices.Count > 0)
+                {
+                    sw.WriteLine($"# MSPV Structure Vertices");
+                    foreach (var v in pm4Data.MSPV.Vertices)
+                    {
+                        // Convert C3Vector to Vector3 for coordinate transformation
+                        var vector3 = new Vector3(v.X, v.Y, v.Z);
+                        var worldPos = ToUnifiedWorld(vector3);
+                        allVertices.Add((worldPos.X, worldPos.Y, worldPos.Z, "MSPV"));
                     }
                 }
                 
                 // Write all vertices
                 foreach (var v in allVertices)
                 {
-                    sw.WriteLine($"v {v.X} {v.Y} {v.Z} # {v.Source}");
+                    sw.WriteLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6} # {v.Source}");
                 }
+                sw.WriteLine();
                 
-                // Write faces (only for MSVT vertices)
-                sw.WriteLine("# Faces from MSVI (MSVT vertices only)");
-                sw.WriteLine("o MSVT_Mesh");
+                int totalFaces = 0;
                 
-                // Examine first few indices to determine if 0 or 1-based
-                bool zeroBasedIndices = true;
-                if (pm4Data.MSVI.Indices.Count > 0)
+                // RENDER MESH FACES: Use MSVI indices for MSVT vertices
+                if (pm4Data.MSVI != null && pm4Data.MSVI.Indices.Count >= 3)
                 {
-                    int minIndex = pm4Data.MSVI.Indices.Min();
-                    int maxIndex = pm4Data.MSVI.Indices.Max();
-                    zeroBasedIndices = minIndex == 0;
+                    sw.WriteLine("# MSVT Render Mesh Faces (via MSVI indices)");
+                    sw.WriteLine("o MSVT_RenderMesh");
                     
-                    // Safety check - don't try to reference vertices that don't exist
-                    if (maxIndex >= msvtCount)
+                    for (int i = 0; i + 2 < pm4Data.MSVI.Indices.Count; i += 3)
                     {
-                        Logger.Log($"[WARN] MSVI indices exceed MSVT vertex count in {basename} (max index: {maxIndex}, vertices: {msvtCount})");
+                        uint idx1 = pm4Data.MSVI.Indices[i];
+                        uint idx2 = pm4Data.MSVI.Indices[i + 1];
+                        uint idx3 = pm4Data.MSVI.Indices[i + 2];
+                        
+                        // Validate indices are within MSVT range
+                        if (idx1 < pm4Data.MSVT.Vertices.Count && 
+                            idx2 < pm4Data.MSVT.Vertices.Count && 
+                            idx3 < pm4Data.MSVT.Vertices.Count &&
+                            idx1 != idx2 && idx1 != idx3 && idx2 != idx3)
+                        {
+                            // OBJ uses 1-based indexing
+                            sw.WriteLine($"f {idx1 + 1} {idx2 + 1} {idx3 + 1}");
+                            totalFaces++;
+                        }
                     }
+                    sw.WriteLine();
                 }
                 
-                // Write faces as triangles
-                for (int i = 0; i + 2 < pm4Data.MSVI.Indices.Count; i += 3)
+                // STRUCTURE FACES: Use MSLK entries with MSPI indices for MSCN/MSPV geometry
+                if (pm4Data.MSLK != null && pm4Data.MSPI != null && 
+                    pm4Data.MSLK.Entries.Count > 0 && pm4Data.MSPI.Indices.Count > 0)
                 {
-                    // Get the three vertex indices for this triangle
-                    int v1 = (int)pm4Data.MSVI.Indices[i];
-                    int v2 = (int)pm4Data.MSVI.Indices[i + 1];
-                    int v3 = (int)pm4Data.MSVI.Indices[i + 2];
+                    sw.WriteLine("# Structure Faces (via MSLK->MSPI linking to MSCN/MSPV)");
+                    sw.WriteLine("o Structure_Geometry");
                     
-                    // If 0-based, add 1 for OBJ format (OBJ uses 1-based indices)
-                    if (zeroBasedIndices)
+                    foreach (var mslkEntry in pm4Data.MSLK.Entries)
                     {
-                        v1 += 1;
-                        v2 += 1;
-                        v3 += 1;
+                        // MSLK entries reference MSPI indices which point to MSCN/MSPV vertices
+                        if (mslkEntry.MspiFirstIndex >= 0 && 
+                            mslkEntry.MspiIndexCount >= 3 && 
+                            mslkEntry.MspiFirstIndex + mslkEntry.MspiIndexCount <= pm4Data.MSPI.Indices.Count)
+                        {
+                            // Get the vertex indices from MSPI
+                            var structureIndices = new List<uint>();
+                            for (int i = 0; i < mslkEntry.MspiIndexCount; i++)
+                            {
+                                uint mspiIdx = pm4Data.MSPI.Indices[mslkEntry.MspiFirstIndex + i];
+                                structureIndices.Add(mspiIdx);
+                            }
+                            
+                            // Determine which geometry chunk these indices reference
+                            // Based on our analysis: lower indices usually reference MSCN, higher ones MSPV
+                            var validIndices = new List<uint>();
+                            foreach (uint idx in structureIndices)
+                            {
+                                uint adjustedIdx = 0;
+                                bool isValid = false;
+                                
+                                // Try MSCN first (collision geometry)
+                                if (pm4Data.MSCN != null && idx < pm4Data.MSCN.ExteriorVertices.Count)
+                                {
+                                    adjustedIdx = idx + (uint)mscnVertexOffset + 1; // +1 for OBJ 1-based indexing
+                                    isValid = true;
+                                }
+                                // Try MSPV (structure geometry)
+                                else if (pm4Data.MSPV != null && idx < pm4Data.MSPV.Vertices.Count)
+                                {
+                                    adjustedIdx = idx + (uint)mspvVertexOffset + 1; // +1 for OBJ 1-based indexing
+                                    isValid = true;
+                                }
+                                
+                                if (isValid)
+                                {
+                                    validIndices.Add(adjustedIdx);
+                                }
+                            }
+                            
+                            // Create triangular faces using triangle fan pattern
+                            if (validIndices.Count >= 3)
+                            {
+                                for (int i = 1; i < validIndices.Count - 1; i++)
+                                {
+                                    uint v1 = validIndices[0];     // Fan center
+                                    uint v2 = validIndices[i];     // Current edge
+                                    uint v3 = validIndices[i + 1]; // Next edge
+                                    
+                                    // Validate adjusted indices are within our total vertex count
+                                    if (v1 <= allVertices.Count && v2 <= allVertices.Count && v3 <= allVertices.Count)
+                                    {
+                                        sw.WriteLine($"f {v1} {v2} {v3}");
+                                        totalFaces++;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    
-                    // Only write face if all vertices exist
-                    if (v1 <= msvtCount && v2 <= msvtCount && v3 <= msvtCount && 
-                        v1 > 0 && v2 > 0 && v3 > 0)
-                    {
-                        sw.WriteLine($"f {v1} {v2} {v3}");
-                    }
+                    sw.WriteLine();
                 }
                 
-                // If MSCN vertices exist, create a separate object for them
-                if (pm4Data.MSCN != null && pm4Data.MSCN.ExteriorVertices.Count > 0)
-                {
-                    sw.WriteLine("# MSCN Exterior Points (rendered as points, no faces)");
-                    sw.WriteLine("o MSCN_Exterior");
-                    sw.WriteLine("# Use point cloud rendering for these vertices");
-                    sw.WriteLine("# Many 3D software requires selecting the points object and enabling point cloud display");
-                }
+                // Statistics
+                int msvtCount = pm4Data.MSVT.Vertices.Count;
+                int mscnCount = pm4Data.MSCN?.ExteriorVertices.Count ?? 0;
+                int mspvCount = pm4Data.MSPV?.Vertices.Count ?? 0;
                 
-                Logger.Log($"[PM4_MESH] Exported complete mesh with MSVT and MSCN data to {objPath}");
-                Logger.Log($"[PM4_MESH] Total vertices: {allVertices.Count} (MSVT: {msvtCount}, MSCN: {allVertices.Count - msvtCount})");
+                Logger.Log($"[PM4_COMPLETE] Exported complete mesh for {basename}:");
+                Logger.Log($"[PM4_COMPLETE]   Total vertices: {allVertices.Count} (MSVT: {msvtCount}, MSCN: {mscnCount}, MSPV: {mspvCount})");
+                Logger.Log($"[PM4_COMPLETE]   Total faces: {totalFaces}");
+                Logger.Log($"[PM4_COMPLETE]   Output: {objPath}");
             }
             catch (Exception ex)
             {
