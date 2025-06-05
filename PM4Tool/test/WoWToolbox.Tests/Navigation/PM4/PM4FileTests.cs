@@ -450,17 +450,39 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Write faces with normals to combined render mesh file
                 combinedRenderMeshWriter.WriteLine("# Combined faces with normals (v//vn)");
                 int combinedFacesWritten = 0;
+                int degenerateTrianglesSkipped = 0;
+                
                 for (int i = 0; i + 2 < combinedTriangleIndices.Count; i += 3)
                 {
                     int idx1 = combinedTriangleIndices[i] + 1; // OBJ 1-based indexing
                     int idx2 = combinedTriangleIndices[i + 1] + 1;
                     int idx3 = combinedTriangleIndices[i + 2] + 1;
                     
+                    // Validate triangle - skip if any vertices are identical (degenerate triangle)
+                    if (idx1 == idx2 || idx1 == idx3 || idx2 == idx3)
+                    {
+                        degenerateTrianglesSkipped++;
+                        continue; // Skip this degenerate triangle
+                    }
+                    
+                    // Validate vertex indices are within bounds
+                    if (idx1 <= 0 || idx1 > combinedVertices.Count ||
+                        idx2 <= 0 || idx2 > combinedVertices.Count ||
+                        idx3 <= 0 || idx3 > combinedVertices.Count)
+                    {
+                        degenerateTrianglesSkipped++;
+                        continue; // Skip triangle with out-of-bounds indices
+                    }
+                    
                     combinedRenderMeshWriter.WriteLine($"f {idx1}//{idx1} {idx2}//{idx2} {idx3}//{idx3}");
                     combinedFacesWritten++;
                 }
                 
-                Console.WriteLine($"  Written {combinedFacesWritten} faces to combined render mesh");
+                Console.WriteLine($"  Written {combinedFacesWritten} valid faces to combined render mesh");
+                if (degenerateTrianglesSkipped > 0)
+                {
+                    Console.WriteLine($"  Skipped {degenerateTrianglesSkipped} degenerate/invalid triangles");
+                }
                 
                 // Write summary of files included
                 combinedRenderMeshWriter.WriteLine($"\n# Combined from {combinedFileInfo.Count} PM4 files:");
@@ -892,6 +914,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     // --- Collect triangle indices for combined mesh (regardless of face generation) ---
                     if (!generateFaces && pm4File.MSVI != null && pm4File.MSVI.Indices.Count >= 3)
                     {
+                        int fallbackInvalidTrianglesSkipped = 0;
                         for (int i = 0; i + 2 < pm4File.MSVI.Indices.Count; i += 3)
                         {
                             uint idx1 = pm4File.MSVI.Indices[i];
@@ -901,12 +924,27 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             // Validate indices against vertex count
                             if (idx1 < msvtFileVertexCount && idx2 < msvtFileVertexCount && idx3 < msvtFileVertexCount)
                             {
+                                // Validate triangle - skip if any vertices are identical (degenerate triangle)
+                                if (idx1 == idx2 || idx1 == idx3 || idx2 == idx3)
+                                {
+                                    fallbackInvalidTrianglesSkipped++;
+                                    continue; // Skip this degenerate triangle
+                                }
+                                
                                 triangleIndices.Add((int)idx1);
                                 triangleIndices.Add((int)idx2);
                                 triangleIndices.Add((int)idx3);
                             }
+                            else
+                            {
+                                fallbackInvalidTrianglesSkipped++;
+                            }
                         }
-                        debugWriter.WriteLine($"Collected {triangleIndices.Count / 3} triangle indices for combined mesh");
+                        debugWriter.WriteLine($"Collected {triangleIndices.Count / 3} valid triangle indices for combined mesh");
+                        if (fallbackInvalidTrianglesSkipped > 0)
+                        {
+                            debugWriter.WriteLine($"Skipped {fallbackInvalidTrianglesSkipped} invalid/degenerate triangles during fallback collection");
+                        }
                     }
                     
                     // --- Generate Faces and Normals from MSVI indices ---
@@ -925,6 +963,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         
                         // Collect all triangle indices
                         var localTriangleIndices = new List<int>();
+                        int invalidTrianglesSkipped = 0;
+                        
                         for (int i = 0; i + 2 < pm4File.MSVI.Indices.Count; i += 3)
                         {
                             uint idx1 = pm4File.MSVI.Indices[i];
@@ -934,6 +974,13 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             // Validate indices against vertex count
                             if (idx1 < msvtFileVertexCount && idx2 < msvtFileVertexCount && idx3 < msvtFileVertexCount)
                             {
+                                // Validate triangle - skip if any vertices are identical (degenerate triangle)
+                                if (idx1 == idx2 || idx1 == idx3 || idx2 == idx3)
+                                {
+                                    invalidTrianglesSkipped++;
+                                    continue; // Skip this degenerate triangle
+                                }
+                                
                                 localTriangleIndices.Add((int)idx1);
                                 localTriangleIndices.Add((int)idx2);
                                 localTriangleIndices.Add((int)idx3);
@@ -943,11 +990,19 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                 triangleIndices.Add((int)idx2);
                                 triangleIndices.Add((int)idx3);
                             }
+                            else
+                            {
+                                invalidTrianglesSkipped++;
+                            }
                         }
                         
                         // Compute proper vertex normals from face geometry
                         var normals = Pm4CoordinateTransforms.ComputeVertexNormals(localVertices, localTriangleIndices);
-                        debugWriter.WriteLine($"Computed {normals.Count} vertex normals from {localTriangleIndices.Count / 3} triangles");
+                        debugWriter.WriteLine($"Computed {normals.Count} vertex normals from {localTriangleIndices.Count / 3} valid triangles");
+                        if (invalidTrianglesSkipped > 0)
+                        {
+                            debugWriter.WriteLine($"Skipped {invalidTrianglesSkipped} invalid/degenerate triangles during processing");
+                        }
                         
                         // Write computed normals to OBJ files
                         renderMeshWriter.WriteLine("# Computed vertex normals from face geometry");

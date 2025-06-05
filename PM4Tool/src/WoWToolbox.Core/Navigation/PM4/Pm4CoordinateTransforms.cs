@@ -218,6 +218,33 @@ namespace WoWToolbox.Core.Navigation.PM4
         }
 
         /// <summary>
+        /// Validates if a triangle is degenerate (has identical vertex indices).
+        /// </summary>
+        /// <param name="idx1">First vertex index</param>
+        /// <param name="idx2">Second vertex index</param>
+        /// <param name="idx3">Third vertex index</param>
+        /// <returns>True if triangle is valid, false if degenerate</returns>
+        public static bool IsValidTriangle(int idx1, int idx2, int idx3)
+        {
+            return idx1 != idx2 && idx1 != idx3 && idx2 != idx3;
+        }
+        
+        /// <summary>
+        /// Validates if triangle indices are within bounds of the vertex list.
+        /// </summary>
+        /// <param name="idx1">First vertex index</param>
+        /// <param name="idx2">Second vertex index</param>
+        /// <param name="idx3">Third vertex index</param>
+        /// <param name="vertexCount">Total number of vertices</param>
+        /// <returns>True if all indices are valid, false otherwise</returns>
+        public static bool AreIndicesInBounds(int idx1, int idx2, int idx3, int vertexCount)
+        {
+            return idx1 >= 0 && idx1 < vertexCount &&
+                   idx2 >= 0 && idx2 < vertexCount &&
+                   idx3 >= 0 && idx3 < vertexCount;
+        }
+
+        /// <summary>
         /// Computes per-vertex normals from triangle data using face normal averaging.
         /// </summary>
         /// <param name="vertices">List of vertices.</param>
@@ -234,8 +261,8 @@ namespace WoWToolbox.Core.Navigation.PM4
                 int idx2 = triangleIndices[i + 1];
                 int idx3 = triangleIndices[i + 2];
                 
-                // Validate indices
-                if (idx1 >= vertices.Count || idx2 >= vertices.Count || idx3 >= vertices.Count)
+                // Validate indices and check for degenerate triangles
+                if (!AreIndicesInBounds(idx1, idx2, idx3, vertices.Count) || !IsValidTriangle(idx1, idx2, idx3))
                     continue;
                 
                 var v1 = vertices[idx1];
@@ -244,10 +271,14 @@ namespace WoWToolbox.Core.Navigation.PM4
                 
                 var faceNormal = ComputeTriangleNormal(v1, v2, v3);
                 
-                // Add face normal to each vertex of the triangle
-                vertexNormals[idx1] += faceNormal;
-                vertexNormals[idx2] += faceNormal;
-                vertexNormals[idx3] += faceNormal;
+                // Skip zero-area triangles (collinear vertices)
+                if (faceNormal.LengthSquared() > 1e-12f)
+                {
+                    // Add face normal to each vertex of the triangle
+                    vertexNormals[idx1] += faceNormal;
+                    vertexNormals[idx2] += faceNormal;
+                    vertexNormals[idx3] += faceNormal;
+                }
             }
             
             // Normalize all vertex normals
