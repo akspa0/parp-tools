@@ -1,0 +1,151 @@
+- rootIndex: 0
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 0
+- rootIndex: 1
+  geometryNodeIndices:
+  - 1
+  doodadNodeIndices: []
+- rootIndex: 2
+  geometryNodeIndices:
+  - 2
+  doodadNodeIndices: []
+- rootIndex: 3
+  geometryNodeIndices:
+  - 3
+  doodadNodeIndices: []
+- rootIndex: 4
+  geometryNodeIndices:
+  - 4
+  doodadNodeIndices: []
+- rootIndex: 5
+  geometryNodeIndices:
+  - 5
+  doodadNodeIndices: []
+- rootIndex: 6
+  geometryNodeIndices:
+  - 6
+  doodadNodeIndices: []
+- rootIndex: 7
+  geometryNodeIndices:
+  - 7
+  doodadNodeIndices: []
+- rootIndex: 8
+  geometryNodeIndices:
+  - 8
+  doodadNodeIndices: []
+- rootIndex: 9
+  geometryNodeIndices:
+  - 9
+  doodadNodeIndices: []
+- rootIndex: 10
+  geometryNodeIndices:
+  - 10
+  doodadNodeIndices: []
+- rootIndex: 11
+  geometryNodeIndices:
+  - 11
+  doodadNodeIndices: []
+- rootIndex: 12
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 12
+  - 82
+- rootIndex: 13
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 13
+  - 87
+- rootIndex: 14
+  geometryNodeIndices:
+  - 16
+  - 105
+  - 98
+  - 70
+  - 71
+  - 40
+  - 72
+  - 88
+  - 92
+  - 91
+  - 102
+  - 95
+  - 99
+  doodadNodeIndices:
+  - 14
+  - 15
+  - 17
+  - 18
+  - 20
+  - 22
+  - 25
+  - 32
+  - 42
+  - 53
+  - 81
+  - 85
+  - 67
+  - 66
+  - 33
+  - 43
+  - 54
+  - 89
+  - 101
+  - 73
+  - 58
+  - 94
+  - 96
+  - 27
+  - 35
+  - 46
+  - 63
+  - 100
+  - 103
+  - 65
+  - 104
+  - 61
+  - 37
+  - 48
+  - 76
+  - 23
+  - 28
+  - 36
+  - 47
+  - 69
+  - 74
+  - 55
+  - 90
+  - 93
+  - 30
+  - 51
+  - 79
+  - 86
+  - 68
+  - 38
+  - 49
+  - 77
+  - 19
+  - 21
+  - 24
+  - 29
+  - 39
+  - 50
+  - 75
+  - 78
+  - 83
+  - 31
+  - 41
+  - 52
+  - 80
+  - 84
+  - 57
+  - 44
+  - 56
+  - 64
+  - 26
+  - 34
+  - 45
+  - 59
+  - 62
+  - 60
+  - 97

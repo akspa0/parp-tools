@@ -1,0 +1,53 @@
+allNodes:
+- &o0
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294911772
+  crossReference_0x10: 23
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o1
+  index: 1
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 1
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294911772
+  crossReference_0x10: 24
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+rootNodes:
+- *o0
+- *o1
+nodesByParentIndex:
+  0:
+  - *o0
+  1:
+  - *o1
+nodesByFlags:
+  1:
+  - *o0
+  - *o1
+nodesBySequence:
+  2:
+  - *o0
+  - *o1
+maxDepth: 0
+geometryNodeCount: 0
+doodadNodeCount: 2
+discoveredPatterns:
+- 'Hierarchy levels found: 1'
+- '  Depth 0: Flags [0x01]'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 0 geometry, 2 doodad nodes'

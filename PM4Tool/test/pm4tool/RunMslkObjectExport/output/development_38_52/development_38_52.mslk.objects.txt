@@ -1,0 +1,52 @@
+MSLK Object Segmentation for development_38_52.pm4
+Generated: 6/6/2025 7:31:38 PM
+Total Objects: 12
+
+Object Root: 0
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [0, 19, 25, 35, 53, 78, 58, 27, 38, 60, 64] (11 nodes)
+
+Object Root: 1
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [1] (1 nodes)
+
+Object Root: 2
+  Geometry Nodes: [2] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 3
+  Geometry Nodes: [3] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 4
+  Geometry Nodes: [20, 48] (2 nodes)
+  Anchor/Group Nodes: [4, 12, 15, 28, 42, 65, 72, 46, 71, 73, 30, 44, 68, 49, 80, 82, 18, 23, 33, 76, 79, 36, 55, 57, 26, 37, 59, 67, 40, 62, 77] (31 nodes)
+
+Object Root: 5
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [5, 39, 61] (3 nodes)
+
+Object Root: 6
+  Geometry Nodes: [6] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 7
+  Geometry Nodes: [7] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 8
+  Geometry Nodes: [8] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 9
+  Geometry Nodes: [31] (1 nodes)
+  Anchor/Group Nodes: [9, 14, 17, 22, 45, 70, 75, 54, 50] (9 nodes)
+
+Object Root: 10
+  Geometry Nodes: [34] (1 nodes)
+  Anchor/Group Nodes: [10, 13, 16, 21, 29, 43, 66, 69, 56, 32, 47, 74, 81, 24, 51, 52] (16 nodes)
+
+Object Root: 11
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [11, 41, 63] (3 nodes)
+

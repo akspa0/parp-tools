@@ -1,0 +1,87 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_62_05.pm4
+Total Nodes: 636
+Root Nodes: 13
+Max Depth: 16
+Geometry Nodes: 134
+Doodad Nodes: 502
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 17
+•   Depth 0: Flags [0x01, 0x02, 0x0A]
+•   Depth 1: Flags [0x02, 0x01]
+•   Depth 2: Flags [0x02, 0x0C, 0x0A, 0x01]
+•   Depth 3: Flags [0x01, 0x0A, 0x02]
+•   Depth 4: Flags [0x02, 0x01]
+•   Depth 5: Flags [0x02, 0x01, 0x0A, 0x0C, 0x04]
+•   Depth 6: Flags [0x0A, 0x02, 0x01, 0x04, 0x0C]
+•   Depth 7: Flags [0x02, 0x0A, 0x01, 0x0C, 0x04]
+•   Depth 8: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 9: Flags [0x0A, 0x02, 0x01]
+•   Depth 10: Flags [0x02, 0x0A, 0x01]
+•   Depth 11: Flags [0x02, 0x01]
+•   Depth 12: Flags [0x01]
+•   Depth 13: Flags [0x01, 0x0C, 0x04]
+•   Depth 14: Flags [0x01, 0x0C, 0x04, 0x02]
+•   Depth 15: Flags [0x01, 0x0C, 0x04, 0x02]
+•   Depth 16: Flags [0x01, 0x04, 0x02]
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x0A has sequence ordering: 0, 1, 2, 3
+• Flag 0x0C has sequence ordering: 0, 1, 2, 3
+• Flag 0x04 has sequence ordering: 0, 1, 2, 3, 4
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 12 geometry, 1 doodad nodes
+•   Depth 1: 7 geometry, 1 doodad nodes
+•   Depth 2: 6 geometry, 2 doodad nodes
+•   Depth 3: 2 geometry, 12 doodad nodes
+•   Depth 4: 4 geometry, 20 doodad nodes
+•   Depth 5: 5 geometry, 38 doodad nodes
+•   Depth 6: 18 geometry, 46 doodad nodes
+•   Depth 7: 15 geometry, 55 doodad nodes
+•   Depth 8: 10 geometry, 38 doodad nodes
+•   Depth 9: 4 geometry, 4 doodad nodes
+•   Depth 10: 4 geometry, 6 doodad nodes
+•   Depth 11: 1 geometry, 16 doodad nodes
+•   Depth 12: 0 geometry, 34 doodad nodes
+•   Depth 13: 4 geometry, 60 doodad nodes
+•   Depth 14: 18 geometry, 81 doodad nodes
+•   Depth 15: 20 geometry, 72 doodad nodes
+•   Depth 16: 4 geometry, 16 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+  Parent Index 2: 2 children
+  Parent Index 5: 2 children
+  Parent Index 6: 2 children
+  Parent Index 10: 2 children
+  Parent Index 11: 2 children
+  Parent Index 12: 2 children
+  Parent Index 13: 2 children
+  Parent Index 14: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 502 total (0 geom, 502 doodad)
+  Flag 0x02: 60 total (60 geom, 0 doodad)
+  Flag 0x04: 37 total (37 geom, 0 doodad)
+  Flag 0x0A: 14 total (14 geom, 0 doodad)
+  Flag 0x0C: 23 total (23 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:3]
+    DOOD_63 [Flag:0x01, Seq:2]
+      DOOD_81 [Flag:0x01, Seq:0]
+      DOOD_84 [Flag:0x01, Seq:0]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:0]
+    GEOM_450 [Flag:0x02, Seq:0]
+
+Root Node 2 (Flag: 0x02):
+  GEOM_2 [Flag:0x02, Seq:0]
+    GEOM_44 [Flag:0x02, Seq:3]
+      GEOM_53 [Flag:0x0A, Seq:3]
+

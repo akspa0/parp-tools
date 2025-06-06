@@ -1,0 +1,132 @@
+allNodes:
+- &o0
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294911508
+  crossReference_0x10: 676
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o1
+  index: 1
+  flags_0x00: 4
+  sequence_0x01: 2
+  parentIndex_0x04: 1
+  mspiFirstIndex: 0
+  mspiIndexCount: 4
+  unknown_0x0C: 4294911507
+  crossReference_0x10: 2
+  hasGeometry: true
+  isDoodadNode: false
+  children: []
+  parent: 
+  depth: 0
+- &o2
+  index: 2
+  flags_0x00: 4
+  sequence_0x01: 2
+  parentIndex_0x04: 2
+  mspiFirstIndex: 4
+  mspiIndexCount: 4
+  unknown_0x0C: 4294911507
+  crossReference_0x10: 1
+  hasGeometry: true
+  isDoodadNode: false
+  children: []
+  parent: 
+  depth: 0
+- &o3
+  index: 3
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 3
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294911508
+  crossReference_0x10: 682
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o4
+  index: 4
+  flags_0x00: 1
+  sequence_0x01: 1
+  parentIndex_0x04: 4
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294911508
+  crossReference_0x10: 684
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o5
+  index: 5
+  flags_0x00: 4
+  sequence_0x01: 2
+  parentIndex_0x04: 5
+  mspiFirstIndex: 8
+  mspiIndexCount: 4
+  unknown_0x0C: 4294911508
+  crossReference_0x10: 685
+  hasGeometry: true
+  isDoodadNode: false
+  children: []
+  parent: 
+  depth: 0
+rootNodes:
+- *o0
+- *o1
+- *o2
+- *o3
+- *o4
+- *o5
+nodesByParentIndex:
+  0:
+  - *o0
+  1:
+  - *o1
+  2:
+  - *o2
+  3:
+  - *o3
+  4:
+  - *o4
+  5:
+  - *o5
+nodesByFlags:
+  1:
+  - *o0
+  - *o3
+  - *o4
+  4:
+  - *o1
+  - *o2
+  - *o5
+nodesBySequence:
+  2:
+  - *o0
+  - *o1
+  - *o2
+  - *o3
+  - *o5
+  1:
+  - *o4
+maxDepth: 0
+geometryNodeCount: 3
+doodadNodeCount: 3
+discoveredPatterns:
+- 'Hierarchy levels found: 1'
+- '  Depth 0: Flags [0x01, 0x04]'
+- 'Flag 0x01 has sequence ordering: 1, 2'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 3 geometry, 3 doodad nodes'

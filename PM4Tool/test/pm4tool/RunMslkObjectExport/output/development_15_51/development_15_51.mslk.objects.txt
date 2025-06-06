@@ -1,0 +1,120 @@
+MSLK Object Segmentation for development_15_51.pm4
+Generated: 6/6/2025 7:31:32 PM
+Total Objects: 29
+
+Object Root: 0
+  Geometry Nodes: [30, 31, 32, 33, 35, 37, 39, 41, 45, 49, 56, 65, 78, 95, 125, 179, 114, 156, 228, 97, 127, 182, 55, 64, 120, 222, 224, 115, 66, 79, 99, 185, 188, 155, 227, 62, 73, 87, 109, 212] (40 nodes)
+  Anchor/Group Nodes: [0, 29, 77, 92, 174, 194, 206, 232, 157, 230, 231, 165, 130, 132, 146, 153, 219, 225] (18 nodes)
+
+Object Root: 1
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [1] (1 nodes)
+
+Object Root: 2
+  Geometry Nodes: [2, 121] (2 nodes)
+  Anchor/Group Nodes: [175, 190] (2 nodes)
+
+Object Root: 3
+  Geometry Nodes: [3] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 4
+  Geometry Nodes: [4, 42, 46, 50, 57, 80, 100, 131, 94, 178] (10 nodes)
+  Anchor/Group Nodes: [67, 187, 198, 245, 124, 133, 189, 195] (8 nodes)
+
+Object Root: 5
+  Geometry Nodes: [5] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 6
+  Geometry Nodes: [6] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 7
+  Geometry Nodes: [7] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 8
+  Geometry Nodes: [8] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 9
+  Geometry Nodes: [105] (1 nodes)
+  Anchor/Group Nodes: [9, 84, 140, 202, 205, 158, 236, 247] (8 nodes)
+
+Object Root: 10
+  Geometry Nodes: [10, 98] (2 nodes)
+  Anchor/Group Nodes: [129, 184, 200] (3 nodes)
+
+Object Root: 11
+  Geometry Nodes: [11, 54, 63, 75, 90, 151, 223] (7 nodes)
+  Anchor/Group Nodes: [112, 217, 220, 161, 246, 249] (6 nodes)
+
+Object Root: 12
+  Geometry Nodes: [12] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 13
+  Geometry Nodes: [13, 74, 89, 111] (4 nodes)
+  Anchor/Group Nodes: [149, 215, 235, 169] (4 nodes)
+
+Object Root: 14
+  Geometry Nodes: [14, 44, 61, 72, 86, 93, 123, 177, 58, 68, 134, 201, 110] (13 nodes)
+  Anchor/Group Nodes: [48, 53, 107, 143, 209, 233, 164, 167, 137, 196, 51, 81, 101, 191, 204, 139, 88, 148, 214, 237, 172] (21 nodes)
+
+Object Root: 15
+  Geometry Nodes: [15] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 16
+  Geometry Nodes: [16] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 17
+  Geometry Nodes: [17] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 18
+  Geometry Nodes: [91] (1 nodes)
+  Anchor/Group Nodes: [18, 76, 117, 160, 241, 243, 170, 128, 183, 197] (10 nodes)
+
+Object Root: 19
+  Geometry Nodes: [19] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 20
+  Geometry Nodes: [20] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 21
+  Geometry Nodes: [21] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 22
+  Geometry Nodes: [22] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 23
+  Geometry Nodes: [23] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 24
+  Geometry Nodes: [24] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 25
+  Geometry Nodes: [25] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 26
+  Geometry Nodes: [71, 85, 96, 126] (4 nodes)
+  Anchor/Group Nodes: [26, 60, 106, 141, 207, 234, 142, 208, 221, 150, 216, 229, 181, 186] (14 nodes)
+
+Object Root: 27
+  Geometry Nodes: [27, 119] (2 nodes)
+  Anchor/Group Nodes: [166, 168] (2 nodes)
+
+Object Root: 28
+  Geometry Nodes: [28, 34, 36, 38, 40, 43, 47, 70, 83, 103, 226, 116, 104, 122, 69, 82, 135, 192, 213, 118] (20 nodes)
+  Anchor/Group Nodes: [52, 59, 136, 193, 203, 154, 159, 238, 240, 163, 242, 113, 152, 218, 239, 171, 138, 199, 144, 210, 248, 176, 180, 102, 108, 145, 211, 244, 147, 162, 173] (31 nodes)
+

@@ -1,0 +1,12 @@
+MSLK Object Segmentation for development_40_46.pm4
+Generated: 6/6/2025 7:31:38 PM
+Total Objects: 2
+
+Object Root: 0
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [0, 2, 3, 4, 7, 13, 25, 26, 18, 8, 14, 28, 29, 16, 32, 33, 6, 11, 21, 23, 12, 24, 27, 9, 17, 19] (26 nodes)
+
+Object Root: 1
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [1, 5, 10, 20, 22, 15, 30, 31] (8 nodes)
+

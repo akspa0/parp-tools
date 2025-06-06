@@ -1,0 +1,66 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_29_22.pm4
+Total Nodes: 160
+Root Nodes: 13
+Max Depth: 10
+Geometry Nodes: 74
+Doodad Nodes: 86
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 11
+•   Depth 0: Flags [0x02, 0x01, 0x0A]
+•   Depth 1: Flags [0x01, 0x02]
+•   Depth 2: Flags [0x01]
+•   Depth 3: Flags [0x01, 0x02, 0x0A]
+•   Depth 4: Flags [0x01, 0x0A]
+•   Depth 5: Flags [0x01, 0x02]
+•   Depth 6: Flags [0x01, 0x02, 0x0A]
+•   Depth 7: Flags [0x01, 0x0A, 0x02]
+•   Depth 8: Flags [0x02, 0x0A, 0x01]
+•   Depth 9: Flags [0x01, 0x02]
+•   Depth 10: Flags [0x01, 0x02]
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x0A has sequence ordering: 0, 1, 2, 3
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 9 geometry, 4 doodad nodes
+•   Depth 1: 1 geometry, 2 doodad nodes
+•   Depth 2: 0 geometry, 4 doodad nodes
+•   Depth 3: 2 geometry, 4 doodad nodes
+•   Depth 4: 1 geometry, 9 doodad nodes
+•   Depth 5: 3 geometry, 10 doodad nodes
+•   Depth 6: 13 geometry, 8 doodad nodes
+•   Depth 7: 14 geometry, 9 doodad nodes
+•   Depth 8: 20 geometry, 9 doodad nodes
+•   Depth 9: 9 geometry, 16 doodad nodes
+•   Depth 10: 2 geometry, 11 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 1: 2 children
+  Parent Index 11: 2 children
+  Parent Index 12: 2 children
+  Parent Index 13: 2 children
+  Parent Index 14: 2 children
+  Parent Index 15: 2 children
+  Parent Index 16: 2 children
+  Parent Index 17: 2 children
+  Parent Index 18: 2 children
+  Parent Index 19: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 86 total (0 geom, 86 doodad)
+  Flag 0x02: 60 total (60 geom, 0 doodad)
+  Flag 0x0A: 14 total (14 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x02):
+  GEOM_0 [Flag:0x02, Seq:1]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:2]
+    GEOM_151 [Flag:0x02, Seq:0]
+
+Root Node 2 (Flag: 0x01):
+  DOOD_2 [Flag:0x01, Seq:3]
+

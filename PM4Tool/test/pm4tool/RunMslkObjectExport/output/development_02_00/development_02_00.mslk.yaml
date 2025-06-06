@@ -1,0 +1,211 @@
+allNodes:
+- &o0
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 1
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294901762
+  crossReference_0x10: 5
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o5
+    index: 5
+    flags_0x00: 1
+    sequence_0x01: 2
+    parentIndex_0x04: 0
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294901762
+    crossReference_0x10: 2
+    hasGeometry: false
+    isDoodadNode: true
+    children: []
+    parent: *o0
+    depth: 1
+  parent: 
+  depth: 0
+- &o4
+  index: 1
+  flags_0x00: 1
+  sequence_0x01: 4
+  parentIndex_0x04: 1
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294901762
+  crossReference_0x10: 3
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o2
+    index: 2
+    flags_0x00: 1
+    sequence_0x01: 2
+    parentIndex_0x04: 1
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294901762
+    crossReference_0x10: 2
+    hasGeometry: false
+    isDoodadNode: true
+    children:
+    - &o1
+      index: 3
+      flags_0x00: 1
+      sequence_0x01: 3
+      parentIndex_0x04: 2
+      mspiFirstIndex: -1
+      mspiIndexCount: 0
+      unknown_0x0C: 4294901762
+      crossReference_0x10: 5
+      hasGeometry: false
+      isDoodadNode: true
+      children:
+      - &o6
+        index: 6
+        flags_0x00: 1
+        sequence_0x01: 3
+        parentIndex_0x04: 3
+        mspiFirstIndex: -1
+        mspiIndexCount: 0
+        unknown_0x0C: 4294901762
+        crossReference_0x10: 7
+        hasGeometry: false
+        isDoodadNode: true
+        children: []
+        parent: *o1
+        depth: 3
+      - &o8
+        index: 8
+        flags_0x00: 1
+        sequence_0x01: 4
+        parentIndex_0x04: 3
+        mspiFirstIndex: -1
+        mspiIndexCount: 0
+        unknown_0x0C: 4294901762
+        crossReference_0x10: 6
+        hasGeometry: false
+        isDoodadNode: true
+        children: []
+        parent: *o1
+        depth: 3
+      parent: *o2
+      depth: 2
+    - &o3
+      index: 4
+      flags_0x00: 1
+      sequence_0x01: 0
+      parentIndex_0x04: 2
+      mspiFirstIndex: -1
+      mspiIndexCount: 0
+      unknown_0x0C: 4294901762
+      crossReference_0x10: 4
+      hasGeometry: false
+      isDoodadNode: true
+      children:
+      - &o7
+        index: 7
+        flags_0x00: 1
+        sequence_0x01: 2
+        parentIndex_0x04: 4
+        mspiFirstIndex: -1
+        mspiIndexCount: 0
+        unknown_0x0C: 4294901762
+        crossReference_0x10: 8
+        hasGeometry: false
+        isDoodadNode: true
+        children: []
+        parent: *o3
+        depth: 3
+      - &o9
+        index: 9
+        flags_0x00: 1
+        sequence_0x01: 1
+        parentIndex_0x04: 4
+        mspiFirstIndex: -1
+        mspiIndexCount: 0
+        unknown_0x0C: 4294901762
+        crossReference_0x10: 7
+        hasGeometry: false
+        isDoodadNode: true
+        children: []
+        parent: *o3
+        depth: 3
+      parent: *o2
+      depth: 2
+    parent: *o4
+    depth: 1
+  parent: 
+  depth: 0
+- *o2
+- *o1
+- *o3
+- *o5
+- *o6
+- *o7
+- *o8
+- *o9
+rootNodes:
+- *o0
+- *o4
+nodesByParentIndex:
+  0:
+  - *o0
+  - *o5
+  1:
+  - *o4
+  - *o2
+  2:
+  - *o1
+  - *o3
+  3:
+  - *o6
+  - *o8
+  4:
+  - *o7
+  - *o9
+nodesByFlags:
+  1:
+  - *o0
+  - *o4
+  - *o2
+  - *o1
+  - *o3
+  - *o5
+  - *o6
+  - *o7
+  - *o8
+  - *o9
+nodesBySequence:
+  1:
+  - *o0
+  - *o9
+  4:
+  - *o4
+  - *o8
+  2:
+  - *o2
+  - *o5
+  - *o7
+  3:
+  - *o1
+  - *o6
+  0:
+  - *o3
+maxDepth: 3
+geometryNodeCount: 0
+doodadNodeCount: 10
+discoveredPatterns:
+- 'Hierarchy levels found: 4'
+- '  Depth 0: Flags [0x01]'
+- '  Depth 1: Flags [0x01]'
+- '  Depth 2: Flags [0x01]'
+- '  Depth 3: Flags [0x01]'
+- 'Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 0 geometry, 2 doodad nodes'
+- '  Depth 1: 0 geometry, 2 doodad nodes'
+- '  Depth 2: 0 geometry, 2 doodad nodes'
+- '  Depth 3: 0 geometry, 4 doodad nodes'

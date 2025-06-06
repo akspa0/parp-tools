@@ -1,0 +1,140 @@
+allNodes:
+- &o5
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 1
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294907190
+  crossReference_0x10: 370
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o3
+  index: 1
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 1
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294907191
+  crossReference_0x10: 1
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o2
+    index: 2
+    flags_0x00: 1
+    sequence_0x01: 1
+    parentIndex_0x04: 1
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294907191
+    crossReference_0x10: 0
+    hasGeometry: false
+    isDoodadNode: true
+    children:
+    - &o1
+      index: 3
+      flags_0x00: 1
+      sequence_0x01: 2
+      parentIndex_0x04: 2
+      mspiFirstIndex: -1
+      mspiIndexCount: 0
+      unknown_0x0C: 4294907190
+      crossReference_0x10: 374
+      hasGeometry: false
+      isDoodadNode: true
+      children:
+      - &o0
+        index: 4
+        flags_0x00: 2
+        sequence_0x01: 4
+        parentIndex_0x04: 3
+        mspiFirstIndex: 0
+        mspiIndexCount: 4
+        unknown_0x0C: 4294907190
+        crossReference_0x10: 376
+        hasGeometry: true
+        isDoodadNode: false
+        children:
+        - &o4
+          index: 5
+          flags_0x00: 2
+          sequence_0x01: 4
+          parentIndex_0x04: 4
+          mspiFirstIndex: 4
+          mspiIndexCount: 4
+          unknown_0x0C: 4294907190
+          crossReference_0x10: 377
+          hasGeometry: true
+          isDoodadNode: false
+          children: []
+          parent: *o0
+          depth: 4
+        parent: *o1
+        depth: 3
+      parent: *o2
+      depth: 2
+    parent: *o3
+    depth: 1
+  parent: 
+  depth: 0
+- *o2
+- *o1
+- *o0
+- *o4
+rootNodes:
+- *o5
+- *o3
+nodesByParentIndex:
+  0:
+  - *o5
+  1:
+  - *o3
+  - *o2
+  2:
+  - *o1
+  3:
+  - *o0
+  4:
+  - *o4
+nodesByFlags:
+  1:
+  - *o5
+  - *o3
+  - *o2
+  - *o1
+  2:
+  - *o0
+  - *o4
+nodesBySequence:
+  1:
+  - *o5
+  - *o2
+  2:
+  - *o3
+  - *o1
+  4:
+  - *o0
+  - *o4
+maxDepth: 4
+geometryNodeCount: 2
+doodadNodeCount: 4
+discoveredPatterns:
+- 'Hierarchy levels found: 5'
+- '  Depth 0: Flags [0x01]'
+- '  Depth 1: Flags [0x01]'
+- '  Depth 2: Flags [0x01]'
+- '  Depth 3: Flags [0x02]'
+- '  Depth 4: Flags [0x02]'
+- 'Flag 0x01 has sequence ordering: 1, 2'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 0 geometry, 2 doodad nodes'
+- '  Depth 1: 0 geometry, 1 doodad nodes'
+- '  Depth 2: 0 geometry, 1 doodad nodes'
+- '  Depth 3: 1 geometry, 0 doodad nodes'
+- '  Depth 4: 1 geometry, 0 doodad nodes'

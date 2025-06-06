@@ -1,0 +1,116 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_16_33.pm4
+Total Nodes: 1587
+Root Nodes: 7
+Max Depth: 31
+Geometry Nodes: 238
+Doodad Nodes: 1349
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 32
+•   Depth 0: Flags [0x02, 0x01]
+•   Depth 1: Flags [0x02, 0x01]
+•   Depth 2: Flags [0x01, 0x02, 0x0A]
+•   Depth 3: Flags [0x01, 0x02, 0x0A, 0x0C]
+•   Depth 4: Flags [0x02, 0x01, 0x0A]
+•   Depth 5: Flags [0x02, 0x0A, 0x04, 0x01]
+•   Depth 6: Flags [0x01, 0x02, 0x0A]
+•   Depth 7: Flags [0x01]
+•   Depth 8: Flags [0x02, 0x01, 0x0A]
+•   Depth 9: Flags [0x02, 0x01]
+•   Depth 10: Flags [0x02, 0x04, 0x01]
+•   Depth 11: Flags [0x01, 0x0C, 0x04, 0x02]
+•   Depth 12: Flags [0x02, 0x01, 0x04, 0x0C, 0x0A]
+•   Depth 13: Flags [0x02, 0x0A, 0x01, 0x0C, 0x04]
+•   Depth 14: Flags [0x0A, 0x04, 0x01, 0x02]
+•   Depth 15: Flags [0x02, 0x01, 0x0C, 0x04]
+•   Depth 16: Flags [0x01, 0x02, 0x04]
+•   Depth 17: Flags [0x0A, 0x02]
+•   Depth 18: Flags [0x01, 0x02]
+•   Depth 19: Flags [0x02, 0x01]
+•   Depth 20: Flags [0x02, 0x0A, 0x01]
+•   Depth 21: Flags [0x01, 0x02, 0x0A]
+•   Depth 22: Flags [0x02, 0x01]
+•   Depth 23: Flags [0x0A, 0x02, 0x01, 0x04, 0x0C]
+•   Depth 24: Flags [0x0A, 0x02, 0x0C, 0x01, 0x04]
+•   Depth 25: Flags [0x0A, 0x02, 0x01, 0x0C]
+•   Depth 26: Flags [0x01, 0x02]
+•   Depth 27: Flags [0x01, 0x04, 0x0C]
+•   Depth 28: Flags [0x01, 0x0C, 0x04, 0x02]
+•   Depth 29: Flags [0x01, 0x04, 0x0C, 0x02]
+•   Depth 30: Flags [0x01, 0x04, 0x0C, 0x02]
+•   Depth 31: Flags [0x01, 0x02, 0x04, 0x0C]
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x0A has sequence ordering: 1, 2, 3, 4
+• Flag 0x0C has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x04 has sequence ordering: 0, 1, 2, 3
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 5 geometry, 2 doodad nodes
+•   Depth 1: 3 geometry, 2 doodad nodes
+•   Depth 2: 3 geometry, 2 doodad nodes
+•   Depth 3: 3 geometry, 2 doodad nodes
+•   Depth 4: 4 geometry, 2 doodad nodes
+•   Depth 5: 5 geometry, 2 doodad nodes
+•   Depth 6: 4 geometry, 4 doodad nodes
+•   Depth 7: 0 geometry, 16 doodad nodes
+•   Depth 8: 3 geometry, 22 doodad nodes
+•   Depth 9: 3 geometry, 34 doodad nodes
+•   Depth 10: 7 geometry, 62 doodad nodes
+•   Depth 11: 16 geometry, 106 doodad nodes
+•   Depth 12: 30 geometry, 184 doodad nodes
+•   Depth 13: 10 geometry, 62 doodad nodes
+•   Depth 14: 8 geometry, 32 doodad nodes
+•   Depth 15: 9 geometry, 62 doodad nodes
+•   Depth 16: 4 geometry, 5 doodad nodes
+•   Depth 17: 4 geometry, 0 doodad nodes
+•   Depth 18: 4 geometry, 2 doodad nodes
+•   Depth 19: 4 geometry, 6 doodad nodes
+•   Depth 20: 5 geometry, 8 doodad nodes
+•   Depth 21: 2 geometry, 20 doodad nodes
+•   Depth 22: 3 geometry, 32 doodad nodes
+•   Depth 23: 7 geometry, 51 doodad nodes
+•   Depth 24: 12 geometry, 86 doodad nodes
+•   Depth 25: 5 geometry, 20 doodad nodes
+•   Depth 26: 2 geometry, 35 doodad nodes
+•   Depth 27: 4 geometry, 66 doodad nodes
+•   Depth 28: 10 geometry, 120 doodad nodes
+•   Depth 29: 22 geometry, 120 doodad nodes
+•   Depth 30: 25 geometry, 150 doodad nodes
+•   Depth 31: 12 geometry, 32 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+  Parent Index 3: 2 children
+  Parent Index 4: 2 children
+  Parent Index 5: 2 children
+  Parent Index 7: 2 children
+  Parent Index 8: 2 children
+  Parent Index 11: 2 children
+  Parent Index 12: 2 children
+  Parent Index 16: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 1349 total (0 geom, 1349 doodad)
+  Flag 0x02: 92 total (92 geom, 0 doodad)
+  Flag 0x04: 75 total (75 geom, 0 doodad)
+  Flag 0x0A: 24 total (24 geom, 0 doodad)
+  Flag 0x0C: 47 total (47 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x02):
+  GEOM_0 [Flag:0x02, Seq:0]
+    GEOM_7 [Flag:0x02, Seq:4]
+      DOOD_8 [Flag:0x01, Seq:1]
+      DOOD_1344 [Flag:0x01, Seq:1]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:1]
+    GEOM_43 [Flag:0x02, Seq:0]
+      GEOM_51 [Flag:0x0A, Seq:2]
+
+Root Node 2 (Flag: 0x02):
+  GEOM_2 [Flag:0x02, Seq:2]
+

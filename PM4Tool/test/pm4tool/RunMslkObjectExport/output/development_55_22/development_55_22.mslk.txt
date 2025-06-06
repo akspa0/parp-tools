@@ -1,0 +1,116 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_55_22.pm4
+Total Nodes: 673
+Root Nodes: 12
+Max Depth: 30
+Geometry Nodes: 336
+Doodad Nodes: 337
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 31
+•   Depth 0: Flags [0x01, 0x0A, 0x02]
+•   Depth 1: Flags [0x01]
+•   Depth 2: Flags [0x01, 0x02]
+•   Depth 3: Flags [0x01, 0x02]
+•   Depth 4: Flags [0x0A, 0x02, 0x01]
+•   Depth 5: Flags [0x0A, 0x01, 0x02]
+•   Depth 6: Flags [0x02, 0x01, 0x04]
+•   Depth 7: Flags [0x0A, 0x02, 0x0C, 0x01, 0x04]
+•   Depth 8: Flags [0x0A, 0x02, 0x01]
+•   Depth 9: Flags [0x0A, 0x02, 0x01]
+•   Depth 10: Flags [0x01, 0x02, 0x0A, 0x04, 0x0C]
+•   Depth 11: Flags [0x02, 0x01]
+•   Depth 12: Flags [0x0A, 0x02, 0x01]
+•   Depth 13: Flags [0x0A, 0x02, 0x01, 0x0C, 0x04]
+•   Depth 14: Flags [0x01, 0x02]
+•   Depth 15: Flags [0x01, 0x02, 0x04]
+•   Depth 16: Flags [0x02, 0x01]
+•   Depth 17: Flags [0x02, 0x01]
+•   Depth 18: Flags [0x02, 0x01, 0x0A]
+•   Depth 19: Flags [0x0C, 0x02, 0x01, 0x0A]
+•   Depth 20: Flags [0x02, 0x0A, 0x01, 0x04]
+•   Depth 21: Flags [0x02, 0x0A, 0x04, 0x0C, 0x01]
+•   Depth 22: Flags [0x01, 0x02, 0x0A, 0x04]
+•   Depth 23: Flags [0x02, 0x04, 0x0A, 0x01]
+•   Depth 24: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 25: Flags [0x01, 0x02]
+•   Depth 26: Flags [0x01, 0x02, 0x04]
+•   Depth 27: Flags [0x02, 0x01, 0x0A, 0x0C, 0x04]
+•   Depth 28: Flags [0x01, 0x02, 0x0A, 0x04]
+•   Depth 29: Flags [0x01, 0x02, 0x0A]
+•   Depth 30: Flags [0x01, 0x02]
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x0A has sequence ordering: 0, 1, 2, 3
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x0C has sequence ordering: 0, 1, 2, 3
+• Flag 0x04 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 9 geometry, 3 doodad nodes
+•   Depth 1: 0 geometry, 3 doodad nodes
+•   Depth 2: 1 geometry, 3 doodad nodes
+•   Depth 3: 1 geometry, 6 doodad nodes
+•   Depth 4: 7 geometry, 2 doodad nodes
+•   Depth 5: 6 geometry, 2 doodad nodes
+•   Depth 6: 8 geometry, 2 doodad nodes
+•   Depth 7: 9 geometry, 2 doodad nodes
+•   Depth 8: 12 geometry, 2 doodad nodes
+•   Depth 9: 12 geometry, 2 doodad nodes
+•   Depth 10: 13 geometry, 6 doodad nodes
+•   Depth 11: 10 geometry, 10 doodad nodes
+•   Depth 12: 9 geometry, 12 doodad nodes
+•   Depth 13: 9 geometry, 17 doodad nodes
+•   Depth 14: 11 geometry, 12 doodad nodes
+•   Depth 15: 18 geometry, 14 doodad nodes
+•   Depth 16: 13 geometry, 31 doodad nodes
+•   Depth 17: 14 geometry, 6 doodad nodes
+•   Depth 18: 7 geometry, 4 doodad nodes
+•   Depth 19: 11 geometry, 5 doodad nodes
+•   Depth 20: 12 geometry, 8 doodad nodes
+•   Depth 21: 16 geometry, 3 doodad nodes
+•   Depth 22: 10 geometry, 9 doodad nodes
+•   Depth 23: 12 geometry, 13 doodad nodes
+•   Depth 24: 9 geometry, 16 doodad nodes
+•   Depth 25: 2 geometry, 24 doodad nodes
+•   Depth 26: 15 geometry, 20 doodad nodes
+•   Depth 27: 30 geometry, 17 doodad nodes
+•   Depth 28: 27 geometry, 41 doodad nodes
+•   Depth 29: 13 geometry, 29 doodad nodes
+•   Depth 30: 10 geometry, 13 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+  Parent Index 2: 2 children
+  Parent Index 12: 2 children
+  Parent Index 13: 2 children
+  Parent Index 16: 2 children
+  Parent Index 20: 2 children
+  Parent Index 21: 2 children
+  Parent Index 28: 2 children
+  Parent Index 29: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 337 total (0 geom, 337 doodad)
+  Flag 0x02: 260 total (260 geom, 0 doodad)
+  Flag 0x04: 24 total (24 geom, 0 doodad)
+  Flag 0x0A: 44 total (44 geom, 0 doodad)
+  Flag 0x0C: 8 total (8 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:0]
+    DOOD_68 [Flag:0x01, Seq:1]
+      GEOM_81 [Flag:0x02, Seq:3]
+
+Root Node 1 (Flag: 0x01):
+  DOOD_1 [Flag:0x01, Seq:1]
+    DOOD_198 [Flag:0x01, Seq:0]
+      DOOD_267 [Flag:0x01, Seq:2]
+
+Root Node 2 (Flag: 0x01):
+  DOOD_2 [Flag:0x01, Seq:2]
+    DOOD_12 [Flag:0x01, Seq:0]
+      DOOD_13 [Flag:0x01, Seq:1]
+      DOOD_36 [Flag:0x01, Seq:1]
+

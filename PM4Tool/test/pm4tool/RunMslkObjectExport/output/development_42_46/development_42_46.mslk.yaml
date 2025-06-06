@@ -1,0 +1,115 @@
+allNodes:
+- &o1
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294913578
+  crossReference_0x10: 1
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o0
+    index: 2
+    flags_0x00: 1
+    sequence_0x01: 2
+    parentIndex_0x04: 0
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294913578
+    crossReference_0x10: 0
+    hasGeometry: false
+    isDoodadNode: true
+    children:
+    - &o4
+      index: 4
+      flags_0x00: 1
+      sequence_0x01: 1
+      parentIndex_0x04: 2
+      mspiFirstIndex: -1
+      mspiIndexCount: 0
+      unknown_0x0C: 4294913577
+      crossReference_0x10: 21
+      hasGeometry: false
+      isDoodadNode: true
+      children: []
+      parent: *o0
+      depth: 2
+    parent: *o1
+    depth: 1
+  parent: 
+  depth: 0
+- &o2
+  index: 1
+  flags_0x00: 1
+  sequence_0x01: 0
+  parentIndex_0x04: 1
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294913578
+  crossReference_0x10: 2
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o3
+    index: 3
+    flags_0x00: 1
+    sequence_0x01: 0
+    parentIndex_0x04: 1
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294913578
+    crossReference_0x10: 1
+    hasGeometry: false
+    isDoodadNode: true
+    children: []
+    parent: *o2
+    depth: 1
+  parent: 
+  depth: 0
+- *o0
+- *o3
+- *o4
+rootNodes:
+- *o1
+- *o2
+nodesByParentIndex:
+  0:
+  - *o1
+  - *o0
+  1:
+  - *o2
+  - *o3
+  2:
+  - *o4
+nodesByFlags:
+  1:
+  - *o1
+  - *o2
+  - *o0
+  - *o3
+  - *o4
+nodesBySequence:
+  2:
+  - *o1
+  - *o0
+  0:
+  - *o2
+  - *o3
+  1:
+  - *o4
+maxDepth: 2
+geometryNodeCount: 0
+doodadNodeCount: 5
+discoveredPatterns:
+- 'Hierarchy levels found: 3'
+- '  Depth 0: Flags [0x01]'
+- '  Depth 1: Flags [0x01]'
+- '  Depth 2: Flags [0x01]'
+- 'Flag 0x01 has sequence ordering: 0, 1, 2'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 0 geometry, 2 doodad nodes'
+- '  Depth 1: 0 geometry, 2 doodad nodes'
+- '  Depth 2: 0 geometry, 1 doodad nodes'

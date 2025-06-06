@@ -1,0 +1,48 @@
+- rootIndex: 0
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 0
+- rootIndex: 1
+  geometryNodeIndices:
+  - 1
+  doodadNodeIndices: []
+- rootIndex: 2
+  geometryNodeIndices:
+  - 2
+  doodadNodeIndices: []
+- rootIndex: 3
+  geometryNodeIndices:
+  - 3
+  doodadNodeIndices: []
+- rootIndex: 4
+  geometryNodeIndices:
+  - 4
+  doodadNodeIndices: []
+- rootIndex: 5
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 5
+- rootIndex: 6
+  geometryNodeIndices:
+  - 6
+  doodadNodeIndices: []
+- rootIndex: 7
+  geometryNodeIndices:
+  - 7
+  doodadNodeIndices: []
+- rootIndex: 8
+  geometryNodeIndices:
+  - 8
+  doodadNodeIndices: []
+- rootIndex: 9
+  geometryNodeIndices:
+  - 9
+  doodadNodeIndices: []
+- rootIndex: 10
+  geometryNodeIndices:
+  - 10
+  doodadNodeIndices: []
+- rootIndex: 11
+  geometryNodeIndices:
+  - 11
+  doodadNodeIndices: []

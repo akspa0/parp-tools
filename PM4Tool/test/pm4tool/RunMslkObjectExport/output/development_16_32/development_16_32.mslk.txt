@@ -1,0 +1,110 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_16_32.pm4
+Total Nodes: 1852
+Root Nodes: 11
+Max Depth: 26
+Geometry Nodes: 627
+Doodad Nodes: 1225
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 27
+•   Depth 0: Flags [0x01, 0x02, 0x0A]
+•   Depth 1: Flags [0x02, 0x01]
+•   Depth 2: Flags [0x01, 0x02]
+•   Depth 3: Flags [0x02, 0x01, 0x0A]
+•   Depth 4: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 5: Flags [0x01, 0x02, 0x0C, 0x04]
+•   Depth 6: Flags [0x02, 0x01, 0x0A, 0x0C, 0x04]
+•   Depth 7: Flags [0x02, 0x01, 0x04, 0x0A]
+•   Depth 8: Flags [0x0A, 0x02, 0x01, 0x04]
+•   Depth 9: Flags [0x02, 0x0A, 0x01]
+•   Depth 10: Flags [0x0C, 0x02, 0x01, 0x04]
+•   Depth 11: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 12: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 13: Flags [0x02, 0x01, 0x0A, 0x0C, 0x04]
+•   Depth 14: Flags [0x01, 0x02, 0x04, 0x0C]
+•   Depth 15: Flags [0x01, 0x02, 0x0C, 0x0A, 0x04]
+•   Depth 16: Flags [0x02, 0x01, 0x0C, 0x0A]
+•   Depth 17: Flags [0x04, 0x01, 0x02, 0x0C, 0x0A]
+•   Depth 18: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 19: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 20: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 21: Flags [0x02, 0x01, 0x04, 0x0C, 0x0A]
+•   Depth 22: Flags [0x0A, 0x01, 0x0C, 0x02, 0x04]
+•   Depth 23: Flags [0x01, 0x04, 0x0C, 0x02]
+•   Depth 24: Flags [0x01, 0x0C, 0x02, 0x0A]
+•   Depth 25: Flags [0x04, 0x0C, 0x01, 0x0A, 0x02]
+•   Depth 26: Flags [0x0A, 0x02]
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x0A has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x0C has sequence ordering: 0, 1, 2, 3, 4, 5
+• Flag 0x04 has sequence ordering: 0, 1, 2, 3
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 8 geometry, 3 doodad nodes
+•   Depth 1: 3 geometry, 3 doodad nodes
+•   Depth 2: 4 geometry, 6 doodad nodes
+•   Depth 3: 5 geometry, 10 doodad nodes
+•   Depth 4: 9 geometry, 18 doodad nodes
+•   Depth 5: 5 geometry, 42 doodad nodes
+•   Depth 6: 30 geometry, 38 doodad nodes
+•   Depth 7: 30 geometry, 33 doodad nodes
+•   Depth 8: 13 geometry, 14 doodad nodes
+•   Depth 9: 12 geometry, 30 doodad nodes
+•   Depth 10: 7 geometry, 66 doodad nodes
+•   Depth 11: 15 geometry, 72 doodad nodes
+•   Depth 12: 44 geometry, 54 doodad nodes
+•   Depth 13: 42 geometry, 32 doodad nodes
+•   Depth 14: 24 geometry, 35 doodad nodes
+•   Depth 15: 25 geometry, 60 doodad nodes
+•   Depth 16: 28 geometry, 73 doodad nodes
+•   Depth 17: 36 geometry, 102 doodad nodes
+•   Depth 18: 62 geometry, 88 doodad nodes
+•   Depth 19: 29 geometry, 106 doodad nodes
+•   Depth 20: 30 geometry, 92 doodad nodes
+•   Depth 21: 26 geometry, 100 doodad nodes
+•   Depth 22: 55 geometry, 50 doodad nodes
+•   Depth 23: 11 geometry, 66 doodad nodes
+•   Depth 24: 49 geometry, 26 doodad nodes
+•   Depth 25: 18 geometry, 6 doodad nodes
+•   Depth 26: 7 geometry, 0 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+  Parent Index 2: 2 children
+  Parent Index 4: 2 children
+  Parent Index 6: 2 children
+  Parent Index 7: 2 children
+  Parent Index 11: 2 children
+  Parent Index 12: 2 children
+  Parent Index 13: 2 children
+  Parent Index 14: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 1225 total (0 geom, 1225 doodad)
+  Flag 0x02: 426 total (426 geom, 0 doodad)
+  Flag 0x04: 66 total (66 geom, 0 doodad)
+  Flag 0x0A: 88 total (88 geom, 0 doodad)
+  Flag 0x0C: 47 total (47 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:0]
+    DOOD_161 [Flag:0x01, Seq:1]
+      DOOD_222 [Flag:0x01, Seq:0]
+      DOOD_227 [Flag:0x01, Seq:1]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:1]
+    GEOM_115 [Flag:0x02, Seq:3]
+      DOOD_142 [Flag:0x01, Seq:2]
+      DOOD_146 [Flag:0x01, Seq:2]
+
+Root Node 2 (Flag: 0x02):
+  GEOM_2 [Flag:0x02, Seq:0]
+    GEOM_167 [Flag:0x02, Seq:3]
+      GEOM_232 [Flag:0x02, Seq:1]
+      GEOM_237 [Flag:0x02, Seq:3]
+

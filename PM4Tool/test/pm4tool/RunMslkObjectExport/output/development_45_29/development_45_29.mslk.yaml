@@ -1,0 +1,1499 @@
+allNodes:
+- &o76
+  index: 0
+  flags_0x00: 1
+  sequence_0x01: 2
+  parentIndex_0x04: 0
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294909230
+  crossReference_0x10: 410
+  hasGeometry: false
+  isDoodadNode: true
+  children: []
+  parent: 
+  depth: 0
+- &o57
+  index: 1
+  flags_0x00: 1
+  sequence_0x01: 0
+  parentIndex_0x04: 1
+  mspiFirstIndex: -1
+  mspiIndexCount: 0
+  unknown_0x0C: 4294909229
+  crossReference_0x10: 2
+  hasGeometry: false
+  isDoodadNode: true
+  children:
+  - &o56
+    index: 2
+    flags_0x00: 1
+    sequence_0x01: 2
+    parentIndex_0x04: 1
+    mspiFirstIndex: -1
+    mspiIndexCount: 0
+    unknown_0x0C: 4294909229
+    crossReference_0x10: 1
+    hasGeometry: false
+    isDoodadNode: true
+    children:
+    - &o55
+      index: 3
+      flags_0x00: 2
+      sequence_0x01: 2
+      parentIndex_0x04: 2
+      mspiFirstIndex: 0
+      mspiIndexCount: 4
+      unknown_0x0C: 4294909230
+      crossReference_0x10: 58
+      hasGeometry: true
+      isDoodadNode: false
+      children:
+      - &o26
+        index: 4
+        flags_0x00: 2
+        sequence_0x01: 2
+        parentIndex_0x04: 3
+        mspiFirstIndex: 4
+        mspiIndexCount: 4
+        unknown_0x0C: 4294909230
+        crossReference_0x10: 59
+        hasGeometry: true
+        isDoodadNode: false
+        children:
+        - &o25
+          index: 5
+          flags_0x00: 1
+          sequence_0x01: 1
+          parentIndex_0x04: 4
+          mspiFirstIndex: -1
+          mspiIndexCount: 0
+          unknown_0x0C: 4294909229
+          crossReference_0x10: 7
+          hasGeometry: false
+          isDoodadNode: true
+          children:
+          - &o24
+            index: 6
+            flags_0x00: 1
+            sequence_0x01: 3
+            parentIndex_0x04: 5
+            mspiFirstIndex: -1
+            mspiIndexCount: 0
+            unknown_0x0C: 4294909230
+            crossReference_0x10: 714
+            hasGeometry: false
+            isDoodadNode: true
+            children:
+            - &o23
+              index: 8
+              flags_0x00: 1
+              sequence_0x01: 3
+              parentIndex_0x04: 6
+              mspiFirstIndex: -1
+              mspiIndexCount: 0
+              unknown_0x0C: 4294909230
+              crossReference_0x10: 731
+              hasGeometry: false
+              isDoodadNode: true
+              children:
+              - &o22
+                index: 10
+                flags_0x00: 1
+                sequence_0x01: 2
+                parentIndex_0x04: 8
+                mspiFirstIndex: -1
+                mspiIndexCount: 0
+                unknown_0x0C: 4294909230
+                crossReference_0x10: 867
+                hasGeometry: false
+                isDoodadNode: true
+                children:
+                - &o9
+                  index: 12
+                  flags_0x00: 12
+                  sequence_0x01: 2
+                  parentIndex_0x04: 10
+                  mspiFirstIndex: 8
+                  mspiIndexCount: 4
+                  unknown_0x0C: 4294909229
+                  crossReference_0x10: 16
+                  hasGeometry: true
+                  isDoodadNode: false
+                  children:
+                  - &o8
+                    index: 14
+                    flags_0x00: 1
+                    sequence_0x01: 1
+                    parentIndex_0x04: 12
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 14
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o7
+                      index: 16
+                      flags_0x00: 2
+                      sequence_0x01: 3
+                      parentIndex_0x04: 14
+                      mspiFirstIndex: 16
+                      mspiIndexCount: 6
+                      unknown_0x0C: 4294909230
+                      crossReference_0x10: 1056
+                      hasGeometry: true
+                      isDoodadNode: false
+                      children:
+                      - &o3
+                        index: 21
+                        flags_0x00: 2
+                        sequence_0x01: 1
+                        parentIndex_0x04: 16
+                        mspiFirstIndex: 22
+                        mspiIndexCount: 4
+                        unknown_0x0C: 4294909230
+                        crossReference_0x10: 1056
+                        hasGeometry: true
+                        isDoodadNode: false
+                        children:
+                        - &o2
+                          index: 28
+                          flags_0x00: 1
+                          sequence_0x01: 2
+                          parentIndex_0x04: 21
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 19
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o1
+                            index: 37
+                            flags_0x00: 4
+                            sequence_0x01: 0
+                            parentIndex_0x04: 28
+                            mspiFirstIndex: 46
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 25
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children:
+                            - &o0
+                              index: 49
+                              flags_0x00: 12
+                              sequence_0x01: 2
+                              parentIndex_0x04: 37
+                              mspiFirstIndex: 68
+                              mspiIndexCount: 4
+                              unknown_0x0C: 4294909229
+                              crossReference_0x10: 21
+                              hasGeometry: true
+                              isDoodadNode: false
+                              children:
+                              - &o63
+                                index: 64
+                                flags_0x00: 1
+                                sequence_0x01: 2
+                                parentIndex_0x04: 49
+                                mspiFirstIndex: -1
+                                mspiIndexCount: 0
+                                unknown_0x0C: 4294909229
+                                crossReference_0x10: 31
+                                hasGeometry: false
+                                isDoodadNode: true
+                                children: []
+                                parent: *o0
+                                depth: 15
+                              - &o67
+                                index: 68
+                                flags_0x00: 1
+                                sequence_0x01: 2
+                                parentIndex_0x04: 49
+                                mspiFirstIndex: -1
+                                mspiIndexCount: 0
+                                unknown_0x0C: 4294909229
+                                crossReference_0x10: 30
+                                hasGeometry: false
+                                isDoodadNode: true
+                                children: []
+                                parent: *o0
+                                depth: 15
+                              parent: *o1
+                              depth: 14
+                            parent: *o2
+                            depth: 13
+                          parent: *o3
+                          depth: 12
+                        - &o6
+                          index: 32
+                          flags_0x00: 1
+                          sequence_0x01: 0
+                          parentIndex_0x04: 21
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 18
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o5
+                            index: 42
+                            flags_0x00: 1
+                            sequence_0x01: 3
+                            parentIndex_0x04: 32
+                            mspiFirstIndex: -1
+                            mspiIndexCount: 0
+                            unknown_0x0C: 4294909230
+                            crossReference_0x10: 1202
+                            hasGeometry: false
+                            isDoodadNode: true
+                            children:
+                            - &o4
+                              index: 55
+                              flags_0x00: 4
+                              sequence_0x01: 2
+                              parentIndex_0x04: 42
+                              mspiFirstIndex: 82
+                              mspiIndexCount: 4
+                              unknown_0x0C: 4294909229
+                              crossReference_0x10: 25
+                              hasGeometry: true
+                              isDoodadNode: false
+                              children:
+                              - &o70
+                                index: 71
+                                flags_0x00: 1
+                                sequence_0x01: 1
+                                parentIndex_0x04: 55
+                                mspiFirstIndex: -1
+                                mspiIndexCount: 0
+                                unknown_0x0C: 4294909229
+                                crossReference_0x10: 34
+                                hasGeometry: false
+                                isDoodadNode: true
+                                children: []
+                                parent: *o4
+                                depth: 15
+                              - &o74
+                                index: 75
+                                flags_0x00: 1
+                                sequence_0x01: 0
+                                parentIndex_0x04: 55
+                                mspiFirstIndex: -1
+                                mspiIndexCount: 0
+                                unknown_0x0C: 4294909229
+                                crossReference_0x10: 33
+                                hasGeometry: false
+                                isDoodadNode: true
+                                children: []
+                                parent: *o4
+                                depth: 15
+                              parent: *o5
+                              depth: 14
+                            parent: *o6
+                            depth: 13
+                          parent: *o3
+                          depth: 12
+                        parent: *o7
+                        depth: 11
+                      parent: *o8
+                      depth: 10
+                    parent: *o9
+                    depth: 9
+                  - &o15
+                    index: 17
+                    flags_0x00: 1
+                    sequence_0x01: 1
+                    parentIndex_0x04: 12
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 13
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o14
+                      index: 23
+                      flags_0x00: 1
+                      sequence_0x01: 2
+                      parentIndex_0x04: 17
+                      mspiFirstIndex: -1
+                      mspiIndexCount: 0
+                      unknown_0x0C: 4294909229
+                      crossReference_0x10: 18
+                      hasGeometry: false
+                      isDoodadNode: true
+                      children:
+                      - &o12
+                        index: 31
+                        flags_0x00: 2
+                        sequence_0x01: 1
+                        parentIndex_0x04: 23
+                        mspiFirstIndex: 38
+                        mspiIndexCount: 4
+                        unknown_0x0C: 4294909230
+                        crossReference_0x10: 1064
+                        hasGeometry: true
+                        isDoodadNode: false
+                        children:
+                        - &o11
+                          index: 41
+                          flags_0x00: 1
+                          sequence_0x01: 2
+                          parentIndex_0x04: 31
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 23
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o10
+                            index: 54
+                            flags_0x00: 1
+                            sequence_0x01: 1
+                            parentIndex_0x04: 41
+                            mspiFirstIndex: -1
+                            mspiIndexCount: 0
+                            unknown_0x0C: 4294909230
+                            crossReference_0x10: 1209
+                            hasGeometry: false
+                            isDoodadNode: true
+                            children:
+                            - &o69
+                              index: 70
+                              flags_0x00: 12
+                              sequence_0x01: 2
+                              parentIndex_0x04: 54
+                              mspiFirstIndex: 114
+                              mspiIndexCount: 4
+                              unknown_0x0C: 4294909229
+                              crossReference_0x10: 29
+                              hasGeometry: true
+                              isDoodadNode: false
+                              children: []
+                              parent: *o10
+                              depth: 14
+                            parent: *o11
+                            depth: 13
+                          parent: *o12
+                          depth: 12
+                        - &o13
+                          index: 44
+                          flags_0x00: 1
+                          sequence_0x01: 3
+                          parentIndex_0x04: 31
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 22
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o58
+                            index: 59
+                            flags_0x00: 2
+                            sequence_0x01: 2
+                            parentIndex_0x04: 44
+                            mspiFirstIndex: 90
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909230
+                            crossReference_0x10: 1208
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children: []
+                            parent: *o13
+                            depth: 13
+                          parent: *o12
+                          depth: 12
+                        parent: *o14
+                        depth: 11
+                      parent: *o15
+                      depth: 10
+                    - &o18
+                      index: 27
+                      flags_0x00: 1
+                      sequence_0x01: 0
+                      parentIndex_0x04: 17
+                      mspiFirstIndex: -1
+                      mspiIndexCount: 0
+                      unknown_0x0C: 4294909229
+                      crossReference_0x10: 16
+                      hasGeometry: false
+                      isDoodadNode: true
+                      children:
+                      - &o17
+                        index: 36
+                        flags_0x00: 1
+                        sequence_0x01: 2
+                        parentIndex_0x04: 27
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 22
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o16
+                          index: 48
+                          flags_0x00: 4
+                          sequence_0x01: 0
+                          parentIndex_0x04: 36
+                          mspiFirstIndex: 64
+                          mspiIndexCount: 4
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 27
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children:
+                          - &o62
+                            index: 63
+                            flags_0x00: 1
+                            sequence_0x01: 0
+                            parentIndex_0x04: 48
+                            mspiFirstIndex: -1
+                            mspiIndexCount: 0
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 33
+                            hasGeometry: false
+                            isDoodadNode: true
+                            children: []
+                            parent: *o16
+                            depth: 13
+                          - &o71
+                            index: 72
+                            flags_0x00: 1
+                            sequence_0x01: 2
+                            parentIndex_0x04: 48
+                            mspiFirstIndex: -1
+                            mspiIndexCount: 0
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 30
+                            hasGeometry: false
+                            isDoodadNode: true
+                            children: []
+                            parent: *o16
+                            depth: 13
+                          parent: *o17
+                          depth: 12
+                        parent: *o18
+                        depth: 11
+                      - &o20
+                        index: 40
+                        flags_0x00: 1
+                        sequence_0x01: 1
+                        parentIndex_0x04: 27
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 21
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o19
+                          index: 53
+                          flags_0x00: 1
+                          sequence_0x01: 0
+                          parentIndex_0x04: 40
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 28
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o68
+                            index: 69
+                            flags_0x00: 4
+                            sequence_0x01: 0
+                            parentIndex_0x04: 53
+                            mspiFirstIndex: 110
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 34
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children: []
+                            parent: *o19
+                            depth: 13
+                          parent: *o20
+                          depth: 12
+                        - &o21
+                          index: 57
+                          flags_0x00: 1
+                          sequence_0x01: 0
+                          parentIndex_0x04: 40
+                          mspiFirstIndex: -1
+                          mspiIndexCount: 0
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 27
+                          hasGeometry: false
+                          isDoodadNode: true
+                          children:
+                          - &o73
+                            index: 74
+                            flags_0x00: 2
+                            sequence_0x01: 3
+                            parentIndex_0x04: 57
+                            mspiFirstIndex: 122
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909230
+                            crossReference_0x10: 1336
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children: []
+                            parent: *o21
+                            depth: 13
+                          parent: *o20
+                          depth: 12
+                        parent: *o18
+                        depth: 11
+                      parent: *o15
+                      depth: 10
+                    parent: *o9
+                    depth: 9
+                  parent: *o22
+                  depth: 8
+                parent: *o23
+                depth: 7
+              parent: *o24
+              depth: 6
+            parent: *o25
+            depth: 5
+          parent: *o26
+          depth: 4
+        - &o54
+          index: 7
+          flags_0x00: 1
+          sequence_0x01: 1
+          parentIndex_0x04: 4
+          mspiFirstIndex: -1
+          mspiIndexCount: 0
+          unknown_0x0C: 4294909229
+          crossReference_0x10: 6
+          hasGeometry: false
+          isDoodadNode: true
+          children:
+          - &o47
+            index: 9
+            flags_0x00: 1
+            sequence_0x01: 2
+            parentIndex_0x04: 7
+            mspiFirstIndex: -1
+            mspiIndexCount: 0
+            unknown_0x0C: 4294909230
+            crossReference_0x10: 842
+            hasGeometry: false
+            isDoodadNode: true
+            children:
+            - &o42
+              index: 11
+              flags_0x00: 1
+              sequence_0x01: 1
+              parentIndex_0x04: 9
+              mspiFirstIndex: -1
+              mspiIndexCount: 0
+              unknown_0x0C: 4294909229
+              crossReference_0x10: 14
+              hasGeometry: false
+              isDoodadNode: true
+              children:
+              - &o41
+                index: 13
+                flags_0x00: 1
+                sequence_0x01: 0
+                parentIndex_0x04: 11
+                mspiFirstIndex: -1
+                mspiIndexCount: 0
+                unknown_0x0C: 4294909229
+                crossReference_0x10: 15
+                hasGeometry: false
+                isDoodadNode: true
+                children:
+                - &o35
+                  index: 15
+                  flags_0x00: 2
+                  sequence_0x01: 3
+                  parentIndex_0x04: 13
+                  mspiFirstIndex: 12
+                  mspiIndexCount: 4
+                  unknown_0x0C: 4294909230
+                  crossReference_0x10: 1055
+                  hasGeometry: true
+                  isDoodadNode: false
+                  children:
+                  - &o31
+                    index: 20
+                    flags_0x00: 1
+                    sequence_0x01: 2
+                    parentIndex_0x04: 15
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 16
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o29
+                      index: 26
+                      flags_0x00: 1
+                      sequence_0x01: 2
+                      parentIndex_0x04: 20
+                      mspiFirstIndex: -1
+                      mspiIndexCount: 0
+                      unknown_0x0C: 4294909229
+                      crossReference_0x10: 18
+                      hasGeometry: false
+                      isDoodadNode: true
+                      children:
+                      - &o28
+                        index: 35
+                        flags_0x00: 1
+                        sequence_0x01: 1
+                        parentIndex_0x04: 26
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 24
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o27
+                          index: 46
+                          flags_0x00: 2
+                          sequence_0x01: 2
+                          parentIndex_0x04: 35
+                          mspiFirstIndex: 60
+                          mspiIndexCount: 4
+                          unknown_0x0C: 4294909230
+                          crossReference_0x10: 1204
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children:
+                          - &o60
+                            index: 61
+                            flags_0x00: 4
+                            sequence_0x01: 0
+                            parentIndex_0x04: 46
+                            mspiFirstIndex: 98
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 32
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children: []
+                            parent: *o27
+                            depth: 13
+                          parent: *o28
+                          depth: 12
+                        parent: *o29
+                        depth: 11
+                      - &o30
+                        index: 47
+                        flags_0x00: 1
+                        sequence_0x01: 1
+                        parentIndex_0x04: 26
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 21
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o61
+                          index: 62
+                          flags_0x00: 4
+                          sequence_0x01: 2
+                          parentIndex_0x04: 47
+                          mspiFirstIndex: 102
+                          mspiIndexCount: 4
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 30
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children: []
+                          parent: *o30
+                          depth: 12
+                        parent: *o29
+                        depth: 11
+                      parent: *o31
+                      depth: 10
+                    - &o34
+                      index: 29
+                      flags_0x00: 1
+                      sequence_0x01: 3
+                      parentIndex_0x04: 20
+                      mspiFirstIndex: -1
+                      mspiIndexCount: 0
+                      unknown_0x0C: 4294909229
+                      crossReference_0x10: 17
+                      hasGeometry: false
+                      isDoodadNode: true
+                      children:
+                      - &o33
+                        index: 38
+                        flags_0x00: 4
+                        sequence_0x01: 3
+                        parentIndex_0x04: 29
+                        mspiFirstIndex: 50
+                        mspiIndexCount: 6
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 27
+                        hasGeometry: true
+                        isDoodadNode: false
+                        children:
+                        - &o32
+                          index: 51
+                          flags_0x00: 2
+                          sequence_0x01: 2
+                          parentIndex_0x04: 38
+                          mspiFirstIndex: 72
+                          mspiIndexCount: 6
+                          unknown_0x0C: 4294909230
+                          crossReference_0x10: 1205
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children:
+                          - &o65
+                            index: 66
+                            flags_0x00: 4
+                            sequence_0x01: 1
+                            parentIndex_0x04: 51
+                            mspiFirstIndex: 106
+                            mspiIndexCount: 4
+                            unknown_0x0C: 4294909229
+                            crossReference_0x10: 29
+                            hasGeometry: true
+                            isDoodadNode: false
+                            children: []
+                            parent: *o32
+                            depth: 13
+                          parent: *o33
+                          depth: 12
+                        parent: *o34
+                        depth: 11
+                      parent: *o31
+                      depth: 10
+                    parent: *o35
+                    depth: 9
+                  - &o40
+                    index: 22
+                    flags_0x00: 1
+                    sequence_0x01: 0
+                    parentIndex_0x04: 15
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 15
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o38
+                      index: 30
+                      flags_0x00: 2
+                      sequence_0x01: 1
+                      parentIndex_0x04: 22
+                      mspiFirstIndex: 34
+                      mspiIndexCount: 4
+                      unknown_0x0C: 4294909230
+                      crossReference_0x10: 1058
+                      hasGeometry: true
+                      isDoodadNode: false
+                      children:
+                      - &o37
+                        index: 39
+                        flags_0x00: 1
+                        sequence_0x01: 0
+                        parentIndex_0x04: 30
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 28
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o36
+                          index: 52
+                          flags_0x00: 2
+                          sequence_0x01: 2
+                          parentIndex_0x04: 39
+                          mspiFirstIndex: 78
+                          mspiIndexCount: 4
+                          unknown_0x0C: 4294909230
+                          crossReference_0x10: 1212
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children:
+                          - &o66
+                            index: 67
+                            flags_0x00: 1
+                            sequence_0x01: 1
+                            parentIndex_0x04: 52
+                            mspiFirstIndex: -1
+                            mspiIndexCount: 0
+                            unknown_0x0C: 4294909230
+                            crossReference_0x10: 1333
+                            hasGeometry: false
+                            isDoodadNode: true
+                            children: []
+                            parent: *o36
+                            depth: 13
+                          parent: *o37
+                          depth: 12
+                        parent: *o38
+                        depth: 11
+                      - &o39
+                        index: 58
+                        flags_0x00: 1
+                        sequence_0x01: 1
+                        parentIndex_0x04: 30
+                        mspiFirstIndex: -1
+                        mspiIndexCount: 0
+                        unknown_0x0C: 4294909229
+                        crossReference_0x10: 22
+                        hasGeometry: false
+                        isDoodadNode: true
+                        children:
+                        - &o75
+                          index: 76
+                          flags_0x00: 4
+                          sequence_0x01: 2
+                          parentIndex_0x04: 58
+                          mspiFirstIndex: 126
+                          mspiIndexCount: 4
+                          unknown_0x0C: 4294909229
+                          crossReference_0x10: 32
+                          hasGeometry: true
+                          isDoodadNode: false
+                          children: []
+                          parent: *o39
+                          depth: 12
+                        parent: *o38
+                        depth: 11
+                      parent: *o40
+                      depth: 10
+                    parent: *o35
+                    depth: 9
+                  parent: *o41
+                  depth: 8
+                parent: *o42
+                depth: 7
+              - &o46
+                index: 19
+                flags_0x00: 1
+                sequence_0x01: 0
+                parentIndex_0x04: 11
+                mspiFirstIndex: -1
+                mspiIndexCount: 0
+                unknown_0x0C: 4294909229
+                crossReference_0x10: 13
+                hasGeometry: false
+                isDoodadNode: true
+                children:
+                - &o45
+                  index: 25
+                  flags_0x00: 4
+                  sequence_0x01: 3
+                  parentIndex_0x04: 19
+                  mspiFirstIndex: 30
+                  mspiIndexCount: 4
+                  unknown_0x0C: 4294909229
+                  crossReference_0x10: 12
+                  hasGeometry: true
+                  isDoodadNode: false
+                  children:
+                  - &o44
+                    index: 34
+                    flags_0x00: 1
+                    sequence_0x01: 2
+                    parentIndex_0x04: 25
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909230
+                    crossReference_0x10: 1171
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o43
+                      index: 45
+                      flags_0x00: 2
+                      sequence_0x01: 2
+                      parentIndex_0x04: 34
+                      mspiFirstIndex: 56
+                      mspiIndexCount: 4
+                      unknown_0x0C: 4294909230
+                      crossReference_0x10: 1203
+                      hasGeometry: true
+                      isDoodadNode: false
+                      children:
+                      - &o59
+                        index: 60
+                        flags_0x00: 2
+                        sequence_0x01: 2
+                        parentIndex_0x04: 45
+                        mspiFirstIndex: 94
+                        mspiIndexCount: 4
+                        unknown_0x0C: 4294909230
+                        crossReference_0x10: 1210
+                        hasGeometry: true
+                        isDoodadNode: false
+                        children: []
+                        parent: *o43
+                        depth: 11
+                      parent: *o44
+                      depth: 10
+                    parent: *o45
+                    depth: 9
+                  parent: *o46
+                  depth: 8
+                parent: *o42
+                depth: 7
+              parent: *o47
+              depth: 6
+            - &o53
+              index: 18
+              flags_0x00: 1
+              sequence_0x01: 2
+              parentIndex_0x04: 9
+              mspiFirstIndex: -1
+              mspiIndexCount: 0
+              unknown_0x0C: 4294909229
+              crossReference_0x10: 12
+              hasGeometry: false
+              isDoodadNode: true
+              children:
+              - &o52
+                index: 24
+                flags_0x00: 2
+                sequence_0x01: 1
+                parentIndex_0x04: 18
+                mspiFirstIndex: 26
+                mspiIndexCount: 4
+                unknown_0x0C: 4294909230
+                crossReference_0x10: 1056
+                hasGeometry: true
+                isDoodadNode: false
+                children:
+                - &o50
+                  index: 33
+                  flags_0x00: 2
+                  sequence_0x01: 1
+                  parentIndex_0x04: 24
+                  mspiFirstIndex: 42
+                  mspiIndexCount: 4
+                  unknown_0x0C: 4294909230
+                  crossReference_0x10: 1065
+                  hasGeometry: true
+                  isDoodadNode: false
+                  children:
+                  - &o49
+                    index: 43
+                    flags_0x00: 1
+                    sequence_0x01: 1
+                    parentIndex_0x04: 33
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 26
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o48
+                      index: 56
+                      flags_0x00: 4
+                      sequence_0x01: 2
+                      parentIndex_0x04: 43
+                      mspiFirstIndex: 86
+                      mspiIndexCount: 4
+                      unknown_0x0C: 4294909229
+                      crossReference_0x10: 21
+                      hasGeometry: true
+                      isDoodadNode: false
+                      children:
+                      - &o72
+                        index: 73
+                        flags_0x00: 2
+                        sequence_0x01: 3
+                        parentIndex_0x04: 56
+                        mspiFirstIndex: 118
+                        mspiIndexCount: 4
+                        unknown_0x0C: 4294909230
+                        crossReference_0x10: 1335
+                        hasGeometry: true
+                        isDoodadNode: false
+                        children: []
+                        parent: *o48
+                        depth: 11
+                      parent: *o49
+                      depth: 10
+                    parent: *o50
+                    depth: 9
+                  - &o51
+                    index: 50
+                    flags_0x00: 1
+                    sequence_0x01: 3
+                    parentIndex_0x04: 33
+                    mspiFirstIndex: -1
+                    mspiIndexCount: 0
+                    unknown_0x0C: 4294909229
+                    crossReference_0x10: 23
+                    hasGeometry: false
+                    isDoodadNode: true
+                    children:
+                    - &o64
+                      index: 65
+                      flags_0x00: 1
+                      sequence_0x01: 3
+                      parentIndex_0x04: 50
+                      mspiFirstIndex: -1
+                      mspiIndexCount: 0
+                      unknown_0x0C: 4294909230
+                      crossReference_0x10: 1332
+                      hasGeometry: false
+                      isDoodadNode: true
+                      children: []
+                      parent: *o51
+                      depth: 10
+                    parent: *o50
+                    depth: 9
+                  parent: *o52
+                  depth: 8
+                parent: *o53
+                depth: 7
+              parent: *o47
+              depth: 6
+            parent: *o54
+            depth: 5
+          parent: *o26
+          depth: 4
+        parent: *o55
+        depth: 3
+      parent: *o56
+      depth: 2
+    parent: *o57
+    depth: 1
+  parent: 
+  depth: 0
+- *o56
+- *o55
+- *o26
+- *o25
+- *o24
+- *o54
+- *o23
+- *o47
+- *o22
+- *o42
+- *o9
+- *o41
+- *o8
+- *o35
+- *o7
+- *o15
+- *o53
+- *o46
+- *o31
+- *o3
+- *o40
+- *o14
+- *o52
+- *o45
+- *o29
+- *o18
+- *o2
+- *o34
+- *o38
+- *o12
+- *o6
+- *o50
+- *o44
+- *o28
+- *o17
+- *o1
+- *o33
+- *o37
+- *o20
+- *o11
+- *o5
+- *o49
+- *o13
+- *o43
+- *o27
+- *o30
+- *o16
+- *o0
+- *o51
+- *o32
+- *o36
+- *o19
+- *o10
+- *o4
+- *o48
+- *o21
+- *o39
+- *o58
+- *o59
+- *o60
+- *o61
+- *o62
+- *o63
+- *o64
+- *o65
+- *o66
+- *o67
+- *o68
+- *o69
+- *o70
+- *o71
+- *o72
+- *o73
+- *o74
+- *o75
+rootNodes:
+- *o76
+- *o57
+nodesByParentIndex:
+  0:
+  - *o76
+  1:
+  - *o57
+  - *o56
+  2:
+  - *o55
+  3:
+  - *o26
+  4:
+  - *o25
+  - *o54
+  5:
+  - *o24
+  6:
+  - *o23
+  7:
+  - *o47
+  8:
+  - *o22
+  9:
+  - *o42
+  - *o53
+  10:
+  - *o9
+  11:
+  - *o41
+  - *o46
+  12:
+  - *o8
+  - *o15
+  13:
+  - *o35
+  14:
+  - *o7
+  15:
+  - *o31
+  - *o40
+  16:
+  - *o3
+  17:
+  - *o14
+  - *o18
+  18:
+  - *o52
+  19:
+  - *o45
+  20:
+  - *o29
+  - *o34
+  21:
+  - *o2
+  - *o6
+  22:
+  - *o38
+  23:
+  - *o12
+  24:
+  - *o50
+  25:
+  - *o44
+  26:
+  - *o28
+  - *o30
+  27:
+  - *o17
+  - *o20
+  28:
+  - *o1
+  29:
+  - *o33
+  30:
+  - *o37
+  - *o39
+  31:
+  - *o11
+  - *o13
+  32:
+  - *o5
+  33:
+  - *o49
+  - *o51
+  34:
+  - *o43
+  35:
+  - *o27
+  36:
+  - *o16
+  37:
+  - *o0
+  38:
+  - *o32
+  39:
+  - *o36
+  40:
+  - *o19
+  - *o21
+  41:
+  - *o10
+  42:
+  - *o4
+  43:
+  - *o48
+  44:
+  - *o58
+  45:
+  - *o59
+  46:
+  - *o60
+  47:
+  - *o61
+  48:
+  - *o62
+  - *o71
+  49:
+  - *o63
+  - *o67
+  50:
+  - *o64
+  51:
+  - *o65
+  52:
+  - *o66
+  53:
+  - *o68
+  54:
+  - *o69
+  55:
+  - *o70
+  - *o74
+  56:
+  - *o72
+  57:
+  - *o73
+  58:
+  - *o75
+nodesByFlags:
+  1:
+  - *o76
+  - *o57
+  - *o56
+  - *o25
+  - *o24
+  - *o54
+  - *o23
+  - *o47
+  - *o22
+  - *o42
+  - *o41
+  - *o8
+  - *o15
+  - *o53
+  - *o46
+  - *o31
+  - *o40
+  - *o14
+  - *o29
+  - *o18
+  - *o2
+  - *o34
+  - *o6
+  - *o44
+  - *o28
+  - *o17
+  - *o37
+  - *o20
+  - *o11
+  - *o5
+  - *o49
+  - *o13
+  - *o30
+  - *o51
+  - *o19
+  - *o10
+  - *o21
+  - *o39
+  - *o62
+  - *o63
+  - *o64
+  - *o66
+  - *o67
+  - *o70
+  - *o71
+  - *o74
+  2:
+  - *o55
+  - *o26
+  - *o35
+  - *o7
+  - *o3
+  - *o52
+  - *o38
+  - *o12
+  - *o50
+  - *o43
+  - *o27
+  - *o32
+  - *o36
+  - *o58
+  - *o59
+  - *o72
+  - *o73
+  12:
+  - *o9
+  - *o0
+  - *o69
+  4:
+  - *o45
+  - *o1
+  - *o33
+  - *o16
+  - *o4
+  - *o48
+  - *o60
+  - *o61
+  - *o65
+  - *o68
+  - *o75
+nodesBySequence:
+  2:
+  - *o76
+  - *o56
+  - *o55
+  - *o26
+  - *o47
+  - *o22
+  - *o9
+  - *o53
+  - *o31
+  - *o14
+  - *o29
+  - *o2
+  - *o44
+  - *o17
+  - *o11
+  - *o43
+  - *o27
+  - *o0
+  - *o32
+  - *o36
+  - *o4
+  - *o48
+  - *o58
+  - *o59
+  - *o61
+  - *o63
+  - *o67
+  - *o69
+  - *o71
+  - *o75
+  0:
+  - *o57
+  - *o41
+  - *o46
+  - *o40
+  - *o18
+  - *o6
+  - *o1
+  - *o37
+  - *o16
+  - *o19
+  - *o21
+  - *o60
+  - *o62
+  - *o68
+  - *o74
+  1:
+  - *o25
+  - *o54
+  - *o42
+  - *o8
+  - *o15
+  - *o3
+  - *o52
+  - *o38
+  - *o12
+  - *o50
+  - *o28
+  - *o20
+  - *o49
+  - *o30
+  - *o10
+  - *o39
+  - *o65
+  - *o66
+  - *o70
+  3:
+  - *o24
+  - *o23
+  - *o35
+  - *o7
+  - *o45
+  - *o34
+  - *o33
+  - *o5
+  - *o13
+  - *o51
+  - *o64
+  - *o72
+  - *o73
+maxDepth: 15
+geometryNodeCount: 31
+doodadNodeCount: 46
+discoveredPatterns:
+- 'Hierarchy levels found: 16'
+- '  Depth 0: Flags [0x01]'
+- '  Depth 1: Flags [0x01]'
+- '  Depth 2: Flags [0x02]'
+- '  Depth 3: Flags [0x02]'
+- '  Depth 4: Flags [0x01]'
+- '  Depth 5: Flags [0x01]'
+- '  Depth 6: Flags [0x01]'
+- '  Depth 7: Flags [0x01, 0x02]'
+- '  Depth 8: Flags [0x0C, 0x02, 0x04]'
+- '  Depth 9: Flags [0x01]'
+- '  Depth 10: Flags [0x02, 0x01, 0x04]'
+- '  Depth 11: Flags [0x02, 0x01, 0x04]'
+- '  Depth 12: Flags [0x01, 0x02, 0x04]'
+- '  Depth 13: Flags [0x04, 0x01, 0x02]'
+- '  Depth 14: Flags [0x0C, 0x04]'
+- '  Depth 15: Flags [0x01]'
+- 'Flag 0x01 has sequence ordering: 0, 1, 2, 3'
+- 'Flag 0x02 has sequence ordering: 1, 2, 3'
+- 'Flag 0x04 has sequence ordering: 0, 1, 2, 3'
+- 'Geometry/Doodad distribution by depth:'
+- '  Depth 0: 0 geometry, 2 doodad nodes'
+- '  Depth 1: 0 geometry, 1 doodad nodes'
+- '  Depth 2: 1 geometry, 0 doodad nodes'
+- '  Depth 3: 1 geometry, 0 doodad nodes'
+- '  Depth 4: 0 geometry, 2 doodad nodes'
+- '  Depth 5: 0 geometry, 2 doodad nodes'
+- '  Depth 6: 0 geometry, 3 doodad nodes'
+- '  Depth 7: 1 geometry, 3 doodad nodes'
+- '  Depth 8: 4 geometry, 0 doodad nodes'
+- '  Depth 9: 0 geometry, 7 doodad nodes'
+- '  Depth 10: 4 geometry, 5 doodad nodes'
+- '  Depth 11: 5 geometry, 6 doodad nodes'
+- '  Depth 12: 6 geometry, 6 doodad nodes'
+- '  Depth 13: 6 geometry, 5 doodad nodes'
+- '  Depth 14: 3 geometry, 0 doodad nodes'
+- '  Depth 15: 0 geometry, 4 doodad nodes'

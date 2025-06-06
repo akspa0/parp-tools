@@ -1,0 +1,64 @@
+MSLK Object Segmentation for development_02_01.pm4
+Generated: 6/6/2025 7:31:31 PM
+Total Objects: 15
+
+Object Root: 0
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [0] (1 nodes)
+
+Object Root: 1
+  Geometry Nodes: [1] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 2
+  Geometry Nodes: [2] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 3
+  Geometry Nodes: [3] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 4
+  Geometry Nodes: [4] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 5
+  Geometry Nodes: [5] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 6
+  Geometry Nodes: [6] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 7
+  Geometry Nodes: [7] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 8
+  Geometry Nodes: [8] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 9
+  Geometry Nodes: [9] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 10
+  Geometry Nodes: [10] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 11
+  Geometry Nodes: [11] (1 nodes)
+  Anchor/Group Nodes: [] (0 nodes)
+
+Object Root: 12
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [12, 82] (2 nodes)
+
+Object Root: 13
+  Geometry Nodes: [] (0 nodes)
+  Anchor/Group Nodes: [13, 87] (2 nodes)
+
+Object Root: 14
+  Geometry Nodes: [16, 105, 98, 70, 71, 40, 72, 88, 92, 91, 102, 95, 99] (13 nodes)
+  Anchor/Group Nodes: [14, 15, 17, 18, 20, 22, 25, 32, 42, 53, 81, 85, 67, 66, 33, 43, 54, 89, 101, 73, 58, 94, 96, 27, 35, 46, 63, 100, 103, 65, 104, 61, 37, 48, 76, 23, 28, 36, 47, 69, 74, 55, 90, 93, 30, 51, 79, 86, 68, 38, 49, 77, 19, 21, 24, 29, 39, 50, 75, 78, 83, 31, 41, 52, 80, 84, 57, 44, 56, 64, 26, 34, 45, 59, 62, 60, 97] (77 nodes)
+

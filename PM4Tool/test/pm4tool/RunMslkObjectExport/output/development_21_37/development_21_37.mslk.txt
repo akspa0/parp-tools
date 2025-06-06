@@ -1,0 +1,42 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_21_37.pm4
+Total Nodes: 12
+Root Nodes: 12
+Max Depth: 0
+Geometry Nodes: 10
+Doodad Nodes: 2
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 1
+•   Depth 0: Flags [0x01, 0x02, 0x04]
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 10 geometry, 2 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 1 children
+  Parent Index 1: 1 children
+  Parent Index 2: 1 children
+  Parent Index 3: 1 children
+  Parent Index 4: 1 children
+  Parent Index 5: 1 children
+  Parent Index 6: 1 children
+  Parent Index 7: 1 children
+  Parent Index 8: 1 children
+  Parent Index 9: 1 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 2 total (0 geom, 2 doodad)
+  Flag 0x02: 1 total (1 geom, 0 doodad)
+  Flag 0x04: 9 total (9 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:2]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:1]
+
+Root Node 2 (Flag: 0x04):
+  GEOM_2 [Flag:0x04, Seq:2]
+

@@ -1,0 +1,263 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_35_29.pm4
+Total Nodes: 19093
+Root Nodes: 5
+Max Depth: 103
+Geometry Nodes: 8316
+Doodad Nodes: 10777
+
+=== DISCOVERED PATTERNS ===
+• Hierarchy levels found: 104
+•   Depth 0: Flags [0x02]
+•   Depth 1: Flags [0x02]
+•   Depth 2: Flags [0x02]
+•   Depth 3: Flags [0x01, 0x02, 0x0A]
+•   Depth 4: Flags [0x01, 0x02]
+•   Depth 5: Flags [0x02, 0x01]
+•   Depth 6: Flags [0x02, 0x0A, 0x01]
+•   Depth 7: Flags [0x02, 0x01]
+•   Depth 8: Flags [0x02, 0x01]
+•   Depth 9: Flags [0x02, 0x01, 0x0A, 0x04]
+•   Depth 10: Flags [0x02, 0x01, 0x0A]
+•   Depth 11: Flags [0x02, 0x01, 0x04, 0x0A]
+•   Depth 12: Flags [0x02, 0x01, 0x0A]
+•   Depth 13: Flags [0x04, 0x01, 0x02, 0x0A]
+•   Depth 14: Flags [0x02, 0x01, 0x04, 0x0A, 0x0C]
+•   Depth 15: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 16: Flags [0x02, 0x01, 0x04]
+•   Depth 17: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 18: Flags [0x02, 0x01, 0x0A]
+•   Depth 19: Flags [0x02, 0x01, 0x0C, 0x04]
+•   Depth 20: Flags [0x02, 0x01, 0x04, 0x0C, 0x0A]
+•   Depth 21: Flags [0x01, 0x02, 0x0A, 0x0C]
+•   Depth 22: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 23: Flags [0x02, 0x01, 0x0A, 0x04]
+•   Depth 24: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 25: Flags [0x01, 0x02, 0x0A, 0x0C]
+•   Depth 26: Flags [0x02, 0x01, 0x0C, 0x0A, 0x04]
+•   Depth 27: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 28: Flags [0x01, 0x02, 0x04, 0x0A, 0x0C]
+•   Depth 29: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 30: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 31: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 32: Flags [0x04, 0x01, 0x02, 0x0A, 0x0C]
+•   Depth 33: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 34: Flags [0x02, 0x01, 0x04, 0x0A, 0x0C]
+•   Depth 35: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 36: Flags [0x01, 0x02, 0x0A, 0x04, 0x0C]
+•   Depth 37: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 38: Flags [0x01, 0x02, 0x0A, 0x04, 0x0C]
+•   Depth 39: Flags [0x02, 0x01, 0x04, 0x0A, 0x0C]
+•   Depth 40: Flags [0x02, 0x01, 0x04, 0x0A, 0x0C]
+•   Depth 41: Flags [0x02, 0x04, 0x01, 0x0A, 0x0C]
+•   Depth 42: Flags [0x02, 0x01, 0x04, 0x0A, 0x0C]
+•   Depth 43: Flags [0x01, 0x02, 0x0A, 0x04, 0x0C]
+•   Depth 44: Flags [0x01, 0x02, 0x04, 0x0C, 0x0A]
+•   Depth 45: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 46: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 47: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 48: Flags [0x02, 0x01, 0x0A, 0x04]
+•   Depth 49: Flags [0x02, 0x04, 0x01, 0x0A, 0x0C]
+•   Depth 50: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 51: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 52: Flags [0x01, 0x02, 0x0A, 0x04]
+•   Depth 53: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 54: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 55: Flags [0x01, 0x02, 0x0A, 0x04, 0x0C]
+•   Depth 56: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 57: Flags [0x02, 0x01, 0x04, 0x0C]
+•   Depth 58: Flags [0x02, 0x01, 0x0A]
+•   Depth 59: Flags [0x02, 0x01, 0x04, 0x0A]
+•   Depth 60: Flags [0x01, 0x02, 0x04, 0x0A, 0x0C]
+•   Depth 61: Flags [0x02, 0x01, 0x0C, 0x04]
+•   Depth 62: Flags [0x02, 0x01, 0x0A, 0x04]
+•   Depth 63: Flags [0x01, 0x02, 0x0A, 0x04]
+•   Depth 64: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 65: Flags [0x01, 0x02, 0x0C, 0x04]
+•   Depth 66: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 67: Flags [0x02, 0x0A, 0x01, 0x04, 0x0C]
+•   Depth 68: Flags [0x02, 0x01, 0x0A, 0x0C, 0x04]
+•   Depth 69: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 70: Flags [0x02, 0x01, 0x0A, 0x04, 0x0C]
+•   Depth 71: Flags [0x02, 0x0A, 0x01]
+•   Depth 72: Flags [0x01, 0x02, 0x0C, 0x04]
+•   Depth 73: Flags [0x02, 0x01, 0x0A]
+•   Depth 74: Flags [0x01, 0x02]
+•   Depth 75: Flags [0x02, 0x0A, 0x01]
+•   Depth 76: Flags [0x02, 0x01]
+•   Depth 77: Flags [0x02, 0x01, 0x0A, 0x0C]
+•   Depth 78: Flags [0x01, 0x02, 0x0A]
+•   Depth 79: Flags [0x02, 0x01]
+•   Depth 80: Flags [0x01, 0x02]
+•   Depth 81: Flags [0x02, 0x01]
+•   Depth 82: Flags [0x01, 0x02]
+•   Depth 83: Flags [0x02, 0x01]
+•   Depth 84: Flags [0x02, 0x01, 0x0C]
+•   Depth 85: Flags [0x02, 0x01, 0x04]
+•   Depth 86: Flags [0x02, 0x01]
+•   Depth 87: Flags [0x01, 0x02, 0x0A]
+•   Depth 88: Flags [0x01, 0x02, 0x0A]
+•   Depth 89: Flags [0x01, 0x02, 0x04]
+•   Depth 90: Flags [0x02, 0x01, 0x04]
+•   Depth 91: Flags [0x02, 0x01]
+•   Depth 92: Flags [0x01, 0x02, 0x0C, 0x04]
+•   Depth 93: Flags [0x02, 0x01, 0x04]
+•   Depth 94: Flags [0x02, 0x0A, 0x01]
+•   Depth 95: Flags [0x01, 0x0A, 0x02]
+•   Depth 96: Flags [0x02, 0x01]
+•   Depth 97: Flags [0x01, 0x02]
+•   Depth 98: Flags [0x04, 0x01, 0x02]
+•   Depth 99: Flags [0x02, 0x01]
+•   Depth 100: Flags [0x02, 0x01]
+•   Depth 101: Flags [0x02, 0x0A, 0x01]
+•   Depth 102: Flags [0x04, 0x01, 0x02, 0x0A]
+•   Depth 103: Flags [0x01, 0x04, 0x0C]
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4, 5, 6, 8
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4, 5, 6, 7
+• Flag 0x04 has sequence ordering: 0, 1, 2, 3, 4
+• Flag 0x0A has sequence ordering: 0, 1, 2, 3, 4, 5, 6
+• Flag 0x0C has sequence ordering: 0, 1, 2, 3, 4
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 5 geometry, 0 doodad nodes
+•   Depth 1: 5 geometry, 0 doodad nodes
+•   Depth 2: 8 geometry, 0 doodad nodes
+•   Depth 3: 7 geometry, 6 doodad nodes
+•   Depth 4: 8 geometry, 14 doodad nodes
+•   Depth 5: 13 geometry, 16 doodad nodes
+•   Depth 6: 26 geometry, 10 doodad nodes
+•   Depth 7: 29 geometry, 21 doodad nodes
+•   Depth 8: 27 geometry, 30 doodad nodes
+•   Depth 9: 29 geometry, 16 doodad nodes
+•   Depth 10: 36 geometry, 26 doodad nodes
+•   Depth 11: 50 geometry, 28 doodad nodes
+•   Depth 12: 50 geometry, 44 doodad nodes
+•   Depth 13: 61 geometry, 45 doodad nodes
+•   Depth 14: 54 geometry, 72 doodad nodes
+•   Depth 15: 53 geometry, 72 doodad nodes
+•   Depth 16: 82 geometry, 61 doodad nodes
+•   Depth 17: 66 geometry, 102 doodad nodes
+•   Depth 18: 58 geometry, 84 doodad nodes
+•   Depth 19: 57 geometry, 96 doodad nodes
+•   Depth 20: 78 geometry, 55 doodad nodes
+•   Depth 21: 73 geometry, 84 doodad nodes
+•   Depth 22: 81 geometry, 100 doodad nodes
+•   Depth 23: 111 geometry, 110 doodad nodes
+•   Depth 24: 109 geometry, 143 doodad nodes
+•   Depth 25: 108 geometry, 156 doodad nodes
+•   Depth 26: 134 geometry, 183 doodad nodes
+•   Depth 27: 149 geometry, 182 doodad nodes
+•   Depth 28: 182 geometry, 226 doodad nodes
+•   Depth 29: 211 geometry, 236 doodad nodes
+•   Depth 30: 227 geometry, 291 doodad nodes
+•   Depth 31: 246 geometry, 295 doodad nodes
+•   Depth 32: 238 geometry, 337 doodad nodes
+•   Depth 33: 249 geometry, 332 doodad nodes
+•   Depth 34: 263 geometry, 339 doodad nodes
+•   Depth 35: 258 geometry, 332 doodad nodes
+•   Depth 36: 252 geometry, 322 doodad nodes
+•   Depth 37: 223 geometry, 335 doodad nodes
+•   Depth 38: 238 geometry, 298 doodad nodes
+•   Depth 39: 212 geometry, 342 doodad nodes
+•   Depth 40: 224 geometry, 322 doodad nodes
+•   Depth 41: 187 geometry, 280 doodad nodes
+•   Depth 42: 204 geometry, 213 doodad nodes
+•   Depth 43: 196 geometry, 248 doodad nodes
+•   Depth 44: 184 geometry, 226 doodad nodes
+•   Depth 45: 193 geometry, 214 doodad nodes
+•   Depth 46: 179 geometry, 247 doodad nodes
+•   Depth 47: 183 geometry, 204 doodad nodes
+•   Depth 48: 189 geometry, 228 doodad nodes
+•   Depth 49: 162 geometry, 216 doodad nodes
+•   Depth 50: 149 geometry, 248 doodad nodes
+•   Depth 51: 143 geometry, 205 doodad nodes
+•   Depth 52: 109 geometry, 152 doodad nodes
+•   Depth 53: 108 geometry, 155 doodad nodes
+•   Depth 54: 80 geometry, 151 doodad nodes
+•   Depth 55: 70 geometry, 112 doodad nodes
+•   Depth 56: 74 geometry, 80 doodad nodes
+•   Depth 57: 58 geometry, 84 doodad nodes
+•   Depth 58: 59 geometry, 71 doodad nodes
+•   Depth 59: 53 geometry, 90 doodad nodes
+•   Depth 60: 64 geometry, 76 doodad nodes
+•   Depth 61: 59 geometry, 90 doodad nodes
+•   Depth 62: 59 geometry, 67 doodad nodes
+•   Depth 63: 53 geometry, 73 doodad nodes
+•   Depth 64: 55 geometry, 64 doodad nodes
+•   Depth 65: 53 geometry, 89 doodad nodes
+•   Depth 66: 56 geometry, 64 doodad nodes
+•   Depth 67: 58 geometry, 50 doodad nodes
+•   Depth 68: 50 geometry, 61 doodad nodes
+•   Depth 69: 57 geometry, 69 doodad nodes
+•   Depth 70: 40 geometry, 100 doodad nodes
+•   Depth 71: 28 geometry, 62 doodad nodes
+•   Depth 72: 28 geometry, 60 doodad nodes
+•   Depth 73: 27 geometry, 36 doodad nodes
+•   Depth 74: 19 geometry, 34 doodad nodes
+•   Depth 75: 22 geometry, 31 doodad nodes
+•   Depth 76: 39 geometry, 26 doodad nodes
+•   Depth 77: 26 geometry, 56 doodad nodes
+•   Depth 78: 30 geometry, 33 doodad nodes
+•   Depth 79: 24 geometry, 30 doodad nodes
+•   Depth 80: 11 geometry, 49 doodad nodes
+•   Depth 81: 19 geometry, 20 doodad nodes
+•   Depth 82: 13 geometry, 20 doodad nodes
+•   Depth 83: 14 geometry, 12 doodad nodes
+•   Depth 84: 12 geometry, 18 doodad nodes
+•   Depth 85: 13 geometry, 15 doodad nodes
+•   Depth 86: 24 geometry, 12 doodad nodes
+•   Depth 87: 17 geometry, 20 doodad nodes
+•   Depth 88: 15 geometry, 28 doodad nodes
+•   Depth 89: 15 geometry, 42 doodad nodes
+•   Depth 90: 16 geometry, 24 doodad nodes
+•   Depth 91: 8 geometry, 28 doodad nodes
+•   Depth 92: 7 geometry, 14 doodad nodes
+•   Depth 93: 5 geometry, 10 doodad nodes
+•   Depth 94: 10 geometry, 2 doodad nodes
+•   Depth 95: 8 geometry, 6 doodad nodes
+•   Depth 96: 8 geometry, 6 doodad nodes
+•   Depth 97: 9 geometry, 8 doodad nodes
+•   Depth 98: 10 geometry, 8 doodad nodes
+•   Depth 99: 7 geometry, 12 doodad nodes
+•   Depth 100: 17 geometry, 6 doodad nodes
+•   Depth 101: 21 geometry, 14 doodad nodes
+•   Depth 102: 17 geometry, 12 doodad nodes
+•   Depth 103: 3 geometry, 33 doodad nodes
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 18: 3 children
+  Parent Index 55: 3 children
+  Parent Index 417: 3 children
+  Parent Index 1053: 3 children
+  Parent Index 1370: 3 children
+  Parent Index 2172: 3 children
+  Parent Index 3953: 3 children
+  Parent Index 5223: 3 children
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 10777 total (0 geom, 10777 doodad)
+  Flag 0x02: 7831 total (7831 geom, 0 doodad)
+  Flag 0x04: 181 total (181 geom, 0 doodad)
+  Flag 0x0A: 189 total (189 geom, 0 doodad)
+  Flag 0x0C: 115 total (115 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x02):
+  GEOM_0 [Flag:0x02, Seq:0]
+    GEOM_3758 [Flag:0x02, Seq:1]
+      GEOM_4797 [Flag:0x02, Seq:2]
+
+Root Node 1 (Flag: 0x02):
+  GEOM_1 [Flag:0x02, Seq:1]
+    GEOM_42 [Flag:0x02, Seq:4]
+      GEOM_45 [Flag:0x02, Seq:0]
+      GEOM_630 [Flag:0x02, Seq:1]
+
+Root Node 2 (Flag: 0x02):
+  GEOM_2 [Flag:0x02, Seq:0]
+    GEOM_38 [Flag:0x02, Seq:3]
+      GEOM_40 [Flag:0x02, Seq:0]
+      GEOM_3757 [Flag:0x02, Seq:1]
+

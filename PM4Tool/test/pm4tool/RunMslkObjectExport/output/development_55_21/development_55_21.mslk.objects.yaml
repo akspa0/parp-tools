@@ -1,0 +1,12 @@
+- rootIndex: 0
+  geometryNodeIndices: []
+  doodadNodeIndices:
+  - 0
+- rootIndex: 1
+  geometryNodeIndices:
+  - 4
+  - 5
+  doodadNodeIndices:
+  - 1
+  - 2
+  - 3
