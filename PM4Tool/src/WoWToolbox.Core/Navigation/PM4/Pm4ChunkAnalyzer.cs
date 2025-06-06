@@ -128,6 +128,38 @@ namespace WoWToolbox.Core.Navigation.PM4
             return result;
         }
 
+        /// <summary>
+        /// Performs comprehensive MSLK relationship analysis with Mermaid diagram output.
+        /// </summary>
+        /// <param name="filePath">Path to the PM4 file</param>
+        /// <param name="outputMermaidToConsole">Whether to output Mermaid diagrams to console</param>
+        public void AnalyzePm4FileWithMslkRelationships(string filePath, bool outputMermaidToConsole = true)
+        {
+            try
+            {
+                var pm4File = PM4File.FromFile(filePath);
+                var fileName = Path.GetFileName(filePath);
+                
+                // Perform standard chunk analysis
+                var standardAnalysis = AnalyzePm4File(filePath);
+                
+                // Output standard analysis insights
+                Console.WriteLine($"🔍 STANDARD PM4 ANALYSIS: {fileName}");
+                foreach (var insight in standardAnalysis.Insights)
+                {
+                    Console.WriteLine($"  📋 {insight}");
+                }
+                Console.WriteLine();
+                
+                // Perform enhanced MSLK relationship analysis
+                Pm4MslkCliAnalyzer.AnalyzeAndOutputMslkRelationships(pm4File, fileName, outputMermaidToConsole);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error analyzing {Path.GetFileName(filePath)}: {ex.Message}");
+            }
+        }
+
         private void AnalyzeChunkCounts(PM4File pm4File, ChunkCounts counts)
         {
             counts.MSVT_Vertices = pm4File.MSVT?.Vertices.Count ?? 0;
@@ -217,8 +249,8 @@ namespace WoWToolbox.Core.Navigation.PM4
                     }
                 }
 
-                // Track group frequency
-                uint groupKey = entry.Unknown_0x04;
+                // Track group frequency using documented Index Reference field
+                uint groupKey = entry.Unknown_0x04; // This is the documented "index somewhere" field
                 if (!analysis.GroupFrequency.ContainsKey(groupKey))
                     analysis.GroupFrequency[groupKey] = 0;
                 analysis.GroupFrequency[groupKey]++;
