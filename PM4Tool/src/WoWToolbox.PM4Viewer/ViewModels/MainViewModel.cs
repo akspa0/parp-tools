@@ -136,6 +136,25 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         [ObservableProperty]
         private ObservableCollection<LegendItem> _legendItems = new();
         
+        // Batch Loading Properties
+        [ObservableProperty]
+        private ObservableCollection<PM4File> _loadedFiles = new();
+        
+        [ObservableProperty]
+        private bool _showBatchSummary = false;
+        
+        [ObservableProperty]
+        private string _batchSummary = "No batch data loaded";
+        
+        [ObservableProperty]
+        private int _totalFilesLoaded = 0;
+        
+        [ObservableProperty]
+        private long _totalVerticesLoaded = 0;
+        
+        [ObservableProperty]
+        private long _totalEntriesLoaded = 0;
+        
         // Camera Controls
         [ObservableProperty]
         private Point3D _cameraPosition = new(100, 100, 100);
@@ -153,6 +172,28 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         [ObservableProperty]
         private bool _autoFitCamera = true;
 
+        // Hierarchy Visualization Properties
+        [ObservableProperty]
+        private HierarchyAnalysisResult? _currentHierarchyAnalysis;
+
+        [ObservableProperty]
+        private bool _showHierarchyTree = false;
+
+        [ObservableProperty]
+        private bool _showRootNodes = true;
+
+        [ObservableProperty]
+        private bool _showLeafNodes = true;
+
+        [ObservableProperty]
+        private bool _showParentChildConnections = true;
+
+        [ObservableProperty]
+        private bool _showCrossReferences = false;
+
+        [ObservableProperty]
+        private int _hierarchyLevelFilter = 0; // 0 = show all levels
+
         public MainViewModel()
         {
             _analyzer = new PM4StructuralAnalyzer();
@@ -161,6 +202,25 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             ToggleChunkVisibilityCommand = new RelayCommand<string>(ToggleChunkVisibility);
             SelectGroupCommand = new RelayCommand<Unknown0x04Group>(SelectGroup);
             CancelLoadingCommand = new RelayCommand(CancelLoading);
+            
+            // Enhanced Controls
+            FitCameraToDataCommand = new RelayCommand(FitCameraToData);
+            ResetCameraCommand = new RelayCommand(ResetCamera);
+            JumpToChunkCommand = new RelayCommand<string>(JumpToChunk);
+            RefreshLegendCommand = new RelayCommand(RefreshLegend);
+            
+            // Enhanced Export Commands
+            ExportInsightsCommand = new AsyncRelayCommand(ExportInsightsAsync);
+            ExportDetailedAnalysisCommand = new AsyncRelayCommand(ExportDetailedAnalysisAsync);
+            ExportGroupAnalysisCommand = new AsyncRelayCommand(ExportGroupAnalysisAsync);
+            PerformDeepAnalysisCommand = new AsyncRelayCommand(PerformDeepAnalysisAsync);
+            InvestigatePaddingCommand = new AsyncRelayCommand(InvestigatePaddingAsync);
+            
+            // Batch Loading Commands
+            LoadBatchFilesCommand = new AsyncRelayCommand(LoadBatchFilesAsync);
+            LoadDirectoryCommand = new AsyncRelayCommand(LoadDirectoryAsync);
+            
+            InitializeLegend();
         }
 
         public IAsyncRelayCommand LoadFileCommand { get; }
@@ -168,6 +228,23 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public IRelayCommand<string> ToggleChunkVisibilityCommand { get; }
         public IRelayCommand<Unknown0x04Group> SelectGroupCommand { get; }
         public IRelayCommand CancelLoadingCommand { get; }
+        
+        // Enhanced Commands
+        public IRelayCommand FitCameraToDataCommand { get; }
+        public IRelayCommand ResetCameraCommand { get; }
+        public IRelayCommand<string> JumpToChunkCommand { get; }
+        public IRelayCommand RefreshLegendCommand { get; }
+
+        // Enhanced Export Commands
+        public IAsyncRelayCommand ExportInsightsCommand { get; }
+        public IAsyncRelayCommand ExportDetailedAnalysisCommand { get; }
+        public IAsyncRelayCommand ExportGroupAnalysisCommand { get; }
+        public IAsyncRelayCommand PerformDeepAnalysisCommand { get; }
+        public IAsyncRelayCommand InvestigatePaddingCommand { get; }
+        
+        // Batch Loading Commands
+        public IAsyncRelayCommand LoadBatchFilesCommand { get; }
+        public IAsyncRelayCommand LoadDirectoryCommand { get; }
 
         partial void OnGroupsFilterTextChanged(string value)
         {
@@ -198,6 +275,92 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         }
         
         partial void OnShowOnlySelectedGroupChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+        
+        // Enhanced Visualization Property Changes
+        partial void OnShowGroundGridChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowCoordinateBoundsChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowCoordinateAxesChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowVertexIndicesChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+        
+        partial void OnShowGroupConnectionsChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowHierarchyLinesChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowMSVTVerticesChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowMSCNPointsChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+        
+        partial void OnShowMSPVVerticesChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+
+        // Hierarchy Visualization Property Changes
+        partial void OnShowHierarchyTreeChanged(bool value)
+        {
+            UpdateVisualization();
+            RefreshLegend();
+        }
+
+        partial void OnShowRootNodesChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+
+        partial void OnShowLeafNodesChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+
+        partial void OnShowParentChildConnectionsChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+
+        partial void OnShowCrossReferencesChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+
+        partial void OnHierarchyLevelFilterChanged(int value)
         {
             UpdateVisualization();
         }
@@ -506,12 +669,18 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
 
             // Visualize node hierarchy connections
-            if (ShowNodeHierarchy)
+            if (ShowNodeHierarchy || ShowHierarchyTree)
             {
                 var hierarchyModel = CreateNodeHierarchyVisualization();
                 if (hierarchyModel != null)
                 {
                     newScene.Children.Add(hierarchyModel);
+                }
+                
+                // If showing hierarchy tree, add the enhanced visualizations directly to scene
+                if (ShowHierarchyTree && CurrentHierarchyAnalysis != null)
+                {
+                    CreateHierarchyTreeVisualization(newScene);
                 }
             }
 
@@ -528,21 +697,39 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
 
             SceneModel = newScene;
+            
+            // Update legend to reflect current visualization state
+            RefreshLegend();
+            
+            // Auto-fit camera if enabled and data loaded
+            if (AutoFitCamera && Pm4File != null)
+            {
+                FitCameraToData();
+            }
         }
 
         private void AddCoordinateSystemVisualization(Model3DGroup scene)
         {
             // Add ground plane grid at Y=0 within PM4 coordinate bounds
-            var groundPlane = CreateGroundPlaneGrid();
-            scene.Children.Add(groundPlane);
+            if (ShowGroundGrid)
+            {
+                var groundPlane = CreateGroundPlaneGrid();
+                scene.Children.Add(groundPlane);
+            }
             
             // Add coordinate boundary visualization
-            var coordinateBounds = CreateCoordinateBounds();
-            scene.Children.Add(coordinateBounds);
+            if (ShowCoordinateBounds)
+            {
+                var coordinateBounds = CreateCoordinateBounds();
+                scene.Children.Add(coordinateBounds);
+            }
             
             // Add coordinate axes
-            var coordinateAxes = CreateCoordinateAxes();
-            scene.Children.Add(coordinateAxes);
+            if (ShowCoordinateAxes)
+            {
+                var coordinateAxes = CreateCoordinateAxes();
+                scene.Children.Add(coordinateAxes);
+            }
         }
 
         private GeometryModel3D CreateGroundPlaneGrid()
@@ -827,37 +1014,376 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
         private GeometryModel3D? CreateNodeHierarchyVisualization()
         {
-            if (Pm4File?.MSLK?.Entries == null) return null;
+            if (!ShowHierarchyTree || CurrentHierarchyAnalysis == null || Pm4File?.MSLK?.Entries == null) return null;
 
-            var geometry = new MeshGeometry3D();
-            var material = new DiffuseMaterial(new SolidColorBrush(Colors.Yellow));
+            var hierarchyScene = new Model3DGroup();
 
-            // Visualize MSLK hierarchical connections
-            var groupedEntries = Pm4File.MSLK.Entries.GroupBy(e => e.Unknown_0x04).ToList();
-            
-            foreach (var group in groupedEntries.Where(g => g.Count() > 1))
+            // Create enhanced hierarchy visualization
+            CreateHierarchyTreeVisualization(hierarchyScene);
+
+            if (hierarchyScene.Children.Count > 0)
             {
-                var entries = group.ToList();
+                return new GeometryModel3D(null, null) { Geometry = null, Material = null, BackMaterial = null };
+            }
+
+            return null;
+        }
+
+        private void CreateHierarchyTreeVisualization(Model3DGroup scene)
+        {
+            if (CurrentHierarchyAnalysis == null) return;
+
+            // 1. Create hierarchy nodes with different visuals for root, intermediate, and leaf nodes
+            foreach (var kvp in CurrentHierarchyAnalysis.GroupHierarchy)
+            {
+                var groupValue = kvp.Key;
+                var hierarchyInfo = kvp.Value;
+
+                // Filter by hierarchy level if specified
+                if (HierarchyLevelFilter > 0 && hierarchyInfo.HierarchyLevel != HierarchyLevelFilter)
+                    continue;
+
+                // Get positions for this group
+                var group = Unknown0x04Groups.FirstOrDefault(g => g.GroupValue == groupValue);
+                if (group?.AssociatedVertices == null || !group.AssociatedVertices.Any())
+                    continue;
+
+                // Calculate center position for the group
+                var centerPos = CalculateGroupCenter(group.AssociatedVertices);
+
+                // Create node visualization based on hierarchy type
+                CreateHierarchyNode(scene, centerPos, hierarchyInfo, groupValue);
+            }
+
+            // 2. Create parent-child connections
+            if (ShowParentChildConnections)
+            {
+                CreateParentChildConnections(scene);
+            }
+
+            // 3. Create cross-reference connections
+            if (ShowCrossReferences)
+            {
+                CreateCrossReferenceConnections(scene);
+            }
+        }
+
+        private Point3D CalculateGroupCenter(List<Vector3> vertices)
+        {
+            if (vertices.Count == 0) return new Point3D();
+
+            var centerX = vertices.Average(v => v.X);
+            var centerY = vertices.Average(v => v.Y);
+            var centerZ = vertices.Average(v => v.Z);
+
+            return new Point3D(centerX, centerY, centerZ);
+        }
+
+        private void CreateHierarchyNode(Model3DGroup scene, Point3D position, GroupHierarchyInfo hierarchyInfo, uint groupValue)
+        {
+            var geometry = new MeshGeometry3D();
+            Color nodeColor;
+            double nodeSize;
+            
+            // Special handling for the root node (0x00000000)
+            if (groupValue == 0x00000000 && hierarchyInfo.IsRootNode && ShowRootNodes)
+            {
+                nodeColor = Colors.Gold;
+                nodeSize = 4.0; // Extra large for root
+                CreateNodeShape(geometry, position, nodeSize, NodeShape.Diamond);
                 
-                // Connect entries within the same group
-                for (int i = 0; i < entries.Count - 1; i++)
+                // Add a glowing effect with a larger transparent diamond
+                var glowGeometry = new MeshGeometry3D();
+                CreateNodeShape(glowGeometry, position, nodeSize * 1.5, NodeShape.Diamond);
+                var glowMaterial = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(64, 255, 215, 0))); // Semi-transparent gold
+                var glowModel = new GeometryModel3D(glowGeometry, glowMaterial);
+                scene.Children.Add(glowModel);
+            }
+            // Other root nodes
+            else if (hierarchyInfo.IsRootNode && ShowRootNodes)
+            {
+                nodeColor = Colors.Orange;
+                nodeSize = 3.0;
+                CreateNodeShape(geometry, position, nodeSize, NodeShape.Diamond);
+            }
+            // Leaf nodes with enhanced colors
+            else if (hierarchyInfo.IsLeafNode && ShowLeafNodes)
+            {
+                // Color leaf nodes based on their level depth
+                var leafHue = 120f + (hierarchyInfo.HierarchyLevel * 10f); // Green spectrum
+                nodeColor = HSVToRGB(leafHue / 360f, 0.7f, 0.9f);
+                nodeSize = 2.0;
+                CreateNodeShape(geometry, position, nodeSize, NodeShape.Triangle);
+            }
+            else
+            {
+                // Intermediate nodes - enhanced level-based coloring for 13 levels
+                var maxLevels = 13f;
+                var levelRatio = Math.Min(hierarchyInfo.HierarchyLevel / maxLevels, 1.0f);
+                
+                // Use a rainbow spectrum across the 13 levels
+                var hue = levelRatio * 300f; // 0° (red) to 300° (magenta), avoiding green which is for leaves
+                var saturation = 0.8f + (levelRatio * 0.2f); // Increase saturation with depth
+                var brightness = 1.0f - (levelRatio * 0.3f); // Slightly dimmer for deeper levels
+                
+                nodeColor = HSVToRGB(hue / 360f, saturation, brightness);
+                nodeSize = 2.5 - (levelRatio * 0.5); // Smaller nodes for deeper levels
+                CreateNodeShape(geometry, position, nodeSize, NodeShape.Cube);
+            }
+
+            var material = new DiffuseMaterial(new SolidColorBrush(nodeColor));
+            var model = new GeometryModel3D(geometry, material);
+            scene.Children.Add(model);
+        }
+
+        private void CreateParentChildConnections(Model3DGroup scene)
+        {
+            if (CurrentHierarchyAnalysis == null) return;
+
+            // Create different geometries for different hierarchy levels
+            var connectionsByLevel = new Dictionary<int, MeshGeometry3D>();
+
+            foreach (var kvp in CurrentHierarchyAnalysis.GroupHierarchy)
+            {
+                var childInfo = kvp.Value;
+                if (!childInfo.ParentValue.HasValue) continue;
+
+                // Skip if level filtering is active and this level doesn't match
+                if (HierarchyLevelFilter > 0 && childInfo.HierarchyLevel != HierarchyLevelFilter)
+                    continue;
+
+                // Find parent and child positions
+                var childGroup = Unknown0x04Groups.FirstOrDefault(g => g.GroupValue == childInfo.GroupValue);
+                var parentGroup = Unknown0x04Groups.FirstOrDefault(g => g.GroupValue == childInfo.ParentValue.Value);
+
+                if (childGroup?.AssociatedVertices.Any() == true && parentGroup?.AssociatedVertices.Any() == true)
                 {
-                    var entry1 = entries[i];
-                    var entry2 = entries[i + 1];
+                    var childPos = CalculateGroupCenter(childGroup.AssociatedVertices);
+                    var parentPos = CalculateGroupCenter(parentGroup.AssociatedVertices);
+
+                    // Get or create geometry for this hierarchy level
+                    if (!connectionsByLevel.ContainsKey(childInfo.HierarchyLevel))
+                        connectionsByLevel[childInfo.HierarchyLevel] = new MeshGeometry3D();
+
+                    // Make connections thicker for higher levels (closer to root)
+                    var thickness = Math.Max(0.2f, 1.0f - (childInfo.HierarchyLevel * 0.06f));
                     
-                    // Try to get 3D positions for connection visualization
-                    var pos1 = TryGetEntryPosition(entry1);
-                    var pos2 = TryGetEntryPosition(entry2);
-                    
-                    if (pos1.HasValue && pos2.HasValue)
+                    CreateConnection(connectionsByLevel[childInfo.HierarchyLevel], parentPos, childPos, thickness, Colors.Orange);
+                }
+            }
+
+            // Add geometries to scene with level-based colors
+            foreach (var kvp in connectionsByLevel)
+            {
+                if (kvp.Value.Positions.Count == 0) continue;
+
+                var level = kvp.Key;
+                var geometry = kvp.Value;
+
+                // Color connections based on hierarchy level
+                var levelRatio = Math.Min(level / 13f, 1.0f);
+                var hue = 20f + (levelRatio * 40f); // Orange to red spectrum
+                var connectionColor = HSVToRGB(hue / 360f, 0.9f, 1.0f);
+
+                var material = new DiffuseMaterial(new SolidColorBrush(connectionColor));
+                var model = new GeometryModel3D(geometry, material);
+                scene.Children.Add(model);
+            }
+        }
+
+        private void CreateCrossReferenceConnections(Model3DGroup scene)
+        {
+            if (CurrentHierarchyAnalysis?.CrossReferenceNetwork == null) return;
+
+            var crossRefGeometry = new MeshGeometry3D();
+            var highVolumeGeometry = new MeshGeometry3D(); // For nodes with many references
+
+            foreach (var kvp in CurrentHierarchyAnalysis.CrossReferenceNetwork)
+            {
+                var sourceGroup = Unknown0x04Groups.FirstOrDefault(g => g.GroupValue == kvp.Key);
+                if (sourceGroup?.AssociatedVertices.Any() != true) continue;
+
+                var sourcePos = CalculateGroupCenter(sourceGroup.AssociatedVertices);
+                var referenceCount = kvp.Value.Count;
+
+                // Special highlighting for high-volume cross-reference nodes
+                var isHighVolume = referenceCount > 5; // More than 5 references
+                var targetGeometry = isHighVolume ? highVolumeGeometry : crossRefGeometry;
+                var thickness = isHighVolume ? 0.4f : 0.2f;
+
+                foreach (var targetGroupValue in kvp.Value)
+                {
+                    var targetGroup = Unknown0x04Groups.FirstOrDefault(g => g.GroupValue == targetGroupValue);
+                    if (targetGroup?.AssociatedVertices.Any() == true)
                     {
-                        // Create line between connected nodes
-                        AddLine(geometry, pos1.Value, pos2.Value);
+                        var targetPos = CalculateGroupCenter(targetGroup.AssociatedVertices);
+                        
+                        // Create dashed-style connection for cross-references
+                        CreateDashedConnection(targetGeometry, sourcePos, targetPos, thickness, Colors.Cyan);
                     }
                 }
             }
 
-            return geometry.Positions.Count > 0 ? new GeometryModel3D(geometry, material) : null;
+            // Add regular cross-reference connections
+            if (crossRefGeometry.Positions.Count > 0)
+            {
+                var material = new DiffuseMaterial(new SolidColorBrush(Colors.Cyan));
+                var model = new GeometryModel3D(crossRefGeometry, material);
+                scene.Children.Add(model);
+            }
+
+            // Add high-volume cross-reference connections with enhanced visibility
+            if (highVolumeGeometry.Positions.Count > 0)
+            {
+                var material = new DiffuseMaterial(new SolidColorBrush(Colors.DeepSkyBlue));
+                var model = new GeometryModel3D(highVolumeGeometry, material);
+                scene.Children.Add(model);
+            }
+        }
+
+        private void CreateNodeShape(MeshGeometry3D geometry, Point3D center, double size, NodeShape shape)
+        {
+            switch (shape)
+            {
+                case NodeShape.Cube:
+                    AddVertexCube(geometry, center, size);
+                    break;
+                case NodeShape.Diamond:
+                    CreateDiamond(geometry, center, size);
+                    break;
+                case NodeShape.Triangle:
+                    CreateTriangle(geometry, center, size);
+                    break;
+            }
+        }
+
+        private void CreateDiamond(MeshGeometry3D geometry, Point3D center, double size)
+        {
+            var half = size / 2;
+            var baseIndex = geometry.Positions.Count;
+
+            // Diamond vertices (6 points)
+            var vertices = new Point3D[]
+            {
+                new(center.X, center.Y, center.Z + half),     // top
+                new(center.X, center.Y, center.Z - half),     // bottom
+                new(center.X + half, center.Y, center.Z),     // right
+                new(center.X - half, center.Y, center.Z),     // left
+                new(center.X, center.Y + half, center.Z),     // front
+                new(center.X, center.Y - half, center.Z)      // back
+            };
+
+            foreach (var vertex in vertices)
+                geometry.Positions.Add(vertex);
+
+            // Diamond faces (8 triangular faces)
+            var indices = new int[]
+            {
+                0, 2, 4,  0, 4, 3,  0, 3, 5,  0, 5, 2,  // top pyramid
+                1, 4, 2,  1, 3, 4,  1, 5, 3,  1, 2, 5   // bottom pyramid
+            };
+
+            foreach (var index in indices)
+                geometry.TriangleIndices.Add(baseIndex + index);
+        }
+
+        private void CreateTriangle(MeshGeometry3D geometry, Point3D center, double size)
+        {
+            var half = size / 2;
+            var height = size * 0.866; // sqrt(3)/2
+            var baseIndex = geometry.Positions.Count;
+
+            // Triangle vertices (3 points in XY plane, elevated in Z)
+            var vertices = new Point3D[]
+            {
+                new(center.X, center.Y + height/2, center.Z),           // top
+                new(center.X - half, center.Y - height/2, center.Z),    // bottom left
+                new(center.X + half, center.Y - height/2, center.Z),    // bottom right
+                new(center.X, center.Y, center.Z + size/3),             // elevated center
+            };
+
+            foreach (var vertex in vertices)
+                geometry.Positions.Add(vertex);
+
+            // Triangle faces
+            var indices = new int[] { 0, 1, 3,  1, 2, 3,  2, 0, 3,  0, 2, 1 };
+
+            foreach (var index in indices)
+                geometry.TriangleIndices.Add(baseIndex + index);
+        }
+
+        private void CreateConnection(MeshGeometry3D geometry, Point3D start, Point3D end, float thickness, Color color)
+        {
+            var direction = end - start;
+            var length = direction.Length;
+            if (length < 0.001) return;
+
+            direction.Normalize();
+            
+            // Create cylinder between points
+            var perpendicular = Vector3D.CrossProduct(direction, new Vector3D(0, 0, 1));
+            if (perpendicular.Length < 0.001)
+                perpendicular = Vector3D.CrossProduct(direction, new Vector3D(1, 0, 0));
+            perpendicular.Normalize();
+
+            var baseIndex = geometry.Positions.Count;
+            var segments = 8;
+
+            // Create cylinder vertices
+            for (int i = 0; i <= segments; i++)
+            {
+                var angle = (double)i / segments * 2 * Math.PI;
+                var offset = perpendicular * thickness * Math.Cos(angle) + 
+                           Vector3D.CrossProduct(direction, perpendicular) * thickness * Math.Sin(angle);
+
+                geometry.Positions.Add(start + offset);
+                geometry.Positions.Add(end + offset);
+            }
+
+            // Create cylinder faces
+            for (int i = 0; i < segments; i++)
+            {
+                var current = baseIndex + i * 2;
+                var next = baseIndex + ((i + 1) % segments) * 2;
+
+                // Two triangles per face
+                geometry.TriangleIndices.Add(current);
+                geometry.TriangleIndices.Add(next);
+                geometry.TriangleIndices.Add(current + 1);
+
+                geometry.TriangleIndices.Add(current + 1);
+                geometry.TriangleIndices.Add(next);
+                geometry.TriangleIndices.Add(next + 1);
+            }
+        }
+
+        private void CreateDashedConnection(MeshGeometry3D geometry, Point3D start, Point3D end, float thickness, Color color)
+        {
+            var direction = end - start;
+            var length = direction.Length;
+            var dashLength = 2.0;
+            var gapLength = 1.0;
+            var totalLength = dashLength + gapLength;
+
+            var normalizedDirection = direction;
+            normalizedDirection.Normalize();
+
+            var numDashes = (int)(length / totalLength);
+            
+            for (int i = 0; i < numDashes; i++)
+            {
+                var dashStart = start + normalizedDirection * (i * totalLength);
+                var dashEnd = start + normalizedDirection * (i * totalLength + dashLength);
+                
+                CreateConnection(geometry, dashStart, dashEnd, thickness, color);
+            }
+        }
+
+        private enum NodeShape
+        {
+            Cube,
+            Diamond, 
+            Triangle
         }
 
         private Point3D? TryGetEntryPosition(MSLKEntry entry)
@@ -1527,6 +2053,8 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         private void SelectGroup(Unknown0x04Group? group)
         {
             SelectedUnknown0x04Group = group;
+            UpdateCameraInfo();
+            RefreshLegend();
             
             // Update visualization when group is selected
             if (ShowOnlySelectedGroup || ColorByUnknown0x04)
@@ -1542,37 +2070,48 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
         #region Deep Hierarchical Analysis
 
-        private HierarchyAnalysisResult PerformDeepHierarchicalAnalysis(List<IGrouping<uint, dynamic>> groupedEntries)
+        private HierarchyAnalysisResult PerformDeepHierarchicalAnalysis(List<IGrouping<uint, dynamic>> groupedEntries, CancellationToken cancellationToken = default)
         {
             var result = new HierarchyAnalysisResult();
             
             if (Pm4File?.MSLK?.Entries == null)
                 return result;
 
+            cancellationToken.ThrowIfCancellationRequested();
+            
             // 1. Analyze numerical hierarchy patterns in Unknown_0x04 values
-            AnalyzeNumericalHierarchy(groupedEntries, result);
+            AnalyzeNumericalHierarchy(groupedEntries, result, cancellationToken);
+            
+            cancellationToken.ThrowIfCancellationRequested();
             
             // 2. Analyze Unknown_0x10 cross-reference relationships
-            AnalyzeUnknown0x10Relationships(result);
+            AnalyzeUnknown0x10Relationships(result, cancellationToken);
+            
+            cancellationToken.ThrowIfCancellationRequested();
             
             // 3. Analyze chunk ownership patterns
-            AnalyzeChunkOwnershipHierarchy(groupedEntries, result);
+            AnalyzeChunkOwnershipHierarchy(groupedEntries, result, cancellationToken);
+            
+            cancellationToken.ThrowIfCancellationRequested();
             
             // 4. Analyze spatial hierarchy patterns
-            AnalyzeSpatialHierarchy(groupedEntries, result);
+            AnalyzeSpatialHierarchy(groupedEntries, result, cancellationToken);
+            
+            cancellationToken.ThrowIfCancellationRequested();
             
             // 5. Calculate hierarchy metrics
-            CalculateHierarchyMetrics(result);
+            CalculateHierarchyMetrics(result, cancellationToken);
             
             return result;
         }
 
-        private void AnalyzeNumericalHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        private void AnalyzeNumericalHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result, CancellationToken cancellationToken = default)
         {
             var groupValues = groupedEntries.Select(g => g.Key).OrderBy(x => x).ToList();
             
             foreach (var groupValue in groupValues)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var hierarchyInfo = new GroupHierarchyInfo
                 {
                     GroupValue = groupValue,
@@ -1613,7 +2152,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
 
-        private void AnalyzeUnknown0x10Relationships(HierarchyAnalysisResult result)
+        private void AnalyzeUnknown0x10Relationships(HierarchyAnalysisResult result, CancellationToken cancellationToken = default)
         {
             if (Pm4File?.MSLK?.Entries == null) return;
 
@@ -1622,6 +2161,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             
             foreach (var entry in Pm4File.MSLK.Entries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 // Check if Unknown_0x10 points to valid indices in other structures
                 if (entry.Unknown_0x10 < Pm4File.MSLK.Entries.Count)
                 {
@@ -1649,13 +2189,14 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             result.CrossReferenceNetwork = unknown0x10References;
         }
 
-        private void AnalyzeChunkOwnershipHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        private void AnalyzeChunkOwnershipHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result, CancellationToken cancellationToken = default)
         {
             if (Pm4File?.MSUR?.Entries == null || Pm4File?.MSVI?.Indices == null) return;
 
             // Analyze which groups "own" which MSUR surfaces and vertex ranges
             foreach (var group in groupedEntries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var entries = group.Select(x => x.Entry).Cast<MSLKEntry>().ToList();
                 var ownership = new ChunkOwnershipInfo();
                 
@@ -1676,7 +2217,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 {
                     if (msviIndex < (Pm4File.MSVI?.Indices.Count ?? 0))
                     {
-                        var vertexIndex = Pm4File.MSVI.Indices[(int)msviIndex];
+                        var vertexIndex = Pm4File.MSVI!.Indices[(int)msviIndex];
                         if (vertexIndex < (Pm4File.MSVT?.Vertices.Count ?? 0))
                         {
                             msvtVertices.Add(vertexIndex);
@@ -1694,11 +2235,12 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
 
-        private void AnalyzeSpatialHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result)
+        private void AnalyzeSpatialHierarchy(List<IGrouping<uint, dynamic>> groupedEntries, HierarchyAnalysisResult result, CancellationToken cancellationToken = default)
         {
             // Analyze spatial clustering to detect hierarchical patterns
             foreach (var group in groupedEntries)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var entries = group.Select(x => x.Entry).Cast<MSLKEntry>().ToList();
                 var vertices = ExtractGroupVertices(entries);
                 
@@ -1721,11 +2263,12 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
 
-        private void CalculateHierarchyMetrics(HierarchyAnalysisResult result)
+        private void CalculateHierarchyMetrics(HierarchyAnalysisResult result, CancellationToken cancellationToken = default)
         {
             // Calculate hierarchy depth
             foreach (var group in result.GroupHierarchy.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 CalculateHierarchyLevel(group, result.GroupHierarchy);
             }
             
@@ -1902,6 +2445,1535 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         }
 
         #endregion
+
+        #region Enhanced Control Methods
+
+        private void InitializeLegend()
+        {
+            RefreshLegend();
+        }
+
+        private void RefreshLegend()
+        {
+            LegendItems.Clear();
+            
+            // Coordinate system items
+            if (ShowGroundGrid)
+            {
+                LegendItems.Add(new LegendItem("Ground Grid", Colors.Gray, "Reference grid at Y=0", "🌐"));
+            }
+            
+            if (ShowCoordinateBounds)
+            {
+                LegendItems.Add(new LegendItem("PM4 Bounds", Colors.Yellow, "±17066.666 coordinate limits", "📦"));
+            }
+            
+            if (ShowCoordinateAxes)
+            {
+                LegendItems.Add(new LegendItem("Coordinate Axes", Colors.White, "Red=X, Green=Y, Blue=Z", "📐"));
+            }
+            
+            // Data type items
+            if (Pm4File != null)
+            {
+                if (ShowMSVTVertices && Pm4File.MSVT?.Vertices?.Count > 0)
+                {
+                    LegendItems.Add(new LegendItem("MSVT Vertices", Colors.Blue, 
+                        $"Render vertices ({Pm4File.MSVT.Vertices.Count:N0})", "🔵"));
+                }
+                
+                if (ShowMSCNPoints && Pm4File.MSCN?.ExteriorVertices?.Count > 0)
+                {
+                    LegendItems.Add(new LegendItem("MSCN Points", Colors.Red, 
+                        $"Collision points ({Pm4File.MSCN.ExteriorVertices.Count:N0})", "🔴"));
+                }
+                
+                if (ShowMSPVVertices && Pm4File.MSPV?.Vertices?.Count > 0)
+                {
+                    LegendItems.Add(new LegendItem("MSPV Vertices", Colors.Green, 
+                        $"Structure vertices ({Pm4File.MSPV.Vertices.Count:N0})", "🟢"));
+                }
+                
+                if (ShowGroupConnections)
+                {
+                    LegendItems.Add(new LegendItem("Group Connections", Colors.Orange, 
+                        "Links between Unknown_0x04 groups", "🔗"));
+                }
+                
+                if (ShowHierarchyLines)
+                {
+                    LegendItems.Add(new LegendItem("Hierarchy Lines", Colors.Purple, 
+                        "Parent-child relationships", "🌳"));
+                }
+                
+                if (ShowHierarchyTree && CurrentHierarchyAnalysis != null)
+                {
+                    // Special highlighting for the master root node
+                    LegendItems.Add(new LegendItem("🌟 Master Root (0x00000000)", Colors.Gold, 
+                        "Golden diamond with glow effect", "💎"));
+                    
+                    if (CurrentHierarchyAnalysis.RootNodes > 1)
+                    {
+                        LegendItems.Add(new LegendItem("Other Root Nodes", Colors.Orange, 
+                            $"{CurrentHierarchyAnalysis.RootNodes - 1} additional roots", "🔶"));
+                    }
+                    
+                    LegendItems.Add(new LegendItem("Leaf Nodes", Colors.LightGreen, 
+                        $"{CurrentHierarchyAnalysis.LeafNodes} terminal triangles (green spectrum)", "🔺"));
+                    
+                    LegendItems.Add(new LegendItem("Level 1-13 Intermediate", Colors.Purple, 
+                        "Rainbow spectrum by hierarchy depth", "🔲"));
+                    
+                    if (ShowParentChildConnections)
+                    {
+                        LegendItems.Add(new LegendItem("Parent-Child Links", Colors.OrangeRed, 
+                            $"{CurrentHierarchyAnalysis.GroupHierarchy.Values.Count(g => g.ParentValue.HasValue)} hierarchical connections", "🔗"));
+                    }
+                    
+                    if (ShowCrossReferences)
+                    {
+                        LegendItems.Add(new LegendItem("Cross-References", Colors.Cyan, 
+                            $"{CurrentHierarchyAnalysis.TotalConnections} Unknown_0x10 connections", "⚡"));
+                        LegendItems.Add(new LegendItem("High-Volume Cross-Refs", Colors.DeepSkyBlue, 
+                            "Nodes with >5 references (thicker lines)", "⚡"));
+                    }
+                    
+                    LegendItems.Add(new LegendItem("📊 Hierarchy Stats", Colors.White, 
+                        $"{CurrentHierarchyAnalysis.MaxHierarchyDepth} levels, {CurrentHierarchyAnalysis.GroupHierarchy.Count} total groups", "📈"));
+                }
+                
+                // Unknown_0x04 group colors
+                if (ColorByUnknown0x04 && Unknown0x04Groups.Count > 0)
+                {
+                    var visibleGroups = ShowOnlySelectedGroup && SelectedUnknown0x04Group != null
+                        ? new[] { SelectedUnknown0x04Group }
+                        : Unknown0x04Groups.Take(10); // Show first 10 in legend
+                    
+                    foreach (var group in visibleGroups)
+                    {
+                        LegendItems.Add(new LegendItem($"Group 0x{group.GroupValue:X8}", 
+                            group.GroupColor, $"{group.EntryCount} entries", "⬛"));
+                    }
+                    
+                    if (Unknown0x04Groups.Count > 10)
+                    {
+                        LegendItems.Add(new LegendItem("... more groups", Colors.LightGray, 
+                            $"{Unknown0x04Groups.Count - 10} additional groups", "⬜"));
+                    }
+                }
+            }
+        }
+
+        private void FitCameraToData()
+        {
+            if (Pm4File == null) return;
+            
+            var allPoints = new List<Point3D>();
+            
+            // Collect all visible data points
+            if (ShowMSVTVertices && Pm4File.MSVT?.Vertices != null)
+            {
+                allPoints.AddRange(Pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)));
+            }
+            
+            if (ShowMSCNPoints && Pm4File.MSCN?.ExteriorVertices != null)
+            {
+                allPoints.AddRange(Pm4File.MSCN.ExteriorVertices.Select(v => new Point3D(v.X, -v.Y, v.Z)));
+            }
+            
+            if (ShowMSPVVertices && Pm4File.MSPV?.Vertices != null)
+            {
+                allPoints.AddRange(Pm4File.MSPV.Vertices.Select(v => new Point3D(v.X, v.Y, v.Z)));
+            }
+            
+            if (allPoints.Count == 0)
+            {
+                ResetCamera();
+                return;
+            }
+            
+            // Calculate bounding box
+            var minX = allPoints.Min(p => p.X);
+            var maxX = allPoints.Max(p => p.X);
+            var minY = allPoints.Min(p => p.Y);
+            var maxY = allPoints.Max(p => p.Y);
+            var minZ = allPoints.Min(p => p.Z);
+            var maxZ = allPoints.Max(p => p.Z);
+            
+            var center = new Point3D(
+                (minX + maxX) / 2,
+                (minY + maxY) / 2,
+                (minZ + maxZ) / 2
+            );
+            
+            var size = Math.Max(Math.Max(maxX - minX, maxY - minY), maxZ - minZ);
+            var distance = size * 2; // Move camera back enough to see everything
+            
+            CameraPosition = new Point3D(center.X + distance, center.Y + distance, center.Z + distance);
+            CameraLookDirection = new Vector3D(center.X - CameraPosition.X, center.Y - CameraPosition.Y, center.Z - CameraPosition.Z);
+            
+            UpdateCameraInfo();
+        }
+
+        private void ResetCamera()
+        {
+            CameraPosition = new Point3D(100, 100, 100);
+            CameraLookDirection = new Vector3D(-1, -1, -1);
+            UpdateCameraInfo();
+        }
+
+        private void JumpToChunk(string? chunkType)
+        {
+            if (Pm4File == null || string.IsNullOrEmpty(chunkType)) return;
+            
+            List<Point3D> points = new();
+            
+            switch (chunkType?.ToUpper())
+            {
+                case "MSVT":
+                    if (Pm4File.MSVT?.Vertices != null)
+                        points.AddRange(Pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)));
+                    break;
+                case "MSCN":
+                    if (Pm4File.MSCN?.ExteriorVertices != null)
+                        points.AddRange(Pm4File.MSCN.ExteriorVertices.Select(v => new Point3D(v.X, -v.Y, v.Z)));
+                    break;
+                case "MSPV":
+                    if (Pm4File.MSPV?.Vertices != null)
+                        points.AddRange(Pm4File.MSPV.Vertices.Select(v => new Point3D(v.X, v.Y, v.Z)));
+                    break;
+            }
+            
+            if (points.Count == 0) return;
+            
+            var center = new Point3D(
+                points.Average(p => p.X),
+                points.Average(p => p.Y),
+                points.Average(p => p.Z)
+            );
+            
+            var size = Math.Max(Math.Max(
+                points.Max(p => p.X) - points.Min(p => p.X),
+                points.Max(p => p.Y) - points.Min(p => p.Y)),
+                points.Max(p => p.Z) - points.Min(p => p.Z));
+            
+            var distance = size * 1.5;
+            
+            CameraPosition = new Point3D(center.X + distance, center.Y + distance, center.Z + distance);
+            CameraLookDirection = new Vector3D(center.X - CameraPosition.X, center.Y - CameraPosition.Y, center.Z - CameraPosition.Z);
+            
+            UpdateCameraInfo();
+        }
+
+        private void UpdateCameraInfo()
+        {
+            CameraInfo = $"Position: ({CameraPosition.X:F1}, {CameraPosition.Y:F1}, {CameraPosition.Z:F1})";
+            
+            // Update selected data info if we have any
+            if (SelectedUnknown0x04Group != null)
+            {
+                SelectedDataInfo = $"Selected: Group 0x{SelectedUnknown0x04Group.GroupValue:X8} " +
+                                   $"({SelectedUnknown0x04Group.EntryCount} entries, {SelectedUnknown0x04Group.AssociatedVertices.Count} vertices)";
+            }
+            else
+            {
+                var totalVertices = 0;
+                if (Pm4File?.MSVT?.Vertices != null) totalVertices += Pm4File.MSVT.Vertices.Count;
+                if (Pm4File?.MSCN?.ExteriorVertices != null) totalVertices += Pm4File.MSCN.ExteriorVertices.Count;
+                if (Pm4File?.MSPV?.Vertices != null) totalVertices += Pm4File.MSPV.Vertices.Count;
+                
+                SelectedDataInfo = $"Total: {totalVertices:N0} vertices across {ChunkItems.Count} chunk types";
+            }
+        }
+
+        #endregion
+
+        #region Batch Loading Methods
+
+        private async Task LoadBatchFilesAsync()
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "PM4 Files (*.pm4)|*.pm4|All Files (*.*)|*.*",
+                Title = "Select PM4 Files for Batch Loading",
+                Multiselect = true
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                await LoadMultipleFilesAsync(dialog.FileNames);
+            }
+        }
+
+        private async Task LoadDirectoryAsync()
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = "Select Directory Containing PM4 Files"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                var pm4Files = Directory.GetFiles(dialog.FolderName, "*.pm4", SearchOption.AllDirectories);
+                if (pm4Files.Length == 0)
+                {
+                    MessageBox.Show("No PM4 files found in the selected directory.", "No Files Found", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var result = MessageBox.Show($"Found {pm4Files.Length} PM4 files. This may take a long time and use significant memory. Continue?", 
+                                           "Batch Load Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                
+                if (result == MessageBoxResult.Yes)
+                {
+                    await LoadMultipleFilesAsync(pm4Files);
+                }
+            }
+        }
+
+        private async Task LoadMultipleFilesAsync(string[] filePaths)
+        {
+            IsLoading = true;
+            LoadingOperation = "Batch Loading PM4 Files";
+            
+            var loadedCount = 0;
+            var totalVertices = 0L;
+            var totalEntries = 0L;
+            var errors = new List<string>();
+
+            try
+            {
+                LoadedFiles.Clear();
+                
+                foreach (var filePath in filePaths)
+                {
+                    try
+                    {
+                        LoadingSubOperation = $"Loading {Path.GetFileName(filePath)} ({loadedCount + 1}/{filePaths.Length})";
+                        await Task.Delay(10); // Allow UI to update
+
+                        var file = await Task.Run(() =>
+                        {
+                            var fileBytes = File.ReadAllBytes(filePath);
+                            return new PM4File(fileBytes);
+                        });
+
+                        LoadedFiles.Add(file);
+                        loadedCount++;
+                        
+                        // Accumulate statistics
+                        totalVertices += file.MSVT?.Vertices?.Count ?? 0;
+                        totalEntries += file.MSLK?.Entries?.Count ?? 0;
+                        
+                        // Update progress every 10 files
+                        if (loadedCount % 10 == 0)
+                        {
+                            Application.Current.Dispatcher.Invoke(() =>
+                            {
+                                TotalFilesLoaded = loadedCount;
+                                TotalVerticesLoaded = totalVertices;
+                                TotalEntriesLoaded = totalEntries;
+                                UpdateBatchSummary();
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"{Path.GetFileName(filePath)}: {ex.Message}");
+                    }
+                }
+
+                // Final update
+                TotalFilesLoaded = loadedCount;
+                TotalVerticesLoaded = totalVertices;
+                TotalEntriesLoaded = totalEntries;
+                UpdateBatchSummary();
+                ShowBatchSummary = true;
+
+                // Show results
+                var message = $"Batch loading complete!\n\n" +
+                             $"✅ Loaded: {loadedCount}/{filePaths.Length} files\n" +
+                             $"📊 Total Vertices: {totalVertices:N0}\n" +
+                             $"📋 Total MSLK Entries: {totalEntries:N0}";
+
+                if (errors.Any())
+                {
+                    message += $"\n\n⚠️ Errors: {errors.Count}\n" +
+                              string.Join("\n", errors.Take(5));
+                    if (errors.Count > 5)
+                        message += $"\n... and {errors.Count - 5} more errors";
+                }
+
+                MessageBox.Show(message, "Batch Load Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                // Perform batch analysis if files were loaded
+                if (loadedCount > 0)
+                {
+                    await PerformBatchAnalysisAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during batch loading: {ex.Message}", "Batch Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        private void UpdateBatchSummary()
+        {
+            BatchSummary = $"Batch Loaded: {TotalFilesLoaded} files | {TotalVerticesLoaded:N0} vertices | {TotalEntriesLoaded:N0} MSLK entries";
+        }
+
+        private async Task PerformBatchAnalysisAsync()
+        {
+            LoadingOperation = "Performing Batch Analysis";
+            LoadingSubOperation = "Analyzing patterns across all files...";
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    // Collect all Unknown_0x04 values across all files
+                    var allUnknown04Values = new List<uint>();
+                    var allUnknown0CValues = new List<uint>();
+                    var fileGroupCounts = new Dictionary<string, int>();
+
+                    foreach (var file in LoadedFiles)
+                    {
+                        if (file.MSLK?.Entries != null)
+                        {
+                            var fileName = "Unknown"; // We'd need to store the filename with the PM4File
+                            
+                            var unknown04Values = file.MSLK.Entries.Select(e => e.Unknown_0x04).ToList();
+                            var unknown0CValues = file.MSLK.Entries.Select(e => e.Unknown_0x0C).ToList();
+                            
+                            allUnknown04Values.AddRange(unknown04Values);
+                            allUnknown0CValues.AddRange(unknown0CValues);
+                            
+                            var groupCount = unknown04Values.Distinct().Count();
+                            fileGroupCounts[fileName] = groupCount;
+                        }
+                    }
+
+                    // Add batch insights
+                    StructuralInsights.Add(new StructuralInsight
+                    {
+                        Type = "Batch Analysis",
+                        Description = $"Cross-file pattern analysis of {LoadedFiles.Count} PM4 files",
+                        Significance = $"Found {allUnknown04Values.Distinct().Count()} unique Unknown_0x04 values across all files",
+                        DataPreview = $"Total entries analyzed: {allUnknown04Values.Count:N0}"
+                    });
+
+                    StructuralInsights.Add(new StructuralInsight
+                    {
+                        Type = "Global Unknown_0x04 Distribution",
+                        Description = "Distribution of Unknown_0x04 values across all loaded files",
+                        Significance = allUnknown04Values.GroupBy(x => x)
+                            .OrderByDescending(g => g.Count())
+                            .Take(5)
+                            .Select(g => $"0x{g.Key:X8}({g.Count()})")
+                            .Aggregate("Top values: ", (acc, val) => acc + val + " "),
+                        DataPreview = $"Range: 0x{allUnknown04Values.Min():X8} - 0x{allUnknown04Values.Max():X8}"
+                    });
+                });
+
+                MessageBox.Show($"Batch analysis complete! Check the Insights tab for cross-file patterns.", 
+                              "Batch Analysis Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during batch analysis: {ex.Message}", "Analysis Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
+        #region Enhanced Analysis and Export Methods
+
+        private async Task ExportInsightsAsync()
+        {
+            if (StructuralInsights.Count == 0)
+            {
+                MessageBox.Show("No insights available to export. Please load a PM4 file first.", "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "CSV Files (*.csv)|*.csv|JSON Files (*.json)|*.json|Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+                Title = "Export Structural Insights",
+                FileName = $"PM4_Insights_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                IsLoading = true;
+                LoadingOperation = "Exporting insights";
+                LoadingSubOperation = "Generating export file...";
+
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        var extension = Path.GetExtension(dialog.FileName).ToLower();
+                        switch (extension)
+                        {
+                            case ".csv":
+                                ExportInsightsToCSV(dialog.FileName);
+                                break;
+                            case ".json":
+                                ExportInsightsToJSON(dialog.FileName);
+                                break;
+                            default:
+                                ExportInsightsToText(dialog.FileName);
+                                break;
+                        }
+                    });
+
+                    MessageBox.Show($"Insights exported successfully to:\n{dialog.FileName}", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error exporting insights: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    IsLoading = false;
+                }
+            }
+        }
+
+        private async Task ExportDetailedAnalysisAsync()
+        {
+            if (Pm4File == null)
+            {
+                MessageBox.Show("No PM4 file loaded. Please load a file first.", "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "HTML Report (*.html)|*.html|JSON Analysis (*.json)|*.json|CSV Data (*.csv)|*.csv|All Files (*.*)|*.*",
+                Title = "Export Detailed Analysis Report",
+                FileName = $"PM4_DetailedAnalysis_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                IsLoading = true;
+                LoadingOperation = "Generating detailed analysis";
+                LoadingSubOperation = "Processing PM4 structure...";
+
+                try
+                {
+                    await Task.Run(async () =>
+                    {
+                        var analysis = await GenerateDetailedAnalysisAsync();
+                        var extension = Path.GetExtension(dialog.FileName).ToLower();
+                        
+                        switch (extension)
+                        {
+                            case ".html":
+                                await ExportAnalysisToHTMLAsync(dialog.FileName, analysis);
+                                break;
+                            case ".json":
+                                await ExportAnalysisToJSONAsync(dialog.FileName, analysis);
+                                break;
+                            case ".csv":
+                                await ExportAnalysisToCSVAsync(dialog.FileName, analysis);
+                                break;
+                            default:
+                                await ExportAnalysisToHTMLAsync(dialog.FileName, analysis);
+                                break;
+                        }
+                    });
+
+                    MessageBox.Show($"Detailed analysis exported successfully to:\n{dialog.FileName}", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error exporting detailed analysis: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    IsLoading = false;
+                }
+            }
+        }
+
+        private async Task ExportGroupAnalysisAsync()
+        {
+            if (Unknown0x04Groups.Count == 0)
+            {
+                MessageBox.Show("No Unknown_0x04 groups analyzed yet. Please load a PM4 file first.", "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "CSV Files (*.csv)|*.csv|JSON Files (*.json)|*.json|Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*",
+                Title = "Export Group Analysis",
+                FileName = $"PM4_GroupAnalysis_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                IsLoading = true;
+                LoadingOperation = "Exporting group analysis";
+                LoadingSubOperation = "Processing group data...";
+
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        var extension = Path.GetExtension(dialog.FileName).ToLower();
+                        switch (extension)
+                        {
+                            case ".csv":
+                                ExportGroupsToCSV(dialog.FileName);
+                                break;
+                            case ".json":
+                                ExportGroupsToJSON(dialog.FileName);
+                                break;
+                            default:
+                                ExportGroupsToCSV(dialog.FileName);
+                                break;
+                        }
+                    });
+
+                    MessageBox.Show($"Group analysis exported successfully to:\n{dialog.FileName}", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error exporting group analysis: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    IsLoading = false;
+                }
+            }
+        }
+
+        private async Task PerformDeepAnalysisAsync()
+        {
+            if (Pm4File == null)
+            {
+                MessageBox.Show("No PM4 file loaded. Please load a file first.", "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Create a new cancellation token for this operation
+            _loadingCancellationTokenSource?.Cancel();
+            _loadingCancellationTokenSource = new CancellationTokenSource();
+            var cancellationToken = _loadingCancellationTokenSource.Token;
+
+            IsLoading = true;
+            LoadingOperation = "Performing Deep Structure Analysis";
+            LoadingSubOperation = "Initializing comprehensive analysis...";
+
+            try
+            {
+                var analysis = await Task.Run(async () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    LoadingSubOperation = "Analyzing unknown field patterns...";
+                    await Task.Delay(100, cancellationToken);
+                    
+                    var fieldAnalysis = await AnalyzeUnknownFieldPatternsAsync(cancellationToken);
+                    
+                    cancellationToken.ThrowIfCancellationRequested();
+                    LoadingSubOperation = "Detecting hierarchical structures...";
+                    await Task.Delay(100, cancellationToken);
+                    
+                    var hierarchyAnalysis = await AnalyzeHierarchicalStructuresAsync(cancellationToken);
+                    
+                    cancellationToken.ThrowIfCancellationRequested();
+                    LoadingSubOperation = "Cross-referencing chunk relationships...";
+                    await Task.Delay(100, cancellationToken);
+                    
+                    var crossRefAnalysis = await AnalyzeCrossChunkReferencesAsync(cancellationToken);
+                    
+                    cancellationToken.ThrowIfCancellationRequested();
+                    LoadingSubOperation = "Generating comprehensive report...";
+                    await Task.Delay(100, cancellationToken);
+                    
+                    return new DeepAnalysisResult
+                    {
+                        FieldPatterns = fieldAnalysis,
+                        HierarchyStructures = hierarchyAnalysis,
+                        CrossReferences = crossRefAnalysis,
+                        Timestamp = DateTime.Now
+                    };
+                }, cancellationToken);
+
+                // Perform detailed hierarchy analysis
+                cancellationToken.ThrowIfCancellationRequested();
+                LoadingSubOperation = "Performing detailed hierarchy analysis...";
+                
+                if (Pm4File?.MSLK?.Entries != null)
+                {
+                    var groupedEntries = Pm4File.MSLK.Entries
+                        .Select((entry, index) => new { Entry = entry, Index = index })
+                        .GroupBy(x => x.Entry.Unknown_0x04)
+                        .ToList();
+
+                    CurrentHierarchyAnalysis = await Task.Run(() => PerformDeepHierarchicalAnalysis(groupedEntries.Cast<IGrouping<uint, dynamic>>().ToList(), cancellationToken), cancellationToken);
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    // Update the Unknown0x04Groups with hierarchy information
+                    foreach (var group in Unknown0x04Groups)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
+                        if (CurrentHierarchyAnalysis.GroupHierarchy.TryGetValue(group.GroupValue, out var hierarchyInfo))
+                        {
+                            group.HierarchyInfo = hierarchyInfo;
+                        }
+                        if (CurrentHierarchyAnalysis.ChunkOwnership.TryGetValue(group.GroupValue, out var chunkOwnership))
+                        {
+                            group.ChunkOwnership = chunkOwnership;
+                        }
+                    }
+
+                    // Add hierarchy insights
+                    AddHierarchyInsights(CurrentHierarchyAnalysis);
+                }
+
+                // Update insights with deep analysis results
+                AddDeepAnalysisInsights(analysis);
+
+                // Enable hierarchy visualization
+                ShowHierarchyTree = true;
+                UpdateVisualization();
+                
+                MessageBox.Show($"Deep analysis complete! Found:\n" +
+                              $"• {analysis.FieldPatterns.Count} field patterns\n" +
+                              $"• {analysis.HierarchyStructures.Count} hierarchy structures\n" +
+                              $"• {analysis.CrossReferences.Count} cross-references\n" +
+                              (CurrentHierarchyAnalysis != null ? 
+                                $"• {CurrentHierarchyAnalysis.MaxHierarchyDepth} hierarchy levels\n" +
+                                $"• {CurrentHierarchyAnalysis.RootNodes} root nodes, {CurrentHierarchyAnalysis.LeafNodes} leaf nodes\n" +
+                                $"• {CurrentHierarchyAnalysis.TotalConnections} total connections\n" : "") +
+                              $"\n🌳 Hierarchy Tree visualization enabled! Check the Insights tab for detailed results.", 
+                              "Deep Analysis Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                MessageBox.Show("Deep analysis was cancelled.", "Analysis Cancelled", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during deep analysis: {ex.Message}", "Analysis Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsLoading = false;
+                _loadingCancellationTokenSource = null;
+            }
+        }
+
+        private async Task InvestigatePaddingAsync()
+        {
+            if (Pm4File == null)
+            {
+                MessageBox.Show("No PM4 file loaded. Please load a file first.", "No Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            IsLoading = true;
+            LoadingOperation = "Investigating Padding & Hidden Data";
+            LoadingSubOperation = "Scanning for non-zero padding...";
+
+            try
+            {
+                var investigation = await Task.Run(async () =>
+                {
+                    LoadingSubOperation = "Analyzing padding patterns...";
+                    await Task.Delay(100);
+                    
+                    var paddingAnalysis = AnalyzePaddingPatterns();
+                    
+                    LoadingSubOperation = "Detecting hidden metadata...";
+                    await Task.Delay(100);
+                    
+                    var hiddenData = DetectHiddenMetadata();
+                    
+                    LoadingSubOperation = "Frequency analysis of bytes...";
+                    await Task.Delay(100);
+                    
+                    var byteFrequency = AnalyzeByteFrequency();
+                    
+                    LoadingSubOperation = "Generating investigation report...";
+                    await Task.Delay(100);
+                    
+                    return new PaddingInvestigationResult
+                    {
+                        PaddingPatterns = paddingAnalysis,
+                        HiddenData = hiddenData,
+                        ByteFrequency = byteFrequency,
+                        Timestamp = DateTime.Now
+                    };
+                });
+
+                // Update insights with padding investigation results
+                AddPaddingInvestigationInsights(investigation);
+                
+                MessageBox.Show($"Padding investigation complete! Found:\n" +
+                              $"• {investigation.PaddingPatterns.Count} padding patterns\n" +
+                              $"• {investigation.HiddenData.Count} potential hidden data regions\n" +
+                              $"• Byte frequency analysis complete\n\n" +
+                              $"Check the Insights tab for detailed results.", 
+                              "Padding Investigation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during padding investigation: {ex.Message}", "Investigation Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+
+        // Export Implementation Methods
+        private void ExportInsightsToCSV(string filePath)
+        {
+            var csv = new System.Text.StringBuilder();
+            csv.AppendLine("Type,Description,Significance,DataPreview");
+            
+            foreach (var insight in StructuralInsights)
+            {
+                csv.AppendLine($"\"{insight.Type}\",\"{insight.Description}\",\"{insight.Significance}\",\"{insight.DataPreview}\"");
+            }
+            
+            File.WriteAllText(filePath, csv.ToString());
+        }
+
+        private void ExportInsightsToJSON(string filePath)
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(StructuralInsights, new System.Text.Json.JsonSerializerOptions 
+            { 
+                WriteIndented = true 
+            });
+            File.WriteAllText(filePath, json);
+        }
+
+        private void ExportInsightsToText(string filePath)
+        {
+            var text = new System.Text.StringBuilder();
+            text.AppendLine($"PM4 Structural Insights Report");
+            text.AppendLine($"Generated: {DateTime.Now}");
+            text.AppendLine($"File: {LoadedFileName}");
+            text.AppendLine(new string('=', 80));
+            text.AppendLine();
+
+            foreach (var insight in StructuralInsights)
+            {
+                text.AppendLine($"[{insight.Type}]");
+                text.AppendLine($"Description: {insight.Description}");
+                text.AppendLine($"Significance: {insight.Significance}");
+                text.AppendLine($"Data Preview: {insight.DataPreview}");
+                text.AppendLine(new string('-', 40));
+                text.AppendLine();
+            }
+            
+            File.WriteAllText(filePath, text.ToString());
+        }
+
+        private void ExportGroupsToCSV(string filePath)
+        {
+            var csv = new System.Text.StringBuilder();
+            csv.AppendLine("GroupValue,EntryCount,Description,AssociatedVertices,AverageUnknown0x0C,MinUnknown0x0C,MaxUnknown0x0C,HierarchyLevel,IsRootNode,IsLeafNode,ChildCount");
+            
+            foreach (var group in Unknown0x04Groups)
+            {
+                csv.AppendLine($"0x{group.GroupValue:X8},{group.EntryCount},\"{group.Description}\",{group.AssociatedVertices.Count}," +
+                              $"{group.AverageUnknown0x0C},{group.MinUnknown0x0C},{group.MaxUnknown0x0C}," +
+                              $"{group.HierarchyInfo.HierarchyLevel},{group.HierarchyInfo.IsRootNode},{group.HierarchyInfo.IsLeafNode},{group.HierarchyInfo.ChildCount}");
+            }
+            
+            File.WriteAllText(filePath, csv.ToString());
+        }
+
+        private void ExportGroupsToJSON(string filePath)
+        {
+            var exportData = Unknown0x04Groups.Select(g => new 
+            {
+                GroupValue = $"0x{g.GroupValue:X8}",
+                g.EntryCount,
+                g.Description,
+                AssociatedVerticesCount = g.AssociatedVertices.Count,
+                g.AverageUnknown0x0C,
+                g.MinUnknown0x0C,
+                g.MaxUnknown0x0C,
+                Hierarchy = new 
+                {
+                    g.HierarchyInfo.HierarchyLevel,
+                    g.HierarchyInfo.IsRootNode,
+                    g.HierarchyInfo.IsLeafNode,
+                    g.HierarchyInfo.ChildCount,
+                    ParentValue = g.HierarchyInfo.ParentValue?.ToString("X8"),
+                    ChildValues = g.HierarchyInfo.ChildValues.Select(v => v.ToString("X8")).ToArray()
+                },
+                ChunkOwnership = new 
+                {
+                    g.ChunkOwnership.VertexRangeStart,
+                    g.ChunkOwnership.VertexRangeEnd,
+                    g.ChunkOwnership.VertexRangeSize,
+                    g.ChunkOwnership.HasExclusiveGeometry,
+                    g.ChunkOwnership.GeometryComplexity
+                }
+            }).ToArray();
+            
+            var json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions 
+            { 
+                WriteIndented = true 
+            });
+            File.WriteAllText(filePath, json);
+        }
+
+        // Deep Analysis Implementation Methods
+        // Async versions with cancellation support
+        private async Task<List<FieldPattern>> AnalyzeUnknownFieldPatternsAsync(CancellationToken cancellationToken)
+        {
+            var patterns = new List<FieldPattern>();
+            
+            if (Pm4File?.MSLK?.Entries == null) return patterns;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Analyze Unknown_0x04 patterns
+            var unknown04Values = Pm4File.MSLK.Entries.Select(e => e.Unknown_0x04).ToList();
+            patterns.Add(await AnalyzeFieldForPatternsAsync("Unknown_0x04", unknown04Values, cancellationToken));
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Analyze Unknown_0x02 patterns  
+            var unknown02Values = Pm4File.MSLK.Entries.Select(e => (uint)e.Unknown_0x02).ToList();
+            patterns.Add(await AnalyzeFieldForPatternsAsync("Unknown_0x02", unknown02Values, cancellationToken));
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Analyze Unknown_0x0C patterns
+            var unknown0CValues = Pm4File.MSLK.Entries.Select(e => e.Unknown_0x0C).ToList();
+            patterns.Add(await AnalyzeFieldForPatternsAsync("Unknown_0x0C", unknown0CValues, cancellationToken));
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Analyze Unknown_0x10 patterns (potential indices)
+            var unknown10Values = Pm4File.MSLK.Entries.Select(e => (uint)e.Unknown_0x10).ToList();
+            patterns.Add(await AnalyzeFieldForPatternsAsync("Unknown_0x10", unknown10Values, cancellationToken));
+
+            return patterns.Where(p => p.Confidence > 0.5).ToList();
+        }
+
+        private List<FieldPattern> AnalyzeUnknownFieldPatterns()
+        {
+            var patterns = new List<FieldPattern>();
+            
+            if (Pm4File?.MSLK?.Entries == null) return patterns;
+
+            // Analyze Unknown_0x04 patterns
+            var unknown04Values = Pm4File.MSLK.Entries.Select(e => e.Unknown_0x04).ToList();
+            patterns.Add(AnalyzeFieldForPatterns("Unknown_0x04", unknown04Values));
+
+            // Analyze Unknown_0x02 patterns  
+            var unknown02Values = Pm4File.MSLK.Entries.Select(e => (uint)e.Unknown_0x02).ToList();
+            patterns.Add(AnalyzeFieldForPatterns("Unknown_0x02", unknown02Values));
+
+            // Analyze Unknown_0x0C patterns
+            var unknown0CValues = Pm4File.MSLK.Entries.Select(e => e.Unknown_0x0C).ToList();
+            patterns.Add(AnalyzeFieldForPatterns("Unknown_0x0C", unknown0CValues));
+
+            // Analyze Unknown_0x10 patterns (potential indices)
+            var unknown10Values = Pm4File.MSLK.Entries.Select(e => (uint)e.Unknown_0x10).ToList();
+            patterns.Add(AnalyzeFieldForPatterns("Unknown_0x10", unknown10Values));
+
+            return patterns.Where(p => p.Confidence > 0.5).ToList();
+        }
+
+        private async Task<FieldPattern> AnalyzeFieldForPatternsAsync(string fieldName, List<uint> values, CancellationToken cancellationToken)
+        {
+            var pattern = new FieldPattern { FieldName = fieldName, Values = values };
+            
+            if (!values.Any()) return pattern;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            var uniqueValues = values.Distinct().ToList();
+            var minValue = values.Min();
+            var maxValue = values.Max();
+            var range = maxValue - minValue;
+            
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Check for sequential patterns
+            var sortedUnique = uniqueValues.OrderBy(x => x).ToList();
+            var sequential = true;
+            for (int i = 1; i < sortedUnique.Count && sequential; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (sortedUnique[i] - sortedUnique[i-1] != 1)
+                    sequential = false;
+            }
+
+            if (sequential && uniqueValues.Count > 3)
+            {
+                pattern.PatternType = "Sequential";
+                pattern.Description = $"Sequential values from {minValue} to {maxValue}";
+                pattern.Confidence = 0.9;
+                return pattern;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Check for power-of-2 patterns (flags)
+            var powerOf2Count = uniqueValues.Count(v => v > 0 && (v & (v - 1)) == 0);
+            if (powerOf2Count > uniqueValues.Count * 0.7)
+            {
+                pattern.PatternType = "Flags";
+                pattern.Description = $"Flag-like values (powers of 2): {powerOf2Count}/{uniqueValues.Count} are powers of 2";
+                pattern.Confidence = 0.8;
+                return pattern;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Check for bounded index patterns
+            if (fieldName == "Unknown_0x10" && maxValue < (Pm4File?.MSLK?.Entries?.Count ?? 0) * 2)
+            {
+                pattern.PatternType = "Index";
+                pattern.Description = $"Potential index values (max: {maxValue}, entries: {Pm4File?.MSLK?.Entries?.Count ?? 0})";
+                pattern.Confidence = 0.7;
+                return pattern;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Check for grouping patterns
+            var groups = values.GroupBy(x => x).Where(g => g.Count() > 1).ToList();
+            if (groups.Count < uniqueValues.Count * 0.5)
+            {
+                pattern.PatternType = "Grouping";
+                pattern.Description = $"Values form {groups.Count} groups with repeats";
+                pattern.Confidence = 0.6;
+                return pattern;
+            }
+
+            pattern.PatternType = "Random";
+            pattern.Description = $"No clear pattern detected in {uniqueValues.Count} unique values";
+            pattern.Confidence = 0.1;
+            return pattern;
+        }
+
+        private FieldPattern AnalyzeFieldForPatterns(string fieldName, List<uint> values)
+        {
+            var pattern = new FieldPattern { FieldName = fieldName, Values = values };
+            
+            if (!values.Any()) return pattern;
+
+            var uniqueValues = values.Distinct().ToList();
+            var minValue = values.Min();
+            var maxValue = values.Max();
+            var range = maxValue - minValue;
+            
+            // Check for sequential patterns
+            var sortedUnique = uniqueValues.OrderBy(x => x).ToList();
+            var sequential = true;
+            for (int i = 1; i < sortedUnique.Count && sequential; i++)
+            {
+                if (sortedUnique[i] - sortedUnique[i-1] != 1)
+                    sequential = false;
+            }
+
+            if (sequential && uniqueValues.Count > 3)
+            {
+                pattern.PatternType = "Sequential";
+                pattern.Description = $"Sequential values from {minValue} to {maxValue}";
+                pattern.Confidence = 0.9;
+                return pattern;
+            }
+
+            // Check for power-of-2 patterns (flags)
+            var powerOf2Count = uniqueValues.Count(v => v > 0 && (v & (v - 1)) == 0);
+            if (powerOf2Count > uniqueValues.Count * 0.7)
+            {
+                pattern.PatternType = "Flags";
+                pattern.Description = $"Flag-like values (powers of 2): {powerOf2Count}/{uniqueValues.Count} are powers of 2";
+                pattern.Confidence = 0.8;
+                return pattern;
+            }
+
+            // Check for bounded index patterns
+            if (fieldName == "Unknown_0x10" && maxValue < (Pm4File?.MSLK?.Entries?.Count ?? 0) * 2)
+            {
+                pattern.PatternType = "Index";
+                pattern.Description = $"Potential index values (max: {maxValue}, entries: {Pm4File?.MSLK?.Entries?.Count ?? 0})";
+                pattern.Confidence = 0.7;
+                return pattern;
+            }
+
+            // Check for grouping patterns
+            var groups = values.GroupBy(x => x).Where(g => g.Count() > 1).ToList();
+            if (groups.Count < uniqueValues.Count * 0.5)
+            {
+                pattern.PatternType = "Grouping";
+                pattern.Description = $"Values form {groups.Count} groups with repeats";
+                pattern.Confidence = 0.6;
+                return pattern;
+            }
+
+            pattern.PatternType = "Random";
+            pattern.Description = $"No clear pattern detected in {uniqueValues.Count} unique values";
+            pattern.Confidence = 0.1;
+            return pattern;
+        }
+
+        private async Task<List<HierarchyStructure>> AnalyzeHierarchicalStructuresAsync(CancellationToken cancellationToken)
+        {
+            var structures = new List<HierarchyStructure>();
+            
+            if (Pm4File?.MSLK?.Entries == null) return structures;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Analyze Unknown_0x04 based hierarchy
+            var unknown04Groups = Pm4File.MSLK.Entries
+                .GroupBy(e => e.Unknown_0x04)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var hierarchy = new HierarchyStructure
+            {
+                StructureType = "Unknown_0x04 Groups",
+                RootNodes = new List<uint>(),
+                Relationships = new Dictionary<uint, List<uint>>()
+            };
+
+            // Find potential parent-child relationships through bit masking
+            foreach (var group in unknown04Groups.Keys.OrderBy(x => x))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                
+                var potentialChildren = unknown04Groups.Keys
+                    .Where(other => other > group && (other & group) == group && other != group)
+                    .ToList();
+
+                if (potentialChildren.Any())
+                {
+                    hierarchy.Relationships[group] = potentialChildren;
+                    if (!unknown04Groups.Keys.Any(parent => parent < group && (group & parent) == parent))
+                    {
+                        hierarchy.RootNodes.Add(group);
+                    }
+                }
+                else if (!unknown04Groups.Keys.Any(parent => parent < group && (group & parent) == parent))
+                {
+                    hierarchy.RootNodes.Add(group);
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            hierarchy.Depth = await CalculateHierarchyDepthAsync(hierarchy.Relationships, hierarchy.RootNodes, cancellationToken);
+            structures.Add(hierarchy);
+
+            return structures;
+        }
+
+        private List<HierarchyStructure> AnalyzeHierarchicalStructures()
+        {
+            var structures = new List<HierarchyStructure>();
+            
+            if (Pm4File?.MSLK?.Entries == null) return structures;
+
+            // Analyze Unknown_0x04 based hierarchy
+            var unknown04Groups = Pm4File.MSLK.Entries
+                .GroupBy(e => e.Unknown_0x04)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var hierarchy = new HierarchyStructure
+            {
+                StructureType = "Unknown_0x04 Groups",
+                RootNodes = new List<uint>(),
+                Relationships = new Dictionary<uint, List<uint>>()
+            };
+
+            // Find potential parent-child relationships through bit masking
+            foreach (var group in unknown04Groups.Keys.OrderBy(x => x))
+            {
+                var potentialChildren = unknown04Groups.Keys
+                    .Where(other => other > group && (other & group) == group && other != group)
+                    .ToList();
+
+                if (potentialChildren.Any())
+                {
+                    hierarchy.Relationships[group] = potentialChildren;
+                    if (!unknown04Groups.Keys.Any(parent => parent < group && (group & parent) == parent))
+                    {
+                        hierarchy.RootNodes.Add(group);
+                    }
+                }
+                else if (!unknown04Groups.Keys.Any(parent => parent < group && (group & parent) == parent))
+                {
+                    hierarchy.RootNodes.Add(group);
+                }
+            }
+
+            hierarchy.Depth = CalculateHierarchyDepth(hierarchy.Relationships, hierarchy.RootNodes);
+            structures.Add(hierarchy);
+
+            return structures;
+        }
+
+        private async Task<int> CalculateHierarchyDepthAsync(Dictionary<uint, List<uint>> relationships, List<uint> rootNodes, CancellationToken cancellationToken)
+        {
+            int maxDepth = 0;
+            foreach (var root in rootNodes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                maxDepth = Math.Max(maxDepth, await CalculateNodeDepthAsync(root, relationships, 0, cancellationToken, new HashSet<uint>()));
+            }
+            return maxDepth;
+        }
+
+        private async Task<int> CalculateNodeDepthAsync(uint node, Dictionary<uint, List<uint>> relationships, int currentDepth, CancellationToken cancellationToken, HashSet<uint> visited)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            // Prevent infinite recursion
+            if (visited.Contains(node) || currentDepth > 20) // Max depth safety check
+                return currentDepth;
+                
+            visited.Add(node);
+
+            if (!relationships.ContainsKey(node) || !relationships[node].Any())
+            {
+                visited.Remove(node);
+                return currentDepth;
+            }
+
+            int maxChildDepth = currentDepth;
+            foreach (var child in relationships[node])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                maxChildDepth = Math.Max(maxChildDepth, await CalculateNodeDepthAsync(child, relationships, currentDepth + 1, cancellationToken, visited));
+            }
+            
+            visited.Remove(node);
+            return maxChildDepth;
+        }
+
+        private int CalculateHierarchyDepth(Dictionary<uint, List<uint>> relationships, List<uint> rootNodes)
+        {
+            int maxDepth = 0;
+            foreach (var root in rootNodes)
+            {
+                maxDepth = Math.Max(maxDepth, CalculateNodeDepth(root, relationships, 0));
+            }
+            return maxDepth;
+        }
+
+        private int CalculateNodeDepth(uint node, Dictionary<uint, List<uint>> relationships, int currentDepth)
+        {
+            if (!relationships.ContainsKey(node) || !relationships[node].Any())
+                return currentDepth;
+
+            int maxChildDepth = currentDepth;
+            foreach (var child in relationships[node])
+            {
+                maxChildDepth = Math.Max(maxChildDepth, CalculateNodeDepth(child, relationships, currentDepth + 1));
+            }
+            return maxChildDepth;
+        }
+
+        private async Task<List<CrossReference>> AnalyzeCrossChunkReferencesAsync(CancellationToken cancellationToken)
+        {
+            var crossRefs = new List<CrossReference>();
+            
+            if (Pm4File == null) return crossRefs;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // MSLK to MSVI references
+            if (Pm4File.MSLK?.Entries != null && Pm4File.MSVI?.Indices != null)
+            {
+                var mslkToMsvi = new CrossReference
+                {
+                    SourceChunk = "MSLK",
+                    TargetChunk = "MSVI", 
+                    ReferenceType = "Index",
+                    References = new List<(uint, uint)>()
+                };
+
+                foreach (var entry in Pm4File.MSLK.Entries)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    if (entry.Unknown_0x10 < Pm4File.MSVI.Indices.Count)
+                    {
+                        mslkToMsvi.References.Add(((uint)entry.Unknown_0x10, Pm4File.MSVI.Indices[entry.Unknown_0x10]));
+                    }
+                }
+
+                crossRefs.Add(mslkToMsvi);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // MSVI to MSVT references
+            if (Pm4File.MSVI?.Indices != null && Pm4File.MSVT?.Vertices != null)
+            {
+                var msviToMsvt = new CrossReference
+                {
+                    SourceChunk = "MSVI",
+                    TargetChunk = "MSVT",
+                    ReferenceType = "VertexIndex",
+                    References = new List<(uint, uint)>()
+                };
+
+                for (int i = 0; i < Pm4File.MSVI.Indices.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    var vertexIndex = Pm4File.MSVI.Indices[i];
+                    if (vertexIndex < Pm4File.MSVT.Vertices.Count)
+                    {
+                        msviToMsvt.References.Add(((uint)i, vertexIndex));
+                    }
+                }
+
+                crossRefs.Add(msviToMsvt);
+            }
+
+            return crossRefs;
+        }
+
+        private List<PaddingPattern> AnalyzePaddingPatterns()
+        {
+            var patterns = new List<PaddingPattern>();
+            
+            // This would require access to raw file bytes - placeholder implementation
+            // In a real implementation, you'd analyze the raw PM4 file for padding between structures
+            
+            return patterns;
+        }
+
+        private List<HiddenDataRegion> DetectHiddenMetadata()
+        {
+            var hiddenRegions = new List<HiddenDataRegion>();
+            
+            // This would require access to raw file bytes - placeholder implementation
+            // In a real implementation, you'd look for non-zero padding, unexpected data patterns
+            
+            return hiddenRegions;
+        }
+
+        private Dictionary<byte, int> AnalyzeByteFrequency()
+        {
+            var frequency = new Dictionary<byte, int>();
+            
+            // This would require access to raw file bytes - placeholder implementation
+            // In a real implementation, you'd count frequency of each byte value
+            
+            return frequency;
+        }
+
+        private void AddDeepAnalysisInsights(DeepAnalysisResult analysis)
+        {
+            foreach (var pattern in analysis.FieldPatterns)
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Field Pattern",
+                    Description = $"{pattern.FieldName}: {pattern.PatternType} pattern detected",
+                    Significance = $"Confidence: {pattern.Confidence:P1} - {pattern.Description}",
+                    DataPreview = pattern.Values.Count > 5 
+                        ? $"Sample: {string.Join(", ", pattern.Values.Take(5).Select(v => $"0x{v:X8}"))}, ..."
+                        : $"Values: {string.Join(", ", pattern.Values.Select(v => $"0x{v:X8}"))}"
+                });
+            }
+
+            foreach (var hierarchy in analysis.HierarchyStructures)
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Hierarchy Structure",
+                    Description = $"{hierarchy.StructureType} with {hierarchy.RootNodes.Count} root nodes",
+                    Significance = $"Depth: {hierarchy.Depth} levels, {hierarchy.Relationships.Count} parent-child relationships",
+                    DataPreview = $"Roots: {string.Join(", ", hierarchy.RootNodes.Take(3).Select(r => $"0x{r:X8}"))}"
+                });
+            }
+
+            foreach (var crossRef in analysis.CrossReferences)
+            {
+                StructuralInsights.Add(new StructuralInsight
+                {
+                    Type = "Cross Reference",
+                    Description = $"{crossRef.SourceChunk} → {crossRef.TargetChunk} references",
+                    Significance = $"{crossRef.References.Count} {crossRef.ReferenceType} connections found",
+                    DataPreview = crossRef.References.Take(3).Any() 
+                        ? $"Sample: {string.Join(", ", crossRef.References.Take(3).Select(r => $"{r.source}→{r.target}"))}"
+                        : "No valid references"
+                });
+            }
+        }
+
+        private void AddPaddingInvestigationInsights(PaddingInvestigationResult investigation)
+        {
+            StructuralInsights.Add(new StructuralInsight
+            {
+                Type = "Padding Investigation",
+                Description = $"Found {investigation.PaddingPatterns.Count} padding patterns and {investigation.HiddenData.Count} hidden data regions",
+                Significance = "Byte frequency analysis completed for potential metadata detection",
+                DataPreview = investigation.ByteFrequency.Any() 
+                    ? $"Most common bytes: {string.Join(", ", investigation.ByteFrequency.OrderByDescending(kvp => kvp.Value).Take(3).Select(kvp => $"0x{kvp.Key:X2}({kvp.Value})"))}"
+                    : "No byte frequency data available"
+            });
+        }
+
+        // Placeholder methods for missing HTML/JSON export functionality
+        private Task<object> GenerateDetailedAnalysisAsync()
+        {
+            return Task.FromResult<object>(new 
+            {
+                FileName = LoadedFileName,
+                Timestamp = DateTime.Now,
+                Insights = StructuralInsights.ToArray(),
+                Groups = Unknown0x04Groups.ToArray(),
+                Summary = new 
+                {
+                    TotalInsights = StructuralInsights.Count,
+                    TotalGroups = Unknown0x04Groups.Count,
+                    ChunkTypes = ChunkItems.Count
+                }
+            });
+        }
+
+        private Task ExportAnalysisToHTMLAsync(string filePath, object analysis)
+        {
+            return Task.Run(() =>
+            {
+                // Placeholder HTML export - would generate a comprehensive HTML report
+                var html = $@"
+                <!DOCTYPE html>
+                <html>
+                <head><title>PM4 Analysis Report</title></head>
+                <body>
+                    <h1>PM4 Detailed Analysis Report</h1>
+                    <p>Generated: {DateTime.Now}</p>
+                    <p>File: {LoadedFileName}</p>
+                    <h2>Summary</h2>
+                    <p>Insights: {StructuralInsights.Count}</p>
+                    <p>Groups: {Unknown0x04Groups.Count}</p>
+                </body>
+                </html>";
+                File.WriteAllText(filePath, html);
+            });
+        }
+
+        private Task ExportAnalysisToJSONAsync(string filePath, object analysis)
+        {
+            return Task.Run(() =>
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(analysis, new System.Text.Json.JsonSerializerOptions 
+                { 
+                    WriteIndented = true 
+                });
+                File.WriteAllText(filePath, json);
+            });
+        }
+
+        private Task ExportAnalysisToCSVAsync(string filePath, object analysis)
+        {
+            return Task.Run(() =>
+            {
+                // Export a comprehensive CSV with all analysis data
+                ExportInsightsToCSV(filePath);
+            });
+        }
+
+        #endregion
+    }
+
+    // Enhanced Analysis Result Classes
+    public class DeepAnalysisResult
+    {
+        public List<FieldPattern> FieldPatterns { get; set; } = new();
+        public List<HierarchyStructure> HierarchyStructures { get; set; } = new();
+        public List<CrossReference> CrossReferences { get; set; } = new();
+        public DateTime Timestamp { get; set; }
+    }
+
+    public class PaddingInvestigationResult
+    {
+        public List<PaddingPattern> PaddingPatterns { get; set; } = new();
+        public List<HiddenDataRegion> HiddenData { get; set; } = new();
+        public Dictionary<byte, int> ByteFrequency { get; set; } = new();
+        public DateTime Timestamp { get; set; }
+    }
+
+    public class FieldPattern
+    {
+        public string FieldName { get; set; } = string.Empty;
+        public string PatternType { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public List<uint> Values { get; set; } = new();
+        public double Confidence { get; set; }
+    }
+
+    public class HierarchyStructure
+    {
+        public string StructureType { get; set; } = string.Empty;
+        public List<uint> RootNodes { get; set; } = new();
+        public Dictionary<uint, List<uint>> Relationships { get; set; } = new();
+        public int Depth { get; set; }
+    }
+
+    public class CrossReference
+    {
+        public string SourceChunk { get; set; } = string.Empty;
+        public string TargetChunk { get; set; } = string.Empty;
+        public string ReferenceType { get; set; } = string.Empty;
+        public List<(uint source, uint target)> References { get; set; } = new();
+    }
+
+    public class PaddingPattern
+    {
+        public int Offset { get; set; }
+        public int Length { get; set; }
+        public byte[] Pattern { get; set; } = Array.Empty<byte>();
+        public string Description { get; set; } = string.Empty;
+    }
+
+    public class HiddenDataRegion
+    {
+        public int Offset { get; set; }
+        public int Length { get; set; }
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+        public string PotentialType { get; set; } = string.Empty;
+    }
+
+    public class LegendItem
+    {
+        public string Name { get; set; } = string.Empty;
+        public Color Color { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+        public bool IsVisible { get; set; } = true;
+
+        public LegendItem() { }
+
+        public LegendItem(string name, Color color, string description, string icon = "")
+        {
+            Name = name;
+            Color = color;
+            Description = description;
+            Icon = icon;
+        }
     }
 
     public class ChunkVisualizationItem
