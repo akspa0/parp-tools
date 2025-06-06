@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace WoWToolbox.Core.Navigation.PM4
 {
@@ -86,6 +88,22 @@ namespace WoWToolbox.Core.Navigation.PM4
                     // Generate and display detailed report
                     var report = hierarchyAnalyzer.GenerateHierarchyReport(hierarchyResult, fileName);
                     Console.WriteLine(report);
+
+                    // Export TXT
+                    var outputDir = Path.Combine("output");
+                    Directory.CreateDirectory(outputDir);
+                    var txtPath = Path.Combine(outputDir, $"{Path.GetFileNameWithoutExtension(fileName)}.mslk.txt");
+                    File.WriteAllText(txtPath, report);
+                    Console.WriteLine($"[TXT] Analysis written to: {txtPath}");
+
+                    // Export YAML
+                    var yamlPath = Path.Combine(outputDir, $"{Path.GetFileNameWithoutExtension(fileName)}.mslk.yaml");
+                    var serializer = new SerializerBuilder()
+                        .WithNamingConvention(CamelCaseNamingConvention.Instance)
+                        .Build();
+                    var yaml = serializer.Serialize(hierarchyResult);
+                    File.WriteAllText(yamlPath, yaml);
+                    Console.WriteLine($"[YAML] Analysis written to: {yamlPath}");
 
                     // Generate and display Mermaid diagram
                     Console.WriteLine("=== MERMAID HIERARCHY DIAGRAM ===");

@@ -16,4 +16,8 @@
     <Compile Include="**/*.cs" Exclude="obj\**\*.cs;bin\**\*.cs" /> <!-- Explicitly include CS files, excluding obj/bin -->
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="13.3.1" />
+  </ItemGroup>
+
 </Project>

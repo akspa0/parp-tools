@@ -556,4 +556,11 @@ This achievement represents **total mastery** of PM4 file format analysis, estab
 - Face generation from MSUR→MSVI→MSVT chain
 - Production-ready OBJ export with comprehensive validation
 
+## 2025-06-06
+- Created `mslk-factual-documentation.md` for strictly factual, empirical MSLK documentation
+- Implemented and tested `MslkJsonExporter` for per-PM4 JSON output of MSLK analysis
+- All MSLK documentation and output tools now strictly separate fact from interpretation
+- JSON output now available for MSLK; YAML and per-entry CSV still pending
+- Next: expand structured output, maintain empirical-only documentation, and continue field validation
+
 ---

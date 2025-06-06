@@ -328,3 +328,6 @@
 
 ## Known Issues
 - **Test process hang after mesh+MSCN boundary output.** The process does not exit and must be manually cancelled. Need to ensure all resources are disposed and the test method completes.
+
+## Tools/Output
+- MslkJsonExporter (2025-06-06): Exports per-PM4 file MSLK analysis as structured JSON. All MSLK output tools now enforce strict fact/interpretation separation. YAML and per-entry CSV not yet implemented for MSLK.

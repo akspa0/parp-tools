@@ -305,3 +305,6 @@ Based on analysis of chunk structures, codebase searches, and recent discoveries
 *   **MSCN ↔ MSVT**: Collision boundaries spatially align with render mesh vertices
 *   **All Chunks ↔ Spatial Framework**: PM4-relative coordinate system enables meaningful spatial relationship analysis
 *   The `MSLK.Unk04` Group ID / ADT UniqueID might logically group related `MSUR` surfaces (via MDSF/MDOS?) or `MSCN` objects.
+
+## Analysis/Output Patterns
+- MSLK analysis and documentation now strictly separate fact from interpretation; all output tools (console, CSV, Mermaid, JSON) must reflect only empirical, reproducible observations. JSON output is now available for MSLK via MslkJsonExporter. YAML and per-entry CSV are not yet implemented.

@@ -258,3 +258,21 @@ With complete PM4 mastery achieved, advanced applications are now possible:
 - **Documentation**: Complete API documentation for production integration
 
 The foundation for all advanced PM4 analysis and reconstruction work is now complete and production-ready.
+
+# Active Context Update (2025-06-06)
+
+## Recent Changes
+- **Created `mslk-factual-documentation.md`**: Contains only empirically verified facts about the MSLK chunk, with no speculative interpretation. This is now the canonical reference for MSLK structure and field behavior.
+- **Implemented `MslkJsonExporter`**: New tool for exporting per-PM4 file MSLK analysis as structured JSON. This enables downstream analysis and strict reproducibility of all field-level observations.
+- **Test Coverage**: Added `MslkJsonExportTest` to verify JSON output and constant validation for MSLK entries across real PM4 files.
+- **Documentation Policy**: All MSLK documentation and analysis tools now strictly separate fact from interpretation. Only wowdev.wiki and empirical, reproducible observations are allowed in core docs.
+
+## Current State
+- **Output Formats**: MSLK analysis now supports console, CSV, Mermaid diagrams, and (new) JSON. YAML output is not yet implemented for MSLK.
+- **Validation**: All field-level patterns (flags, constants, hierarchy) are validated empirically and documented in the new factual file.
+- **Known Gaps**: No YAML export for MSLK; CSV is limited to summary stats; JSON is now available for all tested PM4 files.
+
+## Next Steps
+- Expand JSON/YAML output coverage for all PM4 analysis tools
+- Maintain strict separation of fact and interpretation in all documentation
+- Continue empirical validation for all PM4 fields and update factual docs as new evidence emerges
