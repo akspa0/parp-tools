@@ -116,7 +116,15 @@ namespace WoWToolbox.PM4Viewer.Services
             
             try
             {
-                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                // Ensure we have the absolute path and the file exists
+                var absolutePath = Path.IsPathRooted(filePath) ? filePath : Path.GetFullPath(filePath);
+                
+                if (!File.Exists(absolutePath))
+                {
+                    throw new FileNotFoundException($"PM4 file not found at path: {absolutePath}");
+                }
+                
+                using var fs = new FileStream(absolutePath, FileMode.Open, FileAccess.Read);
                 using var br = new BinaryReader(fs);
                 
                 while (fs.Position < fs.Length - 8) // At least 8 bytes for chunk header

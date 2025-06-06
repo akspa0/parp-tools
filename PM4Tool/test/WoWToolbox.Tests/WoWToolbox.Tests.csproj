@@ -37,6 +37,8 @@
   <ItemGroup>
     <Compile Include="Navigation/PM4/PD4FileTests.cs" />
     <Compile Include="Navigation/PM4/PM4FileTests.cs" />
+    <Compile Include="Navigation/PM4/MPRLMeshUtilityTests.cs" />
+    <Compile Include="scripts/CombineMPRLMesh.cs" />
     <Compile Include="WMO/WmoGroupMeshTests.cs" />
     <Compile Include="WMO/WmoBatchObjExportTests.cs" />
     <Compile Include="ADT/AdtServiceTests.cs" />

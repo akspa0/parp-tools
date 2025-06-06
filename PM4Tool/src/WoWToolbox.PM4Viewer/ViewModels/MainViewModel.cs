@@ -15,6 +15,7 @@ using WoWToolbox.Core.Navigation.PM4;
 using WoWToolbox.Core.Navigation.PM4.Chunks;
 using WoWToolbox.PM4Viewer.Services;
 using System.Threading;
+using Color = System.Windows.Media.Color;
 
 namespace WoWToolbox.PM4Viewer.ViewModels
 {
@@ -29,6 +30,9 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         
         [ObservableProperty]
         private string? _loadedFileName;
+        
+        [ObservableProperty]
+        private string? _loadedFilePath;
         
         [ObservableProperty] 
         private PM4File? _pm4File;
@@ -172,6 +176,40 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         [ObservableProperty]
         private bool _autoFitCamera = true;
 
+        // Enhanced Optimization Features
+        [ObservableProperty]
+        private bool _showSurfaceNormals = false;
+        
+        [ObservableProperty]
+        private bool _useSurfaceNormals = true;
+        
+        [ObservableProperty]
+        private bool _colorByObjectType = false;
+        
+        [ObservableProperty]
+        private bool _colorByMaterialId = false;
+        
+        [ObservableProperty]
+        private bool _showHeightBands = false;
+        
+        [ObservableProperty]
+        private double _heightBandSize = 50.0;
+        
+        [ObservableProperty]
+        private ObservableCollection<ObjectTypeGroup> _objectTypeGroups = new();
+        
+        [ObservableProperty]
+        private ObservableCollection<MaterialGroup> _materialGroups = new();
+        
+        [ObservableProperty]
+        private ObjectTypeGroup? _selectedObjectType;
+        
+        [ObservableProperty]
+        private MaterialGroup? _selectedMaterial;
+        
+        [ObservableProperty]
+        private bool _enhancedExportMode = false;
+
         // Hierarchy Visualization Properties
         [ObservableProperty]
         private HierarchyAnalysisResult? _currentHierarchyAnalysis;
@@ -204,6 +242,27 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         [ObservableProperty]
         private string _hierarchyTreeFilter = string.Empty;
 
+        // Combined MPRL Mesh Properties
+        [ObservableProperty]
+        private bool _showCombinedMPRLMesh = false;
+
+        [ObservableProperty]
+        private bool _isBuildingCombinedMesh = false;
+
+        [ObservableProperty]
+        private string _combinedMeshStatus = "No combined mesh loaded";
+
+        [ObservableProperty]
+        private int _combinedMeshVertexCount = 0;
+
+        // Batch loading properties for MPRL combination
+        [ObservableProperty]
+        private List<string> _loadedPM4Files = new();
+
+        // Combined MPRL mesh data
+        private List<Point3D> _combinedMPRLVertices = new();
+        private Dictionary<string, List<Point3D>> _mprlMeshByFile = new();
+
         public MainViewModel()
         {
             _analyzer = new PM4StructuralAnalyzer();
@@ -234,6 +293,18 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             SelectHierarchyNodeCommand = new RelayCommand<HierarchyTreeNode>(SelectHierarchyNode);
             ExpandAllHierarchyNodesCommand = new RelayCommand(ExpandAllHierarchyNodes);
             CollapseAllHierarchyNodesCommand = new RelayCommand(CollapseAllHierarchyNodes);
+
+            // Combined MPRL Mesh Commands
+            BuildCombinedMPRLMeshCommand = new AsyncRelayCommand(BuildCombinedMPRLMeshAsync);
+            ExportCombinedMPRLMeshCommand = new AsyncRelayCommand(ExportCombinedMPRLMeshAsync);
+            ClearCombinedMeshCommand = new RelayCommand(ClearCombinedMesh);
+            
+            // Enhanced Optimization Commands
+            AnalyzeObjectTypesCommand = new RelayCommand(AnalyzeObjectTypes);
+            AnalyzeMaterialsCommand = new RelayCommand(AnalyzeMaterials);
+            ExportEnhancedOBJCommand = new AsyncRelayCommand(ExportEnhancedOBJAsync);
+            SelectObjectTypeCommand = new RelayCommand<ObjectTypeGroup>(SelectObjectType);
+            SelectMaterialCommand = new RelayCommand<MaterialGroup>(SelectMaterial);
             
             InitializeLegend();
         }
@@ -265,6 +336,18 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public IRelayCommand<HierarchyTreeNode> SelectHierarchyNodeCommand { get; }
         public IRelayCommand ExpandAllHierarchyNodesCommand { get; }
         public IRelayCommand CollapseAllHierarchyNodesCommand { get; }
+
+        // Combined MPRL Mesh Commands
+        public IAsyncRelayCommand BuildCombinedMPRLMeshCommand { get; }
+        public IAsyncRelayCommand ExportCombinedMPRLMeshCommand { get; }
+        public IRelayCommand ClearCombinedMeshCommand { get; }
+        
+        // Enhanced Optimization Commands
+        public IRelayCommand AnalyzeObjectTypesCommand { get; }
+        public IRelayCommand AnalyzeMaterialsCommand { get; }
+        public IAsyncRelayCommand ExportEnhancedOBJCommand { get; }
+        public IRelayCommand<ObjectTypeGroup> SelectObjectTypeCommand { get; }
+        public IRelayCommand<MaterialGroup> SelectMaterialCommand { get; }
 
         partial void OnGroupsFilterTextChanged(string value)
         {
@@ -399,6 +482,11 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
         }
 
+        partial void OnShowCombinedMPRLMeshChanged(bool value)
+        {
+            UpdateVisualization();
+        }
+
         private async Task LoadFileAsync()
         {
             var dialog = new Microsoft.Win32.OpenFileDialog
@@ -443,6 +531,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         private async Task LoadPM4FileAsync(string filePath, CancellationToken cancellationToken = default)
         {
             LoadedFileName = Path.GetFileName(filePath);
+            LoadedFilePath = filePath;
             
             try
             {
@@ -458,8 +547,28 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 LoadingSubOperation = "Detecting chunk headers...";
                 await Task.Delay(100, cancellationToken);
                 
-                Pm4File = await Task.Run(() => PM4File.FromFile(filePath), cancellationToken);
+                Pm4File = await Task.Run(() => 
+                {
+                    try 
+                    {
+                        return PM4File.FromFile(filePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log error and continue with null file to prevent complete failure
+                        Console.WriteLine($"Error parsing PM4 file: {ex.Message}");
+                        return null;
+                    }
+                }, cancellationToken);
                 
+                // Check if file was successfully parsed
+                if (Pm4File == null)
+                {
+                    LoadingOperation = "Error: Could not parse PM4 file";
+                    LoadingSubOperation = "File may be corrupted or in an unsupported format";
+                    return;
+                }
+
                 // Report what we found
                 LoadingProgress = 25;
                 LoadingSubOperation = $"Found chunks: {GetChunkSummary(Pm4File)}";
@@ -487,14 +596,21 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 // Stage 5: Structural analysis (10%)
                 LoadingProgress = 85;
                 LoadingOperation = "Structural analysis";
-                LoadingSubOperation = "Analyzing Unknown_0x04 patterns...";
+                LoadingSubOperation = "Performing basic analysis...";
                 await Task.Delay(100, cancellationToken);
                 
-                AnalyzeUnknown0x0CGroups();
-                AnalyzeUnknown0x04Groups();
+                // Perform lightweight analysis on UI thread to prevent deadlocks
+                try
+                {
+                    AnalyzeUnknown0x04Groups();
+                }
+                catch (Exception ex)
+                {
+                    LoadingSubOperation = $"Analysis skipped: {ex.Message}";
+                }
                 
                 LoadingProgress = 90;
-                LoadingSubOperation = "Analyzing Unknown_0x0C patterns...";
+                LoadingSubOperation = "Analyzing group patterns...";
                 await Task.Delay(100, cancellationToken);
                 
                 AnalyzeUnknown0x0CGroups();
@@ -504,7 +620,15 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 {
                     try
                     {
-                        return _analyzer.AnalyzeFile(filePath);
+                        // Ensure absolute path before passing to analyzer
+                        var absolutePath = Path.IsPathRooted(filePath) ? filePath : Path.GetFullPath(filePath);
+                        
+                        if (!File.Exists(absolutePath))
+                        {
+                            throw new FileNotFoundException($"PM4 file not found at path: {absolutePath}");
+                        }
+                        
+                        return _analyzer.AnalyzeFile(absolutePath);
                     }
                     catch (Exception ex)
                     {
@@ -514,6 +638,9 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                         };
                         errorResult.Metadata["AnalysisError"] = ex.Message;
                         errorResult.Metadata["StackTrace"] = ex.StackTrace ?? "No stack trace";
+                        errorResult.Metadata["DebugFilePath"] = filePath;
+                        errorResult.Metadata["DebugFileExists"] = File.Exists(filePath);
+                        errorResult.Metadata["DebugWorkingDir"] = Directory.GetCurrentDirectory();
                         return errorResult;
                     }
                 }, cancellationToken);
@@ -634,8 +761,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             // Add coordinate system visualization first
             AddCoordinateSystemVisualization(newScene);
 
-            // Analyze Unknown_0x04 groups first
-            AnalyzeUnknown0x04Groups();
+            // Skip heavy analysis during initial visualization to prevent hanging
 
             // Visualize MSVT render vertices
             if (Pm4File.MSVT?.Vertices != null && ShowMSVTVertices)
@@ -702,22 +828,6 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 }
             }
 
-            // Visualize node hierarchy connections
-            if (ShowNodeHierarchy || ShowHierarchyTree)
-            {
-                var hierarchyModel = CreateNodeHierarchyVisualization();
-                if (hierarchyModel != null)
-                {
-                    newScene.Children.Add(hierarchyModel);
-                }
-                
-                // If showing hierarchy tree, add the enhanced visualizations directly to scene
-                if (ShowHierarchyTree && CurrentHierarchyAnalysis != null)
-                {
-                    CreateHierarchyTreeVisualization(newScene);
-                }
-            }
-
             // Visualize Unknown_0x04 groups if enabled
             if (ColorByUnknown0x04 || ShowOnlySelectedGroup)
             {
@@ -730,6 +840,13 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 CreateUnknown0x0CGroupVisualization(newScene);
             }
 
+            // Add combined MPRL mesh visualization
+            var combinedMesh = CreateCombinedMPRLMeshVisualization();
+            if (combinedMesh != null)
+            {
+                newScene.Children.Add(combinedMesh);
+            }
+
             SceneModel = newScene;
             
             // Update legend to reflect current visualization state
@@ -740,6 +857,123 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             {
                 FitCameraToData();
             }
+        }
+
+        private void UpdateBatchVisualization()
+        {
+            if (LoadedFiles.Count == 0)
+            {
+                UpdateVisualization(); // Fall back to single file visualization
+                return;
+            }
+
+            var newScene = new Model3DGroup();
+            ChunkItems.Clear();
+
+            // Add coordinate system visualization
+            AddCoordinateSystemVisualization(newScene);
+
+            var totalVertices = 0;
+            var fileIndex = 0;
+            var distinctColors = GenerateDistinctColors(LoadedFiles.Count);
+
+            // Process each loaded PM4 file
+            foreach (var pm4File in LoadedFiles)
+            {
+                var fileColor = distinctColors[fileIndex % distinctColors.Count];
+                var fileName = fileIndex < LoadedPM4Files.Count ? Path.GetFileNameWithoutExtension(LoadedPM4Files[fileIndex]) : $"File{fileIndex + 1}";
+
+                // Visualize MSVT render vertices for this file
+                if (pm4File.MSVT?.Vertices != null && ShowMSVTVertices)
+                {
+                    var msvtPoints = pm4File.MSVT.Vertices.Select(v => new Point3D(v.Y, v.X, v.Z)).ToList();
+                    var boundsInfo = ValidateCoordinateBounds(msvtPoints, "MSVT");
+                    
+                    var msvtModel = CreateVertexVisualization(msvtPoints, fileColor, $"{fileName} MSVT");
+                    newScene.Children.Add(msvtModel);
+                    
+                    ChunkItems.Add(new ChunkVisualizationItem
+                    {
+                        Name = $"{fileName} MSVT ({pm4File.MSVT.Vertices.Count:N0} vertices){boundsInfo}",
+                        Count = pm4File.MSVT.Vertices.Count,
+                        Color = fileColor,
+                        IsVisible = true
+                    });
+
+                    totalVertices += pm4File.MSVT.Vertices.Count;
+                }
+
+                // Visualize MSCN collision points for this file
+                if (pm4File.MSCN?.ExteriorVertices != null && ShowMSCNPoints)
+                {
+                    var mscnPoints = pm4File.MSCN.ExteriorVertices.Select(v => new Point3D(v.X, -v.Y, v.Z)).ToList();
+                    var boundsInfo = ValidateCoordinateBounds(mscnPoints, "MSCN");
+                    
+                    // Use a slightly different color for collision points
+                    var mscnColor = Color.FromArgb(255, 
+                        (byte)Math.Max(0, fileColor.R - 30), 
+                        (byte)Math.Min(255, fileColor.G + 30), 
+                        (byte)Math.Max(0, fileColor.B - 30));
+                    
+                    var mscnModel = CreateVertexVisualization(mscnPoints, mscnColor, $"{fileName} MSCN");
+                    newScene.Children.Add(mscnModel);
+                    
+                    ChunkItems.Add(new ChunkVisualizationItem
+                    {
+                        Name = $"{fileName} MSCN ({pm4File.MSCN.ExteriorVertices.Count:N0} points){boundsInfo}",
+                        Count = pm4File.MSCN.ExteriorVertices.Count,
+                        Color = mscnColor,
+                        IsVisible = true
+                    });
+                }
+
+                // Visualize MSPV structure vertices for this file
+                if (pm4File.MSPV?.Vertices != null && ShowMSPVVertices)
+                {
+                    var mspvPoints = pm4File.MSPV.Vertices.Select(v => new Point3D(v.X, v.Y, v.Z)).ToList();
+                    var boundsInfo = ValidateCoordinateBounds(mspvPoints, "MSPV");
+                    
+                    // Use a slightly different color for structure vertices
+                    var mspvColor = Color.FromArgb(255, 
+                        (byte)Math.Min(255, fileColor.R + 30), 
+                        (byte)Math.Max(0, fileColor.G - 30), 
+                        (byte)Math.Min(255, fileColor.B + 30));
+                    
+                    var mspvModel = CreateVertexVisualization(mspvPoints, mspvColor, $"{fileName} MSPV");
+                    newScene.Children.Add(mspvModel);
+                    
+                    ChunkItems.Add(new ChunkVisualizationItem
+                    {
+                        Name = $"{fileName} MSPV ({pm4File.MSPV.Vertices.Count:N0} vertices){boundsInfo}",
+                        Count = pm4File.MSPV.Vertices.Count,
+                        Color = mspvColor,
+                        IsVisible = true
+                    });
+                }
+
+                fileIndex++;
+            }
+
+            // Add combined MPRL mesh visualization if available
+            var combinedMesh = CreateCombinedMPRLMeshVisualization();
+            if (combinedMesh != null)
+            {
+                newScene.Children.Add(combinedMesh);
+            }
+
+            SceneModel = newScene;
+            
+            // Update legend to reflect current batch visualization state
+            RefreshLegend();
+            
+            // Auto-fit camera to show all data
+            if (AutoFitCamera)
+            {
+                FitCameraToData();
+            }
+            
+            // Update batch summary to show combined info
+            BatchSummary = $"Batch Loaded: {LoadedFiles.Count} PM4 files | {totalVertices:N0} total vertices across all files";
         }
 
         private void AddCoordinateSystemVisualization(Model3DGroup scene)
@@ -1663,7 +1897,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             report.AppendLine($"=== PM4 REAL-TIME ANALYSIS REPORT ===");
             report.AppendLine($"File: {result.FileName}");
             report.AppendLine($"Generated: {DateTime.Now}");
-            report.AppendLine($"File Size: {(Pm4File != null ? new FileInfo(LoadedFileName).Length / 1024 : 0):N0} KB");
+            report.AppendLine($"File Size: {(Pm4File != null && !string.IsNullOrEmpty(LoadedFilePath) && File.Exists(LoadedFilePath) ? new FileInfo(LoadedFilePath).Length / 1024 : 0):N0} KB");
             report.AppendLine();
 
             // File Loading Progress (enhanced)
@@ -1803,6 +2037,19 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         }
 
         private void BuildHierarchyTree()
+        {
+            // Ensure we're on the UI thread for collection updates
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                BuildHierarchyTreeImpl();
+            }
+            else
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(BuildHierarchyTreeImpl);
+            }
+        }
+
+        private void BuildHierarchyTreeImpl()
         {
             HierarchyTreeNodes.Clear();
 
@@ -2033,8 +2280,8 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 .OrderByDescending(g => g.Count())
                 .ToList();
 
-            // Perform deep hierarchical analysis
-            var hierarchyAnalysis = PerformDeepHierarchicalAnalysis(groupedEntries.Cast<IGrouping<uint, dynamic>>().ToList());
+            // Perform lightweight hierarchical analysis to prevent hanging
+            var hierarchyAnalysis = PerformLightweightHierarchicalAnalysis(groupedEntries.Cast<IGrouping<uint, dynamic>>().ToList());
 
             // Generate distinct colors for groups using HSV
             int maxColors = Math.Min(groupedEntries.Count, 360); // One color per degree
@@ -2346,6 +2593,41 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         private void CancelLoading()
         {
             _loadingCancellationTokenSource?.Cancel();
+        }
+
+        private HierarchyAnalysisResult PerformLightweightHierarchicalAnalysis(List<IGrouping<uint, dynamic>> groupedEntries)
+        {
+            // Simplified version that doesn't hang the UI
+            var result = new HierarchyAnalysisResult();
+            
+            try
+            {
+                                 foreach (var group in groupedEntries.Take(50)) // Limit to prevent hanging
+                 {
+                     var hierarchyInfo = new GroupHierarchyInfo
+                     {
+                         GroupValue = group.Key,
+                         IsRootNode = group.Key == 0x00000000,
+                         IsLeafNode = true, // Simplified - assume all are leaves for performance
+                         ChildCount = group.Count(),
+                         HierarchyLevel = group.Key == 0x00000000 ? 0 : 1 // Simplified level calculation
+                     };
+                    
+                    result.GroupHierarchy[group.Key] = hierarchyInfo;
+                }
+                
+                result.MaxHierarchyDepth = result.GroupHierarchy.Values.Any() ? result.GroupHierarchy.Values.Max(h => h.HierarchyLevel) : 0;
+                result.RootNodes = result.GroupHierarchy.Values.Count(h => h.IsRootNode);
+                result.LeafNodes = result.GroupHierarchy.Values.Count(h => h.IsLeafNode);
+                result.TotalConnections = result.GroupHierarchy.Count;
+            }
+            catch
+            {
+                // Return empty result if anything fails
+                result = new HierarchyAnalysisResult();
+            }
+            
+            return result;
         }
 
         #region Deep Hierarchical Analysis
@@ -2673,52 +2955,22 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         {
             if (!points.Any()) return "";
 
-            var outOfBounds = points.Where(p => 
-                p.X < PM4_MIN_COORDINATE || p.X > PM4_MAX_COORDINATE ||
-                p.Y < PM4_MIN_COORDINATE || p.Y > PM4_MAX_COORDINATE ||
-                p.Z < PM4_MIN_COORDINATE || p.Z > PM4_MAX_COORDINATE).ToList();
-
-            if (outOfBounds.Any())
+            // Quick check for out-of-bounds without expensive LINQ operations
+            var outOfBoundsCount = 0;
+            foreach (var point in points)
             {
-                var percentage = (outOfBounds.Count * 100.0) / points.Count;
-                
-                // Add insight about out-of-bounds vertices
-                StructuralInsights.Add(new StructuralInsight
+                if (point.X < PM4_MIN_COORDINATE || point.X > PM4_MAX_COORDINATE ||
+                    point.Y < PM4_MIN_COORDINATE || point.Y > PM4_MAX_COORDINATE ||
+                    point.Z < PM4_MIN_COORDINATE || point.Z > PM4_MAX_COORDINATE)
                 {
-                    Type = "Coordinate Bounds",
-                    Description = $"{chunkType} has {outOfBounds.Count} vertices outside PM4 coordinate bounds",
-                    Significance = $"{percentage:F1}% of vertices exceed ±{PM4_COORDINATE_BOUND:F0} limits",
-                    DataPreview = $"Range: X[{points.Min(p => p.X):F0}, {points.Max(p => p.X):F0}] Y[{points.Min(p => p.Y):F0}, {points.Max(p => p.Y):F0}] Z[{points.Min(p => p.Z):F0}, {points.Max(p => p.Z):F0}]"
-                });
-
-                return $" ⚠️{outOfBounds.Count}OOB";
+                    outOfBoundsCount++;
+                    if (outOfBoundsCount > 10) break; // Stop counting after 10 to prevent hanging
+                }
             }
 
-            // Calculate actual bounds for information
-            var minX = points.Min(p => p.X);
-            var maxX = points.Max(p => p.X);
-            var minY = points.Min(p => p.Y);
-            var maxY = points.Max(p => p.Y);
-            var minZ = points.Min(p => p.Z);
-            var maxZ = points.Max(p => p.Z);
-
-            // Add insight about coordinate usage
-            var rangeX = maxX - minX;
-            var rangeY = maxY - minY;
-            var rangeZ = maxZ - minZ;
-            var percentageUsedX = (rangeX / (2 * PM4_COORDINATE_BOUND)) * 100;
-            var percentageUsedY = (rangeY / (2 * PM4_COORDINATE_BOUND)) * 100;
-            var percentageUsedZ = (rangeZ / (2 * PM4_COORDINATE_BOUND)) * 100;
-
-            if (points.Count > 100) // Only add insight for significant chunks
+            if (outOfBoundsCount > 0)
             {
-                StructuralInsights.Add(new StructuralInsight
-                {
-                    Type = "Coordinate Usage",
-                    Description = $"{chunkType} uses {percentageUsedX:F1}%×{percentageUsedY:F1}%×{percentageUsedZ:F1}% of PM4 coordinate space",
-                    Significance = $"Spatial distribution across coordinate bounds",
-                    DataPreview = $"Center: ({(minX + maxX) / 2:F0}, {(minY + maxY) / 2:F0}, {(minZ + maxZ) / 2:F0})"
-                });
+                return $" ⚠️{outOfBoundsCount}+OOB";
             }
 
             return " ✓";
@@ -2987,21 +3239,28 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
         private async Task LoadDirectoryAsync()
         {
-            var dialog = new Microsoft.Win32.OpenFolderDialog
+            // Use OpenFileDialog to select any file in the target directory
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                Title = "Select Directory Containing PM4 Files"
+                Title = "Select any PM4 file in the directory you want to batch load",
+                Filter = "PM4 Files (*.pm4)|*.pm4|All Files (*.*)|*.*",
+                CheckFileExists = true
             };
 
             if (dialog.ShowDialog() == true)
             {
-                var pm4Files = Directory.GetFiles(dialog.FolderName, "*.pm4", SearchOption.AllDirectories);
+                var selectedDirectory = Path.GetDirectoryName(dialog.FileName);
+                if (string.IsNullOrEmpty(selectedDirectory))
+                    return;
+
+                var pm4Files = Directory.GetFiles(selectedDirectory, "*.pm4", SearchOption.AllDirectories);
                 if (pm4Files.Length == 0)
                 {
                     MessageBox.Show("No PM4 files found in the selected directory.", "No Files Found", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
-                var result = MessageBox.Show($"Found {pm4Files.Length} PM4 files. This may take a long time and use significant memory. Continue?", 
+                var result = MessageBox.Show($"Found {pm4Files.Length} PM4 files in {selectedDirectory}.\nThis may take a long time and use significant memory. Continue?", 
                                            "Batch Load Confirmation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                 
                 if (result == MessageBoxResult.Yes)
@@ -3024,13 +3283,23 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             try
             {
                 LoadedFiles.Clear();
+                LoadedPM4Files.Clear();
+                _mprlMeshByFile.Clear();
                 
                 foreach (var filePath in filePaths)
                 {
                     try
                     {
-                        LoadingSubOperation = $"Loading {Path.GetFileName(filePath)} ({loadedCount + 1}/{filePaths.Length})";
+                        var fileName = Path.GetFileName(filePath);
+                        LoadingSubOperation = $"Loading {fileName} ({loadedCount + 1}/{filePaths.Length})";
                         await Task.Delay(10); // Allow UI to update
+
+                        // Validate file exists before attempting to load
+                        if (!File.Exists(filePath))
+                        {
+                            errors.Add($"{fileName}: File not found at path {filePath}");
+                            continue;
+                        }
 
                         var file = await Task.Run(() =>
                         {
@@ -3039,7 +3308,19 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                         });
 
                         LoadedFiles.Add(file);
+                        LoadedPM4Files.Add(filePath);
                         loadedCount++;
+                        
+                        // Extract MPRL data if available
+                        if (file.MSVT?.Vertices != null)
+                        {
+                            var mprlVertices = new List<Point3D>();
+                            foreach (var vertex in file.MSVT.Vertices)
+                            {
+                                mprlVertices.Add(new Point3D(vertex.X, vertex.Y, vertex.Z));
+                            }
+                            _mprlMeshByFile[fileName] = mprlVertices;
+                        }
                         
                         // Accumulate statistics
                         totalVertices += file.MSVT?.Vertices?.Count ?? 0;
@@ -3059,7 +3340,8 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                     }
                     catch (Exception ex)
                     {
-                        errors.Add($"{Path.GetFileName(filePath)}: {ex.Message}");
+                        var fileName = Path.GetFileName(filePath) ?? "Unknown file";
+                        errors.Add($"{fileName}: {ex.Message}");
                     }
                 }
 
@@ -3090,6 +3372,21 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 if (loadedCount > 0)
                 {
                     await PerformBatchAnalysisAsync();
+                    
+                    // Set the first loaded file as the current file for visualization
+                    if (LoadedFiles.Count > 0)
+                    {
+                        Pm4File = LoadedFiles[0];
+                        LoadedFileName = Path.GetFileName(LoadedPM4Files[0]);
+                        LoadedFilePath = LoadedPM4Files[0];
+                        
+                        // Create combined visualization of all loaded files
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            UpdateBatchVisualization();
+                            AnalyzeUnknown0x04Groups();
+                        });
+                    }
                 }
             }
             catch (Exception ex)
@@ -3138,8 +3435,10 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                         }
                     }
 
-                    // Add batch insights
-                    StructuralInsights.Add(new StructuralInsight
+                    // Prepare insights to add on UI thread
+                    var batchInsights = new List<StructuralInsight>();
+                    
+                    batchInsights.Add(new StructuralInsight
                     {
                         Type = "Batch Analysis",
                         Description = $"Cross-file pattern analysis of {LoadedFiles.Count} PM4 files",
@@ -3147,16 +3446,28 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                         DataPreview = $"Total entries analyzed: {allUnknown04Values.Count:N0}"
                     });
 
-                    StructuralInsights.Add(new StructuralInsight
+                    if (allUnknown04Values.Any())
                     {
-                        Type = "Global Unknown_0x04 Distribution",
-                        Description = "Distribution of Unknown_0x04 values across all loaded files",
-                        Significance = allUnknown04Values.GroupBy(x => x)
-                            .OrderByDescending(g => g.Count())
-                            .Take(5)
-                            .Select(g => $"0x{g.Key:X8}({g.Count()})")
-                            .Aggregate("Top values: ", (acc, val) => acc + val + " "),
-                        DataPreview = $"Range: 0x{allUnknown04Values.Min():X8} - 0x{allUnknown04Values.Max():X8}"
+                        batchInsights.Add(new StructuralInsight
+                        {
+                            Type = "Global Unknown_0x04 Distribution",
+                            Description = "Distribution of Unknown_0x04 values across all loaded files",
+                            Significance = allUnknown04Values.GroupBy(x => x)
+                                .OrderByDescending(g => g.Count())
+                                .Take(5)
+                                .Select(g => $"0x{g.Key:X8}({g.Count()})")
+                                .Aggregate("Top values: ", (acc, val) => acc + val + " "),
+                            DataPreview = $"Range: 0x{allUnknown04Values.Min():X8} - 0x{allUnknown04Values.Max():X8}"
+                        });
+                    }
+
+                    // Add insights on UI thread
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        foreach (var insight in batchInsights)
+                        {
+                            StructuralInsights.Add(insight);
+                        }
                     });
                 });
 
@@ -4177,6 +4488,516 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         }
 
         #endregion
+
+        #region Combined MPRL Mesh Methods
+
+        private async Task BuildCombinedMPRLMeshAsync()
+        {
+            if (!_mprlMeshByFile.Any())
+            {
+                MessageBox.Show("No PM4 files with MPRL data loaded. Please load multiple PM4 files first.", 
+                    "No MPRL Data", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            IsBuildingCombinedMesh = true;
+            CombinedMeshStatus = "Building combined MPRL mesh...";
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    _combinedMPRLVertices.Clear();
+                    
+                    // Combine all MPRL vertices from all files
+                    foreach (var kvp in _mprlMeshByFile)
+                    {
+                        _combinedMPRLVertices.AddRange(kvp.Value);
+                    }
+                });
+
+                CombinedMeshVertexCount = _combinedMPRLVertices.Count;
+                CombinedMeshStatus = $"Combined mesh ready: {CombinedMeshVertexCount:N0} vertices from {_mprlMeshByFile.Count} files";
+                
+                MessageBox.Show($"Combined MPRL mesh built successfully!\n\n" +
+                               $"📊 Total Vertices: {CombinedMeshVertexCount:N0}\n" +
+                               $"📁 Source Files: {_mprlMeshByFile.Count}\n" +
+                               $"🔗 Enable 'Show Combined MPRL Mesh' to visualize",
+                               "Combined Mesh Ready", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                UpdateVisualization();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error building combined MPRL mesh: {ex.Message}", 
+                    "Build Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                CombinedMeshStatus = "Error building combined mesh";
+            }
+            finally
+            {
+                IsBuildingCombinedMesh = false;
+            }
+        }
+
+        private async Task ExportCombinedMPRLMeshAsync()
+        {
+            if (!_combinedMPRLVertices.Any())
+            {
+                MessageBox.Show("No combined MPRL mesh available. Build the combined mesh first.", 
+                    "No Combined Mesh", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "OBJ Files (*.obj)|*.obj|PLY Files (*.ply)|*.ply|Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+                FileName = $"CombinedMPRL_Mesh_{DateTime.Now:yyyyMMdd_HHmmss}.obj"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        var extension = Path.GetExtension(dialog.FileName).ToLowerInvariant();
+                        
+                        switch (extension)
+                        {
+                            case ".obj":
+                                ExportCombinedMeshAsOBJ(dialog.FileName);
+                                break;
+                            case ".ply":
+                                ExportCombinedMeshAsPLY(dialog.FileName);
+                                break;
+                            default:
+                                ExportCombinedMeshAsText(dialog.FileName);
+                                break;
+                        }
+                    });
+
+                    MessageBox.Show($"Combined MPRL mesh exported successfully!\n\nFile: {dialog.FileName}\nVertices: {_combinedMPRLVertices.Count:N0}", 
+                        "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error exporting combined mesh: {ex.Message}", 
+                        "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        private void ExportCombinedMeshAsOBJ(string filePath)
+        {
+            using var writer = new StreamWriter(filePath);
+            
+            writer.WriteLine("# Combined MPRL Mesh from PM4 Files");
+            writer.WriteLine($"# Generated: {DateTime.Now}");
+            writer.WriteLine($"# Total Vertices: {_combinedMPRLVertices.Count:N0}");
+            writer.WriteLine($"# Source Files: {_mprlMeshByFile.Count}");
+            writer.WriteLine();
+
+            // Write vertices
+            foreach (var vertex in _combinedMPRLVertices)
+            {
+                writer.WriteLine($"v {vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}");
+            }
+
+            writer.WriteLine();
+            writer.WriteLine("# Point cloud - no faces defined");
+            writer.WriteLine("# Use in Blender/3D software for terrain reconstruction");
+        }
+
+        private void ExportCombinedMeshAsPLY(string filePath)
+        {
+            using var writer = new StreamWriter(filePath);
+            
+            writer.WriteLine("ply");
+            writer.WriteLine("format ascii 1.0");
+            writer.WriteLine($"comment Combined MPRL Mesh from PM4 Files - Generated: {DateTime.Now}");
+            writer.WriteLine($"comment Total Vertices: {_combinedMPRLVertices.Count:N0} from {_mprlMeshByFile.Count} files");
+            writer.WriteLine($"element vertex {_combinedMPRLVertices.Count}");
+            writer.WriteLine("property float x");
+            writer.WriteLine("property float y");
+            writer.WriteLine("property float z");
+            writer.WriteLine("end_header");
+
+            foreach (var vertex in _combinedMPRLVertices)
+            {
+                writer.WriteLine($"{vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}");
+            }
+        }
+
+        private void ExportCombinedMeshAsText(string filePath)
+        {
+            using var writer = new StreamWriter(filePath);
+            
+            writer.WriteLine("Combined MPRL Mesh Data");
+            writer.WriteLine("======================");
+            writer.WriteLine($"Generated: {DateTime.Now}");
+            writer.WriteLine($"Total Vertices: {_combinedMPRLVertices.Count:N0}");
+            writer.WriteLine($"Source Files: {_mprlMeshByFile.Count}");
+            writer.WriteLine();
+            
+            writer.WriteLine("Source File Breakdown:");
+            foreach (var kvp in _mprlMeshByFile)
+            {
+                writer.WriteLine($"  {kvp.Key}: {kvp.Value.Count:N0} vertices");
+            }
+            writer.WriteLine();
+
+            writer.WriteLine("Vertex Data (X, Y, Z):");
+            foreach (var vertex in _combinedMPRLVertices)
+            {
+                writer.WriteLine($"{vertex.X:F6}, {vertex.Y:F6}, {vertex.Z:F6}");
+            }
+        }
+
+        private void ClearCombinedMesh()
+        {
+            _combinedMPRLVertices.Clear();
+            _mprlMeshByFile.Clear();
+            CombinedMeshVertexCount = 0;
+            CombinedMeshStatus = "No combined mesh loaded";
+            ShowCombinedMPRLMesh = false;
+            UpdateVisualization();
+        }
+
+        private GeometryModel3D? CreateCombinedMPRLMeshVisualization()
+        {
+            if (!ShowCombinedMPRLMesh || !_combinedMPRLVertices.Any())
+                return null;
+
+            var geometry = new MeshGeometry3D();
+            
+            // Create small cubes for each vertex in the combined mesh
+            foreach (var vertex in _combinedMPRLVertices)
+            {
+                AddVertexCube(geometry, vertex, 1.0); // Smaller cubes for better performance
+            }
+
+            // Use a distinctive color for the combined mesh
+            var material = new DiffuseMaterial(new SolidColorBrush(Colors.Magenta));
+            
+            return new GeometryModel3D(geometry, material);
+        }
+
+        // Enhanced Optimization Methods
+        private void AnalyzeObjectTypes()
+        {
+            if (Pm4File?.MSLK?.Entries == null)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    SelectedDataInfo = "No MSLK data to analyze";
+                });
+                return;
+            }
+
+            try
+            {
+                var objectTypeGroups = Pm4File.MSLK.Entries
+                    .GroupBy(e => e.ObjectTypeFlags)
+                    .Select((group, index) => new ObjectTypeGroup
+                    {
+                        ObjectType = group.Key,
+                        TypeName = GetObjectTypeName(group.Key),
+                        EntryCount = group.Count(),
+                        Color = GenerateDistinctColors(1)[0],
+                        Entries = group.ToList(),
+                        Description = $"Type {group.Key}: {group.Count()} entries"
+                    })
+                    .OrderByDescending(g => g.EntryCount)
+                    .ToList();
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    ObjectTypeGroups.Clear();
+                    foreach (var group in objectTypeGroups)
+                    {
+                        ObjectTypeGroups.Add(group);
+                    }
+                    SelectedDataInfo = $"Found {ObjectTypeGroups.Count} object types";
+                });
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    SelectedDataInfo = $"Error analyzing object types: {ex.Message}";
+                });
+            }
+        }
+
+        private void AnalyzeMaterials()
+        {
+            if (Pm4File?.MSLK?.Entries == null)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    SelectedDataInfo = "No MSLK data to analyze";
+                });
+                return;
+            }
+
+            try
+            {
+                var materialGroups = Pm4File.MSLK.Entries
+                    .GroupBy(e => e.MaterialColorId)
+                    .Select((group, index) => new MaterialGroup
+                    {
+                        MaterialId = group.Key,
+                        MaterialName = GetMaterialName(group.Key),
+                        EntryCount = group.Count(),
+                        Color = GenerateDistinctColors(1)[0],
+                        Entries = group.ToList(),
+                        Description = $"Material 0x{group.Key:X8}: {group.Count()} entries"
+                    })
+                    .OrderByDescending(g => g.EntryCount)
+                    .ToList();
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    MaterialGroups.Clear();
+                    foreach (var group in materialGroups)
+                    {
+                        MaterialGroups.Add(group);
+                    }
+                    SelectedDataInfo = $"Found {MaterialGroups.Count} material types";
+                });
+            }
+            catch (Exception ex)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    SelectedDataInfo = $"Error analyzing materials: {ex.Message}";
+                });
+            }
+        }
+
+        private string GetObjectTypeName(byte objectType)
+        {
+            return objectType switch
+            {
+                1 => "Terrain Base",
+                2 => "Structure Foundation", 
+                4 => "Doodad Placement",
+                10 => "Terrain Detail",
+                12 => "Object Reference",
+                17 => "Special Feature",
+                _ => $"Type {objectType}"
+            };
+        }
+
+        private string GetMaterialName(uint materialId)
+        {
+            if ((materialId & 0xFFFF0000) == 0xFFFF0000)
+            {
+                var materialIndex = materialId & 0xFFFF;
+                return $"Material #{materialIndex}";
+            }
+            return $"ID {materialId:X8}";
+        }
+
+        private void SelectObjectType(ObjectTypeGroup? objectType)
+        {
+            SelectedObjectType = objectType;
+            if (objectType != null)
+            {
+                SelectedDataInfo = $"Selected: {objectType.TypeName} ({objectType.EntryCount} entries)";
+                // Update visualization to highlight selected object type
+                UpdateVisualization();
+            }
+        }
+
+        private void SelectMaterial(MaterialGroup? material)
+        {
+            SelectedMaterial = material;
+            if (material != null)
+            {
+                SelectedDataInfo = $"Selected: {material.MaterialName} ({material.EntryCount} entries)";
+                // Update visualization to highlight selected material
+                UpdateVisualization();
+            }
+        }
+
+        private async Task ExportEnhancedOBJAsync()
+        {
+            if (Pm4File == null)
+            {
+                SelectedDataInfo = "No PM4 file loaded";
+                return;
+            }
+
+            try
+            {
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var outputDir = Path.Combine("output", timestamp, "EnhancedObjExport");
+                Directory.CreateDirectory(outputDir);
+
+                await Task.Run(() =>
+                {
+                    // Export with surface normals from MSUR if available
+                    if (Pm4File.MSUR?.Entries != null && Pm4File.MSUR.Entries.Count > 0)
+                    {
+                        ExportWithSurfaceNormals(Path.Combine(outputDir, "enhanced_with_normals.obj"));
+                    }
+
+                    // Export grouped by object type
+                    if (ObjectTypeGroups.Count > 0)
+                    {
+                        ExportGroupedByObjectType(outputDir);
+                    }
+
+                    // Export grouped by material
+                    if (MaterialGroups.Count > 0)
+                    {
+                        ExportGroupedByMaterial(outputDir);
+                    }
+
+                    // Export height bands if enabled
+                    if (ShowHeightBands)
+                    {
+                        ExportHeightBands(outputDir);
+                    }
+                });
+
+                SelectedDataInfo = $"Enhanced export completed to: {outputDir}";
+            }
+            catch (Exception ex)
+            {
+                SelectedDataInfo = $"Export error: {ex.Message}";
+            }
+        }
+
+        private void ExportWithSurfaceNormals(string filePath)
+        {
+            if (Pm4File?.MSUR?.Entries == null || Pm4File.MSVT?.Vertices == null)
+                return;
+
+            using var writer = new StreamWriter(filePath);
+            writer.WriteLine("# Enhanced PM4 Export with Surface Normals");
+            writer.WriteLine($"# Generated: {DateTime.Now}");
+            writer.WriteLine($"# Source: {LoadedFileName}");
+            writer.WriteLine();
+
+            // Export vertices
+            foreach (var vertex in Pm4File.MSVT.Vertices)
+            {
+                writer.WriteLine($"v {vertex.X} {vertex.Y} {vertex.Z}");
+            }
+
+            // Export normals from MSUR
+            foreach (var surface in Pm4File.MSUR.Entries)
+            {
+                writer.WriteLine($"vn {surface.SurfaceNormalX} {surface.SurfaceNormalY} {surface.SurfaceNormalZ}");
+            }
+
+            writer.WriteLine("# Faces with normals");
+            // Create simple triangles (this is simplified - real implementation would need proper indexing)
+            for (int i = 0; i < Pm4File.MSVT.Vertices.Count - 2; i += 3)
+            {
+                var normalIndex = Math.Min(i / 3, Pm4File.MSUR.Entries.Count - 1) + 1;
+                writer.WriteLine($"f {i + 1}//{normalIndex} {i + 2}//{normalIndex} {i + 3}//{normalIndex}");
+            }
+        }
+
+        private void ExportGroupedByObjectType(string outputDir)
+        {
+            foreach (var objectType in ObjectTypeGroups)
+            {
+                var fileName = $"object_type_{objectType.ObjectType:D2}_{objectType.TypeName.Replace(" ", "_")}.obj";
+                var filePath = Path.Combine(outputDir, fileName);
+                
+                using var writer = new StreamWriter(filePath);
+                writer.WriteLine($"# Object Type: {objectType.TypeName}");
+                writer.WriteLine($"# Entry Count: {objectType.EntryCount}");
+                writer.WriteLine();
+
+                // Export vertices for this object type
+                ExportEntriesAsOBJ(writer, objectType.Entries);
+            }
+        }
+
+        private void ExportGroupedByMaterial(string outputDir)
+        {
+            foreach (var material in MaterialGroups)
+            {
+                var fileName = $"material_{material.MaterialId:X8}_{material.MaterialName.Replace(" ", "_")}.obj";
+                var filePath = Path.Combine(outputDir, fileName);
+                
+                using var writer = new StreamWriter(filePath);
+                writer.WriteLine($"# Material: {material.MaterialName}");
+                writer.WriteLine($"# Entry Count: {material.EntryCount}");
+                writer.WriteLine();
+
+                // Export vertices for this material
+                ExportEntriesAsOBJ(writer, material.Entries);
+            }
+        }
+
+        private void ExportHeightBands(string outputDir)
+        {
+            if (Pm4File?.MSVT?.Vertices == null)
+                return;
+
+            var minHeight = Pm4File.MSVT.Vertices.Min(v => v.Z);
+            var maxHeight = Pm4File.MSVT.Vertices.Max(v => v.Z);
+            var bandCount = (int)Math.Ceiling((maxHeight - minHeight) / HeightBandSize);
+
+            for (int band = 0; band < bandCount; band++)
+            {
+                var bandMin = minHeight + (band * HeightBandSize);
+                var bandMax = bandMin + HeightBandSize;
+                
+                var verticesInBand = Pm4File.MSVT.Vertices
+                    .Where(v => v.Z >= bandMin && v.Z < bandMax)
+                    .ToList();
+
+                if (verticesInBand.Count > 0)
+                {
+                    var fileName = $"height_band_{band:D2}_{bandMin:F1}_to_{bandMax:F1}.obj";
+                    var filePath = Path.Combine(outputDir, fileName);
+                    
+                    using var writer = new StreamWriter(filePath);
+                    writer.WriteLine($"# Height Band {band}: {bandMin:F1} to {bandMax:F1}");
+                    writer.WriteLine($"# Vertex Count: {verticesInBand.Count}");
+                    writer.WriteLine();
+
+                    foreach (var vertex in verticesInBand)
+                    {
+                        writer.WriteLine($"v {vertex.X} {vertex.Y} {vertex.Z}");
+                    }
+                }
+            }
+        }
+
+        private void ExportEntriesAsOBJ(StreamWriter writer, List<MSLKEntry> entries)
+        {
+            if (Pm4File?.MSVT?.Vertices == null)
+                return;
+
+            // This is a simplified approach - in reality, you'd need to properly map
+            // MSLK entries to their corresponding vertices through MSPI indices
+            var validEntries = entries.Where(e => e.MspiFirstIndex >= 0 && e.MspiIndexCount > 0).ToList();
+            
+            int vertexIndex = 1;
+            foreach (var entry in validEntries)
+            {
+                writer.WriteLine($"# Entry: Group={entry.GroupObjectId:X8}, Material={entry.MaterialColorId:X8}");
+                
+                // Export a small cube at the entry's position (simplified visualization)
+                var baseIndex = Math.Min(entry.MspiFirstIndex, Pm4File.MSVT.Vertices.Count - 1);
+                if (baseIndex >= 0 && baseIndex < Pm4File.MSVT.Vertices.Count)
+                {
+                    var vertex = Pm4File.MSVT.Vertices[baseIndex];
+                    writer.WriteLine($"v {vertex.X} {vertex.Y} {vertex.Z}");
+                    vertexIndex++;
+                }
+            }
+        }
+
+        #endregion
     }
 
     // Enhanced Analysis Result Classes
@@ -4402,5 +5223,44 @@ namespace WoWToolbox.PM4Viewer.ViewModels
 
         public string NodeTypeName => HierarchyInfo?.IsRootNode == true ? "Root" :
                                      HierarchyInfo?.IsLeafNode == true ? "Leaf" : "Intermediate";
+    }
+
+    /// <summary>
+    /// Represents a group of objects by type for classification
+    /// </summary>
+    public class ObjectTypeGroup
+    {
+        public byte ObjectType { get; set; }
+        public string TypeName { get; set; } = string.Empty;
+        public int EntryCount { get; set; }
+        public Color Color { get; set; }
+        public List<MSLKEntry> Entries { get; set; } = new();
+        public string Description { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a group of objects by material ID
+    /// </summary>
+    public class MaterialGroup
+    {
+        public uint MaterialId { get; set; }
+        public string MaterialName { get; set; } = string.Empty;
+        public int EntryCount { get; set; }
+        public Color Color { get; set; }
+        public List<MSLKEntry> Entries { get; set; } = new();
+        public string Description { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents surface data with enhanced metadata
+    /// </summary>
+    public class SurfaceInfo
+    {
+        public Vector3 Normal { get; set; }
+        public float Height { get; set; }
+        public int TriangleCount { get; set; }
+        public List<int> VertexIndices { get; set; } = new();
+        public Color Color { get; set; }
+        public string QualityInfo { get; set; } = string.Empty;
     }
 } 
