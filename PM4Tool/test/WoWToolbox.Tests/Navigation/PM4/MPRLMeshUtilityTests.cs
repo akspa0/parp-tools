@@ -77,9 +77,9 @@ public class MPRLMeshUtilityTests
             
             var content = File.ReadAllText(outputPath);
             Assert.Contains("# Test Combined MPRL Mesh", content);
-            // Check for Z-coordinate fix (Z values are negated)
-            Assert.Contains("v 0.000000 0.000000 -0.000000", content);
-            Assert.Contains("v 1.000000 0.000000 -0.000000", content);
+            // Check for coordinate mirroring fix (all coordinates negated)
+            Assert.Contains("v -0.000000 -0.000000 -0.000000", content);
+            Assert.Contains("v -1.000000 -0.000000 -0.000000", content);
         }
         finally
         {
@@ -185,8 +185,8 @@ public class MPRLMeshUtilityTests
 
         foreach (var vertex in vertices)
         {
-            // Fix Z inversion by negating Z coordinate
-            writer.WriteLine($"v {vertex.X:F6} {vertex.Y:F6} {-vertex.Z:F6}");
+            // Fix coordinate mirroring: negate X (horizontal flip) and Y (vertical flip), keep Z negated
+            writer.WriteLine($"v {-vertex.X:F6} {-vertex.Y:F6} {-vertex.Z:F6}");
         }
     }
 
@@ -210,8 +210,8 @@ public class MPRLMeshUtilityTests
 
         foreach (var vertex in vertices)
         {
-            // Fix Z inversion by negating Z coordinate  
-            writer.WriteLine($"{vertex.X:F6} {vertex.Y:F6} {-vertex.Z:F6}");
+            // Fix coordinate mirroring: negate X (horizontal flip) and Y (vertical flip), keep Z negated
+            writer.WriteLine($"{-vertex.X:F6} {-vertex.Y:F6} {-vertex.Z:F6}");
         }
     }
 
@@ -227,6 +227,7 @@ public class MPRLMeshUtilityTests
         writer.WriteLine($"Generated: {DateTime.Now}");
         writer.WriteLine($"Total Vertices: {vertices.Count:N0}");
         writer.WriteLine($"Source Files: {verticesByFile.Count}");
+        writer.WriteLine($"Coordinate Fix: Applied mirroring correction (negated X, Y, Z)");
         writer.WriteLine();
 
         writer.WriteLine("File Breakdown:");
