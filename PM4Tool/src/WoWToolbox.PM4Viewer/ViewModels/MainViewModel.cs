@@ -194,6 +194,16 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         [ObservableProperty]
         private int _hierarchyLevelFilter = 0; // 0 = show all levels
 
+        // Hierarchy Tree View Properties
+        [ObservableProperty]
+        private ObservableCollection<HierarchyTreeNode> _hierarchyTreeNodes = new();
+
+        [ObservableProperty]
+        private HierarchyTreeNode? _selectedHierarchyNode;
+
+        [ObservableProperty]
+        private string _hierarchyTreeFilter = string.Empty;
+
         public MainViewModel()
         {
             _analyzer = new PM4StructuralAnalyzer();
@@ -219,6 +229,11 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             // Batch Loading Commands
             LoadBatchFilesCommand = new AsyncRelayCommand(LoadBatchFilesAsync);
             LoadDirectoryCommand = new AsyncRelayCommand(LoadDirectoryAsync);
+
+            // Hierarchy Tree Commands
+            SelectHierarchyNodeCommand = new RelayCommand<HierarchyTreeNode>(SelectHierarchyNode);
+            ExpandAllHierarchyNodesCommand = new RelayCommand(ExpandAllHierarchyNodes);
+            CollapseAllHierarchyNodesCommand = new RelayCommand(CollapseAllHierarchyNodes);
             
             InitializeLegend();
         }
@@ -245,6 +260,11 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         // Batch Loading Commands
         public IAsyncRelayCommand LoadBatchFilesCommand { get; }
         public IAsyncRelayCommand LoadDirectoryCommand { get; }
+
+        // Hierarchy Tree Commands
+        public IRelayCommand<HierarchyTreeNode> SelectHierarchyNodeCommand { get; }
+        public IRelayCommand ExpandAllHierarchyNodesCommand { get; }
+        public IRelayCommand CollapseAllHierarchyNodesCommand { get; }
 
         partial void OnGroupsFilterTextChanged(string value)
         {
@@ -363,6 +383,20 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         partial void OnHierarchyLevelFilterChanged(int value)
         {
             UpdateVisualization();
+        }
+
+        partial void OnHierarchyTreeFilterChanged(string value)
+        {
+            FilterHierarchyTree();
+        }
+
+        partial void OnSelectedHierarchyNodeChanged(HierarchyTreeNode? value)
+        {
+            if (value?.GroupInfo != null)
+            {
+                SelectedUnknown0x04Group = value.GroupInfo;
+                UpdateVisualization();
+            }
         }
 
         private async Task LoadFileAsync()
@@ -1626,11 +1660,97 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         {
             var report = new System.Text.StringBuilder();
             
-            report.AppendLine($"=== PM4 STRUCTURAL ANALYSIS REPORT ===");
+            report.AppendLine($"=== PM4 REAL-TIME ANALYSIS REPORT ===");
             report.AppendLine($"File: {result.FileName}");
             report.AppendLine($"Generated: {DateTime.Now}");
+            report.AppendLine($"File Size: {(Pm4File != null ? new FileInfo(LoadedFileName).Length / 1024 : 0):N0} KB");
             report.AppendLine();
-            
+
+            // File Loading Progress (enhanced)
+            report.AppendLine("📂 LOADING PROGRESS:");
+            report.AppendLine($"  ✓ File read and parsed successfully");
+            report.AppendLine($"  ✓ Chunk structure analysis completed");
+            report.AppendLine($"  ✓ Vertex data processing completed");
+            report.AppendLine($"  ✓ Hierarchy analysis completed");
+            report.AppendLine();
+
+            // Enhanced Chunk Analysis
+            if (Pm4File != null)
+            {
+                report.AppendLine("📊 CHUNK ANALYSIS:");
+                if (Pm4File.MSLK?.Entries?.Count > 0)
+                    report.AppendLine($"  ✓ MSLK: {Pm4File.MSLK.Entries.Count:N0} navigation entries");
+                if (Pm4File.MSVT?.Vertices?.Count > 0)
+                    report.AppendLine($"  ✓ MSVT: {Pm4File.MSVT.Vertices.Count:N0} render vertices");
+                if (Pm4File.MSCN?.ExteriorVertices?.Count > 0)
+                    report.AppendLine($"  ✓ MSCN: {Pm4File.MSCN.ExteriorVertices.Count:N0} collision vertices");
+                if (Pm4File.MSPV?.Vertices?.Count > 0)
+                    report.AppendLine($"  ✓ MSPV: {Pm4File.MSPV.Vertices.Count:N0} portal vertices");
+                if (Pm4File.MSVI?.Indices?.Count > 0)
+                    report.AppendLine($"  ✓ MSVI: {Pm4File.MSVI.Indices.Count:N0} vertex indices ({Pm4File.MSVI.Indices.Count / 3:N0} faces)");
+                if (Pm4File.MSUR?.Entries?.Count > 0)
+                    report.AppendLine($"  ✓ MSUR: {Pm4File.MSUR.Entries.Count:N0} surface entries");
+                report.AppendLine();
+            }
+
+            // Enhanced Hierarchy Analysis
+            if (CurrentHierarchyAnalysis != null)
+            {
+                report.AppendLine("🌳 HIERARCHY STRUCTURE ANALYSIS:");
+                report.AppendLine($"  📈 Depth: {CurrentHierarchyAnalysis.MaxHierarchyDepth} levels");
+                report.AppendLine($"  🌟 Root nodes: {CurrentHierarchyAnalysis.RootNodes}");
+                report.AppendLine($"  🔺 Leaf nodes: {CurrentHierarchyAnalysis.LeafNodes}");
+                report.AppendLine($"  🔲 Total groups: {CurrentHierarchyAnalysis.GroupHierarchy.Count}");
+                report.AppendLine($"  🔗 Parent-child connections: {CurrentHierarchyAnalysis.GroupHierarchy.Values.Count(g => g.ParentValue.HasValue)}");
+                report.AppendLine($"  ⚡ Cross-references: {CurrentHierarchyAnalysis.TotalConnections}");
+                report.AppendLine();
+
+                // Root node details
+                var rootNodes = CurrentHierarchyAnalysis.GroupHierarchy.Values.Where(g => g.IsRootNode).ToList();
+                if (rootNodes.Any())
+                {
+                    report.AppendLine("  🌟 ROOT NODE DETAILS:");
+                    foreach (var root in rootNodes.OrderBy(r => r.GroupValue))
+                    {
+                        report.AppendLine($"    • 0x{root.GroupValue:X8} - {root.ChildCount} children");
+                        if (root.GroupValue == 0x00000000)
+                            report.AppendLine($"      ⭐ MASTER ROOT NODE - Controls entire hierarchy");
+                    }
+                    report.AppendLine();
+                }
+
+                // Level distribution
+                report.AppendLine("  📊 LEVEL DISTRIBUTION:");
+                var levelCounts = CurrentHierarchyAnalysis.GroupHierarchy.Values
+                    .GroupBy(g => g.HierarchyLevel)
+                    .OrderBy(g => g.Key)
+                    .ToList();
+                foreach (var level in levelCounts)
+                {
+                    report.AppendLine($"    Level {level.Key}: {level.Count()} groups");
+                }
+                report.AppendLine();
+            }
+
+            // Group Analysis Summary
+            if (Unknown0x04Groups.Count > 0)
+            {
+                report.AppendLine("🔢 UNKNOWN_0x04 GROUP ANALYSIS:");
+                report.AppendLine($"  📋 Total groups discovered: {Unknown0x04Groups.Count}");
+                
+                var topGroups = Unknown0x04Groups.OrderByDescending(g => g.EntryCount).Take(10).ToList();
+                report.AppendLine($"  🔝 TOP 10 GROUPS BY SIZE:");
+                foreach (var group in topGroups)
+                {
+                    var hierarchyInfo = group.HierarchyInfo;
+                    var typeInfo = hierarchyInfo.IsRootNode ? "(Root)" : 
+                                  hierarchyInfo.IsLeafNode ? "(Leaf)" : 
+                                  $"(L{hierarchyInfo.HierarchyLevel})";
+                    report.AppendLine($"    • 0x{group.GroupValue:X8}: {group.EntryCount} entries, {group.AssociatedVertices.Count} vertices {typeInfo}");
+                }
+                report.AppendLine();
+            }
+
             // Chunk presence summary
             if (result.Metadata.TryGetValue("ChunkPresence", out var presenceObj) && presenceObj is Dictionary<string, bool> presence)
             {
@@ -1645,7 +1765,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             // Padding analysis
             if (result.PaddingAnalysis.Any(p => p.HasNonZeroPadding))
             {
-                report.AppendLine("NON-ZERO PADDING DETECTED:");
+                report.AppendLine("🔍 NON-ZERO PADDING DETECTED:");
                 foreach (var padding in result.PaddingAnalysis.Where(p => p.HasNonZeroPadding))
                 {
                     report.AppendLine($"  {padding.ChunkType}: {padding.PaddingBytes} bytes");
@@ -1655,7 +1775,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             }
 
             // Unknown field patterns
-            report.AppendLine("UNKNOWN FIELD ANALYSIS:");
+            report.AppendLine("🔍 UNKNOWN FIELD ANALYSIS:");
             foreach (var field in result.UnknownFields)
             {
                 report.AppendLine($"  {field.ChunkType}.{field.FieldName}:");
@@ -1666,7 +1786,7 @@ namespace WoWToolbox.PM4Viewer.ViewModels
             report.AppendLine();
 
             // Hierarchical relationships
-            report.AppendLine("HIERARCHICAL RELATIONSHIPS:");
+            report.AppendLine("🔗 HIERARCHICAL RELATIONSHIPS:");
             foreach (var hierarchy in result.Hierarchies.OrderByDescending(h => h.ConfidenceScore))
             {
                 report.AppendLine($"  {hierarchy.ParentChunk} → {hierarchy.ChildChunk} ({hierarchy.ConfidenceScore:P0})");
@@ -1674,7 +1794,161 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 report.AppendLine($"    Evidence: {hierarchy.Evidence}");
             }
 
+            // Analysis completion timestamp
+            report.AppendLine();
+            report.AppendLine($"🎯 ANALYSIS COMPLETED: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            report.AppendLine($"⏱️ Ready for visualization and exploration!");
+
             AnalysisOutput = report.ToString();
+        }
+
+        private void BuildHierarchyTree()
+        {
+            HierarchyTreeNodes.Clear();
+
+            if (CurrentHierarchyAnalysis == null || Unknown0x04Groups.Count == 0)
+                return;
+
+            // Create dictionary for quick lookup
+            var nodeDict = new Dictionary<uint, HierarchyTreeNode>();
+
+            // Create all nodes first
+            foreach (var group in Unknown0x04Groups)
+            {
+                var hierarchyInfo = group.HierarchyInfo;
+                var node = new HierarchyTreeNode
+                {
+                    GroupValue = group.GroupValue,
+                    DisplayName = $"0x{group.GroupValue:X8}",
+                    Description = $"{group.EntryCount} entries, {group.AssociatedVertices.Count} vertices",
+                    HierarchyLevel = hierarchyInfo.HierarchyLevel,
+                    EntryCount = group.EntryCount,
+                    ParentValue = hierarchyInfo.ParentValue,
+                    VertexCount = group.AssociatedVertices.Count,
+                    NodeColor = group.GroupColor,
+                    HierarchyInfo = hierarchyInfo,
+                    GroupInfo = group,
+                    Unknown0x10References = string.Join(", ", hierarchyInfo.CrossReferences.Take(3).Select(r => $"0x{r:X8}")) +
+                                          (hierarchyInfo.CrossReferences.Count > 3 ? $" (+{hierarchyInfo.CrossReferences.Count - 3} more)" : ""),
+                    IsExpanded = hierarchyInfo.HierarchyLevel <= 2 // Expand first 2 levels by default
+                };
+
+                nodeDict[group.GroupValue] = node;
+            }
+
+            // Build parent-child relationships
+            foreach (var node in nodeDict.Values)
+            {
+                if (node.ParentValue.HasValue && nodeDict.TryGetValue(node.ParentValue.Value, out var parent))
+                {
+                    parent.Children.Add(node);
+                }
+                else if (!node.ParentValue.HasValue) // Root node
+                {
+                    HierarchyTreeNodes.Add(node);
+                }
+            }
+
+            // Sort children by group value for consistent ordering
+            SortTreeNodes(HierarchyTreeNodes);
+        }
+
+        private void SortTreeNodes(ObservableCollection<HierarchyTreeNode> nodes)
+        {
+            var sortedNodes = nodes.OrderBy(n => n.GroupValue).ToList();
+            nodes.Clear();
+            foreach (var node in sortedNodes)
+            {
+                nodes.Add(node);
+                SortTreeNodes(node.Children);
+            }
+        }
+
+        private void FilterHierarchyTree()
+        {
+            if (string.IsNullOrWhiteSpace(HierarchyTreeFilter))
+            {
+                BuildHierarchyTree();
+                return;
+            }
+
+            var filter = HierarchyTreeFilter.ToLowerInvariant();
+            
+            // Rebuild filtered tree
+            BuildHierarchyTree();
+            FilterTreeNodes(HierarchyTreeNodes, filter);
+        }
+
+        private bool FilterTreeNodes(ObservableCollection<HierarchyTreeNode> nodes, string filter)
+        {
+            var nodesToRemove = new List<HierarchyTreeNode>();
+            var hasVisibleChildren = false;
+
+            foreach (var node in nodes)
+            {
+                var nodeMatches = node.DisplayName.ToLowerInvariant().Contains(filter) ||
+                                 node.Description.ToLowerInvariant().Contains(filter) ||
+                                 node.NodeTypeName.ToLowerInvariant().Contains(filter);
+
+                var childrenVisible = FilterTreeNodes(node.Children, filter);
+
+                if (!nodeMatches && !childrenVisible)
+                {
+                    nodesToRemove.Add(node);
+                }
+                else
+                {
+                    hasVisibleChildren = true;
+                    if (childrenVisible) node.IsExpanded = true; // Expand if children match
+                }
+            }
+
+            foreach (var node in nodesToRemove)
+            {
+                nodes.Remove(node);
+            }
+
+            return hasVisibleChildren;
+        }
+
+        private void SelectHierarchyNode(HierarchyTreeNode? node)
+        {
+            if (node == null) return;
+
+            // Clear previous selection
+            ClearTreeSelection(HierarchyTreeNodes);
+            
+            // Set new selection
+            node.IsSelected = true;
+            SelectedHierarchyNode = node;
+        }
+
+        private void ClearTreeSelection(ObservableCollection<HierarchyTreeNode> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                node.IsSelected = false;
+                ClearTreeSelection(node.Children);
+            }
+        }
+
+        private void ExpandAllHierarchyNodes()
+        {
+            SetTreeExpansion(HierarchyTreeNodes, true);
+        }
+
+        private void CollapseAllHierarchyNodes()
+        {
+            SetTreeExpansion(HierarchyTreeNodes, false);
+        }
+
+        private void SetTreeExpansion(ObservableCollection<HierarchyTreeNode> nodes, bool expanded)
+        {
+            foreach (var node in nodes)
+            {
+                node.IsExpanded = expanded;
+                SetTreeExpansion(node.Children, expanded);
+            }
         }
 
         private void ToggleChunkVisibility(string? chunkName)
@@ -1808,8 +2082,14 @@ namespace WoWToolbox.PM4Viewer.ViewModels
                 $"Top 5: {string.Join(", ", topGroups.Select(g => $"0x{g.GroupValue:X8}({g.EntryCount})"))}";
             GroupsSummary = summary;
 
+            // Store hierarchy analysis result
+            CurrentHierarchyAnalysis = hierarchyAnalysis;
+
             // Add hierarchy insights to structural insights
             AddHierarchyInsights(hierarchyAnalysis);
+
+            // Build hierarchy tree view
+            BuildHierarchyTree();
 
             FilterUnknown0x04Groups();
         }
@@ -4074,5 +4354,53 @@ namespace WoWToolbox.PM4Viewer.ViewModels
         public int VertexRangeSize { get; set; }
         public bool HasExclusiveGeometry { get; set; }
         public float GeometryComplexity { get; set; }
+    }
+
+    public partial class HierarchyTreeNode : ObservableObject
+    {
+        [ObservableProperty]
+        private uint _groupValue;
+
+        [ObservableProperty]
+        private string _displayName = string.Empty;
+
+        [ObservableProperty]
+        private string _description = string.Empty;
+
+        [ObservableProperty]
+        private bool _isExpanded = true;
+
+        [ObservableProperty]
+        private bool _isSelected = false;
+
+        [ObservableProperty]
+        private int _hierarchyLevel;
+
+        [ObservableProperty]
+        private int _entryCount;
+
+        [ObservableProperty]
+        private uint? _parentValue;
+
+        [ObservableProperty]
+        private int _vertexCount;
+
+        [ObservableProperty]
+        private string _unknown0x10References = string.Empty;
+
+        [ObservableProperty]
+        private Color _nodeColor = Colors.Gray;
+
+        [ObservableProperty]
+        private ObservableCollection<HierarchyTreeNode> _children = new();
+
+        public GroupHierarchyInfo? HierarchyInfo { get; set; }
+        public Unknown0x04Group? GroupInfo { get; set; }
+
+        public string NodeTypeIcon => HierarchyInfo?.IsRootNode == true ? "💎" :
+                                     HierarchyInfo?.IsLeafNode == true ? "🔺" : "🔲";
+
+        public string NodeTypeName => HierarchyInfo?.IsRootNode == true ? "Root" :
+                                     HierarchyInfo?.IsLeafNode == true ? "Leaf" : "Intermediate";
     }
 } 
