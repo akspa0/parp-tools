@@ -1914,6 +1914,22 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 if (pm4File.MPRR != null && pm4File.MPRR.Sequences.Count > 0) // Corrected typo here
                 {
                     // ... (Existing correct logic using Sequences) ...
+                    // After loading pm4File and before summary/error output
+                    if (pm4File.MPRR != null && pm4File.MPRR.Sequences.Count > 0)
+                    {
+                        var firstSeq = pm4File.MPRR.Sequences.First();
+                        var lastSeq = pm4File.MPRR.Sequences.Last();
+                        string FormatSeq(List<ushort> seq)
+                        {
+                            return string.Join(", ", seq.Select(v =>
+                                v == 0xFFFF ? $"0xFFFF" :
+                                (v == 0xFFFFu ? $"-1" : v.ToString())));
+                        }
+                        Console.WriteLine($"  MPRR First Sequence [Index 0, Length {firstSeq.Count}]: {FormatSeq(firstSeq)}");
+                        Console.WriteLine($"  MPRR Last Sequence [Index {pm4File.MPRR.Sequences.Count - 1}, Length {lastSeq.Count}]: {FormatSeq(lastSeq)}");
+                        debugWriter.WriteLine($"  MPRR First Sequence [Index 0, Length {firstSeq.Count}]: {FormatSeq(firstSeq)}");
+                        debugWriter.WriteLine($"  MPRR Last Sequence [Index {pm4File.MPRR.Sequences.Count - 1}, Length {lastSeq.Count}]: {FormatSeq(lastSeq)}");
+                    }
                 }
                 else
                 {
