@@ -34,7 +34,9 @@ namespace WoWToolbox.Core.Navigation.PM4
             public bool IsDoodadNode => MspiFirstIndex == -1;
             
             // Hierarchy relationships
+            [System.Text.Json.Serialization.JsonIgnore]
             public List<HierarchyNode> Children { get; set; } = new();
+            [System.Text.Json.Serialization.JsonIgnore]
             public HierarchyNode? Parent { get; set; }
             public int Depth { get; set; } = 0;
         }
@@ -79,8 +81,14 @@ namespace WoWToolbox.Core.Navigation.PM4
             // Detect hierarchy patterns
             DetectHierarchyPatterns(result);
             
+            // Investigate alternative hierarchy indicators
+            InvestigateAlternativeHierarchyFields(result);
+            
             // Calculate hierarchy statistics
             CalculateHierarchyStats(result);
+            
+            // Final validation to catch any remaining cycles
+            ValidateHierarchyIntegrity(result);
             
             return result;
         }
@@ -118,36 +126,97 @@ namespace WoWToolbox.Core.Navigation.PM4
                 .GroupBy(n => n.ParentIndex_0x04)
                 .ToDictionary(g => g.Key, g => g.ToList());
 
-            // Hypothesis 1: 0x04 field represents parent index
+            // ✨ NEW APPROACH: Investigate what ParentIndex_0x04 actually represents
+            AnalyzeParentIndexPatterns(result);
+
+            // ✨ SIMPLIFIED: NO HIERARCHY BUILDING - Treat each node as independent
+            // This eliminates ALL circular reference issues
+            
+            var selfReferencingNodes = 0;
+            var nonSelfReferencingNodes = 0;
+            
             foreach (var node in result.AllNodes)
             {
-                // Check if ParentIndex_0x04 could be an index into the MSLK array
+                // Analyze patterns but DON'T build parent-child relationships
                 if (node.ParentIndex_0x04 < result.AllNodes.Count)
                 {
-                    var potentialParent = result.AllNodes[(int)node.ParentIndex_0x04];
-                    
-                    // Only create parent-child if it makes logical sense
-                    if (potentialParent.Index != node.Index && // Not self-referencing
-                        !WouldCreateCycle(node, potentialParent, result)) // No cycles
+                    if (node.ParentIndex_0x04 == node.Index)
                     {
-                        node.Parent = potentialParent;
-                        potentialParent.Children.Add(node);
+                        selfReferencingNodes++;
+                        result.DiscoveredPatterns.Add($"Node {node.Index} self-references (primary object candidate)");
+                    }
+                    else
+                    {
+                        nonSelfReferencingNodes++;
+                        result.DiscoveredPatterns.Add($"Node {node.Index} references {node.ParentIndex_0x04} (potential grouping)");
                     }
                 }
+                
+                // Leave all Parent/Children relationships empty to prevent cycles
+                // node.Parent = null; (already null)
+                // node.Children = new(); (already empty)
             }
 
-            // Find root nodes (nodes with no parent)
-            result.RootNodes = result.AllNodes.Where(n => n.Parent == null).ToList();
+            result.DiscoveredPatterns.Add($"SUMMARY: {selfReferencingNodes} self-refs, {nonSelfReferencingNodes} other refs");
             
-            // Calculate depths
-            CalculateDepths(result.RootNodes);
+            // All nodes are "roots" since we don't build hierarchy
+            result.RootNodes = result.AllNodes.ToList();
+            
+            // No depth calculation needed since no hierarchy
+        }
+
+        private void AnalyzeParentIndexPatterns(HierarchyAnalysisResult result)
+        {
+            var selfReferences = result.AllNodes.Count(n => n.ParentIndex_0x04 == n.Index);
+            var validParentRefs = result.AllNodes.Count(n => n.ParentIndex_0x04 < result.AllNodes.Count && n.ParentIndex_0x04 != n.Index);
+            var invalidRefs = result.AllNodes.Count(n => n.ParentIndex_0x04 >= result.AllNodes.Count);
+            
+            result.DiscoveredPatterns.Add($"PARENT INDEX ANALYSIS:");
+            result.DiscoveredPatterns.Add($"  Self-references: {selfReferences} ({selfReferences * 100.0 / result.AllNodes.Count:F1}%)");
+            result.DiscoveredPatterns.Add($"  Valid parent refs: {validParentRefs} ({validParentRefs * 100.0 / result.AllNodes.Count:F1}%)");
+            result.DiscoveredPatterns.Add($"  Invalid refs: {invalidRefs} ({invalidRefs * 100.0 / result.AllNodes.Count:F1}%)");
+            
+            if (selfReferences > result.AllNodes.Count * 0.5)
+            {
+                result.DiscoveredPatterns.Add("HYPOTHESIS: ParentIndex_0x04 may represent GROUP MEMBERSHIP, not hierarchy");
+                result.DiscoveredPatterns.Add("  - Self-references likely indicate 'group leaders' or 'primary objects'");
+                result.DiscoveredPatterns.Add("  - This is NOT a traditional parent-child tree structure");
+            }
         }
 
         private bool WouldCreateCycle(HierarchyNode child, HierarchyNode potentialParent, HierarchyAnalysisResult result)
         {
-            // Simple cycle detection: check if potentialParent is already a descendant of child
+            // Enhanced cycle detection with multiple checks
+            
+            // Check 1: Direct self-reference
+            if (child.Index == potentialParent.Index)
+                return true;
+            
+            // Check 2: Would potentialParent become a descendant of child?
             var visited = new HashSet<int>();
-            return IsDescendant(potentialParent, child.Index, visited);
+            if (IsDescendant(potentialParent, child.Index, visited))
+                return true;
+            
+            // Check 3: Would child become an ancestor of potentialParent?
+            visited.Clear();
+            if (IsAncestor(child, potentialParent.Index, visited))
+                return true;
+                
+            return false;
+        }
+        
+        private bool IsAncestor(HierarchyNode node, int descendantIndex, HashSet<int> visited)
+        {
+            if (visited.Contains(node.Index))
+                return false; // Prevent infinite loops
+                
+            visited.Add(node.Index);
+            
+            if (node.Index == descendantIndex)
+                return true;
+                
+            // Check if any ancestor of this node is the descendant
+            return node.Parent != null && IsAncestor(node.Parent, descendantIndex, visited);
         }
 
         private bool IsDescendant(HierarchyNode node, int ancestorIndex, HashSet<int> visited)
@@ -163,6 +232,16 @@ namespace WoWToolbox.Core.Navigation.PM4
             return node.Children.Any(c => IsDescendant(c, ancestorIndex, visited));
         }
 
+        private bool IsAlreadyParentOf(HierarchyNode potentialParent, HierarchyNode child)
+        {
+            return child.Parent?.Index == potentialParent.Index;
+        }
+
+        private bool IsAlreadyChildOf(HierarchyNode potentialChild, HierarchyNode parent)
+        {
+            return parent.Children.Any(c => c.Index == potentialChild.Index);
+        }
+
         private void CalculateDepths(List<HierarchyNode> rootNodes)
         {
             foreach (var root in rootNodes)
@@ -173,10 +252,29 @@ namespace WoWToolbox.Core.Navigation.PM4
 
         private void CalculateDepthRecursive(HierarchyNode node, int depth)
         {
+            var visited = new HashSet<int>();
+            CalculateDepthRecursiveInternal(node, depth, visited);
+        }
+
+        private void CalculateDepthRecursiveInternal(HierarchyNode node, int depth, HashSet<int> visited)
+        {
+            // Prevent infinite loops with cycle detection
+            if (visited.Contains(node.Index))
+                return;
+                
+            // Safety limit to prevent extremely deep recursion
+            if (depth > 100)
+            {
+                Console.WriteLine($"Warning: Maximum depth limit (100) reached at node {node.Index}");
+                return;
+            }
+                
+            visited.Add(node.Index);
+            
             node.Depth = depth;
             foreach (var child in node.Children)
             {
-                CalculateDepthRecursive(child, depth + 1);
+                CalculateDepthRecursiveInternal(child, depth + 1, visited);
             }
         }
 
@@ -236,6 +334,65 @@ namespace WoWToolbox.Core.Navigation.PM4
         private void CalculateHierarchyStats(HierarchyAnalysisResult result)
         {
             result.MaxDepth = result.AllNodes.Any() ? result.AllNodes.Max(n => n.Depth) : 0;
+        }
+
+        private void InvestigateAlternativeHierarchyFields(HierarchyAnalysisResult result)
+        {
+            result.DiscoveredPatterns.Add("INVESTIGATING ALTERNATIVE HIERARCHY INDICATORS:");
+            
+            // Look at Sequence_0x01 as potential hierarchy indicator
+            var sequenceGroups = result.AllNodes.GroupBy(n => n.Sequence_0x01).Where(g => g.Count() > 1).ToList();
+            result.DiscoveredPatterns.Add($"  Sequence field groups: {sequenceGroups.Count}");
+            
+            // Look at CrossReference_0x10 as potential parent/sibling indicator
+            var crossRefGroups = result.AllNodes.GroupBy(n => n.CrossReference_0x10).Where(g => g.Count() > 1).ToList();
+            result.DiscoveredPatterns.Add($"  Cross-reference groups: {crossRefGroups.Count}");
+            
+            // Look at Unknown_0x0C as potential grouping field
+            var unknownGroups = result.AllNodes.GroupBy(n => n.Unknown_0x0C).Where(g => g.Count() > 1).ToList();
+            result.DiscoveredPatterns.Add($"  Unknown_0x0C groups: {unknownGroups.Count}");
+            
+            // Analyze MSPI groupings (geometry nodes)
+            var geometryNodes = result.AllNodes.Where(n => n.HasGeometry).ToList();
+            if (geometryNodes.Any())
+            {
+                var mspiRanges = geometryNodes.GroupBy(n => n.MspiFirstIndex / 100).ToList(); // Group by ranges
+                result.DiscoveredPatterns.Add($"  MSPI index ranges: {mspiRanges.Count}");
+            }
+            
+            result.DiscoveredPatterns.Add("RECOMMENDATION: Use self-referencing nodes as primary objects for export");
+        }
+
+        private void ValidateHierarchyIntegrity(HierarchyAnalysisResult result)
+        {
+            var issuesFound = 0;
+            
+            foreach (var node in result.AllNodes)
+            {
+                // Check for self-reference in children (should be rare now)
+                if (node.Children.Any(c => c.Index == node.Index))
+                {
+                    Console.WriteLine($"ERROR: Node {node.Index} has itself as a child! Removing self-reference.");
+                    node.Children.RemoveAll(c => c.Index == node.Index);
+                    issuesFound++;
+                }
+                
+                // Check for parent-child inconsistency
+                foreach (var child in node.Children.ToList())
+                {
+                    if (child.Parent?.Index != node.Index)
+                    {
+                        Console.WriteLine($"WARNING: Parent-child inconsistency detected. Node {child.Index} is child of {node.Index} but parent is {child.Parent?.Index}");
+                        // Fix the inconsistency
+                        child.Parent = node;
+                    }
+                }
+            }
+            
+            if (issuesFound > 0)
+            {
+                Console.WriteLine($"Hierarchy validation found and fixed {issuesFound} circular reference issues.");
+            }
         }
 
         /// <summary>
@@ -373,20 +530,239 @@ namespace WoWToolbox.Core.Navigation.PM4
 
         private void PrintHierarchyTree(StringBuilder sb, HierarchyNode node, string indent, int maxDepth)
         {
+            var visited = new HashSet<int>();
+            PrintHierarchyTreeRecursive(sb, node, indent, maxDepth, visited);
+        }
+
+        private void PrintHierarchyTreeRecursive(StringBuilder sb, HierarchyNode node, string indent, int maxDepth, HashSet<int> visited)
+        {
             if (maxDepth <= 0) return;
+            
+            // Prevent infinite loops with cycle detection
+            if (visited.Contains(node.Index))
+            {
+                sb.AppendLine($"{indent}[CYCLE DETECTED - Node {node.Index} already visited]");
+                return;
+            }
+                
+            visited.Add(node.Index);
             
             var nodeType = node.HasGeometry ? "GEOM" : "DOOD";
             sb.AppendLine($"{indent}{nodeType}_{node.Index} [Flag:0x{node.Flags_0x00:X2}, Seq:{node.Sequence_0x01}]");
             
             foreach (var child in node.Children.Take(5)) // Limit children shown
             {
-                PrintHierarchyTree(sb, child, indent + "  ", maxDepth - 1);
+                PrintHierarchyTreeRecursive(sb, child, indent + "  ", maxDepth - 1, visited);
             }
             
             if (node.Children.Count > 5)
             {
                 sb.AppendLine($"{indent}  ... and {node.Children.Count - 5} more children");
             }
+        }
+
+        /// <summary>
+        /// ✨ REVISED: Segments based on self-referencing "group leaders" instead of traditional hierarchy
+        /// Each self-referencing node represents a primary object
+        /// </summary>
+        public List<ObjectSegmentationResult> SegmentObjectsByHierarchy(HierarchyAnalysisResult analysis)
+        {
+            var results = new List<ObjectSegmentationResult>();
+            
+            // Find self-referencing nodes (group leaders/primary objects)
+            var groupLeaders = analysis.AllNodes.Where(n => n.ParentIndex_0x04 == n.Index).ToList();
+            
+            if (groupLeaders.Any())
+            {
+                // Use group leaders as primary objects
+                foreach (var leader in groupLeaders)
+                {
+                    var geom = new List<int>();
+                    var dood = new List<int>();
+                    
+                    // Include the leader itself
+                    if (leader.HasGeometry)
+                        geom.Add(leader.Index);
+                    else if (leader.IsDoodadNode)
+                        dood.Add(leader.Index);
+                    
+                    // Include any children (if traditional hierarchy exists)
+                    TraverseAndCollect(leader, geom, dood);
+                    
+                    results.Add(new ObjectSegmentationResult
+                    {
+                        RootIndex = leader.Index,
+                        GeometryNodeIndices = geom,
+                        DoodadNodeIndices = dood,
+                        SegmentationType = "group_leader"
+                    });
+                }
+            }
+            else
+            {
+                // Fallback to traditional root-based approach
+                foreach (var root in analysis.RootNodes)
+                {
+                    var geom = new List<int>();
+                    var dood = new List<int>();
+                    TraverseAndCollect(root, geom, dood);
+                    results.Add(new ObjectSegmentationResult
+                    {
+                        RootIndex = root.Index,
+                        GeometryNodeIndices = geom,
+                        DoodadNodeIndices = dood,
+                        SegmentationType = "root_hierarchy"
+                    });
+                }
+            }
+            
+            return results;
+        }
+
+        /// <summary>
+        /// ✨ NEW: Segments each individual geometry node as a separate object
+        /// This provides the finest granularity - one OBJ file per geometry node
+        /// </summary>
+        public List<ObjectSegmentationResult> SegmentByIndividualGeometry(HierarchyAnalysisResult analysis)
+        {
+            var results = new List<ObjectSegmentationResult>();
+            
+            foreach (var node in analysis.AllNodes.Where(n => n.HasGeometry))
+            {
+                results.Add(new ObjectSegmentationResult
+                {
+                    RootIndex = node.Index,
+                    GeometryNodeIndices = new List<int> { node.Index },
+                    DoodadNodeIndices = new List<int>(), // Individual geometry nodes don't include doodads
+                    SegmentationType = "individual_geometry"
+                });
+            }
+            
+            return results;
+        }
+
+        /// <summary>
+        /// ✨ NEW: Segments logical sub-hierarchies as separate objects
+        /// Creates one object per parent node that has children, including the parent + immediate children
+        /// </summary>
+        public List<ObjectSegmentationResult> SegmentBySubHierarchies(HierarchyAnalysisResult analysis)
+        {
+            var results = new List<ObjectSegmentationResult>();
+            var processedNodes = new HashSet<int>();
+            
+            // Find nodes that have children and could represent logical sub-objects
+            var parentNodes = analysis.AllNodes.Where(n => n.Children.Any()).ToList();
+            
+            foreach (var parentNode in parentNodes)
+            {
+                // Skip if this node was already included in another sub-hierarchy
+                if (processedNodes.Contains(parentNode.Index))
+                    continue;
+                
+                var geom = new List<int>();
+                var dood = new List<int>();
+                
+                // Include the parent if it has geometry
+                if (parentNode.HasGeometry)
+                    geom.Add(parentNode.Index);
+                else if (parentNode.IsDoodadNode)
+                    dood.Add(parentNode.Index);
+                
+                // Include immediate children only (not deep traversal like root hierarchy)
+                foreach (var child in parentNode.Children)
+                {
+                    if (child.HasGeometry)
+                        geom.Add(child.Index);
+                    else if (child.IsDoodadNode)
+                        dood.Add(child.Index);
+                    
+                    processedNodes.Add(child.Index);
+                }
+                
+                // Only create an object if it has meaningful content
+                if (geom.Any() || dood.Any())
+                {
+                    results.Add(new ObjectSegmentationResult
+                    {
+                        RootIndex = parentNode.Index,
+                        GeometryNodeIndices = geom,
+                        DoodadNodeIndices = dood,
+                        SegmentationType = "sub_hierarchy"
+                    });
+                    
+                    processedNodes.Add(parentNode.Index);
+                }
+            }
+            
+            // Also add standalone leaf geometry nodes that weren't included in any sub-hierarchy
+            foreach (var node in analysis.AllNodes.Where(n => n.HasGeometry && !processedNodes.Contains(n.Index)))
+            {
+                results.Add(new ObjectSegmentationResult
+                {
+                    RootIndex = node.Index,
+                    GeometryNodeIndices = new List<int> { node.Index },
+                    DoodadNodeIndices = new List<int>(),
+                    SegmentationType = "leaf_geometry"
+                });
+            }
+            
+            return results;
+        }
+
+        /// <summary>
+        /// ✨ NEW: Comprehensive segmentation that provides all export strategies
+        /// </summary>
+        public SegmentationStrategiesResult SegmentByAllStrategies(HierarchyAnalysisResult analysis)
+        {
+            return new SegmentationStrategiesResult
+            {
+                ByRootHierarchy = SegmentObjectsByHierarchy(analysis),
+                ByIndividualGeometry = SegmentByIndividualGeometry(analysis),
+                BySubHierarchies = SegmentBySubHierarchies(analysis)
+            };
+        }
+
+        private void TraverseAndCollect(HierarchyNode node, List<int> geom, List<int> dood)
+        {
+            var visited = new HashSet<int>();
+            TraverseAndCollectRecursive(node, geom, dood, visited);
+        }
+
+        private void TraverseAndCollectRecursive(HierarchyNode node, List<int> geom, List<int> dood, HashSet<int> visited)
+        {
+            // Prevent infinite loops with cycle detection
+            if (visited.Contains(node.Index))
+                return;
+                
+            visited.Add(node.Index);
+            
+            if (node.HasGeometry)
+                geom.Add(node.Index);
+            else if (node.IsDoodadNode)
+                dood.Add(node.Index);
+                
+            foreach (var child in node.Children)
+                TraverseAndCollectRecursive(child, geom, dood, visited);
+        }
+
+        public class ObjectSegmentationResult
+        {
+            public int RootIndex { get; set; }
+            public List<int> GeometryNodeIndices { get; set; } = new();
+            public List<int> DoodadNodeIndices { get; set; } = new();
+            public string SegmentationType { get; set; } = "unknown"; // ✨ NEW: Track segmentation strategy
+        }
+
+        /// <summary>
+        /// ✨ NEW: Container for all segmentation strategies
+        /// </summary>
+        public class SegmentationStrategiesResult
+        {
+            public List<ObjectSegmentationResult> ByRootHierarchy { get; set; } = new();
+            public List<ObjectSegmentationResult> ByIndividualGeometry { get; set; } = new();
+            public List<ObjectSegmentationResult> BySubHierarchies { get; set; } = new();
+            
+            public int TotalObjects => ByRootHierarchy.Count + ByIndividualGeometry.Count + BySubHierarchies.Count;
         }
     }
 } 
