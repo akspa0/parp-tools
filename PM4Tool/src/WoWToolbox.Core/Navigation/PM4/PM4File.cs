@@ -28,16 +28,19 @@ namespace WoWToolbox.Core.Navigation.PM4
         /// <summary>
         /// Gets or sets the MSLK chunk
         /// </summary>
+        [ChunkOptional]
         public MSLK? MSLK { get; set; }
 
         /// <summary>
         /// Gets or sets the MSPI chunk (Indices into MSPV).
         /// </summary>
+        [ChunkOptional]
         public MSPIChunk? MSPI { get; set; }
 
         /// <summary>
         /// Gets or sets the MSPV chunk (Vertices).
         /// </summary>
+        [ChunkOptional]
         public MSPVChunk? MSPV { get; set; }
 
         /// <summary>
@@ -59,6 +62,12 @@ namespace WoWToolbox.Core.Navigation.PM4
         /// Gets or sets the MSCN chunk (Exterior Vertices; previously misinterpreted as normals).
         /// </summary>
         public MSCNChunk? MSCN { get; set; }
+
+        /// <summary>
+        /// Gets or sets the MSRN chunk (Mesh Surface Referenced Normals).
+        /// </summary>
+        [ChunkOptional]
+        public MSRNChunk? MSRN { get; set; }
 
         /// <summary>
         /// Gets or sets the MPRL chunk (Position Data).

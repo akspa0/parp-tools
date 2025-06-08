@@ -60,8 +60,11 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
                     {
                         if (br.BaseStream.Position >= endPosition)
                         {
-                             Console.WriteLine($"Warning: MPRR chunk ended unexpectedly while reading a sequence. Processed {Sequences.Count} complete sequences.");
-                             // Optionally add the incomplete sequence if needed: if (currentSequence.Count > 0) Sequences.Add(currentSequence);
+                             // This is normal - we've reached the end of the chunk data
+                             if (currentSequence.Count > 0)
+                             {
+                                 Console.WriteLine($"Warning: MPRR chunk ended unexpectedly while reading a sequence. Processed {Sequences.Count} complete sequences.");
+                             }
                              goto EndLoad; // Exit outer loop
                         }
 

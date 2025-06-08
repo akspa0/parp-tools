@@ -15,10 +15,31 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
         public byte IndexCount { get; set; }          // _0x01 - Number of indices in MSVI used by this surface.
         public byte Unknown_0x02 { get; set; }            // _0x02 - Meaning TBD.
         public byte Padding_0x03 { get; set; }             // _0x03 - Likely padding.
-        public float UnknownFloat_0x04 { get; set; }             // _0x04 - Meaning TBD.
-        public float UnknownFloat_0x08 { get; set; }             // _0x08 - Meaning TBD.
-        public float UnknownFloat_0x0C { get; set; }             // _0x0C - Meaning TBD.
-        public float UnknownFloat_0x10 { get; set; }             // _0x10 - Meaning TBD.
+        public float UnknownFloat_0x04 { get; set; }             // _0x04 - DECODED: Surface Normal X
+        public float UnknownFloat_0x08 { get; set; }             // _0x08 - DECODED: Surface Normal Y
+        public float UnknownFloat_0x0C { get; set; }             // _0x0C - DECODED: Surface Normal Z
+        public float UnknownFloat_0x10 { get; set; }             // _0x10 - DECODED: Surface Height
+
+        // Decoded surface data accessors
+        /// <summary>
+        /// Gets the surface normal X component (normalized).
+        /// </summary>
+        public float SurfaceNormalX => UnknownFloat_0x04;
+
+        /// <summary>
+        /// Gets the surface normal Y component (normalized).
+        /// </summary>
+        public float SurfaceNormalY => UnknownFloat_0x08;
+
+        /// <summary>
+        /// Gets the surface normal Z component (normalized).
+        /// </summary>
+        public float SurfaceNormalZ => UnknownFloat_0x0C;
+
+        /// <summary>
+        /// Gets the surface height/Y-coordinate in world space.
+        /// </summary>
+        public float SurfaceHeight => UnknownFloat_0x10;
         public uint MsviFirstIndex { get; set; }      // _0x14 - Starting index in MSVI for this surface.
         public uint MdosIndex { get; set; }            // _0x18 - Index into MDOS (Destructible Object States). Note: This field is NOT directly present in PM4 docs but is implied by MDSF link.
         public uint Unknown_0x1C { get; set; }            // _0x1C - Meaning TBD.

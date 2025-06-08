@@ -17,11 +17,342 @@ namespace WoWToolbox.MPRRExplorer
         {
             if (args.Length < 1)
             {
-                Console.WriteLine("Usage: WoWToolbox.MPRRExplorer <pm4 file path>");
+                Console.WriteLine("Usage: WoWToolbox.MPRRExplorer <command> [options]");
+                Console.WriteLine();
+                Console.WriteLine("Commands:");
+                Console.WriteLine("  analyze <pm4 file>     - Analyze MPRR sequences");
+                Console.WriteLine("  trailing <pm4 file>    - Investigate trailing data hypothesis");
+                Console.WriteLine("  batch <directory>      - Batch analyze trailing data");
                 return;
             }
 
-            string pm4Path = args[0];
+            string command = args[0].ToLower();
+
+            try
+            {
+                switch (command)
+                {
+                    case "trailing":
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("Usage: trailing <pm4 file>");
+                            return;
+                        }
+                        InvestigateTrailingDataHypothesis(args[1]);
+                        break;
+
+                    case "batch":
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("Usage: batch <directory>");
+                            return;
+                        }
+                        BatchAnalyzeTrailingData(args[1]);
+                        break;
+
+                    case "analyze":
+                        if (args.Length < 2)
+                        {
+                            Console.WriteLine("Usage: analyze <pm4 file>");
+                            return;
+                        }
+                        AnalyzeSingleFile(args[1]);
+                        break;
+
+                    default:
+                        Console.WriteLine($"Unknown command: {command}");
+                        return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+        }
+
+        static void InvestigateTrailingDataHypothesis(string pm4Path)
+        {
+            Console.WriteLine("🔬 **INVESTIGATING MPRR TRAILING DATA HYPOTHESIS**");
+            Console.WriteLine("=================================================");
+            Console.WriteLine("Hypothesis: MPRR 'trailing data' contains node system linking, not incomplete sequences");
+            Console.WriteLine();
+
+            if (!File.Exists(pm4Path))
+            {
+                Console.WriteLine($"File not found: {pm4Path}");
+                return;
+            }
+
+            // Load PM4 file using the library
+            PM4File pm4File;
+            try
+            {
+                pm4File = PM4File.FromFile(pm4Path);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Failed to load PM4: {ex.Message}");
+                return;
+            }
+
+            // Check if MPRR chunk exists
+            if (pm4File.MPRR == null)
+            {
+                Console.WriteLine("❌ No MPRR chunk found");
+                return;
+            }
+
+            Console.WriteLine($"📁 File: {Path.GetFileName(pm4Path)}");
+            Console.WriteLine($"✅ MPRR chunk found with {pm4File.MPRR.Sequences.Count} sequences");
+
+            // Get raw MPRR data from the loaded chunk
+            var rawMprrData = pm4File.MPRR.Serialize();
+            Console.WriteLine($"📊 Serialized MPRR Data: {rawMprrData.Length} bytes");
+
+            AnalyzeMprrStructureAndTrailingData(rawMprrData, pm4File);
+        }
+
+        static void BatchAnalyzeTrailingData(string directory)
+        {
+            Console.WriteLine("🔬 **BATCH TRAILING DATA ANALYSIS**");
+            Console.WriteLine("===================================");
+
+            var pm4Files = Directory.GetFiles(directory, "*.pm4").Take(10).ToList();
+            Console.WriteLine($"Found {pm4Files.Count} PM4 files to analyze");
+            Console.WriteLine();
+
+            int filesWithTrailingData = 0;
+            var trailingSizes = new List<int>();
+
+            foreach (var filePath in pm4Files)
+            {
+                try
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    Console.WriteLine($"📁 {fileName}");
+
+                    // Load PM4 file using library
+                    PM4File pm4File;
+                    try
+                    {
+                        pm4File = PM4File.FromFile(filePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"  ❌ Failed to load PM4: {ex.Message}");
+                        continue;
+                    }
+
+                    if (pm4File.MPRR == null)
+                    {
+                        Console.WriteLine("  ❌ No MPRR chunk");
+                        continue;
+                    }
+
+                    var rawMprrData = pm4File.MPRR.Serialize();
+
+                    var trailingDataSize = AnalyzeTrailingDataSize(rawMprrData);
+                    Console.WriteLine($"  📦 Trailing data: {trailingDataSize} bytes");
+
+                    if (trailingDataSize > 0)
+                    {
+                        filesWithTrailingData++;
+                        trailingSizes.Add(trailingDataSize);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  ❌ Error: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("📊 **BATCH SUMMARY**:");
+            Console.WriteLine($"  Files analyzed: {pm4Files.Count}");
+            Console.WriteLine($"  Files with trailing data: {filesWithTrailingData}");
+            Console.WriteLine($"  Percentage: {(double)filesWithTrailingData / pm4Files.Count * 100:F1}%");
+
+            if (trailingSizes.Any())
+            {
+                Console.WriteLine($"  Trailing data sizes: {trailingSizes.Min()}-{trailingSizes.Max()} bytes");
+                Console.WriteLine($"  Average: {trailingSizes.Average():F1} bytes");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("🎯 **CONCLUSION**: If ALL files have trailing data, it's NOT parsing errors - it's structured data!");
+        }
+
+        // Removed ExtractRawMprrChunk method - now using PM4File library directly
+
+        static int AnalyzeTrailingDataSize(byte[] rawData)
+        {
+            using var ms = new MemoryStream(rawData);
+            using var br = new BinaryReader(ms);
+
+            // Parse sequences to find where they actually end
+            long lastSequenceEnd = 0;
+
+            while (br.BaseStream.Position < br.BaseStream.Length - 1)
+            {
+                bool foundTerminator = false;
+                while (br.BaseStream.Position < br.BaseStream.Length - 1)
+                {
+                    ushort value = br.ReadUInt16();
+                    if (value == 0xFFFF)
+                    {
+                        foundTerminator = true;
+                        lastSequenceEnd = br.BaseStream.Position;
+                        break;
+                    }
+                }
+
+                if (!foundTerminator)
+                {
+                    break; // Reached the "trailing data"
+                }
+            }
+
+            return (int)(rawData.Length - lastSequenceEnd);
+        }
+
+        static void AnalyzeMprrStructureAndTrailingData(byte[] rawData, PM4File pm4File)
+        {
+            using var ms = new MemoryStream(rawData);
+            using var br = new BinaryReader(ms);
+
+            int sequenceCount = 0;
+            long lastSequenceEnd = 0;
+
+            Console.WriteLine();
+            Console.WriteLine("🔄 **SEQUENCE PARSING**:");
+
+            // Parse the sequences to find the real end
+            while (br.BaseStream.Position < br.BaseStream.Length - 1)
+            {
+                var sequenceValues = new List<ushort>();
+                bool foundTerminator = false;
+
+                while (br.BaseStream.Position < br.BaseStream.Length - 1)
+                {
+                    ushort value = br.ReadUInt16();
+                    sequenceValues.Add(value);
+
+                    if (value == 0xFFFF)
+                    {
+                        foundTerminator = true;
+                        lastSequenceEnd = br.BaseStream.Position;
+                        sequenceCount++;
+                        break;
+                    }
+                }
+
+                if (!foundTerminator)
+                {
+                    Console.WriteLine($"  Sequence {sequenceCount}: INCOMPLETE - {sequenceValues.Count} values");
+                    break;
+                }
+                else if (sequenceCount < 5) // Show first few sequences
+                {
+                    var nonTermValues = sequenceValues.Take(sequenceValues.Count - 1).ToList();
+                    Console.WriteLine($"  Sequence {sequenceCount}: {nonTermValues.Count} values [{string.Join(", ", nonTermValues.Take(5))}{(nonTermValues.Count > 5 ? "..." : "")}]");
+                }
+            }
+
+            long trailingDataStart = lastSequenceEnd;
+            long trailingDataLength = rawData.Length - trailingDataStart;
+
+            Console.WriteLine($"  Total complete sequences: {sequenceCount}");
+            Console.WriteLine($"  Sequences end at byte: {lastSequenceEnd}");
+
+            if (trailingDataLength > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("🎯 **TRAILING DATA ANALYSIS**:");
+                Console.WriteLine($"  Trailing data: {trailingDataLength} bytes");
+
+                // Extract the trailing data
+                byte[] trailingData = new byte[trailingDataLength];
+                Array.Copy(rawData, (int)trailingDataStart, trailingData, 0, (int)trailingDataLength);
+
+                AnalyzeTrailingDataAsNodeReferences(trailingData, pm4File);
+            }
+            else
+            {
+                Console.WriteLine();
+                Console.WriteLine("✅ No trailing data - sequences fill entire chunk");
+            }
+        }
+
+        static void AnalyzeTrailingDataAsNodeReferences(byte[] trailingData, PM4File pm4File)
+        {
+            Console.WriteLine($"  📋 Raw hex: {BitConverter.ToString(trailingData).Replace("-", " ")}");
+
+            // Test 1: Analyze as ushort values
+            if (trailingData.Length % 2 == 0)
+            {
+                var ushortValues = new List<ushort>();
+                for (int i = 0; i < trailingData.Length; i += 2)
+                {
+                    ushortValues.Add(BitConverter.ToUInt16(trailingData, i));
+                }
+
+                Console.WriteLine($"  🔢 As ushorts: [{string.Join(", ", ushortValues.Select(v => $"0x{v:X4}"))}]");
+
+                // Check against chunk counts
+                var mslkCount = pm4File.MSLK?.Entries?.Count ?? 0;
+                var msviCount = pm4File.MSVI?.Indices?.Count ?? 0;
+                var msvtCount = pm4File.MSVT?.Vertices?.Count ?? 0;
+                var mprlCount = pm4File.MPRL?.Entries?.Count ?? 0;
+
+                Console.WriteLine($"  🎯 **REFERENCE ANALYSIS**:");
+                Console.WriteLine($"    MSLK entries: {mslkCount}");
+                Console.WriteLine($"    MSVI indices: {msviCount}");
+                Console.WriteLine($"    MSVT vertices: {msvtCount}");
+                Console.WriteLine($"    MPRL entries: {mprlCount}");
+
+                if (mslkCount > 0)
+                {
+                    var validMslkRefs = ushortValues.Where(v => v < mslkCount).ToList();
+                    Console.WriteLine($"    → Valid MSLK refs: {validMslkRefs.Count}/{ushortValues.Count}");
+                }
+
+                if (msviCount > 0)
+                {
+                    var validMsviRefs = ushortValues.Where(v => v < msviCount).ToList();
+                    Console.WriteLine($"    → Valid MSVI refs: {validMsviRefs.Count}/{ushortValues.Count}");
+                }
+
+                if (msvtCount > 0)
+                {
+                    var validMsvtRefs = ushortValues.Where(v => v < msvtCount).ToList();
+                    Console.WriteLine($"    → Valid MSVT refs: {validMsvtRefs.Count}/{ushortValues.Count}");
+                }
+
+                // Look for patterns
+                if (ushortValues.Count >= 2)
+                {
+                    Console.WriteLine($"  🔍 **PATTERN ANALYSIS**:");
+                    Console.WriteLine($"    Values: {string.Join(", ", ushortValues.Select(v => v.ToString()))}");
+                    Console.WriteLine($"    Could be: Node count + node indices?");
+                    Console.WriteLine($"    Could be: Chunk reference pairs?");
+                }
+            }
+
+            // Test 2: Analyze as uint values
+            if (trailingData.Length % 4 == 0)
+            {
+                var uintValues = new List<uint>();
+                for (int i = 0; i < trailingData.Length; i += 4)
+                {
+                    uintValues.Add(BitConverter.ToUInt32(trailingData, i));
+                }
+
+                Console.WriteLine($"  🔢 As uints: [{string.Join(", ", uintValues.Select(v => $"0x{v:X8}"))}]");
+            }
+        }
+
+        static void AnalyzeSingleFile(string pm4Path)
+        {
             if (!File.Exists(pm4Path))
             {
                 Console.WriteLine($"File not found: {pm4Path}");
