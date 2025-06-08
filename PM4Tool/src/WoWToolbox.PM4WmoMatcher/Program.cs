@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.CommandLine;
 using System.CommandLine.Invocation;
@@ -31,10 +32,14 @@ namespace WoWToolbox.PM4WmoMatcher
             var exportMprlOption = new Option<bool>("--export-mprl", "Export all MPRL positions from the first PM4 file as a point cloud OBJ (mprl_points.obj) in the output directory.");
             var exportChunksOption = new Option<string?>("--export-pm4-chunks", "Export geometry from individual PM4 chunks (MSVT mesh, MSCN/MSPV/MPRL points) into a specified directory.");
             var skipWmoComparisonOption = new Option<bool>("--skip-wmo-comparison", "Skip WMO comparison and only output PM4 MSCN/MSPV point clouds (optional)");
+            var useMslkObjectsOption = new Option<bool>("--use-mslk-objects", "Use individual MSLK scene graph objects for matching instead of combined MSCN+MSPV point clouds (recommended for precision)");
+            var preprocessWmoOption = new Option<string?>("--preprocess-wmo", "Preprocess WMO files: extract walkable surfaces and save to cache directory");
+            var preprocessPm4Option = new Option<string?>("--preprocess-pm4", "Preprocess PM4 files: extract MSLK objects and save to cache directory");
+            var analyzeCacheOption = new Option<string?>("--analyze-cache", "Analyze preprocessed cache directory for PM4/WMO correlations");
 
             var rootCommand = new RootCommand("PM4–WMO mesh matching tool")
             {
-                pm4Option, wmoOption, outputOption, maxCandidatesOption, minVerticesOption, verboseOption, visualizeOption, exportBaselineOption, exportMprlOption, exportChunksOption, skipWmoComparisonOption
+                pm4Option, wmoOption, outputOption, maxCandidatesOption, minVerticesOption, verboseOption, visualizeOption, exportBaselineOption, exportMprlOption, exportChunksOption, skipWmoComparisonOption, useMslkObjectsOption, preprocessWmoOption, preprocessPm4Option, analyzeCacheOption
             };
 
             rootCommand.SetHandler((InvocationContext ctx) =>
@@ -50,6 +55,10 @@ namespace WoWToolbox.PM4WmoMatcher
                 var exportMprl = ctx.ParseResult.GetValueForOption(exportMprlOption);
                 var exportChunks = ctx.ParseResult.GetValueForOption(exportChunksOption);
                 var skipWmoComparison = ctx.ParseResult.GetValueForOption(skipWmoComparisonOption);
+                var useMslkObjects = ctx.ParseResult.GetValueForOption(useMslkObjectsOption);
+                var preprocessWmo = ctx.ParseResult.GetValueForOption(preprocessWmoOption);
+                var preprocessPm4 = ctx.ParseResult.GetValueForOption(preprocessPm4Option);
+                var analyzeCache = ctx.ParseResult.GetValueForOption(analyzeCacheOption);
 
                 // Enforce output as a directory
                 if (File.Exists(output))
@@ -76,6 +85,36 @@ namespace WoWToolbox.PM4WmoMatcher
                     Logger.Log($"  --export-mprl: {exportMprl}");
                     Logger.Log($"  --export-pm4-chunks: {exportChunks}");
                     Logger.Log($"  --skip-wmo-comparison: {skipWmoComparison}");
+                    Logger.Log($"  --use-mslk-objects: {useMslkObjects}");
+                    Logger.Log($"  --preprocess-wmo: {preprocessWmo}");
+                    Logger.Log($"  --preprocess-pm4: {preprocessPm4}");
+                    Logger.Log($"  --analyze-cache: {analyzeCache}");
+
+                    // Handle preprocessing modes
+                    if (!string.IsNullOrEmpty(preprocessWmo))
+                    {
+                        Logger.Log("[PREPROCESS] WMO preprocessing mode activated");
+                        if (string.IsNullOrEmpty(wmo))
+                        {
+                            throw new ArgumentException("--wmo is required for WMO preprocessing");
+                        }
+                        PreprocessWmoFiles(wmo, preprocessWmo, output);
+                        return;
+                    }
+
+                    if (!string.IsNullOrEmpty(preprocessPm4))
+                    {
+                        Logger.Log("[PREPROCESS] PM4 preprocessing mode activated");
+                        PreprocessPm4Files(pm4, preprocessPm4, output);
+                        return;
+                    }
+
+                    if (!string.IsNullOrEmpty(analyzeCache))
+                    {
+                        Logger.Log("[ANALYZE] Cache analysis mode activated");
+                        AnalyzePreprocessedCache(analyzeCache, output, maxCandidates, visualize);
+                        return;
+                    }
 
                     // Validate that WMO is provided if we're not skipping WMO comparison
                     if (!skipWmoComparison && string.IsNullOrEmpty(wmo))
@@ -83,17 +122,46 @@ namespace WoWToolbox.PM4WmoMatcher
                         throw new ArgumentException("--wmo is required unless --skip-wmo-comparison is enabled");
                     }
 
-                    // Batch extract PM4 meshes
+                    // Batch extract PM4 meshes - NEW: Support MSLK objects
                     Logger.Log("[INFO] Extracting PM4 meshes...");
-                    var pm4Meshes = Directory.Exists(pm4) ? MeshExtractor.ExtractAllFromDirectory(pm4, true) : MeshExtractor.ExtractFromPm4(pm4);
+                    var pm4Meshes = Directory.Exists(pm4) ? 
+                        MeshExtractor.ExtractAllFromDirectory(pm4, true, useMslkObjects) : 
+                        MeshExtractor.ExtractFromPm4(pm4, useMslkObjects);
                     Logger.Log($"[INFO] Extracted {pm4Meshes.Count} PM4 mesh candidates.");
+
+                    // NEW: Export MSLK objects as individual OBJ files if using MSLK mode
+                    if (useMslkObjects && pm4Meshes.Count > 0)
+                    {
+                        var mslkOutputDir = Path.Combine(output, "mslk_objects");
+                        Directory.CreateDirectory(mslkOutputDir);
+                        Logger.Log($"[INFO] Exporting {pm4Meshes.Count} MSLK objects to {mslkOutputDir}...");
+                        
+                        foreach (var mesh in pm4Meshes)
+                        {
+                            try
+                            {
+                                var baseName = Path.GetFileNameWithoutExtension(mesh.SourceFile);
+                                var objFileName = $"{baseName}_{mesh.SubObjectName}.obj";
+                                var objPath = Path.Combine(mslkOutputDir, objFileName);
+                                
+                                // Export the mesh candidate as an OBJ file
+                                mesh.WriteObj(objPath);
+                                Logger.Log($"[MSLK_EXPORT] {mesh.SubObjectName}: {mesh.Vertices.Count} vertices → {objFileName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Log($"[MSLK_EXPORT][ERROR] Failed to export {mesh.SubObjectName}: {ex.Message}");
+                            }
+                        }
+                        Logger.Log($"[INFO] MSLK object export complete: {pm4Meshes.Count} files in {mslkOutputDir}");
+                    }
 
                     // Only extract WMO meshes if we're not skipping WMO comparison
                     List<MeshCandidate> wmoMeshes = new List<MeshCandidate>();
                     if (!skipWmoComparison)
                     {
                         Logger.Log("[INFO] Extracting WMO meshes...");
-                        wmoMeshes = Directory.Exists(wmo) ? MeshExtractor.ExtractAllFromDirectory(wmo, false) : MeshExtractor.ExtractFromWmo(wmo);
+                        wmoMeshes = Directory.Exists(wmo) ? MeshExtractor.ExtractAllFromDirectory(wmo, false, false) : MeshExtractor.ExtractFromWmo(wmo);
                         Logger.Log($"[INFO] Extracted {wmoMeshes.Count} WMO mesh candidates.");
                     }
                     else
@@ -828,7 +896,6 @@ namespace WoWToolbox.PM4WmoMatcher
                 
                 // Track all vertices with their source chunk and vertex offsets
                 var allVertices = new List<(float X, float Y, float Z, string Source)>();
-                int msvtVertexOffset = 0;
                 int mscnVertexOffset = 0;
                 int mspvVertexOffset = 0;
                 
@@ -997,6 +1064,302 @@ namespace WoWToolbox.PM4WmoMatcher
             // This corrects horizontal mirroring and Z inversion for combined mesh exports.
             return new Vector3(-v.Y, -v.Z, v.X);
         }
+
+        /// <summary>
+        /// Preprocess WMO files: extract walkable surfaces and save as .obj files
+        /// </summary>
+        private static void PreprocessWmoFiles(string wmoPath, string cacheDir, string outputDir)
+        {
+            try
+            {
+                Directory.CreateDirectory(outputDir);
+                var wmoOutputDir = Path.Combine(outputDir, "wmo_walkable");
+                Directory.CreateDirectory(wmoOutputDir);
+                
+                Logger.Log($"[PREPROCESS_WMO] Processing WMO files from: {wmoPath}");
+                Logger.Log($"[PREPROCESS_WMO] Output directory: {wmoOutputDir}");
+                
+                var wmoFiles = Directory.Exists(wmoPath) ? 
+                    Directory.GetFiles(wmoPath, "*.wmo", SearchOption.AllDirectories) : 
+                    new[] { wmoPath };
+                
+                int processedCount = 0;
+                int totalMeshes = 0;
+                
+                foreach (var wmoFile in wmoFiles)
+                {
+                    try
+                    {
+                        Logger.Log($"[PREPROCESS_WMO] Processing: {Path.GetFileName(wmoFile)}");
+                        
+                        // Extract walkable surfaces
+                        var candidates = MeshExtractor.ExtractFromWmo(wmoFile);
+                        
+                        foreach (var candidate in candidates)
+                        {
+                            var baseName = Path.GetFileNameWithoutExtension(wmoFile);
+                            var objFileName = $"wmo_{baseName}_{candidate.SubObjectName}.obj";
+                            var objPath = Path.Combine(wmoOutputDir, objFileName);
+                            
+                            // Write as .obj file
+                            candidate.WriteObj(objPath);
+                            totalMeshes++;
+                            
+                            Logger.Log($"[PREPROCESS_WMO]   → {candidate.Vertices.Count} walkable points → {objFileName}");
+                        }
+                        
+                        processedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[PREPROCESS_WMO][ERROR] Failed to process {wmoFile}: {ex.Message}");
+                    }
+                }
+                
+                Logger.Log($"[PREPROCESS_WMO] Completed: {processedCount} WMO files, {totalMeshes} walkable surface .obj files");
+                Logger.Log($"[PREPROCESS_WMO] Output: {wmoOutputDir}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[PREPROCESS_WMO][ERROR] {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Preprocess PM4 files: extract MSLK objects and save as .obj files
+        /// </summary>
+        private static void PreprocessPm4Files(string pm4Path, string cacheDir, string outputDir)
+        {
+            try
+            {
+                Directory.CreateDirectory(outputDir);
+                var pm4OutputDir = Path.Combine(outputDir, "pm4_mslk");
+                Directory.CreateDirectory(pm4OutputDir);
+                
+                Logger.Log($"[PREPROCESS_PM4] Processing PM4 files from: {pm4Path}");
+                Logger.Log($"[PREPROCESS_PM4] Output directory: {pm4OutputDir}");
+                
+                var pm4Files = Directory.Exists(pm4Path) ? 
+                    Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories) : 
+                    new[] { pm4Path };
+                
+                int processedCount = 0;
+                int totalMeshes = 0;
+                
+                foreach (var pm4File in pm4Files)
+                {
+                    try
+                    {
+                        Logger.Log($"[PREPROCESS_PM4] Processing: {Path.GetFileName(pm4File)}");
+                        
+                        // Extract MSLK objects (use single object per file for clean testing)
+                        var candidates = MeshExtractor.ExtractFromPm4(pm4File, useMslkObjects: true);
+                        
+                        foreach (var candidate in candidates.Take(1)) // Take only first object for clean testing
+                        {
+                            // Only process objects with meaningful geometry
+                            if (candidate.Vertices.Count < 50) continue;
+                            
+                            var baseName = Path.GetFileNameWithoutExtension(pm4File);
+                            var objFileName = $"pm4_{baseName}_{candidate.SubObjectName}.obj";
+                            var objPath = Path.Combine(pm4OutputDir, objFileName);
+                            
+                            // Write as .obj file
+                            candidate.WriteObj(objPath);
+                            totalMeshes++;
+                            
+                            Logger.Log($"[PREPROCESS_PM4]   → {candidate.Vertices.Count} vertices, {candidate.Indices.Count / 3} triangles → {objFileName}");
+                        }
+                        
+                        processedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[PREPROCESS_PM4][ERROR] Failed to process {pm4File}: {ex.Message}");
+                    }
+                }
+                
+                Logger.Log($"[PREPROCESS_PM4] Completed: {processedCount} PM4 files, {totalMeshes} MSLK object .obj files");
+                Logger.Log($"[PREPROCESS_PM4] Output: {pm4OutputDir}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[PREPROCESS_PM4][ERROR] {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Analyze preprocessed mesh files for PM4/WMO correlations
+        /// </summary>
+        private static void AnalyzePreprocessedCache(string cacheDir, string outputDir, int maxCandidates, bool visualize)
+        {
+            try
+            {
+                Logger.Log($"[ANALYZE] Analyzing preprocessed mesh files: {cacheDir}");
+                
+                var pm4OutputDir = Path.Combine(cacheDir, "pm4_mslk");
+                var wmoOutputDir = Path.Combine(cacheDir, "wmo_walkable");
+                
+                if (!Directory.Exists(pm4OutputDir) || !Directory.Exists(wmoOutputDir))
+                {
+                    Logger.Log("[ANALYZE][ERROR] Preprocessed directories not found. Run --preprocess-pm4 and --preprocess-wmo first.");
+                    Logger.Log($"[ANALYZE][ERROR] Looking for: {pm4OutputDir} and {wmoOutputDir}");
+                    return;
+                }
+                
+                // Load PM4 mesh files
+                Logger.Log("[ANALYZE] Loading PM4 MSLK object meshes...");
+                var pm4Files = Directory.GetFiles(pm4OutputDir, "pm4_*.obj");
+                var pm4Candidates = new List<MeshCandidate>();
+                
+                foreach (var pm4File in pm4Files.Take(maxCandidates))
+                {
+                    try
+                    {
+                        var candidate = LoadObjFile(pm4File, "PM4_MSLK");
+                        if (candidate != null && candidate.Vertices.Count > 0)
+                        {
+                            pm4Candidates.Add(candidate);
+                            Logger.Log($"[ANALYZE]   PM4: {Path.GetFileName(pm4File)} ({candidate.Vertices.Count} vertices)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[ANALYZE][WARN] Failed to load PM4 mesh {pm4File}: {ex.Message}");
+                    }
+                }
+                
+                // Load WMO mesh files
+                Logger.Log("[ANALYZE] Loading WMO walkable surface meshes...");
+                var wmoFiles = Directory.GetFiles(wmoOutputDir, "wmo_*.obj");
+                var wmoCandidates = new List<MeshCandidate>();
+                
+                foreach (var wmoFile in wmoFiles.Take(maxCandidates))
+                {
+                    try
+                    {
+                        var candidate = LoadObjFile(wmoFile, "WMO_WALKABLE");
+                        if (candidate != null && candidate.Vertices.Count > 0)
+                        {
+                            wmoCandidates.Add(candidate);
+                            Logger.Log($"[ANALYZE]   WMO: {Path.GetFileName(wmoFile)} ({candidate.Vertices.Count} vertices)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[ANALYZE][WARN] Failed to load WMO mesh {wmoFile}: {ex.Message}");
+                    }
+                }
+                
+                Logger.Log($"[ANALYZE] Performing correlation analysis between {pm4Candidates.Count} PM4 objects and {wmoCandidates.Count} WMO surfaces...");
+                
+                // Perform geometric matching
+                var matchResults = new List<(MeshCandidate pm4, MeshCandidate wmo, double distance)>();
+                
+                foreach (var pm4 in pm4Candidates)
+                {
+                    foreach (var wmo in wmoCandidates)
+                    {
+                        try
+                        {
+                            double distance = ModifiedHausdorffDistance(pm4.Vertices, wmo.Vertices);
+                            matchResults.Add((pm4, wmo, distance));
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log($"[ANALYZE][WARN] Failed to compute distance between {pm4.SubObjectName} and {wmo.SubObjectName}: {ex.Message}");
+                        }
+                    }
+                }
+                
+                // Sort by best matches
+                var bestMatches = matchResults.OrderBy(r => r.distance).Take(10).ToList();
+                
+                Logger.Log($"[ANALYZE] Top matches found:");
+                foreach (var match in bestMatches)
+                {
+                    Logger.Log($"[ANALYZE]   {match.pm4.SubObjectName} ↔ {match.wmo.SubObjectName}: distance = {match.distance:F2}");
+                }
+                
+                // Export visualization if requested
+                if (visualize && bestMatches.Any())
+                {
+                    var vizDir = Path.Combine(outputDir, "matches_visualization");
+                    Directory.CreateDirectory(vizDir);
+                    
+                    for (int i = 0; i < Math.Min(3, bestMatches.Count); i++)
+                    {
+                        var match = bestMatches[i];
+                        var pm4VizPath = Path.Combine(vizDir, $"match_{i:D2}_pm4_{match.pm4.SubObjectName}.obj");
+                        var wmoVizPath = Path.Combine(vizDir, $"match_{i:D2}_wmo_{match.wmo.SubObjectName}.obj");
+                        
+                        match.pm4.WriteObj(pm4VizPath);
+                        match.wmo.WriteObj(wmoVizPath);
+                        
+                        Logger.Log($"[ANALYZE]   Visualization exported: match_{i:D2}_*.obj");
+                    }
+                }
+                
+                Logger.Log("[ANALYZE] Analysis complete - results logged above");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[ANALYZE][ERROR] {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Load a mesh candidate from an .obj file
+        /// </summary>
+        private static MeshCandidate? LoadObjFile(string objPath, string sourceType)
+        {
+            try
+            {
+                var lines = File.ReadAllLines(objPath);
+                var vertices = new List<(float X, float Y, float Z)>();
+                var indices = new List<int>();
+                
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("v "))
+                    {
+                        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length >= 4 && 
+                            float.TryParse(parts[1], out float x) &&
+                            float.TryParse(parts[2], out float y) &&
+                            float.TryParse(parts[3], out float z))
+                        {
+                            vertices.Add((x, y, z));
+                        }
+                    }
+                    else if (line.StartsWith("f "))
+                    {
+                        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        for (int i = 1; i < parts.Length; i++)
+                        {
+                            var indexPart = parts[i].Split('/')[0]; // Handle f v1/vt1/vn1 format
+                            if (int.TryParse(indexPart, out int vertexIndex))
+                            {
+                                indices.Add(vertexIndex - 1); // Convert to 0-based indexing
+                            }
+                        }
+                    }
+                }
+                
+                return new MeshCandidate
+                {
+                    SourceFile = objPath,
+                    SourceType = sourceType,
+                    SubObjectName = Path.GetFileNameWithoutExtension(objPath),
+                    Vertices = vertices,
+                    Indices = indices
+                };
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
     }
 
     // Shared mesh data structure for matching
@@ -1096,10 +1459,17 @@ namespace WoWToolbox.PM4WmoMatcher
     // Utility for mesh extraction
     public static class MeshExtractor
     {
-        // *** MODIFIED: Extract ONLY MSCN/MSPV points, combine, and apply transform ***
-        public static List<MeshCandidate> ExtractFromPm4(string pm4Path)
+        // *** ENHANCED: Extract MSLK objects OR combined MSCN/MSPV points ***
+        public static List<MeshCandidate> ExtractFromPm4(string pm4Path, bool useMslkObjects = false)
         {
             var candidates = new List<MeshCandidate>();
+            Logger.Log($"[EXTRACT_PM4] Loading {Path.GetFileName(pm4Path)}...");
+            
+            if (useMslkObjects)
+            {
+                return ExtractMslkObjectsFromPm4(pm4Path);
+            }
+            
             try
             {
                 var pm4 = PM4File.FromFile(pm4Path);
@@ -1159,7 +1529,151 @@ namespace WoWToolbox.PM4WmoMatcher
             return candidates;
         }
 
-        // Extract all mesh data from a WMO file (merged groups as one mesh)
+        /// <summary>
+        /// ✨ NEW: Extract individual MSLK scene graph objects as separate mesh candidates
+        /// </summary>
+        private static List<MeshCandidate> ExtractMslkObjectsFromPm4(string pm4Path)
+        {
+            var candidates = new List<MeshCandidate>();
+            Logger.Log($"[EXTRACT_MSLK] Loading MSLK objects from {Path.GetFileName(pm4Path)}...");
+            
+            try
+            {
+                var pm4File = PM4File.FromFile(pm4Path);
+                
+                if (pm4File.MSLK?.Entries == null || pm4File.MSLK.Entries.Count == 0)
+                {
+                    Logger.Log($"[WARN] No MSLK data found in {pm4Path}");
+                    return candidates;
+                }
+
+                // Skip files with insufficient MPRR data (indicates parsing issues)
+                if (pm4File.MPRR?.Sequences == null || pm4File.MPRR.Sequences.Count < 100)
+                {
+                    Logger.Log($"[WARN] Insufficient MPRR data in {pm4Path} ({pm4File.MPRR?.Sequences?.Count ?? 0} sequences). Skipping due to potential parsing issues.");
+                    return candidates;
+                }
+
+                // Perform MSLK hierarchy analysis
+                var hierarchyAnalyzer = new WoWToolbox.Core.Navigation.PM4.MslkHierarchyAnalyzer();
+                var hierarchyResult = hierarchyAnalyzer.AnalyzeHierarchy(pm4File.MSLK);
+                // Use root hierarchy but limit to first object only for testing
+                var allObjectSegments = hierarchyAnalyzer.SegmentObjectsByHierarchy(hierarchyResult);
+                var objectSegments = allObjectSegments.Take(1).ToList(); // Just test with 1 object for proof of concept
+
+                // Export each object as a separate mesh candidate
+                var objectMeshExporter = new WoWToolbox.Core.Navigation.PM4.MslkObjectMeshExporter();
+                
+                foreach (var objectSegment in objectSegments)
+                {
+                    try
+                    {
+                        // Extract mesh data using render-mesh-only mode for clean geometry
+                        var meshData = ExtractMslkObjectMeshData(objectSegment, pm4File, objectMeshExporter);
+                        
+                        // Only include objects with meaningful geometry (at least 50 vertices)
+                        if (meshData.Vertices.Count >= 50)
+                        {
+                            var mesh = new MeshCandidate
+                            {
+                                SourceFile = pm4Path,
+                                SourceType = "PM4_MSLK",
+                                SubObjectName = $"Object_{objectSegment.RootIndex}",
+                                Vertices = meshData.Vertices,
+                                Indices = meshData.Indices
+                            };
+                            
+                            candidates.Add(mesh);
+                            Logger.Log($"[EXTRACT_MSLK] Object {objectSegment.RootIndex}: {meshData.Vertices.Count} vertices, {meshData.Indices.Count / 3} triangles");
+                        }
+                        else
+                        {
+                            Logger.Log($"[SKIP] Object {objectSegment.RootIndex}: Only {meshData.Vertices.Count} vertices (too small)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[WARN] Failed to extract MSLK object {objectSegment.RootIndex} from {pm4Path}: {ex.Message}");
+                    }
+                }
+                
+                Logger.Log($"[EXTRACT_MSLK] Extracted {candidates.Count} MSLK objects from {Path.GetFileName(pm4Path)}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[WARN] Failed to extract MSLK objects from {pm4Path}: {ex.Message}");
+            }
+            
+            return candidates;
+        }
+
+        /// <summary>
+        /// Helper to extract mesh data from a single MSLK object segment
+        /// </summary>
+        private static (List<(float X, float Y, float Z)> Vertices, List<int> Indices) ExtractMslkObjectMeshData(
+            WoWToolbox.Core.Navigation.PM4.MslkHierarchyAnalyzer.ObjectSegmentationResult objectSegment,
+            WoWToolbox.Core.Navigation.PM4.PM4File pm4File,
+            WoWToolbox.Core.Navigation.PM4.MslkObjectMeshExporter objectMeshExporter)
+        {
+            var vertices = new List<(float X, float Y, float Z)>();
+            var indices = new List<int>();
+            
+            try
+            {
+                // Create a temporary file to capture the object mesh data
+                var tempPath = Path.GetTempFileName();
+                try
+                {
+                    // Export the object with render-mesh-only mode for clean geometry
+                    objectMeshExporter.ExportObjectMesh(objectSegment, pm4File, tempPath, renderMeshOnly: true);
+                    
+                    // Parse the exported OBJ to extract vertices
+                    var objContent = File.ReadAllLines(tempPath);
+                    foreach (var line in objContent)
+                    {
+                        if (line.StartsWith("v "))
+                        {
+                            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length >= 4 && 
+                                float.TryParse(parts[1], out float x) &&
+                                float.TryParse(parts[2], out float y) &&
+                                float.TryParse(parts[3], out float z))
+                            {
+                                vertices.Add((x, y, z));
+                            }
+                        }
+                        else if (line.StartsWith("f "))
+                        {
+                            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length >= 4)
+                            {
+                                for (int i = 1; i < parts.Length; i++)
+                                {
+                                    var indexPart = parts[i].Split('/')[0]; // Handle f v1/vt1/vn1 format
+                                    if (int.TryParse(indexPart, out int vertexIndex))
+                                    {
+                                        indices.Add(vertexIndex - 1); // Convert to 0-based indexing
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[WARN] Failed to extract mesh data for object {objectSegment.RootIndex}: {ex.Message}");
+            }
+            
+            return (vertices, indices);
+        }
+
+        // Extract walkable/top-facing surfaces from WMO file (focuses on navigation-relevant geometry)
         public static List<MeshCandidate> ExtractFromWmo(string wmoPath)
         {
             var candidates = new List<MeshCandidate>();
@@ -1168,27 +1682,119 @@ namespace WoWToolbox.PM4WmoMatcher
                 var merged = WmoMeshExporter.LoadMergedWmoMesh(wmoPath);
                 if (merged == null || merged.Vertices.Count == 0 || merged.Triangles.Count == 0)
                     return candidates;
-                // Use only triangles with FLAG_RENDER for the point cloud
-                var pointCloud = merged.ExtractPointCloud(WoWToolbox.Core.WMO.WmoGroupMesh.FLAG_RENDER, null, false);
-                var mesh = new MeshCandidate
+
+                // Extract walkable surfaces by filtering for top-facing triangles
+                var walkableSurfaces = ExtractWalkableSurfaces(merged);
+                
+                if (walkableSurfaces.Count > 0)
                 {
-                    Vertices = pointCloud.Select(v => (v.X, v.Y, v.Z)).ToList(),
-                    Indices = new List<int>(), // No faces for point cloud
-                    SourceFile = wmoPath,
-                    SourceType = "WMO",
-                    SubObjectName = null // TODO: group name if needed
-                };
-                candidates.Add(mesh);
+                    var mesh = new MeshCandidate
+                    {
+                        Vertices = walkableSurfaces,
+                        Indices = new List<int>(), // Point cloud for now
+                        SourceFile = wmoPath,
+                        SourceType = "WMO_WALKABLE",
+                        SubObjectName = "TopFacingSurfaces"
+                    };
+                    candidates.Add(mesh);
+                    Logger.Log($"[EXTRACT_WMO] Extracted {walkableSurfaces.Count} walkable surface points from {Path.GetFileName(wmoPath)}");
+                }
+                else
+                {
+                    Logger.Log($"[EXTRACT_WMO] No walkable surfaces found in {Path.GetFileName(wmoPath)}");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WARN] Failed to extract WMO mesh from {wmoPath}: {ex.Message}");
+                Logger.Log($"[WARN] Failed to extract WMO walkable surfaces from {wmoPath}: {ex.Message}");
             }
             return candidates;
         }
 
+        /// <summary>
+        /// Extract only walkable/top-facing surfaces from WMO mesh
+        /// Focuses on horizontal surfaces that correspond to navigation data
+        /// </summary>
+        private static List<(float X, float Y, float Z)> ExtractWalkableSurfaces(WoWToolbox.Core.WMO.WmoGroupMesh merged)
+        {
+            var walkablePoints = new List<(float X, float Y, float Z)>();
+            
+            try
+            {
+                // Define what constitutes a "walkable" surface
+                const float walkableNormalThreshold = 0.7f; // Normal Y component must be > 0.7 (roughly 45° slope)
+                
+                // Process triangles to find top-facing/walkable surfaces
+                for (int i = 0; i < merged.Triangles.Count; i++)
+                {
+                    var triangle = merged.Triangles[i];
+                    
+                    // Skip non-renderable triangles
+                    if ((triangle.Flags & WoWToolbox.Core.WMO.WmoGroupMesh.FLAG_RENDER) == 0)
+                        continue;
+                    
+                    // Get triangle vertices using correct property names
+                    if (triangle.Index0 >= merged.Vertices.Count || 
+                        triangle.Index1 >= merged.Vertices.Count || 
+                        triangle.Index2 >= merged.Vertices.Count)
+                        continue;
+                        
+                    var v1 = merged.Vertices[triangle.Index0];
+                    var v2 = merged.Vertices[triangle.Index1];
+                    var v3 = merged.Vertices[triangle.Index2];
+                    
+                    // Calculate triangle normal using Position property
+                    var edge1 = new Vector3(v2.Position.X - v1.Position.X, v2.Position.Y - v1.Position.Y, v2.Position.Z - v1.Position.Z);
+                    var edge2 = new Vector3(v3.Position.X - v1.Position.X, v3.Position.Y - v1.Position.Y, v3.Position.Z - v1.Position.Z);
+                    var normal = Vector3.Cross(edge1, edge2);
+                    
+                    if (normal.Length() > 0)
+                    {
+                        normal = Vector3.Normalize(normal);
+                        
+                        // Check if surface is walkable (facing upward, not walls/ceilings)
+                        // In WoW coordinate system, Y is typically up
+                        // Only include surfaces that face upward (positive Y normal) and are roughly horizontal
+                        if (normal.Y > walkableNormalThreshold && normal.Y > Math.Max(Math.Abs(normal.X), Math.Abs(normal.Z)))
+                        {
+                            // Apply coordinate transformation to match PM4 data coordinate system
+                            // Using the same transform pattern as ToUnifiedWorld: (X, Y, Z) → (-Y, -Z, X)
+                            var transformedV1 = new Vector3(-v1.Position.Y, -v1.Position.Z, v1.Position.X);
+                            var transformedV2 = new Vector3(-v2.Position.Y, -v2.Position.Z, v2.Position.X);
+                            var transformedV3 = new Vector3(-v3.Position.Y, -v3.Position.Z, v3.Position.X);
+                            
+                            // Add triangle vertices as walkable surface points
+                            walkablePoints.Add((transformedV1.X, transformedV1.Y, transformedV1.Z));
+                            walkablePoints.Add((transformedV2.X, transformedV2.Y, transformedV2.Z));
+                            walkablePoints.Add((transformedV3.X, transformedV3.Y, transformedV3.Z));
+                        }
+                    }
+                }
+                
+                // Remove duplicate points (optional optimization)
+                var uniquePoints = new HashSet<(float X, float Y, float Z)>();
+                foreach (var point in walkablePoints)
+                {
+                    // Round to avoid floating point precision issues
+                    var roundedPoint = (
+                        (float)Math.Round(point.X, 3),
+                        (float)Math.Round(point.Y, 3), 
+                        (float)Math.Round(point.Z, 3)
+                    );
+                    uniquePoints.Add(roundedPoint);
+                }
+                
+                return uniquePoints.ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[WARN] Error extracting walkable surfaces: {ex.Message}");
+                return walkablePoints;
+            }
+        }
+
         // Recursively extract all meshes from a directory of PM4 or WMO files
-        public static List<MeshCandidate> ExtractAllFromDirectory(string dir, bool isPm4)
+        public static List<MeshCandidate> ExtractAllFromDirectory(string dir, bool isPm4, bool useMslkObjects)
         {
             var candidates = new List<MeshCandidate>();
             if (!Directory.Exists(dir))
@@ -1200,7 +1806,7 @@ namespace WoWToolbox.PM4WmoMatcher
             var files = Directory.GetFiles(dir, "*" + ext, SearchOption.AllDirectories);
             foreach (var file in files)
             {
-                var meshes = isPm4 ? ExtractFromPm4(file) : ExtractFromWmo(file);
+                var meshes = isPm4 ? ExtractFromPm4(file, useMslkObjects) : ExtractFromWmo(file);
                 candidates.AddRange(meshes);
             }
             return candidates;
