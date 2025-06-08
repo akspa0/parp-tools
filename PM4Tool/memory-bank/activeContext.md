@@ -13,6 +13,29 @@
 
 # Mode: PLAN
 
+# Active Context: PM4 v2 Chunk Audit & Test Expansion (2025-01-16)
+
+## Current Focus
+- Ensuring every PM4 chunk type from the original Core is present and fully implemented in WoWToolbox.Core.v2.
+- Porting any missing chunk classes: MVER, MSHDChunk, MDOSChunk, MDSFChunk.
+- Verifying all v2 chunk classes implement required interfaces and loader compatibility.
+- Porting and updating key test tools from WoWToolbox.Tests to validate v2 chunk and loader functionality (e.g., BuildingExtractionTests, SimpleAnalysisTest, Pm4ChunkAnalysisTests, MslkJsonExportTest).
+- Expanding test coverage to ensure all chunk types and edge cases are validated in v2.
+
+## Next Steps
+1. Port missing chunk classes to v2 and ensure full interface compatibility.
+2. Port and update prioritized test tools to use the v2 loader and chunk classes.
+3. Expand tests to cover all chunk types and edge cases.
+4. Run and validate tests to confirm v2 loader and chunk system are fully functional.
+
+## Status
+- v2 Core chunk system is nearly complete; only a few chunk types remain to be ported.
+- Test infrastructure is being expanded to ensure full coverage and validation of v2 functionality.
+
+---
+
+# Mode: PLAN
+
 # Active Context: PRODUCTION ARCHITECTURE COMPLETE - Core.v2 Successfully Deployed (2025-01-16)
 
 ## 🎯 LATEST UPDATE: Project Analysis Complete & Architecture Validated (2025-01-16)
@@ -1285,3 +1308,19 @@ The MSLK scene graph is now fully **decoded, segmented, and exportable** as indi
 - Review logs for patterns and update the node system model accordingly.
 
 ---
+
+# Active Context
+
+## PM4Tool: Core.v2 Parity and Testing
+
+- **Chunk Audit:** The file `memory-bank/chunk_audit_report.md` contains a detailed, chunk-by-chunk audit comparing the original Core and Core.v2 PM4 chunk implementations. **This file should be read at the start of every session.**
+- **Status:** All 15 core PM4 chunk types have been audited. The report identifies which chunks are fully ported and which require additional work for full parity (utility methods, helpers, serialization, etc.).
+- **Next Steps:**
+  1. Use the audit report to guide any further porting or bugfix work.
+  2. Ensure all flagged action items are addressed before running comprehensive tests.
+  3. Keep the audit report up to date as changes are made.
+
+---
+
+**Instruction:**
+> At the start of every session, read `memory-bank/chunk_audit_report.md` to understand the current state of Core.v2 parity and outstanding work.

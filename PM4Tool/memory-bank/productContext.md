@@ -98,3 +98,5 @@ Batch process regions → Generate comprehensive datasets → Analyze evolution
 
 ## Current Status
 **PRODUCTION READY** - All core functionality validated and working with professional-quality output. Users achieve "exactly the quality desired" with exported building models. 
+
+**Product Workflow Note:** Persistent audit and compatibility reports (e.g., `chunk_audit_report.md`) are now part of the product workflow and must be referenced at the start of every session for Core.v2 work. 

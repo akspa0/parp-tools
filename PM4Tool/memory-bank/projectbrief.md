@@ -54,4 +54,8 @@ WoWToolbox v3 is a production-ready C# (.NET 9.0) toolkit for parsing, analyzing
 - **Individual Building Quality** achieving "exactly the quality desired" user validation
 
 ## Future Development
-Planning major architecture refactor to extract all proven functionality from research code into production-ready libraries while maintaining 100% of achieved quality and capabilities. 
+Planning major architecture refactor to extract all proven functionality from research code into production-ready libraries while maintaining 100% of achieved quality and capabilities.
+
+---
+
+**Note:** For all Core.v2 development, the file `memory-bank/chunk_audit_report.md` is a required context file. It must be read at the start of every session to ensure up-to-date knowledge of chunk parity and outstanding work. 

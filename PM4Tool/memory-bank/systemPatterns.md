@@ -322,3 +322,7 @@ public void BuildingExtraction_ShouldProduceIdenticalQuality()
 4. **Metadata Preservation**: Maintain all decoded field information throughout processing
 
 This architecture represents the proven, production-ready patterns that enable WoWToolbox v3's breakthrough capabilities in PM4 analysis and building extraction.
+
+## System Pattern: Persistent Audit Reports
+- Any audit or compatibility report (e.g., `chunk_audit_report.md`) must be referenced in both `activeContext.md` and `projectbrief.md`.
+- Such reports are required reading at the start of every session if relevant to the current work focus.

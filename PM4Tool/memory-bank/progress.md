@@ -279,4 +279,22 @@ The WoWToolbox v3 project now stands as a **complete, production-ready system** 
 
 *Major refactor completed: January 16, 2025*  
 *Status: Production architecture achieved with 100% quality preservation*  
-*Next phase: Advanced applications and external integration* 
+*Next phase: Advanced applications and external integration*
+
+## Recent Progress (2025-01-16)
+- v2 Core chunk system is nearly complete; only a few chunk types remain to be ported (MVER, MSHDChunk, MDOSChunk, MDSFChunk).
+- All implemented v2 chunk classes now match the original Core's interface and loader requirements.
+- v2 loader is compatible with Warcraft.NET's chunk loading system.
+- Test infrastructure is being expanded to ensure all chunk types and edge cases are validated in v2.
+
+## Next Steps
+1. Port missing chunk classes to v2 and ensure full interface compatibility.
+2. Port and update prioritized test tools to use the v2 loader and chunk classes.
+3. Expand tests to cover all chunk types and edge cases.
+4. Run and validate tests to confirm v2 loader and chunk system are fully functional.
+
+---
+
+## Audit Tracking
+- `chunk_audit_report.md` is now maintained as a persistent audit of Core.v2 chunk parity.
+- All future Core.v2 work should check this file for outstanding issues before proceeding with implementation or testing.

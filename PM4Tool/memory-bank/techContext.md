@@ -176,4 +176,6 @@ dotnet clean src/WoWToolbox.sln    # Clean build artifacts
 - ✅ **Batch Processing**: Consistent quality across hundreds of PM4 files
 
 ### **Next Phase**
-Planning major architecture refactor to extract all proven functionality from research code (PM4FileTests.cs) into production-ready libraries while maintaining 100% of achieved quality and capabilities. 
+Planning major architecture refactor to extract all proven functionality from research code (PM4FileTests.cs) into production-ready libraries while maintaining 100% of achieved quality and capabilities.
+
+**Workflow Note:** For Core.v2 development, always read `chunk_audit_report.md` at the start of every session. This file tracks technical parity and outstanding work for PM4 chunk implementations. 
