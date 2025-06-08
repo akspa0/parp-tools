@@ -298,3 +298,25 @@ The WoWToolbox v3 project now stands as a **complete, production-ready system** 
 ## Audit Tracking
 - `chunk_audit_report.md` is now maintained as a persistent audit of Core.v2 chunk parity.
 - All future Core.v2 work should check this file for outstanding issues before proceeding with implementation or testing.
+
+## Known Issues (as of 2025-06-08)
+- All major PM4 chunk types in Core.v2 are now at full parity with the original Core implementation.
+- However, 5 test failures remain in the PM4FileV2Tests suite:
+  - All failures are due to `System.IO.EndOfStreamException: Not enough data remaining to read MsurEntry (requires 24 bytes)`.
+  - This suggests a mismatch between the expected struct size (24 bytes) and the actual data in the test files or loader logic.
+  - The v2 MsurEntry struct was recently updated to 32 bytes for full parity; test data or loader may still expect the old 24-byte size.
+  - Action: Review and update test data, loader, and struct size handling to ensure consistency across all components.
+
+## 🧹 Major Cleanup & Clarity Milestone (2025-06-08)
+- Plan to move all legacy/confusing tests (Complete_Buildings, Final_Correct_Buildings, EnhancedObjExport, Complete_Hybrid_Buildings, Multi_PM4_Compatibility_Test, individual mscn_points.obj and render_mesh.obj for development_00_00 and development_22_18, CompleteGeometryExport, Complete_MSUR_Buildings, Complete_MSUR_Corrected_Buildings, WebExplorer) into a new 'WoWToolbox.DeprecatedTests' project for historical tracking.
+- All outputs will be consolidated into a single timestamped output folder in the root output directory for each run, eliminating split/jumbled results.
+- This will dramatically improve clarity and make Core.v2 analysis and debugging much easier.
+
+## 📊 CURRENT STATUS (updated)
+- Core.v2 chunk parity and test coverage are nearly complete.
+- Test/output cleanup and consolidation are now a top priority for clarity.
+
+## 🚀 NEXT STEPS (updated)
+1. Create 'WoWToolbox.DeprecatedTests' project and move legacy/confusing tests there.
+2. Refactor output logic so all results go to a single timestamped folder in output/.
+3. Continue Core.v2 analysis and debugging with a clean, focused test suite.

@@ -326,3 +326,20 @@ This architecture represents the proven, production-ready patterns that enable W
 ## System Pattern: Persistent Audit Reports
 - Any audit or compatibility report (e.g., `chunk_audit_report.md`) must be referenced in both `activeContext.md` and `projectbrief.md`.
 - Such reports are required reading at the start of every session if relevant to the current work focus.
+
+### **11. Deprecated Tests Project & Output Consolidation Pattern**
+```csharp
+// Move legacy/confusing tests to a dedicated project for historical tracking
+// Consolidate all outputs into a single timestamped output folder per run
+public class OutputManager
+{
+    public string GetRunOutputFolder()
+    {
+        // Always use a single timestamped folder in output/ for all results
+        return Path.Combine("output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+    }
+}
+```
+- **Purpose**: Preserve historical tests while keeping the main suite clean and focused
+- **Result**: All outputs are easy to find and compare; no more split/jumbled folders
+- **Benefit**: Dramatically improved clarity, maintainability, and analysis for Core.v2 workflows

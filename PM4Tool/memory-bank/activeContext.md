@@ -32,6 +32,16 @@
 - v2 Core chunk system is nearly complete; only a few chunk types remain to be ported.
 - Test infrastructure is being expanded to ensure full coverage and validation of v2 functionality.
 
+## Known Issues (as of 2025-06-08)
+- All major Core.v2 PM4 chunk types are now at full parity with the original Core implementation.
+- 5 test failures remain in PM4FileV2Tests, all due to `System.IO.EndOfStreamException: Not enough data remaining to read MsurEntry (requires 24 bytes)`.
+- This likely indicates a mismatch between the expected struct size (24 bytes) and the actual data in the test files or loader logic.
+- The v2 MsurEntry struct was recently updated to 32 bytes for full parity; test data or loader may still expect the old 24-byte size.
+
+## Next Steps (updated)
+1. Review and update test data, loader, and struct size handling for MsurEntry to ensure consistency across all components.
+2. Re-run tests to confirm all failures are resolved.
+
 ---
 
 # Mode: PLAN
@@ -1324,3 +1334,19 @@ The MSLK scene graph is now fully **decoded, segmented, and exportable** as indi
 
 **Instruction:**
 > At the start of every session, read `memory-bank/chunk_audit_report.md` to understand the current state of Core.v2 parity and outstanding work.
+
+## Major Cleanup & Clarity Milestone (2025-06-08)
+- Plan to move all legacy/confusing tests (Complete_Buildings, Final_Correct_Buildings, EnhancedObjExport, Complete_Hybrid_Buildings, Multi_PM4_Compatibility_Test, individual mscn_points.obj and render_mesh.obj for development_00_00 and development_22_18, CompleteGeometryExport, Complete_MSUR_Buildings, Complete_MSUR_Corrected_Buildings, WebExplorer) into a new 'WoWToolbox.DeprecatedTests' project for historical tracking.
+- All outputs will be consolidated into a single timestamped output folder in the root output directory for each run, eliminating split/jumbled results.
+- This will dramatically improve clarity and make Core.v2 analysis and debugging much easier.
+
+## Current Focus (updated)
+- In addition to Core.v2 chunk parity and test coverage, focus is now on cleaning up the test suite and output structure for clarity.
+
+## Next Steps (updated)
+1. Create 'WoWToolbox.DeprecatedTests' project and move legacy/confusing tests there.
+2. Refactor output logic so all results go to a single timestamped folder in output/.
+3. Continue Core.v2 analysis and debugging with a clean, focused test suite.
+
+## Known Issues (updated)
+- Legacy test outputs and split output folders are causing confusion and making analysis difficult. Cleanup and consolidation are in progress.
