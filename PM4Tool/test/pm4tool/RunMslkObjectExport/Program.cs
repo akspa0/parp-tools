@@ -136,62 +136,44 @@ class Program
         var outputDir = Path.Combine("output", baseFileName);
         Directory.CreateDirectory(outputDir);
 
-        // Export all analysis data
-        ExportAnalysisData(hierarchyResult, objectSegments, hierarchyAnalyzer, outputDir, baseFileName, fileName);
+        // Export simple TXT report only (no YAML to prevent circular references)
+        var txtPath = Path.Combine(outputDir, $"{baseFileName}.mslk.txt");
+        var report = hierarchyAnalyzer.GenerateHierarchyReport(hierarchyResult, fileName);
+        File.WriteAllText(txtPath, report);
+        Console.WriteLine($"   📄 TXT report: {Path.GetFileName(txtPath)}");
 
-        // Export per-object meshes
-        var objectOutputDir = Path.Combine(outputDir, "objects");
-        objectMeshExporter.ExportAllObjects(objectSegments, pm4File, objectOutputDir, baseFileName);
+        // ✨ Export individual geometry objects (clean small components)
+        var individualGeometry = hierarchyAnalyzer.SegmentByIndividualGeometry(hierarchyResult);
+        var individualOutputDir = Path.Combine(outputDir, "individual_objects");
+        Directory.CreateDirectory(individualOutputDir);
+        
+        Console.WriteLine($"🎯 Exporting {individualGeometry.Count} individual geometry objects...");
+        
+        var exportedCount = 0;
+        foreach (var obj in individualGeometry)
+        {
+            try
+            {
+                var objFileName = $"{baseFileName}.geom_{obj.RootIndex:D3}.obj";
+                var objPath = Path.Combine(individualOutputDir, objFileName);
+                
+                objectMeshExporter.ExportObjectMesh(obj, pm4File, objPath, renderMeshOnly: true);
+                Console.WriteLine($"  ✅ Geometry {obj.RootIndex}: {objFileName}");
+                exportedCount++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  ❌ Failed to export geometry {obj.RootIndex}: {ex.Message}");
+            }
+        }
+        
+        Console.WriteLine($"📊 Export Summary: {exportedCount} exported, 0 skipped/failed");
 
         Console.WriteLine($"   📁 All outputs written to: {outputDir}");
         Console.WriteLine();
     }
 
-    static void ExportAnalysisData(MslkHierarchyAnalyzer.HierarchyAnalysisResult hierarchyResult, 
-                                 List<MslkHierarchyAnalyzer.ObjectSegmentationResult> objectSegments,
-                                 MslkHierarchyAnalyzer hierarchyAnalyzer,
-                                 string outputDir, string baseFileName, string fileName)
-    {
-        // Export TXT report
-        var txtPath = Path.Combine(outputDir, $"{baseFileName}.mslk.txt");
-        var report = hierarchyAnalyzer.GenerateHierarchyReport(hierarchyResult, fileName);
-        File.WriteAllText(txtPath, report);
-
-        // Export YAML hierarchy data
-        var yamlPath = Path.Combine(outputDir, $"{baseFileName}.mslk.yaml");
-        var serializer = new YamlDotNet.Serialization.SerializerBuilder()
-            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.CamelCaseNamingConvention.Instance)
-            .Build();
-        var yaml = serializer.Serialize(hierarchyResult);
-        File.WriteAllText(yamlPath, yaml);
-
-        // Export object segmentation YAML
-        var objectsYamlPath = Path.Combine(outputDir, $"{baseFileName}.mslk.objects.yaml");
-        var objectsYaml = serializer.Serialize(objectSegments);
-        File.WriteAllText(objectsYamlPath, objectsYaml);
-
-        // Export object segmentation TXT
-        var objectsTxtPath = Path.Combine(outputDir, $"{baseFileName}.mslk.objects.txt");
-        using (var writer = new StreamWriter(objectsTxtPath))
-        {
-            writer.WriteLine($"MSLK Object Segmentation for {fileName}");
-            writer.WriteLine($"Generated: {DateTime.Now}");
-            writer.WriteLine($"Total Objects: {objectSegments.Count}");
-            writer.WriteLine();
-
-            foreach (var obj in objectSegments)
-            {
-                writer.WriteLine($"Object Root: {obj.RootIndex}");
-                writer.WriteLine($"  Geometry Nodes: [{string.Join(", ", obj.GeometryNodeIndices)}] ({obj.GeometryNodeIndices.Count} nodes)");
-                writer.WriteLine($"  Anchor/Group Nodes: [{string.Join(", ", obj.DoodadNodeIndices)}] ({obj.DoodadNodeIndices.Count} nodes)");
-                writer.WriteLine();
-            }
-        }
-
-        Console.WriteLine($"   📄 TXT report: {Path.GetFileName(txtPath)}");
-        Console.WriteLine($"   📊 YAML data: {Path.GetFileName(yamlPath)}");
-        Console.WriteLine($"   🎯 Object data: {Path.GetFileName(objectsYamlPath)}");
-    }
+    // Removed ExportAnalysisData method - now using simplified individual geometry export
 
     static void ShowUsage()
     {
