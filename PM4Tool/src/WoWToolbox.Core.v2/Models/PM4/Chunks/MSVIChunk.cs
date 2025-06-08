@@ -43,5 +43,39 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
                 bw.Write(index);
             return ms.ToArray();
         }
+
+        /// <summary>
+        /// Validates if all indices are within the bounds of a given vertex count.
+        /// </summary>
+        /// <param name="vertexCount">The total number of vertices (e.g., from MSVT chunk).</param>
+        /// <returns>True if all indices are valid, false otherwise.</returns>
+        public bool ValidateIndices(int vertexCount)
+        {
+            foreach (var index in Indices)
+            {
+                if (index >= vertexCount)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Retrieves a range of indices, typically corresponding to a surface definition from MSUR.
+        /// </summary>
+        /// <param name="firstIndex">The starting index (zero-based) within this chunk's index list.</param>
+        /// <param name="count">The number of indices to retrieve.</param>
+        /// <returns>A list of indices for the specified range, or an empty list if the range is invalid.</returns>
+        public List<uint> GetIndicesForSurface(uint firstIndex, uint count)
+        {
+            if (firstIndex >= Indices.Count)
+                return new List<uint>();
+            uint actualCount = System.Math.Min(count, (uint)(Indices.Count - firstIndex));
+            return Indices.GetRange((int)firstIndex, (int)actualCount);
+        }
+
+        public override string ToString()
+        {
+            return $"MSVI Chunk [{Indices.Count} Indices]";
+        }
     }
 } 

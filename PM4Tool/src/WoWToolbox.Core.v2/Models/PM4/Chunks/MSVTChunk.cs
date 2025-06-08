@@ -11,6 +11,37 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public float Z { get; set; }
 
         public const int StructSize = 12;
+
+        public override string ToString() => $"(X:{X:F3}, Y:{Y:F3}, Z:{Z:F3})";
+
+        // Coordinate transformation constants (from original)
+        private const float CoordinateOffset = 17066.666f;
+        private const float HeightScaleFactor = 36.0f;
+
+        /// <summary>
+        /// Converts the internal file coordinates (YXZ floats) to world coordinates (XYZ floats).
+        /// </summary>
+        public System.Numerics.Vector3 ToWorldCoordinates()
+        {
+            float worldX = Y;  // Use Y property (first float read) for OBJ X
+            float worldY = Z;  // Use Z property (third float read) for OBJ Y (Up)
+            float worldZ = -X; // Use X property (second float read), negated, for OBJ Z (Depth)
+            return new System.Numerics.Vector3(worldX, worldY, worldZ);
+        }
+
+        /// <summary>
+        /// Creates an MsvtEntry from standard world coordinates (XYZ floats).
+        /// </summary>
+        public static MsvtEntry FromWorldCoordinates(System.Numerics.Vector3 worldPos)
+        {
+            // Inverse calculation (see original for details)
+            return new MsvtEntry
+            {
+                Y = worldPos.X,
+                X = -worldPos.Z,
+                Z = worldPos.Y
+            };
+        }
     }
 
     public class MSVTChunk : IIFFChunk, IBinarySerializable
@@ -42,8 +73,8 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
             Vertices = new List<C3Vector>(vertexCount);
             for (int i = 0; i < vertexCount; i++)
             {
-                float x = br.ReadSingle();
                 float y = br.ReadSingle();
+                float x = br.ReadSingle();
                 float z = br.ReadSingle();
                 Vertices.Add(new C3Vector { X = x, Y = y, Z = z });
             }
@@ -55,11 +86,24 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
             using var bw = new BinaryWriter(ms);
             foreach (var v in Vertices)
             {
-                bw.Write(v.X);
-                bw.Write(v.Y);
-                bw.Write(v.Z);
+                bw.Write(v.Y); // Y first
+                bw.Write(v.X); // X second
+                bw.Write(v.Z); // Z third
             }
             return ms.ToArray();
+        }
+
+        public override string ToString()
+        {
+            return $"MSVT Chunk [{Vertices.Count} Vertices] (YXZ order, 12-byte float struct)";
+        }
+
+        /// <summary>
+        /// Converts a C3Vector (v2) to an MsvtEntry (original struct, YXZ order).
+        /// </summary>
+        public static MsvtEntry ToMsvtEntry(C3Vector v)
+        {
+            return new MsvtEntry { X = v.X, Y = v.Y, Z = v.Z };
         }
     }
 } 

@@ -41,13 +41,34 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
-            foreach (var v in ExteriorVertices)
-            {
-                bw.Write(v.X);
-                bw.Write(v.Y);
-                bw.Write(v.Z);
-            }
+            Write(bw);
             return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Writes all exterior vertices to the provided BinaryWriter.
+        /// </summary>
+        public void Write(BinaryWriter writer)
+        {
+            foreach (var vertex in ExteriorVertices)
+            {
+                writer.Write(vertex.X);
+                writer.Write(vertex.Y);
+                writer.Write(vertex.Z);
+            }
+        }
+
+        public override string ToString()
+        {
+            return $"MSCN Chunk [{ExteriorVertices.Count} Exterior Vertices (Vector3)]";
+        }
+
+        /// <summary>
+        /// Converts an MSCN vertex from file coordinates (X, Y, Z) to canonical world coordinates (Y, -X, Z).
+        /// </summary>
+        public static Vector3 ToCanonicalWorldCoordinates(Vector3 vertex)
+        {
+            return new Vector3(vertex.Y, -vertex.X, vertex.Z);
         }
     }
 } 

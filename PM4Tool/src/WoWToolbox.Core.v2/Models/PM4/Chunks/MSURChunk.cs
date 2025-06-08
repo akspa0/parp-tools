@@ -299,6 +299,26 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
             }
         }
 
+        /// <summary>
+        /// Validates that all index ranges defined by the entries are within the bounds 
+        /// of the provided MSVI index count.
+        /// </summary>
+        /// <param name="msviIndexCount">The total number of indices available in the corresponding MSVI chunk.</param>
+        /// <returns>True if all ranges are valid, false otherwise.</returns>
+        public bool ValidateIndices(int msviIndexCount)
+        {
+            if (_entries == null || msviIndexCount <= 0) return EntryCount == 0;
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                var entry = _entries[i];
+                if (entry.MsviFirstIndex >= msviIndexCount)
+                    return false;
+                if ((long)entry.MsviFirstIndex + entry.IndexCount > msviIndexCount)
+                    return false;
+            }
+            return true;
+        }
+
         #endregion
 
         #region IBinarySerializable Implementation

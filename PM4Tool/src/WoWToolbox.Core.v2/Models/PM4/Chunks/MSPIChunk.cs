@@ -34,9 +34,32 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
-            foreach (var index in Indices)
-                bw.Write(index);
+            Write(bw);
             return ms.ToArray();
+        }
+
+        /// <summary>
+        /// Writes all indices to the provided BinaryWriter.
+        /// </summary>
+        public void Write(BinaryWriter writer)
+        {
+            foreach (var index in Indices)
+                writer.Write(index);
+        }
+
+        /// <summary>
+        /// Validates indices against the vertex count of the MSPV chunk.
+        /// </summary>
+        /// <param name="vertexCount">The number of vertices in the MSPV chunk.</param>
+        /// <returns>True if all indices are valid, false otherwise.</returns>
+        public bool ValidateIndices(int vertexCount)
+        {
+            foreach (var index in Indices)
+            {
+                if (index >= vertexCount)
+                    return false;
+            }
+            return true;
         }
     }
 } 

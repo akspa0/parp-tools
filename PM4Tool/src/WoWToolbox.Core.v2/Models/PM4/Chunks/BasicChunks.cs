@@ -66,13 +66,90 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
     public class MSHDChunk : IIFFChunk, IBinarySerializable
     {
         public const string Signature = "MSHD";
-        public byte[] HeaderData { get; set; } = Array.Empty<byte>();
+        public const int ExpectedSize = 32;
+        private byte[] _headerData = new byte[ExpectedSize];
+        public byte[] HeaderData
+        {
+            get => _headerData;
+            set
+            {
+                if (value == null || value.Length != ExpectedSize)
+                    throw new ArgumentException($"MSHD HeaderData must be exactly {ExpectedSize} bytes.");
+                _headerData = value;
+            }
+        }
 
-        public void LoadBinaryData(byte[] inData) => HeaderData = inData;
-        public void Load(BinaryReader br) => HeaderData = br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position));
-        public byte[] Serialize(long offset = 0) => HeaderData;
+        // Explicit field accessors (uint32, little-endian)
+        public uint Unknown_0x00
+        {
+            get => BitConverter.ToUInt32(_headerData, 0);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 0);
+        }
+        public uint Unknown_0x04
+        {
+            get => BitConverter.ToUInt32(_headerData, 4);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 4);
+        }
+        public uint Unknown_0x08
+        {
+            get => BitConverter.ToUInt32(_headerData, 8);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 8);
+        }
+        public uint Unknown_0x0C
+        {
+            get => BitConverter.ToUInt32(_headerData, 12);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 12);
+        }
+        public uint Unknown_0x10
+        {
+            get => BitConverter.ToUInt32(_headerData, 16);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 16);
+        }
+        public uint Unknown_0x14
+        {
+            get => BitConverter.ToUInt32(_headerData, 20);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 20);
+        }
+        public uint Unknown_0x18
+        {
+            get => BitConverter.ToUInt32(_headerData, 24);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 24);
+        }
+        public uint Unknown_0x1C
+        {
+            get => BitConverter.ToUInt32(_headerData, 28);
+            set => BitConverter.GetBytes(value).CopyTo(_headerData, 28);
+        }
+
+        public void LoadBinaryData(byte[] inData)
+        {
+            if (inData == null || inData.Length != ExpectedSize)
+                throw new ArgumentException($"MSHD chunk must be exactly {ExpectedSize} bytes.");
+            inData.CopyTo(_headerData, 0);
+        }
+
+        public void Load(BinaryReader br)
+        {
+            var data = br.ReadBytes(ExpectedSize);
+            if (data.Length != ExpectedSize)
+                throw new InvalidDataException($"MSHD chunk read {data.Length} bytes, expected {ExpectedSize}.");
+            data.CopyTo(_headerData, 0);
+        }
+
+        public byte[] Serialize(long offset = 0)
+        {
+            // Always return a copy to prevent external mutation
+            return (byte[])_headerData.Clone();
+        }
+
         public string GetSignature() => Signature;
-        public uint GetSize() => (uint)HeaderData.Length;
+        public uint GetSize() => ExpectedSize;
+
+        public override string ToString()
+        {
+            return $"MSHD: [00={Unknown_0x00:X8}, 04={Unknown_0x04:X8}, 08={Unknown_0x08:X8}, 0C={Unknown_0x0C:X8}, " +
+                   $"10={Unknown_0x10:X8}, 14={Unknown_0x14:X8}, 18={Unknown_0x18:X8}, 1C={Unknown_0x1C:X8}]";
+        }
     }
 
     #endregion

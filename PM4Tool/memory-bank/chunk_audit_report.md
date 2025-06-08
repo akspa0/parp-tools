@@ -75,11 +75,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `uint GetSize()`
 
 ### Differences & Notes
-- **v1** exposes each of the 8 header fields as individual `uint` properties, allowing direct access and manipulation.
-- **v2** stores the entire header as a raw `byte[]` (`HeaderData`), with no direct accessors for the 8 fields.
-- **v2** is more generic but loses the explicit field-level access and type safety of v1.
-- **Potential Issue:** Any code or tests that expect to read/write the individual header fields will not work with v2 as written.
-- **Conclusion:** ⚠️ **Not fully ported.** To match v1, v2 should expose the 8 header fields as properties, and ensure serialization/deserialization logic matches field order and size. **Action needed.**
+- v2 now exposes each of the 8 header fields as individual `uint` properties, matching v1 for direct access and type safety.
+- Serialization/deserialization logic matches field order and size.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -185,10 +183,11 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `void LoadBinaryData(byte[] inData)`
   - `void Read(BinaryReader reader, uint size)`
   - `byte[] Serialize(long offset = 0)`
-- **Differences & Notes**
-  - v2 omits the `Write(BinaryWriter writer)` and `ValidateIndices(int vertexCount)` methods from v1.
-  - All core serialization, deserialization, and property access are present and compatible.
-  - **Conclusion:** ⚠️ **Mostly ported, but missing two utility methods.** If any code or tests rely on `Write` or `ValidateIndices`, these should be added to v2 for full parity. **Action recommended.**
+
+### Differences & Notes
+- v2 now includes the `Write(BinaryWriter writer)` and `ValidateIndices(int vertexCount)` methods, matching v1.
+- All core serialization, deserialization, and property access are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -250,9 +249,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `uint GetSize()`, `void LoadBinaryData(byte[] chunkData)`, `void Load(BinaryReader br)`, `byte[] Serialize(long offset = 0)`
 
 ### Differences & Notes
-- v2 omits the `ToString()`, `ToWorldCoordinates()`, and `FromWorldCoordinates(Vector3)` methods from the struct/class, and stores vertices as `C3Vector` instead of `MsvtVertex`.
-- All core serialization, deserialization, and property access are present and compatible, but coordinate transformation helpers are missing.
-- **Conclusion:** ⚠️ **Mostly ported, but missing coordinate transformation helpers and ToString.** If any code or tests rely on these, they should be added to v2 for full parity. **Action recommended.**
+- v2 now includes `ToString()` and coordinate transformation helpers, matching v1 for utility and debugging.
+- All core serialization, deserialization, and property access are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -280,9 +279,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `uint GetSize()`, `void LoadBinaryData(byte[] chunkData)`, `void Load(BinaryReader br)`, `byte[] Serialize(long offset = 0)`
 
 ### Differences & Notes
-- v2 omits the `ValidateIndices(int vertexCount)`, `GetIndicesForSurface(uint firstIndex, uint count)`, and `ToString()` methods from v1.
-- All core serialization, deserialization, and property access are present and compatible, but utility and helper methods are missing.
-- **Conclusion:** ⚠️ **Mostly ported, but missing utility/helper methods and ToString.** If any code or tests rely on these, they should be added to v2 for full parity. **Action recommended.**
+- v2 now includes `ValidateIndices(int vertexCount)`, `GetIndicesForSurface(uint firstIndex, uint count)`, and `ToString()`, matching v1.
+- All core serialization, deserialization, and property access are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -403,9 +402,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `void Read(BinaryReader br, long size)`
 
 ### Differences & Notes
-- v2 omits the IIFFChunk/IBinarySerializable interfaces, signature, and all serialization helpers (`GetSize()`, `LoadBinaryData()`, `Serialize()`, `ToString()`), and uses a struct for entries with explicit X/Y/Z fields instead of a C3Vector property.
-- All core data fields are present and compatible, but interface, serialization, and utility methods are missing.
-- **Conclusion:** ⚠️ **Mostly ported, but missing interface, serialization, and utility methods.** If any code or tests rely on these, they should be added to v2 for full parity. **Action recommended.**
+- v2 now implements IIFFChunk and IBinarySerializable, includes the chunk signature, serialization helpers, and ToString().
+- All core data fields and the main reading/serialization logic are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -429,9 +428,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `void Read(BinaryReader br, long size)`
 
 ### Differences & Notes
-- v2 omits the IIFFChunk/IBinarySerializable interfaces, signature, and all serialization helpers (`GetSignature()`, `GetSize()`, `LoadBinaryData()`, `Serialize()`, `ValidateIndices()`, `ToString()`).
-- All core data fields and the main sequence reading logic are present and compatible, but interface, serialization, and utility methods are missing.
-- **Conclusion:** ⚠️ **Mostly ported, but missing interface, serialization, and utility methods.** If any code or tests rely on these, they should be added to v2 for full parity. **Action recommended.**
+- v2 now implements IIFFChunk and IBinarySerializable, includes the chunk signature, serialization helpers, and ToString().
+- All core data fields and the main sequence reading/serialization logic are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
@@ -457,9 +456,9 @@ This document tracks the detailed, field-by-field and method-by-method audit of 
   - `private static string ReadNullTerminatedString(BinaryReader reader)`
 
 ### Differences & Notes
-- v2 omits the IIFFChunk/IBinarySerializable interfaces, signature, and all serialization helpers (`Count`, `GetSize()`, `LoadBinaryData()`, `Serialize()`, `ToString()`), and uses a struct for entries.
-- All core data fields and the main reading logic are present and compatible, but interface, serialization, and utility methods are missing.
-- **Conclusion:** ⚠️ **Mostly ported, but missing interface, serialization, and utility methods.** If any code or tests rely on these, they should be added to v2 for full parity. **Action recommended.**
+- v2 now implements IIFFChunk and IBinarySerializable, includes the chunk signature, serialization helpers, and ToString().
+- All core data fields and the main reading/serialization logic are present and compatible.
+- **Conclusion:** ✅ Fully ported and compatible. No action needed.
 
 ---
 
