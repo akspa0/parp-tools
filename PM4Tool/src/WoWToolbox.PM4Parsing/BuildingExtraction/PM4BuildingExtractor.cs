@@ -157,22 +157,37 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
             if (pm4File.MSVT?.Vertices == null || pm4File.MSVI?.Indices == null || pm4File.MSUR?.Entries == null)
                 return building;
             
-            // Add all MSVT vertices (render vertices)
-            foreach (var vertex in pm4File.MSVT.Vertices)
-            {
-                var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(vertex);
-                building.Vertices.Add(worldCoords);
-            }
-            
-            // Process only the specified MSUR surfaces
+            // --- NEW: Only add MSVT vertices actually referenced by this building's surfaces ---
+            var usedMsvtIndices = new HashSet<uint>();
             foreach (int surfaceIndex in surfaceIndices)
             {
                 if (surfaceIndex >= pm4File.MSUR.Entries.Count) continue;
-                
                 var surface = pm4File.MSUR.Entries[surfaceIndex];
                 if (surface.IndexCount < 3) continue;
-                
-                // Add surface faces based on triangle count
+                for (int i = 0; i < surface.IndexCount; i++)
+                {
+                    if (surface.MsviFirstIndex + i < pm4File.MSVI.Indices.Count)
+                    {
+                        uint msvtIdx = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + i];
+                        if (msvtIdx < pm4File.MSVT.Vertices.Count)
+                            usedMsvtIndices.Add(msvtIdx);
+                    }
+                }
+            }
+            // Build mapping: global MSVT index → local OBJ vertex index
+            var msvtIndexToLocal = new Dictionary<uint, int>();
+            foreach (var msvtIdx in usedMsvtIndices.OrderBy(idx => idx))
+            {
+                var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(pm4File.MSVT.Vertices[(int)msvtIdx]);
+                msvtIndexToLocal[msvtIdx] = building.Vertices.Count;
+                building.Vertices.Add(worldCoords);
+            }
+            // Add faces, remapping indices
+            foreach (int surfaceIndex in surfaceIndices)
+            {
+                if (surfaceIndex >= pm4File.MSUR.Entries.Count) continue;
+                var surface = pm4File.MSUR.Entries[surfaceIndex];
+                if (surface.IndexCount < 3) continue;
                 for (int i = 0; i < surface.IndexCount - 2; i += 3)
                 {
                     if (surface.MsviFirstIndex + i + 2 < pm4File.MSVI.Indices.Count)
@@ -180,22 +195,17 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
                         uint v1Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + i];
                         uint v2Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + i + 1];
                         uint v3Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + i + 2];
-                        
-                        if (v1Index < pm4File.MSVT.Vertices.Count && 
-                            v2Index < pm4File.MSVT.Vertices.Count && 
-                            v3Index < pm4File.MSVT.Vertices.Count)
+                        if (msvtIndexToLocal.ContainsKey(v1Index) && msvtIndexToLocal.ContainsKey(v2Index) && msvtIndexToLocal.ContainsKey(v3Index))
                         {
-                            building.TriangleIndices.Add((int)v1Index);
-                            building.TriangleIndices.Add((int)v2Index);
-                            building.TriangleIndices.Add((int)v3Index);
+                            building.TriangleIndices.Add(msvtIndexToLocal[v1Index]);
+                            building.TriangleIndices.Add(msvtIndexToLocal[v2Index]);
+                            building.TriangleIndices.Add(msvtIndexToLocal[v3Index]);
                         }
                     }
                 }
             }
-            
             // Generate normals for the complete model
             CompleteWMOModelUtilities.GenerateNormals(building);
-            
             return building;
         }
 

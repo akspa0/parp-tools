@@ -127,24 +127,9 @@ namespace WoWToolbox.Core.Navigation.PM4
 
             if (renderMeshOnly)
             {
-                // 🎯 RENDER-MESH-ONLY MODE: Focus on visual geometry only
-                meshData.Comments.Add("=== RENDER MESH ONLY MODE (Visual Geometry) ===");
-                
-                if (isIndividualGeometry)
-                {
-                    // For individual geometry, be VERY strict - only extract from this specific node
-                    ExtractStrictIndividualGeometry(objectSegment, pm4File, meshData, renderMeshOnly: true);
-                }
-                else
-                {
-                    // For other strategies, use broader surface association
-                    var associatedSurfaces = FindAllAssociatedMsurSurfaces(objectSegment, pm4File);
-                    if (associatedSurfaces.Any())
-                    {
-                        ExtractRenderMeshFromSurfaces(associatedSurfaces, pm4File, meshData);
-                    }
-                    ExtractCleanRenderMeshOnly(objectSegment, pm4File, meshData);
-                }
+                // 🎯 RENDER-MESH-ONLY MODE: Always use strict extraction for per-object geometry
+                meshData.Comments.Add("=== RENDER MESH ONLY MODE (Strict Per-Object Geometry) ===");
+                ExtractStrictIndividualGeometry(objectSegment, pm4File, meshData, renderMeshOnly: true);
             }
             else
             {
