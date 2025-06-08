@@ -7553,39 +7553,184 @@ namespace WoWToolbox.Tests.Navigation.PM4
             if (pm4File.MSVT?.Vertices == null || pm4File.MSVI?.Indices == null || pm4File.MSUR?.Entries == null)
                 return building;
             
-            // === ADD ALL MSVT VERTICES FIRST ===
+            // === STEP 1: DETERMINE BUILDING ID FOR THIS SURFACE GROUP ===
+            uint buildingId = 0;
+            if (surfaceIndices.Count > 0)
+            {
+                var firstSurfaceIndex = surfaceIndices[0];
+                var mdsfEntry = pm4File.MDSF?.Entries?.FirstOrDefault(entry => entry.msur_index == firstSurfaceIndex);
+                if (mdsfEntry != null && mdsfEntry.mdos_index < pm4File.MDOS.Entries.Count)
+                {
+                    var mdosEntry = pm4File.MDOS.Entries[(int)mdsfEntry.mdos_index];
+                    buildingId = mdosEntry.m_destructible_building_index;
+                }
+            }
+            
+            // === STEP 2: FIND MSLK STRUCTURAL ELEMENTS FOR THIS BUILDING ===
+            var structuralElementsCount = 0;
+            var structuralVertexOffset = 0;
+            
+            if (pm4File.MSLK?.Entries != null && pm4File.MSPV?.Vertices != null && pm4File.MSPI?.Indices != null)
+            {
+                // Add MSPV vertices first (structural vertices)
+                foreach (var vertex in pm4File.MSPV.Vertices)
+                {
+                    var worldCoords = Pm4CoordinateTransforms.FromMspvVertex(vertex);
+                    building.Vertices.Add(worldCoords);
+                }
+                structuralVertexOffset = building.Vertices.Count;
+                
+                // Find MSLK entries that might belong to this building
+                // For now, we'll use a heuristic based on the Unknown_0x04 field patterns
+                var buildingGroupKey = buildingId; // Use building ID as group key
+                
+                foreach (var mslkEntry in pm4File.MSLK.Entries)
+                {
+                    // Check if this MSLK entry has valid geometry and might belong to this building
+                    if (mslkEntry.MspiFirstIndex >= 0 && mslkEntry.MspiIndexCount > 0)
+                    {
+                        // Heuristic: include structural elements that seem related to this building
+                        // This is a simplified approach - in reality we'd need more sophisticated linking
+                        bool includeInBuilding = false;
+                        
+                        // Strategy 1: Check if Unknown_0x04 matches a pattern related to buildingId
+                        if (mslkEntry.Unknown_0x04 == buildingId || 
+                            (mslkEntry.Unknown_0x04 % 100) == (buildingId % 100)) // Rough heuristic
+                        {
+                            includeInBuilding = true;
+                        }
+                        
+                        // Strategy 2: For now, include some structural elements in each building
+                        // This ensures we get structural data while we refine the linking
+                        if (!includeInBuilding && structuralElementsCount < 20) // Limit per building
+                        {
+                            includeInBuilding = (mslkEntry.Unknown_0x04 % (buildingIndex + 1)) == 0;
+                        }
+                        
+                        if (includeInBuilding)
+                        {
+                            // Extract MSLK geometry 
+                            var validIndices = new List<int>();
+                            for (int i = mslkEntry.MspiFirstIndex; i < mslkEntry.MspiFirstIndex + mslkEntry.MspiIndexCount && i < pm4File.MSPI.Indices.Count; i++)
+                            {
+                                uint mspvIndex = pm4File.MSPI.Indices[i];
+                                if (mspvIndex < pm4File.MSPV.Vertices.Count)
+                                {
+                                    validIndices.Add((int)mspvIndex);
+                                }
+                            }
+                            
+                            // Create triangular faces from structural points
+                            for (int i = 0; i < validIndices.Count - 2; i += 3)
+                            {
+                                if (i + 2 < validIndices.Count)
+                                {
+                                    building.TriangleIndices.Add(validIndices[i]);
+                                    building.TriangleIndices.Add(validIndices[i + 1]);
+                                    building.TriangleIndices.Add(validIndices[i + 2]);
+                                    structuralElementsCount++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // === STEP 3: ADD MSVT VERTICES (RENDER VERTICES) ===
+            var renderVertexOffset = building.Vertices.Count;
             foreach (var vertex in pm4File.MSVT.Vertices)
             {
                 var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(vertex);
                 building.Vertices.Add(worldCoords);
             }
             
-            // === ADD ONLY THE LINKED MSUR SURFACES ===
+            // === STEP 4: ADD ONLY THE LINKED MSUR SURFACES (FIXED FACE PROCESSING) ===
+            var renderSurfacesCount = 0;
             foreach (int surfaceIndex in surfaceIndices)
             {
                 if (surfaceIndex >= pm4File.MSUR.Entries.Count) continue;
                 
                 var surface = pm4File.MSUR.Entries[surfaceIndex];
+                if (surface.IndexCount < 3) continue; // Skip invalid surfaces
                 
-                // Create triangular faces from the surface
-                for (int i = (int)surface.MsviFirstIndex; i < surface.MsviFirstIndex + surface.IndexCount - 2; i += 3)
+                // FIXED: Proper face processing for different surface types
+                if (surface.IndexCount == 3)
                 {
-                    if (i + 2 >= pm4File.MSVI.Indices.Count) break;
-                    
-                    uint v1Index = pm4File.MSVI.Indices[i];
-                    uint v2Index = pm4File.MSVI.Indices[i + 1];
-                    uint v3Index = pm4File.MSVI.Indices[i + 2];
-                    
-                    if (v1Index < pm4File.MSVT.Vertices.Count && 
-                        v2Index < pm4File.MSVT.Vertices.Count && 
-                        v3Index < pm4File.MSVT.Vertices.Count)
+                    // Triangle - add directly
+                    if (surface.MsviFirstIndex + 2 < pm4File.MSVI.Indices.Count)
                     {
-                        building.TriangleIndices.Add((int)v1Index);
-                        building.TriangleIndices.Add((int)v2Index);
-                        building.TriangleIndices.Add((int)v3Index);
+                        uint v1Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex];
+                        uint v2Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + 1];
+                        uint v3Index = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + 2];
+                        
+                        if (v1Index < pm4File.MSVT.Vertices.Count && 
+                            v2Index < pm4File.MSVT.Vertices.Count && 
+                            v3Index < pm4File.MSVT.Vertices.Count)
+                        {
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v1Index);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v2Index);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v3Index);
+                            renderSurfacesCount++;
+                        }
+                    }
+                }
+                else if (surface.IndexCount == 4)
+                {
+                    // Quad - triangulate into 2 triangles
+                    if (surface.MsviFirstIndex + 3 < pm4File.MSVI.Indices.Count)
+                    {
+                        uint v1 = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex];
+                        uint v2 = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + 1];
+                        uint v3 = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + 2];
+                        uint v4 = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + 3];
+                        
+                        if (v1 < pm4File.MSVT.Vertices.Count && v2 < pm4File.MSVT.Vertices.Count && 
+                            v3 < pm4File.MSVT.Vertices.Count && v4 < pm4File.MSVT.Vertices.Count)
+                        {
+                            // First triangle: v1, v2, v3
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v1);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v2);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v3);
+                            
+                            // Second triangle: v1, v3, v4
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v1);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v3);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)v4);
+                            renderSurfacesCount++;
+                        }
+                    }
+                }
+                else if (surface.IndexCount > 4)
+                {
+                    // Polygon - fan triangulation
+                    if (surface.MsviFirstIndex + surface.IndexCount - 1 < pm4File.MSVI.Indices.Count)
+                    {
+                        var indices = new List<uint>();
+                        for (int i = 0; i < surface.IndexCount; i++)
+                        {
+                            uint vIndex = pm4File.MSVI.Indices[(int)surface.MsviFirstIndex + i];
+                            if (vIndex < pm4File.MSVT.Vertices.Count)
+                                indices.Add(vIndex);
+                        }
+                        
+                        // Fan triangulation from first vertex
+                        for (int i = 1; i < indices.Count - 1; i++)
+                        {
+                            building.TriangleIndices.Add(renderVertexOffset + (int)indices[0]);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)indices[i]);
+                            building.TriangleIndices.Add(renderVertexOffset + (int)indices[i + 1]);
+                        }
+                        renderSurfacesCount++;
                     }
                 }
             }
+            
+            // === STEP 5: ADD METADATA ===
+            building.Metadata["BuildingID"] = $"0x{buildingId:X8}";
+            building.Metadata["StructuralElements"] = structuralElementsCount;
+            building.Metadata["RenderSurfaces"] = renderSurfacesCount;
+            building.Metadata["StructuralVertices"] = structuralVertexOffset;
+            building.Metadata["RenderVertices"] = building.Vertices.Count - renderVertexOffset;
             
             return building;
         }
@@ -7679,6 +7824,132 @@ namespace WoWToolbox.Tests.Navigation.PM4
             }
             
             return building;
+        }
+
+        [Fact]
+        public void TestFlexibleMethod_OnMultiplePM4Files()
+        {
+            Console.WriteLine("--- TESTING FLEXIBLE METHOD ON MULTIPLE PM4 FILES ---");
+            
+            // List of PM4 files to test
+            var testFiles = new[]
+            {
+                "development_00_00.pm4", // Has MDSF/MDOS - our known working case
+                "development_14_38.pm4", 
+                "development_15_39.pm4",
+                "development_21_38.pm4",
+                "development_28_15.pm4",
+                "development_40_50.pm4",
+                "development_48_18.pm4",
+                "development_53_22.pm4"
+            };
+            
+            string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Multi_PM4_Compatibility_Test");
+            Directory.CreateDirectory(outputDir);
+            
+            int successfulExports = 0;
+            int totalFiles = 0;
+            
+            foreach (string filename in testFiles)
+            {
+                string inputFilePath = Path.Combine(TestDataRoot, "original_development", filename);
+                if (!File.Exists(inputFilePath))
+                {
+                    Console.WriteLine($"❌ File not found: {filename}");
+                    continue;
+                }
+                
+                totalFiles++;
+                Console.WriteLine($"\n📁 Testing: {filename}");
+                
+                try
+                {
+                    var pm4File = PM4File.FromFile(inputFilePath);
+                    string sourceFileName = Path.GetFileNameWithoutExtension(inputFilePath);
+                    
+                    // Check chunk availability
+                    bool hasMslk = pm4File.MSLK?.Entries?.Count > 0;
+                    bool hasMsur = pm4File.MSUR?.Entries?.Count > 0;
+                    bool hasMdsf = pm4File.MDSF?.Entries?.Count > 0;
+                    bool hasMdos = pm4File.MDOS?.Entries?.Count > 0;
+                    
+                    Console.WriteLine($"  MSLK: {pm4File.MSLK?.Entries?.Count ?? 0} entries");
+                    Console.WriteLine($"  MSUR: {pm4File.MSUR?.Entries?.Count ?? 0} surfaces");
+                    Console.WriteLine($"  MDSF: {pm4File.MDSF?.Entries?.Count ?? 0} links");
+                    Console.WriteLine($"  MDOS: {pm4File.MDOS?.Entries?.Count ?? 0} buildings");
+                    Console.WriteLine($"  MSVT: {pm4File.MSVT?.Vertices?.Count ?? 0} vertices");
+                    Console.WriteLine($"  MSPV: {pm4File.MSPV?.Vertices?.Count ?? 0} structure vertices");
+                    
+                    if (!hasMslk || !hasMsur)
+                    {
+                        Console.WriteLine($"  ❌ Missing essential chunks (MSLK or MSUR)");
+                        continue;
+                    }
+                    
+                    // === DETERMINE EXPORT STRATEGY ===
+                    bool hasMdsfMdos = hasMdsf && hasMdos;
+                    Console.WriteLine($"  📋 Strategy: {(hasMdsfMdos ? "MDSF/MDOS Building IDs" : "MSLK Root Node Groups")}");
+                    
+                    // Find self-referencing MSLK entries (potential building roots)
+                    var selfRefEntries = pm4File.MSLK.Entries
+                        .Select((entry, index) => new { Entry = entry, Index = index })
+                        .Where(x => x.Entry.Unknown_0x04 == x.Index)
+                        .ToList();
+                    
+                    Console.WriteLine($"  🏗️ Self-referencing MSLK entries: {selfRefEntries.Count}");
+                    
+                    if (hasMdsfMdos)
+                    {
+                        // Count buildings via MDSF/MDOS system
+                        var buildingGroups = new Dictionary<uint, int>();
+                        
+                        for (int msurIndex = 0; msurIndex < pm4File.MSUR.Entries.Count; msurIndex++)
+                        {
+                            var mdsfEntry = pm4File.MDSF.Entries.FirstOrDefault(entry => entry.msur_index == msurIndex);
+                            
+                            if (mdsfEntry != null && mdsfEntry.mdos_index < pm4File.MDOS.Entries.Count)
+                            {
+                                var mdosEntry = pm4File.MDOS.Entries[(int)mdsfEntry.mdos_index];
+                                var buildingId = mdosEntry.m_destructible_building_index;
+                                
+                                buildingGroups[buildingId] = buildingGroups.GetValueOrDefault(buildingId, 0) + 1;
+                            }
+                        }
+                        
+                        Console.WriteLine($"  🏢 Buildings via MDSF/MDOS: {buildingGroups.Count}");
+                        foreach (var building in buildingGroups.Take(3))
+                        {
+                            Console.WriteLine($"    Building 0x{building.Key:X8}: {building.Value} surfaces");
+                        }
+                    }
+                    
+                    // Test if flexible method would handle this file
+                    if (selfRefEntries.Count > 0 || hasMdsfMdos)
+                    {
+                        Console.WriteLine($"  ✅ Compatible - Would export {(hasMdsfMdos ? "MDSF/MDOS buildings" : $"{selfRefEntries.Count} MSLK root buildings")}");
+                        successfulExports++;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  ❓ Questionable - No self-referencing MSLK entries or MDSF/MDOS system");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  ❌ Error processing {filename}: {ex.Message}");
+                }
+            }
+            
+            Console.WriteLine($"\n📊 COMPATIBILITY SUMMARY:");
+            Console.WriteLine($"  Total files tested: {totalFiles}");
+            Console.WriteLine($"  Compatible files: {successfulExports}");
+            Console.WriteLine($"  Compatibility rate: {(double)successfulExports / totalFiles * 100:F1}%");
+            
+            // Create summary file
+            var summaryPath = Path.Combine(outputDir, "pm4_compatibility_summary.txt");
+            File.WriteAllText(summaryPath, $"PM4 Flexible Export Compatibility Test\n\nTested {totalFiles} files\nCompatible: {successfulExports}\nRate: {(double)successfulExports / totalFiles * 100:F1}%");
+            
+            Console.WriteLine("--- MULTI-PM4 COMPATIBILITY TEST END ---");
         }
 
     } // End PM4FileTests class
