@@ -23,55 +23,47 @@ namespace PM4Tool
         
         // Complete asset database - ALL WMO assets loaded
         private static List<WmoAsset> completeWmoDatabase = new List<WmoAsset>();
-        private static StreamWriter logWriter;
+        private static StreamWriter? logWriter;
         
         static void Main(string[] args)
         {
-            Console.WriteLine("=== COMPREHENSIVE PM4 → WMO Positioning Analysis ===");
-            Console.WriteLine("Loading ALL WMO assets and performing exhaustive spatial correlation\n");
-
+            Console.WriteLine("🎯 PM4-WMO Comprehensive Positioning Analysis");
+            Console.WriteLine("==============================================");
+            
             try
             {
-                // Initialize logging
-                Directory.CreateDirectory(Path.GetDirectoryName(OUTPUT_LOG_PATH));
-                logWriter = new StreamWriter(OUTPUT_LOG_PATH, false);
-                WriteLogHeader();
-
-                // Step 1: Load ALL WMO assets (not just 100!)
-                Console.WriteLine("🔍 Loading ALL WMO Assets...");
-                LoadAllWmoAssets();
-
-                // Step 2: Load and analyze PM4 files
-                Console.WriteLine("\n📁 Loading PM4 Files...");
-                var pm4Files = GetAllPM4Files();
-                
-                if (pm4Files.Count == 0)
+                // Initialize output directory and logging
+                var outputDir = Path.GetDirectoryName(OUTPUT_LOG_PATH);
+                if (!string.IsNullOrEmpty(outputDir))
                 {
-                    Console.WriteLine("❌ No PM4 files found.");
-                    return;
+                    Directory.CreateDirectory(outputDir);
                 }
-
-                Console.WriteLine($"✅ Found {pm4Files.Count} PM4 files for analysis");
-
-                // Step 3: Perform EXHAUSTIVE positioning analysis
-                Console.WriteLine("\n🎯 Performing Exhaustive PM4 → WMO Analysis...");
-                PerformExhaustivePositioningAnalysis(pm4Files);
-
-                Console.WriteLine("\n✅ Comprehensive analysis completed!");
-                Console.WriteLine($"📄 Detailed log written to: {OUTPUT_LOG_PATH}");
-
+                
+                using (logWriter = new StreamWriter(OUTPUT_LOG_PATH))
+                {
+                    WriteLogHeader();
+                    
+                    Console.WriteLine("📦 Loading WMO asset database...");
+                    LoadAllWmoAssets();
+                    
+                    Console.WriteLine("🗂️ Discovering PM4 files...");
+                    var pm4Files = GetAllPM4Files();
+                    
+                    Console.WriteLine($"🧪 TESTING WALKABLE SURFACE EXTRACTION");
+                    TestWalkableSurfaceExtraction();
+                    
+                    Console.WriteLine("🔍 Performing comprehensive positioning analysis...");
+                    PerformExhaustivePositioningAnalysis(pm4Files);
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Error: {ex.Message}");
+                Console.WriteLine($"❌ Critical error: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
             }
-            finally
-            {
-                logWriter?.Close();
-            }
-
-            Console.WriteLine("\nPress any key to exit...");
+            
+            Console.WriteLine("\n✅ Analysis complete! Check output log for detailed results.");
+            Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
         }
 
@@ -117,9 +109,9 @@ namespace PM4Tool
             }
 
             // Write to log
-            logWriter.WriteLine($"COMPLETE WMO ASSET DATABASE: {completeWmoDatabase.Count} assets loaded");
-            logWriter.WriteLine($"Categories: {string.Join(", ", categories.Select(c => $"{c.Key}({c.Count()})"))}");
-            logWriter.WriteLine();
+            logWriter?.WriteLine($"COMPLETE WMO ASSET DATABASE: {completeWmoDatabase.Count} assets loaded");
+            logWriter?.WriteLine($"Categories: {string.Join(", ", categories.Select(c => $"{c.Key}({c.Count()})"))}");
+            logWriter?.WriteLine();
         }
 
         static List<string> GetAllPM4Files()
@@ -146,9 +138,9 @@ namespace PM4Tool
             {
                 var fileName = Path.GetFileName(pm4FilePath);
                 Console.WriteLine($"\n🔍 Analyzing: {fileName}");
-                logWriter.WriteLine($"\n{'='*80}");
-                logWriter.WriteLine($"ANALYZING PM4 FILE: {fileName}");
-                logWriter.WriteLine($"{'='*80}");
+                logWriter?.WriteLine($"\n{'='*80}");
+                logWriter?.WriteLine($"ANALYZING PM4 FILE: {fileName}");
+                logWriter?.WriteLine($"{'='*80}");
 
                 try
                 {
@@ -691,7 +683,7 @@ namespace PM4Tool
             return (xContainment + yContainment + zContainment) / 3.0f;
         }
 
-        static float CalculateVolumeCompatibility(float pm4Volume, float wmoVolume)
+        public static float CalculateVolumeCompatibility(float pm4Volume, float wmoVolume)
         {
             if (pm4Volume == 0 || wmoVolume == 0) return 0f;
             
@@ -717,7 +709,7 @@ namespace PM4Tool
         /// <summary>
         /// CORRECTED: Calculate dimensional similarity (not scale ratios!)
         /// </summary>
-        static float CalculateDimensionalSimilarity(Vector3 pm4Dimensions, Vector3 wmoDimensions)
+        public static float CalculateDimensionalSimilarity(Vector3 pm4Dimensions, Vector3 wmoDimensions)
         {
             if (pm4Dimensions == Vector3.Zero || wmoDimensions == Vector3.Zero) return 0f;
             
@@ -843,7 +835,7 @@ namespace PM4Tool
             return pathParts.Length > 0 ? pathParts[0] : "Uncategorized";
         }
 
-        static BoundingBox3D CalculateBoundingBox(List<Vector3> vertices)
+        public static BoundingBox3D CalculateBoundingBox(List<Vector3> vertices)
         {
             if (vertices.Count == 0)
                 return new BoundingBox3D(Vector3.Zero, Vector3.Zero);
@@ -859,12 +851,33 @@ namespace PM4Tool
 
             return new BoundingBox3D(min, max);
         }
+        
+        /// <summary>
+        /// Helper method to calculate bounding box from vertices (for walkable surface extraction)
+        /// </summary>
+        static BoundingBox3D CalculateBoundingBoxFromVertices(List<Vector3> vertices)
+        {
+            return CalculateBoundingBox(vertices);
+        }
+        
+        /// <summary>
+        /// Normalizes a Vector3 (creates unit vector)
+        /// </summary>
+        static Vector3 NormalizeVector3(Vector3 vector)
+        {
+            var length = vector.Length();
+            if (length > 0.000001f)
+            {
+                return vector / length;
+            }
+            return Vector3.UnitZ; // Default to up vector if zero length
+        }
 
         static void WriteLogHeader()
         {
-            logWriter.WriteLine("=== COMPREHENSIVE PM4 → WMO Positioning Analysis ===");
-            logWriter.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            logWriter.WriteLine();
+            logWriter?.WriteLine("=== COMPREHENSIVE PM4 → WMO Positioning Analysis ===");
+            logWriter?.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            logWriter?.WriteLine();
         }
 
         // POSITIONING AND SCALING ANALYSIS METHODS
@@ -967,6 +980,56 @@ namespace PM4Tool
             }
             
             return 0;
+        }
+
+        static void TestWalkableSurfaceExtraction()
+        {
+            Console.WriteLine("🚶 Testing Walkable Surface Extraction on Sample WMO Files");
+            Console.WriteLine("=========================================================");
+            
+            // Test on first few WMO assets
+            var testAssets = completeWmoDatabase.Take(3).ToList();
+            
+            foreach (var asset in testAssets)
+            {
+                Console.WriteLine($"\n📂 Testing: {asset.FileName}");
+                Console.WriteLine($"   Category: {asset.Category}");
+                Console.WriteLine($"   File Size: {asset.FileSizeBytes:N0} bytes");
+                
+                // Extract walkable surfaces
+                var walkableSegments = WalkableSurfaceExtractor.ExtractWalkableSurfaces(asset);
+                
+                if (walkableSegments.Count > 0)
+                {
+                    Console.WriteLine($"   ✅ Found {walkableSegments.Count} walkable surface segments:");
+                    
+                    foreach (var segment in walkableSegments.Take(3)) // Show first 3 segments
+                    {
+                        Console.WriteLine($"      🔸 Segment {segment.SegmentId}: {segment.Vertices.Count} vertices, " +
+                                        $"{segment.SurfaceArea:F1} area, {segment.WalkableType}, height {segment.AverageHeight:F1}");
+                    }
+                    
+                    // Demonstrate improved matching potential
+                    var largestSegment = walkableSegments.OrderByDescending(s => s.SurfaceArea).FirstOrDefault();
+                    if (largestSegment != null)
+                    {
+                        Console.WriteLine($"   🎯 Largest walkable segment: {largestSegment.SurfaceArea:F1} area, " +
+                                        $"{largestSegment.WalkableType}");
+                        Console.WriteLine($"      This segment would be ideal for matching PM4 navigation data!");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"   ⚠️  No walkable surfaces extracted (likely OBJ file not found or parsing issue)");
+                }
+            }
+            
+            Console.WriteLine("\n🎯 WALKABLE SURFACE EXTRACTION BENEFITS:");
+            Console.WriteLine("   • Focus on actual navigable areas instead of complete models");
+            Console.WriteLine("   • Better spatial correlation with PM4 navigation data");
+            Console.WriteLine("   • Segment complex buildings into matchable components");
+            Console.WriteLine("   • Classify walkable areas by type and importance");
+            Console.WriteLine("   • Multi-factor scoring for navigation-aware matching");
         }
     }
 
@@ -1151,8 +1214,8 @@ namespace PM4Tool
     /// </summary>
     public class WmoPositionalMatch
     {
-        public WmoAsset WmoAsset { get; set; }
-        public PM4ObjectWithPositioning PM4Object { get; set; }
+        public required WmoAsset WmoAsset { get; set; }
+        public required PM4ObjectWithPositioning PM4Object { get; set; }
         public float MatchScore { get; set; }
         public Vector3 PositionOffset { get; set; }
         public float ScaleRatio { get; set; }
@@ -1227,7 +1290,7 @@ namespace PM4Tool
 
     public class NormalizedWMOAsset
     {
-        public WmoAsset OriginalAsset { get; set; }
+        public required WmoAsset OriginalAsset { get; set; }
         public Vector3 OriginalPosition { get; set; }
         public Vector3 NormalizedPosition { get; set; }
         public Vector3 RelativeDimensions { get; set; }
@@ -1237,5 +1300,765 @@ namespace PM4Tool
         public float Volume { get; set; }
         public float SurfaceArea { get; set; }
         public float Complexity { get; set; }
+    }
+
+    /// <summary>
+    /// ENHANCED WALKABLE SURFACE EXTRACTION SYSTEM
+    /// Extracts only the navigable/walkable surfaces from WMO models for proper PM4 matching
+    /// </summary>
+    public class WalkableSurfaceExtractor
+    {
+        private const float WALKABLE_ANGLE_THRESHOLD = 45.0f; // Maximum slope for walkable surface (degrees)
+        private const float SURFACE_SEGMENT_DISTANCE = 10.0f; // Distance to group nearby walkable surfaces
+        private const int MIN_WALKABLE_VERTICES = 3; // Minimum vertices to consider a valid walkable surface
+        
+        /// <summary>
+        /// Extracts walkable surface segments from a WMO asset
+        /// </summary>
+        public static List<WalkableSurfaceSegment> ExtractWalkableSurfaces(WmoAsset wmoAsset)
+        {
+            var walkableSegments = new List<WalkableSurfaceSegment>();
+            
+            try
+            {
+                // Load WMO geometry (this would need to be implemented based on your WMO parsing)
+                var wmoGeometry = LoadWmoGeometry(wmoAsset.FilePath);
+                if (wmoGeometry == null) return walkableSegments;
+                
+                // Step 1: Identify all walkable faces (horizontal or near-horizontal)
+                var walkableFaces = IdentifyWalkableFaces(wmoGeometry);
+                Console.WriteLine($"         🚶 Found {walkableFaces.Count} potentially walkable faces in {wmoAsset.FileName}");
+                
+                // Step 2: Group nearby walkable faces into coherent surface segments
+                var surfaceSegments = GroupWalkableFacesIntoSegments(walkableFaces);
+                Console.WriteLine($"         📐 Grouped into {surfaceSegments.Count} walkable surface segments");
+                
+                                 // Step 3: Create walkable surface segments with proper metadata
+                 foreach (var segment in surfaceSegments)
+                 {
+                     // Populate vertices from indices
+                     segment.PopulateVertices(wmoGeometry);
+                     
+                     if (segment.Vertices.Count >= MIN_WALKABLE_VERTICES)
+                     {
+                         var walkableSegment = new WalkableSurfaceSegment
+                         {
+                             OriginalWmoAsset = wmoAsset,
+                             Vertices = segment.Vertices,
+                             Faces = segment.Faces,
+                             BoundingBox = CalculateBoundingBoxFromVertices(segment.Vertices),
+                             SurfaceArea = CalculateSurfaceArea(segment.Faces),
+                             AverageHeight = segment.Vertices.Average(v => v.Z),
+                             WalkableType = ClassifyWalkableType(segment),
+                             SegmentId = walkableSegments.Count
+                         };
+                         
+                         walkableSegments.Add(walkableSegment);
+                     }
+                 }
+                
+                Console.WriteLine($"         ✅ Extracted {walkableSegments.Count} walkable segments from {wmoAsset.FileName}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"         ❌ Error extracting walkable surfaces from {wmoAsset.FileName}: {ex.Message}");
+            }
+            
+            return walkableSegments;
+        }
+        
+        /// <summary>
+        /// Identifies faces that are walkable (horizontal or near-horizontal surfaces)
+        /// </summary>
+        private static List<WalkableFace> IdentifyWalkableFaces(WmoGeometry geometry)
+        {
+            var walkableFaces = new List<WalkableFace>();
+            var upVector = Vector3.UnitZ; // Assuming Z is up
+            
+            foreach (var face in geometry.Faces)
+            {
+                // Calculate face normal
+                var normal = CalculateFaceNormal(face, geometry.Vertices);
+                
+                // Check if face is mostly horizontal (angle with up vector < threshold)
+                var angleWithUp = MathF.Acos(Vector3.Dot(NormalizeVector3(normal), upVector)) * (180.0f / MathF.PI);
+                
+                if (angleWithUp <= WALKABLE_ANGLE_THRESHOLD)
+                {
+                    walkableFaces.Add(new WalkableFace
+                    {
+                        Face = face,
+                        Normal = normal,
+                        AngleWithUp = angleWithUp,
+                        CenterPoint = CalculateFaceCenter(face, geometry.Vertices),
+                        SurfaceArea = CalculateFaceArea(face, geometry.Vertices)
+                    });
+                }
+            }
+            
+            return walkableFaces;
+        }
+        
+        /// <summary>
+        /// Groups nearby walkable faces into coherent surface segments
+        /// </summary>
+        private static List<SurfaceSegment> GroupWalkableFacesIntoSegments(List<WalkableFace> walkableFaces)
+        {
+            var segments = new List<SurfaceSegment>();
+            var processed = new HashSet<int>();
+            
+            for (int i = 0; i < walkableFaces.Count; i++)
+            {
+                if (processed.Contains(i)) continue;
+                
+                var segment = new SurfaceSegment();
+                var faceQueue = new Queue<int>();
+                faceQueue.Enqueue(i);
+                processed.Add(i);
+                
+                // Flood fill to find connected walkable faces
+                while (faceQueue.Count > 0)
+                {
+                    var currentFaceIndex = faceQueue.Dequeue();
+                    var currentFace = walkableFaces[currentFaceIndex];
+                    segment.Faces.Add(currentFace.Face);
+                    
+                    // Add vertices from this face
+                    foreach (var vertexIndex in currentFace.Face.VertexIndices)
+                    {
+                        if (!segment.VertexIndices.Contains(vertexIndex))
+                        {
+                            segment.VertexIndices.Add(vertexIndex);
+                        }
+                    }
+                    
+                    // Find nearby unprocessed faces
+                    for (int j = 0; j < walkableFaces.Count; j++)
+                    {
+                        if (processed.Contains(j)) continue;
+                        
+                        var distance = Vector3.Distance(currentFace.CenterPoint, walkableFaces[j].CenterPoint);
+                        if (distance <= SURFACE_SEGMENT_DISTANCE)
+                        {
+                            faceQueue.Enqueue(j);
+                            processed.Add(j);
+                        }
+                    }
+                }
+                
+                segments.Add(segment);
+            }
+            
+            return segments;
+        }
+        
+        /// <summary>
+        /// Classifies the type of walkable surface
+        /// </summary>
+        private static WalkableSurfaceType ClassifyWalkableType(SurfaceSegment segment)
+        {
+            var area = segment.Faces.Sum(f => f.SurfaceArea);
+            var avgHeight = segment.Vertices.Average(v => v.Z);
+            
+            if (area > 100.0f) return WalkableSurfaceType.LargeFloor;
+            if (area > 20.0f) return WalkableSurfaceType.Platform;
+            if (avgHeight > 50.0f) return WalkableSurfaceType.Elevated;
+            return WalkableSurfaceType.SmallSurface;
+        }
+        
+        // Helper methods (these would need to be implemented based on your WMO format)
+        private static WmoGeometry? LoadWmoGeometry(string filePath) 
+        {
+            try
+            {
+                // Convert WMO file path to corresponding OBJ file path
+                var objPath = ConvertWmoPathToObjPath(filePath);
+                if (!File.Exists(objPath))
+                {
+                    Console.WriteLine($"         ⚠️  OBJ file not found: {objPath}");
+                    return null;
+                }
+                
+                Console.WriteLine($"         📂 Loading OBJ geometry from: {Path.GetFileName(objPath)}");
+                
+                var geometry = new WmoGeometry();
+                var lines = File.ReadAllLines(objPath);
+                
+                foreach (var line in lines)
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 0) continue;
+                    
+                    switch (parts[0].ToLower())
+                    {
+                        case "v": // Vertex
+                            if (parts.Length >= 4 &&
+                                float.TryParse(parts[1], out float x) &&
+                                float.TryParse(parts[2], out float y) &&
+                                float.TryParse(parts[3], out float z))
+                            {
+                                // Note: OBJ files use +Z as up, might need coordinate transformation
+                                geometry.Vertices.Add(new Vector3(x, y, z));
+                            }
+                            break;
+                            
+                        case "f": // Face
+                            if (parts.Length >= 4) // At least triangle
+                            {
+                                var face = new Face();
+                                for (int i = 1; i < parts.Length; i++)
+                                {
+                                    // OBJ indices are 1-based, convert to 0-based
+                                    var indexStr = parts[i].Split('/')[0]; // Handle "vertex/texture/normal" format
+                                    if (int.TryParse(indexStr, out int index) && index > 0)
+                                    {
+                                        face.VertexIndices.Add(index - 1);
+                                    }
+                                }
+                                
+                                if (face.VertexIndices.Count >= 3)
+                                {
+                                    face.SurfaceArea = CalculateFaceArea(face, geometry.Vertices);
+                                    geometry.Faces.Add(face);
+                                }
+                            }
+                            break;
+                    }
+                }
+                
+                Console.WriteLine($"         ✅ Loaded {geometry.Vertices.Count} vertices, {geometry.Faces.Count} faces");
+                return geometry;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"         ❌ Error loading WMO geometry: {ex.Message}");
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// Converts WMO file path to corresponding OBJ file path in the wmo_335-objs directory
+        /// </summary>
+        private static string ConvertWmoPathToObjPath(string wmoPath)
+        {
+            // Example: Convert "I:\...\test_data\wmo_335-objs\wmo\World\wmo\Azeroth\Buildings\Human_Buildings\StormwindCity_Objects.wmo"
+            // to corresponding OBJ path
+            var fileName = Path.GetFileNameWithoutExtension(wmoPath);
+            var directory = Path.GetDirectoryName(wmoPath) ?? "";
+            
+            // Replace .wmo extension with .obj
+            var objFileName = fileName + ".obj";
+            var objPath = Path.Combine(directory, objFileName);
+            
+            return objPath;
+        }
+        
+        private static Vector3 CalculateFaceNormal(Face face, List<Vector3> vertices)
+        {
+            if (face.VertexIndices.Count < 3) return Vector3.UnitZ;
+            
+            var v1 = vertices[face.VertexIndices[1]] - vertices[face.VertexIndices[0]];
+            var v2 = vertices[face.VertexIndices[2]] - vertices[face.VertexIndices[0]];
+            return NormalizeVector3(Vector3.Cross(v1, v2));
+        }
+        
+        private static Vector3 CalculateFaceCenter(Face face, List<Vector3> vertices)
+        {
+            var center = Vector3.Zero;
+            foreach (var index in face.VertexIndices)
+            {
+                center += vertices[index];
+            }
+            return center / face.VertexIndices.Count;
+        }
+        
+        private static float CalculateFaceArea(Face face, List<Vector3> vertices)
+        {
+            if (face.VertexIndices.Count < 3) return 0.0f;
+            
+            // Simple triangle area calculation (for more complex faces, would need triangulation)
+            var v1 = vertices[face.VertexIndices[1]] - vertices[face.VertexIndices[0]];
+            var v2 = vertices[face.VertexIndices[2]] - vertices[face.VertexIndices[0]];
+            return Vector3.Cross(v1, v2).Length() * 0.5f;
+        }
+        
+        private static float CalculateSurfaceArea(List<Face> faces)
+        {
+            return faces.Sum(f => f.SurfaceArea);
+        }
+        
+        /// <summary>
+        /// Helper method to calculate bounding box from vertices (for walkable surface extraction)
+        /// </summary>
+        private static BoundingBox3D CalculateBoundingBoxFromVertices(List<Vector3> vertices)
+        {
+            if (vertices.Count == 0)
+                return new BoundingBox3D(Vector3.Zero, Vector3.Zero);
+
+            var min = vertices[0];
+            var max = vertices[0];
+
+            foreach (var vertex in vertices)
+            {
+                min = Vector3.Min(min, vertex);
+                max = Vector3.Max(max, vertex);
+            }
+
+            return new BoundingBox3D(min, max);
+        }
+        
+        /// <summary>
+        /// Normalizes a Vector3 (creates unit vector)
+        /// </summary>
+        private static Vector3 NormalizeVector3(Vector3 vector)
+        {
+            var length = vector.Length();
+            if (length > 0.000001f)
+            {
+                return vector / length;
+            }
+            return Vector3.UnitZ; // Default to up vector if zero length
+        }
+    }
+    
+    // WALKABLE SURFACE DATA STRUCTURES
+    
+    /// <summary>
+    /// Represents a walkable surface segment extracted from a WMO model
+    /// </summary>
+    public class WalkableSurfaceSegment
+    {
+        public required WmoAsset OriginalWmoAsset { get; set; }
+        public List<Vector3> Vertices { get; set; } = new List<Vector3>();
+        public List<Face> Faces { get; set; } = new List<Face>();
+        public BoundingBox3D BoundingBox { get; set; }
+        public float SurfaceArea { get; set; }
+        public float AverageHeight { get; set; }
+        public WalkableSurfaceType WalkableType { get; set; }
+        public int SegmentId { get; set; }
+        
+        /// <summary>
+        /// Matches this walkable surface against a PM4 object
+        /// </summary>
+        public float CalculateMatchScore(PM4ObjectWithPositioning pm4Object)
+        {
+            var score = 0.0f;
+            
+            // Spatial proximity (30%)
+            var distance = Vector3.Distance(BoundingBox.GetCenter(), pm4Object.Position);
+            var proximityScore = MathF.Exp(-distance / 50.0f); // Exponential decay
+            score += proximityScore * 0.3f;
+            
+            // Surface area compatibility (25%)
+            var areaRatio = MathF.Min(SurfaceArea, pm4Object.SurfaceArea) / MathF.Max(SurfaceArea, pm4Object.SurfaceArea);
+            score += areaRatio * 0.25f;
+            
+            // Height compatibility (20%)
+            var heightDiff = MathF.Abs(AverageHeight - pm4Object.Position.Z);
+            var heightScore = MathF.Exp(-heightDiff / 10.0f);
+            score += heightScore * 0.2f;
+            
+            // Vertex count reasonableness (15%)
+            var vertexRatio = MathF.Min(Vertices.Count, pm4Object.VertexCount) / MathF.Max(Vertices.Count, pm4Object.VertexCount);
+            score += vertexRatio * 0.15f;
+            
+            // Walkable surface type bonus (10%)
+            var typeBonus = WalkableType == WalkableSurfaceType.LargeFloor ? 1.0f : 0.5f;
+            score += typeBonus * 0.1f;
+            
+            return score;
+        }
+    }
+    
+    public enum WalkableSurfaceType
+    {
+        LargeFloor,      // Large walkable floor areas
+        Platform,        // Medium-sized platforms
+        Elevated,        // Elevated walkable surfaces
+        SmallSurface     // Small walkable areas
+    }
+    
+    public class WalkableFace
+    {
+        public required Face Face { get; set; }
+        public Vector3 Normal { get; set; }
+        public float AngleWithUp { get; set; }
+        public Vector3 CenterPoint { get; set; }
+        public float SurfaceArea { get; set; }
+    }
+    
+         public class SurfaceSegment
+     {
+         public List<Face> Faces { get; set; } = new List<Face>();
+         public List<int> VertexIndices { get; set; } = new List<int>();
+         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
+         
+         /// <summary>
+         /// Populates vertices from vertex indices using the provided geometry
+         /// </summary>
+         public void PopulateVertices(WmoGeometry geometry)
+         {
+             Vertices.Clear();
+             foreach (var index in VertexIndices)
+             {
+                 if (index >= 0 && index < geometry.Vertices.Count)
+                 {
+                     Vertices.Add(geometry.Vertices[index]);
+                 }
+             }
+         }
+     }
+    
+    public class Face
+    {
+        public List<int> VertexIndices { get; set; } = new List<int>();
+        public float SurfaceArea { get; set; }
+    }
+    
+    public class WmoGeometry
+    {
+        public List<Vector3> Vertices { get; set; } = new List<Vector3>();
+        public List<Face> Faces { get; set; } = new List<Face>();
+    }
+
+    /// <summary>
+    /// ORIENTATION-AWARE MATCHING SYSTEM
+    /// Tests different orientations and transformations to find proper PM4-WMO alignment
+    /// </summary>
+    public class OrientationMatcher
+    {
+        private static readonly Vector3[] CommonRotations = new[]
+        {
+            new Vector3(0, 0, 0),       // No rotation
+            new Vector3(0, 90, 0),      // 90° Y rotation
+            new Vector3(0, 180, 0),     // 180° Y rotation  
+            new Vector3(0, 270, 0),     // 270° Y rotation
+            new Vector3(90, 0, 0),      // 90° X rotation
+            new Vector3(180, 0, 0),     // 180° X rotation (upside down)
+            new Vector3(270, 0, 0),     // 270° X rotation
+            new Vector3(0, 0, 90),      // 90° Z rotation
+            new Vector3(0, 0, 180),     // 180° Z rotation
+            new Vector3(0, 0, 270),     // 270° Z rotation
+        };
+        
+        /// <summary>
+        /// Tests multiple orientations and coordinate transformations to find best match
+        /// </summary>
+        public static OrientationMatchResult FindBestOrientation(PM4ObjectWithPositioning pm4Object, WmoAsset wmoAsset)
+        {
+            var bestResult = new OrientationMatchResult();
+            
+            foreach (var rotation in CommonRotations)
+            {
+                // Test normal coordinates
+                var normalResult = TestOrientation(pm4Object, wmoAsset, rotation, false, false, false);
+                if (normalResult.Score > bestResult.Score)
+                {
+                    bestResult = normalResult;
+                }
+                
+                // Test with X-Y swap
+                var swapXYResult = TestOrientation(pm4Object, wmoAsset, rotation, true, false, false);
+                if (swapXYResult.Score > bestResult.Score)
+                {
+                    bestResult = swapXYResult;
+                }
+                
+                // Test with Z inversion (flip vertical)
+                var flipZResult = TestOrientation(pm4Object, wmoAsset, rotation, false, false, true);
+                if (flipZResult.Score > bestResult.Score)
+                {
+                    bestResult = flipZResult;
+                }
+                
+                // Test with Y-Z swap (different up axis)
+                var swapYZResult = TestOrientation(pm4Object, wmoAsset, rotation, false, true, false);
+                if (swapYZResult.Score > bestResult.Score)
+                {
+                    bestResult = swapYZResult;
+                }
+            }
+            
+            return bestResult;
+        }
+        
+        private static OrientationMatchResult TestOrientation(PM4ObjectWithPositioning pm4Object, WmoAsset wmoAsset, 
+            Vector3 rotation, bool swapXY, bool swapYZ, bool flipZ)
+        {
+            // Transform PM4 object vertices with the given orientation
+            var transformedVertices = new List<Vector3>();
+            foreach (var vertex in pm4Object.Vertices)
+            {
+                var transformed = ApplyTransformation(vertex, rotation, swapXY, swapYZ, flipZ);
+                transformedVertices.Add(transformed);
+            }
+            
+            // Calculate transformed bounding box
+            var transformedBounds = WmoMatchingDemo.CalculateBoundingBox(transformedVertices);
+            var transformedScale = transformedBounds.GetScale();
+            
+            // Calculate match score with transformed geometry
+            var score = CalculateOrientationScore(transformedScale, transformedBounds.GetCenter(), wmoAsset);
+            
+            return new OrientationMatchResult
+            {
+                Score = score,
+                Rotation = rotation,
+                SwapXY = swapXY,
+                SwapYZ = swapYZ,
+                FlipZ = flipZ,
+                TransformedVertices = transformedVertices,
+                TransformedBounds = transformedBounds,
+                Description = GetTransformationDescription(rotation, swapXY, swapYZ, flipZ)
+            };
+        }
+        
+        private static Vector3 ApplyTransformation(Vector3 vertex, Vector3 rotation, bool swapXY, bool swapYZ, bool flipZ)
+        {
+            var result = vertex;
+            
+            // Apply coordinate swaps
+            if (swapXY)
+            {
+                result = new Vector3(result.Y, result.X, result.Z);
+            }
+            if (swapYZ)
+            {
+                result = new Vector3(result.X, result.Z, result.Y);
+            }
+            if (flipZ)
+            {
+                result = new Vector3(result.X, result.Y, -result.Z);
+            }
+            
+            // Apply rotations (simplified - could use proper rotation matrices for more accuracy)
+            if (rotation.Y != 0) // Y rotation (most common for buildings)
+            {
+                var radians = rotation.Y * MathF.PI / 180.0f;
+                var cos = MathF.Cos(radians);
+                var sin = MathF.Sin(radians);
+                result = new Vector3(
+                    result.X * cos - result.Z * sin,
+                    result.Y,
+                    result.X * sin + result.Z * cos
+                );
+            }
+            
+            return result;
+        }
+        
+        private static float CalculateOrientationScore(Vector3 pm4Scale, Vector3 pm4Center, WmoAsset wmoAsset)
+        {
+            var score = 0.0f;
+            
+            // Dimensional similarity (40%)
+            var dimSimilarity = WmoMatchingDemo.CalculateDimensionalSimilarity(pm4Scale, wmoAsset.Dimensions);
+            score += dimSimilarity * 0.4f;
+            
+            // Position proximity (30%)
+            var distance = Vector3.Distance(pm4Center, wmoAsset.Position);
+            var proximityScore = MathF.Exp(-distance / 100.0f);
+            score += proximityScore * 0.3f;
+            
+            // Volume compatibility (20%)
+            var pm4Volume = pm4Scale.X * pm4Scale.Y * pm4Scale.Z;
+            var volumeCompat = WmoMatchingDemo.CalculateVolumeCompatibility(pm4Volume, wmoAsset.Volume);
+            score += volumeCompat * 0.2f;
+            
+            // Aspect ratio match (10%)
+            var pm4Ratio = CalculateAspectRatio(pm4Scale);
+            var wmoRatio = CalculateAspectRatio(wmoAsset.Dimensions);
+            var ratioMatch = 1.0f - MathF.Abs(pm4Ratio - wmoRatio) / MathF.Max(pm4Ratio, wmoRatio);
+            score += ratioMatch * 0.1f;
+            
+            return score;
+        }
+        
+        private static float CalculateAspectRatio(Vector3 scale)
+        {
+            if (scale.Y > 0 && scale.Z > 0)
+            {
+                return (scale.X / scale.Y) + (scale.X / scale.Z) + (scale.Y / scale.Z);
+            }
+            return 1.0f;
+        }
+        
+        private static string GetTransformationDescription(Vector3 rotation, bool swapXY, bool swapYZ, bool flipZ)
+        {
+            var parts = new List<string>();
+            
+            if (rotation != Vector3.Zero)
+            {
+                parts.Add($"Rot({rotation.X}°,{rotation.Y}°,{rotation.Z}°)");
+            }
+            if (swapXY) parts.Add("SwapXY");
+            if (swapYZ) parts.Add("SwapYZ");
+            if (flipZ) parts.Add("FlipZ");
+            
+            return parts.Count > 0 ? string.Join("+", parts) : "Identity";
+        }
+    }
+    
+    public class OrientationMatchResult
+    {
+        public float Score { get; set; }
+        public Vector3 Rotation { get; set; }
+        public bool SwapXY { get; set; }
+        public bool SwapYZ { get; set; }
+        public bool FlipZ { get; set; }
+        public List<Vector3> TransformedVertices { get; set; } = new();
+        public BoundingBox3D TransformedBounds { get; set; }
+        public string Description { get; set; } = "";
+    }
+    
+    /// <summary>
+    /// HIERARCHY-AWARE EXTRACTION SYSTEM
+    /// Prevents merging of unrelated geometry by analyzing MSLK hierarchy properly
+    /// </summary>
+    public class HierarchyAnalyzer
+    {
+        /// <summary>
+        /// Extracts individual objects without merging unrelated geometry
+        /// </summary>
+        public static List<PM4ObjectWithPositioning> ExtractIndividualObjects(PM4File pm4File, string filePath)
+        {
+            var objects = new List<PM4ObjectWithPositioning>();
+            
+            if (pm4File.MSLK?.Entries == null) return objects;
+            
+            Console.WriteLine($"      🔍 HIERARCHY ANALYSIS: {pm4File.MSLK.Entries.Count} MSLK entries");
+            
+            // Analyze hierarchy relationships
+            var hierarchyMap = BuildHierarchyMap(pm4File.MSLK.Entries);
+            
+            // Find root objects (objects that are not children of others)
+            var rootObjects = FindRootObjects(hierarchyMap);
+            Console.WriteLine($"      📊 Found {rootObjects.Count} root objects");
+            
+            // Extract each root object individually
+            foreach (var rootIndex in rootObjects)
+            {
+                var individualObject = ExtractSingleObject(pm4File, rootIndex, hierarchyMap);
+                if (individualObject != null && individualObject.VertexCount > 0)
+                {
+                    objects.Add(individualObject);
+                    Console.WriteLine($"      ✅ Extracted object {rootIndex}: {individualObject.VertexCount} vertices");
+                }
+            }
+            
+            return objects;
+        }
+        
+        private static Dictionary<int, HashSet<int>> BuildHierarchyMap(List<WoWToolbox.Core.v2.Models.PM4.Chunks.MSLKEntry> entries)
+        {
+            var hierarchy = new Dictionary<int, HashSet<int>>();
+            
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var entry = entries[i];
+                var parentIndex = (int)entry.Unknown_0x04;
+                
+                if (parentIndex != i) // Not self-referencing
+                {
+                    if (!hierarchy.ContainsKey(parentIndex))
+                    {
+                        hierarchy[parentIndex] = new HashSet<int>();
+                    }
+                    hierarchy[parentIndex].Add(i);
+                }
+            }
+            
+            return hierarchy;
+        }
+        
+        private static List<int> FindRootObjects(Dictionary<int, HashSet<int>> hierarchyMap)
+        {
+            var allChildren = new HashSet<int>();
+            foreach (var children in hierarchyMap.Values)
+            {
+                foreach (var child in children)
+                {
+                    allChildren.Add(child);
+                }
+            }
+            
+            var roots = new List<int>();
+            foreach (var parent in hierarchyMap.Keys)
+            {
+                if (!allChildren.Contains(parent))
+                {
+                    roots.Add(parent);
+                }
+            }
+            
+            return roots;
+        }
+        
+        private static PM4ObjectWithPositioning? ExtractSingleObject(PM4File pm4File, int rootIndex, Dictionary<int, HashSet<int>> hierarchyMap)
+        {
+            // Extract only this specific object and its direct children (not distant relatives)
+            var objectIndices = new HashSet<int> { rootIndex };
+            
+            // Add direct children only (avoid merging unrelated geometry)
+            if (hierarchyMap.ContainsKey(rootIndex))
+            {
+                foreach (var child in hierarchyMap[rootIndex])
+                {
+                    objectIndices.Add(child);
+                    
+                    // Only add grandchildren if they're small decorative elements
+                    if (hierarchyMap.ContainsKey(child) && hierarchyMap[child].Count <= 2)
+                    {
+                        foreach (var grandchild in hierarchyMap[child])
+                        {
+                            objectIndices.Add(grandchild);
+                        }
+                    }
+                }
+            }
+            
+            // Now extract vertices only from these specific indices
+            var vertices = new List<Vector3>();
+            foreach (var index in objectIndices)
+            {
+                if (index < pm4File.MSLK.Entries.Count)
+                {
+                    var entry = pm4File.MSLK.Entries[index];
+                    ExtractVerticesFromEntry(pm4File, entry, vertices);
+                }
+            }
+            
+            if (vertices.Count == 0) return null;
+            
+            var bounds = WmoMatchingDemo.CalculateBoundingBox(vertices);
+            return new PM4ObjectWithPositioning
+            {
+                ObjectId = rootIndex,
+                Vertices = vertices,
+                BoundingBox = bounds,
+                VertexCount = vertices.Count,
+                Position = bounds.GetCenter(),
+                Scale = bounds.GetScale(),
+                Volume = bounds.GetVolume(),
+                Source = "HierarchyAware",
+                ComplexityClass = vertices.Count <= 4 ? PM4ComplexityClass.CollisionHull : 
+                                vertices.Count <= 50 ? PM4ComplexityClass.SimplifiedGeometry : PM4ComplexityClass.FullGeometry
+            };
+        }
+        
+        private static void ExtractVerticesFromEntry(PM4File pm4File, WoWToolbox.Core.v2.Models.PM4.Chunks.MSLKEntry entry, List<Vector3> vertices)
+        {
+            if (pm4File.MSPI?.Indices == null || pm4File.MSPV?.Vertices == null) return;
+            
+            for (int i = entry.MspiFirstIndex; i < entry.MspiFirstIndex + entry.MspiIndexCount && i < pm4File.MSPI.Indices.Count; i++)
+            {
+                var vertexIndex = pm4File.MSPI.Indices[i];
+                if (vertexIndex < pm4File.MSPV.Vertices.Count)
+                {
+                    var vertex = pm4File.MSPV.Vertices[(int)vertexIndex];
+                    vertices.Add(new Vector3(vertex.X, vertex.Y, vertex.Z));
+                }
+            }
+        }
     }
 } 

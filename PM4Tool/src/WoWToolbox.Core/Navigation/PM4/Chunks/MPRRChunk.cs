@@ -63,7 +63,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
                              // This is normal - we've reached the end of the chunk data
                              if (currentSequence.Count > 0)
                              {
-                                 Console.WriteLine($"Warning: MPRR chunk ended unexpectedly while reading a sequence. Processed {Sequences.Count} complete sequences.");
+                                 // Reached end of chunk while reading sequence - this is normal behavior
                              }
                              goto EndLoad; // Exit outer loop
                         }
@@ -80,7 +80,7 @@ namespace WoWToolbox.Core.Navigation.PM4.Chunks
                 }
                 catch (EndOfStreamException)
                 {
-                     Console.WriteLine($"Warning: MPRR chunk ended unexpectedly (EndOfStreamException) while reading a sequence. Processed {Sequences.Count} complete sequences.");
+                    // Reached end of stream - this is normal for the last sequence in a chunk
                     // Optionally add the incomplete sequence if needed: if (currentSequence.Count > 0) Sequences.Add(currentSequence);
                     break; // Exit outer loop
                 }
