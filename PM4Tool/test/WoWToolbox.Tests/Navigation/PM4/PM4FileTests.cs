@@ -69,8 +69,11 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Define the root output directory with timestamp
             public static string TimestampedOutputRoot => Path.Combine(WorkspaceRoot, "output", Timestamp);
 
-            // Original TestResultsDirectory - Keep for reference or potential future use, but prefer TimestampedOutputRoot
-            public static string OriginalTestResultsDirectory => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TestResults");
+            // This static constructor ensures the directory is created only once per test run.
+            static TestContext()
+            {
+                Directory.CreateDirectory(TimestampedOutputRoot);
+            }
         }
 
         // Removed ApplyMprlTransform helper function
@@ -95,7 +98,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             var inputDirectoryPath = Path.Combine(testDataRoot, "original_development", "development"); // Added intermediate 'development' directory
             
             // --- Use Timestamped Output --- 
-            var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "PM4_BatchOutput");
+            var outputDir = TestContext.TimestampedOutputRoot;
             Directory.CreateDirectory(outputDir); // Ensure the output directory exists
 
             Console.WriteLine($"Input Directory: {inputDirectoryPath}");
@@ -2125,221 +2128,6 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 return 0;
             }
         } // End ProcessHighRatioPm4File (within PM4FileTests class)
-        // Original LoadPM4File_ShouldLoadChunks can be removed or commented out
-        /*
-        [Fact]
-        public void LoadPM4File_ShouldLoadChunks_OLD()
-        {
-            // ... original single-file test code ...
-        }
-        */
-
-        // --- Helper method to analyze problematic files specifically ---
-        private void AnalyzeProblematicFile(string inputFilePath, string outputDir)
-        {
-            string fileName = Path.GetFileName(inputFilePath);
-            Console.WriteLine($"  * Running specialized processing for problematic file: {fileName}");
-            
-            // Create a diagnostics subdirectory for detailed analysis
-            string diagnosticsDir = Path.Combine(outputDir, "diagnostics");
-            Directory.CreateDirectory(diagnosticsDir);
-            
-            // Use our specialized processor to handle the file
-            var processor = new PM4HighRatioProcessor();
-            int processedVertices = processor.ProcessHighRatioFile(inputFilePath, diagnosticsDir);
-            
-            Console.WriteLine($"  * Specialized processing completed. Processed {processedVertices} vertices.");
-            Console.WriteLine($"  * Check detailed output in: {diagnosticsDir}");
-        }
-
-        // --- Helper method to check and log chunk info
-        private void CheckChunk(string chunkName, int entryCount, StreamWriter writer)
-        {
-            if (entryCount > 0)
-            {
-                writer.WriteLine($"{chunkName}: Present - {entryCount} entries");
-            }
-            else if (entryCount == 0)
-            {
-                writer.WriteLine($"{chunkName}: Present but EMPTY (0 entries)");
-            }
-            else
-            {
-                writer.WriteLine($"{chunkName}: MISSING!");
-            }
-        }
-        
-        // --- Helper method to analyze raw bytes for chunk signatures
-        private void AnalyzeRawChunkSignatures(byte[] fileData, StreamWriter writer)
-        {
-            // List of known chunk signatures to look for
-            var knownSignatures = new List<string> { "MVER", "MSHD", "MSVT", "MSVI", "MSPV", "MSPI", "MPRL", "MPRR", "MSLK", "MDOS", "MDSF", "MDBH", "MSCN", "MCRC" };
-            var foundSignatures = new List<(string Signature, int Offset, int Size)>();
-            
-            writer.WriteLine("Scanning file for chunk signatures...");
-            
-            for (int i = 0; i < fileData.Length - 8; i++)
-            {
-                // Extract 4-byte signature
-                string signature = System.Text.Encoding.ASCII.GetString(fileData, i, 4);
-                
-                if (knownSignatures.Contains(signature))
-                {
-                    // Read chunk size (4 bytes after signature)
-                    int size = BitConverter.ToInt32(fileData, i + 4);
-                    
-                    // Record found signature
-                    foundSignatures.Add((signature, i, size));
-                    
-                    // Skip to after this chunk (to avoid finding signatures in data)
-                    i += 7 + size;
-                }
-            }
-            
-            // Report findings
-            if (foundSignatures.Count > 0)
-            {
-                writer.WriteLine($"Found {foundSignatures.Count} chunk signatures:");
-                
-                foreach (var chunk in foundSignatures)
-                {
-                    writer.WriteLine($"  {chunk.Signature} at offset 0x{chunk.Offset:X8}, size: {chunk.Size} bytes");
-                }
-            }
-            else
-            {
-                writer.WriteLine("No known chunk signatures found in file!");
-            }
-        }
-
-        [Fact]
-        [Trait("Category", "SpecialCases")]
-        public void TestDevelopment49_28_WithSpecializedHandling()
-        {
-            // Arrange
-            string testFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_49_28.pm4"); // Added intermediate 'development' directory
-            
-            // --- Use Timestamped Output --- 
-            string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "PM4_HighRatio");
-            Directory.CreateDirectory(outputDir);
-            string logPath = Path.Combine(outputDir, "processing_results.log");
-            
-            // Ensure target file exists
-            Assert.True(File.Exists(testFilePath), $"Test file does not exist: {testFilePath}");
-
-            // Act - Process file with the specialized handler
-            using (var logWriter = new StreamWriter(logPath, false))
-            {
-                // Call the method directly to ensure it's used
-                // NOTE: need to instantiate a class with ProcessHighRatioPm4File method
-                var processor = new PM4HighRatioProcessor();
-                int vertexCount = processor.ProcessHighRatioFile(testFilePath, outputDir);
-                
-                // Log results
-                logWriter.WriteLine($"Test completed at {DateTime.Now}");
-                logWriter.WriteLine($"File: {Path.GetFileName(testFilePath)}");
-                logWriter.WriteLine($"Output directory: {outputDir}");
-                logWriter.WriteLine($"Processed vertices: {vertexCount}");
-            }
-            
-            // Assert
-            // Check for the output files we expect to see
-            string debugLogPath = Path.Combine(outputDir, "development_49_28_debug.log");
-            Assert.True(File.Exists(debugLogPath), "Debug log file should be created");
-            
-            // Check for vertex output files
-            string msvtObjPath = Path.Combine(outputDir, "development_49_28_msvt.obj");
-            string mprlPointsObjPath = Path.Combine(outputDir, "development_49_28_mprl_points.obj");
-            
-            bool hasMsvtOutput = File.Exists(msvtObjPath);
-            bool hasMprlOutput = File.Exists(mprlPointsObjPath);
-            
-            Assert.True(hasMsvtOutput || hasMprlOutput, 
-                "At least one vertex output file should be created");
-                
-            // Analyze the debug log to verify it shows expected behavior
-            string debugLogContent = File.ReadAllText(debugLogPath);
-            
-            Assert.Contains("Processing High MPRR/MPRL Ratio File", debugLogContent);
-            Assert.Contains("Skipped processing MPRR links due to high MPRR/MPRL ratio", debugLogContent);
-            
-            Console.WriteLine($"Test completed successfully. Check output in: {outputDir}");
-        }
-
-        [Fact]
-        public void ExportRenderMeshAndMscnBoundary_WithSnapping_ForKeyPm4Files()
-        {
-            var testFiles = new[]
-            {
-                Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4"),
-                Path.Combine(TestDataRoot, "original_development", "development_22_18.pm4")
-            };
-
-            foreach (var pm4Path in testFiles)
-            {
-                Assert.True(File.Exists(pm4Path), $"Test PM4 file not found: {pm4Path}");
-                var pm4File = PM4File.FromFile(pm4Path);
-                Assert.NotNull(pm4File);
-
-                // --- Extract Render Mesh ---
-                var meshData = new MeshData();
-                if (pm4File.MSVT != null && pm4File.MSVI != null && pm4File.MSUR != null)
-                {
-                    meshData.Vertices.AddRange(pm4File.MSVT.Vertices.Select(v => v.ToWorldCoordinates()));
-                    foreach (var msur in pm4File.MSUR.Entries)
-                    {
-                        for (int i = 0; i < msur.IndexCount - 2; i++)
-                        {
-                            if (msur.MsviFirstIndex > int.MaxValue)
-                                throw new OverflowException($"MSUR.MsviFirstIndex {msur.MsviFirstIndex} exceeds int.MaxValue");
-                            int baseIdx = (int)msur.MsviFirstIndex;
-                            uint idx0 = pm4File.MSVI.Indices[baseIdx];
-                            uint idx1 = pm4File.MSVI.Indices[baseIdx + i + 1];
-                            uint idx2 = pm4File.MSVI.Indices[baseIdx + i + 2];
-                            if (idx0 > int.MaxValue || idx1 > int.MaxValue || idx2 > int.MaxValue)
-                                throw new OverflowException($"MSVI index exceeds int.MaxValue: {idx0}, {idx1}, {idx2}");
-                            int i0 = (int)idx0;
-                            int i1 = (int)idx1;
-                            int i2 = (int)idx2;
-                            meshData.Indices.Add(i0);
-                            meshData.Indices.Add(i1);
-                            meshData.Indices.Add(i2);
-                        }
-                    }
-                }
-                Assert.True(meshData.Vertices.Count > 0, "No vertices in render mesh");
-                Assert.True(meshData.Indices.Count > 0, "No indices in render mesh");
-
-                // --- Extract MSCN Points ---
-                var mscnPoints = pm4File.MSCN?.ExteriorVertices ?? new List<Vector3>();
-                string baseOut = Path.Combine(TestContext.TimestampedOutputRoot, Path.GetFileNameWithoutExtension(pm4Path));
-                Directory.CreateDirectory(baseOut);
-
-                // --- Output Render Mesh OBJ ---
-                string meshObjPath = Path.Combine(baseOut, "render_mesh.obj");
-                using (var writer = new StreamWriter(meshObjPath))
-                {
-                    writer.WriteLine("o RenderMesh");
-                    foreach (var v in meshData.Vertices)
-                        writer.WriteLine($"v {v.X} {v.Y} {v.Z}");
-                    for (int i = 0; i < meshData.Indices.Count; i += 3)
-                        writer.WriteLine($"f {meshData.Indices[i] + 1} {meshData.Indices[i + 1] + 1} {meshData.Indices[i + 2] + 1}");
-                }
-
-                // --- Output MSCN Points OBJ ---
-                string mscnObjPath = Path.Combine(baseOut, "mscn_points.obj");
-                using (var writer = new StreamWriter(mscnObjPath))
-                {
-                    writer.WriteLine("o MSCN_Boundary");
-                    foreach (var v in mscnPoints)
-                        writer.WriteLine($"v {v.X} {v.Y} {v.Z}");
-                }
-
-                // --- Merged OBJ output is disabled ---
-                // MeshLab and other tools do not handle multiple overlapping meshes in the same file well.
-                // Until all unknowns are resolved, merged OBJ output is not produced.
-            }
-        }
 
         [Fact]
         public void InvestigateUnknownFieldMeanings()
@@ -2696,7 +2484,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Create output directory
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "ChunkRelationshipAnalysis");
             Directory.CreateDirectory(outputDir);
-            
+
             var results = new List<string>();
             
             // Get a representative PM4 file for detailed analysis
@@ -2713,8 +2501,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
             results.Add("=== CHUNK RELATIONSHIP ANALYSIS ===");
             results.Add($"File: {Path.GetFileName(testFile)}");
             results.Add("");
-            
-            // Analyze chunk sizes and data availability
+
+                // Analyze chunk sizes and data availability
             results.Add("=== CHUNK DATA OVERVIEW ===");
             results.Add($"MSVT Vertices: {pm4File.MSVT?.Vertices?.Count ?? 0}");
             results.Add($"MSCN Vertices: {pm4File.MSCN?.ExteriorVertices?.Count ?? 0}");
@@ -2724,13 +2512,13 @@ namespace WoWToolbox.Tests.Navigation.PM4
             results.Add($"MSVI Indices: {pm4File.MSVI?.Indices?.Count ?? 0}");
             results.Add($"MPRL Points: {pm4File.MPRL?.Entries?.Count ?? 0}");
             results.Add("");
-            
-            // Analyze MSLK relationships to other chunks
+
+                // Analyze MSLK relationships to other chunks
             results.Add("=== MSLK CHUNK RELATIONSHIPS ===");
-            if (pm4File.MSLK?.Entries != null)
-            {
-                foreach (var mslk in pm4File.MSLK.Entries.Take(10))
+                if (pm4File.MSLK?.Entries != null)
                 {
+                    foreach (var mslk in pm4File.MSLK.Entries.Take(10))
+                    {
                     results.Add($"MSLK Entry:");
                     results.Add($"  Object Type: {mslk.ObjectTypeFlags}");
                     results.Add($"  Group ID: {mslk.GroupObjectId}");
@@ -2738,56 +2526,56 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     results.Add($"  MSPI Index Count: {mslk.MspiIndexCount}");
                     results.Add($"  Reference Index: {mslk.ReferenceIndex}");
                     results.Add($"  Material ID: 0x{mslk.MaterialColorId:X8}");
-                    
-                    // Check if Reference Index points to other chunks
-                    if (mslk.ReferenceIndex < (pm4File.MSCN?.ExteriorVertices?.Count ?? 0))
-                    {
+                        
+                        // Check if Reference Index points to other chunks
+                        if (mslk.ReferenceIndex < (pm4File.MSCN?.ExteriorVertices?.Count ?? 0))
+                        {
                         results.Add($"  -> References MSCN vertex {mslk.ReferenceIndex}");
-                    }
-                    if (mslk.ReferenceIndex < (pm4File.MSPV?.Vertices?.Count ?? 0))
-                    {
+                        }
+                        if (mslk.ReferenceIndex < (pm4File.MSPV?.Vertices?.Count ?? 0))
+                        {
                         results.Add($"  -> References MSPV vertex {mslk.ReferenceIndex}");
-                    }
-                    if (mslk.ReferenceIndex < (pm4File.MSVI?.Indices?.Count ?? 0))
-                    {
+                        }
+                        if (mslk.ReferenceIndex < (pm4File.MSVI?.Indices?.Count ?? 0))
+                        {
                         results.Add($"  -> References MSVI index {mslk.ReferenceIndex}");
-                    }
+                        }
                     results.Add("");
+                    }
                 }
-            }
-            
-            // Analyze geometry distribution and find missing vertical data
+
+                // Analyze geometry distribution and find missing vertical data
             results.Add("=== GEOMETRY DISTRIBUTION ANALYSIS ===");
-            
-            // MSVT geometry analysis
-            if (pm4File.MSVT?.Vertices != null)
-            {
-                var msvtBounds = AnalyzeGeometryBounds(pm4File.MSVT.Vertices.Select(v => new { X = v.Y, Y = v.X, Z = v.Z }));
+
+                // MSVT geometry analysis
+                if (pm4File.MSVT?.Vertices != null)
+                {
+                    var msvtBounds = AnalyzeGeometryBounds(pm4File.MSVT.Vertices.Select(v => new { X = v.Y, Y = v.X, Z = v.Z }));
                 results.Add("MSVT (Render Mesh) Bounds:");
                 results.Add($"  X: {msvtBounds.MinX:F2} to {msvtBounds.MaxX:F2} (range: {msvtBounds.MaxX - msvtBounds.MinX:F2})");
                 results.Add($"  Y: {msvtBounds.MinY:F2} to {msvtBounds.MaxY:F2} (range: {msvtBounds.MaxY - msvtBounds.MinY:F2})");
                 results.Add($"  Z: {msvtBounds.MinZ:F2} to {msvtBounds.MaxZ:F2} (range: {msvtBounds.MaxZ - msvtBounds.MinZ:F2})");
-            }
-            
-            // MSCN geometry analysis  
-            if (pm4File.MSCN?.ExteriorVertices != null)
-            {
-                var mscnBounds = AnalyzeGeometryBounds(pm4File.MSCN.ExteriorVertices.Select(v => new { 
-                    X = v.X * 0.25f + v.Y * 0.25f, 
-                    Y = v.Y * 0.25f - v.Z * 0.25f, 
-                    Z = v.Z * 0.25f + v.X * 0.25f 
-                }));
+                }
+
+                // MSCN geometry analysis  
+                if (pm4File.MSCN?.ExteriorVertices != null)
+                {
+                    var mscnBounds = AnalyzeGeometryBounds(pm4File.MSCN.ExteriorVertices.Select(v => new { 
+                        X = v.X * 0.25f + v.Y * 0.25f, 
+                        Y = v.Y * 0.25f - v.Z * 0.25f, 
+                        Z = v.Z * 0.25f + v.X * 0.25f 
+                    }));
                 results.Add("");
                 results.Add("MSCN (Collision/Structure) Bounds:");
                 results.Add($"  X: {mscnBounds.MinX:F2} to {mscnBounds.MaxX:F2} (range: {mscnBounds.MaxX - mscnBounds.MinX:F2})");
                 results.Add($"  Y: {mscnBounds.MinY:F2} to {mscnBounds.MaxY:F2} (range: {mscnBounds.MaxY - mscnBounds.MinY:F2})");
                 results.Add($"  Z: {mscnBounds.MinZ:F2} to {mscnBounds.MaxZ:F2} (range: {mscnBounds.MaxZ - mscnBounds.MinZ:F2})");
-            }
-            
-            // MSPV geometry analysis
-            if (pm4File.MSPV?.Vertices != null)
-            {
-                var mspvBounds = AnalyzeGeometryBounds(pm4File.MSPV.Vertices.Select(v => new { X = v.X, Y = v.Y, Z = v.Z }));
+                }
+
+                // MSPV geometry analysis
+                if (pm4File.MSPV?.Vertices != null)
+                {
+                    var mspvBounds = AnalyzeGeometryBounds(pm4File.MSPV.Vertices.Select(v => new { X = v.X, Y = v.Y, Z = v.Z }));
                 results.Add("");
                 results.Add("MSPV (Structure Points) Bounds:");
                 results.Add($"  X: {mspvBounds.MinX:F2} to {mspvBounds.MaxX:F2} (range: {mspvBounds.MaxX - mspvBounds.MinX:F2})");
@@ -2797,39 +2585,39 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             results.Add("");
             results.Add("=== MISSING GEOMETRY ANALYSIS ===");
-            
-            // Check if we're missing significant vertical structures
-            if (pm4File.MSCN?.ExteriorVertices != null && pm4File.MSVT?.Vertices != null)
-            {
-                var mscnVerticalRange = pm4File.MSCN.ExteriorVertices.Max(v => v.Y) - pm4File.MSCN.ExteriorVertices.Min(v => v.Y);
-                var msvtVerticalRange = pm4File.MSVT.Vertices.Max(v => v.X) - pm4File.MSVT.Vertices.Min(v => v.X);
-                
+
+                // Check if we're missing significant vertical structures
+                if (pm4File.MSCN?.ExteriorVertices != null && pm4File.MSVT?.Vertices != null)
+                {
+                    var mscnVerticalRange = pm4File.MSCN.ExteriorVertices.Max(v => v.Y) - pm4File.MSCN.ExteriorVertices.Min(v => v.Y);
+                    var msvtVerticalRange = pm4File.MSVT.Vertices.Max(v => v.X) - pm4File.MSVT.Vertices.Min(v => v.X);
+                    
                 results.Add($"MSCN Vertical Range: {mscnVerticalRange:F2}");
                 results.Add($"MSVT Vertical Range: {msvtVerticalRange:F2}");
-                
-                if (mscnVerticalRange > msvtVerticalRange * 2)
-                {
+                    
+                    if (mscnVerticalRange > msvtVerticalRange * 2)
+                    {
                     results.Add("*** WARNING: MSCN has significantly more vertical range than MSVT ***");
                     results.Add("*** This suggests missing vertical geometry in render mesh ***");
+                    }
                 }
-            }
-            
-            // Analyze how MSLK might reference vertical structures
+
+                // Analyze how MSLK might reference vertical structures
             results.Add("");
             results.Add("=== MSLK TO GEOMETRY RELATIONSHIPS ===");
-            if (pm4File.MSLK?.Entries != null)
-            {
-                var objectTypes = pm4File.MSLK.Entries.GroupBy(e => e.ObjectTypeFlags).ToList();
-                foreach (var group in objectTypes)
+                if (pm4File.MSLK?.Entries != null)
                 {
+                    var objectTypes = pm4File.MSLK.Entries.GroupBy(e => e.ObjectTypeFlags).ToList();
+                    foreach (var group in objectTypes)
+                    {
                     results.Add($"Object Type {group.Key}: {group.Count()} entries");
-                    var sample = group.First();
-                    if (sample.MspiFirstIndex != -1 && sample.MspiIndexCount > 0)
-                    {
+                        var sample = group.First();
+                        if (sample.MspiFirstIndex != -1 && sample.MspiIndexCount > 0)
+                        {
                         results.Add($"  -> References MSPI geometry (Index: {sample.MspiFirstIndex}, Count: {sample.MspiIndexCount})");
-                    }
-                    else
-                    {
+                        }
+                        else
+                        {
                         results.Add($"  -> No MSPI geometry (likely references other data)");
                         results.Add($"  -> Reference Index: {sample.ReferenceIndex} (might point to MSCN/MSPV)");
                     }
@@ -2842,7 +2630,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             Console.WriteLine($"Chunk relationship analysis complete. Output: {outputPath}");
         }
-        
+
         private dynamic AnalyzeGeometryBounds(IEnumerable<dynamic> vertices)
         {
             var vertexList = vertices.ToList();
@@ -2864,7 +2652,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Create output directory
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "CompleteGeometryExport");
             Directory.CreateDirectory(outputDir);
-            
+
             var results = new List<string>();
             
             // Get test file
@@ -2885,15 +2673,15 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Generate complete OBJ with all geometry sources
             string objFilePath = Path.Combine(outputDir, "complete_geometry.obj");
             var objContent = new List<string>();
-            
+
             objContent.Add("# Complete PM4 Geometry Export Using MSLK References");
             objContent.Add($"# Generated: {DateTime.Now}");
             objContent.Add("# Includes: MSVT render mesh + MSCN collision/structure + MSPV structure points");
             objContent.Add("# Organized by MSLK object type references");
             objContent.Add("");
-            
+
             int vertexOffset = 0;
-            
+
             // 1. Export all MSVT vertices (render mesh)
             objContent.Add("# MSVT Render Mesh Vertices");
             if (pm4File.MSVT?.Vertices != null)
@@ -2909,7 +2697,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 vertexOffset += pm4File.MSVT.Vertices.Count;
             }
             objContent.Add("");
-            
+
             // 2. Export all MSCN vertices (collision/structure)
             objContent.Add("# MSCN Collision/Structure Vertices");
             int mscnVertexOffset = vertexOffset;
@@ -2927,7 +2715,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 vertexOffset += pm4File.MSCN.ExteriorVertices.Count;
             }
             objContent.Add("");
-            
+
             // 3. Export all MSPV vertices (structure points)
             objContent.Add("# MSPV Structure Point Vertices");
             int mspvVertexOffset = vertexOffset;
@@ -2941,7 +2729,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 vertexOffset += pm4File.MSPV.Vertices.Count;
             }
             objContent.Add("");
-            
+
             // 4. Generate faces based on MSLK object type references
             results.Add("");
             results.Add("=== FACE GENERATION BY MSLK OBJECT TYPE ===");
@@ -2950,14 +2738,14 @@ namespace WoWToolbox.Tests.Navigation.PM4
             if (pm4File.MSLK?.Entries != null)
             {
                 var objectTypeGroups = pm4File.MSLK.Entries.GroupBy(e => e.ObjectTypeFlags).ToList();
-                
+
                 foreach (var group in objectTypeGroups)
                 {
                     objContent.Add($"# Object Type {group.Key} ({group.Count()} entries)");
                     objContent.Add($"g object_type_{group.Key}");
                     
                     int facesGenerated = 0;
-                    
+
                     foreach (var mslk in group.Take(100)) // Limit for testing
                     {
                         // Different strategies based on whether MSLK has MSPI geometry or references other data
@@ -2971,14 +2759,14 @@ namespace WoWToolbox.Tests.Navigation.PM4
                         {
                             // References other geometry via Reference Index
                             var refIndex = mslk.ReferenceIndex;
-                            
+
                             // Try to create geometry based on reference index
                             if (refIndex < (pm4File.MSCN?.ExteriorVertices?.Count ?? 0))
                             {
                                 // Reference points to MSCN vertex - create structure geometry
                                 int mscnIndex = (int)refIndex;
                                 int vertexIndex = mscnVertexOffset + mscnIndex + 1; // 1-based OBJ indexing
-                                
+
                                 // Create a simple face structure (this might need more sophisticated logic)
                                 if (mscnIndex + 2 < pm4File.MSCN.ExteriorVertices.Count)
                                 {
@@ -2986,13 +2774,13 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                     facesGenerated++;
                                 }
                             }
-                            
+
                             if (refIndex < (pm4File.MSPV?.Vertices?.Count ?? 0))
                             {
                                 // Reference points to MSPV vertex - create structure point geometry
                                 int mspvIndex = (int)refIndex;
                                 int vertexIndex = mspvVertexOffset + mspvIndex + 1; // 1-based OBJ indexing
-                                
+
                                 // Create point-based geometry
                                 if (mspvIndex + 2 < pm4File.MSPV.Vertices.Count)
                                 {
@@ -3002,16 +2790,16 @@ namespace WoWToolbox.Tests.Navigation.PM4
                             }
                         }
                     }
-                    
+
                     results.Add($"Object Type {group.Key}: Generated {facesGenerated} structure faces");
                     objContent.Add("");
                 }
             }
-            
+
             // 5. Generate traditional MSUR faces for comparison
             objContent.Add("# Traditional MSUR-based faces for comparison");
             objContent.Add("g msur_traditional_faces");
-            
+
             int msurFaces = 0;
             var processedSurfaceSignatures = new HashSet<string>();
             
@@ -3077,7 +2865,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Create output directory for investigation results
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "MPRR_MSLK_NavigationAnalysis");
             Directory.CreateDirectory(outputDir);
-            
+
             var investigationResults = new List<string>();
             var correlationData = new List<string>();
             var navigationConnections = new List<(int from, int to, float distance, string objectTypeFrom, string objectTypeTo)>();
@@ -3419,7 +3207,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Create output directory for reference index analysis
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "MSLK_ReferenceIndex_Analysis");
             Directory.CreateDirectory(outputDir);
-            
+
             var analysisResults = new List<string>();
             var referenceData = new List<string>();
             var navigationNodePositions = new List<(int mslkIndex, Vector3 position, uint objectType, uint referenceIndex, string coordinateSource)>();
@@ -3695,7 +3483,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Create output directory for complete navigation graph
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Complete_NavigationGraph");
             Directory.CreateDirectory(outputDir);
-            
+
             var analysisResults = new List<string>();
             var navigationNodes = new Dictionary<int, (Vector3 position, uint objectType, uint referenceIndex, string source)>();
             var navigationConnections = new List<(int fromMslk, int toMslk, float distance, uint fromType, uint toType)>();
@@ -3914,83 +3702,6 @@ namespace WoWToolbox.Tests.Navigation.PM4
             // Assert we found a meaningful navigation graph
             Assert.True(navigationNodes.Count > 50, "Should find significant number of navigation waypoints");
             Assert.True(navigationConnections.Count > 10, "Should find meaningful pathfinding connections");
-        }
-        
-        private void GenerateCompleteNavigationGraphOBJ(Dictionary<int, (Vector3 position, uint objectType, uint referenceIndex, string source)> nodes, 
-                                                       List<(int fromMslk, int toMslk, float distance, uint fromType, uint toType)> connections, 
-                                                       string outputPath)
-        {
-            var objContent = new List<string>();
-            
-            objContent.Add("# Complete PM4 Navigation Graph");
-            objContent.Add($"# Generated: {DateTime.Now}");
-            objContent.Add("# Shows complete WoW AI pathfinding system:");
-            objContent.Add("# - Vertices = Navigation waypoints (MSLK→MSCN)");
-            objContent.Add("# - Lines = Pathfinding connections (MPRR sequences)");
-            objContent.Add("");
-            
-            // Add navigation waypoints as vertices
-            objContent.Add("# Navigation Waypoints");
-            var nodeList = nodes.ToList();
-            foreach (var kvp in nodeList)
-            {
-                var nodeData = kvp.Value;
-                objContent.Add($"v {nodeData.position.X:F3} {nodeData.position.Y:F3} {nodeData.position.Z:F3} # Node{kvp.Key} Type{nodeData.objectType}");
-            }
-            
-            objContent.Add("");
-            objContent.Add("# Pathfinding Connections");
-            objContent.Add("g navigation_connections");
-            
-            // Add connections as lines
-            foreach (var connection in connections)
-            {
-                // Find vertex indices for the connection endpoints
-                int fromIndex = nodeList.FindIndex(n => n.Key == connection.fromMslk) + 1; // OBJ is 1-indexed
-                int toIndex = nodeList.FindIndex(n => n.Key == connection.toMslk) + 1;
-                
-                if (fromIndex > 0 && toIndex > 0)
-                {
-                    objContent.Add($"l {fromIndex} {toIndex} # MSLK{connection.fromMslk}→MSLK{connection.toMslk} ({connection.distance:F1}u)");
-                }
-            }
-            
-            File.WriteAllLines(outputPath, objContent);
-        }
-        
-        private void GenerateNavigationGraphDOT(Dictionary<int, (Vector3 position, uint objectType, uint referenceIndex, string source)> nodes, 
-                                               List<(int fromMslk, int toMslk, float distance, uint fromType, uint toType)> connections, 
-                                               string outputPath)
-        {
-            var dotContent = new List<string>();
-            
-            dotContent.Add("digraph NavigationGraph {");
-            dotContent.Add("    label=\"PM4 Navigation Graph (MPRR+MSLK+MSCN)\";");
-            dotContent.Add("    node [shape=circle];");
-            dotContent.Add("");
-            
-            // Add nodes with different colors for different types
-            foreach (var kvp in nodes)
-            {
-                var nodeData = kvp.Value;
-                string color = nodeData.objectType == 1 ? "lightblue" : "lightgreen";
-                string label = $"MSLK{kvp.Key}\\nType{nodeData.objectType}\\n({nodeData.position.X:F0},{nodeData.position.Y:F0})";
-                
-                dotContent.Add($"    node{kvp.Key} [label=\"{label}\", fillcolor={color}, style=filled];");
-            }
-            
-            dotContent.Add("");
-            
-            // Add connections
-            foreach (var connection in connections)
-            {
-                string label = $"{connection.distance:F1}u";
-                dotContent.Add($"    node{connection.fromMslk} -> node{connection.toMslk} [label=\"{label}\"];");
-            }
-            
-            dotContent.Add("}");
-            
-            File.WriteAllLines(outputPath, dotContent);
         }
         
         private void GenerateConnectionAnalysis(Dictionary<int, (Vector3 position, uint objectType, uint referenceIndex, string source)> nodes, 
@@ -4220,7 +3931,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Console.WriteLine($"- Output directory: {outputDir}");
             Console.WriteLine("--- MSUR-BASED BUILDING EXPORT END ---");
         }
-        
+
         [Fact]
         public void ExportCompleteBuildings_MSURCorrect_WithMSLKLinking()
         {
@@ -4229,7 +3940,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4");
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Complete_MSUR_Corrected_Buildings");
             Directory.CreateDirectory(outputDir);
-            
+
             var pm4File = PM4File.FromFile(inputFilePath);
             string sourceFileName = Path.GetFileNameWithoutExtension(inputFilePath);
             
@@ -4387,9 +4098,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 analysisWriter.WriteLine($"MSLK HIERARCHY ANALYSIS - {sourceFileName}");
                 analysisWriter.WriteLine($"Generated: {DateTime.Now}");
                 analysisWriter.WriteLine(new string('=', 60));
-                
+
                 int vertexOffset = 0;
-                
+
                 // === PART 1: MSPV STRUCTURAL VERTICES ===
                 objWriter.WriteLine("# === MSPV STRUCTURAL VERTICES ===");
                 analysisWriter.WriteLine($"\nMSPV STRUCTURAL VERTICES: {pm4File.MSPV.Vertices.Count}");
@@ -4557,7 +4268,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Console.WriteLine($"Output directory: {outputDir}");
             Console.WriteLine("--- IMPROVED BATCH OUTPUT WITH MSLK HIERARCHY ANALYSIS END ---");
         }
-        
+
         [Fact]
         public void AnalyzeMSUR_BuildingConnections()
         {
@@ -4647,10 +4358,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
         {
             Console.WriteLine("--- FINAL CORRECT BUILDING EXPORT USING 11 ROOT NODES START ---");
             
-            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4");
+            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Final_Correct_Buildings");
             Directory.CreateDirectory(outputDir);
-            
+
             var pm4File = PM4File.FromFile(inputFilePath);
             string sourceFileName = Path.GetFileNameWithoutExtension(inputFilePath);
             
@@ -4774,10 +4485,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 
                 // Find all MSLK entries that belong to this building's group
                 var buildingEntries = pm4File.MSLK.Entries
-                    .Select((entry, index) => new { entry, index })
+                                .Select((entry, index) => new { entry, index })
                     .Where(x => x.entry.Unknown_0x04 == rootGroupKey && x.entry.MspiFirstIndex >= 0 && x.entry.MspiIndexCount > 0)
-                    .ToList();
-                
+                                .ToList();
+                                
                 foreach (var entryData in buildingEntries)
                 {
                     var entry = entryData.entry;
@@ -5463,16 +5174,16 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             return building;
         }
-        
+
         [Fact]
         public void ExportCompleteBuildings_HybridMethod()
         {
             Console.WriteLine("--- HYBRID COMPLETE BUILDING EXPORT START ---");
             
-            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4");
+            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Complete_Hybrid_Buildings");
             Directory.CreateDirectory(outputDir);
-            
+
             var pm4File = PM4File.FromFile(inputFilePath);
             string sourceFileName = Path.GetFileNameWithoutExtension(inputFilePath);
             
@@ -5505,7 +5216,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
         {
             Console.WriteLine("--- PM4-WMO MATCHING FOR PLACEMENT ANALYSIS START ---");
             
-            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4");
+            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "PM4_WMO_Matching");
             Directory.CreateDirectory(outputDir);
             
@@ -6223,9 +5934,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 if (model.Normals[i] != Vector3.Zero)
                 {
                     model.Normals[i] = Vector3.Normalize(model.Normals[i]);
-                }
-                else
-                {
+                    }
+                    else
+                    {
                     model.Normals[i] = Vector3.UnitY; // Default up normal
                 }
             }
@@ -6379,7 +6090,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "WebExplorer");
             Directory.CreateDirectory(outputDir);
-            
+
             // Process single test file for clear analysis
             var inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
             
@@ -6485,10 +6196,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 
                 Console.WriteLine($"Web explorer data exported to: {outputDir}");
                 Console.WriteLine($"Open {outputDir}/index.html in a web browser to explore the data");
-                
-            }
-            catch (Exception ex)
-            {
+                    
+                }
+                catch (Exception ex)
+                {
                 Console.WriteLine($"ERROR: {ex.Message}");
             }
             
@@ -6944,7 +6655,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "MSLK_Grouping_Analysis");
             Directory.CreateDirectory(outputDir);
-            
+
             var inputDirectoryPath = Path.Combine(TestDataRoot, "original_development", "development");
             var pm4Files = Directory.GetFiles(inputDirectoryPath, "*.pm4", SearchOption.TopDirectoryOnly)
                 .Where(f => !f.Contains("_49_28"))
@@ -6959,8 +6670,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
             foreach (string pm4FilePath in pm4Files)
             {
                 try
-                {
-                    var pm4File = PM4File.FromFile(pm4FilePath);
+            {
+                var pm4File = PM4File.FromFile(pm4FilePath);
                     var fileName = Path.GetFileNameWithoutExtension(pm4FilePath);
                     
                     analysisResults.Add($"\n=== FILE: {fileName} ===");
@@ -6968,9 +6679,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     if (pm4File.MSLK?.Entries == null || pm4File.MSLK.Entries.Count == 0)
                     {
                         analysisResults.Add("No MSLK entries found");
-                        continue;
-                    }
-                    
+                    continue;
+                }
+
                     analysisResults.Add($"Total MSLK entries: {pm4File.MSLK.Entries.Count}");
                     
                     // Analyze Unknown_0x04 field patterns
@@ -7078,9 +6789,9 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             var outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Geometry_Content_Analysis");
             Directory.CreateDirectory(outputDir);
-            
+
             var inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
-            
+
             try
             {
                 var pm4File = PM4File.FromFile(inputFilePath);
@@ -7103,8 +6814,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 analysis.Add("");
                 
                 // Analyze MSLK node types and what they actually contain
-                if (pm4File.MSLK?.Entries != null)
-                {
+                        if (pm4File.MSLK?.Entries != null)
+                        {
                     analysis.Add("## MSLK NODE TYPE ANALYSIS ##");
                     var nodeTypeAnalysis = pm4File.MSLK.Entries
                         .GroupBy(e => e.Unknown_0x00)
@@ -7257,10 +6968,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
         {
             Console.WriteLine("--- FLEXIBLE BUILDING EXPORT (HANDLES BOTH CHUNK TYPES) START ---");
             
-            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development_00_00.pm4");
+            string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", "development_00_00.pm4");
             string outputDir = Path.Combine(TestContext.TimestampedOutputRoot, "Flexible_Building_Export");
             Directory.CreateDirectory(outputDir);
-            
+
             var pm4File = PM4File.FromFile(inputFilePath);
             string sourceFileName = Path.GetFileNameWithoutExtension(inputFilePath);
             
@@ -7430,10 +7141,10 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 
                 // Get MSLK structural elements for this building
                 var buildingEntries = pm4File.MSLK.Entries
-                    .Select((entry, index) => new { entry, index })
+                                .Select((entry, index) => new { entry, index })
                     .Where(x => x.entry.Unknown_0x04 == rootGroupKey && x.entry.MspiFirstIndex >= 0 && x.entry.MspiIndexCount > 0)
-                    .ToList();
-                
+                                .ToList();
+                                
                 if (buildingEntries.Count == 0)
                 {
                     Console.WriteLine($"  No structural elements found for building {buildingIndex + 1}");
@@ -7795,8 +7506,8 @@ namespace WoWToolbox.Tests.Navigation.PM4
             }
             
             // === PART 4: ADD NEARBY MSUR SURFACES ===
-            if (pm4File.MSUR?.Entries != null && pm4File.MSVI?.Indices != null)
-            {
+                if (pm4File.MSUR?.Entries != null && pm4File.MSVI?.Indices != null)
+                {
                 foreach (int surfaceIndex in nearbySurfaces)
                 {
                     if (surfaceIndex >= pm4File.MSUR.Entries.Count) continue;
@@ -7852,7 +7563,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             
             foreach (string filename in testFiles)
             {
-                string inputFilePath = Path.Combine(TestDataRoot, "original_development", filename);
+                string inputFilePath = Path.Combine(TestDataRoot, "original_development", "development", filename);
                 if (!File.Exists(inputFilePath))
                 {
                     Console.WriteLine($"❌ File not found: {filename}");
@@ -7952,26 +7663,174 @@ namespace WoWToolbox.Tests.Navigation.PM4
             Console.WriteLine("--- MULTI-PM4 COMPATIBILITY TEST END ---");
         }
 
+        [Fact]
+        public void InvestigateMSRNChunkData_AndFallbackStrategy()
+        {
+            Console.WriteLine("=== MSRN CHUNK INVESTIGATION - ALL FILES ===");
+            
+            // Test ALL PM4 files
+            var pm4Files = Directory.GetFiles(Path.Combine(TestDataRoot, "original_development", "development"), "*.pm4")
+                .Where(f => new FileInfo(f).Length > 5120) // Skip tiny files
+                .ToArray();
+                
+            // Also test PD4 files 
+            var pd4Files = Directory.GetFiles(Path.Combine(TestDataRoot, "development"), "*.pd4")
+                .Where(f => new FileInfo(f).Length > 5120) // Skip tiny files
+                .ToArray();
+                
+            var allFiles = pm4Files.Concat(pd4Files).ToArray();
+                
+            Console.WriteLine($"Found {pm4Files.Length} PM4 files and {pd4Files.Length} PD4 files to analyze");
+            Console.WriteLine($"Total files: {allFiles.Length}");
+            
+            int msrnDataFound = 0;
+            int fallbackNeeded = 0;
+            int mdosDataFound = 0;
+            
+            foreach (string filePath in allFiles)
+            {
+                try
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    long fileSize = new FileInfo(filePath).Length;
+                    string fileType = fileName.EndsWith(".pd4") ? "PD4" : "PM4";
+                    
+                    Console.WriteLine($"\n📁 [{fileType}] {fileName} ({fileSize / 1024}KB)");
+                    
+                    var pm4File = PM4File.FromFile(filePath);
+                    
+                    // Basic chunk counts
+                    Console.WriteLine($"  MSLK: {pm4File.MSLK?.Entries?.Count ?? 0}");
+                    Console.WriteLine($"  MSUR: {pm4File.MSUR?.Entries?.Count ?? 0}");
+                    Console.WriteLine($"  MSRN: {pm4File.MSRN?.Normals?.Count ?? 0}");
+                    Console.WriteLine($"  MDOS: {pm4File.MDOS?.Entries?.Count ?? 0}");
+                    Console.WriteLine($"  MDSF: {pm4File.MDSF?.Entries?.Count ?? 0}");
+                    
+                    // MSRN Analysis
+                    if (pm4File.MSRN?.Normals?.Count > 0)
+                    {
+                        msrnDataFound++;
+                        var normals = pm4File.MSRN.Normals;
+                        var uniqueNormals = normals.Distinct().Count();
+                        bool matchesMSUR = normals.Count == (pm4File.MSUR?.Entries?.Count ?? 0);
+                        
+                        Console.WriteLine($"  🔍 MSRN Analysis: ⭐ FOUND DATA!");
+                        Console.WriteLine($"    Total: {normals.Count}, Unique: {uniqueNormals}");
+                        Console.WriteLine($"    Matches MSUR: {matchesMSUR}");
+                        
+                        // Sample normals
+                        if (normals.Count > 0)
+                        {
+                            var sample = normals.Take(3);
+                            foreach (var normal in sample)
+                            {
+                                // Calculate length for integer vector
+                                double length = Math.Sqrt(normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+                                Console.WriteLine($"    Sample: ({normal.X},{normal.Y},{normal.Z}) |len|={length:F3}");
+                            }
+                        }
+                        
+                        // Check if they look like normalized vectors (scaled integers)
+                        var maxMagnitudes = normals.Take(10).Select(n => Math.Max(Math.Max(Math.Abs(n.X), Math.Abs(n.Y)), Math.Abs(n.Z))).ToList();
+                        if (maxMagnitudes.Count > 0)
+                        {
+                            var avgMaxMag = maxMagnitudes.Average();
+                            Console.WriteLine($"    Avg max component: {avgMaxMag:F1} (suggests scale factor)");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  ❌ No MSRN data");
+                    }
+                    
+                    // Fallback strategy viability
+                    bool hasStructuralData = (pm4File.MDOS?.Entries?.Count ?? 0) > 1 || (pm4File.MDSF?.Entries?.Count ?? 0) > 0;
+                    if (!hasStructuralData)
+                    {
+                        fallbackNeeded++;
+                        Console.WriteLine($"  🔄 Fallback strategy needed (no meaningful MDOS/MDSF)");
+                        
+                        // Find root nodes for fallback
+                        if (pm4File.MSLK?.Entries != null)
+                        {
+                            var rootNodes = pm4File.MSLK.Entries
+                                .Select((entry, index) => new { entry, index })
+                                .Where(x => x.entry.Unknown_0x04 == x.index)
+                                .Select(x => x.index)
+                                .ToList();
+                                
+                            Console.WriteLine($"    🏗️  Root nodes: {rootNodes.Count}");
+                            
+                            if (rootNodes.Count > 0)
+                            {
+                                int totalStructural = rootNodes.Sum(rootIndex =>
+                                {
+                                    uint groupId = pm4File.MSLK.Entries[rootIndex].Unknown_0x04;
+                                    return pm4File.MSLK.Entries
+                                        .Count(entry => entry.Unknown_0x04 == groupId && entry.MspiIndexCount > 0);
+                                });
+                                
+                                Console.WriteLine($"    📈 Structural elements: {totalStructural}");
+                                Console.WriteLine($"    🎯 MSUR surfaces: {pm4File.MSUR?.Entries?.Count ?? 0}");
+                                
+                                bool fallbackViable = rootNodes.Count > 0 && (pm4File.MSUR?.Entries?.Count ?? 0) > 0;
+                                Console.WriteLine($"    {(fallbackViable ? "✅" : "❌")} Fallback strategy viable");
+                            }
+                    }
+                }
+                else
+                {
+                        mdosDataFound++;
+                        Console.WriteLine($"  ✅ FlexibleMethod proven (has meaningful MDOS/MDSF)");
+                    }
+                    
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  ❌ Error: {ex.Message}");
+                }
+            }
+            
+            // Summary
+            Console.WriteLine($"\n📊 COMPREHENSIVE MSRN INVESTIGATION SUMMARY:");
+            Console.WriteLine($"  Total files analyzed: {allFiles.Length}");
+            Console.WriteLine($"    PM4 files: {pm4Files.Length}");
+            Console.WriteLine($"    PD4 files: {pd4Files.Length}");
+            Console.WriteLine($"  Files with MSRN data: {msrnDataFound}");
+            Console.WriteLine($"  Files with MDOS/MDSF data: {mdosDataFound}");
+            Console.WriteLine($"  Files needing fallback strategy: {fallbackNeeded}");
+            Console.WriteLine($"  Fallback coverage: {(double)fallbackNeeded / allFiles.Length * 100:F1}%");
+            
+            if (msrnDataFound > 0)
+            {
+                Console.WriteLine($"\n⭐ MSRN data discovered in {msrnDataFound} files!");
+            }
+            else
+            {
+                Console.WriteLine($"\n❌ No MSRN data found in any PM4 or PD4 files");
+            }
+        }
+
     } // End PM4FileTests class
 
     /// <summary>
     /// Helper class to expose specialized processing method for testing
     /// </summary>
-    public class PM4HighRatioProcessor
-    {
+        public class PM4HighRatioProcessor
+        {
         // Use centralized coordinate transforms instead of local constants
         
-        public int ProcessHighRatioFile(string inputFilePath, string outputDir)
-        {
+            public int ProcessHighRatioFile(string inputFilePath, string outputDir)
+            {
             string fileName = Path.GetFileName(inputFilePath);
             string baseOutputName = Path.GetFileNameWithoutExtension(inputFilePath);
-            
+
             string debugLogPath = Path.Combine(outputDir, $"{baseOutputName}_debug.log");
             using var debugWriter = new StreamWriter(debugLogPath, false);
-            
+
             debugWriter.WriteLine($"=== Processing High MPRR/MPRL Ratio File: {fileName} ===");
             debugWriter.WriteLine($"Processing Time: {DateTime.Now}\n");
-            
+
             try
             {
                 // Load the file but don't process MPRR links (which would cause exceptions)
@@ -8078,14 +7937,14 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 debugWriter.WriteLine($"NOTE: MPRR links were skipped to avoid index out of range exceptions");
                 
                 return processedVertexCount;
-            }
-            catch (Exception ex)
-            {
+                }
+                catch (Exception ex)
+                {
                 debugWriter.WriteLine($"ERROR: Failed to process high-ratio file: {ex.Message}");
                 debugWriter.WriteLine($"Stack trace: {ex.StackTrace}");
                 
                 return 0;
+                }
             }
         }
-    }
 } // End namespace

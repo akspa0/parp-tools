@@ -15,19 +15,22 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
     {
         #region Core Fields - DECODED THROUGH STATISTICAL ANALYSIS
 
-        // Surface geometry references
-        public uint MsviFirstIndex { get; set; } // Index into MSVI for vertex indices
-        public uint IndexCount { get; set; } // Number of indices for this surface
-
+        // Flags and index data (first 4 bytes)
+        public byte FlagsOrUnknown_0x00 { get; set; }          // _0x00 - Meaning TBD. Might be flags.
+        public byte IndexCount { get; set; }                   // _0x01 - Number of indices in MSVI used by this surface.
+        public byte Unknown_0x02 { get; set; }                 // _0x02 - Meaning TBD.
+        public byte Padding_0x03 { get; set; }                 // _0x03 - Likely padding.
+        
         // DECODED FIELDS - Surface Normal and Height System
-        public float SurfaceNormalX { get; set; } // UnknownFloat_0x04 -> Surface Normal X
-        public float SurfaceNormalY { get; set; } // UnknownFloat_0x08 -> Surface Normal Y  
-        public float SurfaceNormalZ { get; set; } // UnknownFloat_0x0C -> Surface Normal Z
-        public float SurfaceHeight { get; set; } // UnknownFloat_0x10 -> Surface Height/Y-coordinate
+        public float SurfaceNormalX { get; set; }              // _0x04 - Surface Normal X
+        public float SurfaceNormalY { get; set; }              // _0x08 - Surface Normal Y  
+        public float SurfaceNormalZ { get; set; }              // _0x0C - Surface Normal Z
+        public float SurfaceHeight { get; set; }               // _0x10 - Surface Height/Y-coordinate
 
-        // Additional fields (structure may vary by PM4 version)
-        public uint Unknown_0x14 { get; set; } // Additional surface flags or data
-        public uint Unknown_0x18 { get; set; } // Material or texture references
+        // Geometry references (last 12 bytes)
+        public uint MsviFirstIndex { get; set; }               // _0x14 - Starting index in MSVI for this surface
+        public uint MdosIndex { get; set; }                    // _0x18 - Index into MDOS (Destructible Object States)
+        public uint Unknown_0x1C { get; set; }                 // _0x1C - Meaning TBD.
 
         #endregion
 
@@ -57,7 +60,7 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
 
         #endregion
 
-        public const int BaseStructSize = 24; // Base size, may vary by version
+        public const int BaseStructSize = 32; // FIXED: Must be 32 bytes to match Core implementation
 
         /// <summary>Initializes a new instance of the MsurEntry class</summary>
         public MsurEntry() { }
@@ -79,17 +82,22 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Load(BinaryReader br)
         {
-            if (br.BaseStream.Position + BaseStructSize > br.BaseStream.Length)
-                throw new EndOfStreamException($"Not enough data remaining to read MsurEntry (requires {BaseStructSize} bytes).");
-
+            // Read flags and index count (4 bytes)
+            FlagsOrUnknown_0x00 = br.ReadByte();
+            IndexCount = br.ReadByte();
+            Unknown_0x02 = br.ReadByte();
+            Padding_0x03 = br.ReadByte();
+            
+            // Read surface normal and height (16 bytes)
+            SurfaceNormalX = br.ReadSingle();
+            SurfaceNormalY = br.ReadSingle();
+            SurfaceNormalZ = br.ReadSingle();
+            SurfaceHeight = br.ReadSingle();
+            
+            // Read geometry references (12 bytes)
             MsviFirstIndex = br.ReadUInt32();
-            IndexCount = br.ReadUInt32();
-            SurfaceNormalX = br.ReadSingle(); // Decoded: Surface Normal X
-            SurfaceNormalY = br.ReadSingle(); // Decoded: Surface Normal Y
-            SurfaceNormalZ = br.ReadSingle(); // Decoded: Surface Normal Z
-            SurfaceHeight = br.ReadSingle(); // Decoded: Surface Height
-            Unknown_0x14 = br.ReadUInt32();
-            Unknown_0x18 = br.ReadUInt32();
+            MdosIndex = br.ReadUInt32();
+            Unknown_0x1C = br.ReadUInt32();
         }
 
         /// <inheritdoc/>
@@ -105,14 +113,22 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Write(BinaryWriter bw)
         {
-            bw.Write(MsviFirstIndex);
+            // Write flags and index count (4 bytes)
+            bw.Write(FlagsOrUnknown_0x00);
             bw.Write(IndexCount);
+            bw.Write(Unknown_0x02);
+            bw.Write(Padding_0x03);
+            
+            // Write surface normal and height (16 bytes)
             bw.Write(SurfaceNormalX);
             bw.Write(SurfaceNormalY);
             bw.Write(SurfaceNormalZ);
             bw.Write(SurfaceHeight);
-            bw.Write(Unknown_0x14);
-            bw.Write(Unknown_0x18);
+            
+            // Write geometry references (12 bytes)
+            bw.Write(MsviFirstIndex);
+            bw.Write(MdosIndex);
+            bw.Write(Unknown_0x1C);
         }
 
         /// <inheritdoc/>
@@ -337,17 +353,12 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         /// <inheritdoc/>
         public void Load(BinaryReader br)
         {
-            if (br == null)
-                throw new ArgumentNullException(nameof(br));
-
-            var remainingBytes = br.BaseStream.Length - br.BaseStream.Position;
-            var entryCount = (int)(remainingBytes / MsurEntry.BaseStructSize);
-            
-            if (entryCount > 0)
+            var chunkSize = br.BaseStream.Length - br.BaseStream.Position;
+            if (chunkSize > 0 && MsurEntry.BaseStructSize > 0)
             {
-                PreAllocate(entryCount);
-                
-                for (int i = 0; i < entryCount; i++)
+                var numEntries = (int)(chunkSize / MsurEntry.BaseStructSize);
+                PreAllocate(numEntries);
+                for (var i = 0; i < numEntries; i++)
                 {
                     var entry = new MsurEntry();
                     entry.Load(br);

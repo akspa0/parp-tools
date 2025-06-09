@@ -89,10 +89,11 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
         /// <summary>
         /// Extracts buildings using MSLK root nodes with spatial clustering.
         /// Falls back method when MDSF/MDOS data is not available.
+        /// Uses multiple strategies for universal PM4 file compatibility.
         /// </summary>
         private List<CompleteWMOModel> ExtractUsingMslkRootNodesWithSpatialClustering(PM4File pm4File, string sourceFileName)
         {
-            // Find MSLK root nodes (self-referencing entries)
+            // Strategy 1: Find MSLK root nodes (self-referencing entries)
             var rootNodes = new List<(int nodeIndex, MSLKEntry entry)>();
             
             for (int i = 0; i < pm4File.MSLK.Entries.Count; i++)
@@ -105,7 +106,9 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
             }
 
             var buildings = new List<CompleteWMOModel>();
+            bool hasValidRoots = false;
             
+            // Try to extract from root nodes first
             for (int buildingIndex = 0; buildingIndex < rootNodes.Count; buildingIndex++)
             {
                 var (rootNodeIndex, rootEntry) = rootNodes[buildingIndex];
@@ -136,6 +139,45 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
                 building.Metadata["ExtractionMethod"] = "MSLK Root Nodes";
                 
                 buildings.Add(building);
+                if (building.Vertices.Count > 0) hasValidRoots = true;
+            }
+
+            // Strategy 2: Fallback - Group by Unknown_0x04 if no valid roots found
+            if (!hasValidRoots && rootNodes.Count > 0)
+            {
+                Console.WriteLine("Root nodes found but no geometry detected, using enhanced fallback strategy...");
+                
+                var groupedEntries = pm4File.MSLK.Entries
+                    .Select((entry, index) => new { entry, index })
+                    .Where(x => x.entry.MspiFirstIndex >= 0 && x.entry.MspiIndexCount > 0)
+                    .GroupBy(x => x.entry.Unknown_0x04)
+                    .Where(g => g.Count() > 0)
+                    .ToList();
+
+                Console.WriteLine($"Found {groupedEntries.Count} geometry groups");
+                buildings.Clear(); // Start fresh with fallback strategy
+
+                for (int groupIndex = 0; groupIndex < groupedEntries.Count; groupIndex++)
+                {
+                    var group = groupedEntries[groupIndex];
+                    var buildingEntries = group.ToList();
+                    
+                    // Calculate bounding box of structural elements
+                    var structuralBounds = CalculateStructuralElementsBounds(pm4File, buildingEntries.Cast<dynamic>().ToList());
+                    if (!structuralBounds.HasValue) continue;
+                    
+                    // Find MSUR surfaces within or near this bounding box
+                    var nearbySurfaces = FindMSURSurfacesNearBounds(pm4File, structuralBounds.Value, tolerance: 50.0f);
+                    
+                    // Create hybrid building
+                    var building = CreateHybridBuilding(pm4File, buildingEntries.Cast<dynamic>().ToList(), nearbySurfaces, sourceFileName, groupIndex);
+                    building.Metadata["GroupKey"] = group.Key;
+                    building.Metadata["StructuralElements"] = buildingEntries.Count;
+                    building.Metadata["RenderSurfaces"] = nearbySurfaces.Count;
+                    building.Metadata["ExtractionMethod"] = "MSLK Fallback Grouping";
+                    
+                    buildings.Add(building);
+                }
             }
             
             return buildings;

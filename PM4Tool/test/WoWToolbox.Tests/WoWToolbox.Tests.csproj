@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+    <ProjectReference Include="..\..\src\WoWToolbox.Core.v2\WoWToolbox.Core.v2.csproj" />
     <ProjectReference Include="..\..\src\WoWToolbox.PM4Parsing\WoWToolbox.PM4Parsing.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
     <ProjectReference Include="..\..\src\WoWToolbox.MSCNExplorer\WoWToolbox.MSCNExplorer.csproj" />
@@ -37,7 +37,8 @@
 
   <ItemGroup>
     <Compile Include="Navigation/PM4/PD4FileTests.cs" />
-    <Compile Include="Navigation/PM4/PM4FileTests.cs" />
+    <Compile Remove="Navigation/PM4/PM4FileTests.cs" />
+    <Compile Include="Navigation/PM4/PM4FileV2Tests.cs" />
     <Compile Include="PM4Parsing/BuildingExtractionTests.cs" />
     <Compile Include="WMO/WmoGroupMeshTests.cs" />
     <Compile Include="WMO/WmoBatchObjExportTests.cs" />
