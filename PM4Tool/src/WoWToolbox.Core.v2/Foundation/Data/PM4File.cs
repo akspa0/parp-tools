@@ -286,56 +286,138 @@ namespace WoWToolbox.Core.v2.Foundation.Data
         }
 
         /// <summary>
-        /// Adds render surfaces from MSUR/MSVI/MSVT with improved face generation.
+        /// Adds render surfaces from MSUR/MSVI/MSVT with proper spatial filtering.
+        /// Only adds surfaces that are spatially near the building's structural elements.
+        /// This prevents the bug where ALL surfaces were added to every building causing massive duplicate files.
         /// </summary>
         private void AddRenderSurfaces(CompleteWMOModel model)
         {
-            var vertexStartIndex = model.Vertices.Count;
+            if (MSUR == null || MSVI == null || MSVT == null || model.Vertices.Count == 0)
+                return;
 
-            foreach (var surface in MSUR.Entries)
+            // Calculate bounding box of existing structural vertices
+            var bounds = CalculateBuildingBounds(model);
+            if (!bounds.HasValue)
+                return;
+
+            // Find MSUR surfaces that are spatially near this building
+            var nearbySurfaces = FindMSURSurfacesNearBounds(bounds.Value, 50.0f); // 50 unit tolerance
+
+            // Add vertices from nearby MSUR surfaces
+            var msvtIndexToLocal = new Dictionary<uint, int>();
+            var structuralVertexOffset = model.Vertices.Count;
+
+            // First pass: Add all MSVT vertices referenced by nearby surfaces
+            foreach (int surfaceIndex in nearbySurfaces)
             {
-                if (!surface.HasValidGeometry) continue;
+                if (surfaceIndex >= MSUR.Entries.Count) continue;
+                var surface = MSUR.Entries[surfaceIndex];
 
-                int start = (int)surface.MsviFirstIndex;
-                int count = (int)surface.IndexCount;
-
-                // Ensure we have valid triangle count
-                if (count < 3 || count % 3 != 0) continue;
-
-                for (int i = 0; i + 2 < count; i += 3)
+                for (int i = 0; i < surface.IndexCount && surface.MsviFirstIndex + i < MSVI.Indices.Count; i++)
                 {
-                    if (start + i + 2 >= MSVI.Indices.Count) break;
-
-                    int a = (int)MSVI.Indices[start + i];
-                    int b = (int)MSVI.Indices[start + i + 1];
-                    int c = (int)MSVI.Indices[start + i + 2];
-
-                    // Validate vertex indices
-                    if (a >= MSVT.Vertices.Count || b >= MSVT.Vertices.Count || c >= MSVT.Vertices.Count) continue;
-                    if (a < 0 || b < 0 || c < 0) continue;
-
-                    // Skip degenerate triangles
-                    if (a == b || b == c || a == c) continue;
-
-                    // Add vertices with coordinate transformation
-                    var va = MSVT.Vertices[a];
-                    var vb = MSVT.Vertices[b];
-                    var vc = MSVT.Vertices[c];
-
-                    int idxA = model.Vertices.Count;
-                    int idxB = model.Vertices.Count + 1;
-                    int idxC = model.Vertices.Count + 2;
-
-                    model.Vertices.Add(new Vector3(va.X, va.Y, va.Z));
-                    model.Vertices.Add(new Vector3(vb.X, vb.Y, vb.Z));
-                    model.Vertices.Add(new Vector3(vc.X, vc.Y, vc.Z));
-
-                    // Add triangle with consistent winding order (counter-clockwise)
-                    model.TriangleIndices.Add(idxA);
-                    model.TriangleIndices.Add(idxB);
-                    model.TriangleIndices.Add(idxC);
+                    uint msvtIndex = MSVI.Indices[(int)surface.MsviFirstIndex + i];
+                    if (msvtIndex < MSVT.Vertices.Count && !msvtIndexToLocal.ContainsKey(msvtIndex))
+                    {
+                        msvtIndexToLocal[msvtIndex] = model.Vertices.Count;
+                        var vertex = MSVT.Vertices[(int)msvtIndex];
+                        // Use proper coordinate transformation
+                        var worldCoords = new Vector3(vertex.Y, vertex.X, vertex.Z);
+                        model.Vertices.Add(worldCoords);
+                    }
                 }
             }
+
+            // Second pass: Add triangle faces from nearby surfaces
+            foreach (int surfaceIndex in nearbySurfaces)
+            {
+                if (surfaceIndex >= MSUR.Entries.Count) continue;
+                var surface = MSUR.Entries[surfaceIndex];
+
+                if (surface.IndexCount < 3) continue;
+
+                // Generate triangle fan from surface
+                for (int i = 0; i < surface.IndexCount - 2; i += 3)
+                {
+                    if (surface.MsviFirstIndex + i + 2 < MSVI.Indices.Count)
+                    {
+                        uint v1Index = MSVI.Indices[(int)surface.MsviFirstIndex + i];
+                        uint v2Index = MSVI.Indices[(int)surface.MsviFirstIndex + i + 1];
+                        uint v3Index = MSVI.Indices[(int)surface.MsviFirstIndex + i + 2];
+
+                        if (msvtIndexToLocal.ContainsKey(v1Index) && 
+                            msvtIndexToLocal.ContainsKey(v2Index) && 
+                            msvtIndexToLocal.ContainsKey(v3Index))
+                        {
+                            model.TriangleIndices.Add(msvtIndexToLocal[v1Index]);
+                            model.TriangleIndices.Add(msvtIndexToLocal[v2Index]);
+                            model.TriangleIndices.Add(msvtIndexToLocal[v3Index]);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Calculates the bounding box of vertices in a building model.
+        /// </summary>
+        private (Vector3 min, Vector3 max)? CalculateBuildingBounds(CompleteWMOModel model)
+        {
+            if (model.Vertices.Count == 0)
+                return null;
+
+            var minX = model.Vertices.Min(v => v.X);
+            var minY = model.Vertices.Min(v => v.Y);
+            var minZ = model.Vertices.Min(v => v.Z);
+            var maxX = model.Vertices.Max(v => v.X);
+            var maxY = model.Vertices.Max(v => v.Y);
+            var maxZ = model.Vertices.Max(v => v.Z);
+
+            return (new Vector3(minX, minY, minZ), new Vector3(maxX, maxY, maxZ));
+        }
+
+        /// <summary>
+        /// Finds MSUR surfaces that are spatially near the given bounds.
+        /// </summary>
+        private List<int> FindMSURSurfacesNearBounds((Vector3 min, Vector3 max) bounds, float tolerance)
+        {
+            var nearbySurfaces = new List<int>();
+
+            if (MSUR?.Entries == null || MSVT?.Vertices == null || MSVI?.Indices == null)
+                return nearbySurfaces;
+
+            for (int surfaceIndex = 0; surfaceIndex < MSUR.Entries.Count; surfaceIndex++)
+            {
+                var surface = MSUR.Entries[surfaceIndex];
+
+                // Check if any vertex of this surface is near the bounds
+                bool isNearby = false;
+                for (int i = (int)surface.MsviFirstIndex; i < surface.MsviFirstIndex + surface.IndexCount && i < MSVI.Indices.Count; i++)
+                {
+                    uint msvtIndex = MSVI.Indices[i];
+                    if (msvtIndex < MSVT.Vertices.Count)
+                    {
+                        var vertex = MSVT.Vertices[(int)msvtIndex];
+                        // Use proper coordinate transformation
+                        var worldCoords = new Vector3(vertex.Y, vertex.X, vertex.Z);
+
+                        // Check if vertex is within expanded bounds
+                        if (worldCoords.X >= bounds.min.X - tolerance && worldCoords.X <= bounds.max.X + tolerance &&
+                            worldCoords.Y >= bounds.min.Y - tolerance && worldCoords.Y <= bounds.max.Y + tolerance &&
+                            worldCoords.Z >= bounds.min.Z - tolerance && worldCoords.Z <= bounds.max.Z + tolerance)
+                        {
+                            isNearby = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isNearby)
+                {
+                    nearbySurfaces.Add(surfaceIndex);
+                }
+            }
+
+            return nearbySurfaces;
         }
     }
 

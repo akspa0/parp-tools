@@ -1,0 +1,138 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_15_50.pm4
+Total Nodes: 84
+Root Nodes: 84
+Max Depth: 0
+Geometry Nodes: 26
+Doodad Nodes: 58
+
+=== DISCOVERED PATTERNS ===
+• PARENT INDEX ANALYSIS:
+•   Self-references: 3 (3.6%)
+•   Valid parent refs: 81 (96.4%)
+•   Invalid refs: 0 (0.0%)
+• Node 0 self-references (primary object candidate)
+• Node 1 self-references (primary object candidate)
+• Node 2 self-references (primary object candidate)
+• Node 3 references 1 (potential grouping)
+• Node 4 references 3 (potential grouping)
+• Node 5 references 4 (potential grouping)
+• Node 6 references 5 (potential grouping)
+• Node 7 references 6 (potential grouping)
+• Node 8 references 7 (potential grouping)
+• Node 9 references 8 (potential grouping)
+• Node 10 references 4 (potential grouping)
+• Node 11 references 0 (potential grouping)
+• Node 12 references 9 (potential grouping)
+• Node 13 references 10 (potential grouping)
+• Node 14 references 3 (potential grouping)
+• Node 15 references 11 (potential grouping)
+• Node 16 references 12 (potential grouping)
+• Node 17 references 13 (potential grouping)
+• Node 18 references 6 (potential grouping)
+• Node 19 references 14 (potential grouping)
+• Node 20 references 15 (potential grouping)
+• Node 21 references 16 (potential grouping)
+• Node 22 references 17 (potential grouping)
+• Node 23 references 18 (potential grouping)
+• Node 24 references 19 (potential grouping)
+• Node 25 references 20 (potential grouping)
+• Node 26 references 21 (potential grouping)
+• Node 27 references 22 (potential grouping)
+• Node 28 references 23 (potential grouping)
+• Node 29 references 24 (potential grouping)
+• Node 30 references 25 (potential grouping)
+• Node 31 references 26 (potential grouping)
+• Node 32 references 27 (potential grouping)
+• Node 33 references 28 (potential grouping)
+• Node 34 references 29 (potential grouping)
+• Node 35 references 30 (potential grouping)
+• Node 36 references 30 (potential grouping)
+• Node 37 references 31 (potential grouping)
+• Node 38 references 31 (potential grouping)
+• Node 39 references 23 (potential grouping)
+• Node 40 references 32 (potential grouping)
+• Node 41 references 16 (potential grouping)
+• Node 42 references 33 (potential grouping)
+• Node 43 references 24 (potential grouping)
+• Node 44 references 29 (potential grouping)
+• Node 45 references 34 (potential grouping)
+• Node 46 references 28 (potential grouping)
+• Node 47 references 35 (potential grouping)
+• Node 48 references 34 (potential grouping)
+• Node 49 references 17 (potential grouping)
+• Node 50 references 35 (potential grouping)
+• Node 51 references 36 (potential grouping)
+• Node 52 references 37 (potential grouping)
+• Node 53 references 38 (potential grouping)
+• Node 54 references 9 (potential grouping)
+• Node 55 references 39 (potential grouping)
+• Node 56 references 40 (potential grouping)
+• Node 57 references 41 (potential grouping)
+• Node 58 references 42 (potential grouping)
+• Node 59 references 37 (potential grouping)
+• Node 60 references 41 (potential grouping)
+• Node 61 references 10 (potential grouping)
+• Node 62 references 43 (potential grouping)
+• Node 63 references 44 (potential grouping)
+• Node 64 references 45 (potential grouping)
+• Node 65 references 46 (potential grouping)
+• Node 66 references 44 (potential grouping)
+• Node 67 references 47 (potential grouping)
+• Node 68 references 38 (potential grouping)
+• Node 69 references 48 (potential grouping)
+• Node 70 references 49 (potential grouping)
+• Node 71 references 48 (potential grouping)
+• Node 72 references 45 (potential grouping)
+• Node 73 references 50 (potential grouping)
+• Node 74 references 51 (potential grouping)
+• Node 75 references 52 (potential grouping)
+• Node 76 references 50 (potential grouping)
+• Node 77 references 53 (potential grouping)
+• Node 78 references 40 (potential grouping)
+• Node 79 references 52 (potential grouping)
+• Node 80 references 54 (potential grouping)
+• Node 81 references 39 (potential grouping)
+• Node 82 references 49 (potential grouping)
+• Node 83 references 36 (potential grouping)
+• SUMMARY: 3 self-refs, 81 other refs
+• Hierarchy levels found: 1
+•   Depth 0: Flags [0x01, 0x02]
+• Flag 0x01 has sequence ordering: 0, 1, 2, 3, 4, 6
+• Flag 0x02 has sequence ordering: 0, 1, 2, 3, 4, 5
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 26 geometry, 58 doodad nodes
+• INVESTIGATING ALTERNATIVE HIERARCHY INDICATORS:
+•   Sequence field groups: 5
+•   Cross-reference groups: 28
+•   Unknown_0x0C groups: 3
+•   MSPI index ranges: 2
+• RECOMMENDATION: Use self-referencing nodes as primary objects for export
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 2 children
+  Parent Index 1: 2 children
+  Parent Index 3: 2 children
+  Parent Index 4: 2 children
+  Parent Index 6: 2 children
+  Parent Index 9: 2 children
+  Parent Index 10: 2 children
+  Parent Index 16: 2 children
+  Parent Index 17: 2 children
+  Parent Index 23: 2 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 58 total (0 geom, 58 doodad)
+  Flag 0x02: 26 total (26 geom, 0 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:1]
+
+Root Node 1 (Flag: 0x01):
+  DOOD_1 [Flag:0x01, Seq:2]
+
+Root Node 2 (Flag: 0x02):
+  GEOM_2 [Flag:0x02, Seq:0]
+

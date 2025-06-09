@@ -68,8 +68,17 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
             // Create buildings from grouped surfaces
             var buildings = new List<CompleteWMOModel>();
             int buildingIndex = 0;
+            const int maxBuildings = 50;
             
-            foreach (var buildingGroup in buildingGroups.OrderBy(g => g.Key))
+            var orderedGroups = buildingGroups.OrderBy(g => g.Key).ToList();
+            
+            // Log if we would create too many buildings
+            if (orderedGroups.Count > maxBuildings)
+            {
+                Console.WriteLine($"WARNING: MDSF/MDOS system would create {orderedGroups.Count} buildings, limiting to {maxBuildings}");
+            }
+            
+            foreach (var buildingGroup in orderedGroups.Take(maxBuildings))
             {
                 var buildingId = buildingGroup.Key;
                 var surfaceIndices = buildingGroup.Value;
@@ -107,9 +116,17 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
 
             var buildings = new List<CompleteWMOModel>();
             bool hasValidRoots = false;
+            const int maxBuildings = 50;
             
-            // Try to extract from root nodes first
-            for (int buildingIndex = 0; buildingIndex < rootNodes.Count; buildingIndex++)
+            // Log if we would create too many buildings from root nodes
+            if (rootNodes.Count > maxBuildings)
+            {
+                Console.WriteLine($"WARNING: MSLK root nodes would create {rootNodes.Count} buildings, limiting to {maxBuildings}");
+            }
+            
+            // Try to extract from root nodes first (limited to maxBuildings)
+            int rootNodesToProcess = Math.Min(rootNodes.Count, maxBuildings);
+            for (int buildingIndex = 0; buildingIndex < rootNodesToProcess; buildingIndex++)
             {
                 var (rootNodeIndex, rootEntry) = rootNodes[buildingIndex];
                 var rootGroupKey = rootEntry.Unknown_0x04;
@@ -155,9 +172,17 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
                     .ToList();
 
                 Console.WriteLine($"Found {groupedEntries.Count} geometry groups");
+                
+                // Log if we would create too many buildings from fallback grouping
+                if (groupedEntries.Count > maxBuildings)
+                {
+                    Console.WriteLine($"WARNING: MSLK fallback grouping would create {groupedEntries.Count} buildings, limiting to {maxBuildings}");
+                }
+                
                 buildings.Clear(); // Start fresh with fallback strategy
 
-                for (int groupIndex = 0; groupIndex < groupedEntries.Count; groupIndex++)
+                int groupsToProcess = Math.Min(groupedEntries.Count, maxBuildings);
+                for (int groupIndex = 0; groupIndex < groupsToProcess; groupIndex++)
                 {
                     var group = groupedEntries[groupIndex];
                     var buildingEntries = group.ToList();
@@ -220,7 +245,7 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
             var msvtIndexToLocal = new Dictionary<uint, int>();
             foreach (var msvtIdx in usedMsvtIndices.OrderBy(idx => idx))
             {
-                var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(pm4File.MSVT.Vertices[(int)msvtIdx]);
+                var worldCoords = Pm4CoordinateTransforms.FromMsvtVertexSimple(pm4File.MSVT.Vertices[(int)msvtIdx]);
                 msvtIndexToLocal[msvtIdx] = building.Vertices.Count;
                 building.Vertices.Add(worldCoords);
             }
@@ -281,7 +306,7 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
             {
                 foreach (var vertex in pm4File.MSVT.Vertices)
                 {
-                    var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(vertex);
+                    var worldCoords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
                     building.Vertices.Add(worldCoords);
                 }
             }
@@ -409,7 +434,7 @@ namespace WoWToolbox.PM4Parsing.BuildingExtraction
                     if (msvtIndex < pm4File.MSVT.Vertices.Count)
                     {
                         var vertex = pm4File.MSVT.Vertices[(int)msvtIndex];
-                        var worldCoords = Pm4CoordinateTransforms.FromMsvtVertex(vertex);
+                        var worldCoords = Pm4CoordinateTransforms.FromMsvtVertexSimple(vertex);
                         
                         // Check if vertex is within expanded bounds
                         if (worldCoords.X >= bounds.min.X - tolerance && worldCoords.X <= bounds.max.X + tolerance &&

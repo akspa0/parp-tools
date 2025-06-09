@@ -1,0 +1,39 @@
+=== MSLK HIERARCHY ANALYSIS ===
+File: development_14_35.pm4
+Total Nodes: 1
+Root Nodes: 1
+Max Depth: 0
+Geometry Nodes: 0
+Doodad Nodes: 1
+
+=== DISCOVERED PATTERNS ===
+• PARENT INDEX ANALYSIS:
+•   Self-references: 1 (100.0%)
+•   Valid parent refs: 0 (0.0%)
+•   Invalid refs: 0 (0.0%)
+• HYPOTHESIS: ParentIndex_0x04 may represent GROUP MEMBERSHIP, not hierarchy
+•   - Self-references likely indicate 'group leaders' or 'primary objects'
+•   - This is NOT a traditional parent-child tree structure
+• Node 0 self-references (primary object candidate)
+• SUMMARY: 1 self-refs, 0 other refs
+• Hierarchy levels found: 1
+•   Depth 0: Flags [0x01]
+• Geometry/Doodad distribution by depth:
+•   Depth 0: 0 geometry, 1 doodad nodes
+• INVESTIGATING ALTERNATIVE HIERARCHY INDICATORS:
+•   Sequence field groups: 0
+•   Cross-reference groups: 0
+•   Unknown_0x0C groups: 0
+• RECOMMENDATION: Use self-referencing nodes as primary objects for export
+
+=== PARENT INDEX DISTRIBUTION ===
+Top parent indices (potential hierarchy roots):
+  Parent Index 0: 1 children
+
+=== FLAG DISTRIBUTION ===
+  Flag 0x01: 1 total (0 geom, 1 doodad)
+
+=== SAMPLE HIERARCHY TREES ===
+Root Node 0 (Flag: 0x01):
+  DOOD_0 [Flag:0x01, Seq:1]
+
