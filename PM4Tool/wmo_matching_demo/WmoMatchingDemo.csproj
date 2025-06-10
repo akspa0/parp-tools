@@ -11,4 +11,9 @@
     <ProjectReference Include="../src/WoWToolbox.PM4Parsing/WoWToolbox.PM4Parsing.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="geometry3Sharp" Version="1.0.324" />
+    <PackageReference Include="MathNet.Spatial" Version="0.6.0" />
+  </ItemGroup>
+
 </Project> 

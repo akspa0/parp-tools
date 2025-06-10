@@ -1,345 +1,178 @@
-# System Patterns
+# System Patterns: PM4-WMO Geometric Correlation Architecture
 
-## Proven Architectural Patterns
+## Current Architecture: Individual Object Analysis ✅
 
-### **1. Dual Geometry Assembly Pattern**
+### Foundation Pattern: Per-Object Granularity
 ```csharp
-public class DualGeometryAssembler
-{
-    // Combines MSLK/MSPV structural data with MSVT/MSUR render surfaces
-    public CompleteWMOModel AssembleBuilding(PM4File pm4File, int rootNodeIndex)
-    {
-        // Phase 1: Extract structural framework
-        var structuralEntries = pm4File.MSLK.Entries
-            .Where(entry => entry.Unknown_0x04 == rootNodeIndex)
-            .ToList();
-        
-        // Phase 2: Extract render surfaces
-        var renderSurfaces = GetLinkedMSURSurfaces(pm4File, rootNodeIndex);
-        
-        // Phase 3: Combine both geometry systems
-        return CombineStructuralAndRenderGeometry(structuralEntries, renderSurfaces);
-    }
+// CORRECT: Individual object extraction within PM4 files
+class IndividualNavigationObject {
+    string ObjectId;                    // "OBJ_001", "OBJ_002", etc.
+    List<Vector3> NavigationVertices;   // Real vertex positions (CURRENTLY EMPTY!)
+    List<Face> NavigationTriangles;     // Real triangle data (CURRENTLY EMPTY!)
+    BoundingBox3D NavigationBounds;     // Real bounds (CURRENTLY FAKE!)
+}
+
+class IndividualObjectMatch {
+    IndividualNavigationObject NavigationObject;
+    List<ObjectWmoMatch> WmoMatches;    // Top matches for this individual object
 }
 ```
-- **Purpose**: Combines PM4's dual geometry systems for complete building models
-- **Result**: Individual buildings with both structural framework and render surfaces
-- **Quality**: "Exactly the quality desired" user validation
 
-### **2. Self-Referencing Root Detection Pattern**
+### Progressive Processing Pattern ✅
 ```csharp
-public class BuildingDetector
-{
-    public List<int> FindBuildingRootNodes(PM4File pm4File)
-    {
-        return pm4File.MSLK.Entries
-            .Select((entry, index) => new { entry, index })
-            .Where(x => x.entry.Unknown_0x04 == x.index)  // Self-referencing nodes
-            .Select(x => x.index)
-            .ToList();
-    }
+// Each PM4 → Multiple Individual Objects → WMO Matches per Object
+PM4: development_00_01.pm4
+├─ Object OBJ_000: 132 vertices → 10 WMO matches
+├─ Object OBJ_001: 149 vertices → 10 WMO matches  
+├─ Object OBJ_002: 180 vertices → 10 WMO matches
+└─ Analysis Summary with per-object results
+```
+
+## CRITICAL FLAW: Fake Implementation Pattern ❌
+
+### Current Broken Pattern:
+```csharp
+// FAKE PM4 PARSING - COMPLETELY WRONG!
+static List<IndividualNavigationObject> LoadPM4IndividualObjects(string pm4FilePath) {
+    var vertexCount = 50 + (objIndex * 30) + (fileBytes[objIndex % fileBytes.Length] % 200); // RANDOM!
+    NavigationVertices = new List<Vector3>(),     // EMPTY! No real data!
+    NavigationBounds = new BoundingBox3D(
+        new Vector3(objIndex * 20f, objIndex * 15f, 0f),  // FAKE BOUNDS!
+        new Vector3((objIndex + 1) * 20f, (objIndex + 1) * 15f, 10f + objIndex * 3f)
+    );
+    // ALL DATA IS FABRICATED!
 }
 ```
-- **Discovery**: MSLK entries with `Unknown_0x04 == index` identify building separators
-- **Impact**: Enables individual building extraction instead of combined fragments
-- **Validation**: Consistently finds 10+ buildings per PM4 file
 
-### **3. Signature-Based Duplicate Elimination Pattern**
-```csharp
-public class SurfaceProcessor
-{
-    public List<Triangle> ProcessSurfacesWithDeduplication(PM4File pm4File)
-    {
-        var processedSignatures = new HashSet<string>();
-        var triangles = new List<Triangle>();
-        
-        foreach (var msur in pm4File.MSUR.Entries)
-        {
-            var signature = CreateSurfaceSignature(msur, pm4File.MSVI);
-            
-            if (!processedSignatures.Contains(signature))
-            {
-                processedSignatures.Add(signature);
-                triangles.AddRange(GenerateTriangleFan(msur, pm4File.MSVI));
-            }
-        }
-        
-        return triangles;
-    }
-}
-```
-- **Problem Solved**: Duplicate MSUR surfaces creating redundant faces and "spikes"
-- **Result**: 884,915+ valid faces with zero degenerate triangles
-- **Quality**: 47% face count improvement with clean connectivity
+### What This Causes:
+- Meaningless correlation scores (fake data vs real WMO data)
+- False confidence ratings
+- User frustration: "none of the objects are correctly identified"
+- Complete system failure despite appearing to work
 
-### **4. Centralized Coordinate Transform Pattern**
+## Required Pattern: Real Geometric Correlation
+
+### 1. Real PM4 Parser Pattern
 ```csharp
-public static class Pm4CoordinateTransforms
-{
-    // Perfect MSVT render mesh transformation
-    public static Vector3 FromMsvtVertex(MsvtVertex vertex) => 
-        new Vector3(vertex.Y, vertex.X, vertex.Z);
-    
-    // Complex MSCN collision boundary alignment
-    public static Vector3 FromMscnVertex(Vector3 vertex)
-    {
-        float correctedY = -vertex.Y;
-        float x = vertex.X;
-        float y = correctedY * MathF.Cos(MathF.PI) - vertex.Z * MathF.Sin(MathF.PI);
-        float z = correctedY * MathF.Sin(MathF.PI) + vertex.Z * MathF.Cos(MathF.PI);
-        return new Vector3(x, y, z);
+class RealPM4Parser {
+    List<IndividualNavigationObject> ParseActualGeometry(byte[] pm4Data) {
+        // Parse real PM4 binary chunks
+        // Extract actual vertex positions from navigation meshes
+        // Group vertices by object/mesh within PM4
+        // Return objects with REAL vertex data
     }
     
-    // Standard structural element coordinates
-    public static Vector3 FromMspvVertex(C3Vector vertex) => 
-        new Vector3(vertex.X, vertex.Y, vertex.Z);
-    
-    // World positioning references
-    public static Vector3 FromMprlEntry(MprlEntry entry) => 
-        new Vector3(entry.Position.X, -entry.Position.Z, entry.Position.Y);
-}
-```
-- **Achievement**: Perfect spatial alignment of all PM4 chunk types
-- **Validation**: MeshLab visual confirmation across hundreds of files
-- **Architecture**: Single source of truth for coordinate transformations
-
-### **5. Enhanced Export Pipeline Pattern**
-```csharp
-public class EnhancedObjExporter
-{
-    public void ExportWithDecodedFields(CompleteWMOModel model, string objPath, string mtlPath)
-    {
-        // Phase 1: Export geometry with surface normals
-        ExportVerticesAndNormals(model.Vertices, model.Normals);
-        
-        // Phase 2: Generate material classification
-        ExportMaterialLibrary(model.Materials, mtlPath);
-        
-        // Phase 3: Export faces with material assignments
-        ExportFacesWithMaterials(model.TriangleIndices, model.MaterialAssignments);
-        
-        // Phase 4: Add spatial organization groups
-        ExportHeightLevelGroups(model.SpatialGroups);
+    List<Vector3> ExtractRealVertices(byte[] chunkData) {
+        // Parse actual PM4 binary format
+        // Extract real 3D coordinates
+        // NOT random/fake data!
     }
 }
 ```
-- **Features**: Surface normals, material classification, spatial organization
-- **Quality**: Professional 3D software compatibility (MeshLab, Blender)
-- **Metadata**: Complete MSLK object type and material ID processing
 
-### **6. MDSF→MDOS Building Linking Pattern**
+### 2. Surface Correlation Pattern  
 ```csharp
-public class BuildingLinker
-{
-    public List<int> GetBuildingSurfaces(PM4File pm4File, int buildingId)
-    {
-        return pm4File.MDSF.Entries
-            .Where(mdsfEntry => 
-            {
-                var mdosEntry = pm4File.MDOS.Entries[mdsfEntry.mdos_index];
-                return mdosEntry.building_id == buildingId;
-            })
-            .Select(mdsfEntry => (int)mdsfEntry.msur_index)
-            .ToList();
-    }
-}
-```
-- **Purpose**: Precise surface-to-building assignment using PM4 hierarchy chunks
-- **Benefit**: Eliminates identical geometry problem in building exports
-- **Scope**: Works when MDSF/MDOS chunks are available
-
-### **7. Adaptive Processing Pattern**
-```csharp
-public class AdaptiveProcessor
-{
-    public CompleteWMOModel ProcessBuilding(PM4File pm4File, int rootNodeIndex)
-    {
-        if (pm4File.MDSF != null && pm4File.MDOS != null)
-        {
-            // Use precise building linking system
-            return ProcessWithMdsfMdosLinking(pm4File, rootNodeIndex);
-        }
-        else
-        {
-            // Fall back to spatial clustering
-            return ProcessWithSpatialClustering(pm4File, rootNodeIndex);
-        }
-    }
-}
-```
-- **Flexibility**: Handles PM4 files with and without building hierarchy chunks
-- **Quality**: Maintains consistent building extraction across PM4 variations
-- **Architecture**: Universal compatibility with different PM4 formats
-
-## Data Model Patterns
-
-### **8. Complete Building Model Pattern**
-```csharp
-public class CompleteWMOModel
-{
-    public string FileName { get; set; } = "";
-    public string Category { get; set; } = "";
-    public List<Vector3> Vertices { get; set; } = new();
-    public List<int> TriangleIndices { get; set; } = new();
-    public List<Vector3> Normals { get; set; } = new();
-    public List<Vector2> TexCoords { get; set; } = new();
-    public string MaterialName { get; set; } = "WMO_Material";
-    public Dictionary<string, object> Metadata { get; set; } = new();
-    
-    public int VertexCount => Vertices.Count;
-    public int FaceCount => TriangleIndices.Count / 3;
-}
-```
-- **Purpose**: Complete building representation with all geometric and metadata
-- **Usage**: Standard model for all building extraction workflows
-- **Features**: Vertices, faces, normals, materials, and decoded metadata
-
-### **9. Decoded Field Integration Pattern**
-```csharp
-public class DecodedFieldProcessor
-{
-    public void ProcessMSURFields(MsurEntry msur, CompleteWMOModel model)
-    {
-        // Extract surface normals from decoded MSUR fields
-        var normal = new Vector3(
-            msur.SurfaceNormalX,    // UnknownFloat_0x04
-            msur.SurfaceNormalY,    // UnknownFloat_0x08  
-            msur.SurfaceNormalZ     // UnknownFloat_0x0C
-        );
-        
-        model.Normals.Add(normal);
-        
-        // Extract height information
-        var height = msur.SurfaceHeight;  // UnknownFloat_0x10
-        model.Metadata["SurfaceHeight"] = height;
+class SurfaceCorrelator {
+    float AnalyzeVertexCorrelation(List<Vector3> pm4Verts, List<Vector3> wmoVerts) {
+        // Real vertex-to-vertex distance analysis
+        // Spatial overlap calculation
+        // Surface normal correlation
     }
     
-    public void ProcessMSLKFields(MSLKEntry mslk, CompleteWMOModel model)
-    {
-        // Extract object type and material classification
-        var objectType = mslk.ObjectTypeFlags;     // Unknown_0x00
-        var materialId = mslk.MaterialColorId;     // Unknown_0x0C
-        
-        model.Metadata["ObjectType"] = objectType;
-        model.Metadata["MaterialId"] = materialId;
+    Matrix4x4[] TestAllRotations(NavigationMesh pm4, WmoAsset wmo) {
+        // Test 0°, 90°, 180°, 270° rotations
+        // Use ICP algorithms for optimal alignment
+        // Return best transformation matrix
     }
 }
 ```
-- **Achievement**: 100% utilization of decoded PM4 unknown fields
-- **Result**: Enhanced export with surface normals, materials, and spatial data
-- **Validation**: Statistical analysis across 76+ files confirms field accuracy
 
-## Quality Assurance Patterns
-
-### **10. Comprehensive Validation Pattern**
+### 3. geometry3Sharp Integration Pattern
 ```csharp
-public class GeometryValidator
-{
-    public ValidationResult ValidateTriangles(List<int> triangleIndices, int vertexCount)
-    {
-        var result = new ValidationResult();
-        
-        for (int i = 0; i < triangleIndices.Count; i += 3)
-        {
-            var idx1 = triangleIndices[i];
-            var idx2 = triangleIndices[i + 1];
-            var idx3 = triangleIndices[i + 2];
-            
-            // Validate triangle indices
-            if (idx1 >= vertexCount || idx2 >= vertexCount || idx3 >= vertexCount)
-                result.AddError($"Triangle {i/3}: Index out of bounds");
-            
-            // Validate non-degenerate triangle
-            if (idx1 == idx2 || idx1 == idx3 || idx2 == idx3)
-                result.AddError($"Triangle {i/3}: Degenerate triangle");
-        }
-        
-        return result;
+using g3;
+
+class GeometricMatcher {
+    DMesh3 ConvertPM4ToMesh(IndividualNavigationObject navObj);
+    DMesh3 ConvertWMOToMesh(WmoAsset wmo);
+    
+    float CalculateICPAlignment(DMesh3 sourceMesh, DMesh3 targetMesh) {
+        var icp = new MeshICP();
+        icp.SetSource(sourceMesh);
+        icp.SetTarget(targetMesh);
+        return icp.Solve(); // Real geometric alignment score
     }
 }
 ```
-- **Result**: Zero degenerate triangles across all processed files
-- **Quality**: Professional 3D software compatibility guaranteed
-- **Coverage**: Validates all geometry before export
 
-## Architecture Design
+## User's "Negative Mold" Theory Integration
 
-### **Project Structure Pattern**
-```
-WoWToolbox.Core/
-├── Navigation/PM4/
-│   ├── Models/           # CompleteWMOModel, DTOs
-│   ├── Transforms/       # Pm4CoordinateTransforms
-│   └── Analysis/         # Core analysis utilities
-
-WoWToolbox.PM4Parsing/    # (Planned refactor target)
-├── BuildingExtraction/   # Dual geometry assembly
-├── GeometryProcessing/   # Surface processing, face generation
-├── MaterialAnalysis/     # MSLK metadata processing
-└── Export/              # Enhanced OBJ/MTL export
-```
-
-### **Testing Pattern**
+### PM4 as Subset Pattern
 ```csharp
-[Fact]
-public void BuildingExtraction_ShouldProduceIdenticalQuality()
-{
-    // Arrange: Load PM4 file
-    var pm4File = LoadTestPM4File();
+// PM4 navigation surfaces should be spatial subset of WMO walkable geometry
+bool ValidateNegativeMoldTheory(NavigationMesh pm4, WmoAsset wmo) {
+    var pm4Bounds = pm4.CalculateActualBounds();
+    var wmoBounds = wmo.BoundingBox;
     
-    // Act: Extract buildings
-    var buildings = extractor.ExtractBuildings(pm4File);
-    
-    // Assert: Validate quality metrics
-    Assert.True(buildings.Count >= 10, "Should extract 10+ buildings");
-    Assert.All(buildings, building => 
-    {
-        Assert.True(building.FaceCount > 0, "Building should have faces");
-        Assert.True(building.Normals.All(n => Math.Abs(n.Length() - 1.0f) < 0.01f), 
-                   "All normals should be normalized");
+    // PM4 should fit INSIDE WMO bounds
+    return wmoBounds.Contains(pm4Bounds) && 
+           CalculateSpatialOverlap(pm4, wmo) > 0.7f;
+}
+```
+
+## Multi-Pass Progressive Architecture (KEEP) ✅
+
+### Pass Structure Pattern:
+```csharp
+// Pass 1: Coarse Geometric Filtering (Basic metrics) → ~1,000 candidates
+// Pass 2: Intermediate Shape Analysis (Surface patterns) → ~200 candidates  
+// Pass 3: Detailed Geometric Correlation (Real vertex matching) → ~50 matches
+```
+
+### Output Pattern (KEEP):
+```
+PM4: development_00_01.pm4/
+├─ pass1_coarse.txt        // Basic filtering results
+├─ pass2_intermediate.txt  // Shape analysis results
+├─ pass3_detailed.txt      // Final geometric correlation
+└─ analysis_summary.txt    // Complete per-object breakdown
+```
+
+## File Processing Pattern (KEEP) ✅
+
+### Parallel WMO Loading:
+```csharp
+// Load complete WMO database with real geometric analysis
+await Task.Run(() => {
+    Parallel.ForEach(objFiles, objFile => {
+        var wmoAsset = ProcessWmoFile(objFile); // Extract real geometry
+        completeWmoDatabase.Add(wmoAsset);
     });
-}
+});
 ```
 
-## Implementation Guidelines
-
-### **Quality Standards**
-1. **Zero Degenerate Triangles**: All face generation must pass comprehensive validation
-2. **Professional Compatibility**: Output must work seamlessly with MeshLab and Blender
-3. **Individual Building Quality**: Each building must be complete and properly separated
-4. **Surface Normal Accuracy**: All normals must be properly normalized vectors
-
-### **Performance Requirements**
-1. **Batch Processing**: Handle hundreds of PM4 files with consistent quality
-2. **Memory Efficiency**: Process large files without excessive memory usage
-3. **Processing Speed**: Maintain reasonable performance for production workflows
-4. **Error Handling**: Robust processing with comprehensive error reporting
-
-### **Architectural Principles**
-1. **Single Responsibility**: Each pattern handles one specific aspect of processing
-2. **Composition Over Inheritance**: Combine patterns for complex workflows
-3. **Validation First**: Validate all geometry before export
-4. **Metadata Preservation**: Maintain all decoded field information throughout processing
-
-This architecture represents the proven, production-ready patterns that enable WoWToolbox v3's breakthrough capabilities in PM4 analysis and building extraction.
-
-## System Pattern: Persistent Audit Reports
-- Any audit or compatibility report (e.g., `chunk_audit_report.md`) must be referenced in both `activeContext.md` and `projectbrief.md`.
-- Such reports are required reading at the start of every session if relevant to the current work focus.
-
-### **11. Deprecated Tests Project & Output Consolidation Pattern**
+### Individual Object Processing:
 ```csharp
-// Move legacy/confusing tests to a dedicated project for historical tracking
-// Consolidate all outputs into a single timestamped output folder per run
-public class OutputManager
-{
-    public string GetRunOutputFolder()
-    {
-        // Always use a single timestamped folder in output/ for all results
-        return Path.Combine("output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-    }
+foreach (var navObject in individualObjects) {
+    var matches = FindWmoMatchesForIndividualObject(navObject);
+    // REAL geometric correlation, not fake scoring
 }
 ```
-- **Purpose**: Preserve historical tests while keeping the main suite clean and focused
-- **Result**: All outputs are easy to find and compare; no more split/jumbled folders
-- **Benefit**: Dramatically improved clarity, maintainability, and analysis for Core.v2 workflows
+
+## Critical Fix Required
+
+### Replace Fake Implementation:
+1. **Remove all fake data generation**
+2. **Implement real PM4 binary parsing**
+3. **Use geometry3Sharp for surface correlation**
+4. **Add rotation analysis (0°, 90°, 180°, 270°)**
+5. **Generate meaningful confidence scores**
+
+### Expected Result Pattern:
+```
+Object OBJ_001 (Building)
+├─ Vertices: 149 (REAL vertex positions)
+├─ Top Match: ZulAmanWall08.obj (87.3% confidence)
+└─ Reason: Spatial overlap 89%, Surface correlation 85%, Rotation: 90°
+```
+
+The architecture is sound - the execution is fake and needs complete geometric correlation rewrite.
