@@ -54,7 +54,17 @@
 - [ ] **Step 5.1: PM4 Utility Merge**
 - [ ] **Step 5.2: PD4 Handling in Core.v2**
 - [ ] **Step 5.3: ADT Terrain Support Migration**
-- [ ] **Step 5.4: WMOv14 Fix Planning**
+- [x] **Step 5.4: WMOv14 Converter Port (in progress)**
+
+#### Phase 5 Execution Slices Progress
+- [x] Slice A – Coordinate & Math Utilities
+- [x] Slice B – PM4 Geometry Edge-Case Handling
+- [x] Slice C – Building Extraction Complete
+- [x] Slice D – WMO Matching Tuning
+- [ ] Slice E – PD4 Parsing & Model Builder
+- [ ] Slice F – ADT Terrain Loader
+- [ ] Slice G – Utility CLI Refactors
+- [ ] Slice H – WMO v14 Fix
 
 ---
 

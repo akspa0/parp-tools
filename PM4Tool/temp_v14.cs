@@ -35,17 +35,6 @@ namespace WoWToolbox.WmoV14Converter
         {
             Log($"ERROR in {context}: {ex.Message}\n{ex.StackTrace}");
         }
-
-        /// <summary>
-        /// Reads a 4-byte chunk identifier stored big-endian in the file and converts it to the canonical ASCII string (e.g. "MVER").
-        /// </summary>
-        private static string ReadChunkId(BinaryReader br)
-        {
-            var idBytes = br.ReadBytes(4);
-            if (idBytes.Length < 4) return string.Empty;
-            Array.Reverse(idBytes); // convert big-endian to little-endian for C# string
-            return Encoding.ASCII.GetString(idBytes);
-        }
         public static string GetLogFilePath() => LogFilePath;
 
         /// <summary>
@@ -87,13 +76,6 @@ namespace WoWToolbox.WmoV14Converter
                         string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
                         uint subChunkSize = momoReader.ReadUInt32();
                         Log($"[WMO][MOMO] Subchunk: ID='{subChunkIdStr}' Offset=0x{subChunkStart:X} Size={subChunkSize}");
-                        if (subChunkIdStr == "MOHD")
-                        {
-                            // Detect version via MOHD inside MOMO if MVER missing
-                            stream.Position = subChunkStart + 8;
-                            int version = reader.ReadInt32();
-                            Log($"[WMO][MOMO] Detected version {version} via MOHD");
-                        }
                         // Optionally: add to chunkHeaders or process as needed
                         momoStream.Position = subChunkStart + 8 + subChunkSize;
                     }
@@ -209,24 +191,16 @@ namespace WoWToolbox.WmoV14Converter
             }
             var mogpHeader = br.ReadBytes(MOGP_HEADER_SIZE);
             // --- Scan forward for the first valid subchunk header ---
-            string[] validSubchunks = {
-                // geometry / rendering
-                "MOPY", "MOVT", "MOVI", "MONR", "MOTV", "MOBA",
-                // textures / materials
-                "MOTX", "MOMT", "MOGN", "MOHD",
-                // doodads
-                "MODN", "MODS", "MODD", "MODR", "MOIN", "MOBN", "MOBR",
-                // lighting / liquids / fog
-                "MLIQ", "MFOG", "MLIQ", "MOCV", "MLLV", "MOLV", "MOLM", "MOLD"
-            };
+            string[] validSubchunks = { "MOPY", "MOVT", "MONR", "MOTV", "MOVI", "MOBA", "MLIQ", "MOCV", "MOTX", "MOGN", "MOMT", "MOLV", "MOIN", "MODR", "MOBN", "MOBR", "MOCV", "MOLM", "MOLD" };
             int scanOffset = MOGP_HEADER_SIZE;
             int foundOffset = -1;
             string foundId = "";
-            for (int off = MOGP_HEADER_SIZE; off + 4 <= groupLen; off++)
+            for (int off = MOGP_HEADER_SIZE; off < MOGP_HEADER_SIZE + 256 && off + 4 <= groupLen; off += 4)
             {
                 ms.Position = off;
-                string id = ReadChunkId(br);
-                ms.Position = off;
+                var idBytes = br.ReadBytes(4);
+                if (idBytes.Length < 4) break;
+                string id = Encoding.ASCII.GetString(idBytes.Reverse().ToArray());
                 if (validSubchunks.Contains(id))
                 {
                     foundOffset = off;
@@ -236,7 +210,7 @@ namespace WoWToolbox.WmoV14Converter
             }
             if (foundOffset == -1)
             {
-                Log($"[v14] ERROR: Could not locate any recognised subchunk header in group after MOGP header. Aborting parse.");
+                Log($"[v14] ERROR: No valid subchunk header found within 256 bytes after MOGP header. Aborting parse.");
                 return mesh;
             }
             Log($"[v14] Found first subchunk '{foundId}' at offset 0x{foundOffset:X}");
@@ -259,9 +233,10 @@ namespace WoWToolbox.WmoV14Converter
                 var peekBytes = br.ReadBytes(4);
                 ms.Position = peekPos; // reset
                 bool allZero = peekBytes.All(b => b == 0);
-                if (allZero)
+                bool allNonPrintable = peekBytes.All(b => b < 0x20 || b > 0x7E);
+                if (allZero || allNonPrintable)
                 {
-                    Log($"[v14][END] Next 4 bytes at 0x{peekPos:X} are all zero (likely padding). Ending subchunk parse cleanly.");
+                    Log($"[v14][END] Next 4 bytes at 0x{peekPos:X} are all zero or non-printable (likely padding). Ending subchunk parse cleanly.");
                     break;
                 }
                 long subChunkStart = ms.Position;
@@ -678,48 +653,24 @@ namespace WoWToolbox.WmoV14Converter
                 stream.Position = motxOffset;
                 byte[] motxData = reader.ReadBytes((int)motxSize);
                 stream.Position = momtOffset;
-                int entrySize = (int)(momtSize > 0 ? momtSize : 44); // fallback
-                if (momtSize % 44 == 0) entrySize = 44;
-                else if (momtSize % 64 == 0) entrySize = 64;
-                int nMaterials = (int)(momtSize / entrySize);
-                Log($"[OBJ][MTL] Detected MOMT entry size: {entrySize} bytes, nMaterials: {nMaterials}");
+                int nMaterials = (int)(momtSize / 44);
                 for (int i = 0; i < nMaterials && i < 256; i++) // byte MaterialId max 255
                 {
+                    stream.Position = momtOffset + i * 44 + 0xC;
+                    int texOffset = reader.ReadInt32();
                     string tex = null;
-                    if (entrySize == 44) // v14
+                    if (texOffset >= 0 && texOffset < motxData.Length)
                     {
-                        stream.Position = momtOffset + i * entrySize + 0xC;
-                        int texOffset = reader.ReadInt32();
-                        if (texOffset >= 0 && texOffset < motxData.Length)
-                        {
-                            int end = texOffset;
-                            while (end < motxData.Length && motxData[end] != 0) end++;
-                            tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
-                        }
-                    }
-                    else if (entrySize == 64) // v17
-                    {
-                        stream.Position = momtOffset + i * entrySize + 0xC;
-                        uint tex1Index = reader.ReadUInt32();
-                        if (tex1Index < motxData.Length)
-                        {
-                            int texOffset = (int)tex1Index;
-                            int end = texOffset;
-                            while (end < motxData.Length && motxData[end] != 0) end++;
-                            tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
-                        }
+                        int end = texOffset;
+                        while (end < motxData.Length && motxData[end] != 0) end++;
+                        tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
                     }
                     if (!string.IsNullOrWhiteSpace(tex))
                     {
+                        // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
                         string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
+                        // Store just the relative path from MTL to PNG
                         materialIdToPng[(byte)i] = Path.Combine(textureDirName, pngFile);
-                        Log($"[OBJ][MTL] Material {i}: {tex} → {materialIdToPng[(byte)i]}");
-                    }
-                    else
-                    {
-                        // fallback to missing.png
-                        materialIdToPng[(byte)i] = Path.Combine(textureDirName, "missing.png");
-                        Log($"[OBJ][MTL][WARN] Material {i}: No texture found, using fallback missing.png");
                     }
                 }
             }
@@ -754,20 +705,15 @@ namespace WoWToolbox.WmoV14Converter
             Log($"[INFO] Converting all groups in {inputWmo} to a single merged OBJ: {outputObj}");
             // Extract and convert textures before exporting meshes
             ExtractAndConvertTextures(inputWmo, "test_data/053_textures", "output/053_textures_png");
-
-            var textureDirName = "textures"; // Ensure this is defined for materialIdToPng mapping
-            // --- OBJ/MTL limitation: Only one texture per material, no blend modes, no multi-texture, no advanced shaders. ---
-            // This mapping logic is copied from ExportAllGroupsAsObj for consistency.
-            Dictionary<byte, string> materialIdToPng = new();
+            
             using var stream = File.OpenRead(inputWmo);
             using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
             long fileLen = stream.Length;
             stream.Position = 0;
+
+            // --- Step 1: Log all top-level chunk IDs, offsets, and sizes ---
             var chunkHeaders = new List<(string id, long offset, uint size)>();
-            long motxOffset = -1, momtOffset = -1;
-            uint motxSize = 0, momtSize = 0;
-            void RecordMotx(long offset, uint size) { if (motxOffset == -1) { motxOffset = offset; motxSize = size; } }
-            void RecordMomt(long offset, uint size) { if (momtOffset == -1) { momtOffset = offset; momtSize = size; } }
+            
             stream.Position = 0;
             while (stream.Position + 8 <= fileLen)
             {
@@ -777,31 +723,8 @@ namespace WoWToolbox.WmoV14Converter
                 string chunkIdStr = Encoding.ASCII.GetString(chunkIdBytes.Reverse().ToArray());
                 uint chunkSize = reader.ReadUInt32();
                 chunkHeaders.Add((chunkIdStr, chunkStart, chunkSize));
-                if (chunkIdStr == "MOTX") RecordMotx(chunkStart + 8, chunkSize);
-                if (chunkIdStr == "MOMT") RecordMomt(chunkStart + 8, chunkSize);
-                if (chunkIdStr == "MOMO")
-                {
-                    long momoDataStart = chunkStart + 8;
-                    stream.Position = momoDataStart;
-                    byte[] momoData = reader.ReadBytes((int)chunkSize);
-                    using var momoStream = new MemoryStream(momoData);
-                    using var momoReader = new BinaryReader(momoStream);
-                    while (momoStream.Position + 8 <= momoStream.Length)
-                    {
-                        long subChunkStart = momoStream.Position;
-                        var subChunkIdBytes = momoReader.ReadBytes(4);
-                        if (subChunkIdBytes.Length < 4) break;
-                        string subChunkIdStr = Encoding.ASCII.GetString(subChunkIdBytes.Reverse().ToArray());
-                        uint subChunkSize = momoReader.ReadUInt32();
-                        if (subChunkIdStr == "MOTX") RecordMotx(momoDataStart + subChunkStart + 8, subChunkSize);
-                        if (subChunkIdStr == "MOMT") RecordMomt(momoDataStart + subChunkStart + 8, subChunkSize);
-                        momoStream.Position = subChunkStart + 8 + subChunkSize;
-                    }
-                }
-                else
-                {
-                    stream.Position = chunkStart + 8 + chunkSize;
-                }
+                Log($"[WMO] Top-level chunk: ID='{chunkIdStr}' Offset=0x{chunkStart:X} Size={chunkSize}");
+                stream.Position = chunkStart + 8 + chunkSize;
             }
 
             // --- Step 2: Find all MOGP group regions ---
@@ -842,8 +765,46 @@ namespace WoWToolbox.WmoV14Converter
                 }
             }
             Log($"[OBJ] Found {groupRegions.Count} group(s) in WMO");
-
-            // --- Step 3: Parse and merge all groups ---
+            
+            // --- Step 3: Build materialId-to-PNG mapping from MOTX/MOMT ---
+            long motxOffset = -1, momtOffset = -1;
+            uint motxSize = 0, momtSize = 0;
+            
+            foreach (var (chunkIdStr, chunkStart, chunkSize) in chunkHeaders)
+            {
+                if (chunkIdStr == "MOTX") { motxOffset = chunkStart + 8; motxSize = chunkSize; }
+                if (chunkIdStr == "MOMT") { momtOffset = chunkStart + 8; momtSize = chunkSize; }
+            }
+            
+            Dictionary<byte, string> materialIdToPng = new();
+            if (motxOffset != -1 && momtOffset != -1)
+            {
+                stream.Position = motxOffset;
+                byte[] motxData = reader.ReadBytes((int)motxSize);
+                stream.Position = momtOffset;
+                int nMaterials = (int)(momtSize / 44);
+                for (int i = 0; i < nMaterials && i < 256; i++) // byte MaterialId max 255
+                {
+                    stream.Position = momtOffset + i * 44 + 0xC;
+                    int texOffset = reader.ReadInt32();
+                    string tex = null;
+                    if (texOffset >= 0 && texOffset < motxData.Length)
+                    {
+                        int end = texOffset;
+                        while (end < motxData.Length && motxData[end] != 0) end++;
+                        tex = Encoding.ASCII.GetString(motxData, texOffset, end - texOffset);
+                    }
+                    if (!string.IsNullOrWhiteSpace(tex))
+                    {
+                        // PNG filename is just the base name with .png, as in ExtractAndConvertTextures
+                        string pngFile = Path.GetFileNameWithoutExtension(tex) + ".png";
+                        // Use fixed path for materials
+                        materialIdToPng[(byte)i] = Path.Combine("053_textures_png", pngFile);
+                    }
+                }
+            }
+            
+            // --- Step 4: Parse and merge all groups ---
             var mergedMesh = new WoWToolbox.Core.WMO.WmoGroupMesh();
             int totalVertices = 0, totalTriangles = 0, mergedGroups = 0;
             foreach (var (groupIdx, groupStart, groupEnd) in groupRegions)
@@ -892,7 +853,7 @@ namespace WoWToolbox.WmoV14Converter
                 return;
             }
             
-            // --- Step 4: Export merged mesh as OBJ+MTL ---
+            // --- Step 5: Export merged mesh as OBJ+MTL ---
             string mtlFile = Path.ChangeExtension(outputObj, ".mtl");
             try
             {

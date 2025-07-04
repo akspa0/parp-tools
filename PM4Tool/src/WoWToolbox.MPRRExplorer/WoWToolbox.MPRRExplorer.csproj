@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+    <ProjectReference Include="..\WoWToolbox.Core.v2\WoWToolbox.Core.v2.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

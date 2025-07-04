@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WoWToolbox.Core.v2\WoWToolbox.Core.v2.csproj" />
+
   </ItemGroup>
 
   <ItemGroup>

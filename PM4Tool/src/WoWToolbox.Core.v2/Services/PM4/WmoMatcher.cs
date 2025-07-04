@@ -33,7 +33,26 @@ namespace WoWToolbox.Core.v2.Services.PM4
 
                 foreach (var wmo in wmoGeometries)
                 {
-                    var score = Vector3.Distance(fragment.BoundingBox.Min, wmo.BoundingBox.Min) + Vector3.Distance(fragment.BoundingBox.Max, wmo.BoundingBox.Max);
+                    // Compute center points
+                    Vector3 Center(Vector3 min, Vector3 max) => (min + max) * 0.5f;
+                    var fragCenter = Center(fragment.BoundingBox.Min, fragment.BoundingBox.Max);
+                    var wmoCenter  = Center(wmo.BoundingBox.Min, wmo.BoundingBox.Max);
+
+                    // Euclidean distance between centers (positional error)
+                    var positionalError = Vector3.Distance(fragCenter, wmoCenter);
+
+                    // Compare bounding-box volumes (size error)
+                    float Volume(BoundingBox3D bb)
+                    {
+                        var size = bb.Max - bb.Min;
+                        return size.X * size.Y * size.Z;
+                    }
+                    var fragVol = Volume(fragment.BoundingBox);
+                    var wmoVol  = Volume(wmo.BoundingBox);
+                    var sizeError = MathF.Abs(fragVol - wmoVol) / MathF.Max(fragVol, wmoVol);
+
+                    // Final score with weights (lower is better)
+                    var score = positionalError + sizeError * 50f; // weight size difference more
                     if (score < bestMatchScore)
                     {
                         bestMatchScore = score;

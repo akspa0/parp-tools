@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using WoWToolbox.Core.v2.Foundation.PM4;
+using WoWToolbox.Core.v2.Foundation.Transforms;
 
 namespace WoWToolbox.Core.v2.Services.PM4
 {
@@ -14,73 +15,59 @@ namespace WoWToolbox.Core.v2.Services.PM4
     {
         // This standard transformation converts from WoW's Z-up coordinate system to a standard Y-up system.
         // (X, Y, Z) in-game -> (X, Z, -Y) in render space.
-        private Vector3 TransformZupToYup(Vector3 vector)
-        {
-            return new Vector3(vector.X, vector.Z, -vector.Y);
-        }
+        
 
-        private Vector3 TransformZupToYup(Vector3_Short vector)
-        {
-            return new Vector3(vector.X, vector.Z, -vector.Y);
-        }
+        public Vector3 FromMsvtVertex(MSVT_Vertex vertex) => CoordinateTransforms.FromMsvtVertex(vertex);
 
-        public Vector3 FromMsvtVertex(MSVT_Vertex vertex)
-        {
-            return TransformZupToYup(vertex.Position);
-        }
-
-        public Vector3 FromMsvtVertexSimple(MSVT_Vertex vertex)
-        {
-            return FromMsvtVertex(vertex);
-        }
+        public Vector3 FromMsvtVertexSimple(MSVT_Vertex vertex) => CoordinateTransforms.FromMsvtVertex(vertex);
 
         // Overload accepting legacy/chunk MsvtVertex
         public Vector3 FromMsvtVertexSimple(WoWToolbox.Core.v2.Foundation.PM4.Chunks.MsvtVertex vertex)
         {
             var converted = new MSVT_Vertex { Position = new Vector3(vertex.X, vertex.Y, vertex.Z) };
-            return FromMsvtVertex(converted);
+            return CoordinateTransforms.FromMsvtVertex(converted);
         }
 
         public Vector3 FromMscnVertex(Vector3 vertex)
         {
             // MSCN chunks store vertices already as XYZ; apply Z-up to Y-up.
-            return TransformZupToYup(vertex);
+            return CoordinateTransforms.FromMscnVertex(vertex);
         }
 
         public Vector3 FromMscnVertex(MSCN_Vertex vertex)
         {
-            return TransformZupToYup(vertex.Position);
+            return CoordinateTransforms.FromMscnVertex(vertex.Position);
         }
 
         public Vector3 FromMspvVertex(WoWToolbox.Core.v2.Models.PM4.Chunks.C3Vector vertex)
         {
             // Assuming identical orientation as MSPV_Vertex placeholder
             var converted = new MSPV_Vertex { Position = new Vector3(vertex.X, vertex.Y, vertex.Z) };
-            return FromMspvVertex(converted);
+            return CoordinateTransforms.FromMspvVertex(converted.Position);
         }
 
         public Vector3 FromMspvVertex(MSPV_Vertex vertex)
         {
-            return TransformZupToYup(vertex.Position);
+            return CoordinateTransforms.FromMspvVertex(vertex.Position);
         }
 
         // Overload for Warcraft.NET.Files.Structures.C3Vector used by PM4 parsing layer
         public Vector3 FromMspvVertex(Warcraft.NET.Files.Structures.C3Vector vertex)
         {
             var converted = new MSPV_Vertex { Position = new Vector3(vertex.X, vertex.Y, vertex.Z) };
-            return FromMspvVertex(converted);
+            return CoordinateTransforms.FromMspvVertex(converted.Position);
         }
 
         public Vector3 FromMprlEntry(MPRL_Entry entry)
         {
             // MPRL_Entry uses Vector3 directly.
-            return TransformZupToYup(entry.Position);
+            return CoordinateTransforms.FromMprlEntry(entry);
         }
 
         // Overload accepting full MprlEntry from Foundation chunk
         public Vector3 FromMprlEntry(WoWToolbox.Core.v2.Foundation.PM4.Chunks.MprlEntry entry)
         {
-            return TransformZupToYup(new Vector3(entry.Position.X, entry.Position.Y, entry.Position.Z));
+            return CoordinateTransforms.FromMprlEntry(entry);
         }
 
         /// <summary>

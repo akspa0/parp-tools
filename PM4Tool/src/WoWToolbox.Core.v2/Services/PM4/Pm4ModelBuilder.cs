@@ -55,9 +55,24 @@ public class Pm4ModelBuilder : IPm4ModelBuilder
             // MSCN chunks do not have their own index buffers (MSCI), they define collision hulls.
         }
 
+        // Validate indices and remove degenerate / out-of-range triangles
+        var cleanedIndices = new List<int>(combinedTriangleIndices.Count);
+        for (int i = 0; i < combinedTriangleIndices.Count; i += 3)
+        {
+            if (i + 2 >= combinedTriangleIndices.Count) break;
+            var i1 = combinedTriangleIndices[i];
+            var i2 = combinedTriangleIndices[i + 1];
+            var i3 = combinedTriangleIndices[i + 2];
+            if (i1 == i2 || i1 == i3 || i2 == i3) continue; // degenerate
+            if (i1 >= combinedVertices.Count || i2 >= combinedVertices.Count || i3 >= combinedVertices.Count) continue; // OOB
+            cleanedIndices.Add(i1);
+            cleanedIndices.Add(i2);
+            cleanedIndices.Add(i3);
+        }
+
         var model = new CompleteWMOModel();
         model.Vertices.AddRange(combinedVertices);
-        model.TriangleIndices.AddRange(combinedTriangleIndices);
+        model.TriangleIndices.AddRange(cleanedIndices);
 
         if (model.VertexCount > 0 && model.FaceCount > 0)
         {

@@ -4,6 +4,16 @@
 
 **Status:** Plan Approved. Ready for Execution.
 
+---
+
+### **Current Focus (July 4): WMO v14 → v17 Converter Port & Unified OBJ/Texture Export**
+* Port legacy `WmoV14ToV17Converter` (commit 59160e1c) into `WoWToolbox.Core.v2`.
+* Provide service `IWmoV14Converter` + implementation with full geometry, material, and texture handling.
+* Create shared helpers `WmoObjExporter` & `WmoTextureExtractor` for OBJ/MTL writing and BLP→PNG.
+* Update Core.v2 csproj with `SixLabors.ImageSharp` and ensure `Warcraft.NET` reference.
+* Write `WmoV14ConversionTests` verifying MVER 17, vertices present, and PNG textures extracted.
+
+
 **Objective:** Decommission the legacy `PM4FileTests.cs` by migrating its proven PM4 processing logic into the `WoWToolbox.Core.v2` library, implementing a clean service architecture, and building a modern, focused test suite.
 
 ---
@@ -65,6 +75,18 @@
 *   **Step 5.2: Migrate PD4 Handling.** Port the PD4 parsing and processing logic from the original Core to Core.v2, exposing a parallel API surface (`IPd4ModelBuilder`, etc.).
 *   **Step 5.3: Integrate ADT Terrain Support.** Back-port the ADT (terrain tile) utilities ensuring elevation & doodad extraction uses Core.v2 shared coordinate services.
 *   **Step 5.4: Plan WMOv14 Fix.** Document current failure modes for WMOv14 and schedule fixes in a dedicated sub-phase.
+
+#### Phase 5 Execution Slices
+| Slice | Focus | Status |
+|-------|-------|--------|
+| A | Coordinate & Math Utilities | ✅ |
+| B | PM4 Geometry Edge-Case Handling | ✅ |
+| C | Building Extraction Complete | ✅ |
+| D | WMO Matching Tuning | ✅ (initial) |
+| E | PD4 Parsing & Model Builder | ⏳ |
+| F | ADT Terrain Loader | ⏳ |
+| G | Utility CLI Refactors | ⏳ |
+| H | WMO v14 Fix | 🚧 |
 
 ---
 
