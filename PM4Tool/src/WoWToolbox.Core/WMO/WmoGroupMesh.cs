@@ -386,7 +386,7 @@ namespace WoWToolbox.Core.WMO
         }
 
         // ADDED: Helper method to save mesh to OBJ format
-        public static void SaveToObj(WmoGroupMesh mesh, string filePath)
+        public static void SaveToObj(WmoGroupMesh mesh, string filePath, Func<WmoTriangle,bool>? triangleFilter = null)
         {
             Console.WriteLine($"[DEBUG][SaveToObj] Attempting to save OBJ to: {filePath}");
             try

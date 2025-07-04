@@ -1,4 +1,13 @@
-# System Patterns: PM4-WMO Geometric Correlation Architecture
+# System Patterns: Service-Oriented Architecture for PM4 Processing
+
+**Core Principle:** Decouple complex logic into small, single-responsibility services that can be composed to build a robust processing pipeline.
+
+**Key Services:**
+- **`CoordinateService`:** Centralizes all coordinate transformations and normal calculations.
+- **`Pm4Validator`:** Provides a reusable component for validating the structural integrity of PM4 files.
+- **`RenderMeshBuilder`:** Constructs render-ready geometry from PM4 data.
+- **`Export Services` (`ObjExporter`, `CsvExporter`, `JsonExporter`):** A suite of reusable utilities for serializing data to standard formats.
+- **`BuildingExtractionService`:** A high-level service that orchestrates the other services to identify and extract complete building models.
 
 ## Current Architecture: Individual Object Analysis ✅
 

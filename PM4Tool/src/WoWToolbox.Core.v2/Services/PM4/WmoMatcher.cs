@@ -46,7 +46,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                     results.Add(new WmoMatchResult
                     {
                         BuildingId = fragment.BuildingId,
-                        WmoFilePath = bestMatch.FilePath,
+                        WMOFilePath = bestMatch.FilePath,
                         Confidence = 1.0f / (1.0f + bestMatchScore) // Simple confidence score
                     });
                 }
@@ -58,6 +58,11 @@ namespace WoWToolbox.Core.v2.Services.PM4
         private List<WmoGeometryData> LoadAllWmoGeometry()
         {
             var wmoDataList = new List<WmoGeometryData>();
+            if (!Directory.Exists(_wmoDataPath))
+            {
+                return wmoDataList; // No WMO directory present
+            }
+
             var wmoRootFiles = Directory.GetFiles(_wmoDataPath, "*.wmo", SearchOption.AllDirectories);
 
             foreach (var wmoFilePath in wmoRootFiles)

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Xunit;
 using WoWToolbox.Core.Navigation.PM4;
+using WoWToolbox.Core.v2.Services.PM4;
 using System.Linq;
 using System.Collections.Generic;
 using System.Numerics;
@@ -10,6 +11,12 @@ namespace WoWToolbox.Tests.Navigation.PM4
 {
     public class SimpleAnalysisTest
     {
+        private readonly ICoordinateService _coordinateService;
+
+        public SimpleAnalysisTest()
+        {
+            _coordinateService = new CoordinateService();
+        }
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data"));
         private static string OutputRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "output", DateTime.Now.ToString("yyyyMMdd_HHmmss"), "SimpleAnalysis"));
 
@@ -209,28 +216,28 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 // Analyze each chunk type's coordinate ranges
                 if (pm4File.MSVT?.Vertices != null && pm4File.MSVT.Vertices.Count > 0)
                 {
-                    var msvtCoords = pm4File.MSVT.Vertices.Select(v => Pm4CoordinateTransforms.FromMsvtVertexSimple(v)).ToList();
+                    var msvtCoords = pm4File.MSVT.Vertices.Select(v => _coordinateService.FromMsvtVertexSimple(v)).ToList();
                     var msvtBounds = CalculateBounds(msvtCoords);
                     Console.WriteLine($"\n🎯 MSVT Bounds: {msvtBounds}");
                 }
                 
                 if (pm4File.MSCN?.ExteriorVertices != null && pm4File.MSCN.ExteriorVertices.Count > 0)
                 {
-                    var mscnCoords = pm4File.MSCN.ExteriorVertices.Select(v => Pm4CoordinateTransforms.FromMscnVertex(v)).ToList();
+                    var mscnCoords = pm4File.MSCN.ExteriorVertices.Select(v => _coordinateService.FromMscnVertex(v)).ToList();
                     var mscnBounds = CalculateBounds(mscnCoords);
                     Console.WriteLine($"🛡️  MSCN Bounds: {mscnBounds}");
                 }
                 
                 if (pm4File.MSPV?.Vertices != null && pm4File.MSPV.Vertices.Count > 0)
                 {
-                    var mspvCoords = pm4File.MSPV.Vertices.Select(v => Pm4CoordinateTransforms.FromMspvVertex(v)).ToList();
+                    var mspvCoords = pm4File.MSPV.Vertices.Select(v => _coordinateService.FromMspvVertex(v)).ToList();
                     var mspvBounds = CalculateBounds(mspvCoords);
                     Console.WriteLine($"📐 MSPV Bounds: {mspvBounds}");
                 }
                 
                 if (pm4File.MPRL?.Entries != null && pm4File.MPRL.Entries.Count > 0)
                 {
-                    var mprlCoords = pm4File.MPRL.Entries.Select(e => Pm4CoordinateTransforms.FromMprlEntry(e)).ToList();
+                    var mprlCoords = pm4File.MPRL.Entries.Select(e => _coordinateService.FromMprlEntry(e)).ToList();
                     var mprlBounds = CalculateBounds(mprlCoords);
                     Console.WriteLine($"📍 MPRL Bounds: {mprlBounds}");
                 }
@@ -241,28 +248,28 @@ namespace WoWToolbox.Tests.Navigation.PM4
                 if (pm4File.MSVT?.Vertices != null && pm4File.MSVT.Vertices.Count > 0)
                 {
                     var msvtPath = Path.Combine(OutputRoot, $"{fileName}_msvt_only.obj");
-                    ExportChunkToObj(pm4File.MSVT.Vertices.Select(v => Pm4CoordinateTransforms.FromMsvtVertexSimple(v)), msvtPath, "MSVT");
+                    ExportChunkToObj(pm4File.MSVT.Vertices.Select(v => _coordinateService.FromMsvtVertexSimple(v)), msvtPath, "MSVT");
                     Console.WriteLine($"📁 Exported MSVT → {msvtPath}");
                 }
                 
                 if (pm4File.MSCN?.ExteriorVertices != null && pm4File.MSCN.ExteriorVertices.Count > 0)
                 {
                     var mscnPath = Path.Combine(OutputRoot, $"{fileName}_mscn_only.obj");
-                    ExportChunkToObj(pm4File.MSCN.ExteriorVertices.Select(v => Pm4CoordinateTransforms.FromMscnVertex(v)), mscnPath, "MSCN");
+                    ExportChunkToObj(pm4File.MSCN.ExteriorVertices.Select(v => _coordinateService.FromMscnVertex(v)), mscnPath, "MSCN");
                     Console.WriteLine($"📁 Exported MSCN → {mscnPath}");
                 }
                 
                 if (pm4File.MSPV?.Vertices != null && pm4File.MSPV.Vertices.Count > 0)
                 {
                     var mspvPath = Path.Combine(OutputRoot, $"{fileName}_mspv_only.obj");
-                    ExportChunkToObj(pm4File.MSPV.Vertices.Select(v => Pm4CoordinateTransforms.FromMspvVertex(v)), mspvPath, "MSPV");
+                    ExportChunkToObj(pm4File.MSPV.Vertices.Select(v => _coordinateService.FromMspvVertex(v)), mspvPath, "MSPV");
                     Console.WriteLine($"📁 Exported MSPV → {mspvPath}");
                 }
                 
                 if (pm4File.MPRL?.Entries != null && pm4File.MPRL.Entries.Count > 0)
                 {
                     var mprlPath = Path.Combine(OutputRoot, $"{fileName}_mprl_only.obj");
-                    ExportChunkToObj(pm4File.MPRL.Entries.Select(e => Pm4CoordinateTransforms.FromMprlEntry(e)), mprlPath, "MPRL");
+                    ExportChunkToObj(pm4File.MPRL.Entries.Select(e => _coordinateService.FromMprlEntry(e)), mprlPath, "MPRL");
                     Console.WriteLine($"📁 Exported MPRL → {mprlPath}");
                 }
 
@@ -410,7 +417,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     writer.WriteLine($"\n=== Coordinate Range Comparison ===");
                     
                     // MSVT coordinate analysis
-                    var msvtCoords = pm4File.MSVT.Vertices.Select(v => Pm4CoordinateTransforms.FromMsvtVertexSimple(v)).ToList();
+                    var msvtCoords = pm4File.MSVT.Vertices.Select(v => _coordinateService.FromMsvtVertexSimple(v)).ToList();
                     if (msvtCoords.Any())
                     {
                         writer.WriteLine($"MSVT coordinate ranges:");
@@ -420,7 +427,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
                     }
                     
                     // MSPV coordinate analysis
-                    var mspvCoords = pm4File.MSPV.Vertices.Select(v => Pm4CoordinateTransforms.FromMspvVertex(v)).ToList();
+                    var mspvCoords = pm4File.MSPV.Vertices.Select(v => _coordinateService.FromMspvVertex(v)).ToList();
                     if (mspvCoords.Any())
                     {
                         writer.WriteLine($"MSPV coordinate ranges:");

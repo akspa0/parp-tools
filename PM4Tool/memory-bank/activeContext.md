@@ -1,121 +1,63 @@
-# Project Vision & Immediate Technical Goal (2024-07-21)
+# Active Context: The Great PM4FileTests.cs Refactoring
 
-## Vision
-- Build tools that inspire others to explore, understand, and preserve digital history, especially game worlds.
-- Use technical skill to liberate hidden or lost data, making it accessible and reusable for future creators and historians.
+**Last Updated:** 2025-07-03
 
-## Immediate Technical Goal
-- Use PM4 files (complex, ADT-focused navigation/model data) to infer and reconstruct WMO (World Model Object) placements in 3D space.
-- Match PM4 mesh components to WMO meshes, deduce which model is where, and generate placement data for ADT chunks.
-- Output reconstructed placement data as YAML for now, with the intent to build a chunk creator/exporter later.
+**Status:** Plan Approved. Ready for Execution.
+
+**Objective:** Decommission the legacy `PM4FileTests.cs` by migrating its proven PM4 processing logic into the `WoWToolbox.Core.v2` library, implementing a clean service architecture, and building a modern, focused test suite.
 
 ---
 
-# Mode: ACT
+### **Phase 1: Foundational Scaffolding (Core Library Setup)**
 
-# Active Context: UNIVERSAL PM4 COMPATIBILITY ACHIEVED - Production Ready (2025-01-16)
+*   **Step 1.1: Verify Directory Structure.** Ensure the target directories for new models and services exist within `WoWToolbox.Core.v2`:
+    *   `src/WoWToolbox.Core.v2/Models/PM4/`
+    *   `src/WoWToolbox.Core.v2/Services/PM4/`
 
-## 🎯 MISSION ACCOMPLISHED: Universal PM4 Compatibility & Production Architecture ✅
+*   **Step 1.2: Create Data Models.** Create POCO models to serve as DTOs:
+    *   `BuildingFragment.cs`
+    *   `WmoMatchResult.cs`
+    *   `WmoGeometryData.cs`
+    *   `CompleteWmoModel.cs`
+    *   `BoundingBox3D.cs`
 
-### **Critical Issue Resolution: COMPLETE SUCCESS**
-Successfully resolved critical building extraction failures that were affecting all non-00_00.pm4 files. The universal compatibility enhancement now enables consistent building extraction across all PM4 file variations.
+*   **Step 1.3: Create Service Contracts and Skeletons.** Define interfaces and create empty implementations to establish the architectural blueprint:
+    *   `IPm4BatchProcessor.cs` / `Pm4BatchProcessor.cs`
+    *   `IPm4ModelBuilder.cs` / `Pm4ModelBuilder.cs`
+    *   `IWmoMatcher.cs` / `WmoMatcher.cs`
 
-#### **Universal PM4 Compatibility ✅ ACHIEVED**
-- **Problem Solved**: Root node detection pattern `Unknown_0x04 == index` wasn't universal across PM4 file variations
-- **Impact Resolved**: development_01_01.pm4 now extracts buildings successfully (was 0 buildings → now 10+ buildings)
-- **Solution Deployed**: Enhanced dual-strategy algorithm in both Core.v2 and PM4Parsing libraries
-- **Result Confirmed**: 127 geometry groups found, 10+ complete buildings exported with 90KB+ geometry files
+---
 
-#### **Enhanced Algorithm Implementation**
-```csharp
-// Strategy 1: Self-referencing root nodes (primary method)
-var rootNodes = MSLK.Entries
-    .Select((entry, idx) => (entry, idx))
-    .Where(x => x.entry.Unknown_0x04 == (uint)x.idx)
-    .ToList();
+### **Phase 2: Logic Migration and Refactoring (The Core Work)**
 
-bool hasValidRoots = false;
-// Try root node extraction first...
+*   **Step 2.1: Implement `Pm4ModelBuilder`.** Extract all chunk-parsing and model-building logic from `PM4FileTests.cs`, including chunk-specific coordinate transformations.
 
-// Strategy 2: Fallback - Group by Unknown_0x04 if no valid roots found
-if (!hasValidRoots)
-{
-    var groupedEntries = MSLK.Entries
-        .Select((entry, idx) => (entry, idx))
-        .Where(x => x.entry.HasGeometry)
-        .GroupBy(x => x.entry.Unknown_0x04)
-        .Where(g => g.Count() > 0);
-    // Extract buildings from geometry groups...
-}
-```
+*   **Step 2.2: Implement `WmoMatcher` (Building Extraction).** Migrate the dual-geometry processing logic, the root node detection algorithm, and the `MDSF`/`MDOS` surface-to-building mapping.
 
-### **Test Results: Complete Success ✅**
+*   **Step 2.3: Implement `Pm4BatchProcessor`.** Migrate the top-level orchestration logic for processing multiple files, integrating the other services.
 
-#### **Core.v2 Tests**
-- ✅ **PM4FileV2_ShouldExtractIndividualBuildings**: PASSING
-- ✅ **All Core.v2 tests**: 5/5 succeeded
-- ✅ **Universal compatibility**: Confirmed working on development_01_01.pm4
+---
 
-#### **PM4Parsing Tests**  
-- ✅ **BuildingExtractionTests**: 8/8 succeeded
-- ✅ **Fallback strategy**: "Root nodes found but no geometry detected, using enhanced fallback strategy... Found 127 geometry groups"
-- ✅ **Universal processing**: Works on all PM4 file variations
+### **Phase 3: Test Suite Modernization (Building Confidence)**
 
-### **Technical Implementation Details**
+*   **Step 3.1: Clean Slate.** Delete the old `PM4FileTests.cs` from the `WoWToolbox.Core.v2.Tests` project.
 
-#### **Libraries Updated**
-1. **WoWToolbox.Core.v2**: Enhanced `PM4File.ExtractBuildings()` with dual strategy
-2. **WoWToolbox.PM4Parsing**: Enhanced `PM4BuildingExtractor` with fallback logic
-3. **Both libraries**: Consistent universal compatibility approach
+*   **Step 3.2: Create New Test Fixtures.** Create new, focused test classes:
+    *   `Pm4ModelBuilderTests.cs`
+    *   `WmoMatcherTests.cs`
+    *   `Pm4BatchProcessorTests.cs`
 
-#### **Algorithm Improvements**
-- **Robust Root Detection**: Handles cases where self-referencing nodes exist but lack geometry
-- **Intelligent Fallback**: Automatically switches to geometry grouping when needed
-- **Enhanced Face Generation**: Improved triangle validation and winding order consistency
-- **Better Error Handling**: Graceful handling of edge cases and malformed data
+*   **Step 3.3: Write Targeted Tests.** Write specific unit and integration tests to validate each service's functionality.
 
-### **Production Files Successfully Created ✅ VERIFIED**
-- **Output Location**: `output/universal_compatibility_success/`
-- **Building Count**: 10 individual buildings extracted and exported
-- **File Sizes**: 90KB+ OBJ files with substantial geometry and complete MTL materials
-- **Quality Assurance**: Professional software compatibility maintained (MeshLab, Blender ready)
+---
 
-## 🎯 CURRENT STATUS: PRODUCTION ARCHITECTURE COMPLETE
+### **Phase 4: Finalization and Deprecation**
 
-### **Universal PM4 Compatibility ✅ ACHIEVED**
-- **All PM4 File Types**: Consistent building extraction across development_00_00, development_01_01, and all variations
-- **Intelligent Fallback**: Automatic strategy detection and switching for optimal results
-- **Quality Preservation**: Same breakthrough-level building extraction quality maintained
-- **File Export Success**: Complete OBJ/MTL generation pipeline working flawlessly
+*   **Step 4.1: Sunset the Legacy.** Delete the original `PM4FileTests.cs` from the `WoWToolbox.Tests` project.
 
-### **Core.v2 Enhancement ✅ DEPLOYED**
-- **PM4File.ExtractBuildings()**: Enhanced with dual-strategy universal compatibility
-- **Automatic Detection**: Intelligent fallback when root nodes lack geometry
-- **API Consistency**: Seamless integration maintaining existing code compatibility
-- **Robust Processing**: Handles edge cases and PM4 file variations gracefully
+*   **Step 4.2: Finalize Public API.** Ensure the public API conforms to the `pm4-api-spec.md`.
 
-### **PM4Parsing Library ✅ PRODUCTION-READY**
-- **PM4BuildingExtractor**: Universal compatibility with enhanced fallback logic
-- **PM4BuildingExtractionService**: Complete workflow with file export and detailed analysis
-- **MslkRootNodeDetector**: Robust hierarchy analysis with intelligent strategy selection
-- **Quality Pipeline**: Production-grade error handling and comprehensive validation
-
-### **Next Phase: Advanced Applications Enabled**
-With universal compatibility achieved, the project is positioned for:
-- **Batch Processing**: Scale to hundreds of PM4 files with consistent quality
-- **Research Integration**: Support academic and preservation projects  
-- **Community Development**: Enable third-party tools and external integration
-- **Performance Optimization**: Advanced algorithms for large-scale dataset processing
-
-## 📊 ACHIEVEMENT METRICS: ALL GREEN ✅
-
-- **Universal Compatibility**: Working on all PM4 file types ✅
-- **Test Coverage**: 13/13 tests passing across Core.v2 and PM4Parsing ✅
-- **Algorithm Migration**: Clean production libraries established ✅
-- **Fallback Strategy**: Automatic detection and graceful handling ✅
-- **Geometry Detection**: 127 groups found vs. previous 0 ✅
-
-The WoWToolbox project now has **universal PM4 compatibility** and is ready for advanced applications across all PM4 file variations. The critical building extraction failures have been resolved, enabling consistent processing regardless of PM4 file structure variations.
+*   **Step 4.3: Document.** Add XML documentation to all new public classes and methods.
 
 ---
 
