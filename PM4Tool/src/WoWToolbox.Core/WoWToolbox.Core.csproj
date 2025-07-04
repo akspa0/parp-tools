@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -6,7 +6,12 @@
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-  </PropertyGroup>
+    </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WoWToolbox.Core.v2" />
+    <InternalsVisibleTo Include="WoWToolbox.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />

@@ -2,6 +2,9 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using WoWToolbox.Core.v2.Models.PM4.Chunks;
+using FoundationChunks = WoWToolbox.Core.v2.Foundation.PM4.Chunks;
+using MsvtVertex = WoWToolbox.Core.v2.Foundation.PM4.Chunks.MsvtVertex;
+using MsurEntry = WoWToolbox.Core.v2.Foundation.PM4.Chunks.MsurEntry;
 
 namespace WoWToolbox.Core.v2.Foundation.Transforms
 {
@@ -46,6 +49,12 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         public static Vector3 FromMspvVertex(C3Vector vertex)
         {
             // Standard coordinate system for structural elements
+            return new Vector3(vertex.X, vertex.Y, vertex.Z);
+        }
+
+        // Overload accepting Warcraft.NET.Files.Structures.C3Vector
+        public static Vector3 FromMspvVertex(Warcraft.NET.Files.Structures.C3Vector vertex)
+        {
             return new Vector3(vertex.X, vertex.Y, vertex.Z);
         }
 

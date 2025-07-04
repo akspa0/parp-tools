@@ -28,7 +28,10 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public float SurfaceHeight { get; set; }               // _0x10 - Surface Height/Y-coordinate
 
         // Geometry references (last 12 bytes)
-        public uint MsviFirstIndex { get; set; }               // _0x14 - Starting index in MSVI for this surface
+        public uint MsviFirstIndex { get; set; }
+
+        // Shim for legacy code expecting FirstIndex
+        public uint FirstIndex => MsviFirstIndex;               // _0x14 - Starting index in MSVI for this surface
         public uint MdosIndex { get; set; }                    // _0x18 - Index into MDOS (Destructible Object States)
         public uint Unknown_0x1C { get; set; }                 // _0x1C - Meaning TBD.
 

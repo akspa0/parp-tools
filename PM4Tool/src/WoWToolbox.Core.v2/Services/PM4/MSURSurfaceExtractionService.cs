@@ -1,7 +1,9 @@
 using System.Numerics;
 using WoWToolbox.Core.v2.Foundation.Data;
+using WoWToolbox.Core.v2.Foundation.PM4;
 using WoWToolbox.Core.v2.Foundation.Transforms;
 using WoWToolbox.Core.v2.Models.PM4.Chunks;
+using WoWToolbox.Core.v2.Foundation.PM4.Chunks;
 
 namespace WoWToolbox.Core.v2.Services.PM4;
 

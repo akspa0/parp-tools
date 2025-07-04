@@ -4,24 +4,20 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <AssemblyTitle>WoWToolbox Core v2 - Optimized Foundation Library</AssemblyTitle>
-    <AssemblyDescription>High-performance foundation library for World of Warcraft PM4 file analysis and 3D geometry processing</AssemblyDescription>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>2.0.0.0</FileVersion>
-    
-    <!-- Performance optimizations -->
-    <Optimize>true</Optimize>
+    <RootNamespace>WoWToolbox.Core.v2</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <TieredCompilation>true</TieredCompilation>
-    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Core dependency - Warcraft.NET for base chunk handling -->
+    <ProjectReference Include="..\WoWToolbox.Common\WoWToolbox.Common.csproj" />
+    <ProjectReference Include="..\WoWToolbox.PM4Parsing\WoWToolbox.PM4Parsing.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
   </ItemGroup>
 
-  <!-- No additional packages - minimal dependencies for maximum performance -->
-  
-</Project> 
+  <ItemGroup>
+    <PackageReference Include="CsvHelper" Version="32.0.3" />
+    <PackageReference Include="System.Numerics.Vectors" Version="4.5.0" />
+  </ItemGroup>
+
+</Project>

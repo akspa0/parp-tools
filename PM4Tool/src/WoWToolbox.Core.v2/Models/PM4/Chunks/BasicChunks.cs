@@ -27,14 +27,6 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public static implicit operator C3Vector(Vector3 vector) => new C3Vector(vector.X, vector.Y, vector.Z);
     }
 
-    /// <summary>MSVT vertex structure</summary>
-    public struct MsvtVertex
-    {
-        public float X { get; set; }
-        public float Y { get; set; }
-        public float Z { get; set; }
-    }
-
     #endregion
 
     #region MVER Chunk
