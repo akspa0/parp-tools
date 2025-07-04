@@ -1,6 +1,6 @@
 # Project Progress: The Great PM4FileTests.cs Refactoring
 
-**Last Updated:** 2025-07-03
+**Last Updated:** 2025-07-04
 
 **Overall Status:** Plan approved. Execution starting now.
 
@@ -43,13 +43,21 @@
 
 ### **Phase 4: Finalization and Deprecation**
 
-- [ ] **Step 4.1: Sunset the Legacy Test File**
+- [x] **Step 4.1: Sunset the Legacy Test File**
 - [ ] **Step 4.2: Finalize Public API**
 - [ ] **Step 4.3: Document Public API**
 
 ---
 
-### 2025-07-03 – Build Fixes In Progress
+### **Phase 5: Utility Consolidation**
+
+- [ ] **Step 5.1: PM4 Utility Merge**
+- [ ] **Step 5.2: PD4 Handling in Core.v2**
+- [ ] **Step 5.3: ADT Terrain Support Migration**
+- [ ] **Step 5.4: WMOv14 Fix Planning**
+
+---
+
+### 2025-07-04 – Build Fixes In Progress
 - Began cleanup of duplicate file-scoped namespaces in Core.v2 service files (`IPm4ModelBuilder`, `Pm4ModelBuilder`, etc.).
 - Replacing incorrect `using Warcraft.Game.Pm4` directives with correct Warcraft.NET namespaces.
-- Initial compile pass reduced error count (namespace issues resolved for first file).

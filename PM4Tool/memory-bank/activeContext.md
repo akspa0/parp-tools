@@ -1,6 +1,6 @@
 # Active Context: The Great PM4FileTests.cs Refactoring
 
-**Last Updated:** 2025-07-03
+**Last Updated:** 2025-07-04
 
 **Status:** Plan Approved. Ready for Execution.
 
@@ -58,6 +58,13 @@
 *   **Step 4.2: Finalize Public API.** Ensure the public API conforms to the `pm4-api-spec.md`.
 
 *   **Step 4.3: Document.** Add XML documentation to all new public classes and methods.
+
+### **Phase 5: Utility Consolidation (NEW)**
+
+*   **Step 5.1: Merge PM4 Utilities.** Consolidate all standalone PM4 command-line tools and GUI helpers to consume `WoWToolbox.Core.v2` APIs only.
+*   **Step 5.2: Migrate PD4 Handling.** Port the PD4 parsing and processing logic from the original Core to Core.v2, exposing a parallel API surface (`IPd4ModelBuilder`, etc.).
+*   **Step 5.3: Integrate ADT Terrain Support.** Back-port the ADT (terrain tile) utilities ensuring elevation & doodad extraction uses Core.v2 shared coordinate services.
+*   **Step 5.4: Plan WMOv14 Fix.** Document current failure modes for WMOv14 and schedule fixes in a dedicated sub-phase.
 
 ---
 
