@@ -6,6 +6,7 @@ using WoWToolbox.Core.v2.Services.PM4;
 using System.Linq;
 using System.Collections.Generic;
 using System.Numerics;
+using WoWToolbox.Tests;
 
 namespace WoWToolbox.Tests.Navigation.PM4
 {
@@ -18,7 +19,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
             _coordinateService = new CoordinateService();
         }
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data"));
-        private static string OutputRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "output", DateTime.Now.ToString("yyyyMMdd_HHmmss"), "SimpleAnalysis"));
+        private static string OutputRoot => OutputLocator.Central("SimpleAnalysis");
 
         [Fact]
         public void AnalyzePm4ChunkRelationships()

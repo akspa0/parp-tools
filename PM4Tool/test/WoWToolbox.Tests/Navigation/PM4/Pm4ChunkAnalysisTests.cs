@@ -4,13 +4,14 @@ using System.IO;
 using System.Linq;
 using Xunit;
 using WoWToolbox.Core.Navigation.PM4;
+using WoWToolbox.Tests;
 
 namespace WoWToolbox.Tests.Navigation.PM4
 {
     public class Pm4ChunkAnalysisTests
     {
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data"));
-        private static string OutputRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "output", DateTime.Now.ToString("yyyyMMdd_HHmmss"), "ChunkAnalysis"));
+        private static string OutputRoot => OutputLocator.Central("ChunkAnalysis");
 
         [Fact]
         public void AnalyzeChunkRelationships_ForKeyFiles()

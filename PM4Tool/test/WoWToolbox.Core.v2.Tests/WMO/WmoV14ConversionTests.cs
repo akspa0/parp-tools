@@ -47,5 +47,20 @@ namespace WoWToolbox.Core.v2.Tests.WMO
             // basic length sanity (should be >= original due to identical copy)
             Assert.True(v17Data.Length >= v14Data.Length - 8);
         }
+
+        [Fact]
+        public void Converter_Exports_First_Group_Obj()
+        {
+            var path = GetSamplePath("Ironforge_053.wmo");
+            if (string.IsNullOrEmpty(TestDataDir) || !File.Exists(path))
+                return; // skip if dataset not present
+
+            var converter = new WmoV14Converter();
+            string objPath = converter.ExportFirstGroupAsObj(path);
+            Assert.True(File.Exists(objPath), $"OBJ not created at {objPath}");
+            long len = new FileInfo(objPath).Length;
+            Assert.True(len > 0, "OBJ file is empty");
+            Console.WriteLine($"[OBJ] v14 first group exported to {objPath}, size {len} bytes");
+        }
     }
 }

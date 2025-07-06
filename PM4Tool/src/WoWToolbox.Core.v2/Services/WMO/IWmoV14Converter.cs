@@ -1,13 +1,33 @@
-using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace WoWToolbox.Core.v2.Services.WMO
 {
+    public class WmoConversionResult
+    {
+        public bool Success { get; set; }
+        public string ConvertedWmoPath { get; set; }
+        public string LogFilePath { get; set; }
+        public string ObjFilePath { get; set; }
+        public string MtlFilePath { get; set; }
+        public List<string> TexturePaths { get; set; } = new List<string>();
+        public string ErrorMessage { get; set; }
+    }
+
     /// <summary>
     /// Service contract for converting legacy (pre-TBC) WMO version 14 files to the modern
     /// version 17 format used in Wrath of the Lich King and later patches.
     /// </summary>
     public interface IWmoV14Converter
     {
+        /// <summary>
+        /// Converts a legacy WMO v14 file to v17, optionally exporting geometry and textures.
+        /// </summary>
+        /// <param name="inputWmoPath">The full path to the input v14 WMO file.</param>
+        /// <param name="outputDirectory">The directory where all output files (logs, converted WMO, OBJ, textures) will be saved.</param>
+        /// <returns>A result object containing the outcome of the conversion.</returns>
+        Task<WmoConversionResult> ConvertAsync(string inputWmoPath, string outputDirectory);
+
         /// <summary>
         /// Converts an in-memory v14 WMO byte buffer to the v17 format.
         /// </summary>

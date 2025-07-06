@@ -18,7 +18,7 @@ namespace WoWToolbox.Core.v2.Foundation.WMO
     /// </summary>
     public static class WmoObjExporter
     {
-        public static void Export(string objPath,
+        public static string Export(string objPath,
                                   IReadOnlyList<Vector3> vertices,
                                   IReadOnlyList<Vector2> uvs,
                                   IReadOnlyList<(int a,int b,int c)> faces,
@@ -65,6 +65,8 @@ namespace WoWToolbox.Core.v2.Foundation.WMO
             mtlWriter.WriteLine("Kd 1.0 1.0 1.0");
             if (!string.IsNullOrEmpty(textureName))
                 mtlWriter.WriteLine($"map_Kd {textureName}");
+
+            return objPath;
         }
 
         /// <summary>
@@ -80,6 +82,19 @@ namespace WoWToolbox.Core.v2.Foundation.WMO
             string pngPath = Path.Combine(outputDir, pngName);
             img.Save(pngPath, new PngEncoder());
             return pngName;
+        }
+
+        /// <summary>
+        /// Convenience helper for cases where only vertices and triangle indices are available (no UVs).
+        /// </summary>
+        public static void WriteObj(string objPath, IReadOnlyList<Vector3> vertices, IReadOnlyList<int> indices)
+        {
+            if (indices.Count % 3 != 0)
+                throw new ArgumentException("Index list length must be a multiple of 3 (triangles)", nameof(indices));
+            var faces = new List<(int,int,int)>(indices.Count/3);
+            for (int i = 0; i < indices.Count; i += 3)
+                faces.Add((indices[i], indices[i+1], indices[i+2]));
+            Export(objPath, vertices, Array.Empty<Vector2>(), faces);
         }
     }
 }

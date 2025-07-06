@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using WoWToolbox.Tests;
 
 namespace WoWToolbox.Tests.WMO
 {
@@ -14,7 +15,7 @@ namespace WoWToolbox.Tests.WMO
     {
         // Define paths relative to test execution
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(Assembly.GetExecutingAssembly().Location, "../../../../../../", "test_data")); // Navigating up 6 levels from bin/Debug/netX.X
-        private static string TestOutputDir => Path.GetFullPath(Path.Combine(Assembly.GetExecutingAssembly().Location, "../../../../../../", "output", "WmoGroupMeshTests")); // Output to project_root/output/WmoGroupMeshTests
+        private static string TestOutputDir => OutputLocator.Central("WmoGroupMeshTests"); // Output to project_root/output/WmoGroupMeshTests
 
         // Example WMO and group index
         // private const string TestWmoRootFile = "wmo/Dungeon/Ulduar/Ulduar_Entrance.wmo"; // Example, replace with a known good test file

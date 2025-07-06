@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using WoWToolbox.Core.v2.Foundation.PM4;
+using WoWToolbox.Core.v2.Infrastructure;
 using WoWToolbox.Core.v2.Models.PM4;
 
 namespace WoWToolbox.Core.v2.Services.PM4
@@ -8,11 +10,13 @@ namespace WoWToolbox.Core.v2.Services.PM4
     {
         private readonly IBuildingExtractionService _buildingExtractionService;
         private readonly IWmoMatcher _wmoMatcher;
+        public string RunDirectory { get; }
 
         public Pm4BatchProcessor(IBuildingExtractionService buildingExtractionService, IWmoMatcher wmoMatcher)
         {
             _buildingExtractionService = buildingExtractionService;
             _wmoMatcher = wmoMatcher;
+            RunDirectory = Infrastructure.ProjectOutput.GetPath("pm4");
         }
 
         public BatchProcessResult Process(string pm4FilePath)
@@ -26,6 +30,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 var wmoMatches = _wmoMatcher.Match(buildingFragments);
                 result.WmoMatches.AddRange(wmoMatches);
                 result.Success = true;
+                // write simple summary
+                WriteSummary(pm4FilePath, result);
             }
             catch (Exception ex)
             {
@@ -33,6 +39,24 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 result.ErrorMessage = ex.Message;
             }
             return result;
+
+            void WriteSummary(string pm4Path, BatchProcessResult r)
+            {
+                try
+                {
+                    string fileName = Path.GetFileNameWithoutExtension(pm4Path);
+                    string dir = Path.Combine(RunDirectory, fileName);
+                    Directory.CreateDirectory(dir);
+                    string summaryPath = Path.Combine(dir, "summary.txt");
+                    File.WriteAllLines(summaryPath, new[]
+                    {
+                        $"Success: {r.Success}",
+                        $"Fragments: {r.BuildingFragments.Count}",
+                        $"Matches: {r.WmoMatches.Count}"
+                    });
+                }
+                catch { /* non-fatal */ }
+            }
         }
     }
 }

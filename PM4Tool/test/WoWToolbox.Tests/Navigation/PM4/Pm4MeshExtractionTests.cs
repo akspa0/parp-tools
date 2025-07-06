@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using WoWToolbox.Core.Navigation.PM4;
+using WoWToolbox.Tests;
 using Xunit;
 
 namespace WoWToolbox.Tests.Navigation.PM4
@@ -11,7 +12,7 @@ namespace WoWToolbox.Tests.Navigation.PM4
     public class Pm4MeshExtractionTests
     {
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data"));
-        private static string OutputRoot => Path.Combine(TestDataRoot, "..", "output", "mesh_extraction");
+        private static string OutputRoot => OutputLocator.Central("mesh_extraction");
 
         [Fact]
         public void ExtractMeshAndMscnBoundary_FromPm4File()

@@ -11,6 +11,13 @@ namespace WoWToolbox.Core.v2.Infrastructure
     /// </summary>
     public static class ProjectOutput
     {
+        static ProjectOutput()
+        {
+            // Ensure directory exists immediately
+            var dir = RunDirectory;
+            File.WriteAllText(Path.Combine(dir, "run_info.txt"), $"Run started {DateTime.Now:u}\nMachine: {Environment.MachineName}\n");
+        }
+
         private static readonly Lazy<string> _runDir = new(() => CreateRunDir());
 
         /// <summary>
@@ -20,13 +27,23 @@ namespace WoWToolbox.Core.v2.Infrastructure
 
         private static string CreateRunDir()
         {
-            // Walk up from the executing assembly until we find the solution root (folder containing 'PM4Tool.sln').
-            var dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 10; i++)
+            // Walk up from the executing assembly until we reach the repository root.  Heuristic:
+            //  • folder name equals "PM4Tool" (top-level repo) OR
+            //  • contains a .git folder OR
+            //  • contains the main solution file src/WoWToolbox.sln
+            var dir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            for (int i = 0; i < 15 && !string.IsNullOrEmpty(dir); i++)
             {
-                if (Directory.GetFiles(dir, "*.sln").Length > 0)
+                if (Path.GetFileName(dir).Equals("PM4Tool", StringComparison.OrdinalIgnoreCase) ||
+                    Directory.Exists(Path.Combine(dir, ".git")) ||
+                    File.Exists(Path.Combine(dir, "src", "WoWToolbox.sln")))
+                {
+                    break; // found repo root
+                }
+                var parent = Path.GetDirectoryName(dir);
+                if (string.IsNullOrEmpty(parent))
                     break;
-                dir = Path.GetDirectoryName(dir)!;
+                dir = parent;
             }
             string outputRoot = Path.Combine(dir, "project_output");
             Directory.CreateDirectory(outputRoot);

@@ -13,13 +13,14 @@ using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using System.Globalization; // Added using
+using WoWToolbox.Tests;
 
 namespace WoWToolbox.Tests.Analysis
 {
     public class ComparisonTests
     {
         private static string TestDataRoot => Path.GetFullPath(Path.Combine(Assembly.GetExecutingAssembly().Location, "../../../../../../", "test_data"));
-        private static string TestOutputRoot => Path.GetFullPath(Path.Combine(Assembly.GetExecutingAssembly().Location, "../../../../../../", "output", "ComparisonTests"));
+        private static string TestOutputRoot = OutputLocator.Central("ComparisonTests");
 
         private const string TestPm4FileRelativePath = "original_development/development_00_00.pm4";
         private const string TestAdtObj0FileRelativePath = "original_development/development_0_0_obj0.adt";

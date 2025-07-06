@@ -6,7 +6,7 @@ namespace WoWToolbox.Tests.WMO
 {
     public class WmoV14ToV17ConverterTests
     {
-        private static readonly string LogPath = Path.Combine("output", "wmo_v17_test", "WmoV14ToV17ConverterTests.log");
+        private static readonly string LogPath = WoWToolbox.Tests.OutputLocator.Central("wmo_v17_test", "WmoV14ToV17ConverterTests.log");
 
         private void Log(string message)
         {
@@ -33,7 +33,7 @@ namespace WoWToolbox.Tests.WMO
                 Log("=== TEST END: CanConvertIronforge053V14ToV17 ===");
                 return; // Skip test if input is missing
             }
-            string outputDir = Path.Combine("output", "wmo_v17_test");
+            string outputDir = WoWToolbox.Tests.OutputLocator.Central("wmo_v17_test");
             if (!Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
             Log($"Input: {inputPath}");
@@ -93,7 +93,7 @@ namespace WoWToolbox.Tests.WMO
                 Log("=== TEST END: CanExportFirstGroupAsObj ===");
                 return; // Skip test if input is missing
             }
-            string outputDir = Path.Combine("output", "wmo_v17_test");
+            string outputDir = WoWToolbox.Tests.OutputLocator.Central("wmo_v17_test");
             if (!Directory.Exists(outputDir))
                 Directory.CreateDirectory(outputDir);
             string objOutPath = Path.Combine(outputDir, "Ironforge_053_firstgroup.obj");

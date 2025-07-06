@@ -42,6 +42,7 @@
 
     <Compile Include="WMO/WmoGroupMeshTests.cs" />
     <Compile Include="WMO/WmoBatchObjExportTests.cs" />
+    <Compile Include="OutputLocator.cs" />
     <Compile Include="ADT/AdtServiceTests.cs" />
     <Compile Include="Analysis/ComparisonTests.cs" />
   </ItemGroup>

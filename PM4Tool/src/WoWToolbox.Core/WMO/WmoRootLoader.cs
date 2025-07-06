@@ -56,23 +56,28 @@ namespace WoWToolbox.Core.WMO
                     long chunkStart = stream.Position;
                     var chunkIdBytes = reader.ReadBytes(4);
                     if (chunkIdBytes.Length < 4) break;
-                    uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
-                    string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                    string chunkIdStrNormal = Encoding.ASCII.GetString(chunkIdBytes);
+                    string chunkIdStrReversed = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                    string chunkIdStr = chunkIdStrNormal;
+                    bool idLooksReversed = chunkIdStrNormal switch { "MOMO" or "MOHD" or "MVER" or "MOGN" => false, _ => true };
+                    if (idLooksReversed)
+                        chunkIdStr = chunkIdStrReversed;
                     uint chunkSize = reader.ReadUInt32();
                     long chunkDataPos = stream.Position;
                     long chunkEnd = chunkDataPos + chunkSize;
                     // DEBUG: Print all chunk headers as parsed during version detection
                     Console.WriteLine($"[DEBUG][WmoRootLoader] (version detect) Chunk at 0x{chunkStart:X}: '{chunkIdStr}' Size: {chunkSize} (0x{chunkSize:X})");
-                    Console.WriteLine($"[DEBUG][WmoRootLoader]   Raw chunkIdBytes: {BitConverter.ToString(chunkIdBytes)}  chunkId (hex): 0x{chunkId:X8}");
+                    Console.WriteLine($"[DEBUG][WmoRootLoader]   Raw chunkIdBytes: {BitConverter.ToString(chunkIdBytes)}  chunkId (hex): 0x{BitConverter.ToUInt32(chunkIdBytes, 0):X8}");
                     // NOTE: WoW chunk IDs are stored as 4 ASCII bytes in little-endian order in the file.
                     // For example, 'MVER' is stored as 'REVM' (0x5245564D), 'MOMO' as 'OMOM' (0x4F4D4F4D), 'MOHD' as 'DHOM' (0x4D4F4844), 'MOGN' as 'NGOM' (0x4E474F4D).
-                    if (chunkId == 0x5245564D) // 'MVER' (little-endian: 'REVM')
+                    if (chunkIdStr == "MVER" || chunkIdStr == "REVM")
                     {
                         versionChunkPos = chunkStart;
                         if (chunkSize == 4)
                         {
                             version = reader.ReadUInt32();
                             isV14 = (version == 14);
+                            Console.WriteLine($"[DEBUG][WmoRootLoader] Version value {version}, isV14={isV14}");
                             Console.WriteLine($"[DEBUG][WmoRootLoader] Detected MVER: {version} (isV14={isV14})");
                         }
                         else
@@ -105,7 +110,7 @@ namespace WoWToolbox.Core.WMO
                         uint chunkSize = reader.ReadUInt32();
                         long chunkDataPos = stream.Position;
                         long chunkEnd = chunkDataPos + chunkSize;
-                        if (chunkId == 0x4F4D4F4D) // 'MOMO' (little-endian: 'OMOM')
+                        if (chunkIdStr == "MOMO" || chunkIdStr == "OMOM")
                         {
                             Console.WriteLine($"[DEBUG][WmoRootLoader] v14: Found MOMO chunk at 0x{chunkStart:X}. Size: {chunkSize}. Data starts at 0x{chunkDataPos:X}, Ends at 0x{chunkEnd:X}");
                             bool foundMohdInMomo = false;
