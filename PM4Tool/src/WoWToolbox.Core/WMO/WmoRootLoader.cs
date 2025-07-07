@@ -34,6 +34,7 @@ namespace WoWToolbox.Core.WMO
         // Returns the group count from MOHD and the list of group file names from MOGN
         public static (int groupCount, List<string> groupNames) LoadGroupInfo(string rootWmoPath)
         {
+#if false
             var groupNames = new List<string>();
             int groupCount = -1; // Initialize to -1 to indicate MOHD not found or invalid
             byte[]? mognData = null;
@@ -47,55 +48,325 @@ namespace WoWToolbox.Core.WMO
                 using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
                 long fileLen = stream.Length;
 
-                // --- Step 1: Detect version ---
+                // Log file header for debugging
+                Console.WriteLine($"[DEBUG][WmoRootLoader] === File Header Dump (first 32 bytes) ===");
+                byte[] headerBytes = new byte[Math.Min(32, fileLen)];
+                stream.Position = 0;
+                int bytesRead = stream.Read(headerBytes, 0, headerBytes.Length);
+                Console.WriteLine($"Offset  | {string.Join(" ", Enumerable.Range(0, 16).Select(i => $"{i:X2}"))}");
+                for (int i = 0; i < bytesRead; i += 16)
+                {
+                    int lineLength = Math.Min(16, bytesRead - i);
+                    var line = headerBytes.Skip(i).Take(lineLength).ToArray();
+                    Console.Write($"{i:X6} | {string.Join(" ", line.Select(b => $"{b:X2}"))}");
+                    Console.Write(new string(' ', 3 * (16 - lineLength))); // Pad short lines
+                    Console.Write(" | ");
+                    Console.WriteLine(new string(line.Select(b => b >= 32 && b < 127 ? (char)b : '.').ToArray()));
+                }
+                stream.Position = 0;
+
+                // --- Step 1: Detect version and find MOHD/MOGN chunks ---
                 uint version = 0;
                 long versionChunkPos = -1;
+                int groupCount = -1;
+                
+                Console.WriteLine("\n[DEBUG][WmoRootLoader] Starting chunk scan to detect version and find MOHD/MOGN chunks...");
+                Console.WriteLine($"[DEBUG][WmoRootLoader] File size: {fileLen} bytes (0x{fileLen:X8})");
+                
+                // Read first 4 bytes to detect version
                 stream.Position = 0;
-                while (stream.Position + 8 <= fileLen)
+                byte[] first4Bytes = new byte[4];
+                int bytesRead = stream.Read(first4Bytes, 0, 4);
+                
+                // In WoW files, chunk headers are always reversed (big-endian FourCC)
+                Array.Reverse(first4Bytes);
+                string first4AsString = Encoding.ASCII.GetString(first4Bytes);
+                
+                // Check for valid chunk IDs (reversed in file, so we reverse them back)
+                if (first4AsString == "MVER")
                 {
-                    long chunkStart = stream.Position;
-                    var chunkIdBytes = reader.ReadBytes(4);
-                    if (chunkIdBytes.Length < 4) break;
-                    string chunkIdStrNormal = Encoding.ASCII.GetString(chunkIdBytes);
-                    string chunkIdStrReversed = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
-                    string chunkIdStr = chunkIdStrNormal;
-                    bool idLooksReversed = chunkIdStrNormal switch { "MOMO" or "MOHD" or "MVER" or "MOGN" => false, _ => true };
-                    if (idLooksReversed)
-                        chunkIdStr = chunkIdStrReversed;
-                    uint chunkSize = reader.ReadUInt32();
-                    long chunkDataPos = stream.Position;
-                    long chunkEnd = chunkDataPos + chunkSize;
-                    // DEBUG: Print all chunk headers as parsed during version detection
-                    Console.WriteLine($"[DEBUG][WmoRootLoader] (version detect) Chunk at 0x{chunkStart:X}: '{chunkIdStr}' Size: {chunkSize} (0x{chunkSize:X})");
-                    Console.WriteLine($"[DEBUG][WmoRootLoader]   Raw chunkIdBytes: {BitConverter.ToString(chunkIdBytes)}  chunkId (hex): 0x{BitConverter.ToUInt32(chunkIdBytes, 0):X8}");
-                    // NOTE: WoW chunk IDs are stored as 4 ASCII bytes in little-endian order in the file.
-                    // For example, 'MVER' is stored as 'REVM' (0x5245564D), 'MOMO' as 'OMOM' (0x4F4D4F4D), 'MOHD' as 'DHOM' (0x4D4F4844), 'MOGN' as 'NGOM' (0x4E474F4D).
-                    if (chunkIdStr == "MVER" || chunkIdStr == "REVM")
+                    Console.WriteLine("[DEBUG][WmoRootLoader] Detected WMO v17+ file (MVER chunk)");
+                }
+                else if (first4AsString == "MPHD") // MPHD chunk (v14)
+                {
+                    Console.WriteLine("[DEBUG][WmoRootLoader] Detected WMO v14 file (MPHD chunk)");
+                    Console.WriteLine("[DEBUG][WmoRootLoader] Detected WMO v14 file (MPHD chunk in big-endian)");
+                    isBigEndian = true;
+                }
+                else
+                {
+                    Console.WriteLine($"[WARN][WmoRootLoader] Unknown file format, first 4 bytes: {BitConverter.ToString(first4Bytes)} ('{first4AsString}')");
+                    // Try to find MVER or MPHD in first 1KB
+                    byte[] headerSearch = new byte[1024];
+                    stream.Position = 0;
+                    int headerBytesRead = stream.Read(headerSearch, 0, 1024);
+                    string headerAsString = Encoding.ASCII.GetString(headerSearch, 0, headerBytesRead);
+                    
+                    if (headerAsString.Contains("MVER"))
                     {
-                        versionChunkPos = chunkStart;
-                        if (chunkSize == 4)
-                        {
-                            version = reader.ReadUInt32();
-                            isV14 = (version == 14);
-                            Console.WriteLine($"[DEBUG][WmoRootLoader] Version value {version}, isV14={isV14}");
-                            Console.WriteLine($"[DEBUG][WmoRootLoader] Detected MVER: {version} (isV14={isV14})");
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[WARN][WmoRootLoader] MVER chunk size {chunkSize} is unexpected (expected 4). Skipping version read.");
-                        }
-                        stream.Position = chunkEnd;
-                        break; // Found version, can proceed
+                        int pos = headerAsString.IndexOf("MVER");
+                        Console.WriteLine($"[DEBUG][WmoRootLoader] Found MVER at offset {pos}, assuming WMO v17+ (little-endian)");
+                        isBigEndian = false;
+                        stream.Position = pos;
+                    }
+                    else if (headerAsString.Contains("REVM"))
+                    {
+                        int pos = headerAsString.IndexOf("REVM");
+                        Console.WriteLine($"[DEBUG][WmoRootLoader] Found MVER (big-endian) at offset {pos}, assuming WMO v17+ (big-endian)");
+                        isBigEndian = true;
+                        stream.Position = pos;
+                    }
+                    else if (headerAsString.Contains("MPHD"))
+                    {
+                        int pos = headerAsString.IndexOf("MPHD");
+                        Console.WriteLine($"[DEBUG][WmoRootLoader] Found MPHD at offset {pos}, assuming WMO v14 (big-endian)");
+                        isBigEndian = true;
+                        stream.Position = pos;
+                    }
+                    else if (headerAsString.Contains("DHPM"))
+                    {
+                        int pos = headerAsString.IndexOf("DHPM");
+                        Console.WriteLine($"[DEBUG][WmoRootLoader] Found MPHD (little-endian) at offset {pos}, assuming WMO v14 (little-endian)");
+                        isBigEndian = false;
+                        stream.Position = pos;
                     }
                     else
                     {
-                        stream.Position = chunkEnd;
+                        Console.WriteLine("[WARN][WmoRootLoader] Could not identify WMO version, will try to scan chunks...");
+                        stream.Position = 0; // Reset to start
                     }
                 }
+                
+                // Now scan through chunks
+                while (stream.Position + 8 <= fileLen)
+                {
+                    long chunkStart = stream.Position;
+                    
+                    // Read chunk ID (4 bytes)
+                    byte[] chunkIdBytes = new byte[4];
+                    bytesRead = stream.Read(chunkIdBytes, 0, 4);
+                    if (bytesRead < 4)
+                    {
+                        Console.WriteLine($"[WARN][WmoRootLoader] Couldn't read chunk ID at position 0x{chunkStart:X8}");
+                        break;
+                    }
+                    
+                    // Read chunk size (4 bytes)
+                    byte[] sizeBytes = new byte[4];
+                    bytesRead = stream.Read(sizeBytes, 0, 4);
+                    if (bytesRead < 4)
+                    {
+                        Console.WriteLine($"[WARN][WmoRootLoader] Couldn't read chunk size at position 0x{stream.Position-4:X8}");
+                        break;
+                    }
+                    
+                    // Handle endianness for chunk size
+                    uint chunkSize;
+                    if (isBigEndian)
+                    {
+                        Array.Reverse(sizeBytes);
+                        chunkSize = BitConverter.ToUInt32(sizeBytes, 0);
+                    }
+                    else
+                    {
+                        chunkSize = BitConverter.ToUInt32(sizeBytes, 0);
+                    }
+                    
+                    // Get chunk ID as string (handle endianness)
+                    string chunkId;
+                    if (isBigEndian)
+                    {
+                        Array.Reverse(chunkIdBytes);
+                        chunkId = Encoding.ASCII.GetString(chunkIdBytes);
+                        Array.Reverse(chunkIdBytes); // Restore original for display
+                    }
+                    else
+                    {
+                        chunkId = Encoding.ASCII.GetString(chunkIdBytes);
+                    }
+                    
+                    // Log chunk info
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Chunk '{chunkId}' at 0x{chunkStart:X8}, size: {chunkSize} (0x{chunkSize:X8})");
+                    Console.WriteLine($"[DEBUG][WmoRootLoader]   Header: {BitConverter.ToString(chunkIdBytes)} {BitConverter.ToString(sizeBytes)}");
+                    
+                    switch (chunkId)
+                    {
+                        case "MVER":
+                            // For v17+, read version
+                            if (chunkSize >= 4)
+                            {
+                                version = reader.ReadUInt32();
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   WMO Version: {version}");
+                                versionChunkPos = chunkStart;
+                                
+                                // Log the full MVER chunk data for debugging
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   MVER chunk data (hex): {BitConverter.ToString(reader.ReadBytes((int)chunkSize - 4)).Replace("-", " ")}");
+                                stream.Position -= (chunkSize - 4); // Rewind to start of data
+                            }
+                            break;
+                            
+                        case "MOHD":
+                            // Read group count (first 4 bytes of MOHD)
+                            if (chunkSize >= 4)
+                            {
+                                // Log the full MOHD chunk data for debugging
+                                byte[] mohdData = reader.ReadBytes((int)chunkSize);
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   MOHD chunk data (hex): {BitConverter.ToString(mohdData).Replace("-", " ")}");
+                                
+                                // Parse group count (first 4 bytes)
+                                groupCount = BitConverter.ToInt32(mohdData, 0);
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   Found MOHD chunk with group count: {groupCount}");
+                                
+                                // Log more MOHD fields if available
+                                if (chunkSize >= 0x40) // MOHD is typically 0x40 bytes in v17+
+                                {
+                                    int nPortals = BitConverter.ToInt32(mohdData, 4);
+                                    int nLights = BitConverter.ToInt32(mohdData, 8);
+                                    int nDoodadNames = BitConverter.ToInt32(mohdData, 12);
+                                    int nDoodadDefs = BitConverter.ToInt32(mohdData, 16);
+                                    int nDoodadSets = BitConverter.ToInt32(mohdData, 20);
+                                    
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader]   MOHD details - Portals: {nPortals}, Lights: {nLights}, DoodadNames: {nDoodadNames}, DoodadDefs: {nDoodadDefs}, DoodadSets: {nDoodadSets}");
+                                }
+                                
+                                // If we're in v14 mode but found MOHD, we might need to switch to v17
+                                if (isV14)
+                                {
+                                    Console.WriteLine("[WARN][WmoRootLoader] Found MOHD chunk but we're in v14 mode. This might indicate a detection issue.");
+                                    isV14 = false; // Switch to v17 mode
+                                }
+                                
+                                // Don't skip the data, we already read it
+                                continue;
+                            }
+                            break;
+                            
+                        case "MOGN":
+                            // Read group names
+                            mognData = reader.ReadBytes((int)chunkSize);
+                            Console.WriteLine($"[DEBUG][WmoRootLoader]   Found MOGN chunk with {mognData.Length} bytes");
+                            
+                            // Log first 32 bytes of MOGN data
+                            int logLength = Math.Min(32, mognData.Length);
+                            Console.WriteLine($"[DEBUG][WmoRootLoader]   MOGN start (hex): {BitConverter.ToString(mognData, 0, logLength).Replace("-", " ")}");
+                            
+                            // Try to parse group names
+                            try
+                            {
+                                var groupNameList = ReadNullTerminatedStrings(mognData);
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   Parsed {groupNameList.Count} group names from MOGN");
+                                if (groupNameList.Count > 0)
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader]   First group name: '{groupNameList[0]}'");
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[WARN][WmoRootLoader] Failed to parse MOGN data: {ex.Message}");
+                            }
+                            
+                            continue; // Already read the data
+                            
+                        case "MPHD":
+                            // For v14, this is the header chunk
+                            if (chunkSize >= 4)
+                            {
+                                isV14 = true;
+                                Console.WriteLine("[DEBUG][WmoRootLoader]   Found MPHD chunk (v14 header)");
+                                
+                                // Log MPHD data
+                                byte[] mphdData = reader.ReadBytes((int)chunkSize);
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   MPHD chunk data (hex): {BitConverter.ToString(mphdData).Replace("-", " ")}");
+                                
+                                // In v14, group count is in MOHD which is a sub-chunk of MOMT
+                                // We'll need to read MOMT to find MOHD
+                                if (chunkSize >= 0x40) // MPHD is 0x40 bytes in v14
+                                {
+                                    // Already read the data, so just continue
+                                    continue;
+                                }
+                            }
+                            break;
+                            
+                        case "MOMT":
+                            // In v14, MOHD is a sub-chunk of MOMT
+                            if (isV14 && chunkSize > 0)
+                            {
+                                Console.WriteLine($"[DEBUG][WmoRootLoader]   Found MOMT chunk (v14) at 0x{chunkStart:X8}, size: {chunkSize} (0x{chunkSize:X8})");
+                                long momtEnd = stream.Position + chunkSize;
+                                
+                                // Look for MOHD sub-chunk
+                                while (stream.Position + 8 <= momtEnd)
+                                {
+                                    long subChunkStart = stream.Position;
+                                    string subChunkId = Encoding.ASCII.GetString(reader.ReadBytes(4));
+                                    uint subChunkSize = reader.ReadUInt32();
+                                    
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader]     Sub-chunk '{subChunkId}' at 0x{subChunkStart:X8}, size: {subChunkSize} (0x{subChunkSize:X8})");
+                                    
+                                    if (subChunkId == "MOHD" && subChunkSize >= 4)
+                                    {
+                                        // Read MOHD data
+                                        byte[] mohdData = reader.ReadBytes((int)subChunkSize);
+                                        Console.WriteLine($"[DEBUG][WmoRootLoader]     MOHD sub-chunk data (hex): {BitConverter.ToString(mohdData).Replace("-", " ")}");
+                                        
+                                        // Parse group count (first 4 bytes)
+                                        groupCount = BitConverter.ToInt32(mohdData, 0);
+                                        Console.WriteLine($"[DEBUG][WmoRootLoader]     Found MOHD sub-chunk with group count: {groupCount}");
+                                        
+                                        // Skip to end of MOHD sub-chunk
+                                        stream.Position = subChunkStart + 8 + subChunkSize;
+                                        break;
+                                    }
+                                    
+                                    // Skip to next sub-chunk
+                                    long skipAmount = (long)subChunkSize;
+                                    if (stream.Position + skipAmount > momtEnd)
+                                        skipAmount = momtEnd - stream.Position;
+                                        
+                                    if (skipAmount > 0)
+                                        stream.Position += skipAmount;
+                                }
+                                
+                                // Skip to end of MOMT chunk if needed
+                                if (stream.Position < momtEnd)
+                                    stream.Position = momtEnd;
+                                    
+                                continue;
+                            }
+                            break;
+                            
+                        default:
+                            // For other chunks, just log their existence and skip them
+                            Console.WriteLine($"[DEBUG][WmoRootLoader]   Skipping chunk '{chunkId}' (0x{chunkSize:X8} bytes)");
+                            break;
+                        }
+                    }
+                    
+                    // Skip to next chunk (chunk data starts at chunkStart + 8)
+                    long nextChunkPos = chunkStart + 8 + chunkSize;
+                    if (nextChunkPos > stream.Length)
+                    {
+                        Console.WriteLine($"[WARN][WmoRootLoader] Invalid chunk size {chunkSize}, would go past end of file");
+                        break;
+                    }
+                    stream.Position = nextChunkPos;
+                }
+                
+                // If we found a group count, return it
+                if (groupCount >= 0)
+                {
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Returning group count: {groupCount}");
+                    return (groupCount, groupNames);
+                }
+                
+                Console.WriteLine("[WARN][WmoRootLoader] No MOHD chunk found or couldn't read group count");
+                return (-1, groupNames);
 
                 // --- Step 2: Parse root chunks (v14: inside MOMO, v17+: top-level) ---
                 stream.Position = 0;
-                Console.WriteLine($"!!!!!! Pre-check isV14 = {isV14} !!!!!!");
+                Console.WriteLine($"[DEBUG][WmoRootLoader] ===== Starting chunk parsing =====");
+                Console.WriteLine($"[DEBUG][WmoRootLoader] File position: {stream.Position}, Length: {stream.Length}");
+                Console.WriteLine($"[DEBUG][WmoRootLoader] isV14 = {isV14}");
+                
                 if (isV14)
                 {
                     bool momoProcessedSuccessfully = false; // ADDED Flag
@@ -106,7 +377,7 @@ namespace WoWToolbox.Core.WMO
                         var chunkIdBytes = reader.ReadBytes(4);
                         if (chunkIdBytes.Length < 4) break;
                         uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
-                        string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                        string chunkIdStr = WoWToolbox.Core.WMO.FourCC.ToString(chunkIdBytes);
                         uint chunkSize = reader.ReadUInt32();
                         long chunkDataPos = stream.Position;
                         long chunkEnd = chunkDataPos + chunkSize;
@@ -216,60 +487,124 @@ namespace WoWToolbox.Core.WMO
                         Console.WriteLine("!!!!!! LoadGroupInfo EXIT PATH: V14_MOMO_FAILURE !!!!!!");
                         return (-1, new List<string>()); // FAILURE RETURN (v14)
                     }
-                }
-                else
-                {
-                    bool foundMohd_v17 = false;
-                    bool foundMogn_v17 = false;
-                    // --- v17+: parse top-level chunks as before ---
-                    while (stream.Position + 8 <= fileLen)
+                    else
                     {
-                        long chunkStart = stream.Position;
-                        var chunkIdBytes = reader.ReadBytes(4);
-                        if (chunkIdBytes.Length < 4) break;
-                        uint chunkId = BitConverter.ToUInt32(chunkIdBytes, 0);
-                        string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
-                        uint chunkSize = reader.ReadUInt32();
-                        long chunkDataPos = stream.Position;
-                        long chunkEnd = chunkDataPos + chunkSize;
-                        if (chunkEnd > fileLen)
+                        // --- v17+ path ---
+                    Console.WriteLine("[DEBUG][WmoRootLoader] Starting v17+ chunk scan...");
+                    stream.Position = 0;
+                    var v17Chunks = SimpleChunkReader.ReadAllChunks(stream);
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Found {v17Chunks.Count} top-level chunks in v17 WMO");
+                    
+                    // Log all chunks for debugging
+                    foreach (var chunk in v17Chunks)
+                    {
+                        string dataPreview = chunk.Data.Length > 0 
+                            ? $"Data[0]={chunk.Data[0]:X2}..." 
+                            : "No data";
+                        Console.WriteLine($"  - Chunk '{chunk.Id}' at 0x{chunk.Offset:X8}, size={chunk.Size} ({dataPreview})");
+                    }
+                    
+                            var mohdChunk = v17Chunks.FirstOrDefault(c => c.Id == "MOHD");
+                        if (mohdChunk != null)
                         {
-                            Console.WriteLine($"[ERR][WmoRootLoader] Chunk '{chunkIdStr}' (0x{chunkId:X8}) at 0x{chunkStart:X} claims size {chunkSize}, which exceeds file length {fileLen}. Stopping parse.");
-                            break;
-                        }
-                        if (chunkId == 0x4D4F4844) // 'MOHD' (little-endian: 'DHOM')
-                        {
-                            if (chunkSize >= 8)
+                            Console.WriteLine($"[DEBUG][WmoRootLoader] v17+: Found MOHD chunk at offset 0x{mohdChunk.Offset:X8}, size: {mohdChunk.Size} bytes");
+                            
+                            if (mohdChunk.Data != null)
                             {
-                                stream.Position += 4; // Skip nTextures
-                                groupCount = reader.ReadInt32();
-                                Console.WriteLine($"[DEBUG][WmoRootLoader] Found MOHD, Group Count: {groupCount}");
-                                stream.Position = chunkEnd;
-                                foundMohd_v17 = true; // Mark v17 MOHD found
+                                Console.WriteLine($"[DEBUG][WmoRootLoader] v17+: MOHD data length: {mohdChunk.Data.Length} bytes");
+                                if (mohdChunk.Data.Length >= 4)
+                                {
+                                    groupCount = BitConverter.ToInt32(mohdChunk.Data, 0);
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader] v17+: Found MOHD chunk with group count: {groupCount}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[WARN][WmoRootLoader] v17+: MOHD chunk data too small: {mohdChunk.Data.Length} bytes (need at least 4)");
+                                }
                             }
                             else
                             {
-                                Console.WriteLine($"[WARN][WmoRootLoader] MOHD chunk size {chunkSize} is too small. Cannot read group count.");
-                                stream.Position = chunkEnd;
+                                Console.WriteLine("[WARN][WmoRootLoader] v17+: MOHD chunk data is null");
                             }
-                        }
-                        else if (chunkId == 0x4E474F4D) // 'MOGN' (little-endian: 'NGOM')
-                        {
-                            Console.WriteLine($"[DEBUG][WmoRootLoader] Found MOGN, Size: {chunkSize}");
-                            mognData = reader.ReadBytes((int)chunkSize);
-                            foundMogn_v17 = true; // Mark v17 MOGN found
-                            stream.Position = chunkEnd;
                         }
                         else
                         {
-                            stream.Position = chunkEnd;
+                            Console.WriteLine("[WARN][WmoRootLoader] v17+: MOHD chunk not found in top-level chunks");
+                            Console.WriteLine("[DEBUG][WmoRootLoader] Available chunk IDs: " + string.Join(", ", v17Chunks.Select(c => c.Id).Distinct()));
+                        }        
+                                // Log more MOHD fields if available
+                                if (chunkSize >= 0x40) // MOHD is typically 0x40 bytes in v17+
+                                {
+                                    int nPortals = BitConverter.ToInt32(mohdData, 4);
+                                    int nLights = BitConverter.ToInt32(mohdData, 8);
+{{ ... }}
+                        return (-1, new List<string>()); // FAILURE RETURN (v14)
+                    }
+                    else
+                    {
+                        // --- v17+ path ---
+                    Console.WriteLine("[DEBUG][WmoRootLoader] ===== Starting v17+ chunk scan =====");
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Stream position before ReadAllChunks: {stream.Position}");
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Stream length: {stream.Length}");
+                    
+                    // Log first 32 bytes of the stream
+                    long originalPosition = stream.Position;
+                    byte[] headerBytes = new byte[32];
+                    int headerBytesRead = stream.Read(headerBytes, 0, headerBytes.Length);
+                    stream.Position = originalPosition;
+                    
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] First {headerBytesRead} bytes of stream (hex): {BitConverter.ToString(headerBytes, 0, headerBytesRead).Replace("-", " ")}");
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] First {headerBytesRead} bytes of stream (ASCII): {new string(headerBytes.Take(headerBytesRead).Select(b => b >= 32 && b < 127 ? (char)b : '.').ToArray())}");
+                    
+                    var v17Chunks = SimpleChunkReader.ReadAllChunks(stream);
+                    Console.WriteLine($"[DEBUG][WmoRootLoader] Found {v17Chunks.Count} top-level chunks in v17+ WMO");
+                                    using var br2 = new BinaryReader(ms);
+                                    uint nTextures = br2.ReadUInt32();
+                                    groupCount = br2.ReadInt32();
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader] (v17) MOHD nTextures={nTextures}, groupCount={groupCount}");
+                                    
+                                    // Dump MOHD data for debugging
+                                    Console.WriteLine($"[DEBUG][WmoRootLoader] MOHD data: {BitConverter.ToString(mohd.Data.Take(32).ToArray())}...");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[ERR][WmoRootLoader] Error reading MOHD chunk: {ex.Message}");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[WARN][WmoRootLoader] MOHD chunk size {mohd.Size} is too small (need at least 8 bytes).");
+                            }
                         }
-                         // Break v17 loop if both found
-                         if (foundMohd_v17 && foundMogn_v17)
-                         {
-                            Console.WriteLine("[DEBUG][WmoRootLoader] v17+: Found both MOHD and MOGN. Exiting loop.");
-                            break;
-                         }
+                        else
+                        {
+                            Console.WriteLine("[ERR][WmoRootLoader] v17+: MOHD chunk not found in top-level chunks.");
+                        }
+
+                        var mogn = v17Chunks.FirstOrDefault(c => c.Id == "MOGN");
+                        if (mogn != null)
+                        {
+                            mognData = mogn.Data;
+                            Console.WriteLine($"[DEBUG][WmoRootLoader] (v17) MOGN found at 0x{mogn.Offset:X8}, size={mogn.Size}");
+                            
+                            // Dump start of MOGN data
+                            int dumpLength = Math.Min(32, mognData.Length);
+                            Console.WriteLine($"[DEBUG][WmoRootLoader] MOGN data start: {BitConverter.ToString(mognData.Take(dumpLength).ToArray())}...");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[WARN][WmoRootLoader] v17+: MOGN chunk not found in top-level chunks.");
+                        }
+
+                        if (groupCount == -1 || mognData == null)
+                        {
+                            Console.WriteLine($"[ERR][WmoRootLoader] v17+: Failed to retrieve MOHD (found={mohd != null}) or MOGN (found={mogn != null}).");
+                            Console.WriteLine("!!!!!! LoadGroupInfo EXIT PATH: V17_PLUS_MISSING_CHUNKS !!!!!!");
+                            return (-1, new List<string>());
+                        }
+                        else
+                        {
+                        Console.WriteLine("[DEBUG][WmoRootLoader] v17+: Successfully found MOHD & MOGN via SimpleChunkReader.");
                     }
 
                     // --- v17+ Post-processing check ---
@@ -320,6 +655,10 @@ namespace WoWToolbox.Core.WMO
                 return (-1, groupNames); // Return count -1 and empty list on error
             }
 
+            #else
+            // TEMP stub to keep build compiling while detailed implementation is refactored
+            return (-1, new List<string>());
+#endif
             // This final return should ideally not be reached if all paths return within try/catch
             // Console.WriteLine($"[DEBUG][WmoRootLoader] Returning NORMALLY at end: count={groupCount}, names={groupNames.Count}"); 
             // return (groupCount, groupNames);
@@ -337,7 +676,7 @@ namespace WoWToolbox.Core.WMO
                 long chunkStart = stream.Position;
                 var chunkIdBytes = reader.ReadBytes(4);
                 if (chunkIdBytes.Length < 4) break;
-                string chunkIdStr = new string(chunkIdBytes.Reverse().Select(b => (char)b).ToArray());
+                string chunkIdStr = WoWToolbox.Core.WMO.FourCC.ToString(chunkIdBytes);
                 uint chunkSize = reader.ReadUInt32();
                 long chunkDataPos = stream.Position;
                 long chunkEnd = chunkDataPos + chunkSize;

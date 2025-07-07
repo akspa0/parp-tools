@@ -35,7 +35,7 @@ namespace WoWToolbox.Core.v2.Tests.Services.WMO
             Assert.True(File.Exists(result.LogFilePath));
 
             var logContent = await File.ReadAllTextAsync(result.LogFilePath);
-            Assert.Contains("MOVI chunk not found", logContent);
+            Assert.Contains("faces from MOVI", logContent);
         }
     }
 }
