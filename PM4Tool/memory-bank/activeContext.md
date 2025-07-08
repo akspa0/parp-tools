@@ -7,6 +7,8 @@
 ---
 
 ### **Current Focus (July 8): PM4 Chunk Parsing & Test Migration**
+* **Update (Jul 8, 03:15)** → Scope clarified: _Destructible-object chunks_ (`MDOS`, `MDBH`, `MDBF`, `MDBI`) are **out of scope** for Core.v2 migration work. Focus strictly on navigation / geometry chunks (`MSHD`, `MSPV`, `MSPI`, `MSCN`, `MSLK`, `MSVT`, `MSVI`, `MSUR`, `MPRL`).
+* `MDSB` was incorrectly introduced and has been deleted; no PM4 sample contains that chunk.
 * Extract remaining PM4 chunk parsers (MSLK, MSCN, MPRR, MSPV, etc.) from legacy code into Core.v2 `Foundation.PM4`.
 * **Begin Phase 1 of new chunk-porting roadmap:** port `MSVI`, `MPRL` and enhance `MPRR` to complete core geometry.
 * Remove `PM4FileTests.cs`.

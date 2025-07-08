@@ -10,10 +10,28 @@ namespace WoWToolbox.Core.v2.Tests.PM4
         // Helper retrieves first test PM4 path deterministically so CI never breaks
         private static string GetSamplePm4Path()
         {
-            // prefer smallest file in development_00_00 area for speed
-            var baseDir = Path.Combine("test_data", "original_development");
-            var candidate = Directory.EnumerateFiles(baseDir, "development_00_00.pm4", SearchOption.AllDirectories).FirstOrDefault();
-            Assert.False(candidate is null, $"Sample PM4 not found under {baseDir}.");
+            // First look relative to test output directory (fast path when files copied)
+            var fastDir = Path.Combine(AppContext.BaseDirectory, "test_data", "original_development");
+            if (Directory.Exists(fastDir))
+            {
+                var fastCand = Directory.EnumerateFiles(fastDir, "development_00_00.pm4", SearchOption.AllDirectories).FirstOrDefault();
+                if (fastCand is not null) return fastCand;
+            }
+
+            // Fallback: walk up from output dir until repo root containing test_data/original_development is found
+            string? dir = AppContext.BaseDirectory;
+            string? candidate = null;
+            while (dir is not null)
+            {
+                var baseDir = Path.Combine(dir, "test_data", "original_development");
+                if (Directory.Exists(baseDir))
+                {
+                    candidate = Directory.EnumerateFiles(baseDir, "development_00_00.pm4", SearchOption.AllDirectories).FirstOrDefault();
+                    break;
+                }
+                dir = Path.GetDirectoryName(dir);
+            }
+            Assert.False(candidate is null, "Sample PM4 not found in test_data/original_development tree.");
             return candidate!;
         }
 
