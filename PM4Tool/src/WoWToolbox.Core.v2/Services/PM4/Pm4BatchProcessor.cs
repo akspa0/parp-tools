@@ -35,7 +35,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 string dir = Path.Combine(RunDirectory, fileStem);
                 Directory.CreateDirectory(dir);
                 string objPath = Path.Combine(dir, fileStem + ".obj");
-                Pm4EnhancedObjExporter.ExportAsync(pm4File, objPath).GetAwaiter().GetResult();
+                Pm4ObjExporter.ExportAsync(pm4File, objPath).GetAwaiter().GetResult();
 
                 result.Success = true;
                 // write simple summary

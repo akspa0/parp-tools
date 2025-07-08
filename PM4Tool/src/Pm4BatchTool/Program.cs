@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using WoWToolbox.Core.v2.Services.PM4;
 using WoWToolbox.Core.v2.Foundation.PM4;
@@ -72,6 +74,7 @@ class Program
             var pm4Files = Directory.EnumerateFiles(inputPath, "*.pm4", SearchOption.AllDirectories);
             int ok = 0;
             int fail = 0;
+            var processed = new List<(PM4File file,string name)>();
             foreach (var file in pm4Files)
             {
                 if (force)
@@ -94,7 +97,7 @@ class Program
                 if (r.Success)
                 {
                     ok++;
-                }
+                    try { processed.Add((PM4File.FromFile(file), Path.GetFileNameWithoutExtension(file))); } catch {}                }
                 else
                 {
                     fail++;
@@ -102,6 +105,31 @@ class Program
                 }
             }
             Console.WriteLine($"Processed {ok + fail} files: {ok} succeeded, {fail} failed.");
+
+            // MSLK cross-tile analysis
+            if (processed.Count>0)
+            {
+                var graph = WoWToolbox.Core.v2.Services.PM4.MslkLinkGraphBuilder.Build(processed);
+                string outDir = Path.Combine(Environment.CurrentDirectory,"project_output","analysis");
+                Directory.CreateDirectory(outDir);
+                string csvPath = Path.Combine(outDir,"mslk_links.csv");
+                using var sw = new StreamWriter(csvPath);
+                sw.WriteLine("LinkIdHex,TileCount,EntryCount,TileList");
+                foreach(var kv in graph.OrderBy(k=>k.Key))
+                {
+                    var tilesStr = string.Join(";", kv.Value.Select(e=>$"{e.TileX},{e.TileY}"));
+                    sw.WriteLine($"0x{kv.Key:X8},{kv.Value.Select(e=> (e.TileX,e.TileY)).Distinct().Count()},{kv.Value.Count},{tilesStr}");
+                }
+                Console.WriteLine($"  ↳ MSLK analysis → {csvPath}");
+
+                // MSLK structure audit per tile
+                var auditRows = new List<WoWToolbox.Core.v2.Services.PM4.MslkStructureAuditor.AuditRow>();
+                foreach(var (pm4, name) in processed)
+                    auditRows.AddRange(WoWToolbox.Core.v2.Services.PM4.MslkStructureAuditor.Audit(pm4,name));
+                var auditCsv = Path.Combine(outDir,"mslk_structure_audit.csv");
+                WoWToolbox.Core.v2.Services.PM4.MslkStructureAuditor.WriteCsv(auditRows,auditCsv);
+                Console.WriteLine($"  ↳ MSLK structure audit → {auditCsv}");
+            }
         }
 
         return 0;

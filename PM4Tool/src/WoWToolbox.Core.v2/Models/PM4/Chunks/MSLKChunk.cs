@@ -38,8 +38,8 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         /// <summary>Gets the group/object ID for organizational grouping</summary>
         public uint GroupObjectId => Unknown_0x04;
 
-        /// <summary>Gets the material/color ID (pattern: 0xFFFF#### where #### varies)</summary>
-        public uint MaterialColorId => Unknown_0x0C;
+        /// <summary>Gets the raw LinkId value used to link objects across PM4 tiles.</summary>
+        public uint LinkIdRaw => Unknown_0x0C;
 
         /// <summary>Gets the reference index for cross-referencing other data structures</summary>
         public ushort ReferenceIndex => Unknown_0x10;
@@ -152,7 +152,7 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public override string ToString()
         {
             return $"MSLK Entry [Type:{ObjectTypeFlags:X2}, Sub:{ObjectSubtype:X2}, Group:{GroupObjectId:X8}, " +
-                   $"MSPI:{MspiFirstIndex}+{MspiIndexCount}, Mat:{MaterialColorId:X8}, Ref:{ReferenceIndex:X4}]";
+                   $"MSPI:{MspiFirstIndex}+{MspiIndexCount}, LinkId:{LinkIdRaw:X8}, Ref:{ReferenceIndex:X4}]";
         }
     }
 

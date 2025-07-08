@@ -29,5 +29,16 @@ namespace WoWToolbox.Core.v2.Utilities
             tileY = yy;
             return true;
         }
+            /// <summary>
+        /// Attempts to parse tile coordinates from a filename pattern ending with _XX_YY.
+        /// </summary>
+        public static (int x,int y)? TryExtractTileCoords(string? tileName)
+        {
+            if (string.IsNullOrEmpty(tileName)) return null;
+            var parts = System.IO.Path.GetFileNameWithoutExtension(tileName).Split('_');
+            if (parts.Length>=2 && int.TryParse(parts[^2],out int x) && int.TryParse(parts[^1],out int y))
+                return (x,y);
+            return null;
+        }
     }
 }

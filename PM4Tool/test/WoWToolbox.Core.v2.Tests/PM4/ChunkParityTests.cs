@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Text;
 using Xunit;
 using WoWToolbox.Core.v2.Foundation.PM4;
 
@@ -64,6 +65,67 @@ namespace WoWToolbox.Core.v2.Tests.PM4
                 Assert.False(float.IsNaN(entry.Position.Y) || float.IsInfinity(entry.Position.Y));
                 Assert.False(float.IsNaN(entry.Position.Z) || float.IsInfinity(entry.Position.Z));
             }
+        }
+
+        // ---------------- BYTE-PARITY TESTS ----------------
+        private static readonly string[] NavChunkSigs =
+        {
+            "MSHD","MSPV","MSPI","MSVI","MSVT","MSUR","MSCN","MSLK","MPRL"
+        };
+
+        public static IEnumerable<object[]> SignatureData => NavChunkSigs.Select(s => new object[] { s });
+
+        [Theory]
+        [MemberData(nameof(SignatureData))]
+        public void Chunk_Roundtrip_ShouldMatchOriginal(string sig)
+        {
+            string path = GetSamplePm4Path();
+            byte[] fileBytes = File.ReadAllBytes(path);
+            var pm4 = PM4File.FromFile(path);
+
+            byte[] original = SliceChunk(fileBytes, sig);
+            byte[] reserialized = SerializeChunk(pm4, sig);
+
+            Assert.Equal(original, reserialized);
+        }
+
+        private static byte[] SliceChunk(byte[] fileBytes, string sig)
+        {
+            byte[] sigBytes = Encoding.ASCII.GetBytes(sig);
+            byte[] revBytes = sigBytes.Reverse().ToArray();
+            for (int i = 0; i + 8 <= fileBytes.Length; i++)
+            {
+                bool matchForward = fileBytes[i]==sigBytes[0] && fileBytes[i+1]==sigBytes[1] &&
+                                     fileBytes[i+2]==sigBytes[2] && fileBytes[i+3]==sigBytes[3];
+                bool matchReverse = fileBytes[i]==revBytes[0] && fileBytes[i+1]==revBytes[1] &&
+                                     fileBytes[i+2]==revBytes[2] && fileBytes[i+3]==revBytes[3];
+
+                if (matchForward || matchReverse)
+                {
+                    uint size = BitConverter.ToUInt32(fileBytes, i+4);
+                    byte[] chunkData = new byte[size];
+                    Buffer.BlockCopy(fileBytes, i+8, chunkData, 0, (int)size);
+                    return chunkData;
+                }
+            }
+            throw new InvalidOperationException($"Signature {sig} not found in sample PM4");
+        }
+
+        private static byte[] SerializeChunk(PM4File pm4, string sig)
+        {
+            return sig switch
+            {
+                "MSHD" => pm4.MSHD!.Serialize(),
+                "MSPV" => pm4.MSPV!.Serialize(),
+                "MSPI" => pm4.MSPI!.Serialize(),
+                "MSVI" => pm4.MSVI!.Serialize(),
+                "MSVT" => pm4.MSVT!.Serialize(),
+                "MSUR" => pm4.MSUR!.Serialize(),
+                "MSCN" => pm4.MSCN!.Serialize(),
+                "MSLK" => pm4.MSLK!.Serialize(),
+                "MPRL" => pm4.MPRL!.Serialize(),
+                _ => throw new ArgumentOutOfRangeException(nameof(sig), sig, null)
+            };
         }
     }
 }
