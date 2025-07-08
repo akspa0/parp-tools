@@ -1,5 +1,23 @@
 # PM4 Chunk Implementation Audit Report
 
+## 🔄 Porting Roadmap (2025-07-08)
+The following chunk classes are still **missing or only stubbed** in `WoWToolbox.Core.v2` and must be ported from the legacy Core implementation.
+
+| Phase | Chunk(s) | Rationale |
+|-------|----------|-----------|
+| 1 | `MSVI`, `MPRL`, **MPRR enhancements** | Required for full geometry (indices + reference points) |
+| 2 | `MDOS`, `MDSF`, `MDSB`, `MDSI` | Building hierarchy support for FlexibleBuildingExtractor |
+| 3 | `MSRN` (if real), PD4-exclusive `MCRC` and friends | Completes metadata & PD4 parity |
+
+Each chunk will be ported with:
+1. Struct/class implementing `IBinarySerializable`.
+2. Unit test loading real sample and asserting field counts.
+3. Entry in this audit marked ✅ once verified.
+
+---
+
+# PM4 Chunk Implementation Audit Report
+
 This document tracks the detailed, field-by-field and method-by-method audit of all PM4 chunk types between the original Core library and Core.v2. It is updated as we progress through each chunk.
 
 ---

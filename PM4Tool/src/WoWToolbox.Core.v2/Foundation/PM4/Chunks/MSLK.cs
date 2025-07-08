@@ -21,7 +21,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public uint Unknown_0x04 { get; set; } // DECODED: Group/Object ID (organizational grouping identifier)
         public int MspiFirstIndex { get; set; } // int24_t - Index into MSPI for geometry, -1 for Doodad nodes.
         public byte MspiIndexCount { get; set; } // uint8_t - Number of points in MSPI for geometry, 0 for Doodad nodes.
-        public uint Unknown_0x0C { get; set; } // DECODED: Material/Color ID (pattern: 0xFFFF#### for material references)
+        public uint Unknown_0x0C { get; set; } // DECODED: FFFFYYZZ (pattern: 0xFFFF#### for map tile ID (hex encoded decimal YY_XX))
         public ushort Unknown_0x10 { get; set; } // DECODED: Reference Index (cross-references to other data structures)
         public ushort Unknown_0x12 { get; set; } // DECODED: System Flag (always 0x8000 - confirmed constant)
 

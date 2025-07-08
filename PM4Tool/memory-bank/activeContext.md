@@ -1,17 +1,18 @@
 # Active Context: The Great PM4FileTests.cs Refactoring
 
-**Last Updated:** 2025-07-07
+**Last Updated:** 2025-07-08
 
 **Status:** Plan Approved. Ready for Execution.
 
 ---
 
-### **Current Focus (July 7): PM4 Diagnostics Refinement & OBJ Parity**
-* Port legacy `WmoV14ToV17Converter` (commit 59160e1c) into `WoWToolbox.Core.v2`.
-* Provide service `IWmoV14Converter` + implementation with full geometry, material, and texture handling.
-* Create shared helpers `WmoObjExporter` & `WmoTextureExtractor` for OBJ/MTL writing and BLP→PNG.
-* Update Core.v2 csproj with `SixLabors.ImageSharp` and ensure `Warcraft.NET` reference.
-* Write `WmoV14ConversionTests` verifying MVER 17, vertices present, and PNG textures extracted.
+### **Current Focus (July 8): PM4 Chunk Parsing & Test Migration**
+* Extract remaining PM4 chunk parsers (MSLK, MSCN, MPRR, MSPV, etc.) from legacy code into Core.v2 `Foundation.PM4`.
+* **Begin Phase 1 of new chunk-porting roadmap:** port `MSVI`, `MPRL` and enhance `MPRR` to complete core geometry.
+* Remove `PM4FileTests.cs`.
+* Add new test fixtures `Pm4ChunkParsingTests` and `Pm4BatchProcessorTests` using real sample data.
+* Ensure batch diagnostics still generate complete CSVs; viewer simplified (stats-only HTML) now lands cleanly.
+* Defer WMO v14 and OBJ parity work until PM4 tests are green.
 
 
 **Objective:** Decommission the legacy `PM4FileTests.cs` by migrating its proven PM4 processing logic into the `WoWToolbox.Core.v2` library, implementing a clean service architecture, and building a modern, focused test suite.
