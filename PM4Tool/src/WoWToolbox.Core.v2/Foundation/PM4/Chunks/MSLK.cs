@@ -42,9 +42,28 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public uint GroupObjectId => Unknown_0x04;
 
         /// <summary>
-        /// Gets the material/color ID (pattern: 0xFFFF#### where #### varies).
+        /// Gets the raw <c>LinkId</c> value stored at offset 0x0C of this entry.
+        /// Verified pattern: <c>0xFFFFYYXX</c>
+        /// <list type="bullet">
+        /// <item><description><c>XX</c> = tile X coordinate (0-255)</description></item>
+        /// <item><description><c>YY</c> = tile Y coordinate (0-255)</description></item>
+        /// </list>
+        /// The high word is always <c>0xFFFF</c>, acting as a sentinel indicating the link
+        /// crosses ADT-tile boundaries.
+        /// <para>
+        /// NOTE: Older code and some CSV exports labelled this field “Material/Color ID”.
+        /// The authoritative PM4 spec confirms it is actually a **Link ID** used for
+        /// cross-tile navigation.
+        /// </para>
         /// </summary>
         public uint MaterialColorId => Unknown_0x0C;
+
+        /// <summary>
+        /// Alias exposing the same value as <see cref="MaterialColorId"/>, but using the
+        /// clarified naming from the PM4 specification. Prefer this when adding new
+        /// code; the original property is retained for backward compatibility.
+        /// </summary>
+        public uint LinkIdRaw => MaterialColorId;
 
         /// <summary>
         /// Gets the reference index for cross-referencing other data structures.

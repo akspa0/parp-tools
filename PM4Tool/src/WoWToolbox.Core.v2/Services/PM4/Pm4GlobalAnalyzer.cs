@@ -49,7 +49,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 for (int i = 0; i < pm4.MSLK.Entries.Count; i++)
                 {
                     var e = pm4.MSLK.Entries[i];
-                    LinkIdDecoder.TryDecode(e.MaterialColorId, out ushort hi, out int tx, out int ty);
+                    ushort hi = (ushort)(e.MaterialColorId >> 16);
+                    LinkIdDecoder.TryDecode(e.MaterialColorId, out int tx, out int ty);
 
                     records.Add(new MslkCsvRow
                     {
