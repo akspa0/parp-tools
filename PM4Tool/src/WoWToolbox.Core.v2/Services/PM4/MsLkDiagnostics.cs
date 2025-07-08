@@ -20,7 +20,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
         /// </summary>
         /// <param name="pm4File">Loaded <see cref="PM4File"/>.</param>
         /// <param name="outputCsvPath">Destination file path.</param>
-        public static void DumpEntryCsv(PM4File pm4File, string outputCsvPath)
+        public static void DumpEntryCsv(PM4File pm4File, string outputCsvPath, bool generateHtml = true)
         {
             if (pm4File == null) throw new ArgumentNullException(nameof(pm4File));
             if (string.IsNullOrWhiteSpace(outputCsvPath))
@@ -54,7 +54,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 }
 
                 bool hasSlice = e.MspiIndexCount > 0;
-string entryType = e.IsGeometryNode ? "Geometry" : "Other";
+                string entryType = e.IsGeometryNode ? "Geometry" : "Other";
 
                 sb.AppendLine(string.Join(',',
                     i,
@@ -74,6 +74,50 @@ string entryType = e.IsGeometryNode ? "Geometry" : "Other";
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputCsvPath)!);
             File.WriteAllText(outputCsvPath, sb.ToString(), Encoding.UTF8);
+
+            // ----- MPRR SUMMARY & CONNECTIVITY -----
+            var mprr = pm4File.MPRR;
+            int mprrSeqCount = mprr?.Sequences.Count ?? 0;
+            int mprrEdgeCount = 0;
+            int mprrValidEdgeCount = 0;
+            if (mprr != null)
+            {
+                foreach (var seq in mprr.Sequences)
+                {
+                    if (seq.Count < 2) continue;
+                    ushort from = seq[0];
+                    for (int k = 1; k < seq.Count - 1; k++) // exclude terminator
+                    {
+                        ushort to = seq[k];
+                        mprrEdgeCount++;
+                        if (from < mslk.Entries.Count && to < mslk.Entries.Count)
+                            mprrValidEdgeCount++;
+                    }
+                }
+            }
+
+            // note: mermaid graphs omitted for large files
+
+            // Create HTML viewer
+            if (generateHtml)
+            {
+                string htmlPath = Path.ChangeExtension(outputCsvPath, ".html");
+                var html = new StringBuilder();
+                html.AppendLine("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>PM4 Diagnostics</title>");
+                html.AppendLine("<style>body{font-family:sans-serif;padding:1em;} pre{background:#f7f7f7;padding:1em;border:1px solid #ccc;overflow:auto;} </style></head><body>");
+                html.AppendLine($"<h2>{Path.GetFileNameWithoutExtension(outputCsvPath)}</h2>");
+                html.AppendLine("<p>Mermaid graphs omitted for large files.</p>");
+
+                // stats
+                html.AppendLine("<h3>Stats</h3><pre>");
+                html.AppendLine($"MPRR sequences: {mprrSeqCount}");
+                html.AppendLine($"MPRR edges: {mprrEdgeCount}");
+                if (mprrEdgeCount > 0)
+                    html.AppendLine($"Valid edges (within MSLK range): {mprrValidEdgeCount} ({mprrValidEdgeCount * 100.0 / mprrEdgeCount:0.0}%)");
+                html.AppendLine("</pre>");
+                html.AppendLine("</body></html>");
+                File.WriteAllText(htmlPath, html.ToString(), Encoding.UTF8);
+                }
         }
     }
 }
