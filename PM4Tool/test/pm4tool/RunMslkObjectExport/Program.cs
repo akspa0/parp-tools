@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using WoWToolbox.Core.Navigation.PM4;
+using WoWToolbox.Core.v2.Foundation.PM4;
+using WoWToolbox.Core.v2.Services.PM4;
 
 class Program
 {
@@ -141,6 +142,12 @@ class Program
         var report = hierarchyAnalyzer.GenerateHierarchyReport(hierarchyResult, fileName);
         File.WriteAllText(txtPath, report);
         Console.WriteLine($"   📄 TXT report: {Path.GetFileName(txtPath)}");
+
+        // ✨ Export group geometry objects using new Core.v2 exporter
+        var groupOutputDir = Path.Combine(outputDir, "groups");
+        Directory.CreateDirectory(groupOutputDir);
+        objectMeshExporter.ExportAllGroupsAsObj(pm4File, groupOutputDir);
+        Console.WriteLine($"   📦 Group OBJ export completed: {Directory.GetFiles(groupOutputDir, "*.obj").Length} files");
 
         // ✨ Export individual geometry objects (clean small components)
         var individualGeometry = hierarchyAnalyzer.SegmentByIndividualGeometry(hierarchyResult);

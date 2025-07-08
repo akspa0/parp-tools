@@ -1,12 +1,12 @@
 # Active Context: The Great PM4FileTests.cs Refactoring
 
-**Last Updated:** 2025-07-04
+**Last Updated:** 2025-07-07
 
 **Status:** Plan Approved. Ready for Execution.
 
 ---
 
-### **Current Focus (July 4): WMO v14 → v17 Converter Port & Unified OBJ/Texture Export**
+### **Current Focus (July 7): PM4 Diagnostics Refinement & OBJ Parity**
 * Port legacy `WmoV14ToV17Converter` (commit 59160e1c) into `WoWToolbox.Core.v2`.
 * Provide service `IWmoV14Converter` + implementation with full geometry, material, and texture handling.
 * Create shared helpers `WmoObjExporter` & `WmoTextureExtractor` for OBJ/MTL writing and BLP→PNG.

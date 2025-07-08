@@ -13,7 +13,7 @@ namespace NewPM4Reader.PM4
     /// <summary>
     /// Represents a PM4 file that contains multiple chunks.
     /// </summary>
-    public class PM4File
+    public partial class PM4File
     {
         private readonly ILogger? _logger;
 

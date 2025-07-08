@@ -1,7 +1,6 @@
 using System.IO;
 using System.Linq;
 using WoWToolbox.Core.v2.Services.PM4;
-using WoWToolbox.Core.v2.Services.PM4;
 using Xunit;
 
 namespace WoWToolbox.Core.v2.Tests.PM4

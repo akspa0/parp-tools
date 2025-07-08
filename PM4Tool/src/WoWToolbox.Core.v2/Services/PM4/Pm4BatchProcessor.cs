@@ -29,14 +29,34 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 result.BuildingFragments.AddRange(buildingFragments);
                 var wmoMatches = _wmoMatcher.Match(buildingFragments);
                 result.WmoMatches.AddRange(wmoMatches);
+
+                // Export geometry to OBJ for parity with legacy batch tool
+                string fileStem = Path.GetFileNameWithoutExtension(pm4FilePath);
+                string dir = Path.Combine(RunDirectory, fileStem);
+                Directory.CreateDirectory(dir);
+                string objPath = Path.Combine(dir, fileStem + ".obj");
+                Pm4EnhancedObjExporter.ExportAsync(pm4File, objPath).GetAwaiter().GetResult();
+
                 result.Success = true;
                 // write simple summary
                 WriteSummary(pm4FilePath, result);
             }
             catch (Exception ex)
             {
-                result.Success = false;
-                result.ErrorMessage = ex.Message;
+                // Missing geometry chunks (e.g., MSPV / MSVT absent) are common and not critical – we still
+                // want a summary and diagnostics.  Mark success true but record a warning.
+                if (ex.Message.Contains("no MSPV vertices", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("Chunk \"MSVT\" not found", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Success = true;
+                    result.ErrorMessage = $"Warning: {ex.Message}";
+                    WriteSummary(pm4FilePath, result);
+                }
+                else
+                {
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                }
             }
             return result;
 

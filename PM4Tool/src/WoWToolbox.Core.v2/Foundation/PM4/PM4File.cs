@@ -10,7 +10,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
     /// <summary>
     /// Represents a PM4 file, which is a variant of ADT files used for phasing/pathing data
     /// </summary>
-    public class PM4File : ChunkedFile, IBinarySerializable
+    public partial class PM4File : ChunkedFile, IBinarySerializable
     {
         /// <summary>
         /// Gets or sets the MVER chunk
@@ -22,7 +22,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// Gets or sets the MSHD chunk (Header).
         /// </summary>
         [ChunkOptional]
-        public MSHDChunk? MSHD { get; private set; }
+        public MSHDChunk? MSHD { get; set; }
 
         /// <summary>
         /// Gets or sets the MSLK chunk
@@ -71,29 +71,29 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Gets or sets the MPRL chunk (Position Data).
         /// </summary>
-        public MPRLChunk? MPRL { get; private set; }
+        public MPRLChunk? MPRL { get; set; }
 
         /// <summary>
         /// Gets or sets the MPRR chunk (Reference Data).
         /// </summary>
-        public MPRRChunk? MPRR { get; private set; }
+        public MPRRChunk? MPRR { get; set; }
 
         /// <summary>
         /// Gets or sets the MDBH chunk (Destructible Building Header).
         /// </summary>
         [ChunkOptional]
-        public MDBHChunk? MDBH { get; private set; }
+        public MDBHChunk? MDBH { get; set; }
 
         /// <summary>
         /// Gets or sets the MDOS chunk (Object Data).
         /// </summary>
         [ChunkOptional]
-        public MDOSChunk? MDOS { get; private set; }
+        public MDOSChunk? MDOS { get; set; }
 
         /// <summary>
         /// Gets or sets the MDSF chunk (Structure Data).
         /// </summary>
-        public MDSFChunk? MDSF { get; private set; }
+        public MDSFChunk? MDSF { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PM4File"/> class.

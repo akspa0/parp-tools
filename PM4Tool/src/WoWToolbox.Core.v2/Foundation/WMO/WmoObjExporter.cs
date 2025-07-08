@@ -106,7 +106,6 @@ namespace WoWToolbox.Core.v2.Foundation.WMO
                 if (!string.IsNullOrEmpty(tex))
                     mtlWriter.WriteLine($"map_Kd {tex}");
             }
-
             return objPath;
         }
 
