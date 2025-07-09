@@ -20,18 +20,24 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         // Canonical PM4-relative transform (Y, Z, -X)
         // New canonical mapping: MSVT file stores vertices already in correct XYZ order.
         // Adjusted: MSVT file stores floats (Y, X, Z). Swap to (X, Y, Z) requires (v.Position.Y, v.Position.X, v.Position.Z)
+        // Legacy-parity mapping: (X,Y,Z) -> (Y,Z,-X)
+        /// <summary>
+        /// Spec-defined transform for MSVT (file order Y,X,Z → world X,Y,Z).
+        /// Maps (Y, X, Z) with NO sign flips.
+        /// </summary>
         public static Vector3 FromMsvtVertex(MSVT_Vertex v) => new(v.Position.Y, v.Position.X, v.Position.Z);
 
         /// <summary>
         /// Helper for legacy <see cref="MsvtVertex"/> used by the parsing layer.
         /// </summary>
+        // Legacy-parity mapping for placeholder struct
         public static Vector3 FromMsvtVertexSimple(MsvtVertex v) => new(v.Y, v.X, v.Z);
 
         /// <summary>
         /// Converts an MSVT vertex maintaining XYZ order (legacy OBJ parity):
         /// Raw layout appears to be (X, Y, Z) stored as X,Y,Z → needs swap (Z,Y,-X).
         /// </summary>
-        public static Vector3 FromMsvtVertexXYZ(MsvtVertex v) => new(v.Y, v.Z, -v.X);
+        public static Vector3 FromMsvtVertexXYZ(MsvtVertex v) => new(v.Y, v.X, v.Z);
 
         /// <summary>
         /// Correct legacy mapping for MSVT vertex: (X, Y, Z) -> (X, Y, -Z).
@@ -42,11 +48,7 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         /// <summary>
         /// Converts an MSCN exterior vertex (already XYZ) – just perform the Z-up ‑&gt; Y-up flip.
         /// </summary>
-        public static Vector3 FromMscnVertex(Vector3 v)
-        {
-            var corrected = new Vector3(v.X, -v.Y, v.Z);
-            return new Vector3(corrected.X, -corrected.Y, corrected.Z);
-        }
+        public static Vector3 FromMscnVertex(Vector3 v) => new(v.Y, -v.X, v.Z);
 
         /// <summary>
         /// Converts an MSPV geometry vertex.

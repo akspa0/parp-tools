@@ -38,21 +38,36 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             var sb = new StringBuilder();
             sb.AppendLine($"# Legacy OBJ generated from PM4 file: {sourceFileName ?? "unknown"}");
             sb.AppendLine($"# Generated on {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+            // Optional terrain-tile comment (filename pattern *_x_y.pm4)
+            var tileCoords = TryExtractTileCoords(sourceFileName);
+            if (tileCoords.HasValue)
+                sb.AppendLine($"# Terrain coordinates: {tileCoords.Value.x}, {tileCoords.Value.y}");
+
             sb.AppendLine();
 
             string objName = Path.GetFileNameWithoutExtension(sourceFileName ?? "pm4_tile");
             string meshGroup = hasMspv ? "MSPV_Mesh" : "MSVT_Mesh";
+            string mtlFileName = Path.GetFileName(Path.ChangeExtension(objPath, ".mtl"));
+            // reference default material library
+            sb.AppendLine($"mtllib {mtlFileName}");
             sb.AppendLine($"o {objName}_{meshGroup}");
             sb.AppendLine($"g {meshGroup}");
+            sb.AppendLine("usemtl default");
 
+            // bounding box trackers
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
 
             // 1. Vertices – choose MSPV preferred (legacy orientation), fallback to MSVT
             if (hasMspv)
             {
                 foreach (var vertex in pm4.MSPV!.Vertices)
                 {
-                    var coords = CoordinateTransforms.FromMspvVertex(vertex);
+                    var coords = new Vector3(vertex.X, vertex.Y, vertex.Z);
                     sb.AppendLine($"v {coords.X.ToString(CultureInfo.InvariantCulture)} {coords.Y.ToString(CultureInfo.InvariantCulture)} {coords.Z.ToString(CultureInfo.InvariantCulture)}");
+                    if (coords.X < minX) minX = coords.X; if (coords.Y < minY) minY = coords.Y; if (coords.Z < minZ) minZ = coords.Z;
+                    if (coords.X > maxX) maxX = coords.X; if (coords.Y > maxY) maxY = coords.Y; if (coords.Z > maxZ) maxZ = coords.Z;
                 }
             }
             sb.AppendLine();
@@ -74,8 +89,52 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             {
                 foreach (var vertex in pm4.MSVT!.Vertices)
                 {
-                    var coords = CoordinateTransforms.FromMsvtVertexSimple(vertex);
+                    // Spec orientation for MSVT: (Y, X, Z)
+                                            var coords = new Vector3(vertex.Y, vertex.X, vertex.Z);
                     sb.AppendLine($"v {coords.X.ToString(CultureInfo.InvariantCulture)} {coords.Y.ToString(CultureInfo.InvariantCulture)} {coords.Z.ToString(CultureInfo.InvariantCulture)}");
+                    if (coords.X < minX) minX = coords.X; if (coords.Y < minY) minY = coords.Y; if (coords.Z < minZ) minZ = coords.Z;
+                    if (coords.X > maxX) maxX = coords.X; if (coords.Y > maxY) maxY = coords.Y; if (coords.Z > maxZ) maxZ = coords.Z;
+                }
+            }
+
+            // Bounding-box summary lines
+            sb.AppendLine();
+            sb.AppendLine(string.Create(CultureInfo.InvariantCulture, $"# Bounding Box: Min({minX:F2},{minY:F2},{minZ:F2}) Max({maxX:F2},{maxY:F2},{maxZ:F2})"));
+            sb.AppendLine(string.Create(CultureInfo.InvariantCulture, $"# Dimensions: W({(maxX - minX):F2}) H({(maxY - minY):F2}) D({(maxZ - minZ):F2})"));
+            sb.AppendLine();
+
+            // Optional MPRL position / command point export (separate objects)
+            if (pm4.MPRL != null && pm4.MPRL.Entries.Count > 0)
+            {
+                int startingIndex = (hasMspv ? pm4.MSPV!.Vertices.Count : 0) + (hasMsvt ? pm4.MSVT!.Vertices.Count : 0) + 1; // OBJ 1-based
+                var posEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 != -1).ToList();
+                var cmdEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 == -1).ToList();
+
+                if (posEntries.Count > 0)
+                {
+                    sb.AppendLine($"o {objName}_PositionData");
+                    sb.AppendLine("usemtl positionData");
+                    foreach (var p in posEntries)
+                    {
+                        sb.AppendLine(string.Create(CultureInfo.InvariantCulture, $"v {p.Position.X} {p.Position.Y} {p.Position.Z}"));
+                    }
+                    sb.Append("p");
+                    for (int i = 0; i < posEntries.Count; i++) sb.Append($" {startingIndex + i}");
+                    sb.AppendLine();
+                    startingIndex += posEntries.Count;
+                }
+
+                if (cmdEntries.Count > 0)
+                {
+                    sb.AppendLine($"o {objName}_CommandData");
+                    sb.AppendLine("usemtl commandData");
+                    foreach (var c in cmdEntries)
+                    {
+                        sb.AppendLine(string.Create(CultureInfo.InvariantCulture, $"v {c.Position.Z} {c.Position.X} {c.Position.Y}"));
+                    }
+                    sb.Append("p");
+                    for (int i = 0; i < cmdEntries.Count; i++) sb.Append($" {startingIndex + i}");
+                    sb.AppendLine();
                 }
             }
 
@@ -95,6 +154,14 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
                     "Ns 10.0"
                 });
             }
+        }
+        private static (int x,int y)? TryExtractTileCoords(string? fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return null;
+            var parts = Path.GetFileNameWithoutExtension(fileName).Split('_');
+            if (parts.Length>=2 && int.TryParse(parts[^2],out int x) && int.TryParse(parts[^1],out int y))
+                return (x,y);
+            return null;
         }
     }
 }
