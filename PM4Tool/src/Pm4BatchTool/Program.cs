@@ -25,6 +25,7 @@ class Program
         bool dumpDiag = args.Contains("--diag");
         bool force = args.Contains("--force");
         bool debugChunks = args.Contains("--debug-chunks");
+        bool chunkQuilts = args.Contains("--chunk-quilts");
         for (int i = 1; i < args.Length; i++)
         {
             switch (args[i])
@@ -32,6 +33,9 @@ class Program
                 case "--wmo" when i + 1 < args.Length:
                     wmoDir = args[i + 1];
                     i++;
+                    break;
+                case "--chunk-quilts":
+                    chunkQuilts = true;
                     break;
                 case "--diag":
                     dumpDiag = true;
@@ -124,6 +128,20 @@ class Program
                 }
             }
             Console.WriteLine($"Processed {ok + fail} files: {ok} succeeded, {fail} failed.");
+
+            if (chunkQuilts)
+            {
+                try
+                {
+                    string outDir = Path.Combine(Environment.CurrentDirectory, "project_output", "analysis");
+                    Directory.CreateDirectory(outDir);
+                    WoWToolbox.Core.v2.Services.PM4.TileQuiltChunkExporter.ExportChunkQuilts(inputPath, outDir);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  Error exporting chunk quilts: {ex.Message}");
+                }
+            }
 
             // MSLK cross-tile analysis
             if (processed.Count>0)
