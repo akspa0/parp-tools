@@ -34,7 +34,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 var dict = entries.ToDictionary(t => t.Index, t => t.Entry);
 
                 // invalid references
-                int invalid = entries.Count(t => !IsRoot(t.Entry) && !dict.ContainsKey(t.Entry.ReferenceIndex));
+                int invalid = entries.Count(t => !IsRoot(t.Entry) && t.Entry.ReferenceIndex != 0xFFFF && !dict.ContainsKey(t.Entry.ReferenceIndex));
 
                 // cycle check via simple visited set DFS
                 bool hasCycles = false;
@@ -47,6 +47,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                         var entry = dict[current];
                         if (IsRoot(entry)) break;
                         int next = entry.ReferenceIndex;
+                        if (next == 0xFFFF) break; // reached sentinel/no parent
                         if (!dict.ContainsKey(next)) break; // invalid already counted
                         if (!visited.Add(next)) { hasCycles = true; break; }
                         current = next;
@@ -58,7 +59,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
             }
         }
 
-        private static bool IsRoot(MSLKEntry entry) => entry.ReferenceIndex == unchecked((ushort)0xFFFF);
+        // A node is considered a root/container when it has no geometry: MSPI first index is -1
+        private static bool IsRoot(MSLKEntry entry) => entry.MspiFirstIndex == -1;
 
         public static void WriteCsv(IEnumerable<AuditRow> rows, string csvPath)
         {

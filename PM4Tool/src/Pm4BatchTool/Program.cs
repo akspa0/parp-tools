@@ -12,11 +12,11 @@ using WoWToolbox.Core.v2.Foundation.PM4;
 
 class Program
 {
-    static int Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
         {
-            Console.WriteLine("Usage: Pm4BatchTool <pm4-file-or-directory> [--wmo <wmoDataDir>] [--diag] [--force]");
+            Console.WriteLine("Usage: Pm4BatchTool <pm4-file-or-directory> [--wmo <wmoDataDir>] [--diag] [--force] [--debug-chunks]");
             return 1;
         }
 
@@ -24,6 +24,7 @@ class Program
         string? wmoDir = null;
         bool dumpDiag = args.Contains("--diag");
         bool force = args.Contains("--force");
+        bool debugChunks = args.Contains("--debug-chunks");
         for (int i = 1; i < args.Length; i++)
         {
             switch (args[i])
@@ -68,6 +69,24 @@ class Program
             }
             var res = processor.Process(inputPath);
             Console.WriteLine(res.Success ? "Success" : $"Failed: {res.ErrorMessage}");
+
+            // Export debug chunks if requested
+            if (debugChunks)
+            {
+                try
+                {
+                    // Reload PM4 (processor already exported OBJ inside Process)
+                    var pm4ForDebug = PM4File.FromFile(inputPath);
+                    string outputDir = Path.Combine(processor.RunDirectory, Path.GetFileNameWithoutExtension(inputPath));
+                    string basePath = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputPath));
+                    await ChunkDebugExporter.ExportChunksAsync(pm4ForDebug, basePath);
+                    Console.WriteLine($"  Exported debug chunks to: {basePath}_*.obj");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"  Error exporting debug chunks: {ex.Message}");
+                }
+            }
         }
         else
         {

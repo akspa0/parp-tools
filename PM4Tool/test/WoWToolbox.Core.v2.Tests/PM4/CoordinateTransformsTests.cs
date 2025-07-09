@@ -14,7 +14,7 @@ namespace WoWToolbox.Core.v2.Tests.PM4
         {
             var raw = new MSVT_Vertex { Position = new Vector3(10, 20, 30) };
             var result = CoordinateTransforms.FromMsvtVertex(raw);
-            Assert.Equal(new Vector3(10, 30, -20), result);
+            Assert.Equal(new Vector3(20, 30, -10), result);
         }
 
         [Fact]
@@ -22,7 +22,7 @@ namespace WoWToolbox.Core.v2.Tests.PM4
         {
             var raw = new MsvtVertex { X = 1, Y = 2, Z = 3 };
             var result = CoordinateTransforms.FromMsvtVertexSimple(raw);
-            Assert.Equal(new Vector3(1, 3, -2), result);
+            Assert.Equal(new Vector3(2, 3, -1), result);
         }
 
         [Fact]
@@ -30,14 +30,14 @@ namespace WoWToolbox.Core.v2.Tests.PM4
         {
             var raw = new Vector3(-5, 7, 9);
             var result = CoordinateTransforms.FromMscnVertex(raw);
-            Assert.Equal(new Vector3(-5, 9, -7), result);
+            Assert.Equal(new Vector3(-5, 7, 9), result);
         }
 
         [Fact]
         public void FromMspvVertex_Uses_C3Vector()
         {
             var raw = new C3Vector { X = 4, Y = 5, Z = 6 };
-            var expected = new Vector3(4, 6, -5);
+            var expected = new Vector3(4, 5, 6);
             var result = CoordinateTransforms.FromMspvVertex(raw);
             Assert.Equal(expected, result);
         }

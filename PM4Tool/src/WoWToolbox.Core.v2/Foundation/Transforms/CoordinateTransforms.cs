@@ -17,38 +17,57 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         /// Converts an <see cref="MSVT_Vertex"/> to the library-wide coordinate space.
         /// The mapping is (X, Y, Z) –&gt; (X, Z, -Y) which flips WoW Z-up to a more conventional Y-up.
         /// </summary>
-        public static Vector3 FromMsvtVertex(MSVT_Vertex v) => new(v.Position.X, v.Position.Z, -v.Position.Y);
+        // Canonical PM4-relative transform (Y, Z, -X)
+        // New canonical mapping: MSVT file stores vertices already in correct XYZ order.
+        // Adjusted: MSVT file stores floats (Y, X, Z). Swap to (X, Y, Z) requires (v.Position.Y, v.Position.X, v.Position.Z)
+        public static Vector3 FromMsvtVertex(MSVT_Vertex v) => new(v.Position.Y, v.Position.X, v.Position.Z);
 
         /// <summary>
         /// Helper for legacy <see cref="MsvtVertex"/> used by the parsing layer.
         /// </summary>
-        public static Vector3 FromMsvtVertexSimple(MsvtVertex v) => new(v.X, v.Z, -v.Y);
+        public static Vector3 FromMsvtVertexSimple(MsvtVertex v) => new(v.Y, v.X, v.Z);
+
+        /// <summary>
+        /// Converts an MSVT vertex maintaining XYZ order (legacy OBJ parity):
+        /// Raw layout appears to be (X, Y, Z) stored as X,Y,Z → needs swap (Z,Y,-X).
+        /// </summary>
+        public static Vector3 FromMsvtVertexXYZ(MsvtVertex v) => new(v.Y, v.Z, -v.X);
+
+        /// <summary>
+        /// Correct legacy mapping for MSVT vertex: (X, Y, Z) -> (X, Y, -Z).
+        /// Matches the last known-good commit used for OBJ parity.
+        /// </summary>
+        public static Vector3 FromMsvtVertexLegacy(MsvtVertex v) => new(v.Y, v.Z, -v.X);
 
         /// <summary>
         /// Converts an MSCN exterior vertex (already XYZ) – just perform the Z-up ‑&gt; Y-up flip.
         /// </summary>
-        public static Vector3 FromMscnVertex(Vector3 v) => new(v.X, v.Z, -v.Y);
+        public static Vector3 FromMscnVertex(Vector3 v)
+        {
+            var corrected = new Vector3(v.X, -v.Y, v.Z);
+            return new Vector3(corrected.X, -corrected.Y, corrected.Z);
+        }
 
         /// <summary>
         /// Converts an MSPV geometry vertex.
         /// No re-arrangement needed, only the axis flip.
         /// </summary>
-        public static Vector3 FromMspvVertex(C3Vector v) => new(v.X, v.Z, -v.Y);
+        public static Vector3 FromMspvVertex(C3Vector v) => new(v.X, v.Y, v.Z);
 
         /// <summary>
         /// Overload accepting <see cref="Vector3"/> directly (parse layer already converted).
         /// </summary>
-        public static Vector3 FromMspvVertex(Vector3 v) => new(v.X, v.Z, -v.Y);
+        public static Vector3 FromMspvVertex(Vector3 v) => new(v.X, v.Y, v.Z);
 
         /// <summary>
         /// Overload for placeholder MSPV_Vertex wrapper.
         /// </summary>
-        public static Vector3 FromMspvVertex(MSPV_Vertex v) => new(v.Position.X, v.Position.Z, -v.Position.Y);
+        public static Vector3 FromMspvVertex(MSPV_Vertex v) => new(v.Position.X, v.Position.Y, v.Position.Z);
 
         /// <summary>
         /// Converts an MPRL entry position.
         /// </summary>
-        public static Vector3 FromMprlEntry(MprlEntry e) => new(-e.Position.Z, e.Position.Y, e.Position.X);
+        public static Vector3 FromMprlEntry(MprlEntry e) => new(-e.Position.Z, e.Position.Y, e.Position.X); // unchanged
 
         /// <summary>
         /// Overload for legacy placeholder struct.

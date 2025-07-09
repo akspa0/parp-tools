@@ -22,24 +22,39 @@ namespace WoWToolbox.Core.v2.Services.PM4
         public BatchProcessResult Process(string pm4FilePath)
         {
             var result = new BatchProcessResult();
+            // declare counts so they are visible to catch/final summary
+            int mspvCount = 0;
+            int msvtCount = 0;
+            int msviCount = 0;
             try
             {
                 var pm4File = PM4File.FromFile(pm4FilePath);
+                mspvCount = pm4File.MSPV?.Vertices.Count ?? 0;
+                msvtCount = pm4File.MSVT?.Vertices.Count ?? 0;
+                msviCount = pm4File.MSVI?.Indices.Count ?? 0;
                 var buildingFragments = _buildingExtractionService.ExtractBuildings(pm4File);
                 result.BuildingFragments.AddRange(buildingFragments);
                 var wmoMatches = _wmoMatcher.Match(buildingFragments);
                 result.WmoMatches.AddRange(wmoMatches);
 
-                // Export geometry to OBJ for parity with legacy batch tool
+                // Export geometry to OBJ for parity with legacy batch tool (only if any vertices present)
                 string fileStem = Path.GetFileNameWithoutExtension(pm4FilePath);
                 string dir = Path.Combine(RunDirectory, fileStem);
                 Directory.CreateDirectory(dir);
                 string objPath = Path.Combine(dir, fileStem + ".obj");
-                Pm4ObjExporter.ExportAsync(pm4File, objPath).GetAwaiter().GetResult();
+
+                if (mspvCount > 0 || msvtCount > 0)
+                {
+                    LegacyObjExporter.ExportAsync(pm4File, objPath, Path.GetFileName(pm4FilePath)).GetAwaiter().GetResult();
+                }
+                else
+                {
+                    result.ErrorMessage = "No vertex chunks present (MSPV/MSVT) – OBJ not generated.";
+                }
 
                 result.Success = true;
                 // write simple summary
-                WriteSummary(pm4FilePath, result);
+                WriteSummary(pm4FilePath, result, mspvCount, msvtCount, msviCount);
             }
             catch (Exception ex)
             {
@@ -50,7 +65,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 {
                     result.Success = true;
                     result.ErrorMessage = $"Warning: {ex.Message}";
-                    WriteSummary(pm4FilePath, result);
+                    WriteSummary(pm4FilePath, result, mspvCount, msvtCount, msviCount);
                 }
                 else
                 {
@@ -60,7 +75,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
             }
             return result;
 
-            void WriteSummary(string pm4Path, BatchProcessResult r)
+            void WriteSummary(string pm4Path, BatchProcessResult r, int mspv, int msvt, int msvi)
             {
                 try
                 {
@@ -72,7 +87,10 @@ namespace WoWToolbox.Core.v2.Services.PM4
                     {
                         $"Success: {r.Success}",
                         $"Fragments: {r.BuildingFragments.Count}",
-                        $"Matches: {r.WmoMatches.Count}"
+                        $"Matches: {r.WmoMatches.Count}",
+                        $"MSPV vertices: {mspv}",
+                        $"MSVT vertices: {msvt}",
+                        $"MSVI indices: {msvi}"
                     });
                 }
                 catch { /* non-fatal */ }

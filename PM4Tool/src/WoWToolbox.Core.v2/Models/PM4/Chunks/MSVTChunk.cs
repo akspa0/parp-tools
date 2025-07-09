@@ -63,7 +63,9 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         {
             long startPosition = br.BaseStream.Position;
             long size = br.BaseStream.Length - startPosition;
-            int vertexSize = 12;
+            // MSVT records have evolved; many files use a 24-byte layout (XYZ floats + 3 unknown floats or padding).
+            // Detect stride automatically: prefer 24 if evenly divisible, else 12 for old docs.
+            int vertexSize = (size % 24 == 0) ? 24 : 12;
             if (size < 0) throw new InvalidDataException("Stream size is negative.");
             if (size % vertexSize != 0)
             {
@@ -76,6 +78,13 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
                 float y = br.ReadSingle();
                 float x = br.ReadSingle();
                 float z = br.ReadSingle();
+                // If stride is 24, skip the remaining 12 bytes (3 floats) which are currently undocumented
+                if (vertexSize == 24)
+                {
+                    br.ReadSingle(); // unkA
+                    br.ReadSingle(); // unkB
+                    br.ReadSingle(); // unkC
+                }
                 Vertices.Add(new C3Vector { X = x, Y = y, Z = z });
             }
         }
