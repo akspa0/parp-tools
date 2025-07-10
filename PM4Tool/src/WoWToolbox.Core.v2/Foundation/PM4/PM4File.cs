@@ -45,11 +45,13 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Gets or sets the MSVT chunk (Vertices).
         /// </summary>
+        [ChunkOptional]
         public MSVTChunk? MSVT { get; set; }
 
         /// <summary>
         /// Gets or sets the MSVI chunk (Vertex Indices).
         /// </summary>
+        [ChunkOptional]
         public MSVIChunk? MSVI { get; set; }
 
         /// <summary>

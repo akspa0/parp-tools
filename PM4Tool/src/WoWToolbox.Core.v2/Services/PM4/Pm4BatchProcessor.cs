@@ -43,13 +43,16 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 Directory.CreateDirectory(dir);
                 string objPath = Path.Combine(dir, fileStem + ".obj");
 
-                if (mspvCount > 0 || msvtCount > 0)
+                try
                 {
+                    // Attempt to export full geometry OBJ
                     LegacyObjExporter.ExportAsync(pm4File, objPath, Path.GetFileName(pm4FilePath)).GetAwaiter().GetResult();
                 }
-                else
+                catch (InvalidOperationException ex) when (ex.Message.Contains("vertex data", StringComparison.OrdinalIgnoreCase))
                 {
-                    result.ErrorMessage = "No vertex chunks present (MSPV/MSVT) – OBJ not generated.";
+                    // Legacy exporter refused due to missing vertex chunks – write stub OBJ so that every PM4 has an output
+                    WriteStubObj(objPath, pm4FilePath);
+                    result.ErrorMessage = "Stub OBJ written (no MSPV/MSVT vertices present)";
                 }
 
                 result.Success = true;
@@ -74,6 +77,15 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 }
             }
             return result;
+
+            void WriteStubObj(string path,string src)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllLines(path,new[]{
+                    $"# Stub OBJ for {Path.GetFileName(src)} – no vertex chunks present",
+                    "o empty"
+                });
+            }
 
             void WriteSummary(string pm4Path, BatchProcessResult r, int mspv, int msvt, int msvi)
             {

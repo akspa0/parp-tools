@@ -69,11 +69,11 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         /// <summary>
         /// Converts an MPRL entry position.
         /// </summary>
-        public static Vector3 FromMprlEntry(MprlEntry e) => new(-e.Position.Z, e.Position.Y, e.Position.X); // unchanged
+        public static Vector3 FromMprlEntry(MprlEntry e) => new(e.Position.X, e.Position.Y, e.Position.Z); // corrected to align with MSPV/MSVT orientation
 
         /// <summary>
         /// Overload for legacy placeholder struct.
         /// </summary>
-        public static Vector3 FromMprlEntry(MPRL_Entry e) => new(-e.Position.Z, e.Position.Y, e.Position.X);
+        public static Vector3 FromMprlEntry(MPRL_Entry e) => new(e.Position.X, e.Position.Y, e.Position.Z);
     }
 }

@@ -5,7 +5,7 @@ The following chunk classes are still **missing or only stubbed** in `WoWToolbox
 
 | Phase | Chunk(s) | Rationale |
 |-------|----------|-----------|
-| 1 | `MSVI`, `MPRL`, **MPRR enhancements** | Required for full geometry (indices + reference points) |
+| 1 | ✅ `MSVI`, ✅ `MPRL`, **MPRR enhancements** | Ported and parity-verified (byte-level). MPRR minor enhancements still pending |
 | 2 | `MDOS`, `MDSF`, `MDSB`, `MDSI` | Building hierarchy support for FlexibleBuildingExtractor |
 | 3 | `MSRN` (if real), PD4-exclusive `MCRC` and friends | Completes metadata & PD4 parity |
 

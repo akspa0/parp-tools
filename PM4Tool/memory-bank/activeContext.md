@@ -1,21 +1,26 @@
-# Active Context: The Great PM4FileTests.cs Refactoring
+# Active Context: PM4 OBJ Export Parity Reset
 
-**Last Updated:** 2025-07-08
+**Last Updated:** 2025-07-09 17:41
 
-**Status:** Plan Approved. Ready for Execution.
+**Status:** Geometry quilt refactor underway; per-PM4 OBJ coverage complete; investigating quilt skew and MSCN/MPRL linkage to MSLK metadata.
 
 ---
 
-### **Current Focus (July 8): PM4 Chunk Parsing & Test Migration**
-* **Update (Jul 8, 03:15)** → Scope clarified: _Destructible-object chunks_ (`MDOS`, `MDBH`, `MDBF`, `MDBI`) are **out of scope** for Core.v2 migration work. Focus strictly on navigation / geometry chunks (`MSHD`, `MSPV`, `MSPI`, `MSCN`, `MSLK`, `MSVT`, `MSVI`, `MSUR`, `MPRL`).
-* `MDSB` was incorrectly introduced and has been deleted; no PM4 sample contains that chunk.
-* Extract remaining PM4 chunk parsers (MSLK, MSCN, MPRR, MSPV, etc.) from legacy code into Core.v2 `Foundation.PM4`.
-* **Begin Phase 1 of new chunk-porting roadmap:** port `MSVI`, `MPRL` and enhance `MPRR` to complete core geometry.
-* Remove `PM4FileTests.cs`.
-* Add new test fixtures `Pm4ChunkParsingTests` and `Pm4BatchProcessorTests` using real sample data.
-* Ensure batch diagnostics still generate complete CSVs; viewer simplified (stats-only HTML) now lands cleanly.
-* Defer WMO v14 and OBJ parity work until PM4 tests are green.
+### **Immediate Focus (Reset 2025-07-08 20:27): Restore Correct OBJ Orientation & Parity**
+* **Update (Jul 8, 04:00)** → Navigation/geometry chunks are fully ported and byte-parity verified (✅ `MSVI`, `MPRL`).
+* New primary objective after reset: Achieve byte-parity OBJ/MTL export against authoritative Git `dev-obj-nogui` implementation.
+* Investigate MSPV/MSVT transform mismatch and reinstate proven legacy transform equations.
+* After matrix approval, port remaining OBJ export logic and add SHA parity tests.
+* Destructible-object chunks remain out of scope; WMO work remains paused until OBJ parity is complete.
 
+### **Update (Jul 9, 17:41)**
+* **White Plate Generator Complete** – Implemented `AdtFlatPlateBuilder` and updated `TerrainStampExporter` to emit a detailed 129×129 grid per ADT tile with quad fillers for empty tiles. Output verified via `--tile` export and MeshLab inspection; mesh alignment and subdivision are correct.
+* **Next Milestone:** Merge MSCN terrain data into the plate (true stamping) to emboss terrain relief.
+
+### **Update (Jul 9, 03:54)**
+* Plan reordered: ① Identify MSLK patterns & grouping, ② Interpret inter-tile CSV, ③ Cross-chunk linkage analysis, ④ Chunk-coverage audit vs wowdev docs.
+* Memory-bank and task list adjusted to reflect the new order.
+* OBJ parity improvements stay tracked but are secondary until the analytical goals above are delivered.
 
 **Objective:** Decommission the legacy `PM4FileTests.cs` by migrating its proven PM4 processing logic into the `WoWToolbox.Core.v2` library, implementing a clean service architecture, and building a modern, focused test suite.
 

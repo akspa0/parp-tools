@@ -49,7 +49,7 @@ namespace WoWToolbox.Core.v2.Tests.PM4
             {
                 Position = new C3Vector { X = 1, Y = 2, Z = 3 }
             };
-            var expected = new Vector3(-3, 2, 1);
+            var expected = new Vector3(1, 2, 3);
             var result = CoordinateTransforms.FromMprlEntry(entry);
             Assert.Equal(expected, result);
         }

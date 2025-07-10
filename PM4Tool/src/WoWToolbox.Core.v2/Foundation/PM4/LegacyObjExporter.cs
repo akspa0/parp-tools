@@ -44,6 +44,15 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             if (tileCoords.HasValue)
                 sb.AppendLine($"# Terrain coordinates: {tileCoords.Value.x}, {tileCoords.Value.y}");
 
+            // Calculate tile offsets (world position) for MSPV/MSVT so per-PM4 OBJ sits correctly in master quilt
+            const float AdtTileSize = 533.3333f;
+            float offsetX = 0f, offsetY = 0f;
+            if (tileCoords.HasValue)
+            {
+                offsetX = tileCoords.Value.x * AdtTileSize;
+                offsetY = (63 - tileCoords.Value.y) * AdtTileSize; // Y-axis inversion keeps north at top
+            }
+
             sb.AppendLine();
 
             string objName = Path.GetFileNameWithoutExtension(sourceFileName ?? "pm4_tile");
@@ -64,7 +73,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             {
                 foreach (var vertex in pm4.MSPV!.Vertices)
                 {
-                    var coords = new Vector3(vertex.X, vertex.Y, vertex.Z);
+                    var coords = new Vector3(vertex.X + offsetX, vertex.Y + offsetY, vertex.Z);
                     sb.AppendLine($"v {coords.X.ToString(CultureInfo.InvariantCulture)} {coords.Y.ToString(CultureInfo.InvariantCulture)} {coords.Z.ToString(CultureInfo.InvariantCulture)}");
                     if (coords.X < minX) minX = coords.X; if (coords.Y < minY) minY = coords.Y; if (coords.Z < minZ) minZ = coords.Z;
                     if (coords.X > maxX) maxX = coords.X; if (coords.Y > maxY) maxY = coords.Y; if (coords.Z > maxZ) maxZ = coords.Z;
@@ -90,7 +99,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
                 foreach (var vertex in pm4.MSVT!.Vertices)
                 {
                     // Spec orientation for MSVT: (Y, X, Z)
-                                            var coords = new Vector3(vertex.Y, vertex.X, vertex.Z);
+                                            var coords = new Vector3(vertex.Y + offsetX, vertex.X + offsetY, vertex.Z);
                     sb.AppendLine($"v {coords.X.ToString(CultureInfo.InvariantCulture)} {coords.Y.ToString(CultureInfo.InvariantCulture)} {coords.Z.ToString(CultureInfo.InvariantCulture)}");
                     if (coords.X < minX) minX = coords.X; if (coords.Y < minY) minY = coords.Y; if (coords.Z < minZ) minZ = coords.Z;
                     if (coords.X > maxX) maxX = coords.X; if (coords.Y > maxY) maxY = coords.Y; if (coords.Z > maxZ) maxZ = coords.Z;

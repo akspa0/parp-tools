@@ -82,8 +82,8 @@ namespace WoWToolbox.Core.v2.Tests.PM4
                 {
                     string? filePath = fileByTile.TryGetValue((tileX,tileY), out var v) ? v : null;
 
-                    float offsetX = tileX * AdtTileSize; // east-west (to be applied on anchor.Y)
-                    float offsetY = tileY * AdtTileSize; // north-south (to be applied on anchor.X)
+                    float offsetX = tileX * AdtTileSize; // east-west (positive X)
+                    float offsetY = (63 - tileY) * AdtTileSize; // north-south – invert so Y=0 is north edge
 
                     writer.WriteLine($"g Tile_{tileX}_{tileY}");
 

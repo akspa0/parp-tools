@@ -67,18 +67,8 @@ namespace WoWToolbox.Core.Navigation.PM4
         /// <returns>PM4-relative coordinates with 180° rotation around X-axis applied to corrected coordinates.</returns>
         public static Vector3 FromMscnVertex(Vector3 v)
         {
-            // First apply Y-axis correction that we know works for X/Y positioning
-            var corrected = new Vector3(v.X, -v.Y, v.Z);
-            
-            // Then apply 180-degree rotation around X-axis to "flip up and over"
-            // Modified rotation: X unchanged, Y negated, Z preserved (not negated)
-            var transformed = new Vector3(
-                corrected.X,           // X unchanged
-                -corrected.Y,          // Y negated (becomes -(-Y) = Y)
-                corrected.Z            // Z preserved (not negated)
-            );
-            
-            return transformed;
+            // MSCN vertices already in PM4-relative orientation; no axis swap needed
+            return new Vector3(v.X, v.Y, v.Z);
         }
 
         /// <summary>
@@ -89,6 +79,7 @@ namespace WoWToolbox.Core.Navigation.PM4
         public static Vector3 FromMspvVertex(C3Vector v)
         {
             // PM4-relative: (X, Y, Z) (no transform unless otherwise discovered)
+            // Original orientation: (X, Y, Z)
             return new Vector3(v.X, v.Y, v.Z);
         }
 

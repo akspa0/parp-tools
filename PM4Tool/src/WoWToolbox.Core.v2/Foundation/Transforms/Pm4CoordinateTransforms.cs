@@ -85,7 +85,7 @@ namespace WoWToolbox.Core.v2.Foundation.Transforms
         public static Vector3 FromMprlEntry(MprlEntry entry)
         {
             // Specialized transformation for world positioning
-            return new Vector3(entry.Position.X, -entry.Position.Z, entry.Position.Y);
+            return new Vector3(entry.Position.X, entry.Position.Y, entry.Position.Z); // aligned with MSPV/MSVT orientation
         }
 
         #endregion
