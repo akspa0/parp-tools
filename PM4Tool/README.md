@@ -180,8 +180,9 @@ Extract individual objects from a single PM4 using different grouping heuristics
 --by-object     # ReferenceIndex (0x10)
 --by-group      # GroupId (0x04)
 --by-flag       # Unknown_0x00
---by-subtype    # Unknown_0x01
 --by-container  # (flag << 8) | high-byte(ReferenceIndex)
+--by-cluster    # Experimental spatial merge of neighbouring containers
+--by-objectcluster # Overlap-connected clusters merged into full objects
 ```
 
 These switches let you experiment to find the field that collapses polygon fragments into complete WMOs.

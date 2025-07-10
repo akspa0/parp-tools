@@ -42,7 +42,21 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public uint LinkIdRaw => Unknown_0x0C;
 
         /// <summary>Gets the reference index for cross-referencing other data structures</summary>
+        // Legacy aggregate reference index (high<<8 | low)
+        [Obsolete("Use RefHighByte/RefLowByte instead.")]
         public ushort ReferenceIndex => Unknown_0x10;
+
+        /// <summary>High byte of ReferenceIndex (parent/object slice)</summary>
+        public byte RefHighByte => (byte)(Unknown_0x10 >> 8);
+        /// <summary>Low byte of ReferenceIndex (child container slice)</summary>
+        public byte RefLowByte  => (byte)(Unknown_0x10 & 0xFF);
+
+        /// <summary>High 16-bit word of LinkIdRaw (expected 0xFFFF sentinel)</summary>
+        public ushort LinkPadWord => (ushort)(Unknown_0x0C >> 16);
+        /// <summary>High byte of low word in LinkIdRaw (sub-container A)</summary>
+        public byte LinkSubHighByte => (byte)((Unknown_0x0C >> 8) & 0xFF);
+        /// <summary>Low byte of low word in LinkIdRaw (sub-container B)</summary>
+        public byte LinkSubLowByte  => (byte)(Unknown_0x0C & 0xFF);
 
         /// <summary>Checks if this entry has geometry data (MSPI references)</summary>
         public bool HasGeometry => MspiFirstIndex >= 0 && MspiIndexCount > 0;
@@ -152,7 +166,8 @@ namespace WoWToolbox.Core.v2.Models.PM4.Chunks
         public override string ToString()
         {
             return $"MSLK Entry [Type:{ObjectTypeFlags:X2}, Sub:{ObjectSubtype:X2}, Group:{GroupObjectId:X8}, " +
-                   $"MSPI:{MspiFirstIndex}+{MspiIndexCount}, LinkId:{LinkIdRaw:X8}, Ref:{ReferenceIndex:X4}]";
+                   $"MSPI:{MspiFirstIndex}+{MspiIndexCount}, LinkPad:{LinkPadWord:X4}, LinkSub:{LinkSubHighByte:X2}{LinkSubLowByte:X2}, " +
+                   $"Ref:{RefHighByte:X2}{RefLowByte:X2}]";
         }
     }
 

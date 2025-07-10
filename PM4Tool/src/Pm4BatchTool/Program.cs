@@ -96,6 +96,29 @@ class Program
             }
         }
 
+        // Custom command: mslk-linkscan
+        if (string.Equals(args[0], "mslk-linkscan", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-linkscan <pm4-file> [<output-csv-path>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outPath = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("analysis", "mslk_linkscan.csv");
+            try
+            {
+                WoWToolbox.Core.v2.Services.PM4.MslkLinkScanner.Dump(pm4Path, outPath);
+                Console.WriteLine($"MSLK vs MSUR scan written to {outPath}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
         // Custom command: mslk-linkage
         if (string.Equals(args[0], "mslk-linkage", StringComparison.OrdinalIgnoreCase))
         {
@@ -124,7 +147,7 @@ class Program
         {
             if (args.Length < 2)
             {
-                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-export <pm4-file> [<output-dir>] [--by-flag | --by-subtype | --by-container | --by-group | --by-object]");
+                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-export <pm4-file> [<output-dir>] [--by-flag | --by-container | --by-group | --by-object | --by-cluster | --by-objectcluster]");
                 return 1;
             }
             string pm4Path = args[1];
@@ -139,7 +162,7 @@ class Program
                 outDir = safeDir;
             }
             // parse flags after potential output dir
-            bool byFlag = false, bySubtype = false, byContainer = false, byGroup = false, byObject = false;
+            bool byFlag = false, byContainer = false, byGroup = false, byObject = false, byCluster = false, byObjectCluster = false;
             for (int i = 2; i < args.Length; i++)
             {
                 string tok = args[i];
@@ -147,10 +170,12 @@ class Program
                 switch (tok.ToLowerInvariant())
                 {
                     case "--by-flag": byFlag = true; break;
-                    case "--by-subtype": bySubtype = true; break;
+                    
                     case "--by-container": byContainer = true; break;
                     case "--by-group": byGroup = true; break;
                     case "--by-object": byObject = true; break;
+                    case "--by-cluster": byCluster = true; break;
+                    case "--by-objectcluster": byObjectCluster = true; break;
                 }
             }
             try
@@ -158,9 +183,11 @@ class Program
                 var pm4 = PM4File.FromFile(pm4Path);
                 var exporter = new MslkObjectMeshExporter();
                 if (byFlag) exporter.ExportAllFlagsAsObj(pm4, outDir);
-                else if (bySubtype) exporter.ExportAllSubtypesAsObj(pm4, outDir);
+                
                 else if (byContainer) exporter.ExportAllContainersAsObj(pm4, outDir);
                 else if (byGroup) exporter.ExportAllGroupsAsObj(pm4, outDir);
+                else if (byCluster) exporter.ExportAllClustersAsObj(pm4, outDir);
+                else if (byObjectCluster) exporter.ExportAllObjectClustersAsObj(pm4, outDir);
                 else /* default or --by-object */ exporter.ExportAllObjectsAsObj(pm4, outDir);
                 Console.WriteLine($"MSLK OBJ objects written to {outDir}");
                 return 0;

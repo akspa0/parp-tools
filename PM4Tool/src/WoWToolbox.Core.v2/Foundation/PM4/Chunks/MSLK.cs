@@ -68,7 +68,17 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         /// <summary>
         /// Gets the reference index for cross-referencing other data structures.
         /// </summary>
+        // Legacy aggregate reference index
+        [Obsolete("Use RefHighByte/RefLowByte instead.")]
         public ushort ReferenceIndex => Unknown_0x10;
+
+        // --- Split field helpers (July 2025 spec update) ---
+        public ushort LinkPadWord => (ushort)(Unknown_0x0C >> 16); // Expected 0xFFFF
+        public byte LinkSubHighByte => (byte)((Unknown_0x0C >> 8) & 0xFF);
+        public byte LinkSubLowByte  => (byte)(Unknown_0x0C & 0xFF);
+
+        public byte RefHighByte => (byte)(Unknown_0x10 >> 8);
+        public byte RefLowByte  => (byte)(Unknown_0x10 & 0xFF);
 
                 // Convenience helpers expected by higher-level services
         public bool IsGeometryNode => MspiIndexCount > 0;
