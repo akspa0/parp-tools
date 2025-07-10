@@ -45,6 +45,57 @@ class Program
             }
         }
 
+        // Custom command: mslk-inspect
+        if (string.Equals(args[0], "mslk-inspect", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-inspect <pm4-file-or-directory> [<output-csv-path>]");
+                return 1;
+            }
+            string input = args[1];
+            string csvPath = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("analysis", "mslk_inter_tile_links.csv");
+            try
+            {
+                IEnumerable<(PM4File file, string tileName)> pm4s;
+                if (File.Exists(input))
+                {
+                    pm4s = new[] { (PM4File.FromFile(input), Path.GetFileNameWithoutExtension(input)) };
+                }
+                else if (Directory.Exists(input))
+                {
+                    var list = new List<(PM4File file,string name)>();
+                    foreach (var path in Directory.EnumerateFiles(input, "*.pm4", SearchOption.AllDirectories))
+                    {
+                        try
+                        {
+                            list.Add((PM4File.FromFile(path), Path.GetFileNameWithoutExtension(path)));
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine($"[warn] Skipping {Path.GetFileName(path)} → {ex.Message}");
+                        }
+                    }
+                    pm4s = list;
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Input path '{input}' does not exist.");
+                    return 1;
+                }
+
+                var rows = MslkInterTileAnalyzer.Build(pm4s);
+                MslkInterTileAnalyzer.WriteCsv(rows, csvPath);
+                Console.WriteLine($"MSLK inter-tile CSV written to {csvPath}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
         // Custom command: terrain-mesh
         if (string.Equals(args[0], "terrain-mesh", StringComparison.OrdinalIgnoreCase))
         {
