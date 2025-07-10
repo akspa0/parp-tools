@@ -68,6 +68,11 @@
 
 ---
 
+### 2025-07-09 – Tile Connectivity Plan Established
+- 📝 Added `tile_connectivity_plan.md` outlining Phases A–C (MSLK discovery, link-aware exporter, MPRR/MPRL graph) and CLI consolidation.
+- 🔄 Updated `activeContext.md` with new update entry at 22:45.
+- 🎯 Next: Implement Phase A-1 – `MslkInterTileAnalyzer` to dump link graph.
+
 ### 2025-07-09 – White Plate Generator Complete
 - ✅ Implemented detailed ADT-style white plate generator (`AdtFlatPlateBuilder`) and integrated into `TerrainStampExporter`.
 - 🔍 Validated single-tile export via MeshLab; mesh alignment, tile size, and subdivision verified.

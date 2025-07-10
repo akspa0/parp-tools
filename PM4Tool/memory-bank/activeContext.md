@@ -13,6 +13,9 @@
 * After matrix approval, port remaining OBJ export logic and add SHA parity tests.
 * Destructible-object chunks remain out of scope; WMO work remains paused until OBJ parity is complete.
 
+### **Update (Jul 9, 22:45)**
+* **Tile Connectivity Plan Defined** – Added `tile_connectivity_plan.md` detailing Phase A (MSLK discovery), Phase B (link-aware exporter), Phase C (MPRR/MPRL graph), and CLI consolidation. Exporter validated; focus moves to Phase A-1 (MSLK parser).
+
 ### **Update (Jul 9, 17:41)**
 * **White Plate Generator Complete** – Implemented `AdtFlatPlateBuilder` and updated `TerrainStampExporter` to emit a detailed 129×129 grid per ADT tile with quad fillers for empty tiles. Output verified via `--tile` export and MeshLab inspection; mesh alignment and subdivision are correct.
 * **Next Milestone:** Merge MSCN terrain data into the plate (true stamping) to emboss terrain relief.
