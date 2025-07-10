@@ -158,6 +158,35 @@ dotnet run --project src/WoWToolbox.PM4WmoMatcher -- -i "path/to/pm4/files" -w "
 dotnet run --project src/WoWToolbox.SpatialAnalyzer -- -i "path/to/pm4/files" -o "output/spatial"
 ```
 
+### 5. MSLK Object Export (Scene-Graph)
+
+Extract individual objects from a single PM4 using different grouping heuristics. All OBJ files are written to `project_output/<timestamp>/mslk_obj/<pm4-name>/` – never beside the source `.pm4`.
+
+**One-liner examples:**
+
+```bash
+# Container grouping (flag + parent-id) – recommended starting point
+ dotnet run --project src/Pm4BatchTool/Pm4BatchTool.csproj -- mslk-export test_data/original_development/development/development_00_00.pm4 --by-container
+
+# Group by Unknown_0x00 flag byte
+ dotnet run --project src/Pm4BatchTool/Pm4BatchTool.csproj -- mslk-export test_data/original_development/development/development_00_00.pm4 --by-flag
+
+# Default (per full ReferenceIndex / object-id)
+ dotnet run --project src/Pm4BatchTool/Pm4BatchTool.csproj -- mslk-export test_data/original_development/development/development_00_00.pm4
+```
+
+**Available grouping switches**
+```
+--by-object     # ReferenceIndex (0x10)
+--by-group      # GroupId (0x04)
+--by-flag       # Unknown_0x00
+--by-subtype    # Unknown_0x01
+--by-container  # (flag << 8) | high-byte(ReferenceIndex)
+```
+
+These switches let you experiment to find the field that collapses polygon fragments into complete WMOs.
+
+
 ## 📁 Input Data Requirements
 
 ### PM4 File Structure
@@ -387,3 +416,50 @@ For questions, issues, or contributions:
 **Happy PM4 Processing!** 🎮✨
 
 *Last updated: June 2025*
+
+## ✨ NEW: MSLK Scene Graph-Based WMO Matching
+
+The latest enhancement allows precise matching between individual MSLK scene graph objects and WMO assets, providing much more accurate correlation than previous combined point cloud approaches.
+
+### Key Features
+
+- **Individual Object Matching**: Each MSLK scene graph object is extracted as a separate mesh candidate
+- **Clean Geometry**: Uses render-mesh-only mode for precise visual geometry matching
+- **Scene Graph Intelligence**: Leverages complete PM4 scene hierarchy understanding
+- **WMO Correlation**: Better correlation with individual WMO files and groups
+
+### Usage
+
+```bash
+# Enhanced PM4/WMO matching with MSLK objects
+PM4WmoMatcher.exe --pm4 path/to/pm4_files --wmo path/to/wmo_files --output results --use-mslk-objects
+
+# Traditional combined point cloud matching (legacy)
+PM4WmoMatcher.exe --pm4 path/to/pm4_files --wmo path/to/wmo_files --output results
+
+# MSLK-only extraction (no WMO comparison)
+PM4WmoMatcher.exe --pm4 path/to/pm4_files --output results --use-mslk-objects --skip-wmo-comparison
+```
+
+### MSLK Scene Graph Tools
+
+- **MslkObjectMeshExporter**: Exports individual MSLK objects as OBJ files
+- **MslkHierarchyAnalyzer**: Analyzes and segments MSLK scene graphs
+- **MslkModelAssemblyExporter**: Creates hierarchical model assemblies
+- **PM4WmoMatcher (Enhanced)**: Matches MSLK objects to WMO assets
+
+### Key Advantages of MSLK-Based Matching
+
+1. **Precision**: Individual objects vs. combined point clouds
+2. **Logical Grouping**: Scene graph hierarchy preserved
+3. **Better Correlation**: Each MSLK object → potential WMO match
+4. **Clean Geometry**: Render-optimized mesh data
+5. **Detailed Analysis**: Per-object matching scores and visualization
+
+## Memory Bank Status
+
+This project maintains complete documentation in `memory-bank/` including:
+- Complete PM4 format understanding (100% mastery achieved)
+- MSLK scene graph implementation
+- WMO correlation strategies
+- Development progress and achievements

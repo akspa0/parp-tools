@@ -124,5 +124,96 @@ namespace WoWToolbox.Core.v2.Services.PM4
             }
             return map;
         }
+
+        /// <summary>
+        /// Returns a mapping of objectId (Unk10 / ReferenceIndex) to list of entry indices that contain geometry.
+        /// This is based on statistical observation that Unknown_0x10 clusters multiple groups into one logical object.
+        /// </summary>
+        public Dictionary<ushort, List<int>> GroupGeometryNodeIndicesByObjectId(MSLK mslkChunk)
+        {
+            var map = new Dictionary<ushort, List<int>>();
+            if (mslkChunk?.Entries == null) return map;
+            for (int i = 0; i < mslkChunk.Entries.Count; i++)
+            {
+                var e = mslkChunk.Entries[i];
+                if (e.MspiFirstIndex < 0) continue;
+                ushort objectId = e.Unknown_0x10;
+                if (!map.TryGetValue(objectId, out var list))
+                {
+                    list = new List<int>();
+                    map[objectId] = list;
+                }
+                list.Add(i);
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Groups geometry nodes by Unknown_0x00 (flag byte).
+        /// </summary>
+        public Dictionary<byte, List<int>> GroupGeometryNodeIndicesByFlag(MSLK mslkChunk)
+        {
+            var map = new Dictionary<byte, List<int>>();
+            if (mslkChunk?.Entries == null) return map;
+            for (int i = 0; i < mslkChunk.Entries.Count; i++)
+            {
+                var e = mslkChunk.Entries[i];
+                if (e.MspiFirstIndex < 0) continue;
+                byte flag = e.Unknown_0x00;
+                if (!map.TryGetValue(flag, out var list))
+                {
+                    list = new List<int>();
+                    map[flag] = list;
+                }
+                list.Add(i);
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Groups geometry nodes by Unknown_0x01 (subtype byte).
+        /// </summary>
+        public Dictionary<byte, List<int>> GroupGeometryNodeIndicesBySubtype(MSLK mslkChunk)
+        {
+            var map = new Dictionary<byte, List<int>>();
+            if (mslkChunk?.Entries == null) return map;
+            for (int i = 0; i < mslkChunk.Entries.Count; i++)
+            {
+                var e = mslkChunk.Entries[i];
+                if (e.MspiFirstIndex < 0) continue;
+                byte subtype = e.Unknown_0x01;
+                if (!map.TryGetValue(subtype, out var list))
+                {
+                    list = new List<int>();
+                    map[subtype] = list;
+                }
+                list.Add(i);
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Groups by composite key (flag << 8 | highByte(ReferenceIndex)). Provides a finer-grained container grouping.
+        /// </summary>
+        public Dictionary<ushort, List<int>> GroupGeometryNodeIndicesByContainer(MSLK mslkChunk)
+        {
+            var map = new Dictionary<ushort, List<int>>();
+            if (mslkChunk?.Entries == null) return map;
+            for (int i = 0; i < mslkChunk.Entries.Count; i++)
+            {
+                var e = mslkChunk.Entries[i];
+                if (e.MspiFirstIndex < 0) continue;
+                byte flag = e.Unknown_0x00;
+                byte highRef = (byte)(e.Unknown_0x10 >> 8);
+                ushort key = (ushort)((flag << 8) | highRef);
+                if (!map.TryGetValue(key, out var list))
+                {
+                    list = new List<int>();
+                    map[key] = list;
+                }
+                list.Add(i);
+            }
+            return map;
+        }
     }
 }

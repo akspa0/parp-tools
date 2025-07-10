@@ -18,6 +18,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
             string TileName,
             int SourceTileX,
             int SourceTileY,
+            uint GroupId,
             uint LinkIdHex,
             int TargetTileX,
             int TargetTileY,
@@ -65,10 +66,10 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 for (int i = 0; i < pm4.MSLK.Entries.Count; i++)
                 {
                     var e = pm4.MSLK.Entries[i];
-                    var (destX, destY) = DecodeLinkId(e.Unknown_0x04);
+                    var (destX, destY) = DecodeLinkId(e.LinkIdRaw);
                     bool sameTile = tileX == destX && tileY == destY;
                     bool hasGeom = e.MspiFirstIndex >= 0;
-                    yield return new Row(name, tileX, tileY, e.Unknown_0x04, destX, destY, sameTile, hasGeom,
+                    yield return new Row(name, tileX, tileY, e.GroupObjectId, e.LinkIdRaw, destX, destY, sameTile, hasGeom,
                         e.Unknown_0x00, e.Unknown_0x01, e.MspiFirstIndex, e.MspiIndexCount, e.Unknown_0x10);
                 }
             }
@@ -81,7 +82,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
         {
             Directory.CreateDirectory(Path.GetDirectoryName(csvPath)!);
             using var sw = new StreamWriter(csvPath);
-            sw.WriteLine("Tile,SrcX,SrcY,LinkIdHex,DestX,DestY,IsSameTile,HasGeometry,Flags,SeqPos,MspiFirstIndex,MspiCount,MsurIndex");
+            sw.WriteLine("Tile,SrcX,SrcY,GroupId,LinkIdHex,DestX,DestY,IsSameTile,HasGeometry,Flags,SeqPos,MspiFirstIndex,MspiCount,MsurIndex");
             foreach (var r in rows)
             {
                 sw.WriteLine(string.Join(',', new object[]
@@ -89,6 +90,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                     r.TileName,
                     r.SourceTileX,
                     r.SourceTileY,
+                    r.GroupId,
                     $"0x{r.LinkIdHex:X8}",
                     r.TargetTileX,
                     r.TargetTileY,

@@ -96,6 +96,82 @@ class Program
             }
         }
 
+        // Custom command: mslk-linkage
+        if (string.Equals(args[0], "mslk-linkage", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-linkage <pm4-file> [<output-path>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outPath = args.Length >= 3 ? args[2] : null;
+            try
+            {
+                MslkMeshLinkageLogger.Log(pm4Path, outPath);
+                Console.WriteLine($"MSLK linkage log written to {(outPath ?? "project_output run directory")}\n");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: mslk-export
+        if (string.Equals(args[0], "mslk-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool mslk-export <pm4-file> [<output-dir>] [--by-flag | --by-subtype | --by-container | --by-group | --by-object]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outDir = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : ProjectOutput.GetPath("mslk_obj", Path.GetFileNameWithoutExtension(pm4Path));
+            // ensure outputs are not written next to PM4 inputs
+            string pm4DirAbs = Path.GetDirectoryName(Path.GetFullPath(pm4Path)) ?? string.Empty;
+            string outDirAbs = Path.GetFullPath(outDir);
+            if (outDirAbs.StartsWith(pm4DirAbs, StringComparison.OrdinalIgnoreCase))
+            {
+                string safeDir = ProjectOutput.GetPath("mslk_obj", Path.GetFileNameWithoutExtension(pm4Path));
+                Console.WriteLine($"[Warn] Output directory '{outDir}' is inside PM4 input directory. Redirecting to '{safeDir}'.");
+                outDir = safeDir;
+            }
+            // parse flags after potential output dir
+            bool byFlag = false, bySubtype = false, byContainer = false, byGroup = false, byObject = false;
+            for (int i = 2; i < args.Length; i++)
+            {
+                string tok = args[i];
+                if (!tok.StartsWith("--")) continue;
+                switch (tok.ToLowerInvariant())
+                {
+                    case "--by-flag": byFlag = true; break;
+                    case "--by-subtype": bySubtype = true; break;
+                    case "--by-container": byContainer = true; break;
+                    case "--by-group": byGroup = true; break;
+                    case "--by-object": byObject = true; break;
+                }
+            }
+            try
+            {
+                var pm4 = PM4File.FromFile(pm4Path);
+                var exporter = new MslkObjectMeshExporter();
+                if (byFlag) exporter.ExportAllFlagsAsObj(pm4, outDir);
+                else if (bySubtype) exporter.ExportAllSubtypesAsObj(pm4, outDir);
+                else if (byContainer) exporter.ExportAllContainersAsObj(pm4, outDir);
+                else if (byGroup) exporter.ExportAllGroupsAsObj(pm4, outDir);
+                else /* default or --by-object */ exporter.ExportAllObjectsAsObj(pm4, outDir);
+                Console.WriteLine($"MSLK OBJ objects written to {outDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
         // Custom command: terrain-mesh
         if (string.Equals(args[0], "terrain-mesh", StringComparison.OrdinalIgnoreCase))
         {
