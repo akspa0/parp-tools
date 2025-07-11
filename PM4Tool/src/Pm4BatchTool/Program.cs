@@ -199,6 +199,86 @@ class Program
             }
         }
 
+        // Custom command: msur-export
+        if (string.Equals(args[0], "msur-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool msur-export <pm4-file> [<output-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outDir = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : ProjectOutput.GetPath("msur_obj", Path.GetFileNameWithoutExtension(pm4Path));
+            // ensure outputs not next to PM4 inputs
+            string pm4DirAbs = Path.GetDirectoryName(Path.GetFullPath(pm4Path)) ?? string.Empty;
+            string outDirAbs = Path.GetFullPath(outDir);
+            if (outDirAbs.StartsWith(pm4DirAbs, StringComparison.OrdinalIgnoreCase))
+            {
+                string safeDir = ProjectOutput.GetPath("msur_obj", Path.GetFileNameWithoutExtension(pm4Path));
+                Console.WriteLine($"[Warn] Output directory '{outDir}' is inside PM4 input directory. Redirecting to '{safeDir}'.");
+                outDir = safeDir;
+            }
+            try
+            {
+                var pm4 = PM4File.FromFile(pm4Path);
+                MsurObjectExporter.ExportBySurfaceKey(pm4, outDir);
+                Console.WriteLine($"MSUR OBJ objects written to {outDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: bulk-extract
+        if (string.Equals(args[0], "bulk-extract", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool bulk-extract <pm4-file> [<output-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string baseOut = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : ProjectOutput.GetPath("bulk_extract", Path.GetFileNameWithoutExtension(pm4Path));
+            // prevent writing next to PM4 input
+            string pm4DirAbs2 = Path.GetDirectoryName(Path.GetFullPath(pm4Path)) ?? string.Empty;
+            string baseOutAbs = Path.GetFullPath(baseOut);
+            if (baseOutAbs.StartsWith(pm4DirAbs2, StringComparison.OrdinalIgnoreCase))
+            {
+                string safeDir = ProjectOutput.GetPath("bulk_extract", Path.GetFileNameWithoutExtension(pm4Path));
+                Console.WriteLine($"[Warn] Output directory '{baseOut}' is inside PM4 input directory. Redirecting to '{safeDir}'.");
+                baseOut = safeDir;
+            }
+            try
+            {
+                var pm4 = PM4File.FromFile(pm4Path);
+                // Create base output dirs
+                Directory.CreateDirectory(baseOut);
+
+                var mslkExporter = new MslkObjectMeshExporter();
+                mslkExporter.ExportAllContainersAsObj(pm4, Path.Combine(baseOut, "obj", "mslk_by_container"));
+                mslkExporter.ExportAllClustersAsObj(pm4, Path.Combine(baseOut, "obj", "mslk_by_cluster"));
+                mslkExporter.ExportAllObjectClustersAsObj(pm4, Path.Combine(baseOut, "obj", "mslk_by_objectcluster"));
+
+                MsurObjectExporter.ExportBySurfaceKey(pm4, Path.Combine(baseOut, "obj", "msur_by_key"));
+
+                string csvDir = Path.Combine(baseOut, "csv");
+                Directory.CreateDirectory(csvDir);
+                string linkCsv = Path.Combine(csvDir, "linkscan.csv");
+                MslkLinkScanner.Dump(pm4Path, linkCsv);
+
+                Console.WriteLine("Bulk extraction complete. Output at " + baseOut);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
         // Custom command: terrain-mesh
         if (string.Equals(args[0], "terrain-mesh", StringComparison.OrdinalIgnoreCase))
         {
