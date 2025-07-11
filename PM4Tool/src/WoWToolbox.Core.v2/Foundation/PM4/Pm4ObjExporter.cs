@@ -25,13 +25,31 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Returns all render vertices in world (OBJ) coordinates, preferring MSVT (render) data and falling back to MSPV.
         /// </summary>
-        private static List<Vector3> GetWorldVertices(PM4File pm4)
+        // Legacy parity: prefer MSPV vertices; apply per-tile offsets and correct orientation.
+        // Returns list of world-space vertices and bounding box.
+        private static List<Vector3> BuildVertexList(PM4File pm4, (int x, int y)? tileCoords, out Vector3 minBounds, out Vector3 maxBounds)
         {
-            if (pm4.MSVT != null && pm4.MSVT.Vertices.Count > 0)
+            const float AdtTileSize = 533.3333f;
+            float offsetX = 0f, offsetY = 0f;
+            if (tileCoords.HasValue)
             {
-                return pm4.MSVT.Vertices.Select(v => new Vector3(v.Y, v.Z, -v.X)).ToList();
+                offsetX = tileCoords.Value.x * AdtTileSize;
+                // Invert Y so that increasing Y in game space maps upward on OBJ Y axis (north-up)
+                offsetY = (63 - tileCoords.Value.y) * AdtTileSize;
             }
-            else if (pm4.MSPV != null && pm4.MSPV.Vertices.Count > 0)
+
+            var verts = new List<Vector3>();
+            minBounds = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            maxBounds = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            bool hasMspv = pm4.MSPV != null && pm4.MSPV.Vertices.Count > 0;
+            bool hasMsvt = pm4.MSVT != null && pm4.MSVT.Vertices.Count > 0;
+
+            if (!hasMspv && !hasMsvt)
+                return verts;
+
+            // 1. Primary vertex source – MSPV preferred for parity
+            if (hasMspv)
             {
                 return pm4.MSPV.Vertices.Select(v => new Vector3(v.X, v.Y, v.Z)).ToList();
             }
@@ -49,7 +67,8 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             Directory.CreateDirectory(Path.GetDirectoryName(objPath)!);
 
             var sb = new StringBuilder();
-            var verts = GetWorldVertices(pm4);
+            Vector3 minB, maxB;
+            var verts = BuildVertexList(pm4, TryExtractTileCoords(sourceFileName), out minB, out maxB);
             // header comments
             sb.AppendLine($"# OBJ generated from PM4 file: {sourceFileName ?? "unknown"}");
             sb.AppendLine($"# Generated on {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -68,17 +87,13 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             sb.AppendLine("usemtl default");
 
             // vertices
-            float minX=float.MaxValue,minY=float.MaxValue,minZ=float.MaxValue;
-            float maxX=float.MinValue,maxY=float.MinValue,maxZ=float.MinValue;
             foreach (var vVec in verts)
             {
                 sb.AppendLine($"v {vVec.X.ToString(CultureInfo.InvariantCulture)} {vVec.Y.ToString(CultureInfo.InvariantCulture)} {vVec.Z.ToString(CultureInfo.InvariantCulture)}");
-                if (vVec.X<minX) minX=vVec.X; if(vVec.Y<minY) minY=vVec.Y; if(vVec.Z<minZ) minZ=vVec.Z;
-                if (vVec.X>maxX) maxX=vVec.X; if(vVec.Y>maxY) maxY=vVec.Y; if(vVec.Z>maxZ) maxZ=vVec.Z;
             }
             sb.AppendLine();
-            sb.AppendLine($"# Bounding Box: Min({minX:F2},{minY:F2},{minZ:F2}) Max({maxX:F2},{maxY:F2},{maxZ:F2})");
-            sb.AppendLine($"# Dimensions: W({maxX-minX:F2}) H({maxY-minY:F2}) D({maxZ-minZ:F2})");
+            sb.AppendLine($"# Bounding Box: Min({minB.X:F2},{minB.Y:F2},{minB.Z:F2}) Max({maxB.X:F2},{maxB.Y:F2},{maxB.Z:F2})");
+            sb.AppendLine($"# Dimensions: W({(maxB.X-minB.X):F2}) H({(maxB.Y-minB.Y):F2}) D({(maxB.Z-minB.Z):F2})");
             sb.AppendLine();
 
             // faces (OBJ indices are 1-based) – only if MSVI present
@@ -94,71 +109,69 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             }
 
             // optionally add position / command points
-if (pm4.MPRL != null && pm4.MPRL.Entries.Count > 0)
-{
-    int startingIndex = verts.Count + 1; // OBJ 1-based
-    var posEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 != -1).ToList();
-    var cmdEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 == -1).ToList();
+            if (pm4.MPRL != null && pm4.MPRL.Entries.Count > 0)
+            {
+                int startingIndex = verts.Count + 1; // OBJ 1-based
+                var posEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 != -1).ToList();
+                var cmdEntries = pm4.MPRL.Entries.Where(e => e.Unknown_0x02 == -1).ToList();
 
-    if (posEntries.Count > 0)
-    {
-        sb.AppendLine();
-        sb.AppendLine($"o {objName}_PositionData");
-        sb.AppendLine("usemtl positionData");
-        foreach (var p in posEntries)
-        {
-            sb.AppendLine($"v {p.Position.X.ToString(CultureInfo.InvariantCulture)} {p.Position.Y.ToString(CultureInfo.InvariantCulture)} {p.Position.Z.ToString(CultureInfo.InvariantCulture)}");
-        }
-        sb.Append("p");
-        for (int i = 0; i < posEntries.Count; i++) sb.Append($" {startingIndex + i}");
-        sb.AppendLine();
-        startingIndex += posEntries.Count;
-    }
-    if (cmdEntries.Count > 0)
-    {
-        sb.AppendLine();
-        sb.AppendLine($"o {objName}_CommandData");
-        sb.AppendLine("usemtl commandData");
-        foreach (var c in cmdEntries)
-        {
-            sb.AppendLine($"v {c.Position.Z.ToString(CultureInfo.InvariantCulture)} {c.Position.X.ToString(CultureInfo.InvariantCulture)} {c.Position.Y.ToString(CultureInfo.InvariantCulture)}");
-        }
-        sb.Append("p");
-        for (int i = 0; i < cmdEntries.Count; i++) sb.Append($" {startingIndex + i}");
-        sb.AppendLine();
-        startingIndex += cmdEntries.Count;
-    }
-}
+                if (posEntries.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"o {objName}_PositionData");
+                    sb.AppendLine("usemtl positionData");
+                    foreach (var p in posEntries)
+                    {
+                        sb.AppendLine($"v {p.Position.X.ToString(CultureInfo.InvariantCulture)} {p.Position.Y.ToString(CultureInfo.InvariantCulture)} {p.Position.Z.ToString(CultureInfo.InvariantCulture)}");
+                    }
+                    sb.Append("p");
+                    for (int i = 0; i < posEntries.Count; i++) sb.Append($" {startingIndex + i}");
+                    sb.AppendLine();
+                    startingIndex += posEntries.Count;
+                }
+                if (cmdEntries.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"o {objName}_CommandData");
+                    sb.AppendLine("usemtl commandData");
+                    foreach (var c in cmdEntries)
+                    {
+                        sb.AppendLine($"v {c.Position.Z.ToString(CultureInfo.InvariantCulture)} {c.Position.X.ToString(CultureInfo.InvariantCulture)} {c.Position.Y.ToString(CultureInfo.InvariantCulture)}");
+                    }
+                    sb.Append("p");
+                    for (int i = 0; i < cmdEntries.Count; i++) sb.Append($" {startingIndex + i}");
+                    sb.AppendLine();
+                    startingIndex += cmdEntries.Count;
+                }
+            }
 
-await File.WriteAllTextAsync(objPath, sb.ToString());
+            await File.WriteAllTextAsync(objPath, sb.ToString());
         }
 
-        public static async Task ExportConsolidatedAsync(IEnumerable<(PM4File file,string name)> tiles, string objPath)
+        public static async Task ExportConsolidatedAsync(IEnumerable<(PM4File file, string name)> tiles, string objPath)
         {
-            if (tiles==null) throw new ArgumentNullException(nameof(tiles));
+            if (tiles == null) throw new ArgumentNullException(nameof(tiles));
             Directory.CreateDirectory(Path.GetDirectoryName(objPath)!);
-            var sb=new StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine($"# Consolidated OBJ generated from {tiles.Count()} PM4 tiles");
             sb.AppendLine($"# Generated on {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine();
-            int vertexOffset=0;
-            foreach(var (pm4,name) in tiles)
+
+            int vertexOffset = 0;
+            foreach (var (pm4, name) in tiles)
             {
-                string objName=Path.GetFileNameWithoutExtension(name);
+                string objName = Path.GetFileNameWithoutExtension(name);
                 sb.AppendLine($"o {objName}");
                 sb.AppendLine($"g {objName}_mesh");
                 sb.AppendLine("usemtl default");
                 try
                 {
-                    var worldVerts = GetWorldVertices(pm4);
+                    Vector3 minTmp, maxTmp;
+                    var worldVerts = BuildVertexList(pm4, TryExtractTileCoords(name), out minTmp, out maxTmp);
                     int addedVerts = worldVerts.Count;
                     foreach (var v in worldVerts)
                     {
-                        
-                        {
-                            sb.AppendLine($"v {v.X.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
-                        }
-                        
+                        sb.AppendLine($"v {v.X.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
                     }
 
                     if (pm4.MSVI != null && pm4.MSVI.Indices.Count >= 3)

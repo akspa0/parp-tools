@@ -1,5 +1,7 @@
 # Technical Context
 
+> Concise cheat-sheets live in `memory-bank/overview/`.
+
 ## Core Technologies
 - **Language**: C# (.NET 9.0)
 - **Primary Framework**: .NET 9.0 across all projects

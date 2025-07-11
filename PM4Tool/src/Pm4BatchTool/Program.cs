@@ -82,7 +82,16 @@ class Program
                 return 1;
             }
             string pm4Path = args[1];
-            string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("msur_obj", Path.GetFileNameWithoutExtension(pm4Path));
+            // detect optional --skip-m2 flag and/or custom out dir
+            bool skipM2 = args.Contains("--skip-m2");
+            // collect positional args after pm4Path that are not flags
+            var positional = new List<string>();
+            for (int i = 2; i < args.Length; i++)
+            {
+                if (args[i].StartsWith("--")) continue;
+                positional.Add(args[i]);
+            }
+            string outDir = positional.Count >= 1 ? positional[0] : ProjectOutput.GetPath("msur_obj", Path.GetFileNameWithoutExtension(pm4Path));
             if (!System.IO.File.Exists(pm4Path))
             {
                 Console.Error.WriteLine($"File '{pm4Path}' not found.");
@@ -91,7 +100,7 @@ class Program
             try
             {
                 var file = PM4File.FromFile(pm4Path);
-                MsurGroupObjExporter.Export(file, outDir);
+                MsurGroupObjExporter.Export(file, outDir, skipM2);
                 Console.WriteLine($"MSUR group OBJs written to {outDir}");
                 return 0;
             }
@@ -153,7 +162,53 @@ class Program
             }
         }
 
-        // Custom command: dump-raw
+        // Custom command: chunk-coverage
+    if (string.Equals(args[0], "chunk-coverage", StringComparison.OrdinalIgnoreCase))
+    {
+        if (args.Length < 2)
+        {
+            Console.Error.WriteLine("Usage: Pm4BatchTool chunk-coverage <pm4-or-dir>");
+            return 1;
+        }
+        var input = args[1];
+        List<string> files = new();
+        if (File.Exists(input)) files.Add(input);
+        else if (Directory.Exists(input))
+            files.AddRange(Directory.GetFiles(input, "*.p?4", SearchOption.AllDirectories));
+        else
+        {
+            Console.Error.WriteLine($"Input '{input}' not found.");
+            return 1;
+        }
+        if (files.Count == 0)
+        {
+            Console.Error.WriteLine("No PM4/PD4 files found.");
+            return 1;
+        }
+        var totals = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in files)
+        {
+            var map = WoWToolbox.Core.v2.Tools.Debug.ChunkCoverageAnalyzer.Analyze(f);
+            foreach (var kv in map)
+            {
+                if (totals.ContainsKey(kv.Key)) totals[kv.Key] += kv.Value;
+                else totals[kv.Key] = kv.Value;
+            }
+        }
+        var implemented = typeof(WoWToolbox.Core.v2.Foundation.PM4.Chunks.MSURChunk).Assembly.GetTypes()
+            .Where(t => t.Namespace?.EndsWith("PM4.Chunks") == true)
+            .Select(t => t.Name.Replace("Chunk", string.Empty))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Console.WriteLine("Chunk Coverage Report:\n----------------------");
+        foreach (var kv in totals.OrderByDescending(k => k.Value))
+        {
+            bool known = implemented.Contains(kv.Key);
+            Console.WriteLine($"{kv.Key,4} : {kv.Value,5} {(known ? "(implemented)" : "**missing**")}");
+        }
+        return 0;
+    }
+
+    // Custom command: dump-raw
         if (string.Equals(args[0], "dump-raw", StringComparison.OrdinalIgnoreCase))
         {
             if (args.Length < 2)
@@ -224,6 +279,73 @@ class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: analyze-links
+        if (string.Equals(args[0], "analyze-links", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool analyze-links <pm4-file-or-directory> [<output-dir>]");
+                return 1;
+            }
+            string analysisInputPath = args[1];
+            string outputDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("links_analysis", DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
+
+            try
+            {
+                var filesToProcess = new List<string>();
+                if (File.Exists(analysisInputPath))
+                {
+                    if (Path.GetExtension(analysisInputPath).Equals(".pm4", StringComparison.OrdinalIgnoreCase))
+                    {
+                        filesToProcess.Add(analysisInputPath);
+                    }
+                }
+                else if (Directory.Exists(analysisInputPath))
+                {
+                    filesToProcess.AddRange(Directory.GetFiles(analysisInputPath, "*.pm4", SearchOption.AllDirectories));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Input path '{analysisInputPath}' not found.");
+                    return 1;
+                }
+
+                if (filesToProcess.Count == 0)
+                {
+                    Console.Error.WriteLine("No .pm4 files found to analyze.");
+                    return 1;
+                }
+
+                Directory.CreateDirectory(outputDir);
+                var analyzer = new AnalyzeLinksTool();
+
+                Console.WriteLine($"Starting link analysis on {filesToProcess.Count} file(s)...");
+
+                foreach (var filePath in filesToProcess)
+                {
+                    try
+                    {
+                        Console.WriteLine($"  Processing {Path.GetFileName(filePath)}...");
+                        var pm4File = PM4File.FromFile(filePath);
+                        var baseFileName = Path.GetFileNameWithoutExtension(filePath);
+                        analyzer.Analyze(pm4File, outputDir, baseFileName);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[ERROR] Failed to process {Path.GetFileName(filePath)}: {ex.Message}");
+                    }
+                }
+
+                Console.WriteLine($"\nLink analysis complete. Output written to: {outputDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
                 return 1;
             }
         }

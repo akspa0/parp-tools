@@ -1,5 +1,7 @@
 # Product Context: Real PM4-WMO Geometric Correlation System
 
+> For concise technical docs, check `memory-bank/overview/`.
+
 ## Project Vision & Purpose
 
 ### Core Problem Statement

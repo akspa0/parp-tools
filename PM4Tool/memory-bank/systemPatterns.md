@@ -1,6 +1,7 @@
 # System Patterns: Service-Oriented Architecture for PM4 Processing
 
 > 🔗 Definitive linkage spec: see `mslk_linkage_reference.md` for how MSLK connects to other chunks.
+> 📄 Quick cheat-sheets live in `memory-bank/overview/`.
 
 **Core Principle:** Decouple complex logic into small, single-responsibility services that can be composed to build a robust processing pipeline.
 

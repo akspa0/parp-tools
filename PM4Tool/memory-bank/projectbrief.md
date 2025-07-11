@@ -1,5 +1,7 @@
 # Project Brief: PM4Tool - The Definitive PM4 Library
 
+> For a concise technical cheat-sheet, see files under `memory-bank/overview/`.
+
 ## 1. Core Mission
 
 To create the definitive, production-quality C# library for reading, analyzing, and manipulating Blizzard's PM4 (Path-mapped Model) format.
