@@ -7,6 +7,7 @@ using WoWToolbox.Core.v2.Services.PM4;
 using WoWToolbox.Core.v2.Infrastructure;
 using System.Numerics;
 using WoWToolbox.Core.v2.Foundation.PM4;
+using WoWToolbox.Core.v2.Tools.Debug; // MsurMslkAnalyzer
 
 // Simple CLI front-end for Pm4BatchProcessor. Usage:
 //   dotnet Pm4BatchTool.dll <pm4-file-or-directory> [--wmo <wmoDataDir>]
@@ -39,6 +40,62 @@ class Program
                 return 0;
             }
             catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: msur-group (group MSUR surfaces by Unk1C)
+        if (string.Equals(args[0], "msur-group", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool msur-group <pm4-file>");
+                return 1;
+            }
+            string pm4Path = args[1];
+            if (!System.IO.File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var file = PM4File.FromFile(pm4Path);
+                MsurGroupAnalyzer.PrintSummary(file);
+                return 0;
+            }
+            catch(Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: msur-export (export each MSUR group to OBJ)
+        if (string.Equals(args[0], "msur-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool msur-export <pm4-file> [<output-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("msur_obj", Path.GetFileNameWithoutExtension(pm4Path));
+            if (!System.IO.File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var file = PM4File.FromFile(pm4Path);
+                MsurGroupObjExporter.Export(file, outDir);
+                Console.WriteLine($"MSUR group OBJs written to {outDir}");
+                return 0;
+            }
+            catch(Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 return 1;
@@ -92,6 +149,35 @@ class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: dump-raw
+        if (string.Equals(args[0], "dump-raw", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool dump-raw <pm4-file>");
+                return 1;
+            }
+            string pm4Path = args[1];
+            if (!File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                string outDir = ProjectOutput.GetPath("raw", Path.GetFileNameWithoutExtension(pm4Path));
+                Directory.CreateDirectory(outDir);
+                ChunkRawDumper.DumpAll(pm4Path, outDir);
+                Console.WriteLine($"Raw chunk CSVs written to {outDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex.Message);
                 return 1;
             }
         }
@@ -268,6 +354,13 @@ class Program
                 Directory.CreateDirectory(csvDir);
                 string linkCsv = Path.Combine(csvDir, "linkscan.csv");
                 MslkLinkScanner.Dump(pm4Path, linkCsv);
+
+                // Dump detailed MSUR⇄MSLK analysis JSON
+                string msurMslkJson = Path.Combine(csvDir, "msur_mslk_analysis.json");
+                using (var sw = new StreamWriter(msurMslkJson))
+                {
+                    MsurMslkAnalyzer.Analyze(pm4Path, sw, json: true);
+                }
 
                 Console.WriteLine("Bulk extraction complete. Output at " + baseOut);
                 return 0;

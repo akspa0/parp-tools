@@ -50,7 +50,6 @@ namespace WoWToolbox.Core.v2.Services.PM4
         {
             var vertices = new List<Vector3>();
             var faces = new List<int>();
-            var vLookup = new Dictionary<uint, int>();
 
             foreach (int surfIdx in surfaceIndices)
             {
@@ -60,28 +59,44 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 if (count < 3 || count % 3 != 0) continue;
                 int end = first + count;
                 if (end > pm4File.MSVI!.Indices.Count) end = pm4File.MSVI.Indices.Count;
+                // Determine best normal orientation once per surface
+                Vector3 nSrc = new Vector3(surf.SurfaceNormalX, surf.SurfaceNormalY, surf.SurfaceNormalZ);
+                bool usePlane = surf.FlagsOrUnknown_0x00 != 18 && nSrc.LengthSquared() > 1e-6f;
+                Vector3 nFinal = nSrc;
+                if (usePlane && ShouldSwapNormal(surf, pm4File))
+                {
+                    nFinal = new Vector3(nSrc.Y, nSrc.X, nSrc.Z);
+#if DEBUG
+                    Console.WriteLine($"[MsurExporter] Swapped XY normal for surface {surfIdx} (key 0x{key:X8})");
+#endif
+                }
+                if (usePlane)
+                    nFinal = Vector3.Normalize(nFinal);
+
                 for (int m = first; m + 2 < end; m += 3)
                 {
                     uint aIdx = pm4File.MSVI.Indices[m];
                     uint bIdx = pm4File.MSVI.Indices[m + 1];
                     uint cIdx = pm4File.MSVI.Indices[m + 2];
 
-                    int Add(uint idx)
+                    int AddWithPlane(uint idx)
                     {
-                        if (!vLookup.TryGetValue(idx, out int local))
+                        var vRaw = pm4File.MSVT!.Vertices[(int)idx];
+                        var v = Pm4CoordinateTransforms.FromMsvtVertex(vRaw);
+
+                        if (usePlane)
                         {
-                            var vRaw = pm4File.MSVT!.Vertices[(int)idx];
-                            var v = Pm4CoordinateTransforms.FromMsvtVertex(vRaw);
-                            local = vertices.Count;
-                            vertices.Add(v);
-                            vLookup[idx] = local;
+                            float d = Vector3.Dot(nFinal, v) - surf.SurfaceHeight;
+                            v -= nFinal * d;
                         }
+                        int local = vertices.Count;
+                        vertices.Add(v);
                         return local;
                     }
 
-                    faces.Add(Add(aIdx));
-                    faces.Add(Add(bIdx));
-                    faces.Add(Add(cIdx));
+                    faces.Add(AddWithPlane(aIdx));
+                    faces.Add(AddWithPlane(bIdx));
+                    faces.Add(AddWithPlane(cIdx));
                 }
             }
 
@@ -104,6 +119,37 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 writer.WriteLine($"f {a} {b} {c}");
             }
             Console.WriteLine($"[MsurExporter] Wrote {outPath} ({vertices.Count} verts, {faces.Count/3} tris)");
+        }
+
+        /// <summary>
+        /// Heuristically decides whether swapping X/Y in the stored MSUR normal better fits the sampled vertices.
+        /// </summary>
+        private static bool ShouldSwapNormal(MsurEntry surf, PM4File pm4File)
+        {
+            int first = (int)surf.MsviFirstIndex;
+            int sampleCount = Math.Min(surf.IndexCount, (byte)9); // up to 3 triangles
+            if (sampleCount == 0 || pm4File.MSVI == null || pm4File.MSVT == null) return false;
+
+            Vector3 nA = new Vector3(surf.SurfaceNormalX, surf.SurfaceNormalY, surf.SurfaceNormalZ);
+            if (nA.LengthSquared() < 1e-6f) return false;
+            Vector3 nB = new Vector3(nA.Y, nA.X, nA.Z);
+            nA = Vector3.Normalize(nA);
+            nB = Vector3.Normalize(nB);
+
+            float errA = 0, errB = 0;
+            int samples = 0;
+            for (int i = 0; i < sampleCount && (first + i) < pm4File.MSVI.Indices.Count; i++)
+            {
+                uint idx = pm4File.MSVI.Indices[first + i];
+                if (idx >= pm4File.MSVT.Vertices.Count) continue;
+                var vRaw = pm4File.MSVT.Vertices[(int)idx];
+                Vector3 v = Pm4CoordinateTransforms.FromMsvtVertex(vRaw);
+                errA += MathF.Abs(Vector3.Dot(nA, v) - surf.SurfaceHeight);
+                errB += MathF.Abs(Vector3.Dot(nB, v) - surf.SurfaceHeight);
+                samples++;
+            }
+            if (samples == 0) return false;
+            return errB < errA;
         }
     }
 }
