@@ -51,7 +51,16 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
             set => MsviFirstIndex = value;
         }      // _0x14 - Starting index in MSVI for this surface.
         public uint MdosIndex { get; set; }            // _0x18 - Index into MDOS (Destructible Object States). Note: This field is NOT directly present in PM4 docs but is implied by MDSF link.
-        public uint Unknown_0x1C { get; set; }            // _0x1C - Meaning TBD.
+        public uint Unknown_0x1C { get; set; }            // _0x1C - Raw 32-bit value (suspected packed two 16-bit integers).
+
+        // Decoded view of Unknown_0x1C
+        public ushort LowWord_0x1C => (ushort)(Unknown_0x1C & 0xFFFF);
+        public ushort HighWord_0x1C => (ushort)((Unknown_0x1C >> 16) & 0xFFFF);
+
+        /// <summary>
+        /// Returns Unknown_0x1C split as two 16-bit words.
+        /// </summary>
+        public (ushort high, ushort low) GetSplit0x1C() => (HighWord_0x1C, LowWord_0x1C);
 
         public const int Size = 32; // Bytes
 
@@ -87,7 +96,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
 
         public override string ToString()
         {
-            return $"MSUR Entry [Index: {MsviFirstIndex}, Count: {IndexCount}, Flags: {FlagsOrUnknown_0x00:X2}, MdosIndex: {MdosIndex}]"; // Updated ToString
+            return $"MSUR Entry [FirstIndex: {MsviFirstIndex}, Count: {IndexCount}, Flags: {FlagsOrUnknown_0x00:X2}, MdosIndex: {MdosIndex}, 0x1C: 0x{Unknown_0x1C:X8} (hi={HighWord_0x1C}, lo={LowWord_0x1C})]"; // Updated ToString
         }
     }
 

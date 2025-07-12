@@ -12,6 +12,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
 {
     public class AnalyzeLinksTool
     {
+        private readonly HashSet<ushort> _routeReferences = new();
         public void Analyze(PM4File pm4File, string outputDirectory, string baseFileName)
         {
             if (!Directory.Exists(outputDirectory))
@@ -32,16 +33,90 @@ namespace WoWToolbox.Core.v2.Services.PM4
             var records = pm4File.MSLK.Entries.Select((entry, index) => new MslkLinkDto
             {
                 Index = index,
-                Unknown_0x00 = $"0x{entry.Unknown_0x00:X2}",
-                Unknown_0x04 = $"0x{entry.GroupObjectId:X8}",
+                Unknown_0x00 = entry.Unknown_0x00,
+                Unknown_0x04 = entry.GroupObjectId,
                 MspiFirstIndex = (uint)entry.MspiFirstIndex,
-                Unknown_0x0C = $"0x{entry.Unknown_0x0C:X8}",
-                Reference = $"{entry.RefHighByte:X2}{entry.RefLowByte:X2}",
-                LinkId = $"0x{entry.LinkIdRaw:X8}"
-            });
+                Unknown_0x0C = entry.Unknown_0x0C,
+                Reference = (ushort)((entry.RefHighByte << 8) | entry.RefLowByte),
+                LinkId = entry.LinkIdRaw
+            }).ToList();
 
             var outputPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk.csv");
             WriteToCsv(records, outputPath);
+
+            // treat MspiFirstIndex as additional reference candidates (adjacent geometry hypothesis)
+            foreach (var rec in records)
+            {
+                if (rec.MspiFirstIndex != uint.MaxValue && rec.MspiFirstIndex <= ushort.MaxValue)
+                {
+                    _routeReferences.Add((ushort)rec.MspiFirstIndex);
+                }
+            }
+
+            // exploratory summary by flag/group
+            var summary = records.GroupBy(r => new { r.Unknown_0x00, r.Unknown_0x04 })
+                                 .Select(g => new MslkSummaryDto
+                                 {
+                                     Unknown_0x00 = g.Key.Unknown_0x00,
+                                     Unknown_0x04 = g.Key.Unknown_0x04,
+                                     Count = g.Count()
+                                 }).ToList();
+            var summaryPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_summary.csv");
+            WriteToCsv(summary, summaryPath);
+
+            // derive list of links not present in any route (MPRR, special MPRL portal refs, or MSPI indices)
+            var unused = records.Where(r => !_routeReferences.Contains(r.Reference)).ToList();
+
+            // build missing-ref set for quick triage
+            var mspiCount = pm4File.MSPI?.Indices?.Count ?? 0;
+            // build MSUR index set
+            var msurIndexSet = new HashSet<ushort>();
+            if (pm4File.MSUR?.Entries != null)
+            {
+                foreach (var surf in pm4File.MSUR.Entries)
+                {
+                    uint start = surf.MsviFirstIndex;
+                    for (uint i = 0; i < surf.IndexCount; i++)
+                    {
+                        uint idx = start + i;
+                        if (idx <= ushort.MaxValue)
+                            msurIndexSet.Add((ushort)idx);
+                    }
+                }
+            }
+
+            var enrichedMissing = unused.Select(u => u.Reference).Distinct().OrderBy(v => v)
+                .Select(v => new EnrichedMissingRefDto
+                {
+                    Reference = v,
+                    ExternalCandidate = v >= mspiCount,
+                    InMsurRange = msurIndexSet.Contains(v)
+                }).ToList();
+            if (enrichedMissing.Any())
+            {
+                var missingPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_enriched.csv");
+                WriteToCsv(enrichedMissing, missingPath);
+            }
+
+            // filtered view: refs whose originating MSLK flag is NOT 2
+            var filtered = unused.Where(r => r.Unknown_0x00 != 2)
+                                  .Select(r => new MissingRefWithFlagDto
+                                  {
+                                      Reference = r.Reference,
+                                      Flag = r.Unknown_0x00,
+                                      GroupId = r.Unknown_0x04
+                                  }).ToList();
+            if (filtered.Any())
+            {
+                var filtPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_filtered.csv");
+                WriteToCsv(filtered, filtPath);
+            }
+
+            if (unused.Count > 0)
+            {
+                var unusedPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_unreferenced.csv");
+                WriteToCsv(unused, unusedPath);
+            }
         }
 
         private void ProcessMsurChunk(PM4File pm4File, string outputDirectory, string baseFileName)
@@ -83,7 +158,16 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 PosZ = entry.Position.Z,
                 Unknown_0x14 = entry.Unknown_0x14,
                 Unknown_0x16 = entry.Unknown_0x16
-            });
+            }).ToList();
+
+            // collect candidate references where _0x02 == -1
+            foreach (var e in pm4File.MPRL.Entries)
+            {
+                if (e.Unknown_0x02 == unchecked((short)0xFFFF))
+                {
+                    _routeReferences.Add((ushort)e.Unknown_0x04);
+                }
+            }
 
             var outputPath = Path.Combine(outputDirectory, $"{baseFileName}_mprl.csv");
             WriteToCsv(records, outputPath);
@@ -99,12 +183,9 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 var sequence = pm4File.MPRR.Sequences[i];
                 for (int j = 0; j < sequence.Count; j++)
                 {
-                    records.Add(new MprrLinkDto
-                    {
-                        SequenceIndex = i,
-                        ValueIndex = j,
-                        Value = $"0x{sequence[j]:X4}"
-                    });
+                    ushort val = sequence[j];
+                    records.Add(new MprrLinkDto { SequenceIndex = i, ValueIndex = j, Value = val });
+                    _routeReferences.Add(val);
                 }
             }
 
@@ -125,17 +206,17 @@ namespace WoWToolbox.Core.v2.Services.PM4
         [Index(0)]
         public int Index { get; set; }
         [Index(1)]
-        public string Unknown_0x00 { get; set; } = string.Empty;
+        public byte Unknown_0x00 { get; set; }
         [Index(2)]
-        public string Unknown_0x04 { get; set; } = string.Empty;
+        public uint Unknown_0x04 { get; set; }
         [Index(3)]
         public uint MspiFirstIndex { get; set; }
         [Index(4)]
-        public string Unknown_0x0C { get; set; } = string.Empty;
+        public uint Unknown_0x0C { get; set; }
         [Index(5)]
-        public string Reference { get; set; } = string.Empty;
+        public ushort Reference { get; set; }
         [Index(6)]
-        public string LinkId { get; set; } = string.Empty;
+        public uint LinkId { get; set; }
     }
 
     public class MsurLinkDto
@@ -162,6 +243,37 @@ namespace WoWToolbox.Core.v2.Services.PM4
         public uint MdosIndex { get; set; }
         [Index(10)]
         public string Unknown_0x1C { get; set; } = string.Empty;
+    }
+
+    public class MissingRefWithFlagDto
+    {
+        [Index(0)] public ushort Reference { get; set; }
+        [Index(1)] public byte Flag { get; set; }
+        [Index(2)] public uint GroupId { get; set; }
+    }
+
+    public class EnrichedMissingRefDto
+    {
+        [Index(0)] public ushort Reference { get; set; }
+        [Index(1)] public bool ExternalCandidate { get; set; }
+        [Index(2)] public bool InMsurRange { get; set; }
+    }
+
+    // legacy simple DTO remains if needed
+    public class MissingRefDto
+    {
+        [Index(0)] public ushort Reference { get; set; }
+        [Index(1)] public bool ExternalCandidate { get; set; }
+    }
+
+    public class MslkSummaryDto
+    {
+        [Index(0)]
+        public byte Unknown_0x00 { get; set; }
+        [Index(1)]
+        public uint Unknown_0x04 { get; set; }
+        [Index(2)]
+        public int Count { get; set; }
     }
 
     public class MprlLinkDto
@@ -195,6 +307,6 @@ namespace WoWToolbox.Core.v2.Services.PM4
         [Index(1)]
         public int ValueIndex { get; set; }
         [Index(2)]
-        public string Value { get; set; } = string.Empty;
+        public ushort Value { get; set; }
     }
 }

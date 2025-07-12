@@ -51,9 +51,36 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
             // 1. Primary vertex source – MSPV preferred for parity
             if (hasMspv)
             {
-                return pm4.MSPV.Vertices.Select(v => new Vector3(v.X, v.Y, v.Z)).ToList();
+                foreach (var v in pm4.MSPV!.Vertices)
+                {
+                    var world = new Vector3(v.X + offsetX, v.Y + offsetY, v.Z);
+                    verts.Add(world);
+                    // track bounds
+                    if (world.X < minBounds.X) minBounds.X = world.X;
+                    if (world.Y < minBounds.Y) minBounds.Y = world.Y;
+                    if (world.Z < minBounds.Z) minBounds.Z = world.Z;
+                    if (world.X > maxBounds.X) maxBounds.X = world.X;
+                    if (world.Y > maxBounds.Y) maxBounds.Y = world.Y;
+                    if (world.Z > maxBounds.Z) maxBounds.Z = world.Z;
+                }
+                return verts;
             }
-            return new List<Vector3>();
+            // 2. Fallback – MSVT render vertices using (Y,X,Z) orientation
+            if (hasMsvt)
+            {
+                foreach (var v in pm4.MSVT!.Vertices)
+                {
+                    var world = new Vector3(v.Y + offsetX, v.X + offsetY, v.Z);
+                    verts.Add(world);
+                    if (world.X < minBounds.X) minBounds.X = world.X;
+                    if (world.Y < minBounds.Y) minBounds.Y = world.Y;
+                    if (world.Z < minBounds.Z) minBounds.Z = world.Z;
+                    if (world.X > maxBounds.X) maxBounds.X = world.X;
+                    if (world.Y > maxBounds.Y) maxBounds.Y = world.Y;
+                    if (world.Z > maxBounds.Z) maxBounds.Z = world.Z;
+                }
+            }
+            return verts;
         }
 
         public static async Task ExportAsync(PM4File pm4, string objPath, string? sourceFileName = null)
