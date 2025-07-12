@@ -30,7 +30,10 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         /// </summary>
         public bool IsM2Bucket => SurfaceGroupKey == 0x00;
         public byte IndexCount { get; set; }          // _0x01 - Number of indices in MSVI used by this surface.
-        public byte Unknown_0x02 { get; set; }            // _0x02 – legacy
+        public byte Unknown_0x02 { get; set; }            // _0x02 legacy raw
+
+        // July-2025: bit-field describing surface attributes; bit7 marks liquids.
+        public byte SurfaceAttributeMask => Unknown_0x02;
 
         /// <summary>
         /// July-2025 hypothesis: highest bit marks liquid surfaces. Empirically
@@ -74,7 +77,10 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
             set => MsviFirstIndex = value;
         }      // _0x14 - Starting index in MSVI for this surface.
         public uint MdosIndex { get; set; }            // _0x18 - Index into MDOS (Destructible Object States). Note: This field is NOT directly present in PM4 docs but is implied by MDSF link.
-        public uint Unknown_0x1C { get; set; }            // _0x1C - Raw 32-bit value (suspected packed two 16-bit integers).
+        public uint Unknown_0x1C { get; set; }            // _0x1C legacy raw – suspected packed params
+
+        // Expose with descriptive alias while keeping legacy field.
+        public uint PackedParams => Unknown_0x1C;
 
         // Decoded view of Unknown_0x1C
         public ushort LowWord_0x1C => (ushort)(Unknown_0x1C & 0xFFFF);
@@ -119,7 +125,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
 
         public override string ToString()
         {
-            return $"MSUR Entry [FirstIndex: {MsviFirstIndex}, Count: {IndexCount}, Flags: {FlagsOrUnknown_0x00:X2}, MdosIndex: {MdosIndex}, 0x1C: 0x{Unknown_0x1C:X8} (hi={HighWord_0x1C}, lo={LowWord_0x1C})]"; // Updated ToString
+            return $"MSUR Entry [FirstIndex: {MsviFirstIndex}, Count: {IndexCount}, GroupKey: {SurfaceGroupKey:X2}, MdosIndex: {MdosIndex}, PackedParams:0x{PackedParams:X8} (hi={HighWord_0x1C}, lo={LowWord_0x1C})]"; // Updated ToString
         }
     }
 

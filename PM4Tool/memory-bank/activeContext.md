@@ -1,6 +1,6 @@
 # Active Context: PM4 OBJ Export Parity Reset
 
-**Last Updated:** 2025-07-09 17:41
+**Last Updated:** 2025-07-12 05:40
 
 **Status:** Geometry quilt refactor underway; per-PM4 OBJ coverage complete; investigating quilt skew and MSCN/MPRL linkage to MSLK metadata.
 
@@ -12,6 +12,9 @@
 * Investigate MSPV/MSVT transform mismatch and reinstate proven legacy transform equations.
 * After matrix approval, port remaining OBJ export logic and add SHA parity tests.
 * Destructible-object chunks remain out of scope; WMO work remains paused until OBJ parity is complete.
+
+### **Update (Jul 12, 05:40)**
+* **Batch Correlation Plan Defined** – New CLI commands (`msur-stats`, `mscn-dump`) implemented; upcoming `batch-dump`, `join-report`, and `batch-join` will automate CSV dumping and cross-chunk joins across all PM4 files. Focus shifted to automated pattern mining linking MSUR ⇄ MSLK ⇄ MPRL ⇄ MSCN.
 
 ### **Update (Jul 9, 22:45)**
 * **Tile Connectivity Plan Defined** – Added `tile_connectivity_plan.md` detailing Phase A (MSLK discovery), Phase B (link-aware exporter), Phase C (MPRR/MPRL graph), and CLI consolidation. Exporter validated; focus moves to Phase A-1 (MSLK parser).

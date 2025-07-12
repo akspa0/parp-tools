@@ -8,6 +8,7 @@ using WoWToolbox.Core.v2.Infrastructure;
 using System.Numerics;
 using WoWToolbox.Core.v2.Foundation.PM4;
 using WoWToolbox.Core.v2.Tools.Debug; // MsurMslkAnalyzer
+using WoWToolbox.Core.v2.Utilities;
 
 // Simple CLI front-end for Pm4BatchProcessor. Usage:
 //   dotnet Pm4BatchTool.dll <pm4-file-or-directory> [--wmo <wmoDataDir>]
@@ -19,9 +20,22 @@ class Program
     {
         if (args.Length == 0)
         {
-            Console.WriteLine("Usage: Pm4BatchTool <pm4-file-or-directory> [--wmo <wmoDataDir>] [--diag] [--force] [--debug-chunks]\n" +
-                              "       Pm4BatchTool terrain-mesh  <pm4-root-dir> <output-obj-path> [--no-stitch] [--tile <x> <y>]\n" +
-                              "       Pm4BatchTool terrain-stamp <pm4-root-dir> <output-obj-path>");
+            Console.WriteLine("Pm4BatchTool – PM4 research CLI\n" +
+                              "\n" +
+                              "Usage:\n" +
+                              "  Pm4BatchTool analyze-links <pm4-file>                               # generate CSV link analysis (default output dir)\n" +
+                              "  Pm4BatchTool dump-all      <pm4-file> [<out-dir>]                  # raw CSV dump of every chunk field\n" +
+                              "  Pm4BatchTool <pm4-file-or-directory> [--wmo <wmoDir>] [--diag] [--force] [--debug-chunks]\n" +
+                              "  Pm4BatchTool terrain-mesh  <pm4-root-dir> <output-obj-path> [--no-stitch] [--tile <x> <y>]\n" +
+                              "  Pm4BatchTool terrain-stamp <pm4-root-dir> <output-obj-path>\n" +
+                              "  Pm4BatchTool msur-group    <pm4-file>                               # group MSUR surfaces by PackedParams\n" +
+                              "  Pm4BatchTool msur-export   <pm4-file> [<out-dir>] [--skip-m2]       # export MSUR groups to OBJ\n" +
+                              "  Pm4BatchTool msur-stats    <pm4-file> [<out-dir>]                  # aggregated MSUR surface stats (CSV)\n" +
+                              "  Pm4BatchTool mslk-inspect  <pm4-file|dir> [<csv-path>]             # inter-tile link report\n" +
+                              "  Pm4BatchTool mscn-dump    <pm4-file> [<out-dir>]                   # dump MSCN vertices to CSV\n" +
+                              "  Pm4BatchTool mscn-ranges   <pm4-file>                               # dump MSCN header ranges\n  Pm4BatchTool batch-dump     <pm4-dir>                                # raw CSV dump for EVERY pm4 in tree\n" +
+                              "\n" +
+                              "Add --help after any subcommand for details where implemented.\n");
             return 1;
         }
 
@@ -73,6 +87,66 @@ class Program
             }
         }
 
+        // Custom command: msur-stats (surface field statistics)
+        if (string.Equals(args[0], "msur-stats", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool msur-stats <pm4-file> [<out-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            if (!File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var file = PM4File.FromFile(pm4Path);
+                string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("msur_stats", Path.GetFileNameWithoutExtension(pm4Path));
+                Directory.CreateDirectory(outDir);
+                string csvPath = Path.Combine(outDir, "msur_stats.csv");
+                MsurStatsAnalyzer.PrintStats(file, csvPath);
+                return 0;
+            }
+            catch(Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: mscn-dump (CSV dump of MSCN vertices)
+        if (string.Equals(args[0], "mscn-dump", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool mscn-dump <pm4-file> [<out-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            if (!File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var file = PM4File.FromFile(pm4Path);
+                string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("mscn_dump", Path.GetFileNameWithoutExtension(pm4Path));
+                Directory.CreateDirectory(outDir);
+                RawDumpHelper.DumpAll(file, outDir);
+                Console.WriteLine($"[mscn-dump] CSVs written → {outDir}");
+                return 0;
+            }
+            catch(Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
         // Custom command: msur-export (export each MSUR group to OBJ)
         if (string.Equals(args[0], "msur-export", StringComparison.OrdinalIgnoreCase))
         {
@@ -102,6 +176,114 @@ class Program
                 var file = PM4File.FromFile(pm4Path);
                 MsurGroupObjExporter.Export(file, outDir, skipM2);
                 Console.WriteLine($"MSUR group OBJs written to {outDir}");
+                return 0;
+            }
+            catch(Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: export-obj (generate one OBJ per logical object)
+        if (string.Equals(args[0], "export-obj", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool export-obj <pm4-file> [<output-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("obj_export", Path.GetFileNameWithoutExtension(pm4Path));
+            if (!File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var pm4 = PM4File.FromFile(pm4Path);
+                var exporter = new WoWToolbox.Core.v2.Services.PM4.MslkObjectMeshExporter();
+                bool includeM2 = args.Any(a => string.Equals(a, "--include-m2", StringComparison.OrdinalIgnoreCase));
+                exporter.ExportAllObjectsByMsurGroup(pm4, outDir, includeM2);
+                Console.WriteLine($"OBJ export completed → {outDir} (MSUR groups, {(includeM2 ? "including" : "excluding")} M2 bucket)");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: batch-dump / bulk-dump (raw CSV dump for .pm4 files)
+        if (string.Equals(args[0], "batch-dump", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(args[0], "bulk-dump", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool batch-dump <pm4-directory>");
+                return 1;
+            }
+            string rootDir = args[1];
+            string[] pm4Files;
+            if (Directory.Exists(rootDir))
+            {
+                pm4Files = Directory.GetFiles(rootDir, "*.pm4", SearchOption.AllDirectories);
+            }
+            else if (File.Exists(rootDir))
+            {
+                pm4Files = new[] { rootDir };
+            }
+            else
+            {
+                Console.Error.WriteLine($"Path '{rootDir}' not found.");
+                return 1;
+            }
+
+            if (pm4Files.Length == 0)
+            {
+                Console.Error.WriteLine("No *.pm4 files found under given directory.");
+                return 1;
+            }
+            foreach (var path in pm4Files)
+            {
+                try
+                {
+                    var file = PM4File.FromFile(path);
+                    string outDir = ProjectOutput.GetPath("batch_dump", Path.GetFileNameWithoutExtension(path));
+                    Directory.CreateDirectory(outDir);
+                    RawDumpHelper.DumpAll(file, outDir);
+                    Console.WriteLine($"[batch-dump] {Path.GetFileName(path)} → {outDir}");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[warn] {Path.GetFileName(path)}: {ex.Message}");
+                }
+            }
+            return 0;
+        }
+
+        // Custom command: dump-all (raw CSV dump of every chunk field)
+        if (string.Equals(args[0], "dump-all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool dump-all <pm4-file> [<output-dir>]");
+                return 1;
+            }
+            string pm4Path = args[1];
+            string outDir = args.Length >= 3 ? args[2] : ProjectOutput.GetPath("dump_all", Path.GetFileNameWithoutExtension(pm4Path));
+            if (!File.Exists(pm4Path))
+            {
+                Console.Error.WriteLine($"File '{pm4Path}' not found.");
+                return 1;
+            }
+            try
+            {
+                var file = PM4File.FromFile(pm4Path);
+                RawDumpHelper.DumpAll(file, outDir);
+                Console.WriteLine($"Raw CSV dump written to {outDir}");
                 return 0;
             }
             catch(Exception ex)
@@ -208,7 +390,7 @@ class Program
         return 0;
     }
 
-    // Custom command: dump-raw
+    // Helper: resolve out dir based on tag\n    static string ResolveOutDir(string tag, string pm4Path, string? explicitArg)\n    {\n        if (!string.IsNullOrWhiteSpace(explicitArg)) return explicitArg;\n        return ProjectOutput.GetPath(tag, Path.GetFileNameWithoutExtension(pm4Path));\n    }\n\n    // Custom command: dump-raw
         if (string.Equals(args[0], "dump-raw", StringComparison.OrdinalIgnoreCase))
         {
             if (args.Length < 2)

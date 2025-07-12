@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.IO;
+using System.Collections.Generic;
 using WoWToolbox.Core.v2.Foundation.PM4;
 using WoWToolbox.Core.v2.Infrastructure;
 
@@ -143,13 +144,59 @@ namespace WoWToolbox.Core.v2.Services.PM4
         /// <summary>
         /// Writes one OBJ per logical object grouped by ReferenceIndex (Unknown_0x10).
         /// </summary>
-        public void ExportAllObjectsAsObj(PM4File pm4File, string outputDirectory)
+        /// <summary>
+        /// Legacy wrapper kept for CLI compatibility. Delegates to MSUR grouping export.
+        /// </summary>
+        public void ExportAllObjectsAsObj(PM4File pm4, string outputDir) => ExportAllObjectsByMsurGroup(pm4, outputDir, includeM2: false);
+
+        public void ExportAllObjectsByMsurGroup(PM4File pm4File, string outputDirectory, bool includeM2 = false)
         {
             outputDirectory = EnsureSafeOutputDir(outputDirectory, "mslk_objects");
             if (!System.IO.Directory.Exists(outputDirectory))
                 System.IO.Directory.CreateDirectory(outputDirectory);
 
-            var grouping = _analyzer.GroupGeometryNodeIndicesByObjectId(pm4File.MSLK);
+            // Build grouping by MSUR SurfaceGroupKey (msur_by_key)
+            var grouping = new Dictionary<byte, List<int>>();
+            if (pm4File.MSUR?.Entries == null)
+            {
+                Console.WriteLine("[MslkExporter] No MSUR data – cannot group by MSUR key, falling back to ReferenceIndex.");
+                grouping = _analyzer.GroupGeometryNodeIndicesByObjectId(pm4File.MSLK)
+                           .ToDictionary(k => (byte)(k.Key & 0xFF), v => v.Value);
+            }
+            else
+            {
+                // Pre-populate dictionary with empty lists for each key we encounter
+                foreach (var msur in pm4File.MSUR.Entries)
+                {
+                    if (!includeM2 && msur.IsM2Bucket) continue; // skip M2 bucket unless requested
+                    byte key = msur.SurfaceGroupKey;
+                    if (!grouping.ContainsKey(key)) grouping[key] = new List<int>();
+                }
+                // Map each geometry node to a key by intersecting MSUR index ranges
+                if (pm4File.MSLK?.Entries != null && pm4File.MSPI?.Indices != null)
+                {
+                    for (int nodeIdx = 0; nodeIdx < pm4File.MSLK.Entries.Count; nodeIdx++)
+                    {
+                        var e = pm4File.MSLK.Entries[nodeIdx];
+                        if (e.MspiFirstIndex < 0 || e.MspiIndexCount == 0) continue;
+                        uint first = (uint)e.MspiFirstIndex;
+                        uint last = first + (uint)e.MspiIndexCount - 1;
+                        // find first MSUR whose index range overlaps
+                        foreach (var msur in pm4File.MSUR.Entries)
+                        {
+                            if (!includeM2 && msur.IsM2Bucket) continue;
+                            uint sFirst = msur.MsviFirstIndex;
+                            uint sLast = sFirst + msur.IndexCount - 1;
+                            if (first >= sFirst && last <= sLast)
+                            {
+                                byte key = msur.SurfaceGroupKey;
+                                grouping[key].Add(nodeIdx);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             if (grouping.Count == 0)
             {
                 Console.WriteLine("[MslkExporter] No object groupings found.");
@@ -158,13 +205,13 @@ namespace WoWToolbox.Core.v2.Services.PM4
 
             foreach (var kvp in grouping)
             {
-                ushort objectId = kvp.Key;
+                byte groupKey = kvp.Key;
                 var nodeIndices = kvp.Value;
 
-                string objPath = System.IO.Path.Combine(outputDirectory, $"object_{objectId:X4}.obj");
+                string objPath = System.IO.Path.Combine(outputDirectory, $"group_{groupKey:X2}.obj");
                 using var writer = new System.IO.StreamWriter(objPath);
-                writer.WriteLine($"# Auto-generated OBJ for ObjectId 0x{objectId:X4}");
-                writer.WriteLine("g object_" + objectId.ToString("X4"));
+                writer.WriteLine($"# Auto-generated OBJ for MSUR GroupKey 0x{groupKey:X2}");
+                writer.WriteLine("g group_" + groupKey.ToString("X2"));
 
                 var vertices = new System.Collections.Generic.List<System.Numerics.Vector3>();
                 var faceIndices = new System.Collections.Generic.List<int>();
@@ -206,6 +253,47 @@ namespace WoWToolbox.Core.v2.Services.PM4
                         faceIndices.Add(a);
                         faceIndices.Add(b);
                         faceIndices.Add(c);
+                    }
+                }
+
+                // ---- Add render mesh via MSUR→MSVI→MSVT ----
+                if (pm4File.MSUR?.Entries != null && pm4File.MSVI?.Indices != null && pm4File.MSVT?.Vertices != null)
+                {
+                    foreach (var surface in pm4File.MSUR.Entries)
+                    {
+                        if (!includeM2 && surface.IsM2Bucket) continue;
+                        if (surface.SurfaceGroupKey != groupKey) continue;
+                        uint start = surface.MsviFirstIndex;
+                        uint count = surface.IndexCount;
+                        var vertexLookupRM = new Dictionary<uint,int>();
+                        for (uint i = 0; i + 2 < count; i += 3)
+                        {
+                            uint idxA = pm4File.MSVI.Indices[(int)(start + i)];
+                            uint idxB = pm4File.MSVI.Indices[(int)(start + i + 1)];
+                            uint idxC = pm4File.MSVI.Indices[(int)(start + i + 2)];
+                            int AddRMVertex(uint gi)
+                            {
+                                if (!vertexLookupRM.TryGetValue(gi, out int local))
+                                {
+                                    if (gi >= pm4File.MSVT.Vertices.Count) return -1;
+                                    var vRaw = pm4File.MSVT.Vertices[(int)gi];
+                                    var v = _coord.FromMsvtVertexSimple(vRaw);
+                                    local = vertices.Count;
+                                    vertices.Add(v);
+                                    vertexLookupRM[gi] = local;
+                                }
+                                return vertexLookupRM[gi];
+                            }
+                            int ra = AddRMVertex(idxA);
+                            int rb = AddRMVertex(idxB);
+                            int rc = AddRMVertex(idxC);
+                            if (ra>=0 && rb>=0 && rc>=0)
+                            {
+                                faceIndices.Add(ra);
+                                faceIndices.Add(rb);
+                                faceIndices.Add(rc);
+                            }
+                        }
                     }
                 }
 

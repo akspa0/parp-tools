@@ -23,8 +23,15 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         // Keep old name for binary load; use ZoneGroupId when writing new code.
         public ushort ZoneGroupId => Unknown_0x06;
         public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Vertex position (float).
-        public short Unknown_0x14 { get; set; }           // _0x14 in doc - Meaning TBD.
-        public ushort Unknown_0x16 { get; set; }          // _0x16 in doc - Meaning TBD.
+        public short Unknown_0x14 { get; set; }           // _0x14 legacy raw
+
+        // July-2025: statistical analysis suggests this signed short encodes portal floor
+        // elevation relative to the map tile origin, in game units.
+        public short FloorOffset => Unknown_0x14;
+        public ushort Unknown_0x16 { get; set; }          // _0x16 legacy raw
+
+        // July-2025: hypothesised attributes bit-field (see AnalyzeLinksTool for mask usage).
+        public ushort AttributeFlags => Unknown_0x16;
         // Removed old UnknownFloat fields
 
         // -----------------------------
@@ -100,7 +107,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public override string ToString()
         {
             // Updated ToString to reflect new fields (Position type change doesn't affect output format)
-            return $"MPRL Entry [Unk00:{Unknown_0x00}, Unk02:{Unknown_0x02}, Unk04:{Unknown_0x04}, Unk06:{Unknown_0x06}, Pos:{Position}, Unk14:{Unknown_0x14}, Unk16:{Unknown_0x16}]";
+            return $"MPRL Entry [Unk00:{Unknown_0x00}, Unk02:{Unknown_0x02}, Unk04:{Unknown_0x04}, Unk06:{Unknown_0x06}, Pos:{Position}, FloorOfs:{FloorOffset}, Attr:0x{AttributeFlags:X4}]";
         }
     }
 

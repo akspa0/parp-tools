@@ -17,7 +17,13 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         // DECODED THROUGH STATISTICAL ANALYSIS - OBJECT METADATA SYSTEM
         public byte Unknown_0x00 { get; set; } // DECODED: Object Type Flags (1-18 values for classification)
         public byte Unknown_0x01 { get; set; } // DECODED: Object Subtype (0-7 values for variants)
-        public ushort Unknown_0x02 { get; set; } // DECODED: Padding/Reserved (always 0x0000)
+        public ushort Unknown_0x02 { get; set; } // legacy raw padding
+
+        /// <summary>
+        /// Always observed as 0x0000; kept for structure alignment.
+        /// Use <see cref="ReservedPadding"/> when writing new code.
+        /// </summary>
+        public ushort ReservedPadding => Unknown_0x02;
         public uint Unknown_0x04 { get; set; } // DECODED: Group/Object ID (organizational grouping identifier)
         /// <summary>
         /// Primary index into the MSPI vertex array for geometry nodes. A value of -1
@@ -35,7 +41,12 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public byte MspiIndexCount { get; set; } // uint8_t – count of contiguous points in MSPI representing this geometry
         public uint Unknown_0x0C { get; set; } // DECODED: FFFFYYZZ (pattern: 0xFFFF#### for map tile ID (hex encoded decimal YY_XX))
         public ushort Unknown_0x10 { get; set; } // DECODED: Reference Index (cross-references to other data structures)
-        public ushort Unknown_0x12 { get; set; } // DECODED: System Flag (always 0x8000 - confirmed constant)
+        public ushort Unknown_0x12 { get; set; } // legacy raw system flag
+
+        /// <summary>
+        /// Constant system flag (0x8000 in all captured samples).
+        /// </summary>
+        public ushort SystemFlag => Unknown_0x12;
 
         // Decoded metadata accessors
         /// <summary>
@@ -209,7 +220,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
             // Update ToString to reflect new fields
             return $"MSLK Entry [Unk00:0x{Unknown_0x00:X2}, Unk01:0x{Unknown_0x01:X2}, Unk02:0x{Unknown_0x02:X4}, Unk04:0x{Unknown_0x04:X8}, " +
                    $"MSPIFirst:{MspiFirstIndex}, MSPICount:{MspiIndexCount}, " +
-                   $"Unk0C:0x{Unknown_0x0C:X8}, Unk10:0x{Unknown_0x10:X4}, Unk12:0x{Unknown_0x12:X4}]";
+                   $"Unk0C:0x{Unknown_0x0C:X8}, RefIdx:0x{Unknown_0x10:X4}, SysFlag:0x{SystemFlag:X4}]";
         }
     }
 

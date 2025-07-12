@@ -17,9 +17,23 @@ PM4 files contain pathfinding mesh data used by World of Warcraft's navigation s
 - **WMO matching** and terrain reconstruction tools
 - **Advanced debugging** and diagnostic capabilities
 
+## 📜 Backstory & Research Goals
+
+World of Warcraft stores server-side navigation data in *PM4* files – an obscure, partially documented binary format. Only a single, ancient snapshot of these files ever leaked (~2008 development build).  Over the years the community has pieced together fragmentary specs (notably Schlumpf’s notes), but large parts remained unsolved.
+
+PM4Tool’s modern mission is to:
+
+1. **Reverse-engineer every chunk type** (MSVT, MSPV, MSVI, MSCN, MSLK, MSUR, MPRL/R, …) with production-grade loaders.
+2. **Recover every object** encoded in the scene-graph (MSLK + friends) and export them to standard OBJ.
+3. **Match recovered meshes to real in-game WMO assets** via heuristic and geometric comparison – paving the way for full world reconstruction.
+4. **Document quirks such as destructive-world geometry (MDOS/MDSF)** even if they appear only on tile `00_00`.
+5. Provide a **clean CLI workflow** (`Pm4BatchTool`) that writes all results to `project_output/<timestamp>/` directories.
+
+These goals replace the older “all-in-one test-runner” focus reflected in parts of this README.  The project now centres on the Core.v2 library and the `Pm4BatchTool` CLI.
+
 ## 🏆 Key Achievements
 
-### **Complete PM4 Coordinate System Mastery**
+### **PM4 Coordinate System Mastery**
 After extensive research and testing, we've achieved complete understanding of all PM4 chunk coordinate systems:
 
 - **MSVT (Render Mesh)**: `(Y, X, Z)` transformation with proper triangle face generation
@@ -43,7 +57,8 @@ After extensive research and testing, we've achieved complete understanding of a
 ```
 PM4Tool/
 ├── src/
-│   ├── WoWToolbox.Core/           # Core PM4 processing library
+│   ├── WoWToolbox.Core.v2/        # **Current** core PM4 processing library (fully typed loaders) 
+│   ├── WoWToolbox.Core/           # Legacy prototype (kept for historical reference)
 │   │   ├── Navigation/PM4/        # PM4 file format handlers
 │   │   ├── Models/                # Data structures
 │   │   └── Extensions/            # Utility extensions
@@ -61,7 +76,11 @@ PM4Tool/
 
 ### Key Classes
 
-- **`PM4File`**: Main PM4 file parser and data container
+- **`WoWToolbox.Core.v2`**: Modern, strongly-typed PM4 library housing:
+  - `PM4File` – central parser & container
+  - Complete chunk models (MSVT, MSPV, MSCN, MSLK, MSUR, MPRL/R, …)
+  - `ProjectOutput` helper for timestamped output dirs
+- **`Pm4BatchTool`**: CLI harness using Core.v2 for batch dumps & exports
 - **`Pm4CoordinateTransforms`**: Coordinate system transformations and mesh generation
 - **`Pm4ChunkAnalyzer`**: Comprehensive chunk analysis and diagnostics
 - **`PM4FileTests`**: Batch processing and validation framework
