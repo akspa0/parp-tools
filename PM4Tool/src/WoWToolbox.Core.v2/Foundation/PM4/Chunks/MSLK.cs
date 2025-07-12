@@ -19,8 +19,20 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public byte Unknown_0x01 { get; set; } // DECODED: Object Subtype (0-7 values for variants)
         public ushort Unknown_0x02 { get; set; } // DECODED: Padding/Reserved (always 0x0000)
         public uint Unknown_0x04 { get; set; } // DECODED: Group/Object ID (organizational grouping identifier)
-        public int MspiFirstIndex { get; set; } // int24_t - Index into MSPI for geometry, -1 for Doodad nodes.
-        public byte MspiIndexCount { get; set; } // uint8_t - Number of points in MSPI for geometry, 0 for Doodad nodes.
+        /// <summary>
+        /// Primary index into the MSPI vertex array for geometry nodes. A value of -1
+        /// indicates this MSLK entry represents a non-geometry (e.g., doodad) link.
+        /// </summary>
+        public int MspiFirstIndex { get; set; } // int24_t in file
+
+        /// <summary>
+        /// Alias introduced July-2025: prefer <c>AdjacentMspiStart</c> when you mean
+        /// “starting vertex index for adjacent geometry lookup”.  The underlying value
+        /// is identical to <see cref="MspiFirstIndex"/> and both will be kept until at
+        /// least September 2025.
+        /// </summary>
+        public int AdjacentMspiStart => MspiFirstIndex;
+        public byte MspiIndexCount { get; set; } // uint8_t – count of contiguous points in MSPI representing this geometry
         public uint Unknown_0x0C { get; set; } // DECODED: FFFFYYZZ (pattern: 0xFFFF#### for map tile ID (hex encoded decimal YY_XX))
         public ushort Unknown_0x10 { get; set; } // DECODED: Reference Index (cross-references to other data structures)
         public ushort Unknown_0x12 { get; set; } // DECODED: System Flag (always 0x8000 - confirmed constant)

@@ -17,13 +17,46 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public ushort Unknown_0x00 { get; set; }          // _0x00 in doc - Meaning TBD (Wowdev says "Always 0"?)
         public short Unknown_0x02 { get; set; }           // _0x02 in doc - Meaning TBD (Wowdev says "Always -1"?)
         public ushort Unknown_0x04 { get; set; }          // _0x04 in doc - Meaning TBD.
-        public ushort Unknown_0x06 { get; set; }          // _0x06 in doc - Meaning TBD.
+        public ushort Unknown_0x06 { get; set; }          // _0x06 legacy raw
+
+        // July-2025: analysis shows this value groups portals into navigation zones.
+        // Keep old name for binary load; use ZoneGroupId when writing new code.
+        public ushort ZoneGroupId => Unknown_0x06;
         public C3Vector Position { get; set; }           // Offset 0x08 (12 bytes) - Vertex position (float).
         public short Unknown_0x14 { get; set; }           // _0x14 in doc - Meaning TBD.
         public ushort Unknown_0x16 { get; set; }          // _0x16 in doc - Meaning TBD.
         // Removed old UnknownFloat fields
 
-        public const int Size = 24; // Bytes (2+2+2+2 + C3Vector(12) + 2+2)
+        // -----------------------------
+        // Clarified field aliases (July 2025 spec update)
+        // -----------------------------
+
+        /// <summary>
+        /// When <see cref="SecondaryLinkSentinel"/> equals -1 the
+        /// <see cref="SecondaryReference"/> field points to an alternate position that can
+        /// satisfy missing <c>MSLK.Reference</c> values.
+        /// </summary>
+        public short SecondaryLinkSentinel => Unknown_0x02;
+
+        /// <summary>
+        /// Potential reference used to patch missing MSLK links when
+        /// <see cref="SecondaryLinkSentinel"/> == -1.
+        /// </summary>
+        public ushort SecondaryReference => Unknown_0x04;
+
+        /// <summary>Raw vertex position helper for external tools.</summary>
+        public C3Vector VertexPosition => Position;
+
+        [Obsolete("Use SecondaryLinkSentinel instead – will be removed after August 2025.")]
+        public short Unk02Alias => Unknown_0x02;
+
+        [Obsolete("Use SecondaryReference instead – will be removed after August 2025.")]
+        public ushort Unk04Alias => Unknown_0x04;
+
+        /// <summary>Fixed-size of the binary structure (in bytes).</summary>
+        public const int Size = 24; // (2+2+2+2) + 12 + (2+2) = 24
+
+
 
         public void Load(BinaryReader br)
         {

@@ -340,6 +340,18 @@ class Program
                     }
                 }
 
+                // Aggregate per-tile CSVs into master summaries for convenience
+                try
+                {
+                    CsvAggregator.Aggregate(outputDir, "*_cross_tile_links.csv", Path.Combine(outputDir, "all_cross_tile_links.csv"));
+                    CsvAggregator.Aggregate(outputDir, "*_cross_tile_pivot.csv", Path.Combine(outputDir, "all_cross_tile_pivot.csv"));
+                    CsvAggregator.Aggregate(outputDir, "*_mslk_missing_refs_filtered.csv", Path.Combine(outputDir, "all_missing_refs_filtered.csv"));
+                }
+                catch (Exception aggEx)
+                {
+                    Console.Error.WriteLine($"[warn] CSV aggregation failed: {aggEx.Message}");
+                }
+
                 Console.WriteLine($"\nLink analysis complete. Output written to: {outputDir}");
                 return 0;
             }

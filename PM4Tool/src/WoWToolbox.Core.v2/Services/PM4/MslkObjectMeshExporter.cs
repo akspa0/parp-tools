@@ -1,6 +1,8 @@
 using System;
 using System.Linq;
+using System.IO;
 using WoWToolbox.Core.v2.Foundation.PM4;
+using WoWToolbox.Core.v2.Infrastructure;
 
 namespace WoWToolbox.Core.v2.Services.PM4
 {
@@ -18,6 +20,26 @@ namespace WoWToolbox.Core.v2.Services.PM4
         private readonly CoordinateService _coord = new CoordinateService();
         private readonly MslkHierarchyAnalyzer _analyzer = new MslkHierarchyAnalyzer();
 
+        // Ensures that the requested output directory resides under ProjectOutput.RunDirectory.
+        // If null/empty or pointing outside, it is redirected to a safe subfolder.
+        private static string EnsureSafeOutputDir(string? requested, string fallbackSubdir)
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+                return ProjectOutput.GetPath(fallbackSubdir);
+
+            string full = Path.GetFullPath(requested);
+            string root = Path.GetFullPath(ProjectOutput.RunDirectory);
+
+            // Redirect if outside the project_output tree to prevent contaminating input folders.
+            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                string safe = ProjectOutput.GetPath(fallbackSubdir, Path.GetFileName(full));
+                Console.WriteLine($"[MslkExporter] Redirecting output directory '{requested}' → '{safe}' (outside project_output).");
+                return safe;
+            }
+            return full;
+        }
+
         /// <summary>
         /// Very first slice of the exporter: write one OBJ per GroupId that contains geometry.
         /// Only vertices are dumped; no faces yet.
@@ -26,8 +48,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
         /// Writes one OBJ per GroupId (Unknown_0x04) – kept for debugging/compat.
         /// </summary>
         public void ExportAllGroupsAsObj(PM4File pm4File, string outputDirectory)
-        
         {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, "mslk_groups");
             if (!System.IO.Directory.Exists(outputDirectory))
                 System.IO.Directory.CreateDirectory(outputDirectory);
 
@@ -122,8 +144,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
         /// Writes one OBJ per logical object grouped by ReferenceIndex (Unknown_0x10).
         /// </summary>
         public void ExportAllObjectsAsObj(PM4File pm4File, string outputDirectory)
-        
         {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, "mslk_objects");
             if (!System.IO.Directory.Exists(outputDirectory))
                 System.IO.Directory.CreateDirectory(outputDirectory);
 
@@ -229,10 +251,15 @@ namespace WoWToolbox.Core.v2.Services.PM4
 
         // --- Helper methods to minimize duplication ---
         private void ExportByByteKey(PM4File pm4File, string outputDirectory, System.Collections.Generic.Dictionary<byte, System.Collections.Generic.List<int>> grouping, System.Func<byte,string> filenameFunc, string label)
-            => ExportGeneric(pm4File, outputDirectory, grouping.ToDictionary(k=> (ushort)k.Key, v=> v.Value), key => filenameFunc((byte)key), label);
+        {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, $"mslk_{label.ToLower()}s");
+            var converted = grouping.ToDictionary(k => (ushort)k.Key, v => v.Value);
+            ExportGeneric(pm4File, outputDirectory, converted, key => filenameFunc((byte)key), label);
+        }
 
         private void ExportGeneric(PM4File pm4File, string outputDirectory, System.Collections.Generic.Dictionary<ushort, System.Collections.Generic.List<int>> grouping, System.Func<ushort,string> filenameFunc, string label)
         {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, $"mslk_{label.ToLower()}s");
             if (!System.IO.Directory.Exists(outputDirectory))
                 System.IO.Directory.CreateDirectory(outputDirectory);
             if (grouping.Count == 0)
@@ -299,6 +326,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
         // Cluster containers that are spatially close and have sequential highRef values
         public void ExportAllClustersAsObj(PM4File pm4File, string outputDirectory, float distanceThreshold = 5f)
         {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, "mslk_clusters");
             var containers = _analyzer.GroupGeometryNodeIndicesByContainer(pm4File.MSLK);
             if (containers.Count == 0)
             {
@@ -377,6 +405,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
         // Experimental: merge clusters whose AABBs overlap into higher-level objects
         public void ExportAllObjectClustersAsObj(PM4File pm4File, string outputDirectory)
         {
+            outputDirectory = EnsureSafeOutputDir(outputDirectory, "mslk_object_clusters");
             // First, build clusters as before
             var tempDir = System.IO.Path.Combine(outputDirectory, "_temp");
             ExportAllClustersAsObj(pm4File, tempDir); // populates individual clusters on disk but we reuse centre map below

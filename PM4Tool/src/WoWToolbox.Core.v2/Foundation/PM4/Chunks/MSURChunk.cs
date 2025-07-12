@@ -11,9 +11,32 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
     /// </summary>
     public class MsurEntry
     {
-        public byte FlagsOrUnknown_0x00 { get; set; }          // _0x00 - Meaning TBD. Might be flags.
+        public byte FlagsOrUnknown_0x00 { get; set; }          // _0x00 – Original raw value (legacy)
+
+        // -----------------------------
+        // Clarified field aliases (July 2025 spec update)
+        // -----------------------------
+        /// <summary>
+        /// Group key used by in-game engine for batching surfaces. <c>0x00</c>
+        /// consistently maps to M2 props (benign, non-walkable geometry). Any
+        /// non-zero value implies walkable world geometry.
+        /// </summary>
+        public byte SurfaceGroupKey => FlagsOrUnknown_0x00;
+
+        /// <summary>
+        /// Convenience flag: <c>true</c> when this surface is the known M2 prop
+        /// bucket (GroupKey == 0x00) that can be skipped by exporters using
+        /// <c>--skip-m2</c>.
+        /// </summary>
+        public bool IsM2Bucket => SurfaceGroupKey == 0x00;
         public byte IndexCount { get; set; }          // _0x01 - Number of indices in MSVI used by this surface.
-        public byte Unknown_0x02 { get; set; }            // _0x02 - Meaning TBD.
+        public byte Unknown_0x02 { get; set; }            // _0x02 – legacy
+
+        /// <summary>
+        /// July-2025 hypothesis: highest bit marks liquid surfaces. Empirically
+        /// observed values 0x80 and 0x00. Use with caution until confirmed.
+        /// </summary>
+        public bool IsLiquidCandidate => (Unknown_0x02 & 0x80) != 0;
         public byte Padding_0x03 { get; set; }             // _0x03 - Likely padding.
         public float UnknownFloat_0x04 { get; set; }             // _0x04 - DECODED: Surface Normal X
         public float UnknownFloat_0x08 { get; set; }             // _0x08 - DECODED: Surface Normal Y

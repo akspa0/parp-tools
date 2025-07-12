@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration.Attributes;
+using WoWToolbox.Core.v2.Utilities;
 using WoWToolbox.Core.v2.Foundation.PM4;
 using WoWToolbox.Core.v2.Foundation.PM4.Chunks;
 
@@ -96,6 +97,14 @@ namespace WoWToolbox.Core.v2.Services.PM4
             {
                 var missingPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_enriched.csv");
                 WriteToCsv(enrichedMissing, missingPath);
+
+                // produce non-benign distinct list (noise reduction)
+                var nonBenign = enrichedMissing.Where(e => !(e.InMsurRange && !e.ExternalCandidate)).ToList();
+                if (nonBenign.Any())
+                {
+                    var nbPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_distinct.csv");
+                    WriteToCsv(nonBenign, nbPath);
+                }
             }
 
             // filtered view: refs whose originating MSLK flag is NOT 2
@@ -112,10 +121,78 @@ namespace WoWToolbox.Core.v2.Services.PM4
                 WriteToCsv(filtered, filtPath);
             }
 
+            // summary per reference/flag/group with occurrence count
+            var missingSummary = unused.GroupBy(r => new { r.Reference, r.Unknown_0x00, r.Unknown_0x04 })
+                                 .Select(g => new MissingRefSummaryDto
+                                 {
+                                     Reference = g.Key.Reference,
+                                     Flag = g.Key.Unknown_0x00,
+                                     GroupId = g.Key.Unknown_0x04,
+                                     Occurrences = g.Count()
+                                 }).OrderBy(s => s.Reference).ToList();
+            if (missingSummary.Any())
+            {
+                var sumPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_summary.csv");
+                WriteToCsv(missingSummary, sumPath);
+            }
+
+            // flag pivot counts
+            var flagPivot = unused.GroupBy(r => r.Unknown_0x00)
+                                   .Select(g => new FlagPivotDto { Flag = g.Key, Count = g.Count() })
+                                   .OrderBy(p => p.Flag).ToList();
+            if (flagPivot.Any())
+            {
+                var pivotPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_missing_refs_flagpivot.csv");
+                WriteToCsv(flagPivot, pivotPath);
+            }
+
             if (unused.Count > 0)
             {
                 var unusedPath = Path.Combine(outputDirectory, $"{baseFileName}_mslk_unreferenced.csv");
                 WriteToCsv(unused, unusedPath);
+            }
+
+            // ---------------- Cross-tile link analysis ----------------
+            var srcCoords = LinkIdDecoder.TryExtractTileCoords(baseFileName);
+            if (srcCoords != null)
+            {
+                var crossTiles = new List<CrossTileLinkDto>();
+                foreach (var rec in records)
+                {
+                    if (LinkIdDecoder.TryDecode(rec.LinkId, out int tgtX, out int tgtY))
+                    {
+                        if (tgtX != srcCoords.Value.x || tgtY != srcCoords.Value.y)
+                        {
+                            crossTiles.Add(new CrossTileLinkDto
+                            {
+                                SourceTileX = srcCoords.Value.x,
+                                SourceTileY = srcCoords.Value.y,
+                                Reference = rec.Reference,
+                                TargetTileX = tgtX,
+                                TargetTileY = tgtY,
+                                Flag = rec.Unknown_0x00,
+                                GroupId = rec.Unknown_0x04
+                            });
+                        }
+                    }
+                }
+                if (crossTiles.Any())
+                {
+                    var ctPath = Path.Combine(outputDirectory, $"{baseFileName}_cross_tile_links.csv");
+                    WriteToCsv(crossTiles, ctPath);
+
+                    // simple pivot for quick counts by source tile & flag
+                    var ctPivot = crossTiles.GroupBy(c => new { c.SourceTileX, c.SourceTileY, c.Flag })
+                                             .Select(g => new CrossTilePivotDto
+                                             {
+                                                 SourceTileX = g.Key.SourceTileX,
+                                                 SourceTileY = g.Key.SourceTileY,
+                                                 Flag = g.Key.Flag,
+                                                 Count = g.Count()
+                                             }).ToList();
+                    var pivotPath = Path.Combine(outputDirectory, $"{baseFileName}_cross_tile_pivot.csv");
+                    WriteToCsv(ctPivot, pivotPath);
+                }
             }
         }
 
@@ -245,11 +322,44 @@ namespace WoWToolbox.Core.v2.Services.PM4
         public string Unknown_0x1C { get; set; } = string.Empty;
     }
 
+    public class MissingRefSummaryDto
+    {
+        [Index(0)] public ushort Reference { get; set; }
+        [Index(1)] public byte Flag { get; set; }
+        [Index(2)] public uint GroupId { get; set; }
+        [Index(3)] public int Occurrences { get; set; }
+    }
+
+    public class FlagPivotDto
+    {
+        [Index(0)] public byte Flag { get; set; }
+        [Index(1)] public int Count { get; set; }
+    }
+
     public class MissingRefWithFlagDto
     {
         [Index(0)] public ushort Reference { get; set; }
         [Index(1)] public byte Flag { get; set; }
         [Index(2)] public uint GroupId { get; set; }
+    }
+
+    public class CrossTileLinkDto
+    {
+        [Index(0)] public int SourceTileX { get; set; }
+        [Index(1)] public int SourceTileY { get; set; }
+        [Index(2)] public ushort Reference { get; set; }
+        [Index(3)] public int TargetTileX { get; set; }
+        [Index(4)] public int TargetTileY { get; set; }
+        [Index(5)] public byte Flag { get; set; }
+        [Index(6)] public uint GroupId { get; set; }
+    }
+
+    public class CrossTilePivotDto
+    {
+        [Index(0)] public int SourceTileX { get; set; }
+        [Index(1)] public int SourceTileY { get; set; }
+        [Index(2)] public byte Flag { get; set; }
+        [Index(3)] public int Count { get; set; }
     }
 
     public class EnrichedMissingRefDto

@@ -24,7 +24,32 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         /// List of sequences found in the chunk. Each inner list is a sequence of ushorts,
         /// including the terminating 0xFFFF.
         /// </summary>
+        /// <summary>
+        /// Terminator value that ends each route sequence (0xFFFF).
+        /// </summary>
+        public const ushort Terminator = 0xFFFF;
+
+        /// <summary>
+        /// Raw sequences as loaded from the file.
+        /// </summary>
         public List<List<ushort>> Sequences { get; private set; } = new List<List<ushort>>();
+
+        /// <summary>
+        /// Convenience property – returns total number of route sequences in this chunk.
+        /// </summary>
+        public int SequenceCount => Sequences.Count;
+
+        /// <summary>
+        /// Flattens all sequences (in order) into a single enumerable of values
+        /// (including terminators).
+        /// </summary>
+        public IEnumerable<ushort> Flattened => Sequences.SelectMany(s => s);
+
+        /// <summary>
+        /// Returns the length (number of values *including* the terminator) for the
+        /// specified sequence index. Returns 0 if out of range.
+        /// </summary>
+        public int GetSequenceLength(int index) => index >= 0 && index < Sequences.Count ? Sequences[index].Count : 0;
 
         /// <inheritdoc/>
         public uint GetSize()
