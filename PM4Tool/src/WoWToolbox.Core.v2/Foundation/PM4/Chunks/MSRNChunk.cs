@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Warcraft.NET.Files.Interfaces;
 using WoWToolbox.Core.v2.Foundation.Vectors;
+using System.Numerics;
 
 namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
 {
@@ -15,6 +16,21 @@ namespace WoWToolbox.Core.v2.Foundation.PM4.Chunks
         public string GetSignature() => ExpectedSignature;
 
         public List<C3Vectori> Normals { get; private set; } = new();
+
+        private const float InvFixedScale = 1f / 8192f; // 2^13 – empirical scale for unit normals
+
+        /// <summary>
+        /// Returns the normals as floating-point vectors (roughly unit length) by applying 1/8192 scaling.
+        /// </summary>
+        public List<Vector3> GetFloatNormals()
+        {
+            var list = new List<Vector3>(Normals.Count);
+            foreach (var n in Normals)
+            {
+                list.Add(new Vector3(n.X * InvFixedScale, n.Y * InvFixedScale, n.Z * InvFixedScale));
+            }
+            return list;
+        }
 
         /// <inheritdoc/>
         public uint GetSize()

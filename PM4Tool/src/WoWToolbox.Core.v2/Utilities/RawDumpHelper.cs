@@ -21,6 +21,7 @@ namespace WoWToolbox.Core.v2.Utilities
             DumpMprl(file, outputDir);
             DumpMprr(file, outputDir);
             DumpMspv(file, outputDir);
+            DumpMsrn(file, outputDir);
             DumpMsvi(file, outputDir);
             DumpMsvt(file, outputDir);
             DumpMdos(file, outputDir);
@@ -107,6 +108,23 @@ namespace WoWToolbox.Core.v2.Utilities
             if (file.MDOS?.Entries == null || file.MDOS.Entries.Count == 0) return;
             var path = Path.Combine(dir, "mdos.csv");
             CsvDumpWriter.WriteDump(file.MDOS.Entries, path);
+        }
+
+        private static void DumpMsrn(PM4File file, string dir)
+        {
+            if (file.MSRN?.Normals == null || file.MSRN.Normals.Count == 0) return;
+            var rows = file.MSRN.Normals.Select((n, i) => new
+            {
+                Index = i,
+                n.X,
+                n.Y,
+                n.Z,
+                NormX = n.X / 8192f,
+                NormY = n.Y / 8192f,
+                NormZ = n.Z / 8192f
+            }).ToList();
+            var path = Path.Combine(dir, "msrn.csv");
+            CsvDumpWriter.WriteDump(rows, path);
         }
 
         private static void DumpMsvt(PM4File file, string dir)
