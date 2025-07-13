@@ -7,8 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace WoWToolbox.Core.v2.Foundation.WMO.V17
 {
     /// <summary>
-    /// Generic chunk walker for post-alpha (v17+) WMO files. Compared to v14 the fourCC bytes are
-    /// written in normal order so we can read them directly.
+    /// Generic chunk walker for post-alpha (v17+) WMO files.
     /// </summary>
     public static class V17ChunkReader
     {
@@ -23,7 +22,9 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V17
             stream.Position = 0;
             while (stream.Position + 8 <= stream.Length)
             {
-                string id = Encoding.ASCII.GetString(reader.ReadBytes(4));
+                var idBytes = reader.ReadBytes(4);
+                Array.Reverse(idBytes);
+                string id = Encoding.ASCII.GetString(idBytes);
                 uint size = reader.ReadUInt32();
                 long dataStart = stream.Position;
                 if (dataStart + size > stream.Length)
@@ -32,6 +33,11 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V17
                 byte[] data = reader.ReadBytes((int)size);
                 chunks.Add(new ChunkInfo(id, (uint)(dataStart - 8), size, data));
                 logger?.LogDebug("Chunk {Id} at 0x{Offset:X8} size {Size}", id, dataStart - 8, size);
+
+                // skip padding to 4-byte boundary (chunks are DWORD-aligned like classic WMO)
+                long pad = (4 - (size & 3)) & 3; // 0-3
+                if (pad > 0 && stream.Position + pad <= stream.Length)
+                    stream.Position += pad;
             }
             return chunks;
         }

@@ -10,5 +10,9 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V17
         public List<Vector3> Vertices { get; init; } = new();
         public List<(ushort A, ushort B, ushort C)> Faces { get; init; } = new();
         public List<byte> FaceFlags { get; init; } = new();
+
+        // Additional metadata from MOGI
+        public uint Flags { get; init; }
+        public int NameIndex { get; init; } = -1;
     }
 }

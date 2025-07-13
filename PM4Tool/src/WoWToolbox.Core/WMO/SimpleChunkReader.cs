@@ -7,7 +7,8 @@ namespace WoWToolbox.Core.WMO
 {
     /// <summary>
     /// Very small self-contained chunk reader for use inside the legacy Core project.
-    /// Reads all top-level chunks (id, size, data) from a WMO stream where FourCC bytes are stored in normal order (v17+).
+    /// Reads all top-level chunks (id, size, data) from a WMO stream. In WoW files, FourCC bytes are stored *reversed* (big-endian),
+    /// so this reader always flips the 4-byte ID to obtain the canonical chunk name (e.g., 'REVM' on disk → 'MVER' in code).
     /// </summary>
     internal static class SimpleChunkReader
     {

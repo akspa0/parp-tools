@@ -48,7 +48,8 @@ namespace WoWToolbox.Core.v2.Infrastructure
             string outputRoot = Path.Combine(dir, "project_output");
             Directory.CreateDirectory(outputRoot);
 
-            string ts = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.Local);
+    string ts = localNow.ToString("yyyyMMdd_HHmmss");
             string run = Path.Combine(outputRoot, ts);
             Directory.CreateDirectory(run);
             return run;

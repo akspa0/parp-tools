@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace WoWToolbox.Core.v2.Foundation.WMO.V14.Models
 {
     /// <summary>
-    /// Represents the 64-byte MOGP group header inside a v14 WMO file.
+    /// Represents the 80-byte MOGP group header (v17) inside a v14 WMO file.
     /// Only fields essential for geometry extraction are included for now.
     /// Layout reference: wow.export & mirrormachine.
     /// </summary>
@@ -28,9 +28,15 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V14.Models
         public uint Unknown2;
         public uint Unknown3;
 
+        // Post-v14 geometry offsets (present in v17)
+        public uint FirstVertex;
+        public uint VertexCount;
+        public uint FirstIndex;
+        public uint IndexCount;
+
         public static MOGPGroupHeader FromSpan(ReadOnlySpan<byte> span)
         {
-            if (span.Length < 64)
+            if (span.Length < 80)
                 throw new ArgumentException("MOGP header requires 64 bytes", nameof(span));
 
             return new MOGPGroupHeader
@@ -49,7 +55,11 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V14.Models
                 DuplicateNameOffset = BinaryPrimitives.ReadUInt32LittleEndian(span[32..36]),
                 Unknown1 = BinaryPrimitives.ReadUInt32LittleEndian(span[36..40]),
                 Unknown2 = BinaryPrimitives.ReadUInt32LittleEndian(span[40..44]),
-                Unknown3 = BinaryPrimitives.ReadUInt32LittleEndian(span[44..48])
+                Unknown3 = BinaryPrimitives.ReadUInt32LittleEndian(span[44..48]),
+                FirstVertex = BinaryPrimitives.ReadUInt32LittleEndian(span[64..68]),
+                VertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[68..72]),
+                FirstIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[72..76]),
+                IndexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[76..80])
             };
         }
     }

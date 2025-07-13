@@ -36,29 +36,81 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V17
             var motxChunk = chunks.FirstOrDefault(c => c.Id == "MOTX");
             var textures = motxChunk != null ? V14.Parsers.MOTXParser.Parse(motxChunk.Data) : new List<string>();
 
-            // Groups – locate each MOGP header and immediately following MOVT/MOVI/MOPY blocks
+            // Shared geometry at root (v17 may use MOVV/MOVB or legacy MOVT/MOVI)
+            var rootMovv = chunks.FirstOrDefault(c => c.Id == "MOVV");
+            var rootMovb = chunks.FirstOrDefault(c => c.Id == "MOVB");
+            var rootMovt = chunks.FirstOrDefault(c => c.Id == "MOVT");
+            var rootMovi = chunks.FirstOrDefault(c => c.Id == "MOVI");
+
+            List<Vector3> sharedVertices;
+            if (rootMovv != null && rootMovv.Size > 0)
+                sharedVertices = V14.Parsers.MOVTParser.Parse(rootMovv.Data); // same 3-float layout
+            else if (rootMovt != null)
+                sharedVertices = V14.Parsers.MOVTParser.Parse(rootMovt.Data);
+            else
+                sharedVertices = new();
+
+            List<(ushort, ushort, ushort)> sharedIndices;
+            if (rootMovb != null && rootMovb.Size > 0)
+                sharedIndices = ParseMovb(rootMovb.Data);
+            else if (rootMovi != null)
+                sharedIndices = V14.Parsers.MOVIParser.Parse(rootMovi.Data);
+            else
+                sharedIndices = new();
+
+            bool hasShared = sharedVertices.Count > 0 && sharedIndices.Count > 0;
+
+            // Groups – load from external files listed by MOGI
             var groups = new List<V17Group>();
-            foreach (var mogp in chunks.Where(c => c.Id == "MOGP"))
+            var mogiChunk = chunks.FirstOrDefault(c => c.Id == "MOGI");
+            int groupCount = mogiChunk != null ? (int)(mogiChunk.Size / 32) : 0;
+
+            string dir = Path.GetDirectoryName(path)!;
+            string baseName = Path.GetFileNameWithoutExtension(path)!;
+
+            for (int idx = 0; idx < groupCount; idx++)
             {
-                var grpHeader = V14.Models.MOGPGroupHeader.FromSpan(mogp.Data);
+                string ext = Path.Combine(dir, $"{baseName}_{idx:D3}.wmo");
+                if (!File.Exists(ext))
+                    ext = Path.Combine(dir, $"{baseName}_{idx:D4}.wmo");
+                if (!File.Exists(ext))
+                    continue;
 
-                // naive association: first MOVT/MOVI/MOPY chunks that occur after this header and before the next MOGP
-                long thisIndex = mogp.Offset;
-                var nextMogp = chunks.Where(c => c.Id == "MOGP" && c.Offset > thisIndex).OrderBy(c => c.Offset).FirstOrDefault();
-                long boundary = nextMogp?.Offset ?? long.MaxValue;
+                using var gs = File.OpenRead(ext);
+                groups.Add(V17GroupLoader.Load(gs, sharedVertices, sharedIndices));
+                List<(ushort, ushort, ushort)> flist;
 
-                var movt = chunks.FirstOrDefault(c => c.Id == "MOVT" && c.Offset > thisIndex && c.Offset < boundary);
-                var movi = chunks.FirstOrDefault(c => c.Id == "MOVI" && c.Offset > thisIndex && c.Offset < boundary);
-                var mopy = chunks.FirstOrDefault(c => c.Id == "MOPY" && c.Offset > thisIndex && c.Offset < boundary);
-
-                var group = new V17Group
+                if (hasShared && extHeader.VertexCount > 0 && extHeader.FirstVertex < sharedVertices.Count)
                 {
-                    Header = grpHeader,
-                    Vertices = movt != null ? MOVTParser.Parse(movt.Data) : new List<Vector3>(),
-                    Faces = movi != null ? MOVIParser.Parse(movi.Data) : new List<(ushort, ushort, ushort)>(),
-                    FaceFlags = mopy != null ? MOPYParser.Parse(mopy.Data) : new List<byte>()
-                };
-                groups.Add(group);
+                    int s = (int)extHeader.FirstVertex;
+                    int cnt = (int)Math.Min(extHeader.VertexCount, sharedVertices.Count - s);
+                    vlist = sharedVertices.GetRange(s, cnt);
+                }
+                else
+                {
+                    var extMovt = extChunks.FirstOrDefault(c => c.Id == "MOVT");
+                    vlist = extMovt != null ? V14.Parsers.MOVTParser.Parse(extMovt.Data) : new();
+                }
+
+                if (hasShared && extHeader.IndexCount > 0 && extHeader.FirstIndex < sharedIndices.Count)
+                {
+                    int s = (int)extHeader.FirstIndex;
+                    int cnt = (int)Math.Min(extHeader.IndexCount, sharedIndices.Count - s);
+                    flist = sharedIndices.GetRange(s, cnt);
+                }
+                else
+                {
+                    var extMovi = extChunks.FirstOrDefault(c => c.Id == "MOVI");
+                    flist = extMovi != null ? V14.Parsers.MOVIParser.Parse(extMovi.Data) : new();
+                }
+
+                groups.Add(new V17Group
+                {
+                    Header = extHeader,
+                    Vertices = vlist,
+                    Faces = flist,
+                    FaceFlags = new List<byte>()
+                });
             }
 
             return new V17WmoFile
@@ -67,6 +119,19 @@ namespace WoWToolbox.Core.v2.Foundation.WMO.V17
                 TextureNames = textures,
                 Groups = groups
             };
+        }
+
+        private static List<(ushort, ushort, ushort)> ParseMovb(byte[] data)
+        {
+            var list = new List<(ushort, ushort, ushort)>();
+            for (int i = 0; i + 5 < data.Length; i += 6)
+            {
+                ushort a = BitConverter.ToUInt16(data, i);
+                ushort b = BitConverter.ToUInt16(data, i + 2);
+                ushort c = BitConverter.ToUInt16(data, i + 4);
+                list.Add((a, b, c));
+            }
+            return list;
         }
     }
 }
