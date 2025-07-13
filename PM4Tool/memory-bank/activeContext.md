@@ -1,17 +1,17 @@
 # Active Context: PM4 OBJ Export Parity Reset
 
-**Last Updated:** 2025-07-12 05:40
+**Last Updated:** 2025-07-12 21:44
 
 **Status:** Geometry quilt refactor underway; per-PM4 OBJ coverage complete; investigating quilt skew and MSCN/MPRL linkage to MSLK metadata.
 
 ---
 
-### **Immediate Focus (Reset 2025-07-08 20:27): Restore Correct OBJ Orientation & Parity**
-* **Update (Jul 8, 04:00)** → Navigation/geometry chunks are fully ported and byte-parity verified (✅ `MSVI`, `MPRL`).
-* New primary objective after reset: Achieve byte-parity OBJ/MTL export against authoritative Git `dev-obj-nogui` implementation.
-* Investigate MSPV/MSVT transform mismatch and reinstate proven legacy transform equations.
-* After matrix approval, port remaining OBJ export logic and add SHA parity tests.
-* Destructible-object chunks remain out of scope; WMO work remains paused until OBJ parity is complete.
+### **Immediate Focus (Reset 2025-07-08 20:27):**
+### **Update (Jul 12, 21:44)**
+* **WMO vs PD4 Geometry Insight** – WMO merged OBJ export now matches the reference asset perfectly, confirming loader correctness.
+* **PD4 Export Status** – Current PD4 OBJ contains roughly 50 % of expected geometry, indicating we are likely exporting collision/navigation surfaces only.
+* **Working Hypothesis** – MSPV/MSVT chunks may represent collision meshes; full render geometry may reside in MSCN or other yet-to-decoded chunks.
+* **Next Actions** – (1) Port full legacy OBJ exporter logic verbatim into Core.v2 for parity; (2) Investigate MSCN and remaining chunks to locate render geometry; (3) Add logging/tests to validate hypothesis.
 
 ### **Update (Jul 12, 05:40)**
 * **Batch Correlation Plan Defined** – New CLI commands (`msur-stats`, `mscn-dump`) implemented; upcoming `batch-dump`, `join-report`, and `batch-join` will automate CSV dumping and cross-chunk joins across all PM4 files. Focus shifted to automated pattern mining linking MSUR ⇄ MSLK ⇄ MPRL ⇄ MSCN.
