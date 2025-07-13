@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>WoWToolbox.Core.v2</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,6 +14,9 @@
     <ProjectReference Include="..\WoWToolbox.PM4Parsing\WoWToolbox.PM4Parsing.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
     <ProjectReference Include="..\WoWToolbox.Core\WoWToolbox.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Tools\Debug\ChunkInspector\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
