@@ -34,3 +34,10 @@ Version:
 Format:
 
     Supports format argument, providing either csv (default) or json.
+
+------
+
+## TODO 2
+
+We also need to look at lib\wow.tools.local
+It's mostly c# code and is continuously updated, and may have loaders or exporters for the files we are parsing. It also has handling for all database-type files, like dbc, db2, wdb, adb. This could be useful for decoding the raw data into our Core.v2 library. It would be ideal to reference their code and not implement our own janky implementation from it. I'm not certain there's a 3d viewer in the library yet, but there is someone that has built such a tool for a web experience (javascript or nodejs or something - I just have to find the repo!)

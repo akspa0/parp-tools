@@ -38,12 +38,19 @@ Port the proven WMO v17 implementation from *wow.export* into **WoWToolbox.Core.
 - [ ] Annotate every chunk handler in WMOLoader.js with equivalent C# data model.
 - [ ] Create mapping table FourCC → C# parser.
 
-### Phase 2 – Library Port
-- [ ] Create `Foundation.WMO.V17.Chunks` namespace with strongly-typed structs for each chunk.
-- [ ] Implement `V17ChunkReader` (done) – verify padding.
-- [ ] Implement `V17RootLoader.Load()`
-- [ ] Implement `V17GroupLoader.Load()`
-- [ ] Implement `MovbParser` (uint16 triplets → triangles)
+### Phase 2 – Library Port (v17)
+- [x] Create `Foundation.WMO.V17.Chunks` namespace with strongly-typed structs for each chunk.
+- [x] Implement `V17ChunkReader` – verified padding & reversed FourCC.
+- [x] Implement `V17RootLoader.Load()` (root chunks, shared geometry).
+- [x] Implement `V17GroupLoader.Load()` (per-group parsing, shared/local geometry).
+- [x] Implement `MovbParser` (uint16 triplets → triangles).
+
+### Phase 2b – Base Mini-Library Extraction
+- [ ] Create `Foundation.WMO.Core` namespace for version-agnostic structs (`MOHDHeader`, `MOGPGroupHeader`, parsers for MOVT/MOVI, etc.).
+- [ ] Refactor v14 & v17 code to reference `WMO.Core` instead of cross-referencing each other.
+- [ ] Remove residual v14 `using` directives from v17 code.
+- [ ] Ensure solution builds clean after extraction.
+
 
 ### Phase 3 – Tools Update
 - [ ] Modify `WmoObjExporter` to use new loaders.
