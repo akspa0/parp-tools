@@ -202,7 +202,9 @@ class Program
             }
             try
             {
-                var pm4 = PM4File.FromFile(pm4Path);
+                var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
                 var exporter = new WoWToolbox.Core.v2.Services.PM4.MslkObjectMeshExporter();
                 bool includeM2 = args.Any(a => string.Equals(a, "--include-m2", StringComparison.OrdinalIgnoreCase));
                 exporter.ExportAllObjectsByMsurGroup(pm4, outDir, includeM2);
@@ -213,6 +215,138 @@ class Program
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 return 1;
+            }
+        }
+
+        // Custom command: wmo-export (export merged OBJ from WMO root)
+        if (string.Equals(args[0], "wmo-export", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool wmo-export <wmo-file> [<output-dir>] [--merged]");
+                return 1;
+            }
+            string wmoPath = args[1];
+            if (!File.Exists(wmoPath) || !wmoPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("File must be an existing .wmo file.");
+                return 1;
+            }
+            string outDir = args.Length >= 3 && !args[2].StartsWith("--") ? args[2] : ProjectOutput.GetPath("wmo_obj", Path.GetFileNameWithoutExtension(wmoPath));
+            bool merged = args.Any(a => string.Equals(a, "--merged", StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                Directory.CreateDirectory(outDir);
+                if (!merged)
+                {
+                    // Fallback: always merged for now (per-group not yet implemented)
+                    merged = true;
+                }
+                if (merged)
+                {
+                    var mesh = WoWToolbox.Core.WMO.WmoMeshExporter.LoadMergedWmoMesh(wmoPath);
+                    if (mesh == null)
+                    {
+                        // Fallback: try direct V17 WMO loader (root contains groups)
+                        try
+                        {
+                            var v17 = WoWToolbox.Core.v2.Foundation.WMO.V17.V17WmoFile.Load(wmoPath);
+                            var verts = new List<System.Numerics.Vector3>();
+                            var faces = new List<(int,int,int)>();
+                            foreach (var grp in v17.Groups)
+                            {
+                                int baseIndex = verts.Count;
+                                verts.AddRange(grp.Vertices);
+                                foreach (var (a,b,c) in grp.Faces)
+                                    faces.Add((baseIndex + a, baseIndex + b, baseIndex + c));
+                            }
+                            if (verts.Count == 0 || faces.Count == 0)
+                            {
+                                Console.Error.WriteLine("WMO loaded but contained no geometry.");
+                                return 1;
+                            }
+                            string v17ObjPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(wmoPath) + "_merged.obj");
+                            WoWToolbox.Core.v2.Foundation.WMO.WmoObjExporter.Export(v17ObjPath, verts, new List<System.Numerics.Vector2>(), faces);
+                            Console.WriteLine($"Merged OBJ exported → {v17ObjPath}");
+                            return 0;
+                        }
+                        catch (Exception ex2)
+                        {
+                            Console.Error.WriteLine($"Failed to load or merge WMO groups (both loaders): {ex2.Message}");
+                            return 1;
+                        }
+                    }
+                    string objPath = Path.Combine(outDir, Path.GetFileNameWithoutExtension(wmoPath) + "_merged.obj");
+                    WoWToolbox.Core.WMO.WmoMeshExporter.SaveMergedWmoToObj(mesh, objPath);
+                    Console.WriteLine($"Merged OBJ exported → {objPath}");
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // Custom command: pd4-dump (list chunk signatures & write unknown raw chunks)
+        if (string.Equals(args[0], "pd4-dump", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.Error.WriteLine("Usage: Pm4BatchTool pd4-dump <pd4-file>");
+                return 1;
+            }
+            string pd4Path = args[1];
+            if (!File.Exists(pd4Path) || !pd4Path.EndsWith(".pd4", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine("File must be an existing .pd4 file.");
+                return 1;
+            }
+
+            try
+            {
+                using var fs = File.OpenRead(pd4Path);
+                using var br = new BinaryReader(fs);
+                string outDir = ProjectOutput.GetPath("pd4_dump", Path.GetFileNameWithoutExtension(pd4Path));
+                Directory.CreateDirectory(outDir);
+                Console.WriteLine($"[pd4-dump] {Path.GetFileName(pd4Path)} → {outDir}\n");
+
+                long offset = 0;
+                while (offset < fs.Length)
+                {
+                    if (fs.Length - offset < 8)
+                    {
+                        Console.WriteLine($"Truncated tail ({fs.Length - offset} bytes) – stopping.");
+                        break;
+                    }
+                    // read 4-byte reversed signature
+                    var sigBytes = br.ReadBytes(4);
+                    var size = br.ReadUInt32();
+                    string sig = new string(sigBytes.Reverse().Select(b => (char)b).ToArray());
+                    Console.WriteLine($"0x{offset:X6}  {sig}  size={size}");
+
+                    byte[] payload = br.ReadBytes((int)size);
+                    // write raw chunk for further analysis if we don't already know it
+                    if (!KnownPd4Chunk(sig))
+                    {
+                        File.WriteAllBytes(Path.Combine(outDir, $"{sig}.bin"), payload);
+                    }
+                    offset = fs.Position;
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+
+            static bool KnownPd4Chunk(string sig)
+            {
+                // List of implemented chunk IDs – extend as we add loaders
+                string[] known = { "MVER", "MSHD", "MSPV", "MSPI", "MSVT", "MSVI", "MSUR", "MSLK", "MSRN", "MCRC", "MSCN" };
+                return known.Contains(sig);
             }
         }
 
@@ -229,7 +363,9 @@ class Program
             string[] pm4Files;
             if (Directory.Exists(rootDir))
             {
-                pm4Files = Directory.GetFiles(rootDir, "*.pm4", SearchOption.AllDirectories);
+                pm4Files = Directory.GetFiles(rootDir, "*.pm4", SearchOption.AllDirectories)
+                            .Concat(Directory.GetFiles(rootDir, "*.pd4", SearchOption.AllDirectories))
+                            .ToArray();
             }
             else if (File.Exists(rootDir))
             {
@@ -243,14 +379,16 @@ class Program
 
             if (pm4Files.Length == 0)
             {
-                Console.Error.WriteLine("No *.pm4 files found under given directory.");
+                Console.Error.WriteLine("No *.pm4 or *.pd4 files found under given directory.");
                 return 1;
             }
             foreach (var path in pm4Files)
             {
                 try
                 {
-                    var file = PM4File.FromFile(path);
+                    var file = Path.GetExtension(path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                        ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(path)
+                        : PM4File.FromFile(path);
                     string outDir = ProjectOutput.GetPath("batch_dump", Path.GetFileNameWithoutExtension(path));
                     Directory.CreateDirectory(outDir);
                     RawDumpHelper.DumpAll(file, outDir);
@@ -582,7 +720,9 @@ class Program
             }
             try
             {
-                var pm4 = PM4File.FromFile(pm4Path);
+                var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
                 var exporter = new MslkObjectMeshExporter();
                 if (byFlag) exporter.ExportAllFlagsAsObj(pm4, outDir);
                 
@@ -622,7 +762,9 @@ class Program
             }
             try
             {
-                var pm4 = PM4File.FromFile(pm4Path);
+                var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
                 MsurObjectExporter.ExportBySurfaceKey(pm4, outDir);
                 Console.WriteLine($"MSUR OBJ objects written to {outDir}");
                 return 0;
@@ -655,7 +797,9 @@ class Program
             }
             try
             {
-                var pm4 = PM4File.FromFile(pm4Path);
+                var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
                 // Create base output dirs
                 Directory.CreateDirectory(baseOut);
 
@@ -1011,7 +1155,9 @@ class Program
         // Local function to dump diagnostic CSV for a single PM4
         void DumpMscnRanges(string pm4Path)
         {
-            var pm4 = PM4File.FromFile(pm4Path);
+            var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
             var verts = pm4.MSCN?.ExteriorVertices;
             if (verts == null || verts.Count == 0)
             {
@@ -1047,7 +1193,9 @@ class Program
         {
             try
             {
-                var pm4 = PM4File.FromFile(pm4Path);
+                var pm4 = Path.GetExtension(pm4Path).Equals(".pd4", StringComparison.OrdinalIgnoreCase)
+                    ? (PM4File)WoWToolbox.Core.v2.Foundation.PD4.PD4File.FromFile(pm4Path)
+                    : PM4File.FromFile(pm4Path);
                 string tsDir = Path.Combine(Environment.CurrentDirectory, "project_output", "diagnostics");
                 Directory.CreateDirectory(tsDir);
                 string csvName = Path.GetFileNameWithoutExtension(pm4Path) + ".csv";

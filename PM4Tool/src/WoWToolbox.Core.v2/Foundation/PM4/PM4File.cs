@@ -57,11 +57,13 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Gets or sets the MSUR chunk (Surface Definitions).
         /// </summary>
+        [ChunkOptional]
         public MSURChunk? MSUR { get; set; }
 
         /// <summary>
         /// Gets or sets the MSCN chunk (Exterior Vertices; previously misinterpreted as normals).
         /// </summary>
+        [ChunkOptional]
         public MSCNChunk? MSCN { get; set; }
 
         /// <summary>
@@ -73,11 +75,13 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Gets or sets the MPRL chunk (Position Data).
         /// </summary>
+        [ChunkOptional]
         public MPRLChunk? MPRL { get; set; }
 
         /// <summary>
         /// Gets or sets the MPRR chunk (Reference Data).
         /// </summary>
+        [ChunkOptional]
         public MPRRChunk? MPRR { get; set; }
 
         /// <summary>
@@ -95,6 +99,7 @@ namespace WoWToolbox.Core.v2.Foundation.PM4
         /// <summary>
         /// Gets or sets the MDSF chunk (Structure Data).
         /// </summary>
+        [ChunkOptional]
         public MDSFChunk? MDSF { get; set; }
 
         /// <summary>

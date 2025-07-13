@@ -25,19 +25,32 @@ namespace WoWToolbox.Core.WMO
             string groupsDir = Path.GetDirectoryName(rootWmoPath) ?? ".";
             string rootBaseName = Path.GetFileNameWithoutExtension(rootWmoPath);
             var (groupCount, internalGroupNames) = WmoRootLoader.LoadGroupInfo(rootWmoPath);
-            if (groupCount <= 0)
-                return null;
-
-            var groupMeshes = new List<WmoGroupMesh>();
-            for (int i = 0; i < groupCount; i++)
+            List<WmoGroupMesh> groupMeshes = new List<WmoGroupMesh>();
+            if (groupCount > 0)
             {
-                string? groupPathToLoad = FindGroupFilePath(i, rootBaseName, groupsDir, internalGroupNames);
-                if (groupPathToLoad == null)
-                    continue;
-                using var groupStream = File.OpenRead(groupPathToLoad);
-                WmoGroupMesh mesh = WmoGroupMesh.LoadFromStream(groupStream, groupPathToLoad);
-                if (mesh != null && mesh.Vertices.Count > 0 && mesh.Triangles.Count > 0)
-                    groupMeshes.Add(mesh);
+                for (int i = 0; i < groupCount; i++)
+                {
+                    string? groupPathToLoad = FindGroupFilePath(i, rootBaseName, groupsDir, internalGroupNames);
+                    if (groupPathToLoad == null)
+                        continue;
+                    using var groupStream = File.OpenRead(groupPathToLoad);
+                    var mesh = WmoGroupMesh.LoadFromStream(groupStream, groupPathToLoad);
+                    if (mesh != null && mesh.Vertices.Count > 0 && mesh.Triangles.Count > 0)
+                        groupMeshes.Add(mesh);
+                }
+            }
+            else
+            {
+                // Enumerate any files matching pattern <root>_###.wmo (some builds may omit _000)
+                var candidateFiles = Directory.EnumerateFiles(groupsDir, $"{rootBaseName}_*.wmo", SearchOption.TopDirectoryOnly)
+                                             .OrderBy(p => p);
+                foreach (var path in candidateFiles)
+                {
+                    using var groupStream = File.OpenRead(path);
+                    var mesh = WmoGroupMesh.LoadFromStream(groupStream, path);
+                    if (mesh != null && mesh.Vertices.Count > 0 && mesh.Triangles.Count > 0)
+                        groupMeshes.Add(mesh);
+                }
             }
             if (groupMeshes.Count == 0)
                 return null;
