@@ -409,6 +409,12 @@ FodyWeavers.xsd
 *.wdl
 *.mpq
 *.pd4
+*.wmo
+*.mdx
+*.m2
+
+# 3d object outputs
+*.obj
 
 # Cursor Rules
 .cursorrules
@@ -425,6 +431,8 @@ community-listfile.csv
 .cursor/*
 docs/apps/*
 memory-bank/*
+
+# Old references and test file inputs or outputs
 PM4Tool/lib/Warcraft.NET/*
 PM4Tool/lib/DBCD/*
 PM4Tool/docs/apps/
@@ -432,3 +440,8 @@ PM4Tool/docs/apps/mirrormachine
 PM4Tool/docs/apps/noggit-red
 PM4Tool/docs/apps/gillijimproject
 test/RunMslkObjectExport/output/
+WoWToolBox.Core/PM4Tool
+parpToolbox/PM4Tool
+parpToolbox/test_data
+
+
