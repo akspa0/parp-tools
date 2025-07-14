@@ -135,5 +135,17 @@ if (command == "pm4")
     ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile);
     Console.WriteLine("Export complete!");
 }
+else if (command == "pd4")
+{
+    Console.WriteLine($"Parsing PD4 file: {fileInfo.FullName}");
+    var loader = new ParpToolbox.Services.PD4.Pd4Adapter();
+    var scene = loader.Load(fileInfo.FullName);
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
+    var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
+    Console.WriteLine($"Exporting OBJ to {outputFile}...");
+    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile);
+    Console.WriteLine("Export complete!");
+}
 
 return 0;

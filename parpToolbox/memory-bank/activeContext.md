@@ -23,13 +23,18 @@
 - [x] Integrate all components into `Program.cs` to create a complete export pipeline.
 
 ### Phase 3: PM4 / PD4 Integration (In Progress)
-- [ ] **Debug CLI:** Resolve issue where command-line arguments are not being correctly passed or parsed when using `dotnet run`.
+- [ ] **Debug CLI:** Resolve issue where arguments are not received when using `dotnet run`.
 - [x] Scaffold `Formats/PM4` and `Formats/PD4` modules inside `parpToolbox`.
-- [x] Implement `WowToolsLocalWmoLoader` exposing high-level `WmoGroup` objects for clean geometry access.
+- [x] Implement `WowToolsLocalWmoLoader` exposing high-level `WmoGroup` objects.
 - [ ] Port essential models and readers from legacy `WoWToolbox.Core.v2` (read-only) into new namespaces.
-- [ ] Implement `Pm4Adapter` / `Pd4Adapter` that leverage `wow.tools.local` for WMO geometry and low-level IO.
-- [ ] Extend CLI parser with `--pm4` / `--pd4` commands and route outputs via `ProjectOutput`.
-- [ ] Create integration tests loading real PM4/PD4 data under `test_data/`, verifying OBJ export counts.
+- [x] Move shared PM4/PD4 chunks to `Formats/P4/Chunks/Common`.
+- [x] Update namespaces of moved chunks to `ParpToolbox.Formats.P4.Chunks.Common`.
+- [x] Adapt `Pm4Adapter` to new namespace and scaffold `Pd4Adapter`.
+- [ ] Implement full `Pm4Adapter` / `Pd4Adapter` behaviour (PD4 chunk audit, geometry export).
+- [x] Extend CLI parser with `pm4` / `pd4` commands and route outputs via `ProjectOutput`.
+- [x] Update OBJ exporter to output vertices only (omit faces) for initial validation.
+- [ ] Port legacy `Pm4BatchTool` research utilities into new `Pm4ResearchTool` project.
+- [ ] Create integration tests loading real PM4/PD4 data under `test_data/`, verifying OBJ vertex counts.
 
 ---
 

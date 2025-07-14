@@ -25,10 +25,7 @@ internal static class Pm4ObjExporter
         foreach (var v in scene.Vertices)
             objWriter.WriteLine($"v {v.X.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
 
-        // single default group
-        objWriter.WriteLine("\ng default");
-        foreach (var (a,b,c) in scene.Triangles)
-            objWriter.WriteLine($"f {a+1} {b+1} {c+1}");
+
 
         File.WriteAllText(mtlPath, "newmtl default\nKd 0.8 0.8 0.8\n");
     }

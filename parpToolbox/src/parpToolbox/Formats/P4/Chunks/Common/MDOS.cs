@@ -1,4 +1,4 @@
-namespace ParpToolbox.Formats.PM4.Chunks;
+namespace ParpToolbox.Formats.P4.Chunks.Common;
 
 using System;
 using System.Collections.Generic;

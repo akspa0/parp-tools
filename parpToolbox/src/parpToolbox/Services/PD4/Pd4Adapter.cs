@@ -1,23 +1,28 @@
+namespace ParpToolbox.Services.PD4;
+
 using System;
 using System.Collections.Generic;
 using System.IO;
-using ParpToolbox.Formats.PM4;
-using ParpToolbox.Formats.P4.Chunks.Common;
 using System.Numerics;
+using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Formats.PM4; // Re-use Pm4Scene model for now (geometry is identical)
+using ParpToolbox.Services.PM4;
 
-namespace ParpToolbox.Services.PM4
-{
-    /// <inheritdoc/>
-    public sealed class Pm4Adapter : IPm4Loader
+/// <summary>
+/// Minimal PD4 loader that reuses the shared P4 chunk definitions. PD4 has the same core geometry
+/// chunks as PM4, so for a first pass we simply parse the same ones. Format-specific chunks can be
+/// added later.
+/// </summary>
+public sealed class Pd4Adapter : IPm4Loader // temporary reuse of interface & scene model
 {
     public Pm4Scene Load(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("PM4 path must be provided", nameof(path));
+            throw new ArgumentException("PD4 path must be provided", nameof(path));
+
         using var fs = File.OpenRead(path);
         using var br = new BinaryReader(fs);
 
-        // Simple chunk scan variables
         MspvChunk? mspv = null;
         MsvtChunk? msvt = null;
         MspiChunk? mspi = null;
@@ -44,17 +49,13 @@ namespace ParpToolbox.Services.PM4
                     int vertCount = msvt?.Vertices.Count ?? mspv?.Vertices.Count ?? 0;
                     mspi.LoadBinaryData(data, vertCount);
                     break;
-                default:
-                    // skip unknown chunks for now
-                    break;
             }
 
-            // Ensure we really consumed expected bytes; seek to next aligned chunk.
             br.BaseStream.Position = payloadStart + size;
         }
 
         if (mspi == null || (msvt == null && mspv == null))
-            throw new InvalidDataException("PM4 missing required chunks (MSPI + MSPV/MSVT)");
+            throw new InvalidDataException("PD4 missing required chunks (MSPI + MSPV/MSVT)");
 
         IReadOnlyList<Vector3> verts = msvt?.Vertices.Count > 0 ? msvt.Vertices : mspv!.Vertices;
         var scene = new Pm4Scene
@@ -64,5 +65,4 @@ namespace ParpToolbox.Services.PM4
         };
         return scene;
     }
-}
 }

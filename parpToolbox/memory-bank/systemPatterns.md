@@ -6,7 +6,7 @@
 - **Clear Separation of Concerns:** The application logic in `parpToolbox` will be distinctly separate from the low-level file handling provided by the `wow.tools.local` dependency. This ensures that our core business logic is not tightly coupled to the internals of the library.
 
 ## Data Flow & Processing
-- **Chunk-Based File Reading:** File formats like WMO and PM4 will be processed as a series of "chunks," identified by FourCC codes. A critical pattern to be carried over is the reversal of FourCC bytes upon reading (e.g., 'REVM' in the file is handled as 'MVER' in the code) to maintain consistency.
+- **Chunk-Based File Reading:** File formats like WMO, PM4, and PD4 are processed as a series of "chunks," identified by FourCC codes. On-disk FourCC values are stored little-endian; therefore a helper `FourCc.Read(BinaryReader)` reverses the bytes so the code works with canonical IDs (e.g., bytes `REVM` → string `MVER`).
 
 - **Immutable Models:** The system will favor immutable data models. Raw file data will be parsed into strongly-typed models that are passed between services for processing and transformation without unexpected side effects.
 
