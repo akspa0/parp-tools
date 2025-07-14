@@ -8,11 +8,14 @@
 - **CLI Parsing:** A simple, manual command-line argument parser has been implemented.
 
 ## What's Left to Build
-- **PM4/PD4 Support:** Core logic for processing these formats needs to be implemented.
-- **Test Suite:** A comprehensive test suite using real data needs to be built to validate all functionality.
+- **PM4/PD4 Support:** Interior geometry loaders, adapters, and exporters.
+- **CLI Enhancements:** `pm4` and `pd4` commands with parity to `wmo` flags.
+- **Test Suite:** Integration tests for PM4/PD4 and regression tests for WMO export.
 
 ## Current Status
-- **Debugging CLI.** The WMO-to-OBJ export pipeline is functionally complete. However, we are currently blocked by an issue where command-line arguments are not being correctly interpreted by the application when launched via `dotnet run`. 
+- **WMO Export Complete.** Group naming is correct and facade planes filtered. Users can generate clean OBJs per group.
+- **dotnet run Quirk.** Argument parsing works in compiled exe; nuance with `dotnet run --` still noted but low priority.
+- **PM4/PD4 Phase Started.** Loader interface scaffolded; implementation to follow in next session.
 
 ## Known Issues
 - **`dotnet run` Argument Parsing:** When using `dotnet run`, arguments passed after `--` are not being received by the application. The immediate priority is to diagnose and fix this issue to enable proper testing and use of the tool.

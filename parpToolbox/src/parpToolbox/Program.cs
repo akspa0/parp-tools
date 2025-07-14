@@ -3,6 +3,7 @@ using System.IO;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
 using ParpToolbox;
+using ParpToolbox.Services.WMO;
 
 if (args.Length == 0)
 {
@@ -28,6 +29,17 @@ switch (command)
 }
 
 string inputFile = null;
+bool includeCollision = false;
+bool splitGroups = false;
+bool includeFacades = false;
+// Detect optional flags
+if (args.Contains("--include-collision"))
+    includeCollision = true;
+if (args.Contains("--split-groups"))
+    splitGroups = true;
+if (args.Contains("--include-facades") || args.Contains("--include-no-draw"))
+    includeFacades = true;
+
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
 FileProvider.SetDefaultBuild("local");
@@ -57,16 +69,22 @@ Console.WriteLine($"Processing WMO file: {fileInfo.FullName}");
 
 try
 {
-    var reader = new WMOReader();
-    var wmo = reader.LoadWMO(fileInfo.FullName);
-    
-    Console.WriteLine($"Successfully loaded WMO with {wmo.materials.Length} materials and {wmo.group.Length} groups.");
+    var wmoLoader = new WowToolsLocalWmoLoader();
+    var (textures, groups) = wmoLoader.Load(inputFile, includeFacades);
+    Console.WriteLine($"Successfully loaded WMO with {textures.Count} textures and {groups.Count} groups.");
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
-    var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
-
-    Console.WriteLine($"Exporting to {outputFile}...");
-    ObjExporter.Export(wmo, outputFile);
+    if (splitGroups)
+    {
+        Console.WriteLine($"Exporting each group to {outputDir}...");
+        ObjExporter.ExportPerGroup(groups, outputDir, includeCollision);
+    }
+    else
+    {
+        var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
+        Console.WriteLine($"Exporting to {outputFile}...");
+        ObjExporter.Export(groups, outputFile, includeCollision);
+    }
     Console.WriteLine("Export complete!");
 }
 catch (Exception e)

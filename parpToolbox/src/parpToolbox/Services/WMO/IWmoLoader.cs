@@ -10,6 +10,6 @@ namespace ParpToolbox.Services.WMO
     {
         /// <param name="path">Local file path of .wmo root file</param>
         /// <returns>Tuple of texture names and parsed group list</returns>
-        (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) Load(string path);
+        (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) Load(string path, bool includeFacades = false);
     }
 }

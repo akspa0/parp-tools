@@ -16,7 +16,7 @@ namespace ParpToolbox.Services.WMO
     /// </summary>
     internal sealed class WowToolsLocalWmoLoader : IWmoLoader
     {
-        public (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) Load(string path)
+        public (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) Load(string path, bool includeFacades = false)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("Path cannot be null or empty", nameof(path));
@@ -43,28 +43,65 @@ namespace ParpToolbox.Services.WMO
                     var verts = mogp.vertices.Select(v => new Vector3(v.vector.X, v.vector.Y, v.vector.Z)).ToList();
 
                     var faces = new List<(ushort, ushort, ushort)>();
-                    for (int i = 0; i + 2 < mogp.indices.Length; i += 3)
+                    // Pre-compute face ranges marked as no-draw (facades)
+                    var noDrawFaces = new HashSet<int>();
+                    if (mogp.renderBatches != null)
                     {
+                        foreach (var batch in mogp.renderBatches)
+                        {
+                            if (((batch.flags & 0x04) != 0) && !includeFacades)
+                            {
+                                int start = (int)batch.firstFace;
+                                int end = start + batch.numFaces;
+                                for (int f = start; f < end; f++)
+                                    noDrawFaces.Add(f);
+                            }
+                        }
+                    }
+
+                    int faceIndex = 0;
+                    for (int i = 0; i + 2 < mogp.indices.Length; i += 3, faceIndex++)
+                    {
+                        if (noDrawFaces.Contains(faceIndex))
+                            continue;
+
                         faces.Add((mogp.indices[i], mogp.indices[i + 1], mogp.indices[i + 2]));
                     }
 
                     // Gather material IDs for each face if present via renderBatches
-                    var faceMaterialIds = new List<byte>(faces.Count);
+                    var faceMaterialIds = new List<byte>();
                     if (mogp.renderBatches != null && mogp.renderBatches.Length > 0)
                     {
                         foreach (var batch in mogp.renderBatches)
                         {
-                            var end = batch.firstFace + batch.numFaces;
-                            for (var fi = batch.firstFace; fi < end; fi++)
+                            if (((batch.flags & 0x04) != 0) && !includeFacades)
+                                continue; // skip no-draw batch
+
+                            for (var fi = 0; fi < batch.numFaces; fi++)
                                 faceMaterialIds.Add(batch.materialID);
                         }
                     }
 
-                    var groupName = wmo.groupNames != null && gi < wmo.groupNames.Length
-                        ? wmo.groupNames[gi].name
-                        : $"group_{gi}";
+                    string groupName;
+                    // Try exact index first
+                    if (wmo.groupNames != null && gi < wmo.groupNames.Length)
+                    {
+                        groupName = wmo.groupNames[gi].name;
+                    }
+                    else
+                    {
+                        groupName = $"group_{gi}";
+                    }
 
-                    groups.Add(new WmoGroup(groupName, verts, faces, faceMaterialIds));
+                    // Attempt to refine name via nameOffset lookup (most accurate)
+                    if (wmo.groupNames != null)
+                    {
+                        var offsetMatch = wmo.groupNames.FirstOrDefault(n => n.offset == mogp.nameOffset);
+                        if (!string.IsNullOrEmpty(offsetMatch.name))
+                            groupName = offsetMatch.name;
+                    }
+
+                    groups.Add(new WmoGroup(groupName, verts, faces, (uint)mogp.flags, faceMaterialIds));
                 }
             }
 

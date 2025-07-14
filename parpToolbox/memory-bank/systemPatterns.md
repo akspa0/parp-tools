@@ -16,6 +16,11 @@
 
 - **Dependency-Light CLI:** To avoid issues with unstable or complex external packages, command-line argument parsing is handled with a simple, manual implementation directly within `Program.cs`. This provides sufficient functionality for the tool's needs while minimizing external dependencies.
 
+## PM4 / PD4 Adapter Pattern
+- **Adapters over Rewrite:** The legacy PM4/PD4 readers from `WoWToolbox.Core.v2` are ported into new adapter classes (`Pm4Adapter`, `Pd4Adapter`). These adapters delegate all low-level WMO geometry access to `wow.tools.local` while preserving the high-level batching and matching logic.
+- **Immutable Flow:** Adapters return immutable domain models (`Pm4Scene`, `Pd4Scene`) that are consumed by the existing exporter and matcher services.
+- **ProjectOutput Enforcement:** All PM4/PD4 exporters reuse `ProjectOutput` ensuring outputs never pollute source directories.
+
 ## Testing & Validation
 - **Real Data Testing:** All new tests written for `parpToolbox` must use real game data to ensure the system is validated against real-world conditions.
 

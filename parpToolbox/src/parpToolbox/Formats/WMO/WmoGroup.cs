@@ -12,16 +12,19 @@ namespace ParpToolbox.Formats.WMO
         public IReadOnlyList<Vector3> Vertices { get; }
         public IReadOnlyList<(ushort, ushort, ushort)> Faces { get; }
         public IReadOnlyList<byte> FaceMaterialIds { get; }
+        public uint RawFlags { get; }
 
         public WmoGroup(string name,
                          IReadOnlyList<Vector3> vertices,
                          IReadOnlyList<(ushort, ushort, ushort)> faces,
+                          uint rawFlags,
                          IReadOnlyList<byte>? faceMaterialIds = null)
         {
             Name = name;
             Vertices = vertices;
             Faces = faces;
             FaceMaterialIds = faceMaterialIds ?? new List<byte>();
+            RawFlags = rawFlags;
         }
     }
 }
