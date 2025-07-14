@@ -439,5 +439,6 @@ memory-bank/*
 test/RunMslkObjectExport/output/
 parpToolbox/PM4Tool/lib/
 parpToolbox/test_data
+parpToolbox/PM4Tool/src
 
 
