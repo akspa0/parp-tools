@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\lib\wow.tools.local\wow.tools.local.csproj" />
+
   </ItemGroup>
 
   <ItemGroup>

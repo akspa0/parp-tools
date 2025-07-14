@@ -1,13 +1,8 @@
 using System;
-
-Console.WriteLine($"Received {args.Length} arguments:");
-for(int i = 0; i < args.Length; i++)
-{
-    Console.WriteLine($"  arg[{i}] = {args[i]}");
-}
 using System.IO;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
+using ParpToolbox;
 
 if (args.Length == 0)
 {
@@ -15,11 +10,21 @@ if (args.Length == 0)
     return 1;
 }
 
-var command = args[0];
-if (command.ToLower() != "wmo")
+var command = args[0].ToLowerInvariant();
+
+switch (command)
 {
-    Console.WriteLine($"Error: Unknown command '{command}'");
-    return 1;
+    case "wmo":
+        // handled below
+        break;
+    case "pm4":
+    case "pd4":
+        // TODO: Implement PM4/PD4 pipeline.
+        Console.WriteLine($"{command.ToUpper()} support not yet implemented in this build.");
+        return 1;
+    default:
+        Console.WriteLine($"Error: Unknown command '{command}'");
+        return 1;
 }
 
 string inputFile = null;
