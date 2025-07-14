@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
 using ParpToolbox;
@@ -7,7 +8,13 @@ using ParpToolbox.Services.WMO;
 
 if (args.Length == 0)
 {
-    Console.WriteLine("Usage: parpToolbox <command> [options]");
+    Console.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
+                      "       or parpToolbox <command> <file> [flags] (positional)\n" +
+                      "Commands: wmo | pm4 | pd4\n" +
+                      "Common flags:\n" +
+                      "   --include-collision   Include collision geometry (WMO only)\n" +
+                      "   --split-groups        Export each WMO group separately\n" +
+                      "   --include-facades     Keep facade/no-draw geometry (WMO)");
     return 1;
 }
 
@@ -20,9 +27,8 @@ switch (command)
         break;
     case "pm4":
     case "pd4":
-        // TODO: Implement PM4/PD4 pipeline.
-        Console.WriteLine($"{command.ToUpper()} support not yet implemented in this build.");
-        return 1;
+        // handled below
+        break;
     default:
         Console.WriteLine($"Error: Unknown command '{command}'");
         return 1;
@@ -52,6 +58,19 @@ if (inputIndex != -1 && inputIndex + 1 < args.Length)
     inputFile = args[inputIndex + 1];
 }
 
+// Fallback: treat first argument after command that doesn't start with '-' as the input file
+if (string.IsNullOrEmpty(inputFile))
+{
+    foreach (var candidate in args.Skip(1))
+    {
+        if (!candidate.StartsWith("-"))
+        {
+            inputFile = candidate;
+            break;
+        }
+    }
+}
+
 if (string.IsNullOrEmpty(inputFile))
 {
     Console.WriteLine("Error: --input <file> is required for the wmo command.");
@@ -65,11 +84,19 @@ if (!fileInfo.Exists)
     return 1;
 }
 
-Console.WriteLine($"Processing WMO file: {fileInfo.FullName}");
-
+if (command == "wmo")
+{
+    Console.WriteLine($"Processing WMO file: {fileInfo.FullName}");
+}
+else
+{
+    Console.WriteLine($"Processing {command.ToUpper()} file: {fileInfo.FullName}");
+}
 try
 {
-    var wmoLoader = new WowToolsLocalWmoLoader();
+    if (command == "wmo")
+    {
+        var wmoLoader = new WowToolsLocalWmoLoader();
     var (textures, groups) = wmoLoader.Load(inputFile, includeFacades);
     Console.WriteLine($"Successfully loaded WMO with {textures.Count} textures and {groups.Count} groups.");
 
@@ -87,11 +114,26 @@ try
     }
     Console.WriteLine("Export complete!");
 }
+}
 catch (Exception e)
 {
     Console.WriteLine($"An error occurred: {e.Message}");
     Console.WriteLine(e.StackTrace);
     return 1;
+}
+
+
+if (command == "pm4")
+{
+    Console.WriteLine($"Parsing PM4 file: {fileInfo.FullName}");
+    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+    var scene = loader.Load(fileInfo.FullName);
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
+    var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
+    Console.WriteLine($"Exporting OBJ to {outputFile}...");
+    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile);
+    Console.WriteLine("Export complete!");
 }
 
 return 0;

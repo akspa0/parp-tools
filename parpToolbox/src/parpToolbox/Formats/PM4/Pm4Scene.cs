@@ -5,7 +5,9 @@ namespace ParpToolbox.Formats.PM4
     /// Will be populated by <see cref="ParpToolbox.Services.PM4.Pm4Adapter"/>.
     /// </summary>
     public sealed record Pm4Scene
-    {
-        // TODO: Add properties once real model fields are identified during port.
-    }
+{
+    public IReadOnlyList<System.Numerics.Vector3> Vertices { get; init; } = Array.Empty<System.Numerics.Vector3>();
+    public IReadOnlyList<(int A,int B,int C)> Triangles { get; init; } = Array.Empty<(int,int,int)>();
+}
+
 }
