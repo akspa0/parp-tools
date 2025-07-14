@@ -433,15 +433,11 @@ docs/apps/*
 memory-bank/*
 
 # Old references and test file inputs or outputs
-PM4Tool/lib/Warcraft.NET/*
-PM4Tool/lib/DBCD/*
-PM4Tool/docs/apps/
-PM4Tool/docs/apps/mirrormachine
-PM4Tool/docs/apps/noggit-red
-PM4Tool/docs/apps/gillijimproject
+*PM4Tool/lib/Warcraft.NET/*
+*PM4Tool/lib/DBCD/*
+*PM4Tool/docs/apps/
 test/RunMslkObjectExport/output/
-WoWToolBox.Core/PM4Tool
-parpToolbox/PM4Tool
+parpToolbox/PM4Tool/lib/
 parpToolbox/test_data
 
 
