@@ -4,6 +4,7 @@ using System.IO;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using System.Numerics;
+using System.Linq;
 
 namespace ParpToolbox.Services.PM4
 {
@@ -21,6 +22,7 @@ namespace ParpToolbox.Services.PM4
         MspvChunk? mspv = null;
         MsvtChunk? msvt = null;
         MspiChunk? mspi = null;
+        MsviChunk? msvi = null;
 
         while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
         {
@@ -39,6 +41,10 @@ namespace ParpToolbox.Services.PM4
                     msvt ??= new MsvtChunk();
                     msvt.LoadBinaryData(data);
                     break;
+                case MsviChunk.Signature:
+                    msvi ??= new MsviChunk();
+                    msvi.LoadBinaryData(data);
+                    break;
                 case MspiChunk.Signature:
                     mspi ??= new MspiChunk();
                     int vertCount = msvt?.Vertices.Count ?? mspv?.Vertices.Count ?? 0;
@@ -53,14 +59,15 @@ namespace ParpToolbox.Services.PM4
             br.BaseStream.Position = payloadStart + size;
         }
 
-        if (mspi == null || (msvt == null && mspv == null))
+        if ((mspi == null && msvi == null) || (msvt == null && mspv == null))
             throw new InvalidDataException("PM4 missing required chunks (MSPI + MSPV/MSVT)");
 
         IReadOnlyList<Vector3> verts = msvt?.Vertices.Count > 0 ? msvt.Vertices : mspv!.Vertices;
+        var tris = msvi != null ? msvi.Triangulate().ToList() : mspi!.Triangles;
         var scene = new Pm4Scene
         {
             Vertices = verts,
-            Triangles = mspi.Triangles
+            Triangles = tris
         };
         return scene;
     }

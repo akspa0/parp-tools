@@ -14,7 +14,9 @@ if (args.Length == 0)
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
-                      "   --include-facades     Keep facade/no-draw geometry (WMO)");
+                      "   --include-facades     Keep facade/no-draw geometry (WMO)\n" +
+                      "   --exportfaces        Write OBJ faces (default: point cloud)\n" +
+                      "   --exportchunks      Export each MSUR group to separate OBJ");
     return 1;
 }
 
@@ -38,6 +40,9 @@ string inputFile = null;
 bool includeCollision = false;
 bool splitGroups = false;
 bool includeFacades = false;
+bool exportFaces = false;
+// TODO: per-group OBJ export pending implementation
+// bool exportChunks = false;
 // Detect optional flags
 if (args.Contains("--include-collision"))
     includeCollision = true;
@@ -45,6 +50,10 @@ if (args.Contains("--split-groups"))
     splitGroups = true;
 if (args.Contains("--include-facades") || args.Contains("--include-no-draw"))
     includeFacades = true;
+if (args.Contains("--exportfaces"))
+    exportFaces = true;
+// if (args.Contains("--exportchunks"))
+//     exportChunks = true;
 
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
@@ -132,7 +141,7 @@ if (command == "pm4")
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
     Console.WriteLine($"Exporting OBJ to {outputFile}...");
-    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile);
+    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
     Console.WriteLine("Export complete!");
 }
 else if (command == "pd4")
@@ -144,7 +153,7 @@ else if (command == "pd4")
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
     Console.WriteLine($"Exporting OBJ to {outputFile}...");
-    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile);
+    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
     Console.WriteLine("Export complete!");
 }
 

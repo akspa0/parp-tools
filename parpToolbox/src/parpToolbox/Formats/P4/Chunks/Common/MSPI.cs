@@ -59,31 +59,43 @@ internal sealed class MspiChunk : IIffChunk, IBinarySerializable
                 use32 = true;
         }
 
-        if (use32 && bytes % 12 != 0)
-            throw new InvalidDataException("MSPI size not valid for 32-bit indices (multiple of 12 bytes)");
-        if (!use32 && bytes % 6 != 0)
-            throw new InvalidDataException("MSPI size not valid for 16-bit indices (multiple of 6 bytes)");
+        // Allow non-multiple-of-6|12 sizes (may indicate triangle strip). Only reject odd byte counts.
+        if (bytes % (use32 ? 4 : 2) != 0)
+            throw new InvalidDataException("MSPI data length not divisible by index width");
 
-        int triCount = (int)(bytes / (use32 ? 12 : 6));
-        _triangles.Capacity = triCount;
-
-        for (int i = 0; i < triCount; i++)
+        int indexCount = (int)(bytes / (use32 ? 4 : 2));
+        var indices = new List<int>(indexCount);
+        for (int i = 0; i < indexCount; i++)
         {
-            int a, b, c;
-            if (use32)
-            {
-                a = (int)br.ReadUInt32();
-                b = (int)br.ReadUInt32();
-                c = (int)br.ReadUInt32();
-            }
-            else
-            {
-                a = br.ReadUInt16();
-                b = br.ReadUInt16();
-                c = br.ReadUInt16();
-            }
-            _triangles.Add((a, b, c));
+            int val = use32 ? (int)br.ReadUInt32() : br.ReadUInt16();
+            indices.Add(val);
         }
+
+        // Determine if data is triangle list or strip
+        if (indices.Count % 3 == 0)
+        {
+            // Triangle list
+            for (int i = 0; i < indices.Count; i += 3)
+                _triangles.Add((indices[i], indices[i + 1], indices[i + 2]));
+        }
+        else if (indices.Count >= 3)
+        {
+            // Triangle strip (alternating winding)
+            bool flip = false;
+            for (int i = 2; i < indices.Count; i++)
+            {
+                int a = indices[i - 2];
+                int b = indices[i - 1];
+                int c = indices[i];
+                if (flip)
+                {
+                    (b, c) = (c, b);
+                }
+                _triangles.Add((a, b, c));
+                flip = !flip;
+            }
+        }
+        // else: too few indices -> leave _triangles empty
     }
 
     public byte[] Serialize(long offset = 0) => throw new NotSupportedException();
