@@ -13,7 +13,9 @@ internal sealed class MspiChunk : IIffChunk, IBinarySerializable
     public const string Signature = "MSPI";
 
     private readonly List<(int A, int B, int C)> _triangles = new();
+    private readonly List<int> _indices = new();
     public IReadOnlyList<(int A, int B, int C)> Triangles => _triangles;
+    public IReadOnlyList<int> Indices => _indices;
 
     public string GetSignature() => Signature;
 
@@ -64,17 +66,19 @@ internal sealed class MspiChunk : IIffChunk, IBinarySerializable
             throw new InvalidDataException("MSPI data length not divisible by index width");
 
         int indexCount = (int)(bytes / (use32 ? 4 : 2));
-        var indices = new List<int>(indexCount);
+        _indices.Clear();
+        _indices.Capacity = indexCount;
         for (int i = 0; i < indexCount; i++)
         {
             int val = use32 ? (int)br.ReadUInt32() : br.ReadUInt16();
-            indices.Add(val);
+            _indices.Add(val);
         }
-
+        var indices = _indices;
         // Determine if data is triangle list or strip
         if (indices.Count % 3 == 0)
         {
             // Triangle list
+            _triangles.Clear();
             for (int i = 0; i < indices.Count; i += 3)
                 _triangles.Add((indices[i], indices[i + 1], indices[i + 2]));
         }

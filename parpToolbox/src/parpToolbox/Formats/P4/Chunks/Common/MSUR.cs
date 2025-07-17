@@ -6,35 +6,43 @@ using System.IO;
 using System.Numerics;
 
 /// <summary>
-/// MSUR – Surface metadata chunk. Each entry is 64 bytes as documented in msur_surface_reference.md.
-/// This loader parses the confirmed fields and stores them in <see cref="Entry"/> records.
+/// MSUR – Surface metadata chunk. Each entry is 32 bytes (confirmed July-2025 spec). The earlier 64-byte
+/// assumption was incorrect and caused misalignment. This implementation matches the authoritative
+/// `WoWToolbox.Core.v2` definition so downstream grouping logic receives valid indices.
 /// Unknown / padding bytes are kept for diagnostic purposes.
 /// </summary>
 internal sealed class MsurChunk : IIffChunk, IBinarySerializable
 {
     public const string Signature = "MSUR";
 
-    public sealed record Entry(
-        byte Flags,
-        byte SurfaceGroupKey,
-        bool IsM2Bucket,
-        byte IndexCount,
-        ushort SurfaceAttributeMask,
-        bool IsLiquidCandidate,
-        Vector3 RawNormal,
-        float RawPlaneD,
-        Vector3 NormalizedNormal,
-        float SurfaceHeight,
-        uint MsviFirstIndex,
-        int MdosIndex,
-        uint SurfaceKey,
-        uint PackedParams);
+    public sealed class Entry
+    {
+        // Raw fields (disk layout)
+        public byte FlagsOrUnknown_0x00;   // GroupKey / flags
+        public byte IndexCount;            // _0x01 – triangle index count
+        public byte Unknown_0x02;          // _0x02 – attribute mask
+        public byte Padding_0x03;          // _0x03 – padding
+        public float Nx;                   // _0x04
+        public float Ny;                   // _0x08
+        public float Nz;                   // _0x0C
+        public float Height;               // _0x10 – plane D or surface height
+        public uint MsviFirstIndex;        // _0x14
+        public uint MdosIndex;             // _0x18
+        public uint PackedParams;          // _0x1C
+
+        // Convenience accessors expected by adapters/exporters
+        public byte SurfaceGroupKey => FlagsOrUnknown_0x00;
+        public bool IsM2Bucket => SurfaceGroupKey == 0x00;
+        public byte SurfaceAttributeMask => Unknown_0x02;
+        public bool IsLiquidCandidate => (Unknown_0x02 & 0x80) != 0;
+        public uint SurfaceKey => PackedParams; // low-word often matches MSLK.LinkSubKey
+    }
 
     private readonly List<Entry> _entries = new();
     public IReadOnlyList<Entry> Entries => _entries;
 
     public string GetSignature() => Signature;
-    public uint GetSize() => (uint)(_entries.Count * 64);
+    public uint GetSize() => (uint)(_entries.Count * 32);
 
     public void LoadBinaryData(byte[] inData)
     {
@@ -45,32 +53,23 @@ internal sealed class MsurChunk : IIffChunk, IBinarySerializable
 
     public void Load(BinaryReader br)
     {
-        while (br.BaseStream.Position + 64 <= br.BaseStream.Length)
+        while (br.BaseStream.Position + 32 <= br.BaseStream.Length)
         {
-            byte flags = br.ReadByte();
-            byte groupKey = br.ReadByte();
-            bool isM2 = (flags & 0x10) != 0;
-            byte indexCount = br.ReadByte();
-            br.ReadByte(); // Unknown_0x02 padding
-            ushort attrMask = br.ReadUInt16();
-            bool isLiquid = (attrMask & 0x000C) != 0;
-            float rawNx = br.ReadSingle();
-            float rawNy = br.ReadSingle();
-            float rawNz = br.ReadSingle();
-            float rawD = br.ReadSingle();
-            Vector3 rawNormal = new(rawNx, rawNy, rawNz);
-            // Normalised normal follows
-            float normX = br.ReadSingle();
-            float normY = br.ReadSingle();
-            float normZ = br.ReadSingle();
-            float surfaceHeight = br.ReadSingle();
-            Vector3 normal = new(normX, normY, normZ);
-            uint firstIndex = br.ReadUInt32();
-            int mdosIndex = br.ReadInt32();
-            uint surfaceKey = br.ReadUInt32();
-            uint packedParams = br.ReadUInt32();
-
-            _entries.Add(new Entry(flags, groupKey, isM2, indexCount, attrMask, isLiquid, rawNormal, rawD, normal, surfaceHeight, firstIndex, mdosIndex, surfaceKey, packedParams));
+            var e = new Entry
+            {
+                FlagsOrUnknown_0x00 = br.ReadByte(),
+                IndexCount = br.ReadByte(),
+                Unknown_0x02 = br.ReadByte(),
+                Padding_0x03 = br.ReadByte(),
+                Nx = br.ReadSingle(),
+                Ny = br.ReadSingle(),
+                Nz = br.ReadSingle(),
+                Height = br.ReadSingle(),
+                MsviFirstIndex = br.ReadUInt32(),
+                MdosIndex = br.ReadUInt32(),
+                PackedParams = br.ReadUInt32()
+            };
+            _entries.Add(e);
         }
     }
 

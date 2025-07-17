@@ -9,7 +9,7 @@ using System.Runtime.CompilerServices;
 /// Ported MSLK entry from legacy Core.v2 with minimal dependencies removed.
 /// Represents a single link object in a PM4 scene graph.
 /// </summary>
-internal sealed class MslkEntry : IBinarySerializable
+public sealed class MslkEntry : IBinarySerializable
 {
     // ---- Raw fields (one-to-one with on-disk layout) --------------------
     public byte Unknown_0x00 { get; private set; }
@@ -23,6 +23,25 @@ internal sealed class MslkEntry : IBinarySerializable
     public ushort Unknown_0x12 { get; private set; }
 
     public const int StructSize = 20;
+
+    /// <summary>
+    /// High-word parent/container identifier used for hierarchical grouping.
+    /// </summary>
+    public uint ParentIndex => Unknown_0x04;
+
+    /// <summary>
+    /// Authoritative group-key for geometry objects. Equals low-word of MSUR.SurfaceKey.
+    /// </summary>
+    public ushort ReferenceIndex => Unknown_0x10;
+
+    /// <summary>
+    /// Composite key: low 16 bits of <see cref="LinkIdRaw"/>. Authoritative lookup key that
+    /// matches <c>SurfaceKey & 0xFFFF</c> from MSUR entries.
+    /// </summary>
+    public ushort LinkSubKey => (ushort)(Unknown_0x0C & 0xFFFF);
+
+
+
 
     // ---- Convenience decoded accessors ----------------------------------
     public bool HasGeometry => MspiFirstIndex >= 0 && MspiIndexCount > 0;
@@ -97,7 +116,7 @@ internal sealed class MslkEntry : IBinarySerializable
 /// <summary>
 /// Ported MSLK chunk – container for <see cref="MslkEntry"/> records.
 /// </summary>
-internal sealed class MslkChunk : IIffChunk, IBinarySerializable
+public sealed class MslkChunk : IIffChunk, IBinarySerializable
 {
     public const string Signature = "MSLK";
 

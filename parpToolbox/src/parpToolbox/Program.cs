@@ -16,7 +16,8 @@ if (args.Length == 0)
                       "   --split-groups        Export each WMO group separately\n" +
                       "   --include-facades     Keep facade/no-draw geometry (WMO)\n" +
                       "   --exportfaces        Write OBJ faces (default: point cloud)\n" +
-                      "   --exportchunks      Export each MSUR group to separate OBJ");
+                      "   --exportchunks      Export each MSUR group to separate OBJ\n" +
+                      "   --bulk-dump        Dump OBJs & CSVs for all groupings");
     return 1;
 }
 
@@ -41,8 +42,8 @@ bool includeCollision = false;
 bool splitGroups = false;
 bool includeFacades = false;
 bool exportFaces = false;
-// TODO: per-group OBJ export pending implementation
-// bool exportChunks = false;
+bool exportChunks = false;
+bool bulkDump = false;
 // Detect optional flags
 if (args.Contains("--include-collision"))
     includeCollision = true;
@@ -52,8 +53,10 @@ if (args.Contains("--include-facades") || args.Contains("--include-no-draw"))
     includeFacades = true;
 if (args.Contains("--exportfaces"))
     exportFaces = true;
-// if (args.Contains("--exportchunks"))
-//     exportChunks = true;
+if (args.Contains("--exportchunks"))
+    exportChunks = true;
+if (args.Contains("--bulk-dump"))
+    bulkDump = true;
 
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
@@ -140,8 +143,16 @@ if (command == "pm4")
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
-    Console.WriteLine($"Exporting OBJ to {outputFile}...");
-    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
+    if (exportChunks && scene.Groups.Count > 0)
+    {
+        Console.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
+        ParpToolbox.Services.PM4.Pm4GroupObjExporter.Export(scene, outputDir, exportFaces);
+    }
+    else
+    {
+        Console.WriteLine($"Exporting OBJ to {outputFile}...");
+        ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
+    }
     Console.WriteLine("Export complete!");
 }
 else if (command == "pd4")
@@ -152,8 +163,16 @@ else if (command == "pd4")
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
-    Console.WriteLine($"Exporting OBJ to {outputFile}...");
-    ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
+    if (exportChunks && scene.Groups.Count > 0)
+    {
+        Console.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
+        ParpToolbox.Services.PM4.Pm4GroupObjExporter.Export(scene, outputDir, exportFaces);
+    }
+    else
+    {
+        Console.WriteLine($"Exporting OBJ to {outputFile}...");
+        ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
+    }
     Console.WriteLine("Export complete!");
 }
 

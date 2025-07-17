@@ -23,6 +23,9 @@ namespace ParpToolbox.Services.PM4
         MsvtChunk? msvt = null;
         MspiChunk? mspi = null;
         MsviChunk? msvi = null;
+        MsurChunk? msur = null;
+        MslkChunk? mslk = null;
+        MprrChunk? mprr = null;
 
         while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
         {
@@ -45,6 +48,18 @@ namespace ParpToolbox.Services.PM4
                     msvi ??= new MsviChunk();
                     msvi.LoadBinaryData(data);
                     break;
+                case MsurChunk.Signature:
+                    msur ??= new MsurChunk();
+                    msur.LoadBinaryData(data);
+                    break;
+                case MslkChunk.Signature:
+                    mslk ??= new MslkChunk();
+                    mslk.LoadBinaryData(data);
+                    break;
+                case MprrChunk.Signature:
+                    mprr ??= new MprrChunk();
+                    mprr.LoadBinaryData(data);
+                    break;
                 case MspiChunk.Signature:
                     mspi ??= new MspiChunk();
                     int vertCount = msvt?.Vertices.Count ?? mspv?.Vertices.Count ?? 0;
@@ -64,10 +79,62 @@ namespace ParpToolbox.Services.PM4
 
         IReadOnlyList<Vector3> verts = msvt?.Vertices.Count > 0 ? msvt.Vertices : mspv!.Vertices;
         var tris = msvi != null ? msvi.Triangulate().ToList() : mspi!.Triangles;
+
+        // Build surface groups keyed by MSUR.SurfaceKey (Unknown_0x1C) – primary render-object key
+        var groupFaces = new Dictionary<uint, List<(int A,int B,int C)>>();
+        var groupAttr  = new Dictionary<uint, byte>();
+
+        // Build groups by MSUR.SurfaceKey – confirmed unique render-object ID
+        if (msur != null && msvi != null)
+        {
+            var indices = msvi.Indices;
+
+            foreach (var surf in msur.Entries)
+            {
+                // Validate index range
+                int first = (int)surf.MsviFirstIndex;
+                int indexCount = surf.IndexCount;
+                if (first < 0 || indexCount < 3 || first + indexCount > indices.Count)
+                    continue;
+
+                if (surf.IsM2Bucket) continue; // Ignore overlay-model bucket
+
+                uint groupId = surf.SurfaceKey;
+
+                if (!groupFaces.TryGetValue(groupId, out var list))
+                {
+                    list = new List<(int,int,int)>();
+                    groupFaces[groupId] = list;
+                    groupAttr[groupId] = surf.SurfaceAttributeMask;
+                }
+
+                int triCount = indexCount / 3;
+                for (int i = 0; i < triCount; i++)
+                {
+                    int baseIdx = first + i * 3;
+                    list.Add((indices[baseIdx], indices[baseIdx + 1], indices[baseIdx + 2]));
+                }
+            }
+        }
+
+        var groups = new List<SurfaceGroup>(groupFaces.Count);
+        foreach (var kvp in groupFaces)
+        {
+            uint gid32 = kvp.Key;
+            byte gidByte = (byte)(gid32 & 0xFF);
+            string gName = $"G{gid32:X8}";
+            groups.Add(new SurfaceGroup(gidByte, gName, kvp.Value, groupAttr[gid32]));
+        }
+
         var scene = new Pm4Scene
         {
             Vertices = verts,
-            Triangles = tris
+            Triangles = tris,
+            Surfaces = msur?.Entries ?? Array.Empty<MsurChunk.Entry>(),
+            Indices = msvi?.Indices ?? Array.Empty<int>(),
+            Groups = groups,
+            Links = mslk?.Entries ?? Array.Empty<MslkEntry>(),
+            Properties = mprr?.Entries ?? Array.Empty<MprrChunk.Entry>()
         };
         return scene;
     }

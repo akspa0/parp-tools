@@ -9,7 +9,7 @@ using System.IO;
 /// to encode two ushort values. Exact semantics remain unknown but the chunk is required by the
 /// legacy exporters and some analysis utilities.
 /// </summary>
-internal sealed class MprrChunk : IIffChunk, IBinarySerializable
+public sealed class MprrChunk : IIffChunk, IBinarySerializable
 {
     /// <summary>Canonical FourCC signature.</summary>
     public const string Signature = "MPRR";

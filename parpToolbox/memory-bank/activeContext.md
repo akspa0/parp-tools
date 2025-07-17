@@ -39,6 +39,19 @@
 ---
 
 ## Current Status
+
+### (2025-07-14 22:51)
+- PM4 export produced **825** groups (expected ~10–20). Grouping algorithm still incorrect.
+- MSUR chunk loader rewritten to 32-byte authoritative spec; alignment confirmed.
+- Hypothesis: grouping must mimic `MsurObjectExporter` logic – surface ranges matched by `ReferenceIndex` clusters.
+- Next session: port reference grouping routine and verify output counts.
+
+### (2025-07-14 21:16)
+- Initial attempt to map MSUR → MSLK via low-word `LinkIdRaw` succeeded for a subset of surfaces but left many unmapped.
+- Added containment fallback, but OBJ exporter now writes invalid geometry (Meshlab crashes) and still outputs just one OBJ file.
+- Hypothesis: 32-bit `Unknown_0x04` group key is correct, but our surface-to-group resolution and/or vertex-remap in `Pm4GroupObjExporter` is corrupting face indices.
+- Next session: audit face-index remapping, verify OBJ validity, ensure one OBJ per `SurfaceGroup`.
+
 WMO → OBJ export has been fully validated: façade planes are correctly filtered by default, and group/file naming matches in-game names. The command-line pipeline works reliably when arguments are passed via an executable build; the `dotnet run --` quirk is still under investigation.
 
 Focus now shifts to Phase 3 (PM4 / PD4 interior geometry support).  `IPm4Loader` has been scaffolded and the next tasks are:

@@ -25,5 +25,16 @@
 - CLI enhanced with `pm4` / `pd4` commands; build passes after refactor.
 - Memory bank `activeContext` tasks updated; port of legacy `Pm4BatchTool` planned for next session.
 
+## Recent Updates (2025-07-14 16:30)
+- Added bounds checks in `Pm4Adapter` when building faces to prevent invalid index ranges.
+- Implemented defensive vertex index validation in `Pm4GroupObjExporter` (skip out-of-range indices, remap checks).
+- CLI `--exportchunks` now functional; tool exports ~2.4k MSUR groups without crash (pending validation).
+
+## Recent Updates (2025-07-14 22:51)
+- Rewrote MSUR loader to 32-byte spec, fixing structure misalignment.
+- Ran PM4 export; received **825** OBJ groups instead of expected 10-20.
+- Conclusion: grouping logic still wrong; must port `MsurObjectExporter` grouping routine.
+- Next step: replicate reference grouping by surface ranges matching MSLK `ReferenceIndex`, validate counts with real data.
+
 ## Known Issues
 - **`dotnet run` Argument Parsing:** When using `dotnet run`, arguments passed after `--` are not being received by the application. The immediate priority is to diagnose and fix this issue to enable proper testing and use of the tool.
