@@ -11,7 +11,7 @@ using System.Numerics;
 /// `WoWToolbox.Core.v2` definition so downstream grouping logic receives valid indices.
 /// Unknown / padding bytes are kept for diagnostic purposes.
 /// </summary>
-internal sealed class MsurChunk : IIffChunk, IBinarySerializable
+public sealed class MsurChunk : IIffChunk, IBinarySerializable
 {
     public const string Signature = "MSUR";
 
@@ -35,7 +35,11 @@ internal sealed class MsurChunk : IIffChunk, IBinarySerializable
         public bool IsM2Bucket => SurfaceGroupKey == 0x00;
         public byte SurfaceAttributeMask => Unknown_0x02;
         public bool IsLiquidCandidate => (Unknown_0x02 & 0x80) != 0;
-        public uint SurfaceKey => PackedParams; // low-word often matches MSLK.LinkSubKey
+        public uint SurfaceKey => PackedParams; // 32-bit composite key
+
+        // High/low 16-bit portions (preferred for grouping)
+        public ushort SurfaceKeyHigh16 => (ushort)(PackedParams >> 16);
+        public ushort SurfaceKeyLow16  => (ushort)(PackedParams & 0xFFFF);
     }
 
     private readonly List<Entry> _entries = new();

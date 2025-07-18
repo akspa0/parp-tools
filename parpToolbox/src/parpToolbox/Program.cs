@@ -142,6 +142,17 @@ if (command == "pm4")
     var scene = loader.Load(fileInfo.FullName);
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
+
+    // Bulk dump path – CSV + per-group OBJs and early exit
+    if (bulkDump)
+    {
+        var bulkDir = Path.Combine(outputDir, "bulk_dump");
+        Console.WriteLine($"Running bulk dump to {bulkDir} ...");
+        ParpToolbox.Services.PM4.Pm4BulkDumper.Dump(scene, bulkDir, exportFaces);
+        Console.WriteLine("Bulk dump complete!");
+        return 0;
+    }
+
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
     if (exportChunks && scene.Groups.Count > 0)
     {
