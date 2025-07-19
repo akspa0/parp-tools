@@ -7,24 +7,51 @@
 - **Output Management:** `ProjectOutput` creates timestamped sub-directories under `project_output` for all generated assets.
 - **CLI Parsing:** Manual argument parser covers `wmo`, `pm4`, and `pd4` commands.
 - **PM4 Chunk Relationship Analysis:** Complete understanding of MPRL ↔ MSLK ↔ MSUR relationships with CSV validation.
-- **PM4 Object Assembly:** Three working exporters:
+- **PM4 Object Assembly:** Working exporters with SurfaceGroupKey-based grouping:
   - `Pm4SceneExporter`: Complete building interior as unified OBJ
-  - `Pm4MsurObjectAssembler`: Objects grouped by MSUR IndexCount (correct method)
-  - `Pm4ObjectAssembler`: Legacy ParentIndex grouping (produces fragments)
+  - `Pm4MsurObjectAssembler`: Objects grouped by MSUR SurfaceGroupKey with MPRL transformations
+  - Enhanced vertex validation to prevent (0,0,0) artifacts from invalid indices
 - **Coordinate System:** X-axis inversion fix applied for proper geometry orientation.
+- **Data Loss Detection:** Comprehensive analysis tools to identify missing vertex references and tile boundary issues.
 
 ## What's Left to Build
-- **PM4 Validation:** Test and validate MSUR-based object assembly with real data.
-- **PD4 Support:** Port PM4 insights to PD4 format for individual object processing.
-- **Output Path Standardization:** Ensure all exports go to unified `project_output` location.
-- **Legacy Comparison:** Compare new MSUR-based exports with legacy Core.v2 outputs.
-- **Test Suite:** Integration tests for PM4/PD4 and regression tests for WMO export.
+- **CRITICAL: Global Tile Loading System:** Implement unified PM4/PD4 loader that processes entire 64x64 tile regions as single mesh to resolve massive data loss (110,988+ missing vertex references)
+- **Index Pattern Investigation:** Complete analysis of high/low pair encodings in unknown fields to discover proper 32-bit index decoding
+- **Vertex Reference Mapping:** Implement cross-tile vertex index mapping and boundary handling
+- **PM4 Validation:** Test global tile loading with real multi-tile regions
+- **PD4 Support:** Port PM4 insights and global loading to PD4 format
+- **Output Path Standardization:** Ensure all exports go to unified `project_output` location
+- **Legacy Comparison:** Compare new global mesh exports with legacy Core.v2 outputs
+- **Test Suite:** Integration tests for PM4/PD4 and regression tests for WMO export
 
 ## Current Status
 - **WMO Export Complete.** Group naming is correct and facade planes filtered. Users can generate clean OBJs per group.
-- **PM4 Object Assembly Breakthrough.** Discovered that MSUR IndexCount (0x01 field) is the correct object identifier, not ParentIndex.
-- **PM4 Implementation Complete.** Three working exporters implemented with coordinate system fixes.
-- **Ready for Validation.** MSUR-based object assembly needs testing with real PM4 data to confirm complete objects vs fragments.
+- **CRITICAL DATA LOSS DISCOVERED.** 110,988 out-of-bounds vertex accesses (~64% data loss) due to cross-tile vertex references.
+- **PM4 Global Tile System Confirmed.** Individual PM4 files reference vertices from adjacent tiles, requiring unified region loading.
+- **Root Cause Analysis Complete.** (0,0,0) vertices are invalid data artifacts, not mysterious anchors. High/low pair encoding likely used for 32-bit indices.
+- **Enhanced Object Assembly.** SurfaceGroupKey-based grouping with MPRL transformations and improved vertex validation implemented.
+- **Investigation Tools Ready.** Pm4IndexPatternAnalyzer created to systematically analyze missing data patterns and high/low pair encodings.
+- **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
+
+## Recent Updates (2025-07-19)
+- **BREAKTHROUGH: Massive Data Loss Root Cause Identified**
+  - Discovered 110,988 out-of-bounds vertex accesses (~64% data loss) in PM4 exports
+  - Confirmed PM4 files are part of global tile system with cross-tile vertex references
+  - Available: 63,298 vertices (0-63297), Accessed: up to 126,595 → Missing ~63,000 vertices
+- **Critical Insights Gained**
+  - (0,0,0) vertices are invalid data artifacts from out-of-bounds access, not mysterious anchors
+  - High/low pair encoding pattern identified in unknown fields (likely 32-bit indices as two 16-bit values)
+  - Sequential out-of-bounds patterns suggest adjacent tile vertex pools
+- **Enhanced PM4 Object Assembly**
+  - Refactored to use MSUR.SurfaceGroupKey instead of IndexCount for object grouping
+  - Implemented MPRL transformation logic with position offset application
+  - Added comprehensive vertex validation to prevent invalid triangles and (0,0,0) artifacts
+  - Created Pm4IndexPatternAnalyzer for systematic investigation of missing data patterns
+- **Tools and Infrastructure**
+  - Enhanced Pm4MsurObjectAssembler with transform-aware vertex extraction
+  - Added detailed logging and debugging for vertex index validation
+  - Created automated chunk combination testing system (Pm4ChunkCombinationTester)
+  - Implemented comprehensive CSV export for chunk cross-reference analysis
 
 ## Recent Updates (2025-07-14)
 - Shared P4 chunk reader set created; identical PM4/PD4 chunks moved to `Formats/P4/Chunks/Common` with namespace `ParpToolbox.Formats.P4.Chunks.Common`.

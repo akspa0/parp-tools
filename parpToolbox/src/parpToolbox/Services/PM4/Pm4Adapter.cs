@@ -11,6 +11,8 @@ namespace ParpToolbox.Services.PM4
     /// <inheritdoc/>
     public sealed class Pm4Adapter : IPm4Loader
 {
+    /// <summary>Last captured raw MSVT chunk data for analysis purposes.</summary>
+    public static byte[]? LastRawMsvtData { get; private set; }
     public Pm4Scene Load(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -27,6 +29,9 @@ namespace ParpToolbox.Services.PM4
         MslkChunk? mslk = null;
         MprrChunk? mprr = null;
         MprlChunk? mprl = null;
+        
+        // Capture raw MSVT data for analysis
+        byte[]? rawMsvtData = null;
 
         while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
         {
@@ -44,6 +49,8 @@ namespace ParpToolbox.Services.PM4
                 case MsvtChunk.Signature:
                     msvt ??= new MsvtChunk();
                     msvt.LoadBinaryData(data);
+                    rawMsvtData = data; // Capture for analysis
+                    LastRawMsvtData = data; // Store for external access
                     break;
                 case MsviChunk.Signature:
                     msvi ??= new MsviChunk();

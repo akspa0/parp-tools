@@ -5,12 +5,18 @@ using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
 using ParpToolbox;
 using ParpToolbox.Services.WMO;
+using ParpToolbox.Utils;
+
+// Initialize logging to timestamped file
+var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+var logOutputDir = Path.Combine(Directory.GetCurrentDirectory(), "project_output", $"session_{timestamp}");
+ConsoleLogger.Initialize(logOutputDir);
 
 if (args.Length == 0)
 {
-    Console.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
+    ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-test-chunks | pm4-analyze-indices\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -19,6 +25,7 @@ if (args.Length == 0)
                       "   --exportchunks      Export each MSUR group to separate OBJ\n" +
                       "   --bulk-dump        Dump OBJs & CSVs for all groupings\n" +
                       "   --csv-dump         Export all chunk data to CSV files");
+    ConsoleLogger.Close();
     return 1;
 }
 
@@ -31,10 +38,12 @@ switch (command)
         break;
     case "pm4":
     case "pd4":
+    case "pm4-region":
+    case "pm4-test-chunks":
         // handled below
         break;
     default:
-        Console.WriteLine($"Error: Unknown command '{command}'");
+        ConsoleLogger.WriteLine($"Error: Unknown command '{command}'");
         return 1;
 }
 
@@ -128,7 +137,7 @@ try
         Console.WriteLine($"Exporting to {outputFile}...");
         ObjExporter.Export(groups, outputFile, includeCollision);
     }
-    Console.WriteLine("Export complete!");
+    ConsoleLogger.WriteLine("Export complete!");
 }
 }
 catch (Exception e)
@@ -141,7 +150,7 @@ catch (Exception e)
 
 if (command == "pm4")
 {
-    Console.WriteLine($"Parsing PM4 file: {fileInfo.FullName}");
+    ConsoleLogger.WriteLine($"Parsing PM4 file: {fileInfo.FullName}");
     var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
     var scene = loader.Load(fileInfo.FullName);
 
@@ -151,9 +160,9 @@ if (command == "pm4")
     if (bulkDump)
     {
         var bulkDir = Path.Combine(outputDir, "bulk_dump");
-        Console.WriteLine($"Running bulk dump to {bulkDir} ...");
-        ParpToolbox.Services.PM4.Pm4BulkDumper.Dump(scene, bulkDir, exportFaces);
-        Console.WriteLine("Bulk dump complete!");
+        ConsoleLogger.WriteLine($"Running bulk dump to {bulkDir} ...");
+        ParpToolbox.Services.PM4.Pm4BulkDumper.Dump(scene, bulkDir, exportFaces, ParpToolbox.Services.PM4.Pm4Adapter.LastRawMsvtData);
+        ConsoleLogger.WriteLine("Bulk dump complete!");
         return 0;
     }
     
@@ -161,7 +170,7 @@ if (command == "pm4")
     if (csvDump)
     {
         var csvDir = Path.Combine(outputDir, "csv_dump");
-        Console.WriteLine($"Running CSV dump to {csvDir} ...");
+        ConsoleLogger.WriteLine($"Running CSV dump to {csvDir} ...");
         ParpToolbox.Services.PM4.Pm4CsvDumper.DumpAllChunks(scene, csvDir);
         return 0;
     }
@@ -169,19 +178,19 @@ if (command == "pm4")
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
     if (exportChunks && scene.Groups.Count > 0)
     {
-        Console.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
+        ConsoleLogger.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
         ParpToolbox.Services.PM4.Pm4GroupObjExporter.Export(scene, outputDir, exportFaces);
     }
     else
     {
-        Console.WriteLine($"Exporting OBJ to {outputFile}...");
+        ConsoleLogger.WriteLine($"Exporting OBJ to {outputFile}...");
         ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
     }
-    Console.WriteLine("Export complete!");
+    ConsoleLogger.WriteLine("Export complete!");
 }
 else if (command == "pd4")
 {
-    Console.WriteLine($"Parsing PD4 file: {fileInfo.FullName}");
+    ConsoleLogger.WriteLine($"Parsing PD4 file: {fileInfo.FullName}");
     var loader = new ParpToolbox.Services.PD4.Pd4Adapter();
     var scene = loader.Load(fileInfo.FullName);
 
@@ -189,15 +198,123 @@ else if (command == "pd4")
     var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputFile) + ".obj");
     if (exportChunks && scene.Groups.Count > 0)
     {
-        Console.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
+        ConsoleLogger.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
         ParpToolbox.Services.PM4.Pm4GroupObjExporter.Export(scene, outputDir, exportFaces);
     }
     else
     {
-        Console.WriteLine($"Exporting OBJ to {outputFile}...");
+        ConsoleLogger.WriteLine($"Exporting OBJ to {outputFile}...");
         ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
     }
-    Console.WriteLine("Export complete!");
+    ConsoleLogger.WriteLine("Export complete!");
+}
+else if (command == "pm4-region")
+{
+    // PM4 Region command - load entire directory as unified global scene
+    if (string.IsNullOrEmpty(inputFile))
+    {
+        ConsoleLogger.WriteLine("Error: Input directory required for pm4-region command");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    if (!Directory.Exists(inputFile))
+    {
+        ConsoleLogger.WriteLine($"Error: Directory not found: {inputFile}");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    ConsoleLogger.WriteLine($"Loading PM4 region from directory: {inputFile}");
+    
+    // Load all PM4 files in directory as unified global scene
+    var globalScene = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.LoadRegion(inputFile, "*.pm4");
+    
+    // Convert to standard scene for compatibility with existing exporters
+    var unifiedScene = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.ToStandardScene(globalScene);
+    
+    var outputDir = ProjectOutput.CreateOutputDirectory("pm4_region_" + Path.GetFileName(inputFile.TrimEnd(Path.DirectorySeparatorChar)));
+    
+    // Test the unified scene with our object assembler
+    ConsoleLogger.WriteLine("Testing unified scene with MSUR object assembler...");
+    var assembledObjects = ParpToolbox.Services.PM4.Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(unifiedScene);
+    
+    // Export the assembled objects
+    if (assembledObjects.Count > 0)
+    {
+        ParpToolbox.Services.PM4.Pm4MsurObjectAssembler.ExportMsurObjects(assembledObjects, unifiedScene, outputDir);
+        ConsoleLogger.WriteLine($"Exported {assembledObjects.Count} unified objects from {globalScene.TotalLoadedTiles} tiles");
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("No objects assembled from unified scene");
+    }
+    
+    ConsoleLogger.WriteLine("PM4 region processing complete!");
+}
+else if (command == "pm4-test-chunks")
+{
+    // PM4 Chunk Testing command - run exhaustive tests to discover correct grouping logic
+    if (string.IsNullOrEmpty(inputFile))
+    {
+        ConsoleLogger.WriteLine("Error: Input PM4 file required for pm4-test-chunks command");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    var testFileInfo = new FileInfo(inputFile);
+    if (!testFileInfo.Exists)
+    {
+        ConsoleLogger.WriteLine($"Error: File not found: {inputFile}");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    ConsoleLogger.WriteLine($"Running exhaustive chunk combination tests on: {testFileInfo.FullName}");
+    
+    // Load the PM4 file
+    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+    var scene = loader.Load(fileInfo.FullName);
+    
+    var outputDir = ProjectOutput.CreateOutputDirectory("chunk_tests_" + Path.GetFileNameWithoutExtension(inputFile));
+    
+    // Run exhaustive chunk combination tests
+    ConsoleLogger.WriteLine("Starting exhaustive chunk combination testing...");
+    var testResults = ParpToolbox.Services.PM4.Pm4ChunkCombinationTester.RunExhaustiveChunkTests(scene, outputDir);
+    
+    // Report results
+    ConsoleLogger.WriteLine($"Completed {testResults.Count} tests");
+    if (testResults.Any())
+    {
+        var bestResult = testResults.First();
+        ConsoleLogger.WriteLine($"Best result: {bestResult.TestName}");
+        ConsoleLogger.WriteLine($"  Quality Score: {bestResult.GeometryQualityScore:F3}");
+        ConsoleLogger.WriteLine($"  Objects: {bestResult.ObjectCount}, Triangles: {bestResult.TotalTriangles}");
+        ConsoleLogger.WriteLine($"  Details: {bestResult.Details}");
+    }
+    
+    ConsoleLogger.WriteLine("Chunk combination testing complete!");
+}
+else if (command == "pm4-index-patterns")
+{
+    // PM4 Index Pattern Analysis command - analyze index patterns and missing data in PM4 files
+    if (string.IsNullOrEmpty(inputFile))
+    {
+        ConsoleLogger.WriteLine("Error: Input PM4 file required for pm4-index-patterns command");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    var testFileInfo = new FileInfo(inputFile);
+    if (!testFileInfo.Exists)
+    {
+        ConsoleLogger.WriteLine($"Error: File not found: {inputFile}");
+        ConsoleLogger.Close();
+        return 1;
+    }
+    
+    AnalyzePm4IndexPatterns(inputFile);
 }
 
+ConsoleLogger.Close();
 return 0;

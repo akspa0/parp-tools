@@ -40,14 +40,28 @@
 
 ## Current Status
 
-### (2025-07-18 19:40) - PM4 Chunk Relationships & Object Assembly Breakthrough
-- **Critical PM4 Discovery**: Individual objects are identified by **MSUR IndexCount (0x01 field)**, not ParentIndex
-- **Chunk Relationship Analysis Complete**:
+### (2025-07-19 03:33) - Critical Data Loss Discovery & Index Pattern Analysis
+- **MASSIVE DATA LOSS IDENTIFIED**: 110,988 out-of-bounds vertex accesses (~64% data loss)
+- **Root Cause**: PM4 files are part of global tile system - individual tiles reference vertices from adjacent tiles
+- **Evidence**:
+  - Available vertices: 63,298 (indices 0-63297)
+  - Maximum vertex index accessed: 126,595
+  - Missing ~63,000 vertices from adjacent/related tiles
+  - Sequential out-of-bounds patterns: 63298, 63299, 63300...
+- **Key Insights**:
+  - **High/Low Pair Encoding**: Unknown fields likely encode 32-bit indices as two 16-bit values
+  - **Tile Boundary References**: Vertex indices cross tile boundaries requiring global mesh loading
+  - **(0,0,0) Anchor Points**: Not mysterious anchors but invalid vertex data from out-of-bounds access
+- **Tools Created**:
+  - **Pm4IndexPatternAnalyzer**: Analyzes index patterns, high/low pairs, missing data
+  - **Enhanced vertex validation**: Skip triangles with invalid indices, prevent (0,0,0) artifacts
+- **Previous PM4 Discovery**: Individual objects identified by **MSUR SurfaceGroupKey**, not IndexCount
+- **Chunk Relationship Analysis**:
   - **MPRL.Unknown4 = MSLK.ParentIndex** (458 confirmed matches) - links placements to geometry
   - **MSLK entries with MspiFirstIndex = -1** are container/grouping nodes (no geometry)
   - **MPRR.Value1 = 65535** are property separators (15,427 sentinel values)
   - **MPRL.Unknown6 = 32768** consistently (likely type flag)
-- **Object Assembly Flow Decoded**:
+- **Object Assembly Flow**:
   1. **MPRL** defines object placements (positions + type IDs)
   2. **MSLK** links placements to geometry via ParentIndex → MPRL.Unknown4
   3. **MPRR** provides segmented properties between sentinel markers
