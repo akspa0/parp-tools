@@ -34,6 +34,10 @@
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
 ## Recent Updates (2025-07-19)
+### MSCN Cross-Tile Remap Started
+- Implemented `MscnRemapper` to append MSCN vertices and rewrite indices.
+- Placeholder per-tile logic in place—needs full region loader integration.
+- Next: create `Pm4RegionLoader` to merge 64×64 tiles and call remapper.
 - **BREAKTHROUGH: Massive Data Loss Root Cause Identified**
   - Discovered 110,988 out-of-bounds vertex accesses (~64% data loss) in PM4 exports
   - Confirmed PM4 files are part of global tile system with cross-tile vertex references

@@ -83,6 +83,12 @@
 WMO → OBJ export has been fully validated: façade planes are correctly filtered by default, and group/file naming matches in-game names. The command-line pipeline works reliably when arguments are passed via an executable build; the `dotnet run --` quirk is still under investigation.
 
 ### Next Priority Tasks
+1. **Integrate ParentIndex Mapping:** Build dictionary MSLK.ParentIndex → geometry nodes and attach to MPRL placements.
+2. **Enhance Object Assembly:** Combine ParentIndex-linked surfaces into composite PlacedObjects with correct transforms.
+3. **Validate Full Link Coverage:** Expect 100 % `LinksToMSLK=True` rows in `mprl_detailed.csv`.
+4. **Global Tile Loader** (unchanged): implement unified 64×64 tile loading.
+5. **High/Low Pair Decoding** (unchanged): verify 32-bit index encoding.
+
 1. **Port `MsurObjectExporter` grouping routine** from legacy codebase
 2. **Implement proper surface range matching** via MSLK `ReferenceIndex`
 3. **Validate PM4 group counts** against real data (target: 10-20 groups)

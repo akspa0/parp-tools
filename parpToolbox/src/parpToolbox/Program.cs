@@ -6,6 +6,7 @@ using WoWFormatLib.FileProviders;
 using ParpToolbox;
 using ParpToolbox.Services.WMO;
 using ParpToolbox.Utils;
+using ParpToolbox.Services.PM4;
 
 // Initialize logging to timestamped file
 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -147,6 +148,17 @@ catch (Exception e)
     return 1;
 }
 
+
+if (command == "pm4-region")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 region starting at: {fileInfo.FullName}");
+    var regionLoader = new Pm4RegionLoader();
+    var scene = regionLoader.LoadRegion(fileInfo.FullName);
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_region");
+    var assembled = Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(scene);
+    Pm4MsurObjectAssembler.ExportMsurObjects(assembled, scene, outputDir);
+    return 0;
+}
 
 if (command == "pm4")
 {
@@ -295,6 +307,7 @@ else if (command == "pm4-test-chunks")
     
     ConsoleLogger.WriteLine("Chunk combination testing complete!");
 }
+#if DEBUG_ANALYZER
 else if (command == "pm4-index-patterns")
 {
     // PM4 Index Pattern Analysis command - analyze index patterns and missing data in PM4 files
@@ -315,6 +328,7 @@ else if (command == "pm4-index-patterns")
     
     AnalyzePm4IndexPatterns(inputFile);
 }
+#endif
 
 ConsoleLogger.Close();
 return 0;

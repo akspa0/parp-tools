@@ -111,6 +111,35 @@ internal static class Pm4MsurObjectAssembler
         // Build MPRL to MSLK mappings for transformation application
         var mprlMappings = BuildMprlMslkMappings(scene);
         
+        // --- Build quick lookup: surface index ranges ----
+        var surfaceRanges = scene.Surfaces.Select(s => new
+        {
+            Surface = s,
+            Start = (int)s.MsviFirstIndex,
+            End = (int)s.MsviFirstIndex + s.IndexCount - 1
+        }).ToList();
+
+        // --- Map MSLK geometry nodes to owning surfaces ---
+        var linksBySurface = new Dictionary<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry, List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>>();
+        foreach (var link in scene.Links.OfType<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>())
+        {
+            if (link.MspiFirstIndex < 0 || link.MspiIndexCount == 0)
+                continue; // skip non-geometry nodes
+
+            int nodeStart = link.MspiFirstIndex;
+            int nodeEnd   = link.MspiFirstIndex + link.MspiIndexCount - 1;
+
+            var owner = surfaceRanges.FirstOrDefault(r => nodeStart >= r.Start && nodeEnd <= r.End)?.Surface;
+            if (owner == null) continue; // could not match – leave it out for now
+
+            if (!linksBySurface.TryGetValue(owner, out var list))
+            {
+                list = new List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>();
+                linksBySurface[owner] = list;
+            }
+            list.Add(link);
+        }
+
         // Process each MSUR surface individually, then group by SurfaceGroupKey
         var objectsBySurfaceGroupKey = new Dictionary<uint, List<(Vector3[] vertices, int[] faces)>>();
         
@@ -122,23 +151,38 @@ internal static class Pm4MsurObjectAssembler
         
         foreach (var surface in scene.Surfaces)
         {
-            if (surface.IndexCount <= 0) continue; // Skip surfaces without geometry
+            // Skip surfaces without geometry
+            if (surface.IndexCount <= 0)
+                continue;
             
             // Extract geometry for this specific surface only
             var surfaceVertices = new List<Vector3>();
             var surfaceFaces = new List<int>();
             
-            ExtractSurfaceTrianglesWithTransform(surface, scene, mprlMappings, surfaceVertices, surfaceFaces, ref maxVertexIndexSeen, ref outOfBoundsCount);
+            // Build transform list for this surface based on linked MSLK parent indices
+            List<Vector3> transforms = new() { Vector3.Zero }; // default
+            if (linksBySurface.TryGetValue(surface, out var linkedNodes))
+            {
+                var parentIds = linkedNodes.Select(l => l.ParentIndex).Distinct().ToHashSet();
+                var matched = mprlMappings.Where(m => parentIds.Contains(m.MslkParentIndex)).ToList();
+                if (matched.Count > 0)
+                {
+                    transforms = matched.Select(m => m.Position).ToList();
+                }
+            }
+
+            ExtractSurfaceTrianglesWithTransforms(surface, scene, transforms, surfaceVertices, surfaceFaces, ref maxVertexIndexSeen, ref outOfBoundsCount);
             
             if (surfaceVertices.Count > 0 && surfaceFaces.Count > 0)
             {
-                // Group by SurfaceGroupKey for final object assembly
-                if (!objectsBySurfaceGroupKey.TryGetValue(surface.SurfaceGroupKey, out var surfaceList))
+                // Group by MSUR.IndexCount (0x01 field) per discovery of full-object grouping
+                uint objectKey = (uint)surface.IndexCount;
+                if (!objectsBySurfaceGroupKey.TryGetValue(objectKey, out var surfaceList))
                 {
                     surfaceList = new List<(Vector3[], int[])>();
-                    objectsBySurfaceGroupKey[surface.SurfaceGroupKey] = surfaceList;
+                    objectsBySurfaceGroupKey[objectKey] = surfaceList;
                 }
-                
+
                 surfaceList.Add((surfaceVertices.ToArray(), surfaceFaces.ToArray()));
             }
         }
@@ -151,7 +195,7 @@ internal static class Pm4MsurObjectAssembler
             var consolidatedVertices = new List<Vector3>();
             var consolidatedFaces = new List<int>();
             
-            ConsoleLogger.WriteLine($"    Processing SurfaceGroupKey {surfaceGroupKey} with {surfaceList.Count} surfaces");
+            ConsoleLogger.WriteLine($"    Processing IndexCount {surfaceGroupKey} with {surfaceList.Count} surfaces");
             
             // Consolidate all surfaces for this IndexCount into a single object
             foreach (var (surfaceVertices, surfaceFaces) in surfaceList)
@@ -187,7 +231,7 @@ internal static class Pm4MsurObjectAssembler
                 }
                 
                 var msurObject = new MsurObject(
-                    SurfaceGroupKey: (byte)surfaceGroupKey, // Use SurfaceGroupKey as identifier
+                    SurfaceGroupKey: (byte)(surfaceGroupKey & 0xFF), // store low byte of IndexCount for legacy compatibility
                     SurfaceCount: surfaceList.Count,
                     Triangles: triangles,
                     BoundingCenter: boundingCenter,
@@ -297,10 +341,11 @@ internal static class Pm4MsurObjectAssembler
     /// Extracts triangles from a surface with MPRL transformation support.
     /// Applies MPRL placement transformations to correctly position geometry in world space.
     /// </summary>
-    private static void ExtractSurfaceTrianglesWithTransform(
+    // Extract triangles applying one or more translation transforms (MPRL positions)
+    private static void ExtractSurfaceTrianglesWithTransforms(
         ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry surface,
         Pm4Scene scene,
-        List<MprlMslkMapping> mprlMappings,
+        List<Vector3> transforms,
         List<Vector3> vertices,
         List<int> faces,
         ref int maxVertexIndexSeen,
@@ -319,13 +364,12 @@ internal static class Pm4MsurObjectAssembler
         var finalNormal = Vector3.Normalize(surfaceNormal);
         bool usePlane = finalNormal.LengthSquared() > 0.01f; // Only project if normal is valid
         
-        // Find applicable MPRL transformations for this surface's group
-        var applicableTransforms = mprlMappings
-            .Where(m => m.MslkParentIndex == surface.SurfaceGroupKey)
-            .ToList();
-        
-        if (applicableTransforms.Any())
+        // Apply each provided transform (often one, sometimes many)
+        var applicableTransforms = transforms.Count > 0 ? transforms : new List<Vector3>{Vector3.Zero};
+        // number of transforms only used for logging
+        if (applicableTransforms.Count > 1)
         {
+            ConsoleLogger.WriteLine($"    Surface SurfaceGroupKey={surface.SurfaceGroupKey}: {applicableTransforms.Count} placement transforms");
             ConsoleLogger.WriteLine($"    Surface SurfaceGroupKey={surface.SurfaceGroupKey}: Found {applicableTransforms.Count} MPRL transforms");
         }
         
@@ -432,7 +476,7 @@ internal static class Pm4MsurObjectAssembler
     /// </summary>
     private static int GetOrAddVertexWithTransform(int vertexIndex, Pm4Scene scene, List<Vector3> vertices,
         Dictionary<int, int> vertexMap, bool usePlane, Vector3 normal, float surfaceHeight, 
-        List<MprlMslkMapping> applicableTransforms, ref int outOfBoundsCount)
+        List<Vector3> transforms, ref int outOfBoundsCount)
     {
         // Check if vertex is already in the local pool
         if (vertexMap.TryGetValue(vertexIndex, out int existingLocalIndex))
@@ -472,19 +516,19 @@ internal static class Pm4MsurObjectAssembler
         }
         
         // Apply MPRL transformations if available
-        if (applicableTransforms.Any())
+        if (transforms.Any())
         {
             // For now, apply the first available transformation
             // TODO: Implement proper hierarchical transformation logic
-            var mprlTransform = applicableTransforms.First();
+            var offset = transforms.First();
             
             // Apply MPRL position offset
-            transformedVertex += mprlTransform.Position;
+            transformedVertex += offset;
             
             // Log transformation for debugging
             if (vertices.Count < 5) // Only log first few vertices to avoid spam
             {
-                ConsoleLogger.WriteLine($"      Applied MPRL transform: vertex[{vertexIndex}] offset by {mprlTransform.Position}");
+                ConsoleLogger.WriteLine($"      Applied MPRL transform: vertex[{vertexIndex}] offset by {offset}");
             }
         }
         

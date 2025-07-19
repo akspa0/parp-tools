@@ -60,8 +60,8 @@ public sealed class Pd4Adapter : IPm4Loader // temporary reuse of interface & sc
         IReadOnlyList<Vector3> verts = msvt?.Vertices.Count > 0 ? msvt.Vertices : mspv!.Vertices;
         var scene = new Pm4Scene
         {
-            Vertices = verts,
-            Triangles = mspi.Triangles
+            Vertices = verts.ToList(),
+            Triangles = mspi.Triangles.ToList()
         };
         return scene;
     }

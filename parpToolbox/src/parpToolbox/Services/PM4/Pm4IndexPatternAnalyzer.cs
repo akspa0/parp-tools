@@ -1,3 +1,4 @@
+#if DEBUG_ANALYZER
 namespace ParpToolbox.Services.PM4;
 
 using System;
@@ -359,3 +360,4 @@ RECOMMENDATIONS:
         return summary.Trim();
     }
 }
+#endif

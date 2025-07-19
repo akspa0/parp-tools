@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using System.Numerics;
-using System.Linq;
+
 
 namespace ParpToolbox.Services.PM4
 {
@@ -29,6 +30,7 @@ namespace ParpToolbox.Services.PM4
         MslkChunk? mslk = null;
         MprrChunk? mprr = null;
         MprlChunk? mprl = null;
+                    MscnChunk? mscn = null;
         
         // Capture raw MSVT data for analysis
         byte[]? rawMsvtData = null;
@@ -76,6 +78,10 @@ namespace ParpToolbox.Services.PM4
                     mspi ??= new MspiChunk();
                     int vertCount = msvt?.Vertices.Count ?? mspv?.Vertices.Count ?? 0;
                     mspi.LoadBinaryData(data, vertCount);
+                    break;
+                case MscnChunk.Signature:
+                    mscn ??= new MscnChunk();
+                    mscn.LoadBinaryData(data);
                     break;
                 default:
                     // skip unknown chunks for now
@@ -140,14 +146,15 @@ namespace ParpToolbox.Services.PM4
 
         var scene = new Pm4Scene
         {
-            Vertices = verts,
-            Triangles = tris,
-            Surfaces = msur?.Entries ?? Array.Empty<MsurChunk.Entry>(),
-            Indices = msvi?.Indices ?? Array.Empty<int>(),
-            Groups = groups,
-            Links = mslk?.Entries ?? Array.Empty<MslkEntry>(),
-            Properties = mprr?.Entries ?? Array.Empty<MprrChunk.Entry>(),
-            Placements = mprl?.Entries ?? Array.Empty<MprlChunk.Entry>()
+            Vertices = verts.ToList(),
+            Triangles = tris.ToList(),
+            Surfaces = (msur?.Entries ?? Array.Empty<MsurChunk.Entry>()).ToList(),
+            Indices = (msvi?.Indices ?? Array.Empty<int>()).ToList(),
+            Groups = groups.ToList(),
+            Links = (mslk?.Entries ?? Array.Empty<MslkEntry>()).ToList(),
+            Properties = (mprr?.Entries ?? Array.Empty<MprrChunk.Entry>()).ToList(),
+            Placements = (mprl?.Entries ?? Array.Empty<MprlChunk.Entry>()).ToList(),
+             ExtraChunks = mscn != null ? new List<IIffChunk>{ mscn } : new List<IIffChunk>()
         };
         return scene;
     }

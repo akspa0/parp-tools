@@ -24,7 +24,7 @@ internal interface IBinarySerializable
 /// <summary>
 /// Contract for binary chunks that have a FourCC signature.
 /// </summary>
-internal interface IIffChunk
+public interface IIffChunk
 {
     /// <summary>Gets the four-character ASCII signature of the chunk (e.g. "MSLK").</summary>
     string GetSignature();
