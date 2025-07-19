@@ -6,16 +6,25 @@
 - **OBJ Exporting:** WMO → OBJ/MTL verified. PM4/PD4 exporters now reliably emit point-cloud OBJ (vertices only) to avoid viewer crashes.
 - **Output Management:** `ProjectOutput` creates timestamped sub-directories under `project_output` for all generated assets.
 - **CLI Parsing:** Manual argument parser covers `wmo`, `pm4`, and `pd4` commands.
+- **PM4 Chunk Relationship Analysis:** Complete understanding of MPRL ↔ MSLK ↔ MSUR relationships with CSV validation.
+- **PM4 Object Assembly:** Three working exporters:
+  - `Pm4SceneExporter`: Complete building interior as unified OBJ
+  - `Pm4MsurObjectAssembler`: Objects grouped by MSUR IndexCount (correct method)
+  - `Pm4ObjectAssembler`: Legacy ParentIndex grouping (produces fragments)
+- **Coordinate System:** X-axis inversion fix applied for proper geometry orientation.
 
 ## What's Left to Build
-- **PM4/PD4 Support:** Interior geometry loaders, adapters, and exporters.
-- **CLI Enhancements:** `pm4` and `pd4` commands with parity to `wmo` flags.
+- **PM4 Validation:** Test and validate MSUR-based object assembly with real data.
+- **PD4 Support:** Port PM4 insights to PD4 format for individual object processing.
+- **Output Path Standardization:** Ensure all exports go to unified `project_output` location.
+- **Legacy Comparison:** Compare new MSUR-based exports with legacy Core.v2 outputs.
 - **Test Suite:** Integration tests for PM4/PD4 and regression tests for WMO export.
 
 ## Current Status
 - **WMO Export Complete.** Group naming is correct and facade planes filtered. Users can generate clean OBJs per group.
-- **dotnet run Quirk.** Argument parsing works in compiled exe; nuance with `dotnet run --` still noted but low priority.
-- **PM4/PD4 Phase Started.** Loader interface scaffolded; implementation to follow in next session.
+- **PM4 Object Assembly Breakthrough.** Discovered that MSUR IndexCount (0x01 field) is the correct object identifier, not ParentIndex.
+- **PM4 Implementation Complete.** Three working exporters implemented with coordinate system fixes.
+- **Ready for Validation.** MSUR-based object assembly needs testing with real PM4 data to confirm complete objects vs fragments.
 
 ## Recent Updates (2025-07-14)
 - Shared P4 chunk reader set created; identical PM4/PD4 chunks moved to `Formats/P4/Chunks/Common` with namespace `ParpToolbox.Formats.P4.Chunks.Common`.

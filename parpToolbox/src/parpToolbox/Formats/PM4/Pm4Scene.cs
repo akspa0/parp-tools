@@ -25,6 +25,9 @@ namespace ParpToolbox.Formats.PM4
 
     /// <summary>Optional property records from MPRR.</summary>
     public IReadOnlyList<ParpToolbox.Formats.P4.Chunks.Common.MprrChunk.Entry> Properties { get; init; } = Array.Empty<ParpToolbox.Formats.P4.Chunks.Common.MprrChunk.Entry>();
+
+    /// <summary>Optional placement records from MPRL (likely doodad/prop positions).</summary>
+    public IReadOnlyList<ParpToolbox.Formats.P4.Chunks.Common.MprlChunk.Entry> Placements { get; init; } = Array.Empty<ParpToolbox.Formats.P4.Chunks.Common.MprlChunk.Entry>();
 }
 
 /// <summary>Represents a contiguous set of indices defined by an MSUR entry.</summary>

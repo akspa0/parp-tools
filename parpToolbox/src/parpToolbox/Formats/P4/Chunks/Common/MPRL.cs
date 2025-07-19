@@ -9,7 +9,7 @@ using System.Numerics;
 /// MPRL – Placement list (likely doodad/prop positions). Structure confirmed 24-byte per entry.
 /// Field meaning largely unknown but contains a position vector at 0x08.
 /// </summary>
-internal sealed class MprlChunk : IIffChunk, IBinarySerializable
+public sealed class MprlChunk : IIffChunk, IBinarySerializable
 {
     public const string Signature = "MPRL";
 

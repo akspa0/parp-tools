@@ -17,7 +17,8 @@ if (args.Length == 0)
                       "   --include-facades     Keep facade/no-draw geometry (WMO)\n" +
                       "   --exportfaces        Write OBJ faces (default: point cloud)\n" +
                       "   --exportchunks      Export each MSUR group to separate OBJ\n" +
-                      "   --bulk-dump        Dump OBJs & CSVs for all groupings");
+                      "   --bulk-dump        Dump OBJs & CSVs for all groupings\n" +
+                      "   --csv-dump         Export all chunk data to CSV files");
     return 1;
 }
 
@@ -44,6 +45,7 @@ bool includeFacades = false;
 bool exportFaces = false;
 bool exportChunks = false;
 bool bulkDump = false;
+bool csvDump = false;
 // Detect optional flags
 if (args.Contains("--include-collision"))
     includeCollision = true;
@@ -57,6 +59,8 @@ if (args.Contains("--exportchunks"))
     exportChunks = true;
 if (args.Contains("--bulk-dump"))
     bulkDump = true;
+if (args.Contains("--csv-dump"))
+    csvDump = true;
 
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
@@ -150,6 +154,15 @@ if (command == "pm4")
         Console.WriteLine($"Running bulk dump to {bulkDir} ...");
         ParpToolbox.Services.PM4.Pm4BulkDumper.Dump(scene, bulkDir, exportFaces);
         Console.WriteLine("Bulk dump complete!");
+        return 0;
+    }
+    
+    // CSV dump path – export all chunk data to CSV files and early exit
+    if (csvDump)
+    {
+        var csvDir = Path.Combine(outputDir, "csv_dump");
+        Console.WriteLine($"Running CSV dump to {csvDir} ...");
+        ParpToolbox.Services.PM4.Pm4CsvDumper.DumpAllChunks(scene, csvDir);
         return 0;
     }
 

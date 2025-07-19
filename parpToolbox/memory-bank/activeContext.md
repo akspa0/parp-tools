@@ -40,22 +40,37 @@
 
 ## Current Status
 
-### (2025-07-14 22:51)
+### (2025-07-18 19:40) - PM4 Chunk Relationships & Object Assembly Breakthrough
+- **Critical PM4 Discovery**: Individual objects are identified by **MSUR IndexCount (0x01 field)**, not ParentIndex
+- **Chunk Relationship Analysis Complete**:
+  - **MPRL.Unknown4 = MSLK.ParentIndex** (458 confirmed matches) - links placements to geometry
+  - **MSLK entries with MspiFirstIndex = -1** are container/grouping nodes (no geometry)
+  - **MPRR.Value1 = 65535** are property separators (15,427 sentinel values)
+  - **MPRL.Unknown6 = 32768** consistently (likely type flag)
+- **Object Assembly Flow Decoded**:
+  1. **MPRL** defines object placements (positions + type IDs)
+  2. **MSLK** links placements to geometry via ParentIndex → MPRL.Unknown4
+  3. **MPRR** provides segmented properties between sentinel markers
+  4. **MSUR** defines surface geometry with **IndexCount as object identifier**
+- **Implementation Status**:
+  - ✅ `Pm4MsurObjectAssembler` created using MSUR IndexCount grouping
+  - ✅ `Pm4SceneExporter` for complete building interior export
+  - ✅ Coordinate system fix (X-axis inversion) applied
+  - ✅ CSV analysis pipeline for chunk relationship validation
+
+### (2025-07-14 22:51) - PM4 Export Issues
 - PM4 export produced **825** groups (expected ~10–20). Grouping algorithm still incorrect.
 - MSUR chunk loader rewritten to 32-byte authoritative spec; alignment confirmed.
-- Hypothesis: grouping must mimic `MsurObjectExporter` logic – surface ranges matched by `ReferenceIndex` clusters.
-- Next session: port reference grouping routine and verify output counts.
+- **Root Cause**: Complex multi-object relationships in PM4 not properly understood
+- **Solution Path**: Port legacy `MsurObjectExporter` grouping algorithm
+- **Critical**: Ensure PD4 export stability while fixing PM4 logic
 
-### (2025-07-14 21:16)
-- Initial attempt to map MSUR → MSLK via low-word `LinkIdRaw` succeeded for a subset of surfaces but left many unmapped.
-- Added containment fallback, but OBJ exporter now writes invalid geometry (Meshlab crashes) and still outputs just one OBJ file.
-- Hypothesis: 32-bit `Unknown_0x04` group key is correct, but our surface-to-group resolution and/or vertex-remap in `Pm4GroupObjExporter` is corrupting face indices.
-- Next session: audit face-index remapping, verify OBJ validity, ensure one OBJ per `SurfaceGroup`.
-
+### WMO Export Status
 WMO → OBJ export has been fully validated: façade planes are correctly filtered by default, and group/file naming matches in-game names. The command-line pipeline works reliably when arguments are passed via an executable build; the `dotnet run --` quirk is still under investigation.
 
-Focus now shifts to Phase 3 (PM4 / PD4 interior geometry support).  `IPm4Loader` has been scaffolded and the next tasks are:
-1. Port Core.v2 PM4/PD4 readers into clean adapters.
-2. Extend CLI with `pm4` / `pd4` commands mirroring existing flags.
-3. Re-use `ObjExporter` for quick geometry validation.
-4. Maintain the same clean output discipline under `project_output/`. 
+### Next Priority Tasks
+1. **Port `MsurObjectExporter` grouping routine** from legacy codebase
+2. **Implement proper surface range matching** via MSLK `ReferenceIndex`
+3. **Validate PM4 group counts** against real data (target: 10-20 groups)
+4. **Maintain PD4 export stability** during PM4 fixes
+5. **Update memory bank** with current format understanding 

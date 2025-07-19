@@ -18,7 +18,7 @@ public sealed class MslkEntry : IBinarySerializable
     public uint Unknown_0x04 { get; private set; }
     public int  MspiFirstIndex { get; private set; }   // 24-bit signed
     public byte MspiIndexCount { get; private set; }
-    public uint Unknown_0x0C { get; private set; }
+    public uint LinkIdRaw { get; private set; }        // 32-bit tile coordinate field
     public ushort Unknown_0x10 { get; private set; }
     public ushort Unknown_0x12 { get; private set; }
 
@@ -35,17 +35,66 @@ public sealed class MslkEntry : IBinarySerializable
     public ushort ReferenceIndex => Unknown_0x10;
 
     /// <summary>
-    /// Composite key: low 16 bits of <see cref="LinkIdRaw"/>. Authoritative lookup key that
-    /// matches <c>SurfaceKey & 0xFFFF</c> from MSUR entries.
+    /// High 16 bits of Unknown_0x10 for grouping analysis.
     /// </summary>
-    public ushort LinkSubKey => (ushort)(Unknown_0x0C & 0xFFFF);
+    public ushort ReferenceIndexHigh => (ushort)(Unknown_0x10 >> 16);
 
+    /// <summary>
+    /// Low 16 bits of Unknown_0x10 for grouping analysis.
+    /// </summary>
+    public ushort ReferenceIndexLow => (ushort)(Unknown_0x10 & 0xFFFF);
 
+    /// <summary>
+    /// Padding field from LinkIdRaw (should always be 0xFFFF).
+    /// </summary>
+    public ushort LinkIdPadding => (ushort)(LinkIdRaw >> 16);
 
+    /// <summary>
+    /// Tile Y coordinate decoded from LinkIdRaw using legacy logic (YYXX pattern).
+    /// </summary>
+    public byte LinkIdTileY => (byte)((LinkIdRaw >> 8) & 0xFF);
+
+    /// <summary>
+    /// Tile X coordinate decoded from LinkIdRaw using legacy logic (YYXX pattern).
+    /// </summary>
+    public byte LinkIdTileX => (byte)(LinkIdRaw & 0xFF);
+
+    /// <summary>
+    /// Attempts to decode tile coordinates from LinkIdRaw using legacy LinkIdDecoder logic.
+    /// Returns true if the pattern matches (high 16 bits == 0xFFFF), false otherwise.
+    /// </summary>
+    public bool TryDecodeTileCoordinates(out int tileX, out int tileY)
+    {
+        tileX = tileY = 0;
+        ushort high = (ushort)(LinkIdRaw >> 16);
+        ushort low = (ushort)(LinkIdRaw & 0xFFFF);
+        if (high != 0xFFFF) return false; // unknown schema
+
+        // low word stored as YYXX (little-endian). Split bytes.
+        byte yy = (byte)(low >> 8);
+        byte xx = (byte)(low & 0xFF);
+        tileX = xx;
+        tileY = yy;
+        return true;
+    }
+
+    /// <summary>
+    /// Returns true if this entry has valid tile coordinates (LinkIdRaw follows 0xFFFFYYXX pattern).
+    /// </summary>
+    public bool HasValidTileCoordinates => (LinkIdRaw >> 16) == 0xFFFF;
+
+    /// <summary>
+    /// Composite tile coordinate key constructed from Y and X tile positions.
+    /// </summary>
+    public ushort TileCoordinate => (ushort)((LinkIdTileY << 8) | LinkIdTileX);
+
+    /// <summary>
+    /// Legacy compatibility: composite key matching MSUR SurfaceKey low 16 bits.
+    /// </summary>
+    public ushort LinkSubKey => TileCoordinate;
 
     // ---- Convenience decoded accessors ----------------------------------
     public bool HasGeometry => MspiFirstIndex >= 0 && MspiIndexCount > 0;
-    public uint LinkIdRaw => Unknown_0x0C;
 
     // ----------------------------------------------------------------------
     public void LoadBinaryData(byte[] inData)
@@ -66,7 +115,7 @@ public sealed class MslkEntry : IBinarySerializable
         Unknown_0x04 = br.ReadUInt32();
         MspiFirstIndex = ReadInt24(br);
         MspiIndexCount = br.ReadByte();
-        Unknown_0x0C = br.ReadUInt32();
+        LinkIdRaw = br.ReadUInt32();
         Unknown_0x10 = br.ReadUInt16();
         Unknown_0x12 = br.ReadUInt16();
     }
@@ -89,7 +138,7 @@ public sealed class MslkEntry : IBinarySerializable
         bw.Write(Unknown_0x04);
         WriteInt24(bw, MspiFirstIndex);
         bw.Write(MspiIndexCount);
-        bw.Write(Unknown_0x0C);
+        bw.Write(LinkIdRaw);
         bw.Write(Unknown_0x10);
         bw.Write(Unknown_0x12);
     }

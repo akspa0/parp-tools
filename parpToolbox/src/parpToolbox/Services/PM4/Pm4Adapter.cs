@@ -26,6 +26,7 @@ namespace ParpToolbox.Services.PM4
         MsurChunk? msur = null;
         MslkChunk? mslk = null;
         MprrChunk? mprr = null;
+        MprlChunk? mprl = null;
 
         while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
         {
@@ -59,6 +60,10 @@ namespace ParpToolbox.Services.PM4
                 case MprrChunk.Signature:
                     mprr ??= new MprrChunk();
                     mprr.LoadBinaryData(data);
+                    break;
+                case MprlChunk.Signature:
+                    mprl ??= new MprlChunk();
+                    mprl.LoadBinaryData(data);
                     break;
                 case MspiChunk.Signature:
                     mspi ??= new MspiChunk();
@@ -134,7 +139,8 @@ namespace ParpToolbox.Services.PM4
             Indices = msvi?.Indices ?? Array.Empty<int>(),
             Groups = groups,
             Links = mslk?.Entries ?? Array.Empty<MslkEntry>(),
-            Properties = mprr?.Entries ?? Array.Empty<MprrChunk.Entry>()
+            Properties = mprr?.Entries ?? Array.Empty<MprrChunk.Entry>(),
+            Placements = mprl?.Entries ?? Array.Empty<MprlChunk.Entry>()
         };
         return scene;
     }
