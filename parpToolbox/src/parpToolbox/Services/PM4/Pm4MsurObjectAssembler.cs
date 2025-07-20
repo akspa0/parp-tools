@@ -35,7 +35,7 @@ internal static class Pm4MsurObjectAssembler
     /// </summary>
     private record MprlMslkMapping(
         int MprlIndex,
-        uint MprlUnknown4,
+        uint PlacementIndexKey,
         uint MslkParentIndex,
         Vector3 Position,
         MprlChunk.Entry MprlEntry
@@ -59,37 +59,36 @@ internal static class Pm4MsurObjectAssembler
     {
         var mappings = new List<MprlMslkMapping>();
         
-        ConsoleLogger.WriteLine($"Building MPRL→MSLK mappings from {scene.Placements.Count} MPRL entries and {scene.Links.Count} MSLK entries...");
+        ConsoleLogger.WriteLine($"Building placementIdx→MSLK.Parent mappings fast ({scene.Placements.Count} placements, {scene.Links.Count} links)...");
+
+        // Pre-index links by ParentIndex for O(1) lookup
+        var linksByParent = scene.Links
+            .GroupBy(l => l.ParentIndex)
+            .ToDictionary(g => g.Key, g => g.ToList());
         
-        for (int mprlIndex = 0; mprlIndex < scene.Placements.Count; mprlIndex++)
+        foreach (var kvp in linksByParent)
         {
-            var mprlEntry = scene.Placements[mprlIndex];
-            var unknown4 = mprlEntry.Unknown4;
-            
-            // Find MSLK entries where ParentIndex matches MPRL.Unknown4
-            var matchingMslkEntries = scene.Links
-                .Select((link, index) => new { Link = link, Index = index })
-                .Where(x => x.Link.ParentIndex == unknown4)
-                .ToList();
-            
-            if (matchingMslkEntries.Any())
+            uint placementKey = kvp.Key;
+            if (placementKey >= scene.Placements.Count)
+                continue; // safety guard – some ParentIndex values exceed placement rows (rare)
+
+            var matches = kvp.Value;
+            var mprlEntry = scene.Placements[(int)placementKey];
+            ConsoleLogger.WriteLine($"  placementIdx {placementKey} → {matches.Count} MSLK matches");
+
+            foreach (var link in matches)
             {
-                ConsoleLogger.WriteLine($"  MPRL[{mprlIndex}].Unknown4={unknown4} → {matchingMslkEntries.Count} MSLK matches");
-                
-                foreach (var match in matchingMslkEntries)
-                {
-                    mappings.Add(new MprlMslkMapping(
-                        mprlIndex,
-                        unknown4,
-                        match.Link.ParentIndex,
-                        TransformMprlPosition(mprlEntry),
-                        mprlEntry
-                    ));
-                }
+                mappings.Add(new MprlMslkMapping(
+                    (int)placementKey,
+                    placementKey,
+                    link.ParentIndex,
+                    TransformMprlPosition(mprlEntry),
+                    mprlEntry
+                ));
             }
         }
         
-        ConsoleLogger.WriteLine($"Built {mappings.Count} MPRL→MSLK mappings");
+        ConsoleLogger.WriteLine($"Built {mappings.Count} placement→link mappings (fast)");
         return mappings;
     }
 
@@ -117,7 +116,8 @@ internal static class Pm4MsurObjectAssembler
             Surface = s,
             Start = (int)s.MsviFirstIndex,
             End = (int)s.MsviFirstIndex + s.IndexCount - 1
-        }).ToList();
+        }).OrderBy(r => r.Start).ToArray();
+        var surfaceStarts = surfaceRanges.Select(r => r.Start).ToArray();
 
         // --- Map MSLK geometry nodes to owning surfaces ---
         var linksBySurface = new Dictionary<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry, List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>>();
@@ -129,15 +129,22 @@ internal static class Pm4MsurObjectAssembler
             int nodeStart = link.MspiFirstIndex;
             int nodeEnd   = link.MspiFirstIndex + link.MspiIndexCount - 1;
 
-            var owner = surfaceRanges.FirstOrDefault(r => nodeStart >= r.Start && nodeEnd <= r.End)?.Surface;
-            if (owner == null) continue; // could not match – leave it out for now
+            // Binary search to find candidate surface by start index
+            int idx = Array.BinarySearch(surfaceStarts, nodeStart);
+            if (idx < 0) idx = ~idx - 1; // previous range
+            if (idx < 0) continue;
 
-            if (!linksBySurface.TryGetValue(owner, out var list))
+            var range = surfaceRanges[idx];
+            if (nodeStart >= range.Start && nodeEnd <= range.End)
             {
-                list = new List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>();
-                linksBySurface[owner] = list;
+                var owner = range.Surface;
+                if (!linksBySurface.TryGetValue(owner, out var list))
+                {
+                    list = new List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>();
+                    linksBySurface[owner] = list;
+                }
+                list.Add(link);
             }
-            list.Add(link);
         }
 
         // Process each MSUR surface individually, then group by SurfaceGroupKey

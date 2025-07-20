@@ -17,7 +17,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-test-chunks | pm4-analyze-indices\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -40,7 +40,9 @@ switch (command)
     case "pm4":
     case "pd4":
     case "pm4-region":
+    case "pm4-export-scene":
     case "pm4-test-chunks":
+    case "pm4-analyze-unknowns":
         // handled below
         break;
     default:
@@ -200,6 +202,16 @@ if (command == "pm4")
     }
     ConsoleLogger.WriteLine("Export complete!");
 }
+else if (command == "pm4-export-scene")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 file for complete scene export: {fileInfo.FullName}");
+    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+    var scene = loader.Load(fileInfo.FullName);
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_scene");
+    ParpToolbox.Services.PM4.Pm4SceneExporter.ExportCompleteScene(scene, outputDir);
+    ConsoleLogger.WriteLine("Scene export complete!");
+}
 else if (command == "pd4")
 {
     ConsoleLogger.WriteLine($"Parsing PD4 file: {fileInfo.FullName}");
@@ -306,6 +318,32 @@ else if (command == "pm4-test-chunks")
     }
     
     ConsoleLogger.WriteLine("Chunk combination testing complete!");
+}
+else if (command == "pm4-analyze-unknowns")
+{
+    // PM4 Unknown Field Analysis command - correlate unknown fields
+    if (string.IsNullOrEmpty(inputFile))
+    {
+        ConsoleLogger.WriteLine("Error: Input PM4 file required for pm4-analyze-unknowns command");
+        ConsoleLogger.Close();
+        return 1;
+    }
+
+    if (!fileInfo.Exists)
+    {
+        ConsoleLogger.WriteLine($"Error: File not found: {inputFile}");
+        ConsoleLogger.Close();
+        return 1;
+    }
+
+    ConsoleLogger.WriteLine($"Running unknown field analysis on: {fileInfo.FullName}");
+    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+    var scene = loader.Load(fileInfo.FullName);
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_unknowns");
+    ParpToolbox.Services.PM4.Pm4UnknownFieldAnalyzer.AnalyzeUnknownFields(scene, outputDir);
+    ConsoleLogger.WriteLine("Unknown field analysis complete!");
+    ConsoleLogger.Close();
+    return 0;
 }
 #if DEBUG_ANALYZER
 else if (command == "pm4-index-patterns")

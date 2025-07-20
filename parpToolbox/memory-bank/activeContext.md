@@ -93,4 +93,15 @@ WMO → OBJ export has been fully validated: façade planes are correctly filter
 2. **Implement proper surface range matching** via MSLK `ReferenceIndex`
 3. **Validate PM4 group counts** against real data (target: 10-20 groups)
 4. **Maintain PD4 export stability** during PM4 fixes
-5. **Update memory bank** with current format understanding 
+5. **Update memory bank with current format understanding  
+
+### (2025-07-19 20:53) - Grouping Still Incorrect & Unknown Field Correlation Needed
+- MSUR.IndexCount grouping reduced objects to **15**, but faces remain mis-assigned and geometry still fragmented.
+- Evidence: OBJ output shows scattered clusters; warnings reveal ~480 k missing vertices (indices beyond global pool).
+- Hypothesis: True object key likely involves multiple fields (e.g., high/low bytes of `surface_key`, `reference_index`, or padding fields).
+- Action Plan:
+  1. Dump **all** fields (including padding/flags) from MSUR, MSLK, MPRL, MPRR.
+  2. Auto-correlate field values to surface counts, triangle counts, and invalid-index percentages.
+  3. Prototype `pm4-test-grouping` command to iterate candidate keys and measure object/face alignment.
+  4. Update assembler/exporters after key confirmed.
+- All unknown fields are treated as potentially meaningful; no data considered filler.

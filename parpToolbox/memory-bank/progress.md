@@ -34,6 +34,12 @@
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
 ## Recent Updates (2025-07-19)
+### Grouping still incorrect (20:53)
+- MSUR.IndexCount grouping yields 15 objects but faces still mis-assigned; geometry remains scattered.
+- OBJ warnings show ~480 k references to missing vertices > global vertex pool.
+- Hypothesis: true object key combines multiple unknown fields (e.g., high/low bytes of `surface_key`, `reference_index`, padding).
+- Action: expand UnknownFieldAnalyzer to dump **all** raw fields and auto-correlate; prototype `pm4-test-grouping` to iterate key expressions.
+
 ### MSCN Cross-Tile Remap Started
 - Implemented `MscnRemapper` to append MSCN vertices and rewrite indices.
 - Placeholder per-tile logic in place—needs full region loader integration.
