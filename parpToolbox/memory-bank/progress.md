@@ -34,6 +34,15 @@
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
 ## Recent Updates (2025-07-19)
+### SurfaceGroupKey Hierarchy & Grouping Tester (22:20)
+- Implemented `pm4-test-grouping` command which groups and exports geometry by `MSUR.SurfaceGroupKey`.
+- Visual inspection confirms:
+  - Group 19 ≈ WMO/group-level objects.
+  - Groups 20–23 are sub-objects; 24 is near per-surface granularity.
+  - Values <19 appear to be larger spatial containers.
+- Conclusion: `SurfaceGroupKey` represents a hierarchy, not a flat object ID.
+- Action: continue exploring composite keys `(ParentIndex, SurfaceGroupKey, IndexCount)` and validate face alignment.
+
 ### Grouping still incorrect (20:53)
 - MSUR.IndexCount grouping yields 15 objects but faces still mis-assigned; geometry remains scattered.
 - OBJ warnings show ~480 k references to missing vertices > global vertex pool.

@@ -17,7 +17,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -43,6 +43,7 @@ switch (command)
     case "pm4-export-scene":
     case "pm4-test-chunks":
     case "pm4-analyze-unknowns":
+        case "pm4-test-grouping":
         // handled below
         break;
     default:
@@ -183,6 +184,13 @@ if (command == "pm4")
     // CSV dump path – export all chunk data to CSV files and early exit
     if (csvDump)
     {
+        // Auto-clean previous timestamped dumps to avoid clutter
+        foreach (var dir in Directory.GetDirectories(outputDir, "csv_dump_*"))
+        {
+            try { Directory.Delete(dir, recursive: true); }
+            catch (Exception ex) { ConsoleLogger.WriteLine($"Warning: Failed to delete old dump {dir}: {ex.Message}"); }
+        }
+
         var csvDir = Path.Combine(outputDir, "csv_dump");
         ConsoleLogger.WriteLine($"Running CSV dump to {csvDir} ...");
         ParpToolbox.Services.PM4.Pm4CsvDumper.DumpAllChunks(scene, csvDir);
@@ -201,6 +209,46 @@ if (command == "pm4")
         ParpToolbox.Services.PM4.Pm4ObjExporter.Export(scene, outputFile, exportFaces);
     }
     ConsoleLogger.WriteLine("Export complete!");
+}
+else if (command == "pm4-test-grouping")
+{
+    ConsoleLogger.WriteLine($"Loading PM4 for grouping test: {fileInfo.FullName}");
+    // If --region flag is present, load whole region across tiles
+    bool loadRegion = args.Contains("--region");
+    ParpToolbox.Services.PM4.Pm4Scene scene;
+    if (loadRegion)
+    {
+        ConsoleLogger.WriteLine("Region mode active – loading all tiles in region ...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
+    else
+    {
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    // parse optional --mingroup <byte>
+    byte? minGroup = null;
+    var mgIdx = Array.IndexOf(args, "--mingroup");
+    if (mgIdx != -1 && mgIdx + 1 < args.Length && byte.TryParse(args[mgIdx + 1], out var mgVal))
+        minGroup = mgVal;
+
+    // Flags: --mingroup <byte> | --composite
+    bool composite = args.Contains("--composite");
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + (composite ? "_grouping_comp" : "_grouping"));
+
+    if (composite)
+    {
+        ConsoleLogger.WriteLine("Running composite grouping export (SurfaceGroupKey + IndexCount)...");
+        ParpToolbox.Services.PM4.Pm4GroupingTester.ExportByCompositeKey(scene, outputDir, writeFaces: exportFaces);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Running SurfaceGroupKey-only grouping export...");
+        ParpToolbox.Services.PM4.Pm4GroupingTester.ExportBySurfaceGroupKey(scene, outputDir, writeFaces: exportFaces, minGroup: minGroup);
+    }
+    ConsoleLogger.WriteLine("Grouping test export complete!");
 }
 else if (command == "pm4-export-scene")
 {

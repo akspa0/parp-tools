@@ -13,26 +13,23 @@ internal static class Pm4CsvDumper
 {
     public static void DumpAllChunks(Pm4Scene scene, string outputRoot)
     {
-        Directory.CreateDirectory(outputRoot);
+        // root path for this run: csv_dump_YYYYMMDD_HHmmss
+        string runRoot = Path.Combine(outputRoot, $"csv_dump_{DateTime.Now:yyyyMMdd_HHmmss}");
+        Directory.CreateDirectory(runRoot);
         
-        // Export MSLK chunk with focus on unknown fields
-        DumpMslkChunk(scene, outputRoot);
-        
-        // Export MSUR chunk 
-        DumpMsurChunk(scene, outputRoot);
-        
-        // Export MPRR chunk (if present)
+        // For each chunk type, make a dedicated sub-folder
+        DumpMslkChunk(scene, Path.Combine(runRoot, "MSLK"));
+        DumpMsurChunk(scene, Path.Combine(runRoot, "MSUR"));
         if (scene.Properties.Count > 0)
-            DumpMprrChunk(scene, outputRoot);
+            DumpMprrChunk(scene, Path.Combine(runRoot, "MPRR"));
+        DumpChunkStats(scene, runRoot);
         
-        // Export chunk statistics
-        DumpChunkStats(scene, outputRoot);
-        
-        Console.WriteLine($"CSV dump complete! Files written to: {outputRoot}");
+        Console.WriteLine($"CSV dump complete! Files written under: {runRoot}");
     }
     
     private static void DumpMslkChunk(Pm4Scene scene, string outputRoot)
     {
+        Directory.CreateDirectory(outputRoot);
         var csvPath = Path.Combine(outputRoot, "mslk_dump.csv");
         using var writer = new StreamWriter(csvPath);
         
@@ -65,6 +62,7 @@ internal static class Pm4CsvDumper
     
     private static void DumpMsurChunk(Pm4Scene scene, string outputRoot)
     {
+        Directory.CreateDirectory(outputRoot);
         var csvPath = Path.Combine(outputRoot, "msur_dump.csv");
         using var writer = new StreamWriter(csvPath);
         
@@ -99,6 +97,7 @@ internal static class Pm4CsvDumper
     
     private static void DumpMprrChunk(Pm4Scene scene, string outputRoot)
     {
+        Directory.CreateDirectory(outputRoot);
         var csvPath = Path.Combine(outputRoot, "mprr_dump.csv");
         using var writer = new StreamWriter(csvPath);
         
@@ -118,6 +117,7 @@ internal static class Pm4CsvDumper
     
     private static void DumpChunkStats(Pm4Scene scene, string outputRoot)
     {
+        Directory.CreateDirectory(outputRoot);
         var csvPath = Path.Combine(outputRoot, "chunk_stats.csv");
         using var writer = new StreamWriter(csvPath);
         

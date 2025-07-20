@@ -96,6 +96,17 @@ WMO → OBJ export has been fully validated: façade planes are correctly filter
 5. **Update memory bank with current format understanding  
 
 ### (2025-07-19 20:53) - Grouping Still Incorrect & Unknown Field Correlation Needed
+
+### (2025-07-19 22:20) - SurfaceGroupKey Hierarchy & Grouping Tester
+- **Grouping Tester Implemented (`pm4-test-grouping`)**: Exports geometry grouped by `MSUR.SurfaceGroupKey` to visualize hierarchy.
+- **Findings**:
+  - Values above 19 represent progressively smaller subdivisions (e.g., 24 ≈ per-surface / polygon).
+  - Value 19 aligns with WMO object groups (building-level grouping).
+  - Lower values (<19) appear to be higher-level spatial containers.
+- **Implications**:
+  - `SurfaceGroupKey` must be interpreted as a hierarchy (subdivision → object → container) rather than a flat identifier.
+  - `MSUR.IndexCount` grouping alone remains insufficient; composite or hierarchical keys are required for correct assembly.
+  - Next: prototype composite grouping using `(ParentIndex, SurfaceGroupKey, IndexCount)` and validate geometry alignment.
 - MSUR.IndexCount grouping reduced objects to **15**, but faces remain mis-assigned and geometry still fragmented.
 - Evidence: OBJ output shows scattered clusters; warnings reveal ~480 k missing vertices (indices beyond global pool).
 - Hypothesis: True object key likely involves multiple fields (e.g., high/low bytes of `surface_key`, `reference_index`, or padding fields).
