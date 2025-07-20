@@ -7,6 +7,7 @@ using ParpToolbox;
 using ParpToolbox.Services.WMO;
 using ParpToolbox.Utils;
 using ParpToolbox.Services.PM4;
+using ParpToolbox.Formats.PM4;
 
 // Initialize logging to timestamped file
 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -26,7 +27,11 @@ if (args.Length == 0)
                       "   --exportchunks      Export each MSUR group to separate OBJ\n" +
                       "   --objects           Export assembled objects by MSUR.IndexCount\n" +
                       "   --bulk-dump        Dump OBJs & CSVs for all groupings\n" +
-                      "   --csv-dump         Export all chunk data to CSV files");
+                      "   --csv-dump         Export all chunk data to CSV files\n" +
+                      "PM4 Grouping test flags:\n" +
+                      "   --composite         Use composite key (ParentIndex+SurfaceGroupKey+IndexCount)\n" +
+                      "   --multi-strategy    Run all experimental grouping strategies with comparison report\n" +
+                      "   --mingroup <byte>   Only export groups with byte value >= mingroup");
     ConsoleLogger.Close();
     return 1;
 }
@@ -61,6 +66,8 @@ bool exportChunks = false;
 bool bulkDump = false;
 bool csvDump = false;
 bool exportObjects = false;
+
+
 // Detect optional flags
 if (args.Contains("--include-collision"))
     includeCollision = true;
@@ -78,6 +85,10 @@ if (args.Contains("--csv-dump"))
     csvDump = true;
 if (args.Contains("--objects") || args.Contains("--indexcount"))
     exportObjects = true;
+
+
+
+
 
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
@@ -201,6 +212,9 @@ if (command == "pm4")
         return 0;
     }
 
+
+
+
     // Export assembled objects grouped by MSUR.IndexCount if requested
     if (exportObjects)
     {
@@ -229,7 +243,7 @@ else if (command == "pm4-test-grouping")
     ConsoleLogger.WriteLine($"Loading PM4 for grouping test: {fileInfo.FullName}");
     // If --region flag is present, load whole region across tiles
     bool loadRegion = args.Contains("--region");
-    ParpToolbox.Services.PM4.Pm4Scene scene;
+    Pm4Scene scene;
     if (loadRegion)
     {
         ConsoleLogger.WriteLine("Region mode active – loading all tiles in region ...");
@@ -241,28 +255,13 @@ else if (command == "pm4-test-grouping")
         var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
         scene = loader.Load(fileInfo.FullName);
     }
-    // parse optional --mingroup <byte>
-    byte? minGroup = null;
-    var mgIdx = Array.IndexOf(args, "--mingroup");
-    if (mgIdx != -1 && mgIdx + 1 < args.Length && byte.TryParse(args[mgIdx + 1], out var mgVal))
-        minGroup = mgVal;
+    // Create an output directory for the results
+    string outputDirSuffix = "_msur_grouping";
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + outputDirSuffix);
 
-    // Flags: --mingroup <byte> | --composite
-    bool composite = args.Contains("--composite");
-
-    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + (composite ? "_grouping_comp" : "_grouping"));
-
-    if (composite)
-    {
-        ConsoleLogger.WriteLine("Running composite grouping export (SurfaceGroupKey + IndexCount)...");
-        ParpToolbox.Services.PM4.Pm4GroupingTester.ExportByCompositeKey(scene, outputDir, writeFaces: exportFaces);
-    }
-    else
-    {
-        ConsoleLogger.WriteLine("Running SurfaceGroupKey-only grouping export...");
-        ParpToolbox.Services.PM4.Pm4GroupingTester.ExportBySurfaceGroupKey(scene, outputDir, writeFaces: exportFaces, minGroup: minGroup);
-    }
-    ConsoleLogger.WriteLine("Grouping test export complete!");
+    ConsoleLogger.WriteLine("Running optimized MSUR raw fields grouping...");
+    ParpToolbox.Services.PM4.Pm4GroupingTester.RunMultipleGroupingStrategies(scene, outputDir, writeFaces: exportFaces);
+    ConsoleLogger.WriteLine("MSUR grouping export complete!");
 }
 else if (command == "pm4-export-scene")
 {

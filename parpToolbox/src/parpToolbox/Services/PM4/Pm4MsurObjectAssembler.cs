@@ -148,7 +148,7 @@ internal static class Pm4MsurObjectAssembler
         }
 
         // Process each MSUR surface individually, then group by SurfaceGroupKey
-        var objectsBySurfaceGroupKey = new Dictionary<uint, List<(Vector3[] vertices, int[] faces)>>();
+        var objectsByIndexCount = new Dictionary<int, List<(Vector3[] vertices, int[] faces)>>();
         
         // Track vertex index usage for debugging
         int maxVertexIndexSeen = -1;
@@ -183,26 +183,26 @@ internal static class Pm4MsurObjectAssembler
             if (surfaceVertices.Count > 0 && surfaceFaces.Count > 0)
             {
                 // Group by MSUR.IndexCount (0x01 field) per discovery of full-object grouping
-                uint objectKey = (uint)surface.IndexCount;
-                if (!objectsBySurfaceGroupKey.TryGetValue(objectKey, out var surfaceList))
+                int objectKey = surface.IndexCount;
+                if (!objectsByIndexCount.TryGetValue(objectKey, out var surfaceList))
                 {
                     surfaceList = new List<(Vector3[], int[])>();
-                    objectsBySurfaceGroupKey[objectKey] = surfaceList;
+                    objectsByIndexCount[objectKey] = surfaceList;
                 }
 
                 surfaceList.Add((surfaceVertices.ToArray(), surfaceFaces.ToArray()));
             }
         }
         
-        ConsoleLogger.WriteLine($"  Found {objectsBySurfaceGroupKey.Count} distinct SurfaceGroupKey groups (complete objects)");
+        ConsoleLogger.WriteLine($"  Found {objectsByIndexCount.Count} distinct IndexCount groups (complete objects)");
         
         // Assemble each object by consolidating all surfaces with the same SurfaceGroupKey
-        foreach (var (surfaceGroupKey, surfaceList) in objectsBySurfaceGroupKey)
+        foreach (var (indexCount, surfaceList) in objectsByIndexCount)
         {
             var consolidatedVertices = new List<Vector3>();
             var consolidatedFaces = new List<int>();
             
-            ConsoleLogger.WriteLine($"    Processing IndexCount {surfaceGroupKey} with {surfaceList.Count} surfaces");
+            ConsoleLogger.WriteLine($"    Processing IndexCount {indexCount} with {surfaceList.Count} surfaces");
             
             // Consolidate all surfaces for this IndexCount into a single object
             foreach (var (surfaceVertices, surfaceFaces) in surfaceList)
@@ -221,11 +221,11 @@ internal static class Pm4MsurObjectAssembler
             
             if (consolidatedVertices.Count > 0)
             {
-                ConsoleLogger.WriteLine($"      Consolidated {consolidatedVertices.Count} vertices and {consolidatedFaces.Count} face indices for SurfaceGroupKey {surfaceGroupKey}");
+                ConsoleLogger.WriteLine($"      Consolidated {consolidatedVertices.Count} vertices and {consolidatedFaces.Count} face indices for IndexCount {indexCount}");
                 
                 // Calculate bounding center from processed vertices
                 var boundingCenter = CalculateBoundingCenter(consolidatedVertices);
-                var objectType = GetObjectTypeName(surfaceGroupKey);
+                var objectType = GetObjectTypeName((uint)indexCount);
                 
                 // Convert faces to triangles for compatibility
                 var triangles = new List<(int A, int B, int C)>();
@@ -237,8 +237,9 @@ internal static class Pm4MsurObjectAssembler
                     }
                 }
                 
+                byte groupKey = 0; // placeholder since grouping now by IndexCount only
                 var msurObject = new MsurObject(
-                    SurfaceGroupKey: (byte)(surfaceGroupKey & 0xFF), // store low byte of IndexCount for legacy compatibility
+                    SurfaceGroupKey: groupKey,
                     SurfaceCount: surfaceList.Count,
                     Triangles: triangles,
                     BoundingCenter: boundingCenter,
@@ -248,11 +249,11 @@ internal static class Pm4MsurObjectAssembler
                 
                 assembledObjects.Add(msurObject);
                 
-                ConsoleLogger.WriteLine($"      Object SurfaceGroupKey={surfaceGroupKey}: {triangles.Count} triangles, {consolidatedVertices.Count} vertices, {surfaceList.Count} surfaces");
+                ConsoleLogger.WriteLine($"      Object IndexCount={indexCount}: {triangles.Count} triangles, {consolidatedVertices.Count} vertices, {surfaceList.Count} surfaces");
                 
                 if (triangles.Count == 0)
                 {
-                    ConsoleLogger.WriteLine($"        WARNING: No triangles generated for SurfaceGroupKey {surfaceGroupKey}!");
+                    ConsoleLogger.WriteLine($"        WARNING: No triangles generated for IndexCount {indexCount}!");
                 }
             }
         }
