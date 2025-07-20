@@ -24,6 +24,7 @@ if (args.Length == 0)
                       "   --include-facades     Keep facade/no-draw geometry (WMO)\n" +
                       "   --exportfaces        Write OBJ faces (default: point cloud)\n" +
                       "   --exportchunks      Export each MSUR group to separate OBJ\n" +
+                      "   --objects           Export assembled objects by MSUR.IndexCount\n" +
                       "   --bulk-dump        Dump OBJs & CSVs for all groupings\n" +
                       "   --csv-dump         Export all chunk data to CSV files");
     ConsoleLogger.Close();
@@ -59,6 +60,7 @@ bool exportFaces = false;
 bool exportChunks = false;
 bool bulkDump = false;
 bool csvDump = false;
+bool exportObjects = false;
 // Detect optional flags
 if (args.Contains("--include-collision"))
     includeCollision = true;
@@ -74,6 +76,8 @@ if (args.Contains("--bulk-dump"))
     bulkDump = true;
 if (args.Contains("--csv-dump"))
     csvDump = true;
+if (args.Contains("--objects") || args.Contains("--indexcount"))
+    exportObjects = true;
 
 var localProvider = new LocalFileProvider(".");
 FileProvider.SetProvider(localProvider, "local");
@@ -194,6 +198,16 @@ if (command == "pm4")
         var csvDir = Path.Combine(outputDir, "csv_dump");
         ConsoleLogger.WriteLine($"Running CSV dump to {csvDir} ...");
         ParpToolbox.Services.PM4.Pm4CsvDumper.DumpAllChunks(scene, csvDir);
+        return 0;
+    }
+
+    // Export assembled objects grouped by MSUR.IndexCount if requested
+    if (exportObjects)
+    {
+        ConsoleLogger.WriteLine("Exporting assembled objects by MSUR.IndexCount ...");
+        var assembled = ParpToolbox.Services.PM4.Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(scene);
+        ParpToolbox.Services.PM4.Pm4MsurObjectAssembler.ExportMsurObjects(assembled, scene, outputDir);
+        ConsoleLogger.WriteLine("Assembled object export complete!");
         return 0;
     }
 

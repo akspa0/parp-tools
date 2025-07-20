@@ -12,15 +12,26 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 - **Multi-object complexity**: Single PM4 can contain data for multiple objects/structures
 - **Interior MODF System**: PM4 acts as an "interior MODF" placing building components inside structures
 
-## Object Assembly Methodology (CRITICAL)
+## Object Assembly Methodology (TENTATIVE – Under Active Investigation)
 
-**Individual objects are identified by the MSUR IndexCount (0x01 field)**, not by ParentIndex or ReferenceIndex grouping.
+**PREVIOUS HYPOTHESIS (2025-07-18):** Individual objects are identified by `MSUR.IndexCount` (0x01 field).
+
+**LATEST FINDINGS (2025-07-19 22:20):** `MSUR.SurfaceGroupKey` represents a **hierarchy**:
+- **19** ➜ object-level groups (aligns with WMO group IDs)
+- **20-23** ➜ sub-objects / sub-divisions
+- **24** ➜ near per-surface granularity
+- Values **<19** appear to be higher-level spatial containers
+
+`IndexCount` grouping alone remains insufficient; the working hypothesis is that a **composite key** such as `(ParentIndex, SurfaceGroupKey, IndexCount)` will yield correct object assembly. Current tooling (`pm4-test-grouping`) exports SurfaceGroupKey-grouped OBJs to visualise this hierarchy. Further correlation analysis is ongoing.
 
 ### Confirmed Chunk Relationships:
 - **MPRL.Unknown4 = MSLK.ParentIndex** (458 confirmed matches) - links placements to geometry
 - **MSLK entries with MspiFirstIndex = -1** are container/grouping nodes (no geometry)
-- **MPRR.Value1 = 65535** are property separators (15,427 sentinel values)
+- **MPRR.Value1 = 65535** are property separators (15,427 sentinel values out of 81,936 total)
 - **MPRL.Unknown6 = 32768** consistently (likely type flag)
+- **MSCN spatial alignment**: Collision vertices often align within 0.1 units of MSVT polygon centers
+- **MSUR.SurfaceGroupKey patterns**: Value 18 = geometry surfaces, Value 3 = collision/special surfaces
+- **Cross-chunk indexing**: Multiple MSLK entries can reference the same MPRL placement (hierarchical assembly)
 
 ### Object Assembly Flow:
 1. **MPRL** defines object placements (positions + type IDs in Unknown4)
@@ -77,15 +88,19 @@ struct MSPI {
 - Groups of 3 indices form triangles
 - May be 16-bit or 32-bit indices (auto-detected)
 
-### MSCN - Normals
+### MSCN - Collision/Exterior Vertices
 ```c
 struct MSCN {
-    Vector3 normals[];  // Surface normals (independent of MSPV)
+    Vector3 collision_vertices[];  // Collision/exterior vertex positions
 };
 ```
 **Implementation Notes:**
-- Not directly related to MSPV geometry
-- May have different count than vertices
+- **Collision mesh vertices**: Simplified geometry for physics/pathfinding
+- **Spatial alignment**: Many vertices align closely with MSVT geometry centers
+- **Independent indexing**: Not directly indexed by other chunks, likely referenced by implicit position
+- **Pathfinding data**: Used for navigation mesh and collision detection
+- **Stride**: 12 bytes per vertex (XYZ float coordinates)
+- **Relationship to MSVT**: Average distance to closest MSVT vertex typically < 0.1 units for aligned vertices
 
 ### MSLK - Link Data
 ```c

@@ -66,15 +66,19 @@ struct MSPI {
 - Groups of 3 indices form triangles
 - May be 16-bit or 32-bit indices (auto-detected)
 
-### MSCN - Normals
+### MSCN - Collision/Exterior Vertices
 ```c
 struct MSCN {
-    Vector3 normals[];  // Surface normals (independent of MSPV)
+    Vector3 collision_vertices[];  // Collision/exterior vertex positions
 };
 ```
 **Implementation Notes:**
-- Not directly related to MSPV geometry
-- May have different count than vertices
+- **Collision mesh vertices**: Simplified geometry for physics/pathfinding
+- **Spatial alignment**: Many vertices align closely with MSPV geometry centers
+- **Independent indexing**: Not directly indexed by other chunks, likely referenced by implicit position
+- **Pathfinding data**: Used for navigation mesh and collision detection
+- **Stride**: 12 bytes per vertex (XYZ float coordinates)
+- **Inheritance from PM4**: Same structure and purpose as PM4's MSCN chunk
 
 ### MSLK - Link Data
 ```c
@@ -151,6 +155,14 @@ struct MSUR {
 ## Relationship to Other Formats
 
 ### vs PM4
+
+**Format Evolution**: PD4 represents a simplification of PM4's complex multi-object system:
+
+- **PM4**: Complex hierarchical assembly with MPRL placements, MSLK links, and MPRR properties
+- **PD4**: Simplified single-object focus with direct geometry representation
+- **Shared chunks**: Both formats use MSPV, MSPI, MSCN, and MSLK with similar structures
+- **MSCN consistency**: Collision vertex analysis shows same spatial alignment patterns in both formats
+- **Object assembly**: PD4 eliminates PM4's complex cross-chunk relationships for simpler processing
 - **PD4**: Simple, single-object, full precision
 - **PM4**: Complex, multi-object, phased descriptors
 - **Evolution**: PM4 → PD4 split simplified object handling
