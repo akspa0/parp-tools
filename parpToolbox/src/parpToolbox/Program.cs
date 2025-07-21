@@ -18,7 +18,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -28,6 +28,7 @@ if (args.Length == 0)
                       "   --objects           Export assembled objects by MSUR.IndexCount\n" +
                       "   --bulk-dump        Dump OBJs & CSVs for all groupings\n" +
                       "   --csv-dump         Export all chunk data to CSV files\n" +
+                      "   --single-tile       Load only single PM4 tile (default: load region with cross-tile refs)\n" +
                       "PM4 Grouping test flags:\n" +
                       "   --composite         Use composite key (ParentIndex+SurfaceGroupKey+IndexCount)\n" +
                       "   --multi-strategy    Run all experimental grouping strategies with comparison report\n" +
@@ -48,6 +49,10 @@ switch (command)
     case "pm4-region":
     case "pm4-export-scene":
     case "pm4-test-chunks":
+    case "pm4-mprl-objects":
+    case "pm4-analyze-data":
+    case "pm4-mprr-objects":
+    case "pm4-mprr-objects-fast":
     case "pm4-analyze-unknowns":
         case "pm4-test-grouping":
         // handled below
@@ -181,8 +186,21 @@ if (command == "pm4-region")
 if (command == "pm4")
 {
     ConsoleLogger.WriteLine($"Parsing PM4 file: {fileInfo.FullName}");
-    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
-    var scene = loader.Load(fileInfo.FullName);
+    // Use region loader by default to resolve cross-tile vertex references
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
 
@@ -266,12 +284,154 @@ else if (command == "pm4-test-grouping")
 else if (command == "pm4-export-scene")
 {
     ConsoleLogger.WriteLine($"Parsing PM4 file for complete scene export: {fileInfo.FullName}");
-    var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
-    var scene = loader.Load(fileInfo.FullName);
+    // Use region loader by default to resolve cross-tile vertex references
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_scene");
     ParpToolbox.Services.PM4.Pm4SceneExporter.ExportCompleteScene(scene, outputDir);
     ConsoleLogger.WriteLine("Scene export complete!");
+}
+else if (command == "pm4-mprl-objects")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 file for MPRL-based object grouping: {fileInfo.FullName}");
+    // Use region loader by default to resolve cross-tile vertex references
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprl_objects");
+    
+    // Group geometry by MPRL placements (actual building objects)
+    var buildingObjects = ParpToolbox.Services.PM4.Pm4MprlObjectGrouper.GroupByMprlPlacements(scene);
+    
+    // Export each building object as separate OBJ file
+    ParpToolbox.Services.PM4.Pm4MprlObjectGrouper.ExportBuildingObjects(buildingObjects, scene, outputDir);
+    
+    ConsoleLogger.WriteLine($"MPRL object export complete! Exported {buildingObjects.Count} building objects");
+}
+else if (command == "pm4-analyze-data")
+{
+    ConsoleLogger.WriteLine($"Analyzing PM4 data structure: {fileInfo.FullName}");
+    // Use region loader by default to get complete data
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_data_analysis");
+    
+    // Analyze PM4 data structure and relationships
+    ParpToolbox.Services.PM4.Pm4DataAnalyzer.AnalyzeDataStructure(scene, outputDir);
+    
+    ConsoleLogger.WriteLine("PM4 data analysis complete!");
+}
+else if (command == "pm4-mprr-objects")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 file for MPRR-based hierarchical object grouping: {fileInfo.FullName}");
+    // Use region loader by default to resolve cross-tile vertex references
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprr_objects");
+    
+    // Assemble objects using MPRR hierarchical grouping (sentinel-based)
+    var hierarchicalObjects = ParpToolbox.Services.PM4.Pm4HierarchicalObjectAssembler.AssembleHierarchicalObjects(scene);
+    
+    // Export each hierarchical object as separate OBJ file
+    ParpToolbox.Services.PM4.Pm4HierarchicalObjectAssembler.ExportHierarchicalObjects(hierarchicalObjects, scene, outputDir);
+    
+    ConsoleLogger.WriteLine($"MPRR hierarchical object export complete! Exported {hierarchicalObjects.Count} building objects");
+}
+else if (command == "pm4-mprr-objects-fast")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 file for OPTIMIZED MPRR-based hierarchical object grouping: {fileInfo.FullName}");
+    // Use region loader by default to resolve cross-tile vertex references
+    bool useSingleTile = args.Contains("--single-tile");
+    Pm4Scene scene;
+    if (useSingleTile)
+    {
+        ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
+        var loader = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = loader.Load(fileInfo.FullName);
+    }
+    else
+    {
+        ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
+        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
+        scene = regionLoader.LoadRegion(fileInfo.FullName);
+    }
+
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprr_objects_fast");
+    
+    // Assemble objects using MPRR hierarchical grouping (sentinel-based)
+    var hierarchicalObjects = ParpToolbox.Services.PM4.Pm4HierarchicalObjectAssembler.AssembleHierarchicalObjects(scene);
+    
+    // Parse command line arguments for optimization settings
+    int maxObjects = 100;
+    int maxTriangles = 100000;
+    bool useParallel = true;
+    
+    foreach (var arg in args)
+    {
+        if (arg.StartsWith("--max-objects="))
+            int.TryParse(arg.Substring("--max-objects=".Length), out maxObjects);
+        else if (arg.StartsWith("--max-triangles="))
+            int.TryParse(arg.Substring("--max-triangles=".Length), out maxTriangles);
+        else if (arg == "--no-parallel")
+            useParallel = false;
+    }
+    
+    // Export using optimized exporter with limits
+    ParpToolbox.Services.PM4.Pm4OptimizedObjectExporter.ExportOptimized(
+        hierarchicalObjects, scene, outputDir, maxObjects, maxTriangles, useParallel);
+    
+    ConsoleLogger.WriteLine($"Optimized MPRR hierarchical object export complete!");
 }
 else if (command == "pd4")
 {

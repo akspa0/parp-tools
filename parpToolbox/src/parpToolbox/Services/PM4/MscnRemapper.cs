@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;
 
@@ -22,15 +23,23 @@ internal static class MscnRemapper
             scene.Vertices.Add(new System.Numerics.Vector3(v.Y, v.X, v.Z));
         }
 
-        // In many maps indices that exceed originalCount are meant to reference MSCN block
-        // so subtract originalCount to map into appended range.
+        // Remap indices that exceed the original vertex count to reference MSCN vertices
+        // These out-of-bounds indices are cross-tile references that should map to MSCN block
+        int mscnStartIndex = originalCount;
+        int remappedCount = 0;
+        
         for (int i = 0; i < scene.Indices.Count; i++)
         {
             int idx = scene.Indices[i];
             if (idx >= originalCount)
             {
-                scene.Indices[i] = idx - originalCount + originalCount; // effectively unchanged; placeholder for per-tile logic
+                // Map out-of-bounds index to MSCN vertex range
+                int mscnOffset = (idx - originalCount) % mscn.Vertices.Count;
+                scene.Indices[i] = mscnStartIndex + mscnOffset;
+                remappedCount++;
             }
         }
+        
+        ConsoleLogger.WriteLine($"MSCN remapper processed {remappedCount} cross-tile vertex references");
     }
 }

@@ -14,7 +14,8 @@ using ParpToolbox.Formats.PM4;
 internal static class Pm4SceneExporter
 {
     /// <summary>
-    /// Exports the complete PM4 scene as a single OBJ file with proper material grouping.
+    /// Exports the complete PM4 scene as a single unified OBJ file.
+    /// Surface groups represent subdivision levels, not separate objects.
     /// </summary>
     public static void ExportCompleteScene(Pm4Scene scene, string outputRoot)
     {
@@ -43,7 +44,7 @@ internal static class Pm4SceneExporter
         }
         writer.WriteLine();
         
-        // Group geometry by surface properties for better organization
+        // Group geometry by surface properties for organization
         var geometryBySurface = new Dictionary<uint, List<(int A, int B, int C)>>();
         
         // Process all MSLK links that have geometry
@@ -81,7 +82,7 @@ internal static class Pm4SceneExporter
             }
         }
         
-        // Write geometry groups by surface type
+        // Write geometry groups as OBJ groups within single file (surface groups are subdivision levels)
         foreach (var (surfaceKey, triangles) in geometryBySurface.OrderBy(kvp => kvp.Key))
         {
             if (triangles.Count == 0) continue;

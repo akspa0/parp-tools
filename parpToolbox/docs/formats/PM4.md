@@ -44,6 +44,34 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 - ParentIndex/ReferenceIndex grouping produces fragments, not complete objects
 - Apply X-axis inversion (`-vertex.X`) for correct coordinate system orientation
 
+## glTF 2.0 Export Strategy
+
+Now that full per-object assembly is possible, the preferred interchange container is **glTF 2.0**.  
+Using a glTF scene enables:
+
+* Single file (or binary `.glb`) containing **all objects, groups, sub-groups, and materials**
+* Explicit node hierarchy preserving `SurfaceGroupKey` → `IndexCount` relationships
+* Efficient transmission (binary, Draco compression, etc.)
+* Broad tooling support in game engines and viewers compared to Wavefront OBJ
+
+### Proposed Mapping
+| PM4 concept | glTF element |
+|-------------|-------------|
+| Assembled object (`IndexCount`) | `Node` + `Mesh` |
+| Sub-objects / sub-surfaces (`SurfaceGroupKey` ≥ 20) | Child `Node`s |
+| Vertex positions | `POSITION` accessor (float32) |
+| Triangles | `indices` accessor (uint32) |
+| Normals (Nx,Ny,Nz) | `NORMAL` accessor |
+| MPRL placement | Node `translation` (world-space offset) |
+| Collision flags / special bits | `extras` dictionary |
+
+In the toolchain this will be exposed via **`--gltf`** and **`--glb`** CLI flags.  
+Implementation will leverage the open-source `SharpGLTF` library for quick authoring, with a custom visitor that walks the assembled objects and emits node hierarchies.
+
+Implementation work is tracked in the project plan (see *Evaluate/integrate glTF 2.0 exporter*).
+
+---
+
 ## Format Structure
 
 PM4 files use the standard WoW chunk-based format with FourCC identifiers. All chunk headers are stored in little-endian byte order.
@@ -203,6 +231,26 @@ struct MPRR {
 **Implementation Notes:**
 - References or links to MPRL data
 - Structure and usage unclear
+
+### MPRL - Placement List
+```c
+struct MPRL {
+    uint16_t unknown_0;      // Always 0 – padding / flags
+    int16_t  sentinel_0x02;  // Always -1 – separates logical groups
+    uint16_t parent_index;   // **Authoritative placement index** (links to MSLK.ParentIndex)
+    uint16_t type_flag;      // Always 32768 (0x8000) – object type/category flag
+    Vector3  position;       // World-space position (Z -> -X, X -> Z, Y stays Y)
+    int16_t  unknown_14;     // Observed 0 in all samples
+    uint16_t unknown_16;     // Observed 0x8000 in all samples
+};
+```
+**Confirmed Behaviour (2025-07-19):**
+* `parent_index` (offset 0x04) **directly equals** `MSLK.ParentIndex` – this forms the core link between placement nodes and geometry.
+* `type_flag` (0x06) is **always 0x8000** for real placements. Container MSLK nodes with `MspiFirstIndex = -1` map to MPRL entries where this flag is also 0x8000.
+* `position` is used to offset assembled geometry; convert to engine-right-handed coordinates via `(-Z, Y, X)`.
+* The pair `(unknown_0, sentinel_0x02)` is constant (0,-1) and acts as a record sentinel.
+
+---
 
 ### MDBH - Destructible Building Header
 ```c

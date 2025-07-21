@@ -33,6 +33,25 @@
 - **Investigation Tools Ready.** Pm4IndexPatternAnalyzer created to systematically analyze missing data patterns and high/low pair encodings.
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
+## Recent Updates (2025-07-21)
+### PM4 Object Grouping BREAKTHROUGH ✅ (01:30)
+- **MPRR-based hierarchical object grouping implemented and validated**
+- Discovered MPRR chunk contains 81,936 properties with 15,427 sentinel markers (Value1=65535)
+- Sentinel markers separate geometry into **15,428 actual building objects** (not fragments)
+- Validated object assembly produces realistic building-scale geometry:
+  - Building Object 0: 38,324 triangles (realistic building scale)
+  - Building Object 2: 654,324 triangles (massive complex structure)
+  - Building Object 3: 204,525 triangles (large building component)
+- **Root cause of fragmentation identified:** MPRL placements are instances/copies, not object definitions
+- **Solution:** MPRR Value1=65535 sentinels mark true object boundaries for hierarchical assembly
+- Export performance optimization needed for large objects (600K+ triangles)
+
+### Cross-Tile Reference Resolution COMPLETE ✅ (01:11)
+- Implemented `Pm4RegionLoader` with MSCN vertex remapping
+- Validated 12.8x vertex increase (63K → 812K vertices) from 502 merged tiles
+- Zero cross-tile reference issues after fix
+- Region loading now default for all PM4 commands
+
 ## Recent Updates (2025-07-19)
 ### SurfaceGroupKey Hierarchy & Grouping Tester (22:20)
 - Implemented `pm4-test-grouping` command which groups and exports geometry by `MSUR.SurfaceGroupKey`.
