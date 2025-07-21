@@ -18,7 +18,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast | pm4-tile-objects | pm4-raw-geometry | pm4-buildings\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -53,6 +53,9 @@ switch (command)
     case "pm4-analyze-data":
     case "pm4-mprr-objects":
     case "pm4-mprr-objects-fast":
+    case "pm4-tile-objects":
+    case "pm4-raw-geometry":
+    case "pm4-buildings":
     case "pm4-analyze-unknowns":
         case "pm4-test-grouping":
         // handled below
@@ -432,6 +435,51 @@ else if (command == "pm4-mprr-objects-fast")
         hierarchicalObjects, scene, outputDir, maxObjects, maxTriangles, useParallel);
     
     ConsoleLogger.WriteLine($"Optimized MPRR hierarchical object export complete!");
+}
+else if (command == "pm4-tile-objects")
+{
+    ConsoleLogger.WriteLine($"Parsing PM4 file for TILE-BASED object export: {fileInfo.FullName}");
+    
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_tile_objects");
+    
+    // Parse command line arguments for tile-based export settings
+    int maxObjectsPerTile = 50;
+    
+    foreach (var arg in args)
+    {
+        if (arg.StartsWith("--max-objects="))
+            int.TryParse(arg.Substring("--max-objects=".Length), out maxObjectsPerTile);
+    }
+    
+    // Export using tile-based approach (much faster)
+    ParpToolbox.Services.PM4.Pm4TileBasedExporter.ExportTileBased(
+        inputFile, outputDir, maxObjectsPerTile);
+    
+    ConsoleLogger.WriteLine($"Tile-based PM4 object export complete!");
+}
+else if (command == "pm4-raw-geometry")
+{
+    ConsoleLogger.WriteLine($"Exporting RAW PM4 geometry (no grouping): {fileInfo.FullName}");
+    
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_raw_geometry");
+    
+    // Export raw geometry to understand what PM4 actually contains
+    ParpToolbox.Services.PM4.Pm4RawGeometryExporter.ExportRawGeometry(
+        inputFile, outputDir);
+    
+    ConsoleLogger.WriteLine($"Raw PM4 geometry export complete!");
+}
+else if (command == "pm4-buildings")
+{
+    ConsoleLogger.WriteLine($"Exporting PM4 buildings (surface group objects): {fileInfo.FullName}");
+    
+    var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_buildings");
+    
+    // Export buildings using correct surface group logic
+    ParpToolbox.Services.PM4.Pm4SurfaceGroupExporter.ExportSurfaceGroups(
+        inputFile, outputDir);
+    
+    ConsoleLogger.WriteLine($"PM4 building export complete!");
 }
 else if (command == "pd4")
 {
