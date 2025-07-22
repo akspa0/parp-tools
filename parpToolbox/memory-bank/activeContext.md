@@ -6,20 +6,51 @@
 - **Real Data Testing:** All tests must use real game data to ensure accuracy.
 - **Clean Output:** All generated files must be written to the timestamped `project_output` directory.
 
-## Current Work Focus
+## Current Focus
+PM4 object grouping investigation has revealed critical insights but also exposed significant tooling fragmentation. Current focus is on consolidating and refactoring all PM4/PD4 analysis tools to create a clean, maintainable foundation.
 
-**BREAKTHROUGH ACHIEVED: PM4 Object Grouping SOLVED ✅**
+## Key Discoveries
 
-The PM4 object grouping problem has been successfully resolved through MPRR-based hierarchical assembly. Key achievements:
+### Object Grouping Reality
+- **PM4 files DO contain building objects** - 3D visualization confirms discrete building clusters
+- **Surface Groups (MSUR.SurfaceGroupKey) appear to be correct object boundaries** - not terrain subdivisions
+- **All previous "object grouping" attempts (MPRL, MPRR) produced fragments/subdivisions** - not complete objects
+- **Raw geometry export shows scattered building point clouds** - confirming objects exist but need proper grouping
 
-- **MPRR-based object grouping implemented and validated**
-- **15,428 realistic building objects identified** (38K-654K triangles each)
-- **Cross-tile vertex reference resolution complete** (12.8x vertex increase)
-- **Comprehensive documentation created** in docs/formats and memory-bank
+### Cross-Tile Reference Success
+- Cross-tile vertex reference resolution working correctly (12.8x data increase, 502 tiles merged)
+- Region loading successfully resolves out-of-bounds vertex access issues
+- MSCN remapping functional and validated
 
-**CURRENT STATUS: Export Performance Optimization**
+### Critical Problem: Tool Fragmentation
+- **8+ different PM4 exporters created** with overlapping/redundant functionality
+- **Feature creep has made analysis confusing and unmaintainable**
+- **Need immediate refactor** to consolidate knowledge into core library
 
-The core object grouping logic is working correctly. Current focus is on optimizing export performance for large objects (600K+ triangles) and ensuring stable OBJ output for all ~15,400 building objects.
+## Immediate Priority: Refactor Plan
+
+### Phase 1: Consolidate Core Library
+- Enhance `Pm4Adapter` with all new knowledge (cross-tile, surface groups, etc.)
+- Remove redundant exporters (keep only essential functionality)
+- Create single `Pm4Analyzer` for comprehensive analysis
+
+### Phase 2: Clean CLI Interface
+- Simplify to 3 commands: `pm4-analyze`, `pm4-export`, `pm4-test`
+- Remove fragmented commands (pm4-mprl-objects, pm4-mprr-objects, etc.)
+
+### Phase 3: Test Suite
+- Build proper unit/integration tests using real data
+- Remove old/broken tests
+- Establish clean foundation for future work
+
+## Next Steps
+
+### (2025-07-21 04:24) - CLI Simplification Progress
+- Extracted `AnalyzeCommand` from `Program.cs`; `pm4-analyze` now routes through this handler.
+- Removed bulky inline analysis logic from main entry to reduce complexity.
+- Build remains green; upcoming work will extract `ExportCommand` and `TestCommand` and deprecate legacy aliases.
+
+Execute refactor plan to consolidate tooling and integrate all discoveries into maintainable core library.
 
 ## Phases & Tasks
 

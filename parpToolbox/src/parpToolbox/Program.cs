@@ -18,7 +18,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast | pm4-tile-objects | pm4-raw-geometry | pm4-buildings\n" +
+                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast | pm4-tile-objects | pm4-raw-geometry | pm4-buildings\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -46,9 +46,11 @@ switch (command)
         break;
     case "pm4":
     case "pd4":
+    // 'pm4-region' deprecated: use 'pm4' (region loading is default)
     case "pm4-region":
     case "pm4-export-scene":
     case "pm4-test-chunks":
+    case "pm4-analyze":
     case "pm4-mprl-objects":
     case "pm4-analyze-data":
     case "pm4-mprr-objects":
@@ -178,8 +180,8 @@ catch (Exception e)
 if (command == "pm4-region")
 {
     ConsoleLogger.WriteLine($"Parsing PM4 region starting at: {fileInfo.FullName}");
-    var regionLoader = new Pm4RegionLoader();
-    var scene = regionLoader.LoadRegion(fileInfo.FullName);
+    var adapter = new Pm4Adapter();
+    var scene = adapter.LoadRegion(fileInfo.FullName);
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_region");
     var assembled = Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(scene);
     Pm4MsurObjectAssembler.ExportMsurObjects(assembled, scene, outputDir);
@@ -188,7 +190,8 @@ if (command == "pm4-region")
 
 if (command == "pm4")
 {
-    ConsoleLogger.WriteLine($"Parsing PM4 file: {fileInfo.FullName}");
+    // Delegated to dedicated command handler for simplicity
+        return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName);
     // Use region loader by default to resolve cross-tile vertex references
     bool useSingleTile = args.Contains("--single-tile");
     Pm4Scene scene;
@@ -201,8 +204,8 @@ if (command == "pm4")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile));
@@ -268,8 +271,8 @@ else if (command == "pm4-test-grouping")
     if (loadRegion)
     {
         ConsoleLogger.WriteLine("Region mode active – loading all tiles in region ...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
     else
     {
@@ -299,8 +302,8 @@ else if (command == "pm4-export-scene")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_scene");
@@ -322,8 +325,8 @@ else if (command == "pm4-mprl-objects")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprl_objects");
@@ -336,6 +339,13 @@ else if (command == "pm4-mprl-objects")
     
     ConsoleLogger.WriteLine($"MPRL object export complete! Exported {buildingObjects.Count} building objects");
 }
+else if (command == "pm4-analyze")
+{
+    // Delegated to dedicated command handler for simplicity
+    return ParpToolbox.CliCommands.AnalyzeCommand.Run(args, fileInfo.FullName);
+}
+
+
 else if (command == "pm4-analyze-data")
 {
     ConsoleLogger.WriteLine($"Analyzing PM4 data structure: {fileInfo.FullName}");
@@ -351,8 +361,8 @@ else if (command == "pm4-analyze-data")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_data_analysis");
@@ -377,8 +387,8 @@ else if (command == "pm4-mprr-objects")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprr_objects");
@@ -406,8 +416,8 @@ else if (command == "pm4-mprr-objects-fast")
     else
     {
         ConsoleLogger.WriteLine("Region mode active (default) - loading cross-tile references...");
-        var regionLoader = new ParpToolbox.Services.PM4.Pm4RegionLoader();
-        scene = regionLoader.LoadRegion(fileInfo.FullName);
+        var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+        scene = adapter.LoadRegion(fileInfo.FullName);
     }
 
     var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputFile) + "_mprr_objects_fast");

@@ -34,23 +34,47 @@
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
 ## Recent Updates (2025-07-21)
-### PM4 Object Grouping BREAKTHROUGH ✅ (01:30)
-- **MPRR-based hierarchical object grouping implemented and validated**
-- Discovered MPRR chunk contains 81,936 properties with 15,427 sentinel markers (Value1=65535)
-- Sentinel markers separate geometry into **15,428 actual building objects** (not fragments)
-- Validated object assembly produces realistic building-scale geometry:
-  - Building Object 0: 38,324 triangles (realistic building scale)
-  - Building Object 2: 654,324 triangles (massive complex structure)
-  - Building Object 3: 204,525 triangles (large building component)
-- **Root cause of fragmentation identified:** MPRL placements are instances/copies, not object definitions
-- **Solution:** MPRR Value1=65535 sentinels mark true object boundaries for hierarchical assembly
-- Export performance optimization needed for large objects (600K+ triangles)
 
-### Cross-Tile Reference Resolution COMPLETE ✅ (01:11)
-- Implemented `Pm4RegionLoader` with MSCN vertex remapping
-- Validated 12.8x vertex increase (63K → 812K vertices) from 502 merged tiles
-- Zero cross-tile reference issues after fix
-- Region loading now default for all PM4 commands
+### CLI Simplification & JSON Report (04:55)
+- Extracted `AnalyzeCommand` and `ExportCommand` handlers; `Program.cs` now delegates to them.
+- Deprecated CSV outputs from `pm4-analyze`; added `--report` flag to generate a single `analysis_report.json` for cleaner results.
+- Build remains green; next step is to retire redundant ad-hoc commands and expose only `pm4-analyze`, `pm4-export`, and `pm4-test`.
+### PM4 Object Grouping - CRITICAL INSIGHTS DISCOVERED
+
+**Status: MAJOR BREAKTHROUGH - Objects exist, but tooling needs consolidation**
+
+### Key Discovery: PM4 Contains Building Objects
+- **3D visualization confirms discrete building objects** exist in PM4 files
+- **Raw geometry export shows scattered building point clouds** - not terrain
+- **Surface Groups (MSUR.SurfaceGroupKey) appear to be correct object boundaries**
+- **Previous attempts (MPRL, MPRR) produced fragments/subdivisions** - not complete objects
+
+### Cross-Tile Reference Resolution 
+- **Successfully implemented and validated** (12.8x vertex increase, 502 tiles merged)
+- **MSCN remapping working correctly** - resolves out-of-bounds vertex access
+- **Region loading functional** - produces complete geometry datasets
+
+### Critical Problem: Tool Fragmentation
+- **8+ different PM4 exporters created** with overlapping functionality:
+  - Pm4Adapter (core)
+  - Pm4RegionLoader (cross-tile)
+  - Pm4MprlObjectGrouper (MPRL-based)
+  - Pm4HierarchicalObjectAssembler (MPRR-based)
+  - Pm4OptimizedObjectExporter (performance)
+  - Pm4TileBasedExporter (tile-based)
+  - Pm4RawGeometryExporter (raw output)
+  - Pm4SurfaceGroupExporter (surface groups)
+
+### Immediate Need: Refactor and Consolidation
+- **Feature creep has made analysis confusing and unmaintainable**
+- **Need to consolidate all knowledge into core library**
+- **Remove redundant/overlapping tools**
+- **Establish clean foundation for future work**
+
+### Current Focus: Refactor Plan Execution
+1. **Phase 1**: Consolidate core library with all discoveries
+2. **Phase 2**: Clean CLI interface (3 commands instead of 12+)
+3. **Phase 3**: Build proper test suite with real data
 
 ## Recent Updates (2025-07-19)
 ### SurfaceGroupKey Hierarchy & Grouping Tester (22:20)
