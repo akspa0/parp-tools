@@ -3,9 +3,14 @@ namespace ParpToolbox.Services.PM4;
 using System.Globalization;
 using System.IO;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Utils;
 
 /// <summary>
 /// Simple OBJ exporter for <see cref="Pm4Scene"/>. Writes single OBJ with default material.
+/// </summary>
+/// <summary>
+/// Legacy wrapper delegating to unified <see cref="Pm4Exporter"/>.
+/// Retained for backwards compatibility with existing call sites.
 /// </summary>
 internal static class Pm4ObjExporter
 {
@@ -17,39 +22,51 @@ internal static class Pm4ObjExporter
     /// <param name="writeFaces">If true, writes face definitions; otherwise points only.</param>
     public static void Export(Pm4Scene scene, string filename, bool writeFaces = false, bool flipX = true)
     {
-        var dir = Path.GetDirectoryName(filename) ?? ".";
+        string dir = Path.GetDirectoryName(filename) ?? ".";
         Directory.CreateDirectory(dir);
-        var modelName = Path.GetFileNameWithoutExtension(filename);
-        var objPath = Path.Combine(dir, modelName + ".obj");
-        var mtlPath = Path.Combine(dir, modelName + ".mtl");
 
-        using var objWriter = new StreamWriter(objPath);
-        objWriter.WriteLine("# parpToolbox PM4 OBJ export");
-        objWriter.WriteLine($"mtllib {modelName}.mtl");
-
-        // vertices (optional X flip)
-        foreach (var v in scene.Vertices)
+        // Note: unified exporter always writes faces. If caller requested point-cloud we warn once.
+        if (!writeFaces)
         {
-            float x = flipX ? -v.X : v.X;
-            objWriter.WriteLine($"v {x.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
+            ConsoleLogger.WriteLine("Warning: Point-cloud export mode is deprecated and has been removed. Exporting faces instead.");
         }
 
-        // default material for now
-        objWriter.WriteLine("usemtl default");
+        var exporter = new Pm4Exporter(
+            scene,
+            dir,
+            new Pm4Exporter.ExportOptions
+            {
+                Grouping = Pm4Exporter.GroupingStrategy.None,
+                SeparateFiles = false,
+                FlipX = flipX,
+                Verbose = true,
+            });
 
-        if (writeFaces && scene.Triangles.Count > 0)
-        {
-            // faces (OBJ uses 1-based indices)
-            foreach (var (a, b, c) in scene.Triangles)
-                objWriter.WriteLine($"f {a + 1} {b + 1} {c + 1}");
-        }
-        else
-        {
-            // Write as point cloud (Meshlab-friendly)
-            for (int i = 0; i < scene.Vertices.Count; i++)
-                objWriter.WriteLine($"p {i + 1}");
-        }
+        exporter.Export();
 
-        File.WriteAllText(mtlPath, "newmtl default\nKd 0.8 0.8 0.8\n");
+        // The unified exporter writes combined.obj / combined.mtl by default when SeparateFiles=false.
+        // Rename to legacy naming convention expected by callers.
+        string generatedObj = Path.Combine(dir, "combined.obj");
+        string generatedMtl = Path.Combine(dir, "combined.mtl");
+        string targetObj = Path.ChangeExtension(filename, ".obj");
+        string targetMtl = Path.ChangeExtension(filename, ".mtl");
+
+        try
+        {
+            if (File.Exists(generatedObj))
+            {
+                if (File.Exists(targetObj)) File.Delete(targetObj);
+                File.Move(generatedObj, targetObj);
+            }
+            if (File.Exists(generatedMtl))
+            {
+                if (File.Exists(targetMtl)) File.Delete(targetMtl);
+                File.Move(generatedMtl, targetMtl);
+            }
+        }
+        catch (IOException ex)
+        {
+            ConsoleLogger.WriteLine($"Warning: Failed to rename combined export files: {ex.Message}");
+        }
     }
 }

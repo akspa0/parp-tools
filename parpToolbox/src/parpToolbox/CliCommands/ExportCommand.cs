@@ -82,19 +82,20 @@ namespace ParpToolbox.CliCommands
             }
             // ---------------------------------------------------------------------
 
-            // Default path: export whole scene
-            var outputFile = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputPath) + ".obj");
-            if (exportChunks && scene.Groups.Count > 0)
-            {
-                ConsoleLogger.WriteLine($"Exporting {scene.Groups.Count} groups to {outputDir}...");
-                Pm4GroupObjExporter.Export(scene, outputDir, exportFaces);
-            }
-            else
-            {
-                ConsoleLogger.WriteLine($"Exporting OBJ to {outputFile}...");
-                Pm4ObjExporter.Export(scene, outputFile, exportFaces);
-            }
-            ConsoleLogger.WriteLine("Export complete!");
+            // Default path: per-object export using unified exporter (MSUR SurfaceGroupKey)
+            ConsoleLogger.WriteLine("=== PM4 EXPORT (per-object default) ===");
+            var exporter = new Pm4Exporter(
+                scene,
+                outputDir,
+                new Pm4Exporter.ExportOptions
+                {
+                    Grouping = Pm4Exporter.GroupingStrategy.MsurSurfaceGroup,
+                    SeparateFiles = true,
+                    FlipX = true,
+                    Verbose = true,
+                });
+            var exported = exporter.Export();
+            ConsoleLogger.WriteLine($"Export complete – wrote {exported} objects to '{outputDir}'.");
             return 0;
         }
     }

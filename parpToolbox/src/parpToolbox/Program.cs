@@ -18,7 +18,7 @@ if (args.Length == 0)
 {
     ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
                       "       or parpToolbox <command> <file> [flags] (positional)\n" +
-                      "Commands: wmo | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast | pm4-tile-objects | pm4-raw-geometry | pm4-buildings\n" +
+                      "Commands: wmo | pm4-export | pm4-analyze | pm4-test | pm4 | pd4 | pm4-region | pm4-export-scene | pm4-test-chunks | pm4-analyze-indices | pm4-analyze-unknowns | pm4-test-grouping | pm4-mprl-objects | pm4-analyze-data | pm4-mprr-objects | pm4-mprr-objects-fast | pm4-tile-objects | pm4-raw-geometry | pm4-buildings\n" +
                       "Common flags:\n" +
                       "   --include-collision   Include collision geometry (WMO only)\n" +
                       "   --split-groups        Export each WMO group separately\n" +
@@ -39,18 +39,35 @@ if (args.Length == 0)
 
 var command = args[0].ToLowerInvariant();
 
+// Global help handler
+if (command == "help" || command == "--help" || command == "-h")
+{
+    ConsoleLogger.WriteLine("Usage: parpToolbox <command> --input <file> [flags]\n" +
+                      "       or parpToolbox <command> <file> [flags] (positional)\n" +
+                      "Primary commands: wmo | pm4-export | pm4-analyze | pm4-test\n" +
+                      "Legacy commands remain available for now (see source).\n" +
+                      "Use '<command> --help' for specific flags.");
+    ConsoleLogger.Close();
+    return 0;
+}
+
 switch (command)
 {
     case "wmo":
         // handled below
         break;
-    case "pm4":
+    case "pm4-export":
+    // fall-through to unified pm4 export handler
+case "pm4":
     case "pd4":
     // 'pm4-region' deprecated: use 'pm4' (region loading is default)
     case "pm4-region":
     case "pm4-export-scene":
     case "pm4-test-chunks":
-    case "pm4-analyze":
+    case "pm4-test":
+    // placeholder integration test command – routed to AnalyzeCommand for now until implemented
+    break;
+case "pm4-analyze":
     case "pm4-mprl-objects":
     case "pm4-analyze-data":
     case "pm4-mprr-objects":
@@ -125,7 +142,7 @@ if (string.IsNullOrEmpty(inputFile))
     }
 }
 
-if (string.IsNullOrEmpty(inputFile))
+if (string.IsNullOrEmpty(inputFile) && command == "wmo")
 {
     Console.WriteLine("Error: --input <file> is required for the wmo command.");
     return 1;
@@ -186,6 +203,23 @@ if (command == "pm4-region")
     var assembled = Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(scene);
     Pm4MsurObjectAssembler.ExportMsurObjects(assembled, scene, outputDir);
     return 0;
+}
+
+// Fast-path: unified PM4 exporter alias – delegate immediately and skip the bulky legacy switch logic
+if (command == "pm4-export")
+{
+    if (string.IsNullOrEmpty(inputFile))
+    {
+        Console.WriteLine("Usage: pm4-export <input.pm4> [flags]\n       pm4-export --help for options");
+        return 1;
+    }
+    return ParpToolbox.CliCommands.ExportCommand.Run(args, Path.GetFullPath(inputFile));
+}
+
+if (command == "pm4")
+{
+    // New canonical export alias – delegate to extracted command handler
+    return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName);
 }
 
 if (command == "pm4")

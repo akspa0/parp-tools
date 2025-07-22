@@ -33,6 +33,16 @@
 - **Investigation Tools Ready.** Pm4IndexPatternAnalyzer created to systematically analyze missing data patterns and high/low pair encodings.
 - **Next Priority: Global Tile Loading.** Must implement unified region loader to access missing ~63,000 vertices for complete object reconstruction.
 
+## Recent Updates (2025-07-22)
+### OBJ Exporter Consolidation Complete
+- Legacy exporters (`Pm4ObjExporter`, `Pm4GroupObjExporter`, `Pm4SceneExporter`, etc.) now thin wrappers that delegate to unified `Pm4Exporter`.
+- All CLI paths (`pm4-export`, `pm4` legacy aliases) funnel through unified exporter; build validated ✅.
+- Deprecated point-cloud (vertices-only) mode; wrappers emit warning and export faces instead.
+- Consolidation removed ~1 k LOC of duplicated code and fixes past inconsistencies (X-flip, material names).
+- Next: Phase 4 – create integration/regression tests using real multi-tile data to validate exporter parity, grouping accuracy, and MSCN remapping integrity.
+
+---
+
 ## Recent Updates (2025-07-21)
 
 ### CLI Simplification & JSON Report (04:55)
