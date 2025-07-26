@@ -29,7 +29,14 @@ namespace ParpToolbox.CliCommands
             bool bulkDump      = args.Contains("--bulk-dump");
             bool csvDump       = args.Contains("--csv-dump");
             bool exportObjects = args.Contains("--objects") || args.Contains("--indexcount");
+            bool selectorGrouping = args.Contains("--selector-grouping") || args.Contains("--selector");
             bool useSingleTile = args.Contains("--single-tile");
+            bool useNewExporter = args.Contains("--new-exporter");
+            bool enableCrossTile = args.Contains("--cross-tile");
+            bool enableMprlTransforms = args.Contains("--mprl-transforms");
+            bool includeM2Objects = args.Contains("--include-m2");
+            bool disableXAxisInversion = args.Contains("--no-x-inversion");
+            bool exportAsWmo = args.Contains("--wmo");
 
             // Load scene (region loader by default)
             Pm4Scene scene;
@@ -46,6 +53,41 @@ namespace ParpToolbox.CliCommands
             }
 
             var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputPath));
+
+            // Use NewPm4Exporter if requested
+            if (useNewExporter)
+            {
+                ConsoleLogger.WriteLine("Using NewPm4Exporter...");
+                
+                // Configure export options
+                var options = new NewPm4Exporter.ExportOptions
+                {
+                    Format = exportAsWmo ? NewPm4Exporter.ExportFormat.Wmo : NewPm4Exporter.ExportFormat.Obj,
+                    MinTriangles = 10, // Default value, could be made configurable
+                    ApplyXAxisInversion = !disableXAxisInversion,
+                    IncludeM2Objects = includeM2Objects,
+                    EnableMprlTransformations = enableMprlTransforms,
+                    EnableCrossTileResolution = enableCrossTile
+                };
+                
+                // Create exporter
+                NewPm4Exporter exporter;
+                if (enableCrossTile)
+                {
+                    // For cross-tile resolution, we need to pass the directory path
+                    var directoryPath = Directory.Exists(inputPath) ? inputPath : Path.GetDirectoryName(inputPath);
+                    exporter = new NewPm4Exporter(directoryPath, options);
+                }
+                else
+                {
+                    exporter = new NewPm4Exporter(scene, options);
+                }
+                
+                // Export
+                var exportedCount = exporter.Export(outputDir);
+                ConsoleLogger.WriteLine($"Export complete – wrote {exportedCount} objects to '{outputDir}'.");
+                return 0;
+            }
 
             // Early-exit paths ------------------------------------------------------
             if (bulkDump)
@@ -72,6 +114,15 @@ namespace ParpToolbox.CliCommands
                 return 0;
             }
 
+            if (selectorGrouping)
+            {
+                ConsoleLogger.WriteLine("Exporting objects by selector key (XX/YY) ...");
+                var selectorObjs = Pm4MsurObjectAssembler.AssembleObjectsBySelectorKey(scene);
+                Pm4MsurObjectAssembler.ExportMsurObjects(selectorObjs, scene, outputDir);
+                ConsoleLogger.WriteLine($"Selector object export complete – wrote {selectorObjs.Count} objects to '{outputDir}'.");
+                return 0;
+            }
+
             if (exportObjects)
             {
                 ConsoleLogger.WriteLine("Exporting assembled objects by MSUR.IndexCount ...");
@@ -82,20 +133,11 @@ namespace ParpToolbox.CliCommands
             }
             // ---------------------------------------------------------------------
 
-            // Default path: per-object export using unified exporter (MSUR SurfaceGroupKey)
-            ConsoleLogger.WriteLine("=== PM4 EXPORT (per-object default) ===");
-            var exporter = new Pm4Exporter(
-                scene,
-                outputDir,
-                new Pm4Exporter.ExportOptions
-                {
-                    Grouping = Pm4Exporter.GroupingStrategy.MsurSurfaceGroup,
-                    SeparateFiles = true,
-                    FlipX = true,
-                    Verbose = true,
-                });
-            var exported = exporter.Export();
-            ConsoleLogger.WriteLine($"Export complete – wrote {exported} objects to '{outputDir}'.");
+            // Default path: assemble objects by MSUR.IndexCount (proof-of-concept logic)
+            ConsoleLogger.WriteLine("=== PM4 EXPORT (assembled objects default) ===");
+            var assembledObjects = Pm4MsurObjectAssembler.AssembleObjectsByMsurIndex(scene);
+            Pm4MsurObjectAssembler.ExportMsurObjects(assembledObjects, scene, outputDir);
+            ConsoleLogger.WriteLine($"Export complete – wrote {assembledObjects.Count} assembled objects to '{outputDir}'.");
             return 0;
         }
     }

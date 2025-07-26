@@ -272,6 +272,73 @@ internal static class Pm4MsurObjectAssembler
         
         return assembledObjects;
     }
+
+    /// <summary>
+    /// Assembles PM4 objects by grouping geometry using the two-byte selector key:
+    /// (SurfaceGroupKey &lt;&lt; 8) | SurfaceAttributeMask (aka XX/YY discovered in July-22 research).
+    /// This yields much finer-grained, semantically correct pieces than IndexCount grouping.
+    /// </summary>
+    public static List<MsurObject> AssembleObjectsBySelectorKey(Pm4Scene scene)
+    {
+        var assembledObjects = new List<MsurObject>();
+        var groups = new Dictionary<int, List<(List<Vector3> verts, List<int> faces)>>();
+
+        int dummyMax = 0;
+        int dummyOob = 0;
+
+        foreach (var surface in scene.Surfaces)
+        {
+            if (surface.IndexCount == 0) continue;
+
+            int selectorKey = (surface.SurfaceGroupKey << 8) | surface.SurfaceAttributeMask;
+
+            var verts = new List<Vector3>();
+            var faces = new List<int>();
+            ExtractSurfaceTriangles(surface, scene, verts, faces, ref dummyMax, ref dummyOob);
+            if (verts.Count == 0 || faces.Count == 0) continue;
+
+            if (!groups.TryGetValue(selectorKey, out var list))
+            {
+                list = new List<(List<Vector3>, List<int>)>();
+                groups[selectorKey] = list;
+            }
+            list.Add((verts, faces));
+        }
+
+        foreach (var (selectorKey, surfaceBatches) in groups)
+        {
+            var consolidatedVerts = new List<Vector3>();
+            var consolidatedFaces = new List<int>();
+            foreach (var (verts, faces) in surfaceBatches)
+            {
+                int offset = consolidatedVerts.Count;
+                consolidatedVerts.AddRange(verts);
+                for (int i = 0; i < faces.Count; i++)
+                {
+                    consolidatedFaces.Add(faces[i] + offset);
+                }
+            }
+            if (consolidatedFaces.Count == 0) continue;
+            var tris = new List<(int A,int B,int C)>();
+            for (int i = 0; i < consolidatedFaces.Count; i += 3)
+            {
+                if (i + 2 >= consolidatedFaces.Count) break;
+                tris.Add((consolidatedFaces[i], consolidatedFaces[i+1], consolidatedFaces[i+2]));
+            }
+            var center = CalculateBoundingCenter(consolidatedVerts);
+            var obj = new MsurObject(
+                SurfaceGroupKey: (byte)(selectorKey >> 8),
+                SurfaceCount: surfaceBatches.Count,
+                Triangles: tris,
+                BoundingCenter: center,
+                VertexCount: consolidatedVerts.Count,
+                ObjectType: $"Selector_{selectorKey:X4}");
+            assembledObjects.Add(obj);
+        }
+
+        ConsoleLogger.WriteLine($"Assembled {assembledObjects.Count} selector‐key objects (XX/YY grouping)");
+        return assembledObjects;
+    }
     
     /// <summary>
     /// Extracts triangles from a surface using legacy-compatible plane projection logic.
@@ -652,7 +719,16 @@ internal static class Pm4MsurObjectAssembler
             
             // Write vertices used by this object (with coordinate fix)
             var vertexMapping = new Dictionary<int, int>();
-            var usedVertices = obj.Triangles
+            // Filter out triangles that reference missing vertices (can occur in single-tile mode)
+            var validTriangles = obj.Triangles
+                .Where(t => t.A < scene.Vertices.Count && t.B < scene.Vertices.Count && t.C < scene.Vertices.Count)
+                .ToList();
+            var skippedCount = obj.Triangles.Count - validTriangles.Count;
+            if (skippedCount > 0)
+                ConsoleLogger.WriteLine($"        Skipped {skippedCount} triangles with out-of-range vertex indices (tile boundary).\n");
+            // Note: cannot mutate init-only property. We'll use 'validTriangles' directly for export.
+
+            var usedVertices = validTriangles
                 .SelectMany(t => new[] { t.A, t.B, t.C })
                 .Distinct()
                 .OrderBy(i => i)
@@ -682,7 +758,7 @@ internal static class Pm4MsurObjectAssembler
             writer.WriteLine($"g {obj.ObjectType}");
             
             // Write faces
-            foreach (var (a, b, c) in obj.Triangles)
+            foreach (var (a, b, c) in validTriangles)
             {
                 writer.WriteLine($"f {vertexMapping[a]} {vertexMapping[b]} {vertexMapping[c]}");
             }

@@ -31,18 +31,19 @@ internal static class Pm4ObjExporter
             ConsoleLogger.WriteLine("Warning: Point-cloud export mode is deprecated and has been removed. Exporting faces instead.");
         }
 
-        var exporter = new Pm4Exporter(
-            scene,
-            dir,
-            new Pm4Exporter.ExportOptions
-            {
-                Grouping = Pm4Exporter.GroupingStrategy.None,
-                SeparateFiles = false,
-                FlipX = flipX,
-                Verbose = true,
-            });
+        // Use NewPm4Exporter with equivalent options
+        var options = new NewPm4Exporter.ExportOptions
+        {
+            Format = NewPm4Exporter.ExportFormat.Obj,
+            MinTriangles = 0, // No filtering
+            ApplyXAxisInversion = flipX,
+            IncludeM2Objects = true, // Include all objects
+            EnableMprlTransformations = false, // No MPRL transforms for legacy compatibility
+            EnableCrossTileResolution = false, // No cross-tile resolution for legacy compatibility
+        };
 
-        exporter.Export();
+        var exporter = new NewPm4Exporter(scene, options);
+        exporter.Export(dir);
 
         // The unified exporter writes combined.obj / combined.mtl by default when SeparateFiles=false.
         // Rename to legacy naming convention expected by callers.

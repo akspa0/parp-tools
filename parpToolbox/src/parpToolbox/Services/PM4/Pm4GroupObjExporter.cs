@@ -16,25 +16,23 @@ internal static class Pm4GroupObjExporter
     /// <param name="flipX">Invert X coordinate to correct mirroring.</param>
     public static void Export(Pm4Scene scene, string outputDir, bool writeFaces = false, bool flipX = true)
     {
-        // Delegates to unified Pm4Exporter with MSUR grouping.
-        var exporter = new Pm4Exporter(
-            scene,
-            outputDir,
-            new Pm4Exporter.ExportOptions
-            {
-                Grouping = Pm4Exporter.GroupingStrategy.MsurSurfaceGroup,
-                SeparateFiles = true,
-                FlipX = flipX,
-                // The unified exporter always writes faces; legacy behaviour of point-cloud export when writeFaces == false
-                // is no longer supported. We emit a warning once to inform the user.
-                Verbose = true,
-            });
+        // Use NewPm4Exporter with equivalent options for MSUR grouping
+        var options = new NewPm4Exporter.ExportOptions
+        {
+            Format = NewPm4Exporter.ExportFormat.Obj,
+            MinTriangles = 0, // No filtering
+            ApplyXAxisInversion = flipX,
+            IncludeM2Objects = true, // Include all objects
+            EnableMprlTransformations = false, // No MPRL transforms for legacy compatibility
+            EnableCrossTileResolution = false, // No cross-tile resolution for legacy compatibility
+        };
 
         if (!writeFaces)
         {
             ConsoleLogger.WriteLine("Warning: Point-cloud export mode is deprecated and has been removed. Exporting faces instead.");
         }
 
-        exporter.Export();
+        var exporter = new NewPm4Exporter(scene, options);
+        exporter.Export(outputDir);
     }
 }

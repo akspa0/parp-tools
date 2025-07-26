@@ -41,6 +41,13 @@
 - Consolidation removed ~1 k LOC of duplicated code and fixes past inconsistencies (X-flip, material names).
 - Next: Phase 4 – create integration/regression tests using real multi-tile data to validate exporter parity, grouping accuracy, and MSCN remapping integrity.
 
+### Selector-Based Grouping Insight & MSUR Selector Export (02:24)
+- **New discovery:** Existing *Object_Group_* outputs are merely container shells. True object splits follow the pair of selector bytes (XX/YY) found in each MSUR entry.
+- Implementing selector-key `(SurfaceGroupKey << 8) | SurfaceAttributeMask` grouping in `Pm4MsurObjectAssembler`.
+- Added triangle validation to suppress invalid-index warnings; build fixes applied (init-only property error resolved).
+- Pending: CLI flag `--selector-grouping` and manifest output for per-selector objects.
+
+
 ---
 
 ## Recent Updates (2025-07-21)

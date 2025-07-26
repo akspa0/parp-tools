@@ -11,45 +11,25 @@ using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;
 
+/*
 /// <summary>
 /// Unified PM4 exporter with support for multiple grouping strategies and export options.
 /// </summary>
-/// <remarks>
-/// <para>
-/// This class consolidates multiple PM4 export approaches into a single, configurable exporter.
-/// It supports various object grouping strategies based on key format insights:
-/// </para>
-/// <list type="bullet">
-///   <item>
-///     <term>MSUR-based grouping</term>
-///     <description>
-///       Groups objects using MSUR.SurfaceGroupKey (FlagsOrUnknown_0x00), which produces
-///       semantically meaningful building-scale objects based on the raw field values.
-///     </description>
-///   </item>
-///   <item>
-///     <term>MPRR-based grouping</term>
-///     <description>
-///       Groups objects using MPRR sentinel values (Value1=65535), which define complete building
-///       object boundaries and produce the most coherent object scale (38K-654K triangles per building).
-///     </description>
-///   </item>
-///   <item>
-///     <term>Raw geometry</term>
-///     <description>
-///       Exports raw geometry without any grouping, useful for testing and analysis.
-///     </description>
-///   </item>
-/// </list>
-/// <para>
-/// The exporter implements proper cross-tile vertex reference resolution to ensure complete
-/// building geometry without data loss.
-/// </para>
-/// </remarks>
 public class Pm4Exporter
 {
     /// <summary>
-    /// Grouping strategies for PM4 object export.
+    /// Export format options.
+    /// </summary>
+    public enum ExportFormat
+    {
+        /// <summary>
+        /// Wavefront OBJ format.
+        /// </summary>
+        Obj,
+    }
+    
+    /// <summary>
+    /// Grouping strategy for PM4 objects.
     /// </summary>
     public enum GroupingStrategy
     {
@@ -59,63 +39,50 @@ public class Pm4Exporter
         None,
         
         /// <summary>
-        /// MSUR-based grouping using SurfaceGroupKey (FlagsOrUnknown_0x00).
-        /// Produces semantically meaningful building-scale objects.
+        /// Groups by MSLK ParentIndex_0x04 (4th field) - the correct approach for PM4 objects.
+        /// </summary>
+        ParentIndex,
+        
+        /// <summary>
+        /// Groups by MSUR surface group key (FlagsOrUnknown_0x00).
         /// </summary>
         MsurSurfaceGroup,
         
         /// <summary>
-        /// MPRR-based grouping using sentinel values (Value1=65535).
-        /// Produces the most coherent object scale (38K-654K triangles per building).
+        /// Groups by MPRR sentinel values (Value1=65535).
         /// </summary>
         MprrSentinel,
         
         /// <summary>
-        /// Legacy tile-based grouping - mostly for backwards compatibility.
+        /// Groups by tile index.
         /// </summary>
-        TileBased
+        TileBased,
     }
     
     /// <summary>
-    /// Format options for PM4 export.
-    /// </summary>
-    public enum ExportFormat
-    {
-        /// <summary>
-        /// Wavefront OBJ format - widely compatible but lacks hierarchy.
-        /// </summary>
-        Obj
-    }
-    
-    /// <summary>
-    /// Export options configuration.
+    /// Export options for <see cref="Pm4Exporter"/>.
     /// </summary>
     public class ExportOptions
     {
         /// <summary>
-        /// Grouping strategy to use. Default is MSUR-based grouping.
-        /// </summary>
-        public GroupingStrategy Grouping { get; set; } = GroupingStrategy.MsurSurfaceGroup;
-        
-        /// <summary>
-        /// Output format. Default is OBJ.
+        /// Gets or sets the export format. Default is OBJ.
         /// </summary>
         public ExportFormat Format { get; set; } = ExportFormat.Obj;
         
         /// <summary>
-        /// If true, flips X coordinates for correct orientation. Default is true.
+        /// Gets or sets the grouping strategy. Default is ParentIndex.
+        /// </summary>
+        public GroupingStrategy Grouping { get; set; } = GroupingStrategy.ParentIndex;
+        
+        /// <summary>
+        /// If true, exports each group to a separate file. Default is false.
+        /// </summary>
+        public bool SeparateFiles { get; set; } = false;
+        
+        /// <summary>
+        /// If true, inverts the X coordinate to correct mirroring. Default is true.
         /// </summary>
         public bool FlipX { get; set; } = true;
-        
-        /// <summary>
-        /// If true, exports each object to a separate file. Default is true.
-        /// </summary>
-        public bool SeparateFiles { get; set; } = true;
-        
-        /// <summary>
-        /// If true, includes material definitions. Default is true.
-        /// </summary>
-        public bool ExportMaterials { get; set; } = true;
         
         /// <summary>
         /// If true, logs detailed export information. Default is true.
@@ -132,7 +99,7 @@ public class Pm4Exporter
         /// </summary>
         public int MinTriangles { get; set; } = 10;
     }
-
+    
     private readonly Pm4Scene _scene;
     private readonly string _outputRoot;
     private readonly ExportOptions _options;
@@ -143,7 +110,7 @@ public class Pm4Exporter
     /// <param name="scene">PM4 scene to export.</param>
     /// <param name="outputRoot">Root output directory.</param>
     /// <param name="options">Export options.</param>
-    public Pm4Exporter(Pm4Scene scene, string outputRoot, ExportOptions options = null)
+    public Pm4Exporter(Pm4Scene scene, string outputRoot, ExportOptions? options = null)
     {
         _scene = scene ?? throw new ArgumentNullException(nameof(scene));
         _outputRoot = outputRoot ?? throw new ArgumentNullException(nameof(outputRoot));
@@ -203,6 +170,8 @@ public class Pm4Exporter
         {
             case GroupingStrategy.None:
                 return GroupAsWholeScene();
+            case GroupingStrategy.ParentIndex:
+                return GroupByParentIndex();
             case GroupingStrategy.MsurSurfaceGroup:
                 return GroupByMsurSurfaceGroup();
             case GroupingStrategy.MprrSentinel:
@@ -215,319 +184,232 @@ public class Pm4Exporter
     }
     
     /// <summary>
-    /// No grouping - exports entire scene as a single object.
+    /// Groups objects by MSLK ParentIndex_0x04 (4th field) - the correct approach for PM4 objects.
     /// </summary>
-    private List<GroupedObject> GroupAsWholeScene()
+    private List<GroupedObject> GroupByParentIndex()
     {
-        var obj = new GroupedObject
-        {
-            Name = "entire_scene",
-            Triangles = _scene.Triangles.ToList()
-        };
-        
-        return new List<GroupedObject> { obj };
-    }
-    
-    /// <summary>
-    /// MSUR-based grouping using SurfaceGroupKey (FlagsOrUnknown_0x00).
-    /// </summary>
-    private List<GroupedObject> GroupByMsurSurfaceGroup()
-    {
-        // Group surfaces by SurfaceGroupKey (this IS the correct object grouping)
-        var surfaceGroups = _scene.Surfaces
-            .GroupBy(s => s.SurfaceGroupKey)
-            .OrderByDescending(g => g.Sum(s => s.IndexCount)) // Largest objects first
-            .ToList();
-        
         var result = new List<GroupedObject>();
         
-        foreach (var group in surfaceGroups)
+        if (_scene.MSLK == null || _scene.MSLK.Entries == null || _scene.MSLK.Entries.Count == 0)
         {
-            var groupKey = group.Key;
-            var surfaces = group.ToList();
-            
-            // Skip empty groups
-            if (_options.SkipEmptyObjects && surfaces.Sum(s => s.IndexCount) / 3 < _options.MinTriangles)
+            if (_options.Verbose)
             {
-                continue;
+                ConsoleLogger.WriteLine("No MSLK entries found to group by ParentIndex");
+            }
+            return result;
+        }
+        
+        // Group MSLK entries by ParentIndex_0x04 (4th field) - this is the actual object grouping key
+        var objectsByParentIndex = _scene.MSLK.Entries
+            .Where(entry => entry != null && GetParentIndex(entry) != 0xFFFFFFFF)
+            .GroupBy(entry => GetParentIndex(entry))
+            .ToList();
+        
+        foreach (var objectGroup in objectsByParentIndex)
+        {
+            var triangles = new List<(int A, int B, int C)>();
+            
+            // Collect triangles from all MSLK entries with this parent index
+            foreach (var mslkEntry in objectGroup)
+            {
+                var entryTriangles = ExtractTrianglesForMslkEntry(mslkEntry);
+                triangles.AddRange(entryTriangles);
             }
             
-            // Create grouped object
+            if (triangles.Count == 0 && _options.SkipEmptyObjects)
+                continue;
+            
+            if (triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
             var obj = new GroupedObject
             {
-                Name = $"building_{groupKey:X2}",
-                GroupKey = groupKey,
-                Triangles = CollectTriangles(surfaces)
+                Name = $"building_{objectGroup.Key}",
+                Triangles = triangles,
+                GroupKey = objectGroup.Key
             };
             
             result.Add(obj);
         }
         
+        if (_options.Verbose)
+        {
+            ConsoleLogger.WriteLine($"Grouped {result.Count} objects by MSLK ParentIndex_0x04");
+        }
+        
         return result;
     }
     
     /// <summary>
-    /// MPRR-based grouping using sentinel values (Value1=65535).
+    /// Gets the ParentIndex_0x04 value from an MSLK entry.
     /// </summary>
-    private List<GroupedObject> GroupByMprrSentinel()
+    private uint GetParentIndex(object mslkEntry)
     {
-        var mprrChunk = _scene.ExtraChunks.OfType<MprrChunk>().FirstOrDefault();
-        if (mprrChunk == null || mprrChunk.Entries.Count == 0)
+        return GetPropertyValue<uint>(mslkEntry, "ParentIndex_0x04");
+    }
+    
+    /// <summary>
+    /// Gets the TileIndex value from an MSLK entry.
+    /// </summary>
+    private uint GetTileIndex(object mslkEntry)
+    {
+        return GetPropertyValue<uint>(mslkEntry, "TileIndex");
+    }
+    
+    /// <summary>
+    /// Gets a property value from an object using reflection.
+    /// </summary>
+    private T GetPropertyValue<T>(object obj, string propertyName)
+    {
+        try
         {
-            ConsoleLogger.WriteLine("Warning: No MPRR chunk found for sentinel-based grouping. Falling back to MSUR grouping.");
-            return GroupByMsurSurfaceGroup();
-        }
-        
-        // Identify object boundaries using MPRR sentinels (Value1=65535)
-        var objectBoundaries = new List<int>();
-        for (int i = 0; i < mprrChunk.Entries.Count; i++)
-        {
-            if (mprrChunk.Entries[i].Value1 == 65535)
+            var type = obj.GetType();
+            var property = type.GetProperty(propertyName);
+            if (property != null)
             {
-                objectBoundaries.Add(i);
+                return (T)property.GetValue(obj);
+            }
+            
+            var field = type.GetField(propertyName);
+            if (field != null)
+            {
+                return (T)field.GetValue(obj);
+            }
+            
+            return default(T);
+        }
+        catch
+        {
+            return default(T);
+        }
+    }
+    
+    /// <summary>
+    /// Extracts triangles for a single MSLK entry.
+    /// </summary>
+    private List<(int A, int B, int C)> ExtractTrianglesForMslkEntry(object mslkEntry)
+    {
+        var triangles = new List<(int A, int B, int C)>();
+        
+        if (mslkEntry == null)
+            return triangles;
+        
+        try
+        {
+            // Get MSLK entry properties using reflection
+            var mspiFirstIndex = GetPropertyValue<int>(mslkEntry, "MspiFirstIndex");
+            var mspiIndexCount = GetPropertyValue<int>(mslkEntry, "MspiIndexCount");
+            
+            // Validate indices
+            if (mspiFirstIndex < 0 || mspiIndexCount <= 0)
+                return triangles;
+            
+            // Get triangles from MSPI using the indices
+            if (_scene.MSPI != null && _scene.MSPI.Indices != null)
+            {
+                var startIndex = mspiFirstIndex;
+                var endIndex = Math.Min(startIndex + mspiIndexCount, _scene.MSPI.Indices.Count);
+                
+                for (int i = startIndex; i + 2 < endIndex; i += 3)
+                {
+                    if (i + 2 < _scene.MSPI.Indices.Count)
+                    {
+                        triangles.Add((
+                            _scene.MSPI.Indices[i],
+                            _scene.MSPI.Indices[i + 1],
+                            _scene.MSPI.Indices[i + 2]
+                        ));
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine($"Error extracting triangles: {ex.Message}");
             }
         }
         
-        // Add end boundary if not present
-        if (objectBoundaries.Count > 0 && objectBoundaries[objectBoundaries.Count - 1] != mprrChunk.Entries.Count - 1)
-        {
-            objectBoundaries.Add(mprrChunk.Entries.Count - 1);
-        }
+        return triangles;
+    }
+    
+    /// <summary>
+    /// Exports a single grouped object to an OBJ file.
+    /// </summary>
+    private void ExportObject(GroupedObject obj, string filePath)
+    {
+        using var writer = new StreamWriter(filePath, false, Encoding.UTF8);
         
-        // If no boundaries found, export as single object
-        if (objectBoundaries.Count == 0)
-        {
-            ConsoleLogger.WriteLine("Warning: No MPRR sentinels found for object grouping. Exporting as single object.");
-            return GroupAsWholeScene();
-        }
+        // Write header
+        writer.WriteLine($"# PM4 Export - {obj.Name}");
+        writer.WriteLine($"# Triangles: {obj.Triangles.Count}");
+        writer.WriteLine();
         
-        var result = new List<GroupedObject>();
-        int startIdx = 0;
+        // Write vertices (we'll need to map indices to actual vertices)
+        var vertices = new List<Vector3>();
+        var vertexMap = new Dictionary<int, int>();
         
-        // For each boundary, create an object
-        for (int i = 0; i < objectBoundaries.Count; i++)
+        if (_scene.MSVT != null && _scene.MSVT.Vertices != null)
         {
-            int endIdx = objectBoundaries[i];
-            
-            // Only create object if non-empty
-            if (endIdx > startIdx)
+            foreach (var triangle in obj.Triangles)
             {
-                // Get MPRR entries for this object
-                var objectEntries = mprrChunk.Entries.Skip(startIdx).Take(endIdx - startIdx).ToList();
-                
-                // Get corresponding surfaces
-                var surfaces = new List<MsurChunk.Entry>();
-                foreach (var entry in objectEntries)
+                if (!vertexMap.ContainsKey(triangle.A))
                 {
-                    if (entry.Value2 < _scene.Surfaces.Count)
+                    vertexMap[triangle.A] = vertices.Count;
+                    if (triangle.A < _scene.MSVT.Vertices.Count)
                     {
-                        surfaces.Add(_scene.Surfaces[(int)entry.Value2]);
+                        vertices.Add(_scene.MSVT.Vertices[triangle.A]);
                     }
                 }
                 
-                // Skip empty objects
-                if (_options.SkipEmptyObjects && surfaces.Sum(s => s.IndexCount) / 3 < _options.MinTriangles)
+                if (!vertexMap.ContainsKey(triangle.B))
                 {
-                    startIdx = endIdx + 1;
-                    continue;
+                    vertexMap[triangle.B] = vertices.Count;
+                    if (triangle.B < _scene.MSVT.Vertices.Count)
+                    {
+                        vertices.Add(_scene.MSVT.Vertices[triangle.B]);
+                    }
                 }
                 
-                // Create grouped object
-                var obj = new GroupedObject
+                if (!vertexMap.ContainsKey(triangle.C))
                 {
-                    Name = $"object_{i:D4}",
-                    GroupKey = (byte)i,
-                    Triangles = CollectTriangles(surfaces)
-                };
-                
-                result.Add(obj);
-            }
-            
-            startIdx = endIdx + 1;
-        }
-        
-        return result;
-    }
-    
-    /// <summary>
-    /// Legacy tile-based grouping.
-    /// </summary>
-    private List<GroupedObject> GroupByTile()
-    {
-        // Simply export entire scene as single object
-        // (could be enhanced with actual tile-based grouping if needed)
-        return GroupAsWholeScene();
-    }
-    
-    /// <summary>
-    /// Exports grouped objects to OBJ format.
-    /// </summary>
-    private int ExportToObj(List<GroupedObject> objects)
-    {
-        if (!_options.SeparateFiles)
-        {
-            // Export all objects to a single OBJ file
-            return ExportSingleObjFile(objects);
-        }
-        else
-        {
-            // Export each object to a separate OBJ file
-            int exportedCount = 0;
-            var objDir = Path.Combine(_outputRoot, "buildings");
-            Directory.CreateDirectory(objDir);
-            
-            for (int i = 0; i < objects.Count; i++)
-            {
-                var obj = objects[i];
-                string objFile = Path.Combine(objDir, $"{obj.Name}.obj");
-                
-                if (ExportObjectToObjFile(obj, objFile))
-                {
-                    exportedCount++;
+                    vertexMap[triangle.C] = vertices.Count;
+                    if (triangle.C < _scene.MSVT.Vertices.Count)
+                    {
+                        vertices.Add(_scene.MSVT.Vertices[triangle.C]);
+                    }
                 }
             }
-            
-            // Write summary report
-            if (_options.Verbose && exportedCount > 0)
-            {
-                WriteSummaryReport(objects, objDir);
-            }
-            
-            return exportedCount;
-        }
-    }
-    
-    /// <summary>
-    /// Exports all objects to a single OBJ file.
-    /// </summary>
-    private int ExportSingleObjFile(List<GroupedObject> objects)
-    {
-        string objFile = Path.Combine(_outputRoot, "combined.obj");
-        string mtlFile = Path.Combine(_outputRoot, "combined.mtl");
-        
-        using var objWriter = new StreamWriter(objFile);
-        objWriter.WriteLine("# parpToolbox PM4 Combined Export");
-        objWriter.WriteLine($"mtllib {Path.GetFileName(mtlFile)}");
-        
-        int exportedCount = 0;
-        int vertexOffset = 1; // OBJ uses 1-based indices
-        
-        foreach (var obj in objects)
-        {
-            // Skip empty objects
-            if (obj.Triangles.Count == 0)
-            {
-                continue;
-            }
-            
-            // Start object
-            objWriter.WriteLine($"o {obj.Name}");
-            objWriter.WriteLine($"g {obj.Name}");
-            
-            // Get unique vertices used by this object
-            var usedVertexIndices = GetUniqueVertices(obj.Triangles);
-            var vertexMap = new Dictionary<int, int>(); // Map from scene index to OBJ index
             
             // Write vertices
-            foreach (var index in usedVertexIndices)
+            foreach (var vertex in vertices)
             {
-                if (index >= 0 && index < _scene.Vertices.Count)
-                {
-                    Vector3 v = _scene.Vertices[index];
-                    float x = _options.FlipX ? -v.X : v.X;
-                    objWriter.WriteLine($"v {x.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
-                    
-                    vertexMap[index] = vertexOffset++;
-                }
+                // Apply X-axis inversion if requested
+                float x = _options.FlipX ? -vertex.X : vertex.X;
+                writer.WriteLine($"v {x:F6} {vertex.Y:F6} {vertex.Z:F6}");
             }
             
-            // Write material
-            objWriter.WriteLine($"usemtl building_{obj.GroupKey:X2}");
+            writer.WriteLine();
             
             // Write faces
-            foreach (var (a, b, c) in obj.Triangles)
+            foreach (var triangle in obj.Triangles)
             {
-                // Check if all vertices are valid and mapped
-                if (vertexMap.TryGetValue(a, out int va) && 
-                    vertexMap.TryGetValue(b, out int vb) && 
-                    vertexMap.TryGetValue(c, out int vc))
+                if (vertexMap.ContainsKey(triangle.A) && 
+                    vertexMap.ContainsKey(triangle.B) && 
+                    vertexMap.ContainsKey(triangle.C))
                 {
-                    objWriter.WriteLine($"f {va} {vb} {vc}");
+                    var a = vertexMap[triangle.A] + 1; // OBJ indices are 1-based
+                    var b = vertexMap[triangle.B] + 1;
+                    var c = vertexMap[triangle.C] + 1;
+                    writer.WriteLine($"f {a} {b} {c}");
                 }
             }
-            
-            exportedCount++;
         }
-        
-        // Write MTL file if enabled
-        if (_options.ExportMaterials)
-        {
-            WriteMaterialFile(objects, mtlFile);
-        }
-        
-        return exportedCount;
     }
     
     /// <summary>
-    /// Exports a single object to an OBJ file.
-    /// </summary>
-    private bool ExportObjectToObjFile(GroupedObject obj, string objFile)
-    {
-        if (obj.Triangles.Count == 0)
-        {
-            return false;
-        }
-        
-        string mtlFile = Path.ChangeExtension(objFile, ".mtl");
-        
-        using var objWriter = new StreamWriter(objFile);
-        objWriter.WriteLine($"# parpToolbox PM4 Export - {obj.Name}");
-        objWriter.WriteLine($"mtllib {Path.GetFileName(mtlFile)}");
-        
-        // Get unique vertices used by this object
-        var usedVertexIndices = GetUniqueVertices(obj.Triangles);
-        var vertexMap = new Dictionary<int, int>(); // Map from scene index to OBJ index
-        int nextIndex = 1; // OBJ uses 1-based indices
-        
-        // Write vertices
-        foreach (var index in usedVertexIndices)
-        {
-            if (index >= 0 && index < _scene.Vertices.Count)
-            {
-                Vector3 v = _scene.Vertices[index];
-                float x = _options.FlipX ? -v.X : v.X;
-                objWriter.WriteLine($"v {x.ToString(CultureInfo.InvariantCulture)} {v.Y.ToString(CultureInfo.InvariantCulture)} {v.Z.ToString(CultureInfo.InvariantCulture)}");
-                
-                vertexMap[index] = nextIndex++;
-            }
-        }
-        
-        // Write material
-        objWriter.WriteLine($"usemtl building_{obj.GroupKey:X2}");
-        
-        // Write faces
-        foreach (var (a, b, c) in obj.Triangles)
-        {
-            // Check if all vertices are valid and mapped
-            if (vertexMap.TryGetValue(a, out int va) && 
-                vertexMap.TryGetValue(b, out int vb) && 
-                vertexMap.TryGetValue(c, out int vc))
-            {
-                objWriter.WriteLine($"f {va} {vb} {vc}");
-            }
-        }
-        
-        // Write MTL file if enabled
-        if (_options.ExportMaterials)
-        {
-            WriteSingleMaterialFile(obj, mtlFile);
-        }
-        
-        return true;
-    }
-    
-    /// <summary>
-    /// Writes a material file for a collection of objects.
+    /// Writes a material file for the exported objects.
     /// </summary>
     private void WriteMaterialFile(List<GroupedObject> objects, string mtlFile)
     {
@@ -555,36 +437,399 @@ public class Pm4Exporter
     }
     
     /// <summary>
-    /// Writes a summary report for the export.
+    /// Exports grouped objects to OBJ format.
     /// </summary>
-    private void WriteSummaryReport(List<GroupedObject> objects, string outputDir)
+    private int ExportToObj(List<GroupedObject> groupedObjects)
     {
-        string reportFile = Path.Combine(outputDir, "export_summary.csv");
-        using var writer = new StreamWriter(reportFile);
-        
-        // Write header
-        writer.WriteLine("ObjectName,GroupKey,Triangles,Vertices");
-        
-        // Write data for each object
-        foreach (var obj in objects)
+        if (_options.SeparateFiles)
         {
-            var usedVertexIndices = GetUniqueVertices(obj.Triangles);
-            writer.WriteLine($"{obj.Name},{obj.GroupKey:X2},{obj.Triangles.Count},{usedVertexIndices.Count}");
+            return ExportToSeparateObjFiles(groupedObjects);
+        }
+        else
+        {
+            return ExportToCombinedObjFile(groupedObjects);
         }
     }
     
     /// <summary>
-    /// Gets unique vertices used by a list of triangles.
+    /// Exports grouped objects to separate OBJ files.
     /// </summary>
-    private HashSet<int> GetUniqueVertices(List<(int A, int B, int C)> triangles)
+    private int ExportToSeparateObjFiles(List<GroupedObject> groupedObjects)
     {
-        var result = new HashSet<int>();
-        foreach (var (a, b, c) in triangles)
+        int exportedCount = 0;
+        
+        foreach (var obj in groupedObjects)
         {
-            result.Add(a);
-            result.Add(b);
-            result.Add(c);
+            if (obj.Triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
+            string fileName = $"{obj.Name}.obj";
+            string filePath = Path.Combine(_outputRoot, fileName);
+            
+            try
+            {
+                ExportObject(obj, filePath);
+                exportedCount++;
+                
+                if (_options.Verbose)
+                {
+                    ConsoleLogger.WriteLine($"Exported: {fileName} ({obj.Triangles.Count} triangles)");
+                }
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.WriteLine($"Error exporting {fileName}: {ex.Message}");
+            }
         }
+        
+        return exportedCount;
+    }
+    
+    /// <summary>
+    /// Exports all grouped objects to a single combined OBJ file.
+    /// </summary>
+    private int ExportToCombinedObjFile(List<GroupedObject> groupedObjects)
+    {
+        string objFile = Path.Combine(_outputRoot, "combined.obj");
+        string mtlFile = Path.Combine(_outputRoot, "combined.mtl");
+        
+        using var writer = new StreamWriter(objFile, false, Encoding.UTF8);
+        writer.WriteLine("# Combined PM4 Export");
+        writer.WriteLine($"# Objects: {groupedObjects.Count}");
+        writer.WriteLine($"mtllib combined.mtl");
+        writer.WriteLine();
+        
+        int totalVertices = 0;
+        int exportedCount = 0;
+        
+        foreach (var obj in groupedObjects)
+        {
+            if (obj.Triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
+            // Write vertices
+            var vertices = new List<Vector3>();
+            var vertexMap = new Dictionary<int, int>();
+            
+            if (_scene.MSVT != null && _scene.MSVT.Vertices != null)
+            {
+                foreach (var triangle in obj.Triangles)
+                {
+                    if (!vertexMap.ContainsKey(triangle.A))
+                    {
+                        vertexMap[triangle.A] = vertices.Count;
+                        if (triangle.A < _scene.MSVT.Vertices.Count)
+                        {
+                            vertices.Add(_scene.MSVT.Vertices[triangle.A]);
+                        }
+                    }
+                    
+                    if (!vertexMap.ContainsKey(triangle.B))
+                    {
+                        vertexMap[triangle.B] = vertices.Count;
+                        if (triangle.B < _scene.MSVT.Vertices.Count)
+                        {
+                            vertices.Add(_scene.MSVT.Vertices[triangle.B]);
+                        }
+                    }
+                    
+                    if (!vertexMap.ContainsKey(triangle.C))
+                    {
+                        vertexMap[triangle.C] = vertices.Count;
+                        if (triangle.C < _scene.MSVT.Vertices.Count)
+                        {
+                            vertices.Add(_scene.MSVT.Vertices[triangle.C]);
+                        }
+                    }
+                }
+                
+                // Write vertices with offset
+                foreach (var vertex in vertices)
+                {
+                    // Apply X-axis inversion if requested
+                    float x = _options.FlipX ? -vertex.X : vertex.X;
+                    writer.WriteLine($"v {x:F6} {vertex.Y:F6} {vertex.Z:F6}");
+                }
+                
+                writer.WriteLine();
+                
+                // Write object group
+                writer.WriteLine($"g {obj.Name}");
+                writer.WriteLine($"usemtl building_{obj.GroupKey:X2}");
+                
+                // Write faces with vertex index offset
+                foreach (var triangle in obj.Triangles)
+                {
+                    if (vertexMap.ContainsKey(triangle.A) && 
+                        vertexMap.ContainsKey(triangle.B) && 
+                        vertexMap.ContainsKey(triangle.C))
+                    {
+                        var a = vertexMap[triangle.A] + 1 + totalVertices; // OBJ indices are 1-based
+                        var b = vertexMap[triangle.B] + 1 + totalVertices;
+                        var c = vertexMap[triangle.C] + 1 + totalVertices;
+                        writer.WriteLine($"f {a} {b} {c}");
+                    }
+                }
+                
+                writer.WriteLine();
+                totalVertices += vertices.Count;
+                exportedCount++;
+            }
+        }
+        
+        // Write material file
+        WriteMaterialFile(groupedObjects, mtlFile);
+        
+        return exportedCount;
+    }
+    
+    /// <summary>
+    /// Groups the entire scene as a single object.
+    /// </summary>
+    private List<GroupedObject> GroupAsWholeScene()
+    {
+        var result = new List<GroupedObject>();
+        
+        if (_scene.MSPI == null || _scene.MSPI.Indices == null || _scene.MSPI.Indices.Count == 0)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine("No MSPI indices found to export");
+            }
+            return result;
+        }
+        
+        // Collect all triangles from MSPI
+        var triangles = new List<(int A, int B, int C)>();
+        for (int i = 0; i + 2 < _scene.MSPI.Indices.Count; i += 3)
+        {
+            triangles.Add((
+                _scene.MSPI.Indices[i],
+                _scene.MSPI.Indices[i + 1],
+                _scene.MSPI.Indices[i + 2]
+            ));
+        }
+        
+        if (triangles.Count == 0 && _options.SkipEmptyObjects)
+            return result;
+        
+        if (triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+            return result;
+        
+        var obj = new GroupedObject
+        {
+            Name = "combined_scene",
+            Triangles = triangles,
+            GroupKey = 0
+        };
+        
+        result.Add(obj);
+        
+        if (_options.Verbose)
+        {
+            ConsoleLogger.WriteLine($"Grouped entire scene as single object with {triangles.Count} triangles");
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// Groups objects by MSUR surface group key (FlagsOrUnknown_0x00).
+    /// </summary>
+    private List<GroupedObject> GroupByMsurSurfaceGroup()
+    {
+        var result = new List<GroupedObject>();
+        
+        if (_scene.MSUR == null || _scene.MSUR.Entries == null || _scene.MSUR.Entries.Count == 0)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine("No MSUR entries found to group by surface group key");
+            }
+            return result;
+        }
+        
+        // Group MSUR entries by SurfaceGroupKey (FlagsOrUnknown_0x00)
+        var objectsByGroupKey = _scene.MSUR.Entries
+            .Where(entry => entry != null)
+            .GroupBy(entry => entry.FlagsOrUnknown_0x00)
+            .ToList();
+        
+        foreach (var objectGroup in objectsByGroupKey)
+        {
+            var triangles = new List<(int A, int B, int C)>();
+            
+            // Collect triangles from all MSUR entries with this group key
+            foreach (var msurEntry in objectGroup)
+            {
+                var entryTriangles = CollectTriangles(new List<MsurChunk.Entry> { msurEntry });
+                triangles.AddRange(entryTriangles);
+            }
+            
+            if (triangles.Count == 0 && _options.SkipEmptyObjects)
+                continue;
+            
+            if (triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
+            var obj = new GroupedObject
+            {
+                Name = $"surface_group_{objectGroup.Key}",
+                Triangles = triangles,
+                GroupKey = objectGroup.Key
+            };
+            
+            result.Add(obj);
+        }
+        
+        if (_options.Verbose)
+        {
+            ConsoleLogger.WriteLine($"Grouped {result.Count} objects by MSUR surface group key");
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// Groups objects by MPRR sentinel values (Value1=65535).
+    /// </summary>
+    private List<GroupedObject> GroupByMprrSentinel()
+    {
+        var result = new List<GroupedObject>();
+        
+        if (_scene.MPRR == null || _scene.MPRR.Entries == null || _scene.MPRR.Entries.Count == 0)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine("No MPRR entries found to group by sentinel values");
+            }
+            return result;
+        }
+        
+        // Find sentinel positions (Value1=65535)
+        var sentinelPositions = _scene.MPRR.Entries
+            .Select((entry, index) => new { entry, index })
+            .Where(x => x.entry.Value1 == 65535)
+            .Select(x => x.index)
+            .ToList();
+        
+        if (sentinelPositions.Count == 0)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine("No MPRR sentinels found, falling back to single object");
+            }
+            
+            // Fallback: treat entire MPRR as one object
+            var triangles = CollectTriangles(_scene.MSUR?.Entries ?? new List<MsurChunk.Entry>());
+            
+            if (triangles.Count >= _options.MinTriangles || !_options.SkipEmptyObjects)
+            {
+                result.Add(new GroupedObject
+                {
+                    Name = "mprr_combined",
+                    Triangles = triangles,
+                    GroupKey = 0
+                });
+            }
+            
+            return result;
+        }
+        
+        // Create object groups between sentinels
+        for (int i = 0; i < sentinelPositions.Count; i++)
+        {
+            int startIdx = sentinelPositions[i] + 1;
+            int endIdx = (i + 1 < sentinelPositions.Count) ? sentinelPositions[i + 1] : _scene.MPRR.Entries.Count;
+            
+            if (startIdx >= _scene.MPRR.Entries.Count)
+                continue;
+            
+            // Get corresponding MSUR entries for this range
+            var msurEntries = _scene.MSUR?.Entries
+                .Where((entry, index) => index >= startIdx && index < endIdx)
+                .ToList() ?? new List<MsurChunk.Entry>();
+            
+            var triangles = CollectTriangles(msurEntries);
+            
+            if (triangles.Count == 0 && _options.SkipEmptyObjects)
+                continue;
+            
+            if (triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
+            var obj = new GroupedObject
+            {
+                Name = $"mprr_object_{i}",
+                Triangles = triangles,
+                GroupKey = (uint)i
+            };
+            
+            result.Add(obj);
+        }
+        
+        if (_options.Verbose)
+        {
+            ConsoleLogger.WriteLine($"Grouped {result.Count} objects by MPRR sentinel values");
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// Groups objects by tile index.
+    /// </summary>
+    private List<GroupedObject> GroupByTile()
+    {
+        var result = new List<GroupedObject>();
+        
+        if (_scene.MSLK == null || _scene.MSLK.Entries == null || _scene.MSLK.Entries.Count == 0)
+        {
+            if (_options.Verbose)
+            {
+                ConsoleLogger.WriteLine("No MSLK entries found to group by tile index");
+            }
+            return result;
+        }
+        
+        // Group MSLK entries by tile index
+        var objectsByTile = _scene.MSLK.Entries
+            .Where(entry => entry != null)
+            .GroupBy(entry => GetTileIndex(entry))
+            .ToList();
+        
+        foreach (var tileGroup in objectsByTile)
+        {
+            var triangles = new List<(int A, int B, int C)>();
+            
+            // Collect triangles from all MSLK entries in this tile
+            foreach (var mslkEntry in tileGroup)
+            {
+                var entryTriangles = ExtractTrianglesForMslkEntry(mslkEntry);
+                triangles.AddRange(entryTriangles);
+            }
+            
+            if (triangles.Count == 0 && _options.SkipEmptyObjects)
+                continue;
+            
+            if (triangles.Count < _options.MinTriangles && _options.SkipEmptyObjects)
+                continue;
+            
+            var obj = new GroupedObject
+            {
+                Name = $"tile_{tileGroup.Key}",
+                Triangles = triangles,
+                GroupKey = tileGroup.Key
+            };
+            
+            result.Add(obj);
+        }
+        
+        if (_options.Verbose)
+        {
+            ConsoleLogger.WriteLine($"Grouped {result.Count} objects by tile index");
+        }
+        
         return result;
     }
     
@@ -622,21 +867,22 @@ public class Pm4Exporter
     /// <summary>
     /// Represents a grouped object for export.
     /// </summary>
-    public class GroupedObject
+    internal class GroupedObject
     {
         /// <summary>
-        /// Name of the object (used for file naming).
+        /// Gets or sets the object name.
         /// </summary>
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
         
         /// <summary>
-        /// Group key (used for material assignment).
-        /// </summary>
-        public byte GroupKey { get; set; }
-        
-        /// <summary>
-        /// List of triangles in this object, specified as vertex indices.
+        /// Gets or sets the triangles that belong to this object.
         /// </summary>
         public List<(int A, int B, int C)> Triangles { get; set; } = new();
+        
+        /// <summary>
+        /// Gets or sets the group key used for material assignment.
+        /// </summary>
+        public uint GroupKey { get; set; }
     }
 }
+*/
