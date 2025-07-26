@@ -4,10 +4,22 @@
 The PM4 exporter requires a complete ground-up rewrite due to severe corruption and fundamental architectural issues. This plan addresses the critical discoveries from recent analysis and implements the correct object grouping strategy based on MSLK.ParentIndex_0x04.
 
 ## Critical Discoveries
-1. **Object Identification**: Individual PM4 objects are identified by **MSLK.ParentIndex_0x04** (4th field), not subdivision indices
+1. **Object Identification**: Individual PM4 objects are identified by **MSUR.Index_0x01** (surface index), which maps to **MSLK.Unknown_0x00**; geometry layers are clustered by **MSUR.Unknown_0x10**.
 2. **Cross-tile References**: ~64% vertex data loss due to missing adjacent tile vertices
 3. **Memory Bank**: Severe file corruption requires complete rewrite
 4. **Legacy Parity**: Need byte-for-byte identical output to legacy exporters
+
+## Observed Implementation Drift (July 26 2025)
+Despite the above discoveries being reiterated multiple times, refactors have repeatedly regressed to prior, incorrect grouping logic (e.g., SurfaceKey-based grouping).  This indicates:
+- Incomplete propagation of Critical Discoveries into code changes.
+- Legacy files (e.g., `NewPm4Exporter.cs`) being patched rather than replaced, re-introducing outdated assumptions.
+- Lack of automated regression tests that fail when grouping deviates from **MSUR.Index_0x01 → MSLK.Unknown_0x00**.
+
+**Action Items**
+1. Freeze old exporter paths; create a clean `Pm4PerObjectExporter` that exclusively uses the validated keys.
+2. Add unit test: given sample PM4, assert assembled object count equals proof-of-concept.
+3. Add SHA regression test against legacy OBJ output.
+4. Code reviews must cross-check every change against this plan before merge.
 
 ## Architecture Overview
 
@@ -32,7 +44,9 @@ PM4File → SceneLoader → ObjectAssembler → VertexResolver → ObjExporter
 - [ ] Establish clean separation of concerns
 
 ### Phase 2: Object Grouping
-- [ ] Implement MSLK.ParentIndex_0x04 grouping strategy
+- [ ] Implement grouping strategy:
+  - Cluster surfaces by **MSUR.Unknown_0x10** (geometry layer)
+  - Within each cluster, group by **MSUR.Index_0x01** and resolve to **MSLK.Unknown_0x00** for object assembly
 - [ ] Handle container nodes (MspiFirstIndex = -1) appropriately
 - [ ] Build hierarchical object relationships
 - [ ] Ensure proper object scale (38K-654K triangles per building)

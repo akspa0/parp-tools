@@ -200,8 +200,11 @@ namespace ParpToolbox.Services.PM4
         /// <returns>Number of objects exported.</returns>
         private int ExportAsObj(string outputDirectory)
         {
-            var objects = GroupObjectsByParentIndex();
-            var exportedCount = 0;
+            Directory.CreateDirectory(outputDirectory);
+            
+            var objects = GroupObjectsByIndexCount();
+            
+            int exportedCount = 0;
             
             foreach (var obj in objects)
             {
@@ -209,11 +212,11 @@ namespace ParpToolbox.Services.PM4
                 if (obj.Triangles.Count < _options.MinTriangles)
                     continue;
                     
-                // Skip M2 objects if not requested
+                // Skip M2 objects if not included
                 if (obj.ParentIndex == 0 && !_options.IncludeM2Objects)
                     continue;
-                
-                var filename = Path.Combine(outputDirectory, $"Object_Group_{obj.ParentIndex}.obj");
+                    
+                var filename = Path.Combine(outputDirectory, $"Object_{obj.ParentIndex}.obj");
                 ExportObjectAsObj(obj, filename);
                 exportedCount++;
             }
@@ -228,7 +231,9 @@ namespace ParpToolbox.Services.PM4
         /// <returns>Number of objects exported.</returns>
         private int ExportAsWmo(string outputDirectory)
         {
-            var objects = GroupObjectsByParentIndex();
+            Directory.CreateDirectory(outputDirectory);
+            
+            var objects = GroupObjectsByIndexCount();
             var exportedCount = 0;
             
             foreach (var obj in objects)
@@ -237,11 +242,11 @@ namespace ParpToolbox.Services.PM4
                 if (obj.Triangles.Count < _options.MinTriangles)
                     continue;
                     
-                // Skip M2 objects if not requested
+                // Skip M2 objects if not included
                 if (obj.ParentIndex == 0 && !_options.IncludeM2Objects)
                     continue;
                 
-                var filename = Path.Combine(outputDirectory, $"Object_Group_{obj.ParentIndex}.wmo");
+                var filename = Path.Combine(outputDirectory, $"Object_{obj.ParentIndex}.wmo");
                 ExportObjectAsWmo(obj, filename);
                 exportedCount++;
             }
@@ -250,103 +255,203 @@ namespace ParpToolbox.Services.PM4
         }
         
         /// <summary>
-        /// Groups PM4 objects by MSLK.ParentIndex_0x04 as the correct object identifier.
+        /// Groups PM4 objects by MSUR.IndexCount (0x01 field) which has been confirmed as the authoritative per-object identifier. SurfaceGroupKey (Unknown_0x00) is preserved in logs for diagnostic purposes.
         /// </summary>
         /// <returns>List of grouped objects.</returns>
-        private List<Pm4Object> GroupObjectsByParentIndex()
+        private List<Pm4Object> GroupObjectsByIndexCount()
         {
             var objects = new List<Pm4Object>();
             
             // Build MPRL to MSLK mappings if MPRL transformations are enabled
             var mprlMslkMap = BuildMprlMslkMappings();
             
-            if (_scene.Links == null || _scene.Links.Count == 0)
+            if (_scene.Surfaces == null || _scene.Surfaces.Count == 0)
+            {
+                ConsoleLogger.WriteLine("No MSUR surfaces found in scene");
                 return objects;
+            }
                 
-            // Group MSLK entries by ParentIndex
-            var entriesByParentIndex = _scene.Links
-                .Where(link => link.MspiFirstIndex >= 0) // Skip container nodes
-                .GroupBy(link => link.ParentIndex)
+            // Group MSUR surfaces by IndexCount (0x01) – confirmed full-object grouping field
+            var surfacesByGroup = _scene.Surfaces
+                .Where(s => s.MsviFirstIndex >= 0 && s.IndexCount > 0)
+                .GroupBy(s => (int)s.IndexCount)
                 .ToDictionary(g => g.Key, g => g.ToList());
                 
-            foreach (var kvp in entriesByParentIndex)
+            ConsoleLogger.WriteLine($"Found {surfacesByGroup.Count} unique IndexCount groups");
+            foreach (var kvp in surfacesByGroup)
             {
-                var parentIndex = kvp.Key;
-                var entries = kvp.Value;
+                ConsoleLogger.WriteLine($"IndexCount {kvp.Key}: {kvp.Value.Count} surfaces (SurfaceGroupKeys: {string.Join(",", kvp.Value.Select(v=>v.SurfaceGroupKey).Distinct())})");
+            }
                 
-                var triangles = new List<(int A, int B, int C)>();
-                var vertexIndices = new HashSet<int>();
+            foreach (var kvp in surfacesByGroup)
+            {
+                int groupKey = kvp.Key;
+                var surfaces = kvp.Value;
                 
-                // Collect all triangles from entries with this ParentIndex
-                foreach (var entry in entries)
+                // Collect all triangles and vertices for this object
+                var allTriangles = new List<(int A, int B, int C)>();
+                var vertexMap = new Dictionary<uint, int>(); // Maps global vertex indices to local indices
+                var remappedVertices = new List<Vector3>();
+                
+                int vertexCount = _scene.Vertices?.Count ?? 0;
+                
+                // Extract triangles from all surfaces in this group
+                foreach (var surface in surfaces)
                 {
-                    var entryTriangles = ExtractTrianglesForMslkEntry(entry);
-                    triangles.AddRange(entryTriangles);
+                    uint firstIndex = surface.MsviFirstIndex;
+                    uint lastIndex = firstIndex + surface.IndexCount;
                     
-                    // Collect unique vertex indices
-                    foreach (var (a, b, c) in entryTriangles)
+                    // Extract triangles (groups of 3 indices)
+                    for (uint i = firstIndex; i + 2 < lastIndex; i += 3)
                     {
-                        vertexIndices.Add(a);
-                        vertexIndices.Add(b);
-                        vertexIndices.Add(c);
+                        // Validate indices exist
+                        if (i + 2 >= _scene.Indices.Count)
+                            break;
+                            
+                        int a = _scene.Indices[(int)i];
+                        int b = _scene.Indices[(int)i + 1];
+                        int c = _scene.Indices[(int)i + 2];
+                        
+                        allTriangles.Add((a, b, c));
                     }
                 }
                 
-                // Create vertex mapping for this object
-                var vertexMap = vertexIndices
-                    .OrderBy(idx => idx)
-                    .Select((originalIdx, newIndex) => new { originalIdx, newIndex })
-                    .ToDictionary(x => x.originalIdx, x => x.newIndex);
+                // Remap global vertex indices to local indices for this object
+                var remappedTriangles = new List<(int A, int B, int C)>();
                 
-                // Remap triangle indices
-                var remappedTriangles = triangles
-                    .Select(t => (vertexMap[t.A], vertexMap[t.B], vertexMap[t.C]))
-                    .ToList();
-                
-                // Create remapped vertices
-                var remappedVertices = vertexIndices
-                    .OrderBy(idx => idx)
-                    .Select(idx => _scene.Vertices[idx])
-                    .ToList();
-                
-                // Apply MPRL transformations if available
-                if (_scene.Placements != null && mprlMslkMap.ContainsKey(parentIndex))
+                // Process all triangles for this object
+                int outOfBoundsCount = 0;
+                foreach (var triangle in allTriangles)
                 {
-                    var transforms = mprlMslkMap[parentIndex];
+                    // Skip triangles with all zero vertices (invalid data)
+                    if (triangle.Item1 == 0 && triangle.Item2 == 0 && triangle.Item3 == 0)
+                    {
+                        ConsoleLogger.WriteLine($"Skipping triangle with all zero vertices: indices {triangle.Item1}, {triangle.Item2}, {triangle.Item3}");
+                        continue; // Skip this triangle
+                    }
+                    
+                    // Resolve and remap vertices
+                    var remappedTriangle = new int[3];
+                    bool isValid = true;
+                    
+                    for (int i = 0; i < 3; i++)
+                    {
+                        uint rawIdx = i switch
+                        {
+                            0 => (uint)triangle.Item1,
+                            1 => (uint)triangle.Item2,
+                            2 => (uint)triangle.Item3,
+                            _ => 0
+                        };
+                        
+                        // Check if we've already mapped this vertex
+                        if (vertexMap.TryGetValue(rawIdx, out int localIdx))
+                        {
+                            remappedTriangle[i] = localIdx;
+                            continue;
+                        }
+                        
+                        // Try to resolve the vertex
+                        if (TryResolveVertex(rawIdx, vertexCount, _scene, out Vector3 vertex))
+                        {
+                            localIdx = remappedVertices.Count;
+                            remappedVertices.Add(vertex);
+                            vertexMap[rawIdx] = localIdx;
+                            remappedTriangle[i] = localIdx;
+                        }
+                        else
+                        {
+                            isValid = false;
+                            outOfBoundsCount++;
+                            if (outOfBoundsCount <= 10) // Only log first 10 to avoid spam
+                            {
+                                ConsoleLogger.WriteLine($"Skipping triangle with invalid vertex index: {rawIdx} (max: {vertexCount - 1})");
+                            }
+                            break;
+                        }
+                    }
+                    
+                    if (isValid)
+                    {
+                        remappedTriangles.Add((remappedTriangle[0], remappedTriangle[1], remappedTriangle[2]));
+                    }
+                }
+                
+                // Apply MPRL transformations if enabled
+                // Note: In the reference implementation, MPRL transformations are applied differently
+                // For now, we'll keep the existing logic but it may need adjustment
+                if (_options.EnableMprlTransformations && mprlMslkMap.TryGetValue((uint)groupKey, out var transforms))
+                {
                     foreach (var transform in transforms)
                     {
-                        // Apply transformation to all vertices in this object
                         for (int i = 0; i < remappedVertices.Count; i++)
                         {
-                            var vertex = remappedVertices[i];
-                            remappedVertices[i] = new Vector3(
-                                vertex.X + transform.X,
-                                vertex.Y + transform.Y,
-                                vertex.Z + transform.Z
-                            );
+                            remappedVertices[i] = TransformMprlPosition(remappedVertices[i] + transform);
                         }
                     }
                 }
                 
-                // Apply coordinate transformation if needed
+                // Apply X-axis inversion if enabled
                 if (_options.ApplyXAxisInversion)
                 {
                     for (int i = 0; i < remappedVertices.Count; i++)
                     {
-                        var vertex = remappedVertices[i];
-                        remappedVertices[i] = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                        var v = remappedVertices[i];
+                        remappedVertices[i] = new Vector3(-v.X, v.Y, v.Z);
                     }
                 }
                 
                 objects.Add(new Pm4Object
                 {
-                    ParentIndex = parentIndex,
+                    ParentIndex = (uint)groupKey, // Using IndexCount as identifier
                     Triangles = remappedTriangles,
                     Vertices = remappedVertices
                 });
             }
             
             return objects;
+        }
+        
+        /// <summary>
+        /// Attempts to resolve a vertex index to a Vector3 position.
+        /// </summary>
+        /// <param name="rawIdx">Raw vertex index from MSVI.</param>
+        /// <param name="msvtCount">Count of MSVT vertices.</param>
+        /// <param name="scene">Scene containing vertex data.</param>
+        /// <param name="vertex">Output vertex position.</param>
+        /// <returns>True if vertex was successfully resolved.</returns>
+        private bool TryResolveVertex(uint rawIdx, int msvtCount, Pm4Scene scene, out Vector3 vertex)
+        {
+            vertex = Vector3.Zero;
+            
+            // Try MSVT vertices first (high-resolution)
+            if (scene.Vertices != null && rawIdx < (uint)scene.Vertices.Count)
+            {
+                vertex = scene.Vertices[(int)rawIdx];
+                return true;
+            }
+
+            // Reject clearly out-of-range indices early
+            if (rawIdx >= (uint)scene.Vertices.Count && rawIdx < 0x80000000)
+            {
+                return false;
+            }
+            
+            // Handle high/low pair encoding for 32-bit indices
+            if (rawIdx >= 0x80000000 && scene.Vertices != null)
+            {
+                uint highPart = (rawIdx >> 16) & 0x7FFF;
+                uint lowPart = rawIdx & 0xFFFF;
+                uint combinedIdx = (highPart << 16) | lowPart;
+                
+                if (combinedIdx < (uint)scene.Vertices.Count)
+                {
+                    vertex = scene.Vertices[(int)combinedIdx];
+                    return true;
+                }
+            }
+            
+            return false;
         }
         
         /// <summary>
@@ -358,51 +463,34 @@ namespace ParpToolbox.Services.PM4
         {
             var triangles = new List<(int A, int B, int C)>();
             
-            if (mslkEntry.MspiFirstIndex < 0 || mslkEntry.MspiIndexCount <= 0)
-                return triangles;
+            if (mslkEntry.MspiFirstIndex < 0 || mslkEntry.MspiIndexCount == 0)
+                return triangles; // Skip container nodes
                 
+            int firstIndex = mslkEntry.MspiFirstIndex;
+            int lastIndex = firstIndex + mslkEntry.MspiIndexCount;
+            
             // Ensure we don't go out of bounds
-            var maxIndex = mslkEntry.MspiFirstIndex + mslkEntry.MspiIndexCount;
-            if (maxIndex > _scene.Triangles.Count)
-                maxIndex = _scene.Triangles.Count;
+            if (_scene.Indices == null || lastIndex > _scene.Indices.Count)
+                lastIndex = _scene.Indices?.Count ?? 0;
                 
-            // Track out of bounds count for logging
-            int outOfBoundsCount = 0;
-                
-            for (int i = mslkEntry.MspiFirstIndex; i < maxIndex; i++)
+            // Extract triangles (groups of 3 indices)
+            for (int i = firstIndex; i + 2 < lastIndex; i += 3)
             {
-                var triangle = _scene.Triangles[i];
+                int a = (int)_scene.Indices[i];
+                int b = (int)_scene.Indices[i + 1];
+                int c = (int)_scene.Indices[i + 2];
                 
                 // Validate indices
-                if (triangle.Item1 >= 0 && triangle.Item1 < _scene.Vertices.Count &&
-                    triangle.Item2 >= 0 && triangle.Item2 < _scene.Vertices.Count &&
-                    triangle.Item3 >= 0 && triangle.Item3 < _scene.Vertices.Count)
+                if (a >= 0 && a < _scene.Vertices.Count &&
+                    b >= 0 && b < _scene.Vertices.Count &&
+                    c >= 0 && c < _scene.Vertices.Count)
                 {
-                    // Additional validation to check for (0,0,0) vertices
-                    var vertexA = _scene.Vertices[triangle.Item1];
-                    var vertexB = _scene.Vertices[triangle.Item2];
-                    var vertexC = _scene.Vertices[triangle.Item3];
-                    
-                    // Check if all vertices are at (0,0,0) which indicates invalid data
-                    if (vertexA == Vector3.Zero && vertexB == Vector3.Zero && vertexC == Vector3.Zero)
-                    {
-                        outOfBoundsCount++;
-                        if (outOfBoundsCount <= 5) // Only log first 5 to avoid spam
-                        {
-                            ConsoleLogger.WriteLine($"Skipping triangle with all zero vertices: indices {triangle.Item1}, {triangle.Item2}, {triangle.Item3}");
-                        }
-                        continue; // Skip this triangle
-                    }
-                    
-                    triangles.Add(triangle);
+                    triangles.Add((a, b, c));
                 }
                 else
                 {
-                    outOfBoundsCount++;
-                    if (outOfBoundsCount <= 10) // Only log first 10 to avoid spam
-                    {
-                        ConsoleLogger.WriteLine($"Skipping triangle with invalid vertex indices: A={triangle.Item1}, B={triangle.Item2}, C={triangle.Item3} (max: {_scene.Vertices.Count - 1})");
-                    }
+                    // Log out of bounds indices
+                    ConsoleLogger.WriteLine($"Skipping triangle with out of bounds indices: {a}, {b}, {c} (vertex count: {_scene.Vertices.Count})");
                 }
             }
             
