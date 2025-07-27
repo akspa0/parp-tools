@@ -1,3 +1,4 @@
+/*
 namespace ParpToolbox.Services.PM4;
 
 using System.Globalization;
@@ -71,3 +72,4 @@ internal static class Pm4ObjExporter
         }
     }
 }
+*/

@@ -18,72 +18,48 @@ namespace ParpToolbox.CliCommands
         /// <param name="inputPath">Resolved absolute input file path.</param>
         public static int Run(string[] args, string inputPath)
         {
+            // Note: The 'inputPath' argument is for generic tests that might need it.
+            // Specific tests like regression or analysis define their own paths internally.
+            if (args.Length < 2)
+            {
+                PrintUsage();
+                return 1;
+            }
+
+            var testName = args[1];
+
             try
             {
-                ConsoleLogger.WriteLine($"Running PM4 validation tests on: {inputPath}");
-                
-                var adapter = new Pm4Adapter();
-                var scene = adapter.LoadRegion(inputPath);
-                
-                // Validate basic scene integrity
-                if (scene == null)
+                switch (testName)
                 {
-                    ConsoleLogger.WriteLine("ERROR: Failed to load scene");
-                    return 1;
-                }
-
-                // Check for MSUR data
-                var msurCount = scene.Surfaces?.Count ?? 0;
-                ConsoleLogger.WriteLine($"✓ Loaded {msurCount} MSUR entries");
-                
-                // Check for geometry data
-                var vertices = scene.Vertices?.Count ?? 0;
-                var indices = scene.Triangles?.Count ?? 0;
-                ConsoleLogger.WriteLine($"✓ Loaded {vertices} vertices");
-                ConsoleLogger.WriteLine($"✓ Loaded {indices} triangles");
-                
-                // Basic validation
-                bool isValid = true;
-                var errors = new System.Collections.Generic.List<string>();
-                
-                if (msurCount == 0)
-                {
-                    errors.Add("No MSUR entries found");
-                    isValid = false;
-                }
-                
-                if (vertices == 0)
-                {
-                    errors.Add("No vertex data found");
-                    isValid = false;
-                }
-                
-                if (indices == 0)
-                {
-                    errors.Add("No triangle data found");
-                    isValid = false;
-                }
-                
-                if (isValid)
-                {
-                    ConsoleLogger.WriteLine("✓ All basic validation tests passed");
-                    return 0;
-                }
-                else
-                {
-                    ConsoleLogger.WriteLine("✗ Validation failed:");
-                    foreach (var error in errors)
-                    {
-                        ConsoleLogger.WriteLine($"  {error}");
-                    }
-                    return 1;
+                    case "--pm4-per-object-exporter":
+                        Pm4PerObjectExporterTests.RunRegressionTest();
+                        break;
+                    case "--analyze-chunks":
+                        Pm4ChunkAnalysisTests.DumpChunkDataForAnalysis();
+                        break;
+                    default:
+                        ConsoleLogger.WriteLine($"Unknown test: {testName}");
+                        PrintUsage();
+                        return 1;
                 }
             }
             catch (Exception ex)
             {
-                ConsoleLogger.WriteLine($"ERROR: Test validation failed: {ex.Message}");
+                ConsoleLogger.WriteLine($"ERROR: Test execution failed: {ex.Message}");
+                ConsoleLogger.WriteLine(ex.ToString());
                 return 1;
             }
+
+            return 0; // Success
+        }
+
+        private static void PrintUsage()
+        {
+            Console.WriteLine("Usage: parpToolbox test <test_name>");
+            Console.WriteLine("Available tests:");
+            Console.WriteLine("  --pm4-per-object-exporter  - Runs the PM4 per-object exporter regression test.");
+            Console.WriteLine("  --analyze-chunks           - Dumps PM4 chunk data to CSV files for analysis.");
         }
     }
 }

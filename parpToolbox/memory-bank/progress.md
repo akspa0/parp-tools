@@ -152,4 +152,6 @@
 - Next step: replicate reference grouping by surface ranges matching MSLK `ReferenceIndex`, validate counts with real data.
 
 ## Known Issues
+- **Agentic File Editing Failure:** My attempts to perform surgical edits on `Pm4PerObjectExporter.cs` have repeatedly failed, leading to file corruption. A more robust approach, such as a complete file overwrite, is required.
+- **Tool Unreliability:** The `view_file` tool has been inconsistent, hindering my ability to get an accurate view of the file state before attempting edits.
 - **`dotnet run` Argument Parsing:** When using `dotnet run`, arguments passed after `--` are not being received by the application. The immediate priority is to diagnose and fix this issue to enable proper testing and use of the tool.

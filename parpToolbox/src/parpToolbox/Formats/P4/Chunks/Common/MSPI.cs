@@ -8,7 +8,7 @@ using System.IO;
 /// Triangle list chunk (MSPI). Stores 16-bit vertex indices grouped by 3.
 /// Some historical files store 32-bit; this loader autodetects by length.
 /// </summary>
-internal sealed class MspiChunk : IIffChunk, IBinarySerializable
+public sealed class MspiChunk : IIffChunk, IBinarySerializable
 {
     public const string Signature = "MSPI";
 

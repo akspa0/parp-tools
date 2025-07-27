@@ -6,8 +6,20 @@
 - **Real Data Testing:** All tests must use real game data to ensure accuracy.
 - **Clean Output:** All generated files must be written to the timestamped `project_output` directory.
 
-## Current Focus
-PM4 object grouping investigation has revealed critical insights but also exposed significant tooling fragmentation. Current focus is on consolidating and refactoring all PM4/PD4 analysis tools to create a clean, maintainable foundation.
+## Current Work Focus
+- Recovering from a critical build failure caused by a corrupted exporter file.
+- Documenting the current state to ensure a clean start in the next session.
+
+## Recent Changes
+- **Validated Grouping Logic:** Successfully generated and analyzed `MSLK` and `MSUR` chunk data, confirming `ParentIndex` is the correct grouping key.
+- **Attempted Refactor:** Made multiple attempts to refactor `Pm4PerObjectExporter.cs` with the new logic.
+- **Introduced Critical Failure:** The refactoring attempts failed and corrupted `Pm4PerObjectExporter.cs`, leaving the project in a non-compiling state.
+
+## Next Steps
+- **Start a new session.**
+- **Fix the Build:** The absolute first priority is to fix `Pm4PerObjectExporter.cs` by completely replacing its content with a clean, correct implementation.
+- **Run Regression Test:** Once the build is fixed, run the regression test to validate the output of the new exporter.
+- **Generate Golden Hash:** If the output is correct, generate a SHA256 hash of the largest object file and update the regression test to use it.
 
 ## Key Discoveries
 

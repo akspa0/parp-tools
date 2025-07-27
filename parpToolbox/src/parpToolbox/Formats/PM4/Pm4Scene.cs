@@ -23,6 +23,9 @@ namespace ParpToolbox.Formats.PM4
     /// <summary>Raw MSUR surface entries for diagnostics / advanced grouping.</summary>
     public List<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry> Surfaces { get; init; } = new();
 
+    /// <summary>Raw MSPI chunks for diagnostics / advanced grouping.</summary>
+    public List<ParpToolbox.Formats.P4.Chunks.Common.MspiChunk> Spis { get; init; } = new();
+
     /// <summary>Optional property records from MPRR.</summary>
     public List<ParpToolbox.Formats.P4.Chunks.Common.MprrChunk.Entry> Properties { get; init; } = new();
 

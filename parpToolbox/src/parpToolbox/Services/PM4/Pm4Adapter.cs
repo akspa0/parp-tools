@@ -178,6 +178,7 @@ namespace ParpToolbox.Services.PM4
             Vertices = verts.ToList(),
             Triangles = tris.ToList(),
             Surfaces = (msur?.Entries ?? Array.Empty<MsurChunk.Entry>()).ToList(),
+            Spis = mspi != null ? new List<MspiChunk> { mspi } : new List<MspiChunk>(),
             Indices = (msvi?.Indices ?? Array.Empty<int>()).ToList(),
             Groups = groups.ToList(),
             Links = (mslk?.Entries ?? Array.Empty<MslkEntry>()).ToList(),

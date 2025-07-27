@@ -1,3 +1,4 @@
+/*
 namespace ParpToolbox.Services.PM4;
 
 using System.IO;
@@ -36,3 +37,4 @@ internal static class Pm4GroupObjExporter
         exporter.Export(outputDir);
     }
 }
+*/

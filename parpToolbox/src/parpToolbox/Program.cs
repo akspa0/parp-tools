@@ -23,24 +23,24 @@ if (args.Length == 0)
                       "  export     Export PM4/PD4/WMO files to OBJ/MTL\n" +
                       "  test       Run validation tests against real data\n" +
                       "  wmo        Export WMO files to OBJ/MTL\n" +
+                      "  test       Run regression tests\n" +
                       "\nCommon flags:\n" +
-                      "   --input <file>      Input file path\n" +
+                       "   --input <file>      Input file path\n" +
                       "   --single-tile       Load only single PM4 tile (default: load region)\n" +
-                      "   --exportchunks      Export each MSUR group separately\n" +
-                      "   --objects           Export assembled building objects\n" +
-                      "   --csv-dump         Export chunk data to CSV for analysis\n" +
-                      "\nNew PM4 Exporter flags:\n" +
-                      "   --new-exporter      Use the new PM4 exporter (unified, correct grouping)\n" +
-                      "   --cross-tile        Enable cross-tile vertex resolution\n" +
-                      "   --mprl-transforms   Apply MPRL placement transformations\n" +
-                      "   --include-m2        Include M2 objects (group key 0x00000000)\n" +
-                      "   --no-x-inversion    Disable X-axis inversion\n" +
-                      "   --wmo               Export as WMO format instead of OBJ");
+                      "   --csv-dump          Export chunk data to CSV for analysis");
     ConsoleLogger.Close();
     return 1;
 }
 
-var command = args[0].ToLowerInvariant();
+var command = args.Length > 0 ? args[0] : string.Empty;
+
+// Handle self-contained commands first
+if (command == "test")
+{
+    var exitCode = ParpToolbox.CliCommands.TestCommand.Run(args, string.Empty); // input path not used
+    ConsoleLogger.Close();
+    return exitCode;
+}
 
 // Global help handler
 if (command == "help" || command == "--help" || command == "-h")
@@ -52,15 +52,15 @@ if (command == "help" || command == "--help" || command == "-h")
                       "Examples:\n" +
                       "  parpToolbox export development_00_00.pm4 --faces\n" +
                       "  parpToolbox analyze development_00_00.pm4 --report\n" +
-                      "  parpToolbox test development_00_00.pm4\n" +
+                      "  parpToolbox test --analyze-chunks\n" +
                       "  parpToolbox wmo dalaran.wmo --split-groups\n" +
                       "\nLegacy commands are deprecated but supported with warnings.");
     ConsoleLogger.Close();
     return 1;
 }
 
-// Parse common arguments
-string inputFile = null;
+// Parse common arguments for commands that require an input file
+string? inputFile = null;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--input" && i + 1 < args.Length)

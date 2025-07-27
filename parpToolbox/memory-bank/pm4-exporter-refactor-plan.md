@@ -8,6 +8,7 @@ The PM4 exporter requires a complete ground-up rewrite due to severe corruption 
 2. **Cross-tile References**: ~64% vertex data loss due to missing adjacent tile vertices
 3. **Memory Bank**: Severe file corruption requires complete rewrite
 4. **Legacy Parity**: Need byte-for-byte identical output to legacy exporters
+5. **Reference PoC Commit**: Working exporter logic is in commit `2e3f9ebfac5cb7dc34cfeee829036a3f62ebccde` – use this as ground truth for porting.
 
 ## Observed Implementation Drift (July 26 2025)
 Despite the above discoveries being reiterated multiple times, refactors have repeatedly regressed to prior, incorrect grouping logic (e.g., SurfaceKey-based grouping).  This indicates:
@@ -58,6 +59,18 @@ PM4File → SceneLoader → ObjectAssembler → VertexResolver → ObjExporter
 - [ ] Ensure complete geometry without fragmentation
 
 ### Phase 4: Legacy Compatibility
+- [ ] Port exact legacy OBJ export format
+- [ ] Implement coordinate system fixes (X-axis inversion)
+- [ ] Ensure byte-for-byte output parity
+- [ ] Add comprehensive regression tests
+
+### Phase 5: Collision & Server Integration (MSCN)
+- [ ] Implement `--collision` flag: export MSCN triangles only.
+- [ ] Write minimal OBJ/GLB or binary mesh for collision.
+- [ ] Build simple BVH/uniform grid accelerator for queries.
+- [ ] Prototype Recast/Detour (or SharpNav) nav-mesh generation using walkable MSCN flags.
+- [ ] Document MSCN field semantics and flipping rules.
+
 - [ ] Port exact legacy OBJ export format
 - [ ] Implement coordinate system fixes (X-axis inversion)
 - [ ] Ensure byte-for-byte output parity
