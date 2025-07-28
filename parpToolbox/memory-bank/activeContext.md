@@ -7,8 +7,9 @@
 - **Clean Output:** All generated files must be written to the timestamped `project_output` directory.
 
 ## Current Work Focus
-- Recovering from a critical build failure caused by a corrupted exporter file.
-- Documenting the current state to ensure a clean start in the next session.
+- MAJOR ARCHITECTURAL BREAKTHROUGH: Surface "bounds" fields are encoded linkage containers, not spatial bounds
+- Implementing linkage-based decoding system to replace failed spatial clustering approach
+- Building tests to validate cross-tile vertex reference resolution using new bounds decoding logic
 
 ## Recent Changes
 - **Validated Grouping Logic:** Successfully generated and analyzed `MSLK` and `MSUR` chunk data, confirming `ParentIndex` is the correct grouping key.
@@ -23,11 +24,20 @@
 
 ## Key Discoveries
 
+### MAJOR BREAKTHROUGH: Bounds Encoding Discovery
+- **Surface "bounds" fields are encoded linkage containers, NOT spatial bounds**
+- **BoundsMaxZ = 3285479936** → Tile/chunk reference ID (consistent across entries)
+- **BoundsMaxX/Y** → Cross-tile vertex indices (explains out-of-bounds access)
+- **BoundsMinX/Y/Z** → Direction vectors or normalized coordinates
+- **BoundsCenterX/Y/Z** → Duplicated geometry indices (MsviFirstIndex, IndexCount, GroupKey)
+- **Field overloading confirmed** - PM4 uses single fields to pack multiple data types
+
 ### Object Grouping Reality
 - **PM4 files DO contain building objects** - 3D visualization confirms discrete building clusters
 - **Surface Groups (MSUR.SurfaceGroupKey) appear to be correct object boundaries** - not terrain subdivisions
 - **All previous "object grouping" attempts (MPRL, MPRR) produced fragments/subdivisions** - not complete objects
 - **Raw geometry export shows scattered building point clouds** - confirming objects exist but need proper grouping
+- **Spatial clustering was fundamentally wrong** - based on non-existent bounds data
 
 ### Cross-Tile Reference Success
 - Cross-tile vertex reference resolution working correctly (12.8x data increase, 502 tiles merged)

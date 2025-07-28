@@ -83,6 +83,14 @@ public sealed partial class Pm4Adapter
             baseScene.Placements.AddRange(s.Placements);
             baseScene.Properties.AddRange(s.Properties);
             baseScene.ExtraChunks.AddRange(s.ExtraChunks);
+            
+            // Merge raw chunk data from each tile for complete future-proofing
+            foreach (var (chunkType, rawData) in s.CapturedRawData)
+            {
+                var tilePrefix = Path.GetFileNameWithoutExtension(scenes.IndexOf(s) == 0 ? firstTilePath : $"tile_{i}");
+                var uniqueKey = $"{tilePrefix}_{chunkType}";
+                baseScene.CapturedRawData[uniqueKey] = rawData;
+            }
         }
 
         AttachMscn(baseScene);

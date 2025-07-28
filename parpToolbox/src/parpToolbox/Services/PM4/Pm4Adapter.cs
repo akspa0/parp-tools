@@ -18,6 +18,9 @@ namespace ParpToolbox.Services.PM4
     /// <summary>Raw chunk data captured during loading for analysis purposes.</summary>
     private readonly Dictionary<string, byte[]> _capturedRawData = new();
     
+    /// <summary>Gets the captured raw chunk data from the last load operation.</summary>
+    public IReadOnlyDictionary<string, byte[]> CapturedRawData => _capturedRawData;
+    
     /// <inheritdoc/>
     public Pm4Scene Load(string path)
     {

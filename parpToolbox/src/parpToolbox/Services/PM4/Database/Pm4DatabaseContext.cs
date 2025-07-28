@@ -26,6 +26,11 @@ namespace ParpToolbox.Services.PM4.Database
         public DbSet<Pm4Placement> Placements { get; set; } = null!;
         public DbSet<Pm4SurfaceGroup> SurfaceGroups { get; set; } = null!;
         public DbSet<Pm4SurfaceGroupMember> SurfaceGroupMembers { get; set; } = null!;
+        public DbSet<Pm4RawChunk> RawChunks { get; set; } = null!;
+        
+        // Hierarchical container decoding entities
+        public DbSet<Pm4HierarchicalContainer> HierarchicalContainers { get; set; } = null!;
+        public DbSet<Pm4HierarchicalContainerMember> HierarchicalContainerMembers { get; set; } = null!;
         
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {

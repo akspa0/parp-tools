@@ -234,10 +234,105 @@ namespace ParpToolbox.Services.PM4.Database
         public int SurfaceId { get; set; }
         
         // Navigation properties
-        [ForeignKey("SurfaceGroupId")]
+        [ForeignKey(nameof(SurfaceGroupId))]
         public virtual Pm4SurfaceGroup SurfaceGroup { get; set; } = null!;
         
-        [ForeignKey("SurfaceId")]
+        [ForeignKey(nameof(SurfaceId))]
         public virtual Pm4Surface Surface { get; set; } = null!;
+    }
+    
+    /// <summary>
+    /// Stores raw chunk data for future-proofing as PM4 understanding evolves.
+    /// Enables new tools to leverage existing raw data without re-parsing original files.
+    /// </summary>
+    public class Pm4RawChunk
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int Pm4FileId { get; set; }
+        
+        [Required]
+        public string ChunkType { get; set; } = string.Empty; // 'MSLK', 'MSUR', 'MPRL', etc.
+        
+        public int ChunkOffset { get; set; }     // Position in original file
+        public int ChunkSize { get; set; }       // Size in bytes
+        public byte[] RawData { get; set; } = Array.Empty<byte>(); // Complete raw chunk data
+        
+        public DateTime ParsedAt { get; set; }
+        public string ParserVersion { get; set; } = string.Empty; // Version of parser used
+        
+        // Optional: Parsed interpretation count for analysis
+        public int? InterpretedRecordCount { get; set; }
+        public string? ParsingNotes { get; set; }
+        
+        // Navigation properties
+        [ForeignKey(nameof(Pm4FileId))]
+        public virtual Pm4File Pm4File { get; set; } = null!;
+    }
+    
+    /// <summary>
+    /// Decoded hierarchical container representing a complete object assembled from related surfaces, links, and placements.
+    /// </summary>
+    public class Pm4HierarchicalContainer
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int Pm4FileId { get; set; }
+        
+        // Container hierarchy identifiers
+        public float ContainerX { get; set; }  // BoundsCenterX value
+        public float ContainerY { get; set; }  // BoundsCenterY value  
+        public float ContainerZ { get; set; }  // BoundsCenterZ value
+        
+        // Object composition metrics
+        public int SurfaceCount { get; set; }
+        public int TotalTriangles { get; set; }
+        public int RelatedLinkCount { get; set; }
+        public int RelatedPlacementCount { get; set; }
+        
+        // Object completeness score (0-3: surfaces, links, placements)
+        public int CompletenessScore { get; set; }
+        
+        // Object classification
+        public string ObjectType { get; set; } = string.Empty;  // "building", "fragment", "detail", etc.
+        public bool IsCompleteObject { get; set; }  // Based on triangle count and completeness
+        
+        // Spatial bounds (actual calculated bounds, not encoded)
+        public float BoundsMinX { get; set; }
+        public float BoundsMinY { get; set; }
+        public float BoundsMinZ { get; set; }
+        public float BoundsMaxX { get; set; }
+        public float BoundsMaxY { get; set; }
+        public float BoundsMaxZ { get; set; }
+        
+        // Navigation properties
+        [ForeignKey("Pm4FileId")]
+        public virtual Pm4File Pm4File { get; set; } = null!;
+        
+        public virtual ICollection<Pm4HierarchicalContainerMember> Members { get; set; } = new List<Pm4HierarchicalContainerMember>();
+    }
+    
+    /// <summary>
+    /// Junction table linking hierarchical containers to their member surfaces, links, and placements.
+    /// </summary>
+    public class Pm4HierarchicalContainerMember
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int ContainerId { get; set; }
+        
+        // Member type and ID
+        public string MemberType { get; set; } = string.Empty;  // "Surface", "Link", "Placement"
+        public int MemberId { get; set; }  // ID from respective table
+        
+        // Member contribution to object
+        public int TriangleContribution { get; set; }  // For surfaces: IndexCount, others: 0
+        
+        // Navigation properties
+        [ForeignKey("ContainerId")]
+        public virtual Pm4HierarchicalContainer Container { get; set; } = null!;
     }
 }

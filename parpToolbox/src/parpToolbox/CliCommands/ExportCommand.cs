@@ -19,7 +19,7 @@ namespace ParpToolbox.CliCommands
         /// <param name="args">Full CLI args array (including the command token at index 0).</param>
         /// <param name="inputPath">Resolved absolute path to the PM4 file specified by the user.</param>
         /// <returns>Exit code (0 = success, non-zero = failure).</returns>
-        public static int Run(string[] args, string inputPath)
+        public static async Task<int> Run(string[] args, string inputPath)
         {
             // --- Flag Parsing ---
             // All legacy/experimental flags have been removed. The exporter now works correctly by default.
@@ -27,27 +27,39 @@ namespace ParpToolbox.CliCommands
             bool useSingleTile = args.Contains("--single-tile");
 
             // --- Scene Loading ---
-            Pm4Scene scene;
+            // --- Load with Raw Data Capture ---
             var adapter = new Pm4Adapter();
-            if (useSingleTile)
+            var loadOptions = new Pm4LoadOptions
             {
-                ConsoleLogger.WriteLine("Single-tile mode active (--single-tile flag detected)");
-                scene = adapter.Load(inputPath);
+                CaptureRawData = true,  // Enable raw chunk capture for database storage
+                VerboseLogging = false
+            };
+            
+            Pm4Scene scene;
+            // Trigger region loading for coordinate-based files (e.g., development_00_00.pm4)
+            if (inputPath.Contains("_00_00") || inputPath.Contains("_000"))
+            {
+                scene = adapter.LoadRegion(inputPath, loadOptions);
             }
             else
             {
-                ConsoleLogger.WriteLine("Region mode active (default) – loading cross-tile references...");
-                scene = adapter.LoadRegion(inputPath);
+                scene = adapter.Load(inputPath, loadOptions);
             }
 
             // --- Export ---
             var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputPath));
             
-            ConsoleLogger.WriteLine("Using PoC spatial grouping exporter...");
-            var exporter = new Pm4PerObjectExporter();
-            exporter.ExportObjects(scene, outputDir);
+            ConsoleLogger.WriteLine("Using JSON export pipeline...");
+            var jsonExporter = new Pm4JsonExportPipeline();
+            var outputPath = await jsonExporter.ExportSceneAsync(
+                scene, 
+                Path.GetFileName(inputPath),
+                inputPath,
+                adapter.CapturedRawData,
+                outputDir
+            );
 
-            ConsoleLogger.WriteLine($"Export complete. Check the output directory: {outputDir}");
+            ConsoleLogger.WriteLine($"JSON export complete! Output file: {outputPath}");
             return 0;
         }
     }

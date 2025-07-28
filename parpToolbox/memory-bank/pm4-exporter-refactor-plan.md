@@ -1,14 +1,46 @@
-# PM4 Exporter Complete Refactor Plan
+# PM4 Database-First Architecture Plan
+
+## 🚨 CRITICAL ARCHITECTURE BREAKTHROUGH (2025-07-27)
+
+**GLOBAL MESH SYSTEM DISCOVERED:** The fundamental PM4 architecture has been **completely solved**. PM4 files implement a **cross-tile linkage system** requiring **multi-tile processing** for complete geometry assembly.
+
+### **Mathematical Validation:**
+- **58.4% of triangles** reference vertices from adjacent tiles (30,677 out of 52,506)
+- **63,297 cross-tile vertex indices** in perfect sequential range: 63,298-126,594
+- **Zero gap** between local (0-63,297) and cross-tile vertex ranges
+- **Complete architectural assembly requires directory-wide PM4 processing**
+
+### **Surface Encoding System:**
+- **GroupKey 3** (1,968 surfaces): Spatial coordinates, local tile geometry
+- **GroupKey 18** (8,988 surfaces): Mixed data, boundary objects spanning tiles
+- **GroupKey 19** (30,468 surfaces): Encoded linkage data, cross-tile references (74% of surfaces)
+- **BoundsMaxZ in encoded groups**: Hex-encoded tile/object references, NOT coordinates
+- **95.5% consistency** in GroupKey 19 encoding - systematic linkage system
+
+**IMPACT:** All previous single-tile processing approaches are fundamentally incomplete. **Multi-tile processing and cross-tile vertex resolution are mandatory.**
+
+---
 
 ## Executive Summary
-The PM4 exporter requires a complete ground-up rewrite due to severe corruption and fundamental architectural issues. This plan addresses the critical discoveries from recent analysis and implements the correct object grouping strategy based on MSLK.ParentIndex_0x04.
+The PM4 exporter has been redesigned as a **database-first architecture** with two distinct phases:
+1. **PM4 → SQLite Importer**: Comprehensive raw chunk storage for future-proofing
+2. **SQLite → Export Subsystem**: Flexible SQL-driven OBJ and analysis tools
 
-## Critical Discoveries
-1. **Object Identification**: Individual PM4 objects are identified by **MSUR.Index_0x01** (surface index), which maps to **MSLK.Unknown_0x00**; geometry layers are clustered by **MSUR.Unknown_0x10**.
-2. **Cross-tile References**: ~64% vertex data loss due to missing adjacent tile vertices
-3. **Memory Bank**: Severe file corruption requires complete rewrite
-4. **Legacy Parity**: Need byte-for-byte identical output to legacy exporters
-5. **Reference PoC Commit**: Working exporter logic is in commit `2e3f9ebfac5cb7dc34cfeee829036a3f62ebccde` – use this as ground truth for porting.
+This approach treats PM4 as the complex hierarchical database it actually is, enabling robust analysis and future tooling development.
+
+## Critical Discoveries (Updated with Database Pattern Analysis)
+1. **Object Instance System**: **MPRL.Unknown4** = Object Instance ID (227 unique objects), linking to **MSLK.ParentIndex**
+2. **LOD Control System**: **MPRL.Unknown14/Unknown16** encodes rendering detail levels:
+   - (-1, 16383) = Full detail rendering (906 instances)
+   - (0-5, 0) = LOD levels 0-5 (667 instances)
+3. **Object State Management**: **MPRL** contains sophisticated encoding:
+   - Unknown0 = Category ID (4630 = building type)
+   - Unknown2 = State flag (-1 = active)
+   - Unknown6 = Property flag (32768 = bit 15 set)
+4. **Coordinate System**: Local tile coordinates require XX*533.33 + YY*533.33 world offset
+5. **Cross-tile References**: ~64% vertex data loss due to missing adjacent tile vertices
+6. **Legacy Parity**: Need byte-for-byte identical output to legacy exporters
+7. **Database-First Validation**: SQLite pattern analysis confirmed field meanings and eliminated "outlier" misinterpretations
 
 ## Observed Implementation Drift (July 26 2025)
 Despite the above discoveries being reiterated multiple times, refactors have repeatedly regressed to prior, incorrect grouping logic (e.g., SurfaceKey-based grouping).  This indicates:
@@ -22,82 +54,130 @@ Despite the above discoveries being reiterated multiple times, refactors have re
 3. Add SHA regression test against legacy OBJ output.
 4. Code reviews must cross-check every change against this plan before merge.
 
-## Architecture Overview
+## Database-First Architecture Overview
 
-### Core Components
-1. **Pm4SceneLoader** - Unified scene loading with cross-tile vertex resolution
-2. **MsurObjectAssembler** - Groups by MSUR.IndexCount for complete objects
-3. **MslkHierarchyBuilder** - Builds object relationships via ParentIndex_0x04
-4. **LegacyObjExporter** - Ensures identical output format to legacy tools
-5. **CrossTileVertexResolver** - Handles missing vertex data from adjacent tiles
+### Phase 1: PM4 → SQLite Importer (Complete Data Capture)
+1. **Pm4DatabaseExporter** - Comprehensive raw chunk storage with optimized batching
+2. **RawChunkStorage** - Every chunk type preserved with full fidelity (MSPV, MSVT, MSVI, MSLK, MSUR, MPRL, MPRR, etc.)
+3. **CrossTileVertexResolver** - Global vertex mapping and reference resolution
+4. **MetadataCapture** - Parse timestamps, chunk offsets, file relationships
+5. **FutureProofing** - Raw data enables new tools as PM4 understanding evolves
+
+### Phase 2: Export Subsystem Framework (SQL-Driven Tools)
+1. **SqlQueryLibrary** - Modular extraction strategies (spatial, hierarchical, surface-based)
+2. **ObjExportPipeline** - Building objects, individual surfaces, collision meshes
+3. **AnalysisTools** - CSV/JSON chunk relationship analysis, coordinate debugging
+4. **FormatExtensibility** - OBJ/MTL, glTF, PLY, custom binary formats
+5. **VisualizationHelpers** - Bounds checking, fragment analysis, cross-tile validation
 
 ### Data Flow
 ```
-PM4File → SceneLoader → ObjectAssembler → VertexResolver → ObjExporter
+PM4File → DatabaseImporter → SQLite → [QueryStrategy] → ExportPipeline → OBJ/Analysis
 ```
 
 ## Implementation Strategy
 
-### Phase 1: Foundation (Clean Architecture)
-- [ ] Create new Pm4Exporter class from scratch
-- [ ] Implement reflection-based MSLK field access for ParentIndex_0x04
-- [ ] Add robust error handling for dynamic property access
-- [ ] Establish clean separation of concerns
+### Phase 1: Complete Database Importer (In Progress ✅)
+- [x] **Pm4DatabaseExporter** - Optimized batching with 50k batch sizes
+- [x] **Performance Optimization** - Disabled change tracking, memory management
+- [x] **Cross-tile Resolution** - Global vertex mapping and reference resolution
+- [ ] **Raw Chunk Storage** - Expand to include every chunk type with full fidelity
+- [ ] **Metadata Capture** - Store chunk offsets, parse timestamps, file relationships
+- [ ] **Remove Building Extraction** - Focus purely on data import, not object assembly
 
-### Phase 2: Object Grouping
-- [ ] Implement grouping strategy:
-  - Cluster surfaces by **MSUR.Unknown_0x10** (geometry layer)
-  - Within each cluster, group by **MSUR.Index_0x01** and resolve to **MSLK.Unknown_0x00** for object assembly
-- [ ] Handle container nodes (MspiFirstIndex = -1) appropriately
-- [ ] Build hierarchical object relationships
-- [ ] Ensure proper object scale (38K-654K triangles per building)
+### Phase 2: SQL Query Library Design
+- [ ] **Spatial Clustering Queries** - Proximity-based object grouping
+- [ ] **Hierarchical Analysis Queries** - ParentIndex-based relationships (MSLK.ParentIndex_0x04)
+- [ ] **Surface Group Queries** - MSUR-based object boundaries (MSUR.Index_0x01 → MSLK.Unknown_0x00)
+- [ ] **Cross-tile Reference Queries** - Global vertex mapping and validation
+- [ ] **Analysis Queries** - Chunk relationship validation, bounds checking
 
-### Phase 3: Vertex Resolution
-- [ ] Implement cross-tile vertex loading system
-- [ ] Handle high/low pair encoding for 32-bit indices
-- [ ] Resolve missing vertex data from adjacent tiles
-- [ ] Ensure complete geometry without fragmentation
+### Phase 3: Export Subsystem Framework
+- [ ] **OBJ/MTL Pipeline** - Building objects, individual surfaces, material support
+- [ ] **Collision Export** - MSCN triangle export with `--collision` flag
+- [ ] **Analysis Tools** - CSV/JSON chunk relationship export, coordinate debugging
+- [ ] **Visualization Helpers** - Bounds checking, fragment analysis, cross-tile validation
+- [ ] **Format Extensions** - glTF, PLY, custom binary formats
 
-### Phase 4: Legacy Compatibility
-- [ ] Port exact legacy OBJ export format
-- [ ] Implement coordinate system fixes (X-axis inversion)
-- [ ] Ensure byte-for-byte output parity
-- [ ] Add comprehensive regression tests
+### Phase 4: Legacy Compatibility & Testing
+- [ ] **Legacy OBJ Format** - Ensure byte-for-byte output parity with existing tools
+- [ ] **Coordinate System Fixes** - X-axis inversion and transform validation
+- [ ] **Regression Tests** - SHA comparison against legacy outputs
+- [ ] **Performance Benchmarks** - Database query optimization and export speed
 
-### Phase 5: Collision & Server Integration (MSCN)
-- [ ] Implement `--collision` flag: export MSCN triangles only.
-- [ ] Write minimal OBJ/GLB or binary mesh for collision.
-- [ ] Build simple BVH/uniform grid accelerator for queries.
-- [ ] Prototype Recast/Detour (or SharpNav) nav-mesh generation using walkable MSCN flags.
-- [ ] Document MSCN field semantics and flipping rules.
+### Phase 5: Advanced Features
+- [ ] **Navigation Mesh Export** - Recast/Detour integration using walkable MSCN flags
+- [ ] **BVH/Spatial Acceleration** - Query optimization for large scenes
+- [ ] **Multi-tile Batch Processing** - Process entire regions efficiently
+- [ ] **Interactive Query Tools** - SQL-based debugging and analysis utilities
 
-- [ ] Port exact legacy OBJ export format
-- [ ] Implement coordinate system fixes (X-axis inversion)
-- [ ] Ensure byte-for-byte output parity
-- [ ] Add comprehensive regression tests
+## Current Status (July 26, 2025)
+
+### ✅ Completed Components
+1. **Pm4DatabaseExporter** - Core database import with optimized performance
+   - 50k batch sizes for vertices/triangles/links
+   - Disabled change tracking during bulk operations
+   - Memory management with entity clearing
+   - Cross-tile vertex resolution working
+2. **Database Schema** - EF Core models for PM4 data
+   - Vertices, Triangles, Surfaces, Links, Placements tables
+   - Spatial indexing and relationship tracking
+3. **Performance Optimization** - MSLK links export now fast
+4. **Cross-tile Loading** - Global vertex mapping resolves 64% data loss
+
+### 🚧 In Progress
+1. **Database hangs** during hierarchical building extraction
+2. **Missing raw chunk storage** for future-proofing
+3. **Export subsystem** not yet implemented
+
+### 🎯 Immediate Next Steps
+1. **Remove building extraction** from database importer (focus on pure data import)
+2. **Add raw chunk storage tables** for every PM4 chunk type
+3. **Design SQL query library** for flexible object extraction
+4. **Create new export subsystem** that reads from SQLite
 
 ## Technical Specifications
 
-### MSLK Entry Processing
-```csharp
-// Key fields to extract dynamically
-- ParentIndex_0x04: uint (object grouping key)
-- MspiFirstIndex: int (geometry start)
-- MspiIndexCount: int (geometry count)
-- ReferenceIndex: uint (cross-references)
+### Database Schema Extensions Needed
+```sql
+-- Raw chunk storage for future-proofing
+CREATE TABLE RawChunks (
+    Id INTEGER PRIMARY KEY,
+    Pm4FileId INTEGER,
+    ChunkType TEXT,         -- 'MSLK', 'MSUR', 'MPRL', etc.
+    ChunkOffset INTEGER,    -- Position in original file
+    ChunkSize INTEGER,      -- Size in bytes
+    RawData BLOB,          -- Complete raw chunk data
+    ParsedAt DATETIME,     -- When this was processed
+    ParserVersion TEXT     -- Version of parser used
+);
 ```
 
-### Object Assembly Logic
-1. **Primary Grouping**: Group MSLK entries by ParentIndex_0x04
-2. **Geometry Collection**: Aggregate triangles from all child entries
-3. **Vertex Mapping**: Map indices to actual MSVT vertices
-4. **Export Format**: Legacy OBJ format with proper coordinate transformation
+### SQL Query Strategies
+```sql
+-- Spatial clustering for building extraction
+SELECT * FROM Surfaces 
+WHERE BoundsCenterX BETWEEN ? AND ? 
+  AND BoundsCenterY BETWEEN ? AND ?
+ORDER BY BoundsCenterX, BoundsCenterY;
 
-### Error Handling
-- Robust reflection-based property access
-- Graceful handling of missing chunks
-- Comprehensive logging for debugging
-- Validation of vertex index bounds
+-- Hierarchical object assembly
+SELECT l.*, s.* FROM Links l
+JOIN Surfaces s ON s.Id = l.SurfaceId
+WHERE l.ParentIndex = ?
+ORDER BY l.MspiFirstIndex;
+```
+
+### Export Pipeline Architecture
+```csharp
+public interface IExportStrategy {
+    Task<ExportResult> ExtractAsync(int pm4FileId, ExportOptions options);
+}
+
+public class SpatialExportStrategy : IExportStrategy { }
+public class HierarchicalExportStrategy : IExportStrategy { }
+public class SurfaceGroupExportStrategy : IExportStrategy { }
+```
 
 ## Testing Strategy
 

@@ -21,7 +21,7 @@ namespace ParpToolbox.Services.PM4
         {
         }
 
-        public async Task ExportObjectsAsync(Pm4Scene scene, string outputDirectory, string sourceFileName = "PM4_Scene")
+        public async Task ExportObjectsAsync(Pm4Scene scene, string outputDirectory, string sourceFileName = "PM4_Scene", IReadOnlyDictionary<string, byte[]>? capturedRawData = null)
         {
             ConsoleLogger.WriteLine("Starting PM4 database-first object extraction...");
             
@@ -40,25 +40,17 @@ namespace ParpToolbox.Services.PM4
             
             try
             {
-                // Export scene to database
+                // Export scene to database (Phase 1: Pure data import)
                 var dbExporter = new Pm4DatabaseExporter(databasePath);
-                var pm4FileId = await dbExporter.ExportSceneAsync(scene, sourceFileName, databasePath);
+                var pm4FileId = await dbExporter.ExportSceneAsync(scene, sourceFileName, databasePath, capturedRawData);
                 
                 ConsoleLogger.WriteLine($"Scene exported to database with ID: {pm4FileId}");
+                ConsoleLogger.WriteLine($"Database path: {databasePath}");
                 
-                // Extract buildings using database queries
-                var objectExtractor = new Pm4DatabaseObjectExtractor(databasePath);
-                var buildings = await objectExtractor.ExtractBuildingsAsync(pm4FileId);
-                
-                ConsoleLogger.WriteLine($"Database analysis extracted {buildings.Count} buildings using multiple strategies");
-                
-                // Export buildings to OBJ files
-                await objectExtractor.ExportBuildingsToOBJAsync(buildings, outputDirectory);
-                
-                // Generate analysis report
-                await GenerateAnalysisReportAsync(buildings, outputDirectory, sourceFileName);
-                
-                ConsoleLogger.WriteLine($"Database-first extraction completed. Results in: {outputDirectory}");
+                // Phase 1 Complete: Database import successful
+                // Phase 2 TODO: Implement separate export subsystem to read from SQLite and generate OBJs
+                ConsoleLogger.WriteLine("PM4 database import completed successfully.");
+                ConsoleLogger.WriteLine("Use a future export tool to extract buildings from the SQLite database.");
             }
             catch (Exception ex)
             {

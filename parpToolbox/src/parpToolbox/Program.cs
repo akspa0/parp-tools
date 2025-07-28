@@ -125,7 +125,7 @@ try
                 ConsoleLogger.WriteLine("Error: Input file required for export command");
                 return 1;
             }
-            return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName);
+            return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName).GetAwaiter().GetResult();
             
         case "test":
             if (string.IsNullOrEmpty(inputFile))
@@ -147,7 +147,7 @@ try
         case "pm4-raw-geometry":
         case "pm4-buildings":
             ConsoleLogger.WriteLine($"Note: '{command}' is deprecated. Use 'export' instead.");
-            return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName);
+            return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName).GetAwaiter().GetResult();
             
         case "pm4-analyze":
         case "pm4-analyze-data":
@@ -160,6 +160,128 @@ try
         case "pm4-test-chunks":
             ConsoleLogger.WriteLine($"Note: '{command}' is deprecated. Use 'test' instead.");
             return ParpToolbox.CliCommands.TestCommand.Run(args, fileInfo.FullName);
+            
+        case "mprl-pattern-analysis":
+        case "mpa":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for MPRL pattern analysis");
+                return 1;
+            }
+            new ParpToolbox.CliCommands.MprlPatternAnalysisCommand().RunAsync(fileInfo.FullName).GetAwaiter().GetResult();
+            return 0;
+            
+        case "mslk-pattern-analysis":
+        case "mla":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for MSLK pattern analysis");
+                return 1;
+            }
+            new ParpToolbox.CliCommands.MslkPatternAnalysisCommand().RunAsync(fileInfo.FullName).GetAwaiter().GetResult();
+            return 0;
+            
+        case "quality-analysis":
+        case "qa":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for quality analysis");
+                return 1;
+            }
+            return ParpToolbox.CliCommands.QualityAnalysisCommand.Run(args, fileInfo.FullName).GetAwaiter().GetResult();
+            
+        case "global-mesh-analysis":
+        case "mprl-analysis":
+        case "mfa":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for MPRL field analysis");
+                return 1;
+            }
+            var mprlAnalyzer = new ParpToolbox.Services.PM4.Database.Pm4MprlFieldAnalyzer(
+                fileInfo.FullName, 
+                ProjectOutput.CreateOutputDirectory("mprl_analysis"));
+            await mprlAnalyzer.AnalyzeAsync();
+            break;
+            
+        case "gma":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for global mesh analysis");
+                return 1;
+            }
+            ParpToolbox.Services.PM4.Database.Pm4GlobalMeshAnalyzer.AnalyzeGlobalMeshLinkage(fileInfo.FullName).GetAwaiter().GetResult();
+            return 0;
+            
+        case "chunk-validation":
+        case "cv":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: PM4 file required for chunk validation");
+                return 1;
+            }
+            
+            // Load PM4 scene for chunk validation
+            var chunkAdapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+            var chunkLoadOptions = new ParpToolbox.Services.PM4.Pm4LoadOptions 
+            { 
+                CaptureRawData = true,
+                ValidateData = true,
+                VerboseLogging = true
+            };
+            
+            ParpToolbox.Formats.PM4.Pm4Scene validationScene;
+            if (inputFile.Contains("_00_00") || inputFile.Contains("_000"))
+            {
+                validationScene = chunkAdapter.LoadRegion(inputFile, chunkLoadOptions);
+            }
+            else
+            {
+                validationScene = chunkAdapter.Load(inputFile, chunkLoadOptions);
+            }
+            
+            var validator = new ParpToolbox.Services.PM4.Pm4ChunkValidationTool();
+            var chunkOutputDir = ProjectOutput.CreateOutputDirectory("chunk_validation");
+            var validationReport = validator.ValidateMsurChunk(validationScene, chunkOutputDir);
+            
+            ConsoleLogger.WriteLine($"Chunk validation complete. Report saved to: {chunkOutputDir}");
+            return 0;
+            
+        case "surface-encoding-analysis":
+        case "sea":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for surface encoding analysis");
+                return 1;
+            }
+            ParpToolbox.Services.PM4.Database.Pm4SurfaceEncodingAnalyzer.AnalyzeSurfaceEncodingPatterns(fileInfo.FullName).GetAwaiter().GetResult();
+            return 0;
+            
+        case "bounds-decoder":
+        case "bd":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for bounds decoder analysis");
+                return 1;
+            }
+            var boundsDecoder = new ParpToolbox.Services.PM4.Database.Pm4SurfaceBoundsDecoder(
+                fileInfo.FullName, 
+                ProjectOutput.CreateOutputDirectory("bounds_decoder"));
+            await boundsDecoder.AnalyzeAsync();
+            return 0;
+            
+        case "hierarchical-decoder":
+        case "hd":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Database file required for hierarchical container decoder");
+                return 1;
+            }
+            var hierarchicalDecoder = new ParpToolbox.Services.PM4.Database.Pm4HierarchicalContainerDecoder(
+                fileInfo.FullName, 
+                ProjectOutput.CreateOutputDirectory("hierarchical_decoder"));
+            await hierarchicalDecoder.AnalyzeAsync();
+            return 0;
             
         default:
             ConsoleLogger.WriteLine($"Error: Unknown command '{command}'");
