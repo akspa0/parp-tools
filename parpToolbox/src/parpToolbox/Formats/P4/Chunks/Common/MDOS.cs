@@ -25,12 +25,19 @@ internal sealed class MdosChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        var endOffset = br.BaseStream.Position + chunkSize;
+        while (br.BaseStream.Position + 8 <= endOffset)
         {
             uint idx = br.ReadUInt32();
             uint state = br.ReadUInt32();
@@ -39,13 +46,16 @@ internal sealed class MdosChunk : IIffChunk, IBinarySerializable
             uint? flags = null;
             float? scale = null;
 
-            long remaining = br.BaseStream.Length - br.BaseStream.Position;
-            if (remaining >= 4) { nameId = br.ReadUInt32(); remaining -= 4; }
-            if (remaining >= 2) { doodadSet = br.ReadUInt16(); remaining -= 2; }
-            if (remaining >= 4) { flags = br.ReadUInt32(); remaining -= 4; }
-            if (remaining >= 4) { scale = br.ReadSingle(); remaining -= 4; }
-            // ignore any extra unknown bytes for now
-            if (remaining > 0) br.BaseStream.Seek(remaining, SeekOrigin.Current);
+            if (br.BaseStream.Position + 4 <= endOffset) { nameId = br.ReadUInt32(); }
+            if (br.BaseStream.Position + 2 <= endOffset) { doodadSet = br.ReadUInt16(); }
+            if (br.BaseStream.Position + 4 <= endOffset) { flags = br.ReadUInt32(); }
+            if (br.BaseStream.Position + 4 <= endOffset) { scale = br.ReadSingle(); }
+
+            // Seek to the end of the known entry or chunk to handle unknown extra bytes gracefully
+            if (br.BaseStream.Position < endOffset)
+            {
+                br.BaseStream.Seek(endOffset - br.BaseStream.Position, SeekOrigin.Current);
+            }
 
             _entries.Add(new Entry(idx, state, nameId, doodadSet, flags, scale));
         }

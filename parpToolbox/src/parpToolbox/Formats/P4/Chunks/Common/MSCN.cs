@@ -22,13 +22,20 @@ internal sealed class MscnChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        var endOffset = br.BaseStream.Position + chunkSize;
         const int stride = 12;
-        while (br.BaseStream.Position + stride <= br.BaseStream.Length)
+        while (br.BaseStream.Position + stride <= endOffset)
         {
             float x = br.ReadSingle();
             float y = br.ReadSingle();

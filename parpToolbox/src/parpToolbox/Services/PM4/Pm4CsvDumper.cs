@@ -33,7 +33,7 @@ internal static class Pm4CsvDumper
         var csvPath = Path.Combine(outputRoot, "mslk_dump.csv");
         using var writer = new StreamWriter(csvPath);
         
-        writer.WriteLine("Idx,Unknown0x00,Unknown0x01,Unknown0x02,Unknown0x04,MspiFirstIndex,MspiIndexCount,LinkIdRaw,HasValidTiles,TileY,TileX,Unknown0x10,Unknown0x12");
+        writer.WriteLine("Idx,Flags_0x00,Type_0x01,SortKey_0x02,ParentId,MspiFirstIndex,MspiIndexCount,TileCoordsRaw,HasValidTiles,TileY,TileX,SurfaceRefIndex,Unknown_0x12");
         
         int idx = 0;
         foreach (var link in scene.Links)
@@ -43,17 +43,18 @@ internal static class Pm4CsvDumper
             
             writer.WriteLine(string.Join(',',
                 idx++,
-                $"0x{link.Unknown_0x00:X2}",
-                $"0x{link.Unknown_0x01:X2}",
-                $"0x{link.Unknown_0x02:X4}",
-                $"0x{link.Unknown_0x04:X8}",
+                $"0x{link.Flags_0x00:X2}",
+                $"0x{link.Type_0x01:X2}",
+                $"0x{link.SortKey_0x02:X4}",
+                $"0x{link.ParentId:X8}",
                 link.MspiFirstIndex,
                 link.MspiIndexCount,
-                $"0x{link.LinkIdRaw:X8}",
+                $"0x{link.TileCoordsRaw:X8}",
                 hasValidTiles,
                 tileY,
                 tileX,
-                $"0x{link.Unknown_0x10:X4}",
+                $"0x{link.SurfaceRefIndex:X4}",
+                $"0x{link.SurfaceRefIndex:X4}",
                 $"0x{link.Unknown_0x12:X4}"));
         }
         
@@ -66,7 +67,7 @@ internal static class Pm4CsvDumper
         var csvPath = Path.Combine(outputRoot, "msur_dump.csv");
         using var writer = new StreamWriter(csvPath);
         
-        writer.WriteLine("Idx,SurfaceKey,SurfaceKeyHi16,SurfaceKeyLo16,SurfaceGroupKey,Flags0x00,AttributeMask,MsviFirstIndex,IndexCount,IsM2Bucket,IsLiquidCandidate,Nx,Ny,Nz,Height,MdosIndex");
+        writer.WriteLine("Idx,SurfaceKey,SurfaceKeyHi16,SurfaceKeyLo16,SurfaceGroupKey,GroupKey,AttributeMask,MsviFirstIndex,IndexCount,IsM2Bucket,IsLiquidCandidate,Nx,Ny,Nz,Height,MdosIndex");
         
         int idx = 0;
         foreach (var surf in scene.Surfaces)
@@ -77,8 +78,8 @@ internal static class Pm4CsvDumper
                 $"0x{surf.SurfaceKeyHigh16:X4}",
                 $"0x{surf.SurfaceKeyLow16:X4}",
                 surf.SurfaceGroupKey,
-                $"0x{surf.FlagsOrUnknown_0x00:X2}",
-                $"0x{surf.SurfaceAttributeMask:X2}",
+                $"0x{surf.GroupKey:X2}",
+                $"0x{surf.AttributeMask:X2}",
                 surf.MsviFirstIndex,
                 surf.IndexCount,
                 surf.IsM2Bucket,

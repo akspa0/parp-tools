@@ -24,28 +24,29 @@ internal sealed class MspvChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        long bytesRemaining = br.BaseStream.Length - br.BaseStream.Position;
-        if (bytesRemaining % 12 != 0 && bytesRemaining % 24 != 0)
-            throw new InvalidDataException("MSPV length not divisible by 12 or 24 bytes – unknown stride.");
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
 
-        int stride = bytesRemaining % 24 == 0 ? 24 : 12;
-        int count = (int)(bytesRemaining / stride);
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        long bytesRemaining = chunkSize;
+        if (bytesRemaining % 12 != 0)
+            throw new InvalidDataException("MSPV length not divisible by 12 bytes, the required stride for a Vector3.");
+
+        int count = (int)(bytesRemaining / 12);
+        _vertices.Clear();
+        _vertices.Capacity = count;
         for (int i = 0; i < count; i++)
         {
             float x = br.ReadSingle();
             float y = br.ReadSingle();
             float z = br.ReadSingle();
-            if (stride == 24)
-            {
-                br.ReadSingle(); // skip unknown
-                br.ReadSingle();
-                br.ReadSingle();
-            }
             _vertices.Add(new Vector3(x, y, z));
         }
     }

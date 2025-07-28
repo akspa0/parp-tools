@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.CommandLine;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
 using ParpToolbox;
@@ -281,6 +282,17 @@ try
                 fileInfo.FullName, 
                 ProjectOutput.CreateOutputDirectory("hierarchical_decoder"));
             await hierarchicalDecoder.AnalyzeAsync();
+            return 0;
+
+        case "pm4-export-json":
+            var outputArg = args.FirstOrDefault(a => a.StartsWith("--output"))?.Split('=')[1];
+            if (string.IsNullOrEmpty(inputFile) || string.IsNullOrEmpty(outputArg))
+            {
+                ConsoleLogger.WriteLine("Error: --input and --output are required for pm4-export-json command");
+                return 1;
+            }
+            var jsonCommand = new ParpToolbox.CliCommands.Pm4ExportJsonCommand();
+            await jsonCommand.InvokeAsync(new string[] { "--input", inputFile, "--output", outputArg });
             return 0;
             
         default:

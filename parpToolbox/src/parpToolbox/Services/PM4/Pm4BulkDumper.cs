@@ -36,7 +36,7 @@ internal static class Pm4BulkDumper
                     idx++,
                     $"0x{s.SurfaceKey:X8}",
                     s.SurfaceGroupKey,
-                    s.FlagsOrUnknown_0x00,
+                    s.GroupKey,
                     $"0x{s.SurfaceAttributeMask:X4}",
                     s.MsviFirstIndex,
                     s.IndexCount,
@@ -54,17 +54,17 @@ internal static class Pm4BulkDumper
             {
                 writer.WriteLine(string.Join(',',
                     idx++,
-                    $"0x{link.Unknown_0x00:X2}",
-                    $"0x{link.Unknown_0x01:X2}",
-                    $"0x{link.Unknown_0x02:X4}",
-                    $"0x{link.Unknown_0x04:X8}",
+                    $"0x{link.Flags_0x00:X2}",
+                    $"0x{link.Type_0x01:X2}",
+                    $"0x{link.SortKey_0x02:X4}",
+                    $"0x{link.TileCoordsRaw:X8}",
                     link.MspiFirstIndex,
                     link.MspiIndexCount,
                     $"0x{link.LinkIdPadding:X4}",
                     link.LinkIdTileY,
                     link.LinkIdTileX,
                     $"0x{link.TileCoordinate:X4}",
-                    $"0x{link.Unknown_0x10:X4}",
+                    $"0x{link.SurfaceRefIndex:X4}",
                     $"0x{link.Unknown_0x12:X4}",
                     link.MspiFirstIndex >= 0 && link.MspiIndexCount > 0));
             }
@@ -292,7 +292,7 @@ internal static class Pm4BulkDumper
         {
             if (link.MspiFirstIndex < 0 || link.MspiIndexCount <= 0) continue; // Skip entries without geometry
             
-            uint parentIndex = link.Unknown_0x04;
+            uint parentIndex = link.ParentId;
             if (!groups.TryGetValue(parentIndex, out var faces))
             {
                 faces = new List<(int A, int B, int C)>();
@@ -343,7 +343,7 @@ internal static class Pm4BulkDumper
         {
             if (link.MspiFirstIndex < 0 || link.MspiIndexCount <= 0) continue; // Skip entries without geometry
             
-            uint referenceIndex = link.Unknown_0x10;
+            uint referenceIndex = link.SurfaceRefIndex;
             if (!groups.TryGetValue(referenceIndex, out var faces))
             {
                 faces = new List<(int A, int B, int C)>();
@@ -537,7 +537,7 @@ internal static class Pm4BulkDumper
         using var writer = new StreamWriter(csvPath);
         
         // Header with all MSLK fields
-        writer.WriteLine("Index,Unknown_0x00,Unknown_0x01,Unknown_0x02,ParentIndex,MspiFirstIndex,MspiIndexCount,LinkIdRaw,ReferenceIndex,Unknown_0x12," +
+        writer.WriteLine("Index,Flags_0x00,Type_0x01,SortKey_0x02,ParentIndex,MspiFirstIndex,MspiIndexCount,TileCoordsRaw,ReferenceIndex,Unknown_0x12," +
                         "LinkIdPadding,ReferenceIndexHigh,ReferenceIndexLow,HasGeometry,IsContainer");
         
         for (int i = 0; i < scene.Links.Count; i++)
@@ -546,8 +546,8 @@ internal static class Pm4BulkDumper
             bool hasGeometry = link.MspiFirstIndex != -1;
             bool isContainer = link.MspiFirstIndex == -1;
             
-            writer.WriteLine($"{i},{link.Unknown_0x00},{link.Unknown_0x01},{link.Unknown_0x02},{link.ParentIndex}," +
-                           $"{link.MspiFirstIndex},{link.MspiIndexCount},{link.LinkIdRaw},{link.ReferenceIndex},{link.Unknown_0x12}," +
+            writer.WriteLine($"{i},{link.Flags_0x00},{link.Type_0x01},{link.SortKey_0x02},{link.ParentIndex}," +
+                           $"{link.MspiFirstIndex},{link.MspiIndexCount},{link.TileCoordsRaw},{link.ReferenceIndex},{link.Unknown_0x12}," +
                            $"{link.LinkIdPadding},{link.ReferenceIndexHigh},{link.ReferenceIndexLow},{hasGeometry},{isContainer}");
         }
         return Task.CompletedTask;
@@ -621,7 +621,7 @@ internal static class Pm4BulkDumper
         using var writer = new StreamWriter(csvPath);
         
         // Header with grouping analysis
-        writer.WriteLine("Index,SurfaceGroupKey,IndexCount,Unknown_0x02,Nx,Ny,Nz,Height,MsviFirstIndex,MdosIndex,SurfaceKey," +
+        writer.WriteLine("Index,SurfaceGroupKey,IndexCount,AttributeMask,Nx,Ny,Nz,Height,MsviFirstIndex,MdosIndex,SurfaceKey," +
                         "SurfaceKeyHigh16,SurfaceKeyLow16,IsM2Bucket,IsLiquidCandidate,HasGeometry");
         
         for (int i = 0; i < scene.Surfaces.Count; i++)
@@ -629,7 +629,7 @@ internal static class Pm4BulkDumper
             var surface = scene.Surfaces[i];
             bool hasGeometry = surface.IndexCount > 0;
             
-            writer.WriteLine($"{i},{surface.SurfaceGroupKey},{surface.IndexCount},{surface.Unknown_0x02}," +
+            writer.WriteLine($"{i},{surface.SurfaceGroupKey},{surface.IndexCount},{surface.AttributeMask}," +
                            $"{surface.Nx},{surface.Ny},{surface.Nz},{surface.Height},{surface.MsviFirstIndex},{surface.MdosIndex}," +
                            $"{surface.SurfaceKey},{surface.SurfaceKeyHigh16},{surface.SurfaceKeyLow16}," +
                            $"{surface.IsM2Bucket},{surface.IsLiquidCandidate},{hasGeometry}");

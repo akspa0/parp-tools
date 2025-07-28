@@ -22,12 +22,19 @@ internal sealed class MdsfChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        var endOffset = br.BaseStream.Position + chunkSize;
+        while (br.BaseStream.Position + 8 <= endOffset)
         {
             uint msurIdx = br.ReadUInt32();
             uint mdosIdx = br.ReadUInt32();

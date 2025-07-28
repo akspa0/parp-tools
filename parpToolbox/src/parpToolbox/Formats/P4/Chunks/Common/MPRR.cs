@@ -55,14 +55,21 @@ public sealed class MprrChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
         // Chunk is an array of 4-byte records: uint16 + uint16
         // Critical for object assembly: entries with Value1=65535 act as sentinel markers defining object boundaries
-        while (br.BaseStream.Position + 4 <= br.BaseStream.Length)
+        var endOffset = br.BaseStream.Position + chunkSize;
+        while (br.BaseStream.Position + 4 <= endOffset)
         {
             ushort v1 = br.ReadUInt16();
             ushort v2 = br.ReadUInt16();

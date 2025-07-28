@@ -46,7 +46,7 @@ public static class Pm4ChunkAnalysisTests
         for (var i = 0; i < scene.Links.Count; i++)
         {
             var l = scene.Links[i];
-            mslkSb.AppendLine($"{i},{l.Unknown_0x00},{l.ReferenceIndex},{l.ParentIndex},{l.MspiFirstIndex},{l.MspiIndexCount},{l.HasGeometry}");
+            mslkSb.AppendLine($"{i},{l.Flags_0x00},{l.ReferenceIndex},{l.ParentIndex},{l.MspiFirstIndex},{l.MspiIndexCount},{l.HasGeometry}");
         }
         File.WriteAllText(mslkCsvPath, mslkSb.ToString());
         ConsoleLogger.WriteLine($"[Analysis] Wrote MSLK data to {mslkCsvPath}");

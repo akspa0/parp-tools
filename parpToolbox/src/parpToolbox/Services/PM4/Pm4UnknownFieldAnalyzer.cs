@@ -63,9 +63,9 @@ public static class Pm4UnknownFieldAnalyzer
         using var writer = new StreamWriter(file);
         writer.WriteLine("Field,Value,Count");
 
-        WriteDistribution(writer, "Unknown_0x00", scene.Links.Select(l => l.Unknown_0x00));
-        WriteDistribution(writer, "Unknown_0x01", scene.Links.Select(l => l.Unknown_0x01));
-        WriteDistribution(writer, "Unknown_0x02", scene.Links.Select(l => l.Unknown_0x02));
+        WriteDistribution(writer, "Unknown_0x00", scene.Links.Select(l => l.Flags_0x00));
+        WriteDistribution(writer, "Unknown_0x01", scene.Links.Select(l => l.Type_0x01));
+        WriteDistribution(writer, "Unknown_0x02", scene.Links.Select(l => l.SortKey_0x02));
         WriteDistribution(writer, "ParentIndex", scene.Links.Select(l => (uint)l.ParentIndex));
         WriteDistribution(writer, "ReferenceIndex", scene.Links.Select(l => (uint)l.ReferenceIndex));
         WriteDistribution(writer, "ReferenceIndexHigh", scene.Links.Select(l => (uint)l.ReferenceIndexHigh));
@@ -280,9 +280,9 @@ public static class Pm4UnknownFieldAnalyzer
                 writer.WriteLine($"{field},{d.Val},{d.Count}");
         }
 
-        Dump("Unknown_0x00", scene.Links.Select(l => l.Unknown_0x00));
-        Dump("Unknown_0x01", scene.Links.Select(l => l.Unknown_0x01));
-        Dump("Unknown_0x02", scene.Links.Select(l => l.Unknown_0x02));
+        Dump("Unknown_0x00", scene.Links.Select(l => l.Flags_0x00));
+        Dump("Unknown_0x01", scene.Links.Select(l => l.Type_0x01));
+        Dump("Unknown_0x02", scene.Links.Select(l => l.SortKey_0x02));
         Dump("MspiIndexCount", scene.Links.Select(l => l.MspiIndexCount));
 
         ConsoleLogger.WriteLine("  Wrote MSLK flag distributions");

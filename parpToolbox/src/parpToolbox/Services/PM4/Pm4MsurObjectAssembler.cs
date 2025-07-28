@@ -631,7 +631,7 @@ internal static class Pm4MsurObjectAssembler
     {
         // Simplified version - in legacy this checks additional surface properties
         // For now, use a basic heuristic based on surface flags
-        return surface.FlagsOrUnknown_0x00 == 18;
+        return surface.GroupKey == 18;
     }
     
     /// <summary>

@@ -23,8 +23,8 @@ internal static class Pm4SmartGrouper
         var linkGroups = scene.Links
             .Where(link => link.MspiFirstIndex >= 0 && link.MspiIndexCount > 0) // Only entries with geometry
             .GroupBy(link => new { 
-                Type = link.Unknown_0x00, 
-                Subtype = link.Unknown_0x01,
+                Type = link.Flags_0x00, 
+                Subtype = link.Type_0x01,
                 TileCoords = GetTileCoordinates(link)
             })
             .ToList();
@@ -60,7 +60,7 @@ internal static class Pm4SmartGrouper
         
         var linkGroups = scene.Links
             .Where(link => link.MspiFirstIndex >= 0 && link.MspiIndexCount > 0)
-            .GroupBy(link => link.Unknown_0x10)
+            .GroupBy(link => link.SurfaceRefIndex)
             .ToList();
         
         foreach (var group in linkGroups)
@@ -93,7 +93,7 @@ internal static class Pm4SmartGrouper
         
         var linkGroups = scene.Links
             .Where(link => link.MspiFirstIndex >= 0 && link.MspiIndexCount > 0)
-            .GroupBy(link => link.Unknown_0x04)
+            .GroupBy(link => link.ParentId)
             .ToList();
         
         foreach (var group in linkGroups)

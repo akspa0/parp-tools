@@ -572,7 +572,7 @@ namespace ParpToolbox.Services.PM4
             {
                 // We'll use multiple raw fields as grouping keys
                 // Experimenting with Field1=FlagsOrUnknown_0x00 and Field2=Unknown_0x02
-                var key = (Field1: (uint)surf.FlagsOrUnknown_0x00, Field2: (uint)surf.Unknown_0x02);
+                var key = (Field1: (uint)surf.GroupKey, Field2: (uint)surf.AttributeMask);
                 
                 int first = (int)surf.MsviFirstIndex;
                 int count = surf.IndexCount;

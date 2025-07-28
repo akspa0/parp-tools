@@ -1,8 +1,11 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using System.Linq;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Services.PM4;
+using ParpToolbox.Services.PM4.Core;
+
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.CliCommands
@@ -23,20 +26,21 @@ namespace ParpToolbox.CliCommands
         {
             // --- Flag Parsing ---
             // All legacy/experimental flags have been removed. The exporter now works correctly by default.
-            // The only supported flag is --single-tile for performance testing or isolated analysis.
+            // Supported flags:
+            // --single-tile for performance testing or isolated analysis
+            // --per-object to export each surface group as a separate OBJ file
             bool useSingleTile = args.Contains("--single-tile");
+            bool usePerObject = args.Contains("--per-object");
+
+            // --- Service Initialization ---
+            var chunkAccessService = new Pm4ChunkAccessService();
+            var fieldMappingService = new Pm4FieldMappingService(chunkAccessService);
+            var exportService = new Pm4ExportService(chunkAccessService, fieldMappingService);
 
             // --- Scene Loading ---
-            // --- Load with Raw Data Capture ---
             var adapter = new Pm4Adapter();
-            var loadOptions = new Pm4LoadOptions
-            {
-                CaptureRawData = true,  // Enable raw chunk capture for database storage
-                VerboseLogging = false
-            };
-            
+            var loadOptions = new Pm4LoadOptions { CaptureRawData = true };
             Pm4Scene scene;
-            // Trigger region loading for coordinate-based files (e.g., development_00_00.pm4)
             if (inputPath.Contains("_00_00") || inputPath.Contains("_000"))
             {
                 scene = adapter.LoadRegion(inputPath, loadOptions);
@@ -48,18 +52,18 @@ namespace ParpToolbox.CliCommands
 
             // --- Export ---
             var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputPath));
-            
-            ConsoleLogger.WriteLine("Using JSON export pipeline...");
-            var jsonExporter = new Pm4JsonExportPipeline();
-            var outputPath = await jsonExporter.ExportSceneAsync(
-                scene, 
-                Path.GetFileName(inputPath),
-                inputPath,
-                adapter.CapturedRawData,
-                outputDir
-            );
+            var outputPath = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputPath) + "_raw.obj");
 
-            ConsoleLogger.WriteLine($"JSON export complete! Output file: {outputPath}");
+            var exportOptions = new Pm4ExportOptions
+            {
+                OutputPath = outputPath,
+                Strategy = usePerObject ? ExportStrategy.PerSurfaceGroup : ExportStrategy.RawSurfaces
+            };
+
+            ConsoleLogger.WriteLine("Executing new PM4 export pipeline...");
+            await exportService.ExportAsync(scene, exportOptions);
+
+            ConsoleLogger.WriteLine($"Export complete! Output file: {outputPath}");
             return 0;
         }
     }

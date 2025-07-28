@@ -32,7 +32,7 @@ public sealed class MspiChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br, vertexCount: 0);
+        Load(br, (uint)inData.Length, vertexCount: 0);
     }
 
     /// <summary>
@@ -42,62 +42,35 @@ public sealed class MspiChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br, vertexCount);
+        Load(br, (uint)inData.Length, vertexCount);
     }
 
     public void Load(BinaryReader br) => throw new NotSupportedException("Call the overload with vertexCount");
 
-    public void Load(BinaryReader br, int vertexCount)
+    public void Load(BinaryReader br, uint chunkSize, int vertexCount)
     {
-        long bytes = br.BaseStream.Length - br.BaseStream.Position;
+        long bytes = chunkSize;
+        if (bytes % 4 != 0)
+            throw new InvalidDataException("MSPI data length not divisible by 4, which is required for 32-bit indices.");
 
-        // Heuristic: if vertexCount > 65535 it must be 32-bit
-        bool use32 = vertexCount > ushort.MaxValue;
-
-        if (!use32)
-        {
-            // If data length cannot be evenly divided by 6, fallback to 32-bit.
-            if (bytes % 6 != 0 && bytes % 12 == 0)
-                use32 = true;
-        }
-
-        // Allow non-multiple-of-6|12 sizes (may indicate triangle strip). Only reject odd byte counts.
-        if (bytes % (use32 ? 4 : 2) != 0)
-            throw new InvalidDataException("MSPI data length not divisible by index width");
-
-        int indexCount = (int)(bytes / (use32 ? 4 : 2));
+        int indexCount = (int)(bytes / 4);
         _indices.Clear();
         _indices.Capacity = indexCount;
         for (int i = 0; i < indexCount; i++)
         {
-            int val = use32 ? (int)br.ReadUInt32() : br.ReadUInt16();
-            _indices.Add(val);
+            _indices.Add((int)br.ReadUInt32());
         }
-        var indices = _indices;
-        // Determine if data is triangle list or strip
-        if (indices.Count % 3 == 0)
+
+        _triangles.Clear();
+        if (_indices.Count % 3 != 0)
         {
-            // Triangle list
-            _triangles.Clear();
-            for (int i = 0; i < indices.Count; i += 3)
-                _triangles.Add((indices[i], indices[i + 1], indices[i + 2]));
+            // Note: Data is not a clean triangle list. This could indicate a problem or a different data structure like a strip.
+            // For now, we process as a simple list and truncate any trailing indices.
         }
-        else if (indices.Count >= 3)
+
+        for (int i = 0; i + 2 < _indices.Count; i += 3)
         {
-            // Triangle strip (alternating winding)
-            bool flip = false;
-            for (int i = 2; i < indices.Count; i++)
-            {
-                int a = indices[i - 2];
-                int b = indices[i - 1];
-                int c = indices[i];
-                if (flip)
-                {
-                    (b, c) = (c, b);
-                }
-                _triangles.Add((a, b, c));
-                flip = !flip;
-            }
+            _triangles.Add((_indices[i], _indices[i + 1], _indices[i + 2]));
         }
         // else: too few indices -> leave _triangles empty
     }

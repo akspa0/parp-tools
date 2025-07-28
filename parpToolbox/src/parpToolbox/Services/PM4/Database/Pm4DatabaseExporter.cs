@@ -312,7 +312,7 @@ namespace ParpToolbox.Services.PM4.Database
                         BoundsMinZ = surface.Nz,
                         BoundsMaxX = surface.Height,
                         BoundsMaxY = surface.MdosIndex,
-                        BoundsMaxZ = surface.PackedParams,
+                        BoundsMaxZ = surface.CompositeKey,
                         BoundsCenterX = surface.MsviFirstIndex,
                         BoundsCenterY = surface.IndexCount,
                         BoundsCenterZ = surface.SurfaceGroupKey

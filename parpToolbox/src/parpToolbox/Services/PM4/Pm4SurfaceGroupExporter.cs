@@ -32,6 +32,20 @@ internal static class Pm4SurfaceGroupExporter
         var adapter = new Pm4Adapter();
         var scene = adapter.Load(pm4FilePath);
         
+        ExportSurfaceGroupsFromScene(scene, outputRoot, fileInfo.Name);
+    }
+
+    /// <summary>
+    /// Export PM4 surface groups as individual building objects from an existing Pm4Scene.
+    /// </summary>
+    public static void ExportSurfaceGroupsFromScene(Pm4Scene scene, string outputRoot, string fileName = "scene")
+    {
+        var startTime = DateTime.Now;
+        
+        ConsoleLogger.WriteLine($"=== PM4 SURFACE GROUP EXPORT (CORRECT OBJECT GROUPING) ===");
+        ConsoleLogger.WriteLine($"Input: {fileName}");
+        ConsoleLogger.WriteLine();
+        
         ConsoleLogger.WriteLine($"Data: {scene.Vertices.Count:N0} vertices, {scene.Indices.Count:N0} indices");
         ConsoleLogger.WriteLine($"Surfaces: {scene.Surfaces.Count:N0}");
         ConsoleLogger.WriteLine();
@@ -58,25 +72,24 @@ internal static class Pm4SurfaceGroupExporter
         int buildingIndex = 0;
         foreach (var group in surfaceGroups)
         {
-            var groupKey = group.Key;
-            var surfaces = group.ToList();
-            
             try
             {
-                ExportSingleBuilding(scene, surfaces, objDir, groupKey, buildingIndex);
+                ExportSingleBuilding(scene, group.ToList(), objDir, (byte)group.Key, buildingIndex);
                 buildingIndex++;
             }
             catch (Exception ex)
             {
-                ConsoleLogger.WriteLine($"Error exporting building 0x{groupKey:X4}: {ex.Message}");
+                ConsoleLogger.WriteLine($"Error exporting building 0x{group.Key:X4}: {ex.Message}");
             }
         }
         
         var elapsed = DateTime.Now - startTime;
-        ConsoleLogger.WriteLine($"Exported {buildingIndex} buildings in {elapsed.TotalSeconds:F1} seconds");
+        ConsoleLogger.WriteLine();
+        ConsoleLogger.WriteLine($"=== EXPORT COMPLETE ({elapsed.TotalSeconds:F1}s) ===");
+        ConsoleLogger.WriteLine($"Exported {surfaceGroups.Count} building objects to {objDir}");
         
         // Write summary
-        WriteBuildingSummary(surfaceGroups, objDir, elapsed, fileInfo.Name);
+        WriteBuildingSummary(surfaceGroups, objDir, elapsed, fileName);
     }
     
     /// <summary>

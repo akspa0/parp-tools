@@ -12,62 +12,62 @@ using System.Runtime.CompilerServices;
 public sealed class MslkEntry : IBinarySerializable
 {
     // ---- Raw fields (one-to-one with on-disk layout) --------------------
-    public byte Unknown_0x00 { get; private set; }
-    public byte Unknown_0x01 { get; private set; }
-    public ushort Unknown_0x02 { get; private set; }
-    public uint Unknown_0x04 { get; private set; }
-    public int  MspiFirstIndex { get; private set; }   // 24-bit signed
+    public byte Flags_0x00 { get; private set; }         // Still under investigation
+    public byte Type_0x01 { get; private set; }          // Still under investigation
+    public ushort SortKey_0x02 { get; private set; }       // Still under investigation
+    public uint ParentId { get; private set; }         // Parent/container identifier for hierarchical grouping
+    public int MspiFirstIndex { get; private set; }    // 24-bit signed index into MSPI
     public byte MspiIndexCount { get; private set; }
-    public uint LinkIdRaw { get; private set; }        // 32-bit tile coordinate field
-    public ushort Unknown_0x10 { get; private set; }
-    public ushort Unknown_0x12 { get; private set; }
+    public uint TileCoordsRaw { get; private set; }      // Raw 32-bit tile coordinate field (0xFFFFYYXX)
+    public ushort SurfaceRefIndex { get; private set; }  // Reference to a surface (e.g., in MSUR)
+    public ushort Unknown_0x12 { get; private set; }     // Still under investigation
 
     public const int StructSize = 20;
 
     /// <summary>
     /// High-word parent/container identifier used for hierarchical grouping.
     /// </summary>
-    public uint ParentIndex => Unknown_0x04;
+    public uint ParentIndex => ParentId;
 
     /// <summary>
-    /// Authoritative group-key for geometry objects. Equals low-word of MSUR.SurfaceKey.
+    /// Authoritative group-key for geometry objects. Corresponds to a surface reference.
     /// </summary>
-    public ushort ReferenceIndex => Unknown_0x10;
+    public ushort ReferenceIndex => SurfaceRefIndex;
 
     /// <summary>
-    /// High 16 bits of Unknown_0x10 for grouping analysis.
+    /// High 16 bits of the surface reference index for grouping analysis.
     /// </summary>
-    public ushort ReferenceIndexHigh => (ushort)(Unknown_0x10 >> 16);
+    public ushort ReferenceIndexHigh => (ushort)(SurfaceRefIndex >> 16);
 
     /// <summary>
-    /// Low 16 bits of Unknown_0x10 for grouping analysis.
+    /// Low 16 bits of the surface reference index for grouping analysis.
     /// </summary>
-    public ushort ReferenceIndexLow => (ushort)(Unknown_0x10 & 0xFFFF);
+    public ushort ReferenceIndexLow => (ushort)(SurfaceRefIndex & 0xFFFF);
 
     /// <summary>
-    /// Padding field from LinkIdRaw (should always be 0xFFFF).
+    /// Padding field from the raw tile coordinates (should always be 0xFFFF).
     /// </summary>
-    public ushort LinkIdPadding => (ushort)(LinkIdRaw >> 16);
+    public ushort LinkIdPadding => (ushort)(TileCoordsRaw >> 16);
 
     /// <summary>
-    /// Tile Y coordinate decoded from LinkIdRaw using legacy logic (YYXX pattern).
+    /// Tile Y coordinate decoded from the raw tile coordinates using the YYXX pattern.
     /// </summary>
-    public byte LinkIdTileY => (byte)((LinkIdRaw >> 8) & 0xFF);
+    public byte LinkIdTileY => (byte)((TileCoordsRaw >> 8) & 0xFF);
 
     /// <summary>
-    /// Tile X coordinate decoded from LinkIdRaw using legacy logic (YYXX pattern).
+    /// Tile X coordinate decoded from the raw tile coordinates using the YYXX pattern.
     /// </summary>
-    public byte LinkIdTileX => (byte)(LinkIdRaw & 0xFF);
+    public byte LinkIdTileX => (byte)(TileCoordsRaw & 0xFF);
 
     /// <summary>
-    /// Attempts to decode tile coordinates from LinkIdRaw using legacy LinkIdDecoder logic.
+    /// Attempts to decode tile coordinates from the raw tile coordinate data.
     /// Returns true if the pattern matches (high 16 bits == 0xFFFF), false otherwise.
     /// </summary>
     public bool TryDecodeTileCoordinates(out int tileX, out int tileY)
     {
         tileX = tileY = 0;
-        ushort high = (ushort)(LinkIdRaw >> 16);
-        ushort low = (ushort)(LinkIdRaw & 0xFFFF);
+        ushort high = (ushort)(TileCoordsRaw >> 16);
+        ushort low = (ushort)(TileCoordsRaw & 0xFFFF);
         if (high != 0xFFFF) return false; // unknown schema
 
         // low word stored as YYXX (little-endian). Split bytes.
@@ -79,9 +79,9 @@ public sealed class MslkEntry : IBinarySerializable
     }
 
     /// <summary>
-    /// Returns true if this entry has valid tile coordinates (LinkIdRaw follows 0xFFFFYYXX pattern).
+    /// Returns true if this entry has valid tile coordinates (raw data follows 0xFFFFYYXX pattern).
     /// </summary>
-    public bool HasValidTileCoordinates => (LinkIdRaw >> 16) == 0xFFFF;
+    public bool HasValidTileCoordinates => (TileCoordsRaw >> 16) == 0xFFFF;
 
     /// <summary>
     /// Composite tile coordinate key constructed from Y and X tile positions.
@@ -101,22 +101,28 @@ public sealed class MslkEntry : IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        if (br.BaseStream.Position + StructSize > br.BaseStream.Length)
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)StructSize);
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        if (chunkSize < StructSize)
             throw new EndOfStreamException("MSLK entry truncated");
 
-        Unknown_0x00 = br.ReadByte();
-        Unknown_0x01 = br.ReadByte();
-        Unknown_0x02 = br.ReadUInt16();
-        Unknown_0x04 = br.ReadUInt32();
+        Flags_0x00 = br.ReadByte();
+        Type_0x01 = br.ReadByte();
+        SortKey_0x02 = br.ReadUInt16();
+        ParentId = br.ReadUInt32();
         MspiFirstIndex = ReadInt24(br);
         MspiIndexCount = br.ReadByte();
-        LinkIdRaw = br.ReadUInt32();
-        Unknown_0x10 = br.ReadUInt16();
+        TileCoordsRaw = br.ReadUInt32();
+        SurfaceRefIndex = br.ReadUInt16();
         Unknown_0x12 = br.ReadUInt16();
     }
 
@@ -132,14 +138,14 @@ public sealed class MslkEntry : IBinarySerializable
 
     private void Write(BinaryWriter bw)
     {
-        bw.Write(Unknown_0x00);
-        bw.Write(Unknown_0x01);
-        bw.Write(Unknown_0x02);
-        bw.Write(Unknown_0x04);
+        bw.Write(Flags_0x00);
+        bw.Write(Type_0x01);
+        bw.Write(SortKey_0x02);
+        bw.Write(ParentId);
         WriteInt24(bw, MspiFirstIndex);
         bw.Write(MspiIndexCount);
-        bw.Write(LinkIdRaw);
-        bw.Write(Unknown_0x10);
+        bw.Write(TileCoordsRaw);
+        bw.Write(SurfaceRefIndex);
         bw.Write(Unknown_0x12);
     }
 
@@ -180,17 +186,22 @@ public sealed class MslkChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        var remaining = br.BaseStream.Length - br.BaseStream.Position;
-        int count = (int)(remaining / MslkEntry.StructSize);
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        int count = (int)(chunkSize / MslkEntry.StructSize);
         for (int i = 0; i < count; i++)
         {
             var e = new MslkEntry();
-            e.Load(br);
+            e.Load(br, MslkEntry.StructSize);
             _entries.Add(e);
         }
     }

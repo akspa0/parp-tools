@@ -22,20 +22,27 @@ internal sealed class MsviChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        long bytes = br.BaseStream.Length - br.BaseStream.Position;
-        bool use32 = bytes % 4 == 0;
-        if (!use32 && bytes % 2 != 0)
-            throw new InvalidDataException("MSVI size not divisible by 2 or 4 bytes – unknown index width.");
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
 
-        int count = (int)(bytes / (use32 ? 4 : 2));
-        for (int i = 0; i < count; i++)
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        long bytes = chunkSize;
+        if (bytes % 4 != 0)
+            throw new InvalidDataException("MSVI data length not divisible by 4, which is required for 32-bit indices.");
+
+        int indexCount = (int)(bytes / 4);
+        _indices.Clear();
+        _indices.Capacity = indexCount;
+        for (int i = 0; i < indexCount; i++)
         {
-            _indices.Add(use32 ? (int)br.ReadUInt32() : br.ReadUInt16());
+            _indices.Add((int)br.ReadUInt32());
         }
     }
 

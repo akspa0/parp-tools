@@ -89,7 +89,7 @@ internal static class Pm4ChunkCombinationTester
         
         // Strategy 3: Group by Unknown_0x02
         results.Add(TestGroupingStrategy(scene, "MSUR_Unknown_0x02", 
-            surfaces => surfaces.GroupBy(s => s.Unknown_0x02).ToList()));
+            surfaces => surfaces.GroupBy(s => s.AttributeMask).ToList()));
         
         // Strategy 4: Group by MdosIndex
         results.Add(TestGroupingStrategy(scene, "MSUR_MdosIndex", 
@@ -127,17 +127,17 @@ internal static class Pm4ChunkCombinationTester
         results.Add(TestMslkStrategy(scene, "MSLK_ParentIndex", 
             links => links.GroupBy(l => l.ParentIndex).ToList()));
         
-        // Strategy 2: Group by Unknown_0x00
-        results.Add(TestMslkStrategy(scene, "MSLK_Unknown_0x00", 
-            links => links.GroupBy(l => l.Unknown_0x00).ToList()));
+        // Strategy 2: Group by Flags_0x00
+        results.Add(TestMslkStrategy(scene, "MSLK_Flags_0x00", 
+            links => links.GroupBy(l => l.Flags_0x00).ToList()));
         
-        // Strategy 3: Group by Unknown_0x01
-        results.Add(TestMslkStrategy(scene, "MSLK_Unknown_0x01", 
-            links => links.GroupBy(l => l.Unknown_0x01).ToList()));
+        // Strategy 3: Group by Type_0x01
+        results.Add(TestMslkStrategy(scene, "MSLK_Type_0x01", 
+            links => links.GroupBy(l => l.Type_0x01).ToList()));
         
-        // Strategy 4: Group by Unknown_0x02
-        results.Add(TestMslkStrategy(scene, "MSLK_Unknown_0x02", 
-            links => links.GroupBy(l => l.Unknown_0x02).ToList()));
+        // Strategy 4: Group by SortKey_0x02
+        results.Add(TestMslkStrategy(scene, "MSLK_SortKey_0x02", 
+            links => links.GroupBy(l => l.SortKey_0x02).ToList()));
         
         // Strategy 5: Group by ReferenceIndex
         results.Add(TestMslkStrategy(scene, "MSLK_ReferenceIndex", 

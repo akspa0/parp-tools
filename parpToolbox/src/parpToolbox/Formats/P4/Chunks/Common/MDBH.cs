@@ -25,23 +25,33 @@ internal sealed class MdbhChunk : IIffChunk, IBinarySerializable
     {
         using var ms = new MemoryStream(inData ?? throw new ArgumentNullException(nameof(inData)));
         using var br = new BinaryReader(ms);
-        Load(br);
+        Load(br, (uint)inData.Length);
     }
 
     public void Load(BinaryReader br)
     {
-        if (br.BaseStream.Length - br.BaseStream.Position < 4)
-            throw new InvalidDataException("MDBH too small for count field");
+        // This variant is for interface compliance. It's unsafe; prefer the size-aware version.
+        Load(br, (uint)(br.BaseStream.Length - br.BaseStream.Position));
+    }
+
+    public void Load(BinaryReader br, uint chunkSize)
+    {
+        var endOffset = br.BaseStream.Position + chunkSize;
+        if (endOffset > br.BaseStream.Length || chunkSize < 4)
+            throw new InvalidDataException("MDBH chunk is smaller than the count field");
+
         uint count = br.ReadUInt32();
         for (int i = 0; i < count; i++)
         {
-            if (br.BaseStream.Position + 4 > br.BaseStream.Length)
-                break; // truncated
+            if (br.BaseStream.Position + 4 > endOffset)
+                break; // Truncated entry
+
             uint idx = br.ReadUInt32();
             var sb = new StringBuilder();
             byte b;
-            while (br.BaseStream.Position < br.BaseStream.Length && (b = br.ReadByte()) != 0)
+            while (br.BaseStream.Position < endOffset && (b = br.ReadByte()) != 0)
                 sb.Append((char)b);
+            
             string filename = sb.ToString();
             _entries.Add(new Entry(idx, filename));
         }
