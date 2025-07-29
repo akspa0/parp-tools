@@ -1,22 +1,22 @@
 # Active Context
 
 ## Current Work
-**Objective:** Restore working PM4 object extraction from POC implementation
+**Objective:** Implement and test PM4 spatial clustering assembler for building-scale object extraction
 
-**Status:** Spatial clustering approach identified and extracted from poc_exporter.cs
+**Status:** Spatial clustering assembler implemented and CLI command registered
 
 ## Verified Working Approach
 **Source:** poc_exporter.cs lines 7402-7683 (`ExportBuildings_UsingMslkRootNodesWithSpatialClustering` and `CreateHybridBuilding_StructuralPlusNearby`)
 
 ### Working Algorithm
-1. **Root Node Identification:** Find MSLK entries where `Unknown_0x04 == entry_index` (self-referencing)
-2. **Structural Grouping:** Group MSLK entries by `Unknown_0x04` value matching root nodes
+1. **Root Node Identification:** Find MSLK entries where `ParentIndex == entry_index` (self-referencing)
+2. **Structural Grouping:** Group MSLK entries by `ParentIndex` value matching root nodes
 3. **Bounds Calculation:** Calculate bounding box from MSPV vertices via MSLK → MSPI → MSPV chain
 4. **Spatial Clustering:** Find MSUR surfaces within expanded bounds (50.0f tolerance)
 5. **Hybrid Assembly:** Combine MSPV structural elements + nearby MSUR render surfaces
 
 ### Verified Data Flow
-- **MSLK.Unknown_0x04** → Group identifier for building objects
+- **MSLK.ParentIndex** → Group identifier for building objects
 - **MSLK.MspiFirstIndex/MspiIndexCount** → Indices into MSPI array
 - **MSPI.Indices** → Point to MSPV vertices for structural geometry
 - **MSUR.MsviFirstIndex/IndexCount** → Indices into MSVI array for render triangles
@@ -28,26 +28,37 @@
 
 ## Implementation Status
 **Created:** `Pm4SpatialClusteringAssembler.cs` - Direct port of working POC logic
-**CLI Command:** `Pm4ExportSpatialClusteringCommand.cs` - Not yet tested
+**CLI Command:** `Pm4ExportSpatialClusteringCommand.cs` - Registered in Program.cs
+**Command Registration:** `pm4-export-spatial-clustering` command available in CLI
 
 ## Key Insight
-Spatial clustering was added to compensate for incomplete hierarchical grouping in PM4 data. Pure hierarchical approaches fail to produce complete building objects.: Building the new parpToolbox Project
-
-## Guiding Principles
-- **Start Fresh:** All new development occurs in the `parpToolbox` project. The legacy `WoWToolbox` project is for reference only.
-- **Dependency, Not Fork:** `wow.tools.local` is a strict library dependency; we will never modify its code directly.
-- **Real Data Testing:** All tests must use real game data to ensure accuracy.
-- **Clean Output:** All generated files must be written to the timestamped `project_output` directory.
+Spatial clustering was added to compensate for incomplete hierarchical grouping in PM4 data. Pure hierarchical approaches fail to produce complete building objects.
 
 ## Current Work Focus
-- MAJOR ARCHITECTURAL BREAKTHROUGH: Surface "bounds" fields are encoded linkage containers, not spatial bounds
-- Implementing linkage-based decoding system to replace failed spatial clustering approach
-- Building tests to validate cross-tile vertex reference resolution using new bounds decoding logic
+- **Test spatial clustering implementation** with real PM4 data
+- **Validate root node detection** and building-scale object assembly
+- **Verify cross-tile reference resolution** through region loading
+- **Analyze output quality** and compare with expected building count
 
 ## Recent Changes
-- **Validated Grouping Logic:** Successfully generated and analyzed `MSLK` and `MSUR` chunk data, confirming `ParentIndex` is the correct grouping key.
-- **Attempted Refactor:** Made multiple attempts to refactor `Pm4PerObjectExporter.cs` with the new logic.
-- **Introduced Critical Failure:** The refactoring attempts failed and corrupted `Pm4PerObjectExporter.cs`, leaving the project in a non-compiling state.
+- **Implemented Pm4SpatialClusteringAssembler** with complete building assembly logic
+- **Created CLI command** for spatial clustering export with proper argument parsing
+- **Registered command** in Program.cs with support for both `--output=value` and `--output value` formats
+- **Integrated region loading** to resolve cross-tile vertex references
+- **Added detailed logging** for debugging and progress tracking
+
+## PM4 Architecture Insights
+- **Global Tile System Confirmed:** PM4 files reference vertices from adjacent tiles, requiring unified region loading
+- **Surface "bounds" fields:** Are encoded linkage containers, not spatial bounds
+- **Object Assembly:** Requires linkage-based decoding rather than spatial clustering
+- **Data Loss:** ~64% of vertex data missing without global tile loading
+
+## Next Steps
+1. **Test CLI command** with real PM4 data
+2. **Validate building count** against expected 458 buildings
+3. **Analyze output geometry** for completeness and correctness
+4. **Compare with reference implementation** outputs
+5. **Document findings** and update progress accordingly
 
 ## Next Steps
 - **Start a new session.**

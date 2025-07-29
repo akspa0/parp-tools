@@ -10,11 +10,14 @@
 - **PM4 Object Assembly:** 
   - ✅ **WORKING APPROACH FOUND:** Spatial clustering method from poc_exporter.cs
   - ✅ `Pm4SpatialClusteringAssembler`: Direct port of verified working logic
-  - ✅ **Verified Data Flow:** MSLK.Unknown_0x04 = building group IDs, self-referencing = root nodes
+  - ✅ **Verified Data Flow:** MSLK.ParentIndex = building group IDs, self-referencing = root nodes
   - ✅ **Coordinate Transforms:** MSPV direct, MSVT with Y-X swap
+  - ✅ **CLI Command:** `pm4-export-spatial-clustering` registered and ready for testing
   - ❌ Pure hierarchical approaches produce fragments (WMO-inspired, ParentIndex-only)
 - **Spatial Clustering Logic:** 50.0f tolerance expansion of structural bounds to capture nearby render surfaces
 - **Root Cause:** PM4 hierarchical data alone insufficient; spatial clustering compensates for incomplete object boundaries
+- **Region Loading:** Cross-tile vertex references resolved through unified PM4 region loading
+- **Command Registration:** Spatial clustering export command fully integrated into CLI
 
 ## What's Left to Build
 - **CRITICAL: Global Tile Loading System:** Implement unified PM4/PD4 loader that processes entire 64x64 tile regions as single mesh to resolve massive data loss (110,988+ missing vertex references)

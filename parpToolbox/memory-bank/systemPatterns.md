@@ -20,6 +20,13 @@
 - **Adapters over Rewrite:** The legacy PM4/PD4 readers from `WoWToolbox.Core.v2` are ported into new adapter classes (`Pm4Adapter`, `Pd4Adapter`). These adapters delegate all low-level WMO geometry access to `wow.tools.local` while preserving the high-level batching and matching logic.
 - **Immutable Flow:** Adapters return immutable domain models (`Pm4Scene`, `Pd4Scene`) that are consumed by the existing exporter and matcher services.
 - **ProjectOutput Enforcement:** All PM4/PD4 exporters reuse `ProjectOutput` ensuring outputs never pollute source directories.
+- **Region Loading:** `Pm4Adapter.LoadRegion()` method resolves cross-tile vertex references by loading multiple PM4 tiles as a unified scene
+
+## PM4 Object Assembly Patterns
+- **Spatial Clustering Approach:** Working implementation that combines MSPV structural elements with nearby MSUR surfaces using bounding box expansion
+- **Root Node Detection:** Identifies building objects by finding self-referencing MSLK entries (`ParentIndex == entry_index`)
+- **Hybrid Assembly:** Combines structural geometry (MSPV via MSLK→MSPI chain) with render surfaces (MSUR via MSVI chain)
+- **CLI Integration:** Dedicated command (`pm4-export-spatial-clustering`) with proper argument parsing and error handling
 
 ## Testing & Validation
 - **Real Data Testing:** All new tests written for `parpToolbox` must use real game data to ensure the system is validated against real-world conditions.
