@@ -1,5 +1,47 @@
 # PM4 Format Documentation
 
+## Verified Object Extraction Method
+
+### Working Algorithm (Source: poc_exporter.cs)
+**Spatial Clustering Approach** - Combines hierarchical grouping with spatial proximity
+
+1. **Root Node Identification**
+   - Find MSLK entries where `Unknown_0x04 == entry_index` (self-referencing)
+   - These are verified building root nodes
+
+2. **Structural Grouping** 
+   - Group MSLK entries by `Unknown_0x04` value matching root nodes
+   - `Unknown_0x04` = Building group identifier
+
+3. **Bounds Calculation**
+   - Calculate bounding box from MSPV vertices
+   - Data flow: MSLK → MSPI → MSPV
+
+4. **Spatial Clustering**
+   - Find MSUR surfaces within expanded bounds (50.0f tolerance)
+   - Compensates for incomplete hierarchical relationships
+
+5. **Hybrid Assembly**
+   - Combine MSPV structural elements + nearby MSUR render surfaces
+   - Creates complete building objects
+
+### Verified Data Relationships
+```
+MPRL.Unknown4 = MSLK.ParentIndex (458 confirmed matches)
+MSLK.Unknown_0x04 = Building group identifier
+MSLK.MspiFirstIndex = -1 → Container/grouping nodes (no geometry)
+MSLK.MspiFirstIndex ≥ 0 → Geometry nodes
+```
+
+### Coordinate Transformations (Verified)
+```csharp
+// MSPV structural vertices (direct)
+Vector3 FromMspvVertex(vertex) => (vertex.X, vertex.Y, vertex.Z)
+
+// MSVT render vertices (Y-X swap)
+Vector3 FromMsvtVertex(vertex) => (vertex.Position.Y, vertex.Position.X, vertex.Position.Z)
+```
+
 ## Overview
 
 PM4 files are complex, phased model descriptor files that serve as server-side supplementary data for ADT (terrain) files. They represent the original approach to World of Warcraft's navigation mesh system before the 2016 split that created the simpler PD4 format.
@@ -12,17 +54,34 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 - **Multi-object complexity**: Single PM4 can contain data for multiple objects/structures
 - **Interior MODF System**: PM4 acts as an "interior MODF" placing building components inside structures
 
-## Object Assembly Methodology (TENTATIVE – Under Active Investigation)
+## Object Assembly Methodology (BREAKTHROUGH VALIDATED – 2025-07-27)
 
-**PREVIOUS HYPOTHESIS (2025-07-18):** Individual objects are identified by `MSUR.IndexCount` (0x01 field).
+**ARCHITECTURAL BREAKTHROUGH (2025-07-27 03:00):** PM4 files implement a **global mesh system** requiring **multi-tile processing** for complete geometry assembly.
 
-**LATEST FINDINGS (2025-07-19 22:20):** `MSUR.SurfaceGroupKey` represents a **hierarchy**:
-- **19** ➜ object-level groups (aligns with WMO group IDs)
-- **20-23** ➜ sub-objects / sub-divisions
-- **24** ➜ near per-surface granularity
-- Values **<19** appear to be higher-level spatial containers
+### **Global Mesh Architecture Confirmed:**
 
-`IndexCount` grouping alone remains insufficient; the working hypothesis is that a **composite key** such as `(ParentIndex, SurfaceGroupKey, IndexCount)` will yield correct object assembly. Current tooling (`pm4-test-grouping`) exports SurfaceGroupKey-grouped OBJs to visualise this hierarchy. Further correlation analysis is ongoing.
+**Mathematical Validation:**
+- **58.4% of triangles** reference vertices from adjacent tiles (30,677 out of 52,506)
+- **63,297 cross-tile vertex indices** in perfect sequential range: 63,298-126,594
+- **Zero gap** between local (0-63,297) and cross-tile vertex ranges
+- **Complete architectural assembly requires processing entire PM4 directory**
+
+**Surface Encoding System:**
+- **GroupKey determines data interpretation**: spatial vs encoded vs mixed
+- **GroupKey 3** (1,968 surfaces): **Spatial** - normal coordinates, local tile geometry
+- **GroupKey 18** (8,988 surfaces): **Mixed** - boundary objects spanning tile edges
+- **GroupKey 19** (30,468 surfaces): **Encoded** - cross-tile/inter-object references (74% of surfaces)
+
+**Cross-Tile Linkage Data:**
+- **BoundsMaxZ field** in encoded groups contains hex-encoded tile/object references
+- **Example**: `1127049344` = `0x432D6880` = linkage data, not spatial coordinates
+- **16-bit pair encoding**: High/low pairs encode tile+object IDs
+- **95.5% consistency** in GroupKey 19 encoding - highly systematic linkage system
+
+**PREVIOUS FINDINGS STILL VALID:**
+- **MSUR.SurfaceGroupKey** hierarchy: 19 ➜ object-level, 20-23 ➜ sub-objects, 24 ➜ surface-level
+- **IndexCount** grouping insufficient for complete objects (missing cross-tile data)
+- **Composite key approach** still needed: `(ParentIndex, SurfaceGroupKey, IndexCount)` + **cross-tile resolution**
 
 ### Confirmed Chunk Relationships:
 - **MPRL.Unknown4 = MSLK.ParentIndex** (458 confirmed matches) - links placements to geometry

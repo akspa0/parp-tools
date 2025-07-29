@@ -102,7 +102,7 @@ namespace ParpToolbox.Services.PM4
                     await writer.WriteLineAsync($"  {building.Name}:");
                     await writer.WriteLineAsync($"    Vertices: {building.VertexCount:N0}");
                     await writer.WriteLineAsync($"    Triangles: {building.TriangleCount:N0}");
-                    await writer.WriteLineAsync($"    Bounds: ({building.BoundsMin.X:F1}, {building.BoundsMin.Y:F1}, {building.BoundsMin.Z:F1}) to ({building.BoundsMax.X:F1}, {building.BoundsMax.Y:F1}, {building.BoundsMax.Z:F1})");
+                    // Note: Bounds fields removed - they don't exist in the actual PM4 data format
                     if (building.PlacementId.HasValue)
                     {
                         await writer.WriteLineAsync($"    Placement ID: {building.PlacementId.Value}");

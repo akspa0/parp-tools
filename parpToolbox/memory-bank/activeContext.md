@@ -1,4 +1,37 @@
-# Active Context: Building the new parpToolbox Project
+# Active Context
+
+## Current Work
+**Objective:** Restore working PM4 object extraction from POC implementation
+
+**Status:** Spatial clustering approach identified and extracted from poc_exporter.cs
+
+## Verified Working Approach
+**Source:** poc_exporter.cs lines 7402-7683 (`ExportBuildings_UsingMslkRootNodesWithSpatialClustering` and `CreateHybridBuilding_StructuralPlusNearby`)
+
+### Working Algorithm
+1. **Root Node Identification:** Find MSLK entries where `Unknown_0x04 == entry_index` (self-referencing)
+2. **Structural Grouping:** Group MSLK entries by `Unknown_0x04` value matching root nodes
+3. **Bounds Calculation:** Calculate bounding box from MSPV vertices via MSLK → MSPI → MSPV chain
+4. **Spatial Clustering:** Find MSUR surfaces within expanded bounds (50.0f tolerance)
+5. **Hybrid Assembly:** Combine MSPV structural elements + nearby MSUR render surfaces
+
+### Verified Data Flow
+- **MSLK.Unknown_0x04** → Group identifier for building objects
+- **MSLK.MspiFirstIndex/MspiIndexCount** → Indices into MSPI array
+- **MSPI.Indices** → Point to MSPV vertices for structural geometry
+- **MSUR.MsviFirstIndex/IndexCount** → Indices into MSVI array for render triangles
+- **MSVI.Indices** → Point to MSVT vertices for render geometry
+
+### Coordinate Transformations (Verified)
+- **MSPV:** `(vertex.X, vertex.Y, vertex.Z)` (direct)
+- **MSVT:** `(vertex.Position.Y, vertex.Position.X, vertex.Position.Z)` (Y-X swap)
+
+## Implementation Status
+**Created:** `Pm4SpatialClusteringAssembler.cs` - Direct port of working POC logic
+**CLI Command:** `Pm4ExportSpatialClusteringCommand.cs` - Not yet tested
+
+## Key Insight
+Spatial clustering was added to compensate for incomplete hierarchical grouping in PM4 data. Pure hierarchical approaches fail to produce complete building objects.: Building the new parpToolbox Project
 
 ## Guiding Principles
 - **Start Fresh:** All new development occurs in the `parpToolbox` project. The legacy `WoWToolbox` project is for reference only.

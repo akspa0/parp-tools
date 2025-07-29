@@ -7,12 +7,14 @@
 - **Output Management:** `ProjectOutput` creates timestamped sub-directories under `project_output` for all generated assets.
 - **CLI Parsing:** Manual argument parser covers `wmo`, `pm4`, and `pd4` commands.
 - **PM4 Chunk Relationship Analysis:** Complete understanding of MPRL ↔ MSLK ↔ MSUR relationships with CSV validation.
-- **PM4 Object Assembly:** Working exporters with SurfaceGroupKey-based grouping:
-  - `Pm4SceneExporter`: Complete building interior as unified OBJ
-  - `Pm4MsurObjectAssembler`: Objects grouped by MSUR SurfaceGroupKey with MPRL transformations
-  - Enhanced vertex validation to prevent (0,0,0) artifacts from invalid indices
-- **Coordinate System:** X-axis inversion fix applied for proper geometry orientation.
-- **Data Loss Detection:** Comprehensive analysis tools to identify missing vertex references and tile boundary issues.
+- **PM4 Object Assembly:** 
+  - ✅ **WORKING APPROACH FOUND:** Spatial clustering method from poc_exporter.cs
+  - ✅ `Pm4SpatialClusteringAssembler`: Direct port of verified working logic
+  - ✅ **Verified Data Flow:** MSLK.Unknown_0x04 = building group IDs, self-referencing = root nodes
+  - ✅ **Coordinate Transforms:** MSPV direct, MSVT with Y-X swap
+  - ❌ Pure hierarchical approaches produce fragments (WMO-inspired, ParentIndex-only)
+- **Spatial Clustering Logic:** 50.0f tolerance expansion of structural bounds to capture nearby render surfaces
+- **Root Cause:** PM4 hierarchical data alone insufficient; spatial clustering compensates for incomplete object boundaries
 
 ## What's Left to Build
 - **CRITICAL: Global Tile Loading System:** Implement unified PM4/PD4 loader that processes entire 64x64 tile regions as single mesh to resolve massive data loss (110,988+ missing vertex references)

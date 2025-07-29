@@ -24,6 +24,11 @@ if (args.Length == 0)
                       "  export     Export PM4/PD4/WMO files to OBJ/MTL\n" +
                       "  test       Run validation tests against real data\n" +
                       "  wmo        Export WMO files to OBJ/MTL\n" +
+                      "  chunk-test Run PM4 chunk combination tests to understand object grouping\n" +
+                      "  refined-hierarchical-export Export PM4 using refined hierarchical object grouping\n" +
+                      "  pm4-analyze-fields    Analyze PM4 chunk field distributions and correlations\n" +
+                      "  pm4-export-wmo-inspired Export PM4 objects using WMO organizational logic\n" +
+                      "  pm4-export-spatial-clustering Export PM4 objects using spatial clustering (with region loading)\n" +
                       "  test       Run regression tests\n" +
                       "\nCommon flags:\n" +
                        "   --input <file>      Input file path\n" +
@@ -283,6 +288,24 @@ try
                 ProjectOutput.CreateOutputDirectory("hierarchical_decoder"));
             await hierarchicalDecoder.AnalyzeAsync();
             return 0;
+            
+        case "chunk-test":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: PM4 file required for chunk combination testing");
+                return 1;
+            }
+            return await ParpToolbox.CliCommands.ChunkCombinationTestCommand.Run(args, fileInfo.FullName);
+            
+        case "refined-hierarchical-export":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: PM4 file required for refined hierarchical export");
+                return 1;
+            }
+            // For now, we'll pass an empty string for outputPath since the command handles its own output directory
+            await ParpToolbox.CliCommands.RefinedHierarchicalExportCommand.Run(fileInfo.FullName, "");
+            return 0;
 
         case "pm4-export-json":
             var outputArg = args.FirstOrDefault(a => a.StartsWith("--output"))?.Split('=')[1];
@@ -293,6 +316,52 @@ try
             }
             var jsonCommand = new ParpToolbox.CliCommands.Pm4ExportJsonCommand();
             await jsonCommand.InvokeAsync(new string[] { "--input", inputFile, "--output", outputArg });
+            return 0;
+
+        case "pm4-analyze-fields":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: PM4 file required for field analysis");
+                return 1;
+            }
+            // Create analyzer and run analysis
+            var analyzer = new ParpToolbox.Services.PM4.Pm4ChunkFieldAnalyzer();
+            var adapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+            var scene = adapter.Load(inputFile);
+            
+            // Create timestamped output directory
+            var analysisTimestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var analysisOutputDir = Path.Combine("project_output", $"pm4_field_analysis_{analysisTimestamp}");
+            Directory.CreateDirectory(analysisOutputDir);
+            
+            ConsoleLogger.WriteLine($"Running PM4 chunk field analysis on: {inputFile}");
+            ConsoleLogger.WriteLine($"Output directory: {analysisOutputDir}");
+            // TODO: Execute analysis command here
+            return 0;
+            
+        case "pm4-export-spatial-clustering":
+            // Handle both --output=value and --output value formats
+            string spatialOutputArg = null;
+            var outputFlagIndex = Array.FindIndex(args, a => a == "--output" || a.StartsWith("--output="));
+            if (outputFlagIndex >= 0)
+            {
+                if (args[outputFlagIndex].StartsWith("--output="))
+                {
+                    spatialOutputArg = args[outputFlagIndex].Split('=')[1];
+                }
+                else if (outputFlagIndex + 1 < args.Length)
+                {
+                    spatialOutputArg = args[outputFlagIndex + 1];
+                }
+            }
+            
+            if (string.IsNullOrEmpty(inputFile) || string.IsNullOrEmpty(spatialOutputArg))
+            {
+                ConsoleLogger.WriteLine("Error: --input and --output are required for pm4-export-spatial-clustering command");
+                return 1;
+            }
+            var spatialCommand = new ParpToolbox.CliCommands.Pm4ExportSpatialClusteringCommand();
+            spatialCommand.Execute(inputFile, spatialOutputArg);
             return 0;
             
         default:

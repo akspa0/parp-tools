@@ -52,18 +52,28 @@ namespace ParpToolbox.CliCommands
 
             // --- Export ---
             var outputDir = ProjectOutput.CreateOutputDirectory(Path.GetFileNameWithoutExtension(inputPath));
-            var outputPath = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputPath) + "_raw.obj");
-
-            var exportOptions = new Pm4ExportOptions
+            
+            if (usePerObject)
             {
-                OutputPath = outputPath,
-                Strategy = usePerObject ? ExportStrategy.PerSurfaceGroup : ExportStrategy.RawSurfaces
-            };
-
-            ConsoleLogger.WriteLine("Executing new PM4 export pipeline...");
-            await exportService.ExportAsync(scene, exportOptions);
-
-            ConsoleLogger.WriteLine($"Export complete! Output file: {outputPath}");
+                // Use the refined hierarchical assembler for multiple object output
+                ConsoleLogger.WriteLine("Executing refined hierarchical PM4 export pipeline...");
+                Pm4RefinedHierarchicalObjectAssembler.StreamRefinedHierarchicalObjects(scene, outputDir);
+                ConsoleLogger.WriteLine($"Export complete! Multiple OBJ files written to: {outputDir}");
+            }
+            else
+            {
+                // Use the original single-file exporter for raw surface output
+                var outputPath = Path.Combine(outputDir, Path.GetFileNameWithoutExtension(inputPath) + "_raw.obj");
+                var exportOptions = new Pm4ExportOptions
+                {
+                    OutputPath = outputPath,
+                    Strategy = ExportStrategy.RawSurfaces
+                };
+                
+                ConsoleLogger.WriteLine("Executing raw PM4 export pipeline...");
+                await exportService.ExportAsync(scene, exportOptions);
+                ConsoleLogger.WriteLine($"Export complete! Output file: {outputPath}");
+            }
             return 0;
         }
     }

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
-using ParpToolbox.Formats.PM4;
 
 namespace ParpToolbox.Services.PM4.Core
 {
@@ -39,7 +38,9 @@ namespace ParpToolbox.Services.PM4.Core
                         SurfaceId = (uint)item.index,
                         MsviFirstIndex = (int)item.entry.MsviFirstIndex,
                         IndexCount = item.entry.IndexCount,
-                        SurfaceGroupKey = item.entry.SurfaceGroupKey
+                        SurfaceGroupKey = item.entry.SurfaceGroupKey,
+                        AttributeMask = item.entry.AttributeMask,
+                        CompositeKey = item.entry.CompositeKey
                     }).ToList()
                 });
 

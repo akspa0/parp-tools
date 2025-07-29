@@ -11,6 +11,8 @@ namespace parpToolbox.Models.PM4.Export
         public int MsviFirstIndex { get; set; }
         public int IndexCount { get; set; }
         public uint SurfaceGroupKey { get; set; }
+        public byte AttributeMask { get; set; }
+        public uint CompositeKey { get; set; }
         // Add other relevant fields from MSUR that are needed for export.
     }
 

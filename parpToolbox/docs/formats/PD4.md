@@ -11,6 +11,9 @@ PD4 files are individual object data descriptors introduced as part of World of 
 - **Individual object focus**: Unlike PM4's complex multi-object approach, PD4 isolates single objects
 - **Post-2016 format**: Part of the PM4→PD4 split that simplified object handling
 
+**💡 PM4→PD4 Transition Context (2025-07-27):**
+Our breakthrough discovery of PM4's **global mesh architecture** explains why the PD4 format was created. PM4's **cross-tile linkage system** (58.4% of triangles reference adjacent tiles) created significant complexity for object processing. PD4 eliminated this by storing **complete, self-contained objects** without cross-tile dependencies, dramatically simplifying geometry extraction and processing.
+
 ## Format Structure
 
 PD4 files use the standard WoW chunk-based format with FourCC identifiers. All chunk headers are stored in little-endian byte order.

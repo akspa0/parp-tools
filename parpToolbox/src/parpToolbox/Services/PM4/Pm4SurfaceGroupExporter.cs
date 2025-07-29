@@ -147,11 +147,12 @@ internal static class Pm4SurfaceGroupExporter
             vertexMapping[sortedVertices[i]] = i + 1; // OBJ uses 1-based indexing
         }
         
-        // Calculate building center for naming
+        // Calculate building center for naming (with coordinate system fix)
         var buildingCenter = Vector3.Zero;
         foreach (var vertexIndex in sortedVertices)
         {
-            buildingCenter += scene.Vertices[vertexIndex];
+            var vertex = scene.Vertices[vertexIndex];
+            buildingCenter += new Vector3(-vertex.X, vertex.Y, -vertex.Z);
         }
         buildingCenter /= sortedVertices.Count;
         
@@ -174,7 +175,7 @@ internal static class Pm4SurfaceGroupExporter
         foreach (var originalIndex in sortedVertices)
         {
             var vertex = scene.Vertices[originalIndex];
-            writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+            writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {-vertex.Z:F6}"); // Fix X and Z axes
         }
         
         writer.WriteLine();
