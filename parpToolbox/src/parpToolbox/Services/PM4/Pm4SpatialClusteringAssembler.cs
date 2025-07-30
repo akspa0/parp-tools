@@ -73,49 +73,106 @@ namespace ParpToolbox.Services.PM4
             
             ConsoleLogger.WriteLine($"Found {rootNodes.Count} root nodes");
 
-            // === STEP 2: CREATE BUILDINGS USING SPATIAL CLUSTERING ===
+            // === STEP 2: CREATE BUILDINGS USING PROPER SURFACE GROUPING ===
             var buildings = new List<CompleteBuilding>();
             
-            for (int buildingIndex = 0; buildingIndex < rootNodes.Count; buildingIndex++)
+            // Create a mapping from SurfaceKey to surface indices for efficient lookup
+            var surfaceKeyToIndices = new Dictionary<uint, List<int>>();
+            if (scene.Surfaces != null)
             {
-                var (rootNodeIndex, rootEntry) = rootNodes[buildingIndex];
-                var rootGroupKey = rootEntry.ParentIndex;
-                
-                ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: Root Node {rootNodeIndex}, Group 0x{rootGroupKey:X8}");
-                
-                // Get MSLK structural elements for this building
-                var buildingEntries = scene.Links
-                    .Select((entry, index) => new { entry, index })
-                    .Where(x => x.entry.ParentIndex == rootGroupKey && x.entry.MspiFirstIndex >= 0 && x.entry.MspiIndexCount > 0)
-                    .ToList();
-                
-                if (buildingEntries.Count == 0)
+                for (int i = 0; i < scene.Surfaces.Count; i++)
                 {
-                    ConsoleLogger.WriteLine($"  No structural elements found for building {buildingIndex + 1}");
-                    continue;
+                    var surface = scene.Surfaces[i];
+                    if (!surfaceKeyToIndices.ContainsKey(surface.SurfaceKey))
+                    {
+                        surfaceKeyToIndices[surface.SurfaceKey] = new List<int>();
+                    }
+                    surfaceKeyToIndices[surface.SurfaceKey].Add(i);
                 }
-                
-                // Calculate bounding box of structural elements
-                var structuralBounds = CalculateStructuralElementsBounds(scene, buildingEntries.Cast<dynamic>().ToList());
-                if (!structuralBounds.HasValue)
+            }
+            
+            // Create buildings based on SurfaceKey grouping rather than MSLK root nodes
+            // This is the key insight from the commit - each SurfaceKey represents a logical object
+            var processedSurfaceKeys = new HashSet<uint>();
+            
+            if (scene.Surfaces != null && scene.Surfaces.Count > 0)
+            {
+                // Group surfaces by SurfaceKey and create one building per group
+                foreach (var kvp in surfaceKeyToIndices)
                 {
-                    ConsoleLogger.WriteLine($"  Could not calculate bounds for building {buildingIndex + 1}");
-                    continue;
+                    var surfaceKey = kvp.Key;
+                    var surfaceIndices = kvp.Value;
+                    
+                    // Skip if we've already processed this SurfaceKey
+                    if (processedSurfaceKeys.Contains(surfaceKey))
+                        continue;
+                    
+                    processedSurfaceKeys.Add(surfaceKey);
+                    
+                    var buildingIndex = buildings.Count;
+                    ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces)");
+                    
+                    // For this approach, we'll create a building for each SurfaceKey group
+                    // We don't have structural elements from MSLK in this approach
+                    var buildingEntries = new List<dynamic>();
+                    
+                    // Create building with surfaces from this SurfaceKey group
+                    var building = CreateHybridBuilding_StructuralPlusNearby(scene, buildingEntries, surfaceIndices, baseFileName, buildingIndex);
+                    building.Metadata["SurfaceKey"] = $"0x{surfaceKey:X8}";
+                    building.Metadata["SurfaceCount"] = surfaceIndices.Count;
+                    
+                    buildings.Add(building);
                 }
-                
-                // Find MSUR surfaces within or near this bounding box
-                var nearbySurfaces = FindMSURSurfacesNearBounds(scene, structuralBounds.Value, tolerance: 50.0f);
-                
-                ConsoleLogger.WriteLine($"  {buildingEntries.Count} structural elements, {nearbySurfaces.Count} nearby surfaces");
-                
-                // Create building combining structural elements and nearby surfaces
-                var building = CreateHybridBuilding_StructuralPlusNearby(scene, buildingEntries.Cast<dynamic>().ToList(), nearbySurfaces, baseFileName, buildingIndex);
-                building.Metadata["RootNodeIndex"] = rootNodeIndex;
-                building.Metadata["GroupKey"] = $"0x{rootGroupKey:X8}";
-                building.Metadata["StructuralElements"] = buildingEntries.Count;
-                building.Metadata["RenderSurfaces"] = nearbySurfaces.Count;
-                
-                buildings.Add(building);
+            }
+            else
+            {
+                // Fallback to MSLK-based approach if no surfaces or groups available
+                for (int buildingIndex = 0; buildingIndex < rootNodes.Count; buildingIndex++)
+                {
+                    var (rootNodeIndex, rootEntry) = rootNodes[buildingIndex];
+                    var rootGroupKey = rootEntry.ParentIndex;
+                    
+                    ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: Root Node {rootNodeIndex}, Group 0x{rootGroupKey:X8}");
+                    
+                    // Get MSLK structural elements for this building
+                    var buildingEntries = scene.Links
+                        .Select((entry, index) => new { entry, index })
+                        .Where(x => x.entry.ParentIndex == rootGroupKey && x.entry.MspiFirstIndex >= 0 && x.entry.MspiIndexCount > 0)
+                        .ToList();
+                    
+                    if (buildingEntries.Count == 0)
+                    {
+                        ConsoleLogger.WriteLine($"  No structural elements found for building {buildingIndex + 1}");
+                        continue;
+                    }
+                    
+                    // Calculate bounding box of structural elements
+                    var structuralBounds = CalculateStructuralElementsBounds(scene, buildingEntries.Cast<dynamic>().ToList());
+                    if (!structuralBounds.HasValue)
+                    {
+                        ConsoleLogger.WriteLine($"  Could not calculate bounds for building {buildingIndex + 1}");
+                        continue;
+                    }
+                    
+                    // Find MSUR surfaces that belong to the same group as this building
+                    // Based on the discovery that MSUR surfaces are grouped by SurfaceKey (Unk1C)
+                    var nearbySurfaces = new List<int>();
+                    
+                    // For now, we'll associate surfaces based on spatial proximity as a fallback
+                    // In a proper implementation with cross-tile loading, we would use the correct SurfaceKey grouping
+                    nearbySurfaces = FindMSURSurfacesNearBounds(scene, structuralBounds.Value, tolerance: 50.0f);
+                    
+                    ConsoleLogger.WriteLine($"  {buildingEntries.Count} structural elements, {nearbySurfaces.Count} nearby surfaces");
+                    
+                    // Create building combining structural elements and nearby surfaces
+                    var building = CreateHybridBuilding_StructuralPlusNearby(scene, buildingEntries.Cast<dynamic>().ToList(), nearbySurfaces, baseFileName, buildingIndex);
+                    building.Metadata["RootNodeIndex"] = rootNodeIndex;
+                    building.Metadata["GroupKey"] = $"0x{rootGroupKey:X8}";
+                    building.Metadata["StructuralElements"] = buildingEntries.Count;
+                    building.Metadata["RenderSurfaces"] = nearbySurfaces.Count;
+                    
+                    buildings.Add(building);
+                }
             }
 
             // === STEP 3: EXPORT TO OBJ FILES ===
@@ -181,42 +238,224 @@ namespace ParpToolbox.Services.PM4
         }
 
         /// <summary>
-        /// Find MSUR surfaces near structural bounds (WORKING POC LOGIC)
+        /// Create a building from a group of surfaces with the same SurfaceKey
+        /// Based on the correct linking: MSUR -> MSVI -> MSVT
+        /// </summary>
+        private CompleteBuilding CreateBuildingFromSurfaceGroup(ParpToolbox.Formats.PM4.Pm4Scene scene, uint surfaceKey, List<int> surfaceIndices, string baseFileName, int buildingIndex)
+        {
+            var building = new CompleteBuilding
+            {
+                FileName = $"{baseFileName}_surfacekey_0x{surfaceKey:X8}",
+                Category = "SurfaceGroup",
+                Vertices = new List<Vector3>(),
+                TriangleIndices = new List<int>()
+            };
+            
+            // Create vertex lookup to avoid duplicates
+            var vertexLookup = new Dictionary<Vector3, int>();
+            
+            // Add vertices and triangles from MSUR surfaces (MSUR -> MSVI -> MSVT)
+            foreach (int surfaceIndex in surfaceIndices)
+            {
+                if (surfaceIndex >= 0 && surfaceIndex < scene.Surfaces.Count)
+                {
+                    var surface = scene.Surfaces[surfaceIndex];
+                    
+                    // Get vertices from MSVT via MSVI indices
+                    int firstIndex = (int)surface.MsviFirstIndex;
+                    int indexCount = surface.IndexCount;
+                    
+                    if (firstIndex >= 0 && indexCount > 0 && firstIndex + indexCount <= scene.Indices.Count)
+                    {
+                        // Add vertices referenced by MSVI indices
+                        for (int i = 0; i < indexCount && firstIndex + i < scene.Indices.Count; i++)
+                        {
+                            int vertexIndex = scene.Indices[firstIndex + i];
+                            
+                            if (vertexIndex >= 0 && vertexIndex < scene.Vertices.Count)
+                            {
+                                var vertex = scene.Vertices[vertexIndex];
+                                
+                                // Add vertex if not already present
+                                if (!vertexLookup.ContainsKey(vertex))
+                                {
+                                    int newIndex = building.Vertices.Count;
+                                    building.Vertices.Add(vertex);
+                                    vertexLookup[vertex] = newIndex;
+                                }
+                            }
+                        }
+                        
+                        // Add triangle indices (triangles are already properly formed in MSVI)
+                        for (int i = 0; i + 2 < indexCount && firstIndex + i + 2 < scene.Indices.Count; i += 3)
+                        {
+                            int v1Index = scene.Indices[firstIndex + i];
+                            int v2Index = scene.Indices[firstIndex + i + 1];
+                            int v3Index = scene.Indices[firstIndex + i + 2];
+                            
+                            if (v1Index >= 0 && v1Index < scene.Vertices.Count &&
+                                v2Index >= 0 && v2Index < scene.Vertices.Count &&
+                                v3Index >= 0 && v3Index < scene.Vertices.Count)
+                            {
+                                // Get the indices in our building's vertex list
+                                var v1 = scene.Vertices[v1Index];
+                                var v2 = scene.Vertices[v2Index];
+                                var v3 = scene.Vertices[v3Index];
+                                
+                                if (vertexLookup.ContainsKey(v1) && vertexLookup.ContainsKey(v2) && vertexLookup.ContainsKey(v3))
+                                {
+                                    building.TriangleIndices.Add(vertexLookup[v1]);
+                                    building.TriangleIndices.Add(vertexLookup[v2]);
+                                    building.TriangleIndices.Add(vertexLookup[v3]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return building;
+        }
+        
+        /// <summary>
+        /// Create a hybrid building combining structural elements and nearby surfaces
+        /// Based on the correct linking: MSLK -> MSPI -> MSCN/MSPV and MSUR -> MSVI -> MSVT
+        /// </summary>
+        private CompleteBuilding CreateHybridBuilding_StructuralPlusNearby(ParpToolbox.Formats.PM4.Pm4Scene scene, List<dynamic> buildingEntries, List<int> nearbySurfaces, string baseFileName, int buildingIndex)
+        {
+            var building = new CompleteBuilding
+            {
+                FileName = $"{baseFileName}_building_{buildingIndex + 1}",
+                Category = "HybridBuilding",
+                Vertices = new List<Vector3>(),
+                TriangleIndices = new List<int>()
+            };
+            
+            // Create vertex lookup to avoid duplicates
+            var vertexLookup = new Dictionary<Vector3, int>();
+            
+            // Add vertices and triangles from structural elements using existing scene triangles
+            foreach (var entry in buildingEntries)
+            {
+                var mslkEntry = (MslkEntry)entry.entry;
+                
+                // Use scene triangles that correspond to this entry
+                // This is a simplified approach - in practice we'd need to map MSLK entries to triangles
+                for (int i = 0; i < scene.Triangles.Count; i++)
+                {
+                    var triangle = scene.Triangles[i];
+                    
+                    if (triangle.A >= 0 && triangle.A < scene.Vertices.Count &&
+                        triangle.B >= 0 && triangle.B < scene.Vertices.Count &&
+                        triangle.C >= 0 && triangle.C < scene.Vertices.Count)
+                    {
+                        // Get vertices (already X-flipped in scene)
+                        var v1 = scene.Vertices[triangle.A];
+                        var v2 = scene.Vertices[triangle.B];
+                        var v3 = scene.Vertices[triangle.C];
+                        
+                        // Add vertices if not already present
+                        int idx1 = GetOrAddVertex(building.Vertices, vertexLookup, v1);
+                        int idx2 = GetOrAddVertex(building.Vertices, vertexLookup, v2);
+                        int idx3 = GetOrAddVertex(building.Vertices, vertexLookup, v3);
+                        
+                        building.TriangleIndices.Add(idx1);
+                        building.TriangleIndices.Add(idx2);
+                        building.TriangleIndices.Add(idx3);
+                    }
+                }
+            }
+            
+            // Add vertices and triangles from nearby surfaces (MSUR -> MSVI -> MSVT)
+            foreach (int surfaceIndex in nearbySurfaces)
+            {
+                if (surfaceIndex >= 0 && surfaceIndex < scene.Surfaces.Count)
+                {
+                    var surface = scene.Surfaces[surfaceIndex];
+                    
+                    // Get vertices from MSVT via MSVI indices
+                    int firstIndex = (int)surface.MsviFirstIndex;
+                    int indexCount = surface.IndexCount;
+                    
+                    if (firstIndex >= 0 && indexCount > 0 && firstIndex + indexCount <= scene.Indices.Count)
+                    {
+                        // Add triangle indices (triangles are already properly formed in MSVI)
+                        for (int i = 0; i + 2 < indexCount && firstIndex + i + 2 < scene.Indices.Count; i += 3)
+                        {
+                            int v1Index = scene.Indices[firstIndex + i];
+                            int v2Index = scene.Indices[firstIndex + i + 1];
+                            int v3Index = scene.Indices[firstIndex + i + 2];
+                            
+                            if (v1Index >= 0 && v1Index < scene.Vertices.Count &&
+                                v2Index >= 0 && v2Index < scene.Vertices.Count &&
+                                v3Index >= 0 && v3Index < scene.Vertices.Count)
+                            {
+                                // Get vertices (already X-flipped in scene)
+                                var v1 = scene.Vertices[v1Index];
+                                var v2 = scene.Vertices[v2Index];
+                                var v3 = scene.Vertices[v3Index];
+                                
+                                // Add vertices if not already present
+                                int idx1 = GetOrAddVertex(building.Vertices, vertexLookup, v1);
+                                int idx2 = GetOrAddVertex(building.Vertices, vertexLookup, v2);
+                                int idx3 = GetOrAddVertex(building.Vertices, vertexLookup, v3);
+                                
+                                building.TriangleIndices.Add(idx1);
+                                building.TriangleIndices.Add(idx2);
+                                building.TriangleIndices.Add(idx3);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return building;
+        }
+        
+        /// <summary>
+        /// Find MSUR surfaces that are spatially near the given bounds
         /// </summary>
         private List<int> FindMSURSurfacesNearBounds(ParpToolbox.Formats.PM4.Pm4Scene scene, (Vector3 min, Vector3 max) bounds, float tolerance)
         {
             var nearbySurfaces = new List<int>();
             
-            if (scene.Surfaces == null || scene.Vertices == null)
-                return nearbySurfaces;
+            if (scene.Surfaces == null) return nearbySurfaces;
             
-            for (int surfaceIndex = 0; surfaceIndex < scene.Surfaces.Count; surfaceIndex++)
+            for (int i = 0; i < scene.Surfaces.Count; i++)
             {
-                var surface = scene.Surfaces[surfaceIndex];
+                var surface = scene.Surfaces[i];
                 
-                // Check if any vertex of this surface is near the bounds
-                bool isNearby = false;
-                for (int i = (int)surface.MsviFirstIndex; i < surface.MsviFirstIndex + surface.IndexCount && i < scene.Indices.Count; i++)
+                // Check if any vertices from this surface are within the bounds + tolerance
+                int firstIndex = (int)surface.MsviFirstIndex;
+                int indexCount = surface.IndexCount;
+                
+                if (firstIndex >= 0 && indexCount > 0 && firstIndex + indexCount <= scene.Indices.Count)
                 {
-                    int vertexIndex = scene.Indices[i];
-                    if (vertexIndex >= 0 && vertexIndex < scene.Vertices.Count)
+                    bool isNearby = false;
+                    
+                    for (int j = 0; j < indexCount && firstIndex + j < scene.Indices.Count; j++)
                     {
-                        var vertex = scene.Vertices[vertexIndex];
+                        int vertexIndex = scene.Indices[firstIndex + j];
                         
-                        // Check if vertex is within expanded bounds
-                        if (vertex.X >= bounds.min.X - tolerance && vertex.X <= bounds.max.X + tolerance &&
-                            vertex.Y >= bounds.min.Y - tolerance && vertex.Y <= bounds.max.Y + tolerance &&
-                            vertex.Z >= bounds.min.Z - tolerance && vertex.Z <= bounds.max.Z + tolerance)
+                        if (vertexIndex >= 0 && vertexIndex < scene.Vertices.Count)
                         {
-                            isNearby = true;
-                            break;
+                            var vertex = scene.Vertices[vertexIndex];
+                            
+                            // Check if vertex is within bounds + tolerance
+                            if (vertex.X >= bounds.min.X - tolerance && vertex.X <= bounds.max.X + tolerance &&
+                                vertex.Y >= bounds.min.Y - tolerance && vertex.Y <= bounds.max.Y + tolerance &&
+                                vertex.Z >= bounds.min.Z - tolerance && vertex.Z <= bounds.max.Z + tolerance)
+                            {
+                                isNearby = true;
+                                break;
+                            }
                         }
                     }
-                }
-                
-                if (isNearby)
-                {
-                    nearbySurfaces.Add(surfaceIndex);
+                    
+                    if (isNearby)
+                    {
+                        nearbySurfaces.Add(i);
+                    }
                 }
             }
             
@@ -224,45 +463,19 @@ namespace ParpToolbox.Services.PM4
         }
 
         /// <summary>
-        /// Create hybrid building combining structural and nearby surfaces (WORKING POC LOGIC)
+        /// Helper method to get or add a vertex to the building's vertex list
         /// </summary>
-        private CompleteBuilding CreateHybridBuilding_StructuralPlusNearby(ParpToolbox.Formats.PM4.Pm4Scene scene, List<dynamic> structuralEntries, List<int> nearbySurfaces, string sourceFileName, int buildingIndex)
+        private int GetOrAddVertex(List<Vector3> vertices, Dictionary<Vector3, int> vertexLookup, Vector3 vertex)
         {
-            var building = new CompleteBuilding
+            if (vertexLookup.TryGetValue(vertex, out int existingIndex))
             {
-                FileName = $"{sourceFileName}_Building_{buildingIndex + 1:D2}",
-                Category = "Hybrid_Building",
-                MaterialName = "Building_Material"
-            };
-            
-            var vertexOffset = 0;
-            
-            // === PART 1: ADD VERTICES FROM SCENE ===
-            if (scene.Vertices != null)
-            {
-                foreach (var vertex in scene.Vertices)
-                {
-                    building.Vertices.Add(vertex);
-                }
-                vertexOffset = scene.Vertices.Count;
+                return existingIndex;
             }
             
-            // === PART 2: ADD TRIANGLES FROM SCENE ===
-            if (scene.Triangles != null)
-            {
-                foreach (var triangle in scene.Triangles)
-                {
-                    building.TriangleIndices.Add(triangle.A);
-                    building.TriangleIndices.Add(triangle.B);
-                    building.TriangleIndices.Add(triangle.C);
-                }
-            }
-            
-            // Note: Parts 3 and 4 are simplified since we're using the already-processed scene data
-            // The scene.Vertices and scene.Triangles already contain the combined and processed geometry
-            // from both MSPV and MSVT sources, so we don't need to process them separately here.
-            
-            return building;
+            int newIndex = vertices.Count;
+            vertices.Add(vertex);
+            vertexLookup[vertex] = newIndex;
+            return newIndex;
         }
 
         /// <summary>
@@ -281,7 +494,7 @@ namespace ParpToolbox.Services.PM4
                 // Write vertices
                 foreach (var vertex in building.Vertices)
                 {
-                    writer.WriteLine($"v {vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}");
+                    writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
                 }
 
                 writer.WriteLine();
