@@ -42,8 +42,8 @@ namespace ParpToolbox.CliCommands
                 var inputFileName = Path.GetFileNameWithoutExtension(inputPath);
                 var baseFileName = Path.Combine(outputDir, inputFileName);
                 
-                // Execute 4D object assembly and export
-                assembler.ExportCrossTile4DObjects(scene, baseFileName);
+                // Execute working spatial clustering assembly and export
+                assembler.Export4DObjects(scene, outputDir, inputFileName);
                 
                 ConsoleLogger.WriteLine("=== 4D OBJECT EXPORT COMPLETED ===");
                 ConsoleLogger.WriteLine($"Output directory: {outputDir}");

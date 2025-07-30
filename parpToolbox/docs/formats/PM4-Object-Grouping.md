@@ -61,6 +61,24 @@ PM4 files store building interior geometry using a complex instanced geometry sy
 ### The Problem
 Initial attempts at PM4 object grouping using surface subdivision levels (MSUR.SurfaceKey) or placement instances (MPRL.Unknown4) produced geometry fragments with ~300-350 vertices each, not complete building objects.
 
+### PM4 Object Grouping Analysis
+
+This document contains analysis of how objects are grouped and organized within PM4 files.
+
+### Coordinate System Architecture (CONFIRMED)
+
+#### PM4 Data Organization
+- **SurfaceKey** = Level of detail, arranged as **Y axis**
+- **Banding slices** = Arranged as **Z axis** 
+- **MSCN data** = Collision normals per polygon (1/64th density of other chunks)
+- **Complex nested coordinate systems** requiring preservation during export
+
+#### Current Export Issues
+- Cross-tile objects still subdivided instead of single objects per PM4 tile
+- Z-axis alignment needed for functional banding
+- Coordinate system preservation required within original chunk data
+- Per-tile object consolidation needed instead of cross-tile subdivision
+
 ### The Solution
 **MPRR chunk contains the true object boundaries** using sentinel values (Value1=65535) that separate geometry into complete building objects.
 

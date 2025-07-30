@@ -28,21 +28,26 @@ New `Pm4CrossTileObjectAssembler` implements the correct approach:
 - Assembles complete objects with vertex deduplication
 - Tracks source tiles and surface keys for diagnostics
 
-### 🧠 REVOLUTIONARY 4D THEORY (USER INSIGHT)
-**SurfaceKeys as Depth Selectors**: SurfaceKeys act as "depth" selectors into banded geometry layers, creating a **4D construct** (X, Y, Z + SurfaceKey depth) across multiple coordinate systems.
+### 🧠 PM4 COORDINATE SYSTEM ARCHITECTURE (USER INSIGHTS)
 
-#### 4D Architecture Model
+#### Confirmed PM4 Data Organization
+- **SurfaceKey = Level of detail** arranged as **Y axis**
+- **Banding slices** arranged as **Z axis**
+- **MSCN data = Collision normals** per polygon (1/64th density of other chunks)
+- **Cross-tile objects** still subdivided instead of single objects per PM4 tile
+- **Complex nested coordinate systems** requiring careful preservation
+
+#### 4D Architecture Model (REFINED)
 ```
-Complete Object = ParentId + Σ(All Tiles) + Σ(All SurfaceKey Depth Layers)
-                = Cross-tile + Cross-depth assembly
+Complete Object = ParentId + Σ(All Tiles) + Σ(SurfaceKey LOD layers)
+                = Cross-tile + Level-of-detail + Z-axis banding
 ```
 
-#### Key Insights
-- **Multi-coordinate systems** arranged in quadrants with different ground planes
-- **Recursive nesting** pattern (like WMO format with 3-4 layers)
-- **PM4 = Full-precision server files** (pathing/collision)
-- **Game files = Reduced precision** for rendering
-- **SurfaceKeys = Depth axis** for guaranteed anchor points across data layers
+#### Critical Requirements
+- **Z-axis alignment** needed for functional banding
+- **Coordinate system preservation** within original chunk data
+- **Per-tile object consolidation** instead of cross-tile subdivision
+- **LOD layer integration** respecting Y-axis arrangement
 
 ## Overview
 This document describes the implemented spatial clustering approach for PM4 object assembly, which is based on the working implementation extracted from the POC `poc_exporter.cs` file.
