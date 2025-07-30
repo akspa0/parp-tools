@@ -40,7 +40,9 @@ namespace ParpToolbox.Services.PM4
         }
 
         /// <summary>
-        /// Export buildings using the WORKING spatial clustering approach from POC
+        /// Export buildings using spatial clustering and SurfaceKey grouping.
+        /// Based on the proven reference implementation and commit 23175c0.
+        /// Includes tile-based filtering to avoid cross-tile/LOD references.
         /// </summary>
         public ExportSummary ExportBuildingsUsingSpatialClustering(ParpToolbox.Formats.PM4.Pm4Scene scene, string outputDirectory, string baseFileName)
         {
@@ -59,18 +61,51 @@ namespace ParpToolbox.Services.PM4
                 return summary;
             }
 
-            // === STEP 1: FIND ROOT NODES (WORKING POC LOGIC) ===
-            var rootNodes = new List<(int nodeIndex, MslkEntry entry)>();
+            ConsoleLogger.WriteLine("=== PM4 Spatial Clustering Assembler - Building Export ===");
             
-            for (int i = 0; i < scene.Links.Count; i++)
+            if (scene.Vertices == null || scene.Vertices.Count == 0)
             {
-                var entry = scene.Links[i];
-                if (entry.ParentIndex == i) // Self-referencing = root node
-                {
-                    rootNodes.Add((i, entry));
-                }
+                ConsoleLogger.WriteLine("No vertices found in scene. Export aborted.");
+                return summary;
             }
             
+            ConsoleLogger.WriteLine($"Total vertices: {scene.Vertices.Count}");
+            ConsoleLogger.WriteLine($"Total triangles: {scene.Triangles.Count}");
+            ConsoleLogger.WriteLine($"Total surfaces: {scene.Surfaces?.Count ?? 0}");
+            ConsoleLogger.WriteLine($"Total links: {scene.Links?.Count ?? 0}");
+            
+            // Determine primary tile coordinates from the scene to filter cross-tile references
+            var primaryTile = DeterminePrimaryTile(scene);
+            if (primaryTile.HasValue)
+            {
+                ConsoleLogger.WriteLine($"Primary tile: ({primaryTile.Value.x}, {primaryTile.Value.y}) - filtering cross-tile references");
+            }
+            else
+            {
+                ConsoleLogger.WriteLine("Warning: Could not determine primary tile - may include cross-tile references");
+            }
+
+            // === STEP 1: FILTER LINKS BY TILE TO ELIMINATE CROSS-TILE/LOD REFERENCES ===
+            var linksToProcess = scene.Links;
+            if (primaryTile.HasValue)
+            {
+                linksToProcess = FilterLinksByTile(scene, primaryTile.Value);
+            }
+            
+            // === STEP 2: FIND ROOT NODES FROM FILTERED LINKS ===
+            var rootNodes = new List<(int nodeIndex, MslkEntry entry)>();
+            
+            if (linksToProcess != null && linksToProcess.Count > 0)
+            {
+                for (int i = 0; i < linksToProcess.Count; i++)
+                {
+                    var entry = linksToProcess[i];
+                    if (entry.ParentIndex == i) // Self-referencing = root node
+                    {
+                        rootNodes.Add((i, entry));
+                    }
+                }
+            }
             ConsoleLogger.WriteLine($"Found {rootNodes.Count} root nodes");
 
             // === STEP 2: CREATE BUILDINGS USING PROPER SURFACE GROUPING ===
@@ -91,13 +126,13 @@ namespace ParpToolbox.Services.PM4
                 }
             }
             
-            // Create buildings based on SurfaceKey grouping rather than MSLK root nodes
-            // This is the key insight from the commit - each SurfaceKey represents a logical object
+            // Create buildings with intelligent size filtering to avoid multi-tile/recursive components
+            // Filter out oversized groups that likely represent multiple buildings or entire tiles
             var processedSurfaceKeys = new HashSet<uint>();
             
             if (scene.Surfaces != null && scene.Surfaces.Count > 0)
             {
-                // Group surfaces by SurfaceKey and create one building per group
+                // Group surfaces by SurfaceKey and filter for reasonable building sizes
                 foreach (var kvp in surfaceKeyToIndices)
                 {
                     var surfaceKey = kvp.Key;
@@ -109,14 +144,35 @@ namespace ParpToolbox.Services.PM4
                     
                     processedSurfaceKeys.Add(surfaceKey);
                     
-                    var buildingIndex = buildings.Count;
-                    ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces)");
+                    // Calculate triangle count for this surface group to filter oversized groups
+                    int triangleCount = CalculateTriangleCount(scene, surfaceIndices);
                     
-                    // For this approach, we'll create a building for each SurfaceKey group
-                    // We don't have structural elements from MSLK in this approach
+                    // Filter out groups that are too large (likely multi-building or tile-spanning)
+                    const int MAX_BUILDING_TRIANGLES = 50000; // Reasonable limit for a single building
+                    const int MIN_BUILDING_TRIANGLES = 10;    // Skip tiny fragments
+                    
+                    if (triangleCount < MIN_BUILDING_TRIANGLES)
+                    {
+                        ConsoleLogger.WriteLine($"Skipping SurfaceKey 0x{surfaceKey:X8}: too small ({triangleCount} triangles)");
+                        continue;
+                    }
+                    
+                    if (triangleCount > MAX_BUILDING_TRIANGLES)
+                    {
+                        ConsoleLogger.WriteLine($"Skipping SurfaceKey 0x{surfaceKey:X8}: too large ({triangleCount} triangles, likely multi-building)");
+                        continue;
+                    }
+                    
+                    var buildingIndex = buildings.Count;
+                    ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces, {triangleCount} triangles)");
+                    
+                    // For now, use the original working approach to avoid performance regression
+                    // The SurfaceKey grouping already gives us meaningful building-scale objects
                     var buildingEntries = new List<dynamic>();
                     
-                    // Create building with surfaces from this SurfaceKey group
+                    ConsoleLogger.WriteLine($"  Using surface-only approach for SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces)");
+                    
+                    // Create building combining structural elements and surfaces from this SurfaceKey group
                     var building = CreateHybridBuilding_StructuralPlusNearby(scene, buildingEntries, surfaceIndices, baseFileName, buildingIndex);
                     building.Metadata["SurfaceKey"] = $"0x{surfaceKey:X8}";
                     building.Metadata["SurfaceCount"] = surfaceIndices.Count;
@@ -235,6 +291,83 @@ namespace ParpToolbox.Services.PM4
             var maxZ = allVertices.Max(v => v.Z);
             
             return (new Vector3(minX, minY, minZ), new Vector3(maxX, maxY, maxZ));
+        }
+
+        /// <summary>
+        /// Calculate the approximate triangle count for a surface group to filter oversized groups
+        /// </summary>
+        private int CalculateTriangleCount(ParpToolbox.Formats.PM4.Pm4Scene scene, List<int> surfaceIndices)
+        {
+            int totalTriangles = 0;
+            
+            foreach (int surfaceIndex in surfaceIndices)
+            {
+                if (surfaceIndex >= 0 && surfaceIndex < scene.Surfaces.Count)
+                {
+                    var surface = scene.Surfaces[surfaceIndex];
+                    int indexCount = surface.IndexCount;
+                    
+                    // Approximate triangle count (indices come in groups of 3)
+                    totalTriangles += indexCount / 3;
+                }
+            }
+            
+            return totalTriangles;
+        }
+
+        /// <summary>
+        /// Determine the primary tile coordinates from the scene to filter cross-tile references
+        /// </summary>
+        private (byte x, byte y)? DeterminePrimaryTile(ParpToolbox.Formats.PM4.Pm4Scene scene)
+        {
+            if (scene.Links == null || scene.Links.Count == 0)
+                return null;
+            
+            // Find the most common tile coordinates among all MSLK entries
+            var tileFrequency = new Dictionary<(byte x, byte y), int>();
+            
+            foreach (var link in scene.Links)
+            {
+                if (link.HasValidTileCoordinates && link.TryDecodeTileCoordinates(out int tileX, out int tileY))
+                {
+                    var coords = ((byte)tileX, (byte)tileY);
+                    tileFrequency[coords] = tileFrequency.GetValueOrDefault(coords, 0) + 1;
+                }
+            }
+            
+            if (tileFrequency.Count == 0)
+                return null;
+            
+            // Return the most frequent tile coordinates (primary tile)
+            return tileFrequency.OrderByDescending(kvp => kvp.Value).First().Key;
+        }
+
+        /// <summary>
+        /// Filter MSLK entries to only include those from the specified tile
+        /// </summary>
+        private List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry> FilterLinksByTile(ParpToolbox.Formats.PM4.Pm4Scene scene, (byte x, byte y) primaryTile)
+        {
+            var filteredLinks = new List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>();
+            
+            foreach (var link in scene.Links)
+            {
+                if (link.TryDecodeTileCoordinates(out int tileX, out int tileY))
+                {
+                    // Only include links from the primary tile
+                    if ((byte)tileX == primaryTile.x && (byte)tileY == primaryTile.y)
+                    {
+                        filteredLinks.Add(link);
+                    }
+                }
+                else
+                {
+                    // Include links without valid tile coordinates (might be local)
+                    filteredLinks.Add(link);
+                }
+            }
+            
+            ConsoleLogger.WriteLine($"Filtered links: {filteredLinks.Count}/{scene.Links.Count} (excluded {scene.Links.Count - filteredLinks.Count} cross-tile references)");
+            return filteredLinks;
         }
 
         /// <summary>

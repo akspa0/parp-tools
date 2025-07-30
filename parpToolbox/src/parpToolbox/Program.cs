@@ -5,9 +5,9 @@ using System.CommandLine;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.FileProviders;
 using ParpToolbox;
-using ParpToolbox.Services.WMO;
+using ParpToolbox.CliCommands;
 using ParpToolbox.Utils;
-using ParpToolbox.Services.PM4;
+using ParpToolbox.Services.WMO;
 using ParpToolbox.Formats.PM4;
 
 // Initialize logging to timestamped file
@@ -361,11 +361,106 @@ try
                 return 1;
             }
             var spatialCommand = new ParpToolbox.CliCommands.Pm4ExportSpatialClusteringCommand();
-            spatialCommand.Execute(inputFile, spatialOutputArg);
-            return 0;
+            new Pm4ExportSpatialClusteringCommand().Execute(inputFile, spatialOutputArg);
+            break;
+
+        case "pm4-analyze-data-banding":
+            string bandingInputPath = null;
+            string bandingOutputPath = null;
             
+            // Parse arguments for data banding command
+            for (int i = 1; i < args.Length; i++) // Start from 1 to skip command name
+            {
+                if (args[i] == "--input" && i + 1 < args.Length)
+                {
+                    bandingInputPath = args[i + 1];
+                    i++; // Skip next argument as it's the value
+                }
+                else if (args[i].StartsWith("--input="))
+                {
+                    bandingInputPath = args[i].Substring("--input=".Length);
+                }
+                else if (args[i] == "--output" && i + 1 < args.Length)
+                {
+                    bandingOutputPath = args[i + 1];
+                    i++; // Skip next argument as it's the value
+                }
+                else if (args[i].StartsWith("--output="))
+                {
+                    bandingOutputPath = args[i].Substring("--output=".Length);
+                }
+                else if (!args[i].StartsWith("--"))
+                {
+                    // If no flags, assume first non-flag argument is input
+                    if (bandingInputPath == null)
+                        bandingInputPath = args[i];
+                }
+            }
+            
+            if (string.IsNullOrEmpty(bandingInputPath))
+            {
+                ConsoleLogger.WriteLine("Error: --input is required for pm4-analyze-data-banding command");
+                return 1;
+            }
+            
+            if (string.IsNullOrEmpty(bandingOutputPath))
+            {
+                ConsoleLogger.WriteLine("Error: --output is required for pm4-analyze-data-banding command");
+                return 1;
+            }
+            
+            await new Pm4AnalyzeDataBandingCommand().RunAsync(bandingInputPath, bandingOutputPath);
+            break;
+
+        case "pm4-export-4d-objects":
+            string export4DInputPath = null;
+            string export4DOutputPath = null;
+            
+            // Parse arguments for 4D export command
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (args[i] == "--input" && i + 1 < args.Length)
+                {
+                    export4DInputPath = args[i + 1];
+                    i++;
+                }
+                else if (args[i].StartsWith("--input="))
+                {
+                    export4DInputPath = args[i].Substring("--input=".Length);
+                }
+                else if (args[i] == "--output" && i + 1 < args.Length)
+                {
+                    export4DOutputPath = args[i + 1];
+                    i++;
+                }
+                else if (args[i].StartsWith("--output="))
+                {
+                    export4DOutputPath = args[i].Substring("--output=".Length);
+                }
+                else if (!args[i].StartsWith("--"))
+                {
+                    if (export4DInputPath == null)
+                        export4DInputPath = args[i];
+                }
+            }
+            
+            if (string.IsNullOrEmpty(export4DInputPath))
+            {
+                ConsoleLogger.WriteLine("Error: --input is required for pm4-export-4d-objects command");
+                return 1;
+            }
+            
+            if (string.IsNullOrEmpty(export4DOutputPath))
+            {
+                ConsoleLogger.WriteLine("Error: --output is required for pm4-export-4d-objects command");
+                return 1;
+            }
+            
+            await new Pm4Export4DObjectsCommand().RunAsync(export4DInputPath, export4DOutputPath);
+            break;
+
         default:
-            ConsoleLogger.WriteLine($"Error: Unknown command '{command}'");
+            Console.WriteLine($"Unknown command: {command}");
             return 1;
     }
 }

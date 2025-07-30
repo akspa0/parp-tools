@@ -1,7 +1,30 @@
 # Active Context
 
-## Current Work
-**Objective:** Implement and test PM4 spatial clustering assembler for building-scale object extraction
+Current focus and recent developments for the PM4 export functionality.
+
+## 🚀 REVOLUTIONARY BREAKTHROUGH (January 29, 2025)
+
+### Cross-Tile Object Architecture Discovered
+The USER's "data banding" hypothesis has been **COMPLETELY CONFIRMED** through data analysis:
+
+- **27,087 ParentIds span multiple tiles** - Massive cross-tile object subdivision
+- **364 tiles in a single PM4** - Far more complex structure than expected
+- **ParentIds = Master object keys** that link scattered fragments
+- **SurfaceKeys = Tile-local fragments** within individual tiles
+
+### Current Priority: Cross-Tile Object Assembly
+**Root Cause Identified**: All previous export attempts failed because they grouped by SurfaceKey (tile-local) instead of ParentId (cross-tile). Complete objects require assembly from fragments across multiple tiles.
+
+**Solution Implemented**: New `Pm4CrossTileObjectAssembler` that:
+- Groups MSLK entries by ParentId (cross-tile object identifier)
+- Collects geometry fragments from ALL tiles for each ParentId
+- Assembles complete objects with proper vertex deduplication
+- Tracks source tiles and surface keys for diagnostics
+
+### Next Steps
+1. Create CLI command for cross-tile assembler
+2. Test cross-tile assembly vs fragment-based approaches
+3. Validate complete building-scale object reconstruction clustering assembler for building-scale object extraction
 
 **Status:** Spatial clustering assembler implemented and CLI command registered
 

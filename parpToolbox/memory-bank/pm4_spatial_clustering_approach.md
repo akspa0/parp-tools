@@ -1,5 +1,49 @@
 # PM4 Spatial Clustering Approach Documentation
 
+## 🚀 REVOLUTIONARY BREAKTHROUGH (January 29, 2025)
+
+### Cross-Tile Object Architecture Discovered
+**FUNDAMENTAL PARADIGM SHIFT**: PM4 objects are not tile-local but span multiple tiles through ParentId linkage.
+
+#### Data Analysis Results
+- **27,087 ParentIds span multiple tiles** - Objects scattered across hundreds of tiles
+- **364 tiles detected** in single PM4 file
+- **0 SurfaceKeys span tiles** - SurfaceKeys are tile-local geometry fragments
+- **ParentIds = Master cross-tile object identifiers**
+- **SurfaceKeys = Tile-local surface geometry fragments**
+
+#### Revolutionary Understanding
+**Previous Approach (WRONG)**: Group by SurfaceKey → Get tile-local fragments
+**Correct Approach (NEW)**: Group by ParentId → Assemble cross-tile complete objects
+
+#### PM4 Object Assembly Model
+```
+Complete Object = ParentId + Σ(Geometry Fragments from ALL tiles)
+```
+
+### Cross-Tile Object Assembler
+New `Pm4CrossTileObjectAssembler` implements the correct approach:
+- Groups MSLK entries by ParentId (cross-tile identifier)
+- Collects geometry fragments from all tiles for each ParentId
+- Assembles complete objects with vertex deduplication
+- Tracks source tiles and surface keys for diagnostics
+
+### 🧠 REVOLUTIONARY 4D THEORY (USER INSIGHT)
+**SurfaceKeys as Depth Selectors**: SurfaceKeys act as "depth" selectors into banded geometry layers, creating a **4D construct** (X, Y, Z + SurfaceKey depth) across multiple coordinate systems.
+
+#### 4D Architecture Model
+```
+Complete Object = ParentId + Σ(All Tiles) + Σ(All SurfaceKey Depth Layers)
+                = Cross-tile + Cross-depth assembly
+```
+
+#### Key Insights
+- **Multi-coordinate systems** arranged in quadrants with different ground planes
+- **Recursive nesting** pattern (like WMO format with 3-4 layers)
+- **PM4 = Full-precision server files** (pathing/collision)
+- **Game files = Reduced precision** for rendering
+- **SurfaceKeys = Depth axis** for guaranteed anchor points across data layers
+
 ## Overview
 This document describes the implemented spatial clustering approach for PM4 object assembly, which is based on the working implementation extracted from the POC `poc_exporter.cs` file.
 

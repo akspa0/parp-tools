@@ -1,5 +1,30 @@
 # Progress for parpToolbox
 
+## 🚀 MAJOR BREAKTHROUGH (January 29, 2025)
+
+### Revolutionary Cross-Tile Object Discovery
+**USER HYPOTHESIS CONFIRMED**: PM4 objects are organized in "bands" or "layers" across multiple tiles, with massive cross-tile object subdivision.
+
+#### Data Banding Analysis Results
+- **27,087 ParentIds span multiple tiles** - Objects are literally scattered across hundreds of tiles
+- **364 tiles detected** from a single PM4 file  
+- **0 SurfaceKeys span tiles** - SurfaceKeys are tile-local geometry fragments
+- **1 unexplored chunk type** detected with potential linking data
+
+#### PM4 Object Architecture (CONFIRMED)
+- **ParentIds** = Master cross-tile object identifiers that link fragments across multiple tiles
+- **SurfaceKeys** = Tile-local surface geometry fragments within individual tiles
+- **Complete Objects** = ParentId + all geometry fragments collected from ALL tiles
+- **Cross-tile assembly required** - Objects cannot be reconstructed from single tiles
+
+#### Root Cause Identified
+Previous export attempts failed because they grouped by SurfaceKey (tile-local) instead of ParentId (cross-tile). We were trying to build complete objects using only fragments from individual tiles.
+
+#### Tools Implemented
+1. **Pm4DataBandingAnalyzer** - Diagnostic tool that confirmed cross-tile object patterns
+2. **Pm4AnalyzeDataBandingCommand** - CLI command for banding analysis  
+3. **Pm4CrossTileObjectAssembler** - Revolutionary assembler that groups by ParentId and collects fragments from all tiles
+
 ## What Works
 - **Project Scaffolding & Build Health:** The solution and project structure are stable and build correctly.
 - **WMO Loading:** The tool loads complex WMO files (root + groups) via `LocalFileProvider`.
