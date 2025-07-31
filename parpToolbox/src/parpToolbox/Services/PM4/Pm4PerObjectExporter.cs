@@ -48,9 +48,23 @@ namespace ParpToolbox.Services.PM4
                 ConsoleLogger.WriteLine($"Database path: {databasePath}");
                 
                 // Phase 1 Complete: Database import successful
-                // Phase 2 TODO: Implement separate export subsystem to read from SQLite and generate OBJs
-                ConsoleLogger.WriteLine("PM4 database import completed successfully.");
-                ConsoleLogger.WriteLine("Use a future export tool to extract buildings from the SQLite database.");
+                // Phase 2: Extract buildings from database and generate OBJs
+                ConsoleLogger.WriteLine("Extracting buildings from database...");
+                
+                var extractor = new Pm4DatabaseObjectExtractor(databasePath);
+                var buildings = await extractor.ExtractBuildingsAsync(pm4FileId);
+                
+                if (buildings.Any())
+                {
+                    var objOutputDir = Path.Combine(outputDirectory, "obj_exports");
+                    await extractor.ExportBuildingsToOBJAsync(buildings, objOutputDir);
+                    await GenerateAnalysisReportAsync(buildings, outputDirectory, sourceFileName);
+                    ConsoleLogger.WriteLine($"Successfully exported {buildings.Count} buildings to OBJ files.");
+                }
+                else
+                {
+                    ConsoleLogger.WriteLine("No buildings extracted from database.");
+                }
             }
             catch (Exception ex)
             {

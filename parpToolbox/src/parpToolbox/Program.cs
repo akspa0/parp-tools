@@ -30,6 +30,7 @@ if (args.Length == 0)
                       "  pm4-export-wmo-inspired Export PM4 objects using WMO organizational logic\n" +
                       "  pm4-export-spatial-clustering Export PM4 objects using spatial clustering (with region loading)\n" +
                       "  pm4-export-scene-graph Export PM4 using scene graph traversal (BREAKTHROUGH APPROACH)\n" +
+                      "  pm4-wmo-match         Perform PM4-to-WMO spatial correlation and matching analysis\n" +
                       "  test       Run regression tests\n" +
                       "\nCommon flags:\n" +
                        "   --input <file>      Input file path\n" +
@@ -386,6 +387,59 @@ try
             diagnosticSpatialCommand.Execute(inputFile, diagnosticOutputDir);
             return 0;
 
+        case "enhanced-diagnostic-spatial":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Input PM4 file required for enhanced diagnostic spatial clustering export");
+                return 1;
+            }
+            
+            var enhancedDiagnosticOutputDir = args.Length > 2 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "enhanced_diagnostic_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            
+            var enhancedDiagnosticCommand = new ParpToolbox.CliCommands.EnhancedDiagnosticSpatialCommand();
+            enhancedDiagnosticCommand.Execute(inputFile, enhancedDiagnosticOutputDir);
+            return 0;
+
+        case "fixed-spatial-clustering":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Input PM4 file required for fixed spatial clustering export");
+                return 1;
+            }
+            
+            var fixedSpatialOutputDir = args.Length > 2 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "fixed_spatial_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            
+            var fixedSpatialCommand = new ParpToolbox.CliCommands.FixedSpatialClusteringCommand();
+            fixedSpatialCommand.Execute(inputFile, fixedSpatialOutputDir);
+            return 0;
+
+        case "pm4-wmo-match":
+            if (args.Length < 3)
+            {
+                ConsoleLogger.WriteLine("Error: PM4 file and WMO file required for PM4-WMO matching");
+                ConsoleLogger.WriteLine("Usage: parpToolbox pm4-wmo-match <pm4-file> <wmo-file> [output-dir]");
+                return 1;
+            }
+
+            var pm4File = args[1];
+            var wmoFile = args[2];
+            var matchOutputDir = args.Length > 3 ? args[3] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "pm4_wmo_match_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+
+            if (!File.Exists(pm4File))
+            {
+                ConsoleLogger.WriteLine($"Error: PM4 file not found: {pm4File}");
+                return 1;
+            }
+
+            if (!File.Exists(wmoFile))
+            {
+                ConsoleLogger.WriteLine($"Error: WMO file not found: {wmoFile}");
+                return 1;
+            }
+
+            var pm4WmoMatchCommand = new ParpToolbox.CliCommands.Pm4WmoMatchCommand();
+            pm4WmoMatchCommand.Execute(pm4File, wmoFile, matchOutputDir);
+            return 0;
 
         case "pm4-analyze-fields":
             if (string.IsNullOrEmpty(inputFile))
