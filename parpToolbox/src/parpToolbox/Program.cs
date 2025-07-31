@@ -29,6 +29,7 @@ if (args.Length == 0)
                       "  pm4-analyze-fields    Analyze PM4 chunk field distributions and correlations\n" +
                       "  pm4-export-wmo-inspired Export PM4 objects using WMO organizational logic\n" +
                       "  pm4-export-spatial-clustering Export PM4 objects using spatial clustering (with region loading)\n" +
+                      "  pm4-export-scene-graph Export PM4 using scene graph traversal (BREAKTHROUGH APPROACH)\n" +
                       "  test       Run regression tests\n" +
                       "\nCommon flags:\n" +
                        "   --input <file>      Input file path\n" +
@@ -318,6 +319,74 @@ try
             await jsonCommand.InvokeAsync(new string[] { "--input", inputFile, "--output", outputArg });
             return 0;
 
+        case "analyze-pm4-keys":
+            var analyzeKeysCommand = ParpToolbox.CliCommands.AnalyzePm4KeysCommand.CreateCommand();
+            return await analyzeKeysCommand.InvokeAsync(args);
+
+        case "export-pm4-dataweb":
+            var dataWebExportCommand = ParpToolbox.CliCommands.ExportPm4DataWebCommand.CreateCommand();
+            return await dataWebExportCommand.InvokeAsync(args);
+
+        case "diagnose-linkage":
+            var diagnoseLinkageCommand = ParpToolbox.CliCommands.DiagnoseLinkageCommand.CreateCommand();
+            return await diagnoseLinkageCommand.InvokeAsync(args);
+
+        case "analyze-surfacerefindex":
+            var surfaceRefAnalysisCommand = ParpToolbox.CliCommands.AnalyzeSurfaceRefIndexCommand.CreateCommand();
+            return await surfaceRefAnalysisCommand.InvokeAsync(args);
+
+        case "analyze-mprl-fields":
+            var mprlFieldsCommand = ParpToolbox.CliCommands.AnalyzeMprlFieldsCommand.CreateCommand();
+            return await mprlFieldsCommand.InvokeAsync(args);
+
+        case "analyze-mslk-fields":
+            var mslkFieldsCommand = ParpToolbox.CliCommands.AnalyzeMslkFieldsCommand.CreateCommand();
+            return await mslkFieldsCommand.InvokeAsync(args);
+
+        case "test-surfaceref-building-grouping":
+            var surfaceRefGroupingCommand = ParpToolbox.CliCommands.TestSurfaceRefBuildingGroupingCommand.CreateCommand();
+            return await surfaceRefGroupingCommand.InvokeAsync(args);
+
+        case "spatial-clustering":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Input PM4 file required for spatial clustering export");
+                return 1;
+            }
+            
+            var spatialOutputDir = args.Length > 2 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "spatial_clustering_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            
+            var spatialClusteringCommand = new ParpToolbox.CliCommands.Pm4ExportSpatialClusteringCommand();
+            spatialClusteringCommand.Execute(inputFile, spatialOutputDir);
+            return 0;
+
+        case "diagnose-tile-contamination":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Input PM4 file required for tile contamination diagnostic");
+                return 1;
+            }
+            
+            var contaminationOutputDir = args.Length > 2 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "tile_contamination_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            
+            var tileContaminationCommand = new ParpToolbox.CliCommands.DiagnoseTileContaminationCommand();
+            tileContaminationCommand.Execute(inputFile, contaminationOutputDir);
+            return 0;
+
+        case "diagnostic-spatial-clustering":
+            if (string.IsNullOrEmpty(inputFile))
+            {
+                ConsoleLogger.WriteLine("Error: Input PM4 file required for diagnostic spatial clustering export");
+                return 1;
+            }
+            
+            var diagnosticOutputDir = args.Length > 2 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", "diagnostic_spatial_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            
+            var diagnosticSpatialCommand = new ParpToolbox.CliCommands.DiagnosticSpatialClusteringCommand();
+            diagnosticSpatialCommand.Execute(inputFile, diagnosticOutputDir);
+            return 0;
+
+
         case "pm4-analyze-fields":
             if (string.IsNullOrEmpty(inputFile))
             {
@@ -362,6 +431,66 @@ try
             }
             var spatialCommand = new ParpToolbox.CliCommands.Pm4ExportSpatialClusteringCommand();
             new Pm4ExportSpatialClusteringCommand().Execute(inputFile, spatialOutputArg);
+            break;
+            
+        case "pm4-export-scene-graph":
+            string sceneGraphInputPath = null;
+            string sceneGraphOutputPath = null;
+            
+            // Parse arguments for scene graph export command
+            for (int i = 1; i < args.Length; i++) // Start from 1 to skip command name
+            {
+                if (args[i] == "--input" && i + 1 < args.Length)
+                {
+                    sceneGraphInputPath = args[i + 1];
+                    i++; // Skip next argument as it's the value
+                }
+                else if (args[i].StartsWith("--input="))
+                {
+                    sceneGraphInputPath = args[i].Substring("--input=".Length);
+                }
+                else if (args[i] == "--output" && i + 1 < args.Length)
+                {
+                    sceneGraphOutputPath = args[i + 1];
+                    i++; // Skip next argument as it's the value
+                }
+                else if (args[i].StartsWith("--output="))
+                {
+                    sceneGraphOutputPath = args[i].Substring("--output=".Length);
+                }
+                else if (!args[i].StartsWith("--"))
+                {
+                    // If no flags, assume first non-flag argument is input
+                    if (sceneGraphInputPath == null)
+                        sceneGraphInputPath = args[i];
+                }
+            }
+            
+            if (string.IsNullOrEmpty(sceneGraphInputPath))
+            {
+                ConsoleLogger.WriteLine("Error: --input is required for pm4-export-scene-graph command");
+                return 1;
+            }
+            
+            // Use project output if no output specified
+            if (string.IsNullOrEmpty(sceneGraphOutputPath))
+            {
+                sceneGraphOutputPath = Path.Combine(Directory.GetCurrentDirectory(), "output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                ConsoleLogger.WriteLine($"Using timestamped project output: {sceneGraphOutputPath}");
+            }
+            
+            // Execute scene graph export
+            var sceneGraphAdapter = new ParpToolbox.Services.PM4.Pm4Adapter();
+            var pm4Scene = sceneGraphAdapter.LoadRegion(sceneGraphInputPath);
+            
+            if (pm4Scene == null)
+            {
+                ConsoleLogger.WriteLine("Failed to load PM4 scene");
+                return 1;
+            }
+            
+            var sceneGraphExporter = new ParpToolbox.Services.PM4.Pm4SceneGraphExporter();
+            sceneGraphExporter.ExportPm4SceneGraph(pm4Scene, sceneGraphOutputPath);
             break;
 
         case "pm4-analyze-data-banding":

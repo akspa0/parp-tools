@@ -47,6 +47,12 @@ namespace ParpToolbox.CliCommands
 
                 ConsoleLogger.WriteLine($"Scene loaded: {scene.Placements.Count} placements, {scene.Links.Count} links, {scene.Surfaces.Count} surfaces");
 
+                // BREAKTHROUGH: Test Scene Graph Architecture First!
+                ConsoleLogger.WriteLine("");
+                ConsoleLogger.WriteLine("TESTING BREAKTHROUGH SCENE GRAPH ARCHITECTURE...");
+                Pm4SceneGraphTest.TestSceneGraphArchitecture(scene, outputPath);
+                ConsoleLogger.WriteLine("");
+
                 // Extract base filename for output naming
                 var baseFileName = Path.GetFileNameWithoutExtension(inputPath);
 

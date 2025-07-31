@@ -467,37 +467,11 @@ namespace ParpToolbox.Services.PM4
             // Create vertex lookup to avoid duplicates
             var vertexLookup = new Dictionary<Vector3, int>();
             
-            // Add vertices and triangles from structural elements using existing scene triangles
-            foreach (var entry in buildingEntries)
-            {
-                var mslkEntry = (MslkEntry)entry.entry;
-                
-                // Use scene triangles that correspond to this entry
-                // This is a simplified approach - in practice we'd need to map MSLK entries to triangles
-                for (int i = 0; i < scene.Triangles.Count; i++)
-                {
-                    var triangle = scene.Triangles[i];
-                    
-                    if (triangle.A >= 0 && triangle.A < scene.Vertices.Count &&
-                        triangle.B >= 0 && triangle.B < scene.Vertices.Count &&
-                        triangle.C >= 0 && triangle.C < scene.Vertices.Count)
-                    {
-                        // Get vertices (already X-flipped in scene)
-                        var v1 = scene.Vertices[triangle.A];
-                        var v2 = scene.Vertices[triangle.B];
-                        var v3 = scene.Vertices[triangle.C];
-                        
-                        // Add vertices if not already present
-                        int idx1 = GetOrAddVertex(building.Vertices, vertexLookup, v1);
-                        int idx2 = GetOrAddVertex(building.Vertices, vertexLookup, v2);
-                        int idx3 = GetOrAddVertex(building.Vertices, vertexLookup, v3);
-                        
-                        building.TriangleIndices.Add(idx1);
-                        building.TriangleIndices.Add(idx2);
-                        building.TriangleIndices.Add(idx3);
-                    }
-                }
-            }
+            // The buildingEntries parameter is a remnant of a flawed implementation that
+            // caused a severe performance regression (O(N*M) complexity) and incorrect
+            // exports (entire scene graph per building).
+            // This logic has been removed. The correct approach is to rely on the
+            // SurfaceKey grouping, which provides the correct surfaces in nearbySurfaces.
             
             // Add vertices and triangles from nearby surfaces (MSUR -> MSVI -> MSVT)
             foreach (int surfaceIndex in nearbySurfaces)
@@ -510,33 +484,43 @@ namespace ParpToolbox.Services.PM4
                     int firstIndex = (int)surface.MsviFirstIndex;
                     int indexCount = surface.IndexCount;
                     
+                    // Determine best normal orientation once per surface
+                    Vector3 nSrc = new Vector3(surface.Nx, surface.Ny, surface.Nz);
+                                        bool usePlane = surface.GroupKey != 18 && nSrc.LengthSquared() > 1e-6f;
+                    Vector3 nFinal = nSrc;
+                    if (usePlane && ShouldSwapNormal(surface, scene))
+                    {
+                        nFinal = new Vector3(nSrc.Y, nSrc.X, nSrc.Z);
+                    }
+                    if (usePlane)
+                        nFinal = Vector3.Normalize(nFinal);
+
                     if (firstIndex >= 0 && indexCount > 0 && firstIndex + indexCount <= scene.Indices.Count)
                     {
-                        // Add triangle indices (triangles are already properly formed in MSVI)
                         for (int i = 0; i + 2 < indexCount && firstIndex + i + 2 < scene.Indices.Count; i += 3)
                         {
-                            int v1Index = scene.Indices[firstIndex + i];
-                            int v2Index = scene.Indices[firstIndex + i + 1];
-                            int v3Index = scene.Indices[firstIndex + i + 2];
-                            
-                            if (v1Index >= 0 && v1Index < scene.Vertices.Count &&
-                                v2Index >= 0 && v2Index < scene.Vertices.Count &&
-                                v3Index >= 0 && v3Index < scene.Vertices.Count)
+                            int v1Idx = scene.Indices[firstIndex + i];
+                            int v2Idx = scene.Indices[firstIndex + i + 1];
+                            int v3Idx = scene.Indices[firstIndex + i + 2];
+
+                            if (v1Idx < 0 || v1Idx >= scene.Vertices.Count ||
+                                v2Idx < 0 || v2Idx >= scene.Vertices.Count ||
+                                v3Idx < 0 || v3Idx >= scene.Vertices.Count) continue;
+
+                            int AddWithPlane(int vIdx)
                             {
-                                // Get vertices (already X-flipped in scene)
-                                var v1 = scene.Vertices[v1Index];
-                                var v2 = scene.Vertices[v2Index];
-                                var v3 = scene.Vertices[v3Index];
-                                
-                                // Add vertices if not already present
-                                int idx1 = GetOrAddVertex(building.Vertices, vertexLookup, v1);
-                                int idx2 = GetOrAddVertex(building.Vertices, vertexLookup, v2);
-                                int idx3 = GetOrAddVertex(building.Vertices, vertexLookup, v3);
-                                
-                                building.TriangleIndices.Add(idx1);
-                                building.TriangleIndices.Add(idx2);
-                                building.TriangleIndices.Add(idx3);
+                                var v = scene.Vertices[vIdx];
+                                if (usePlane)
+                                {
+                                    float d = Vector3.Dot(nFinal, v) - surface.Height;
+                                    v -= nFinal * d;
+                                }
+                                return GetOrAddVertex(building.Vertices, vertexLookup, v);
                             }
+
+                            building.TriangleIndices.Add(AddWithPlane(v1Idx));
+                            building.TriangleIndices.Add(AddWithPlane(v2Idx));
+                            building.TriangleIndices.Add(AddWithPlane(v3Idx));
                         }
                     }
                 }
@@ -614,6 +598,37 @@ namespace ParpToolbox.Services.PM4
         /// <summary>
         /// Export building to OBJ file
         /// </summary>
+        /// <summary>
+        /// Heuristically decides whether swapping X/Y in the stored MSUR normal better fits the sampled vertices.
+        /// Adapted from the reference MsurObjectExporter.cs.
+        /// </summary>
+                private bool ShouldSwapNormal(ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry surf, ParpToolbox.Formats.PM4.Pm4Scene scene)
+        {
+            int first = (int)surf.MsviFirstIndex;
+            int sampleCount = Math.Min(surf.IndexCount, (byte)9); // up to 3 triangles
+            if (sampleCount == 0 || scene.Indices == null || scene.Vertices == null) return false;
+
+            Vector3 nA = new Vector3(surf.Nx, surf.Ny, surf.Nz);
+            if (nA.LengthSquared() < 1e-6f) return false;
+            Vector3 nB = new Vector3(nA.Y, nA.X, nA.Z);
+            nA = Vector3.Normalize(nA);
+            nB = Vector3.Normalize(nB);
+
+            float errA = 0, errB = 0;
+            int samples = 0;
+            for (int i = 0; i < sampleCount && (first + i) < scene.Indices.Count; i++)
+            {
+                uint idx = (uint)scene.Indices[first + i];
+                if (idx >= scene.Vertices.Count) continue;
+                var v = scene.Vertices[(int)idx]; // Vertices are already transformed in Pm4Scene
+                        errA += Math.Abs(Vector3.Dot(nA, v) - surf.Height);
+                errB += Math.Abs(Vector3.Dot(nB, v) - surf.Height);
+                samples++;
+            }
+            if (samples == 0) return false;
+            return errB < errA;
+        }
+
         private void ExportBuildingToObj(CompleteBuilding building, string filePath)
         {
             using (var writer = new StreamWriter(filePath))

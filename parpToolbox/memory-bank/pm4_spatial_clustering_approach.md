@@ -43,11 +43,22 @@ Complete Object = ParentId + Σ(All Tiles) + Σ(SurfaceKey LOD layers)
                 = Cross-tile + Level-of-detail + Z-axis banding
 ```
 
-#### Critical Requirements
-- **Z-axis alignment** needed for functional banding
-- **Coordinate system preservation** within original chunk data
-- **Per-tile object consolidation** instead of cross-tile subdivision
-- **LOD layer integration** respecting Y-axis arrangement
+### Why This Explains Everything
+
+1. **MSCN points align with polygon centers** → Spatial anchors at coarse scale
+2. **Faces "escape boundaries"** → Missing coordinate system transforms
+3. **No single-object exports** → Not following scene graph hierarchy
+4. **Spatial clustering failures** → Mixing incompatible coordinate systems
+5. **Cross-tile vertex references** → Coordinate boundaries misaligned
+
+### Implementation Strategy
+
+**Scene Graph Traversal Exporter** that:
+- Follows PM4's hierarchical structure (MPRL → MSLK → geometry)
+- Applies transforms in correct order (parent → child)
+- Uses built-in spatial partitioning (SurfaceKey as spatial index)
+- Leverages LoD systems (MSCN coarse → MSUR fine)
+- Produces true single-object exports per building
 
 ## Overview
 This document describes the implemented spatial clustering approach for PM4 object assembly, which is based on the working implementation extracted from the POC `poc_exporter.cs` file.
