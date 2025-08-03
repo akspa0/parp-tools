@@ -39,53 +39,56 @@ internal class RefinedHierarchicalExportCommand
         return command;
     }
     
-    public static async Task Run(string inputPath, string outputPath)
+    public static Task Run(string inputPath, string outputPath)
     {
-        try
+        return Task.Run(() =>
         {
-            var pm4Files = new List<string>();
-            if (File.Exists(inputPath))
+            try
             {
-                pm4Files.Add(inputPath);
-            }
-            else if (Directory.Exists(inputPath))
-            {
-                pm4Files.AddRange(Directory.GetFiles(inputPath, "*.pm4", SearchOption.AllDirectories));
-            }
-
-            if (!pm4Files.Any())
-            {
-                Console.WriteLine("No PM4 files found at the specified path.");
-                return;
-            }
-
-            var exportPath = ProjectOutput.CreateOutputDirectory(outputPath);
-            Console.WriteLine($"Found {pm4Files.Count} PM4 files. Exporting to: {exportPath}");
-
-            var exporter = new Pm4SceneGraphExporter();
-            var adapter = new Pm4Adapter();
-            var options = new Pm4LoadOptions { VerboseLogging = false }; // Reduce noise for per-tile loading
-
-            foreach (var file in pm4Files)
-            {
-                try
+                var pm4Files = new List<string>();
+                if (File.Exists(inputPath))
                 {
-                    Console.WriteLine($"--- Processing tile: {Path.GetFileName(file)} ---");
-                    var scene = adapter.LoadRegion(file, options);
-                    exporter.ExportPm4SceneGraph(scene, exportPath);
+                    pm4Files.Add(inputPath);
                 }
-                catch (Exception ex)
+                else if (Directory.Exists(inputPath))
                 {
-                    Console.WriteLine($"ERROR: Failed to process tile {Path.GetFileName(file)}: {ex.Message}");
+                    pm4Files.AddRange(Directory.GetFiles(inputPath, "*.pm4", SearchOption.AllDirectories));
                 }
-            }
 
-            Console.WriteLine($"\nScene graph export completed. Objects exported to: {exportPath}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error during scene graph export: {ex.Message}");
-            Console.WriteLine(ex.StackTrace);
-        }
+                if (!pm4Files.Any())
+                {
+                    Console.WriteLine("No PM4 files found at the specified path.");
+                    return;
+                }
+
+                var exportPath = ProjectOutput.CreateOutputDirectory(outputPath);
+                Console.WriteLine($"Found {pm4Files.Count} PM4 files. Exporting to: {exportPath}");
+
+                var exporter = new Pm4SceneGraphExporter();
+                var adapter = new Pm4Adapter();
+                var options = new Pm4LoadOptions { VerboseLogging = false }; // Reduce noise for per-tile loading
+
+                foreach (var file in pm4Files)
+                {
+                    try
+                    {
+                        Console.WriteLine($"--- Processing tile: {Path.GetFileName(file)} ---");
+                        var scene = adapter.LoadRegion(file, options);
+                        exporter.ExportPm4SceneGraph(scene, exportPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"ERROR: Failed to process tile {Path.GetFileName(file)}: {ex.Message}");
+                    }
+                }
+
+                Console.WriteLine($"\nScene graph export completed. Objects exported to: {exportPath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error during scene graph export: {ex.Message}");
+                Console.WriteLine(ex.StackTrace ?? "No stack trace available");
+            }
+        });
     }
 }

@@ -19,7 +19,7 @@ namespace ParpToolbox.CliCommands
         /// <param name="args">Full CLI args array (including the command token at index 0).</param>
         /// <param name="inputPath">Resolved absolute path to the PM4 file specified by the user.</param>
         /// <returns>Exit code (0 = success, non-zero = failure).</returns>
-        public static async Task<int> Run(string[] args, string inputPath)
+        public static Task<int> Run(string[] args, string inputPath)
         {
             try
             {
@@ -64,13 +64,13 @@ namespace ParpToolbox.CliCommands
                 var results = Pm4ChunkCombinationTester.RunExhaustiveChunkTests(scene, outputDir);
 
                 ConsoleLogger.WriteLine($"Chunk combination tests completed. Results exported to: {outputDir}");
-                return 0;
+                return Task.FromResult(0);
             }
             catch (Exception ex)
             {
                 ConsoleLogger.WriteLine($"Error during chunk combination testing: {ex.Message}");
-                ConsoleLogger.WriteLine(ex.StackTrace);
-                return 1;
+                ConsoleLogger.WriteLine(ex.StackTrace ?? "No stack trace available");
+                return Task.FromResult(1);
             }
         }
     }

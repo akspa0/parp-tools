@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Threading.Tasks;
@@ -10,6 +11,7 @@ using ParpToolbox.Utils;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using WoWFormatLib.FileProviders;
 
 namespace ParpToolbox.CliCommands
 {
@@ -18,11 +20,12 @@ namespace ParpToolbox.CliCommands
     /// </summary>
     public class Pm4WmoMatchCommand
     {
-        public void Execute(string pm4Path, string wmoPath, string outputPath)
+        public void Execute(string pm4Path, string wmoPath, string outputPath, int targetTileX = 0, int targetTileY = 0)
         {
             ConsoleLogger.WriteLine("=== PM4-WMO Spatial Correlation and Matching Test ===");
             ConsoleLogger.WriteLine($"PM4 Input: {pm4Path}");
             ConsoleLogger.WriteLine($"WMO Input: {wmoPath}");
+            ConsoleLogger.WriteLine($"Target Tile: {targetTileX:D2}_{targetTileY:D2}");
             ConsoleLogger.WriteLine($"Output: {outputPath}");
 
             try
@@ -52,20 +55,27 @@ namespace ParpToolbox.CliCommands
                     return;
                 }
 
+                // Initialize FileProvider with a default build to avoid ArgumentNullException
+                // This is required for the wow.tools.local WMO reader to function properly
+                var wmoDirectory = Path.GetDirectoryName(wmoPath);
+                var localProvider = new LocalFileProvider(wmoDirectory);
+                FileProvider.SetProvider(localProvider, "local");
+                FileProvider.SetDefaultBuild("local");
+
                 // Create output directory
                 Directory.CreateDirectory(outputPath);
 
-                // Step 1: Extract PM4 buildings using spatial clustering
-                ConsoleLogger.WriteLine("\n=== Step 1: Extracting PM4 Buildings via Spatial Clustering ===");
-                var pm4Buildings = ExtractPm4Buildings(pm4Path);
-                
+                // Step 1: Extract PM4 buildings from the specified tile only
+                ConsoleLogger.WriteLine("\n=== Step 1: PM4 Building Extraction (Targeted Tile) ===");
+                var pm4Buildings = ExtractPm4BuildingsFromSpecificTile(pm4Path, targetTileX, targetTileY);
+
                 if (!pm4Buildings.Any())
                 {
-                    ConsoleLogger.WriteLine("ERROR: No PM4 buildings extracted from spatial clustering");
+                    ConsoleLogger.WriteLine("ERROR: No PM4 buildings extracted from targeted tile");
                     return;
                 }
 
-                ConsoleLogger.WriteLine($"Extracted {pm4Buildings.Count} PM4 buildings");
+                ConsoleLogger.WriteLine($"Extracted {pm4Buildings.Count} PM4 buildings from tile {targetTileX:D2}_{targetTileY:D2}");
 
                 // Step 2: Perform PM4-WMO correlation
                 ConsoleLogger.WriteLine("\n=== Step 2: PM4-WMO Spatial Correlation Analysis ===");
@@ -108,10 +118,11 @@ namespace ParpToolbox.CliCommands
 
                 ConsoleLogger.WriteLine($"Scene loaded: {scene.Placements.Count} placements, {scene.Links.Count} links, {scene.Surfaces.Count} surfaces");
 
-                // Use spatial clustering assembler to export buildings
+                // Use spatial clustering assembler to export buildings based on correct PM4 architecture
                 var assembler = new Pm4SpatialClusteringAssembler();
-                var tempOutputDir = Path.Combine(Path.GetTempPath(), "pm4_temp_" + Guid.NewGuid().ToString("N")[0..8]);
-                var exportSummary = assembler.ExportBuildingsUsingSpatialClustering(scene, tempOutputDir, "temp_15_37");
+                // Use ProjectOutput helper to ensure files are written to the timestamped project directory
+                var outputDir = ProjectOutput.CreateOutputDirectory("pm4_wmo_match");
+                var exportSummary = assembler.ExportBuildingsUsingSpatialClustering(scene, outputDir, Path.GetFileNameWithoutExtension(pm4Path));
 
                 ConsoleLogger.WriteLine($"Spatial clustering exported {exportSummary.Buildings.Count} building clusters");
 
@@ -119,42 +130,188 @@ namespace ParpToolbox.CliCommands
                 int buildingIndex = 1;
                 foreach (var building in exportSummary.Buildings)
                 {
-                    var buildingId = $"development_15_37_building_{buildingIndex}";
-                    
-                    // Generate a synthetic surface key from building metadata or use index
-                    var surfaceKey = (uint)(building.Metadata.ContainsKey("SurfaceKey") ?
-                        building.Metadata["SurfaceKey"] : (0x40000000 + buildingIndex));
-                    
-                    var triangleCount = building.TriangleCount;
-                    var vertexCount = building.VertexCount;
-
-                    // Extract MSCN vertices if available from ExtraChunks
                     var mscnVertices = new List<Vector3>();
                     var mscnChunk = scene.ExtraChunks?.OfType<MscnChunk>().FirstOrDefault();
                     if (mscnChunk?.Vertices?.Any() == true)
                     {
-                        // For now, use sample MSCN vertices - in real implementation,
-                        // we'd need to map building surfaces to their MSCN collision vertices
-                        mscnVertices = mscnChunk.Vertices.Take(Math.Min(10, mscnChunk.Vertices.Count)).ToList();
+                        foreach (var v in mscnChunk.Vertices)
+                        {
+                            // Transform Y,X,Z and scale once by 1/4096
+                            mscnVertices.Add(new Vector3(v.Y, v.X, v.Z));
+                        }
+                    }
+
+                    var mscnBoundingBoxMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                    var mscnBoundingBoxMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+                    foreach (var vertex in mscnVertices)
+                    {
+                        mscnBoundingBoxMin.X = Math.Min(mscnBoundingBoxMin.X, vertex.X);
+                        mscnBoundingBoxMin.Y = Math.Min(mscnBoundingBoxMin.Y, vertex.Y);
+                        mscnBoundingBoxMin.Z = Math.Min(mscnBoundingBoxMin.Z, vertex.Z);
+
+                        mscnBoundingBoxMax.X = Math.Max(mscnBoundingBoxMax.X, vertex.X);
+                        mscnBoundingBoxMax.Y = Math.Max(mscnBoundingBoxMax.Y, vertex.Y);
+                        mscnBoundingBoxMax.Z = Math.Max(mscnBoundingBoxMax.Z, vertex.Z);
+                    }
+
+                    var triangleCount = 0; // we no longer rely on surface triangles
+                    var vertexCount = mscnVertices.Count;
+
+                    uint surfaceKey = 0u;
+                    if (building.Metadata.TryGetValue("SurfaceKey", out var skObj) && skObj is string skStr && skStr.StartsWith("0x"))
+                    {
+                        _ = uint.TryParse(skStr.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out surfaceKey);
                     }
 
                     var pm4Building = Pm4WmoMatcher.CreatePm4Building(
-                        buildingId, surfaceKey, triangleCount, vertexCount, mscnVertices);
+                        $"B{buildingIndex}", surfaceKey, triangleCount, vertexCount, mscnVertices);
+
+                    // Set the calculated properties
+                    pm4Building.CenterPoint = (mscnBoundingBoxMin + mscnBoundingBoxMax) / 2;
+                    pm4Building.BoundingBoxMin = mscnBoundingBoxMin;
+                    pm4Building.BoundingBoxMax = mscnBoundingBoxMax;
+                    pm4Building.SurfaceArea = 0;
 
                     buildings.Add(pm4Building);
                     buildingIndex++;
                 }
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.WriteLine($"ERROR during PM4 building extraction: {ex.Message}");
+            }
 
-                // Clean up temp directory
-                try
+            return buildings;
+        }
+
+        /// <summary>
+        /// Extract PM4 buildings from a specific tile using spatial clustering
+        /// </summary>
+        private List<Pm4WmoMatcher.Pm4Building> ExtractPm4BuildingsFromSpecificTile(string pm4Path, int targetTileX, int targetTileY)
+        {
+            var buildings = new List<Pm4WmoMatcher.Pm4Building>();
+
+            try
+            {
+                // Load specific PM4 tile only
+                ConsoleLogger.WriteLine($"Loading PM4 tile {targetTileX:D2}_{targetTileY:D2} only...");
+                var adapter = new Pm4Adapter();
+                var dir = Path.GetDirectoryName(pm4Path);
+                var name = Path.GetFileNameWithoutExtension(pm4Path);
+                var parts = name.Split('_');
+                
+                // Get the prefix (everything except the last two parts which are coordinates)
+                var prefix = string.Join("_", parts.Take(parts.Length - 2));
+                
+                var scene = adapter.LoadSpecificTile(dir ?? "", prefix, targetTileX, targetTileY);
+
+                if (scene == null)
                 {
-                    if (Directory.Exists(tempOutputDir))
-                        Directory.Delete(tempOutputDir, true);
+                    ConsoleLogger.WriteLine("ERROR: Failed to load PM4 scene");
+                    return buildings;
                 }
-                catch
+
+                ConsoleLogger.WriteLine($"Scene loaded: {scene.Placements.Count} placements, {scene.Links.Count} links, {scene.Surfaces.Count} surfaces");
+
+                // Use spatial clustering assembler to export buildings based on correct PM4 architecture
+                var assembler = new Pm4SpatialClusteringAssembler();
+                // Use ProjectOutput helper to ensure files are written to the timestamped project directory
+                var outputDir = ProjectOutput.CreateOutputDirectory("pm4_wmo_match");
+                var exportSummary = assembler.ExportBuildingsUsingSpatialClustering(scene, outputDir, $"{prefix}_{targetTileX:D2}_{targetTileY:D2}");
+
+                ConsoleLogger.WriteLine($"Spatial clustering exported {exportSummary.Buildings.Count} building clusters");
+
+                // Convert to PM4WMO matcher format
+                int buildingIndex = 1;
+                foreach (var building in exportSummary.Buildings)
                 {
-                    // Ignore cleanup errors
+                    // Determine mesh bounding box from the mesh vertices of this building
+                    var meshMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                    var meshMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                    foreach (var mv in building.Vertices)
+                    {
+                        meshMin.X = Math.Min(meshMin.X, mv.X);
+                        meshMin.Y = Math.Min(meshMin.Y, mv.Y);
+                        meshMin.Z = Math.Min(meshMin.Z, mv.Z);
+
+                        meshMax.X = Math.Max(meshMax.X, mv.X);
+                        meshMax.Y = Math.Max(meshMax.Y, mv.Y);
+                        meshMax.Z = Math.Max(meshMax.Z, mv.Z);
+                    }
+
+                    // Extract MSCN vertices that fall inside (or very close to) that bounding box.
+                    var mscnVertices = new List<Vector3>();
+                    const float bboxMargin = 5.0f; // a little padding to cope with numeric drift
+                    if (scene.ExtraChunks.OfType<MscnChunk>().FirstOrDefault() is MscnChunk mscn)
+                    {
+                        foreach (var pt in mscn.Vertices)
+                        {
+                            var vec = new Vector3(pt.Y, pt.X, pt.Z);
+                            if (vec.X >= meshMin.X - bboxMargin && vec.X <= meshMax.X + bboxMargin &&
+                                vec.Y >= meshMin.Y - bboxMargin && vec.Y <= meshMax.Y + bboxMargin &&
+                                vec.Z >= meshMin.Z - bboxMargin && vec.Z <= meshMax.Z + bboxMargin)
+                            {
+                                mscnVertices.Add(vec);
+                            }
+                        }
+                    }
+
+                    // If no MSCN vertices matched the mesh bbox, we still keep the filtered list (which may be empty).
+
+                    
+                    // Calculate bounding box from filtered MSCN vertices
+                    var mscnBoundingBoxMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                    var mscnBoundingBoxMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                    foreach (var mv in mscnVertices)
+                    {
+                        mscnBoundingBoxMin.X = Math.Min(mscnBoundingBoxMin.X, mv.X);
+                        mscnBoundingBoxMin.Y = Math.Min(mscnBoundingBoxMin.Y, mv.Y);
+                        mscnBoundingBoxMin.Z = Math.Min(mscnBoundingBoxMin.Z, mv.Z);
+
+                        mscnBoundingBoxMax.X = Math.Max(mscnBoundingBoxMax.X, mv.X);
+                        mscnBoundingBoxMax.Y = Math.Max(mscnBoundingBoxMax.Y, mv.Y);
+                        mscnBoundingBoxMax.Z = Math.Max(mscnBoundingBoxMax.Z, mv.Z);
+                    }
+
+                    var triangleCount = building.TriangleCount;
+                    var vertexCount = mscnVertices.Count;
+
+                    uint surfaceKey = 0u;
+                    if (building.Metadata.TryGetValue("SurfaceKey", out var skObj) && skObj is string skStr && skStr.StartsWith("0x"))
+                    {
+                        _ = uint.TryParse(skStr.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out surfaceKey);
+                    }
+
+                    // Export MSCN-only OBJ for visual debugging
+                    try
+                    {
+                        var objPath = Path.Combine(outputDir, $"mscnbldg_{buildingIndex}.obj");
+                        using var sw = new StreamWriter(objPath);
+                        foreach (var v in mscnVertices)
+                        {
+                            sw.WriteLine($"v {v.X} {v.Y} {v.Z}");
+                        }
+                    }
+                    catch (Exception objEx)
+                    {
+                        ConsoleLogger.WriteLine($"WARNING: Failed to write MSCN OBJ for building {buildingIndex}: {objEx.Message}");
+                    }
+
+                    var pm4Building = Pm4WmoMatcher.CreatePm4Building(
+                        $"B{buildingIndex}", surfaceKey, building.TriangleCount, building.VertexCount, mscnVertices);
+
+                    // Set the calculated properties
+                    pm4Building.CenterPoint = (mscnBoundingBoxMin + mscnBoundingBoxMax) / 2;
+                    pm4Building.BoundingBoxMin = mscnBoundingBoxMin;
+                    pm4Building.BoundingBoxMax = mscnBoundingBoxMax;
+                    pm4Building.SurfaceArea = 0;
+                    buildings.Add(pm4Building);
+                    buildingIndex++;
                 }
+
+                // No need for cleanup since we're using the ProjectOutput directory
+                // Output files will remain in the project_output directory as expected
 
                 return buildings;
             }

@@ -19,7 +19,7 @@ namespace ParpToolbox.Services.PM4
         private readonly IWmoLoader _wmoLoader;
 
         // Coordinate system constants
-        private const float MSCN_SCALE_FACTOR = 1.0f / 4096.0f;
+        private const float MSCN_SCALE_FACTOR = 1.0f;
         private const float CORRELATION_DISTANCE_THRESHOLD = 100.0f; // WoW units
         private const float GEOMETRY_SIMILARITY_THRESHOLD = 0.7f; // 70% similarity
 
@@ -121,11 +121,23 @@ namespace ParpToolbox.Services.PM4
         {
             try
             {
-                var (textures, groups) = _wmoLoader.Load(wmoFilePath);
+                // Try to load collision-only geometry first
+                var (textures, groups) = _wmoLoader is WowToolsLocalWmoLoader wowLoader 
+                    ? wowLoader.LoadCollisionOnly(wmoFilePath) 
+                    : _wmoLoader.Load(wmoFilePath);
+                
+                // If no collision groups found, fall back to all geometry
                 if (groups == null || !groups.Any())
                 {
-                    _logger.LogWarning($"No WMO groups found in {wmoFilePath}");
-                    return null;
+                    _logger.LogWarning($"No collision groups found in {wmoFilePath}, falling back to all geometry");
+                    var (allTextures, allGroups) = _wmoLoader.Load(wmoFilePath);
+                    groups = allGroups;
+                    
+                    if (groups == null || !groups.Any())
+                    {
+                        _logger.LogWarning($"No WMO groups found in {wmoFilePath}");
+                        return null;
+                    }
                 }
 
                 var geometry = new WmoGeometry
@@ -225,7 +237,71 @@ namespace ParpToolbox.Services.PM4
                 similarities.Add(areaRatio);
             }
 
+            // MSCN-based shape similarity (if MSCN data is available)
+            if (pm4Building.MscnVertices.Any())
+            {
+                var mscnSimilarity = CalculateMscnBasedSimilarity(pm4Building, wmoGeometry);
+                similarities.Add(mscnSimilarity);
+            }
+
             return similarities.Average();
+        }
+
+        /// <summary>
+        /// Calculate shape similarity based on MSCN point cloud data
+        /// </summary>
+        private float CalculateMscnBasedSimilarity(Pm4Building pm4Building, WmoGeometry wmoGeometry)
+        {
+            // For now, we'll use a simple approach comparing bounding box centers and sizes
+            // In a more advanced implementation, we could use point cloud matching algorithms
+            
+            // Calculate distance between bounding box centers
+            var centerDistance = Vector3.Distance(pm4Building.CenterPoint, wmoGeometry.CenterPoint);
+            
+            // Convert to similarity score (closer = more similar)
+            var centerSimilarity = Math.Max(0, 1.0f - (centerDistance / CORRELATION_DISTANCE_THRESHOLD));
+            
+            // Calculate bounding box overlap ratio
+            var overlapRatio = CalculateBoundingBoxOverlap(
+                pm4Building.BoundingBoxMin, pm4Building.BoundingBoxMax,
+                wmoGeometry.BoundingBoxMin, wmoGeometry.BoundingBoxMax);
+            
+            // Combine MSCN-based metrics
+            return (centerSimilarity * 0.7f) + (overlapRatio * 0.3f);
+        }
+
+        /// <summary>
+        /// Calculate bounding box overlap ratio
+        /// </summary>
+        private float CalculateBoundingBoxOverlap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+        {
+            // Calculate intersection boundaries
+            var intersectMin = new Vector3(
+                Math.Max(minA.X, minB.X),
+                Math.Max(minA.Y, minB.Y),
+                Math.Max(minA.Z, minB.Z));
+            
+            var intersectMax = new Vector3(
+                Math.Min(maxA.X, maxB.X),
+                Math.Min(maxA.Y, maxB.Y),
+                Math.Min(maxA.Z, maxB.Z));
+            
+            // Check if boxes actually intersect
+            if (intersectMin.X > intersectMax.X || intersectMin.Y > intersectMax.Y || intersectMin.Z > intersectMax.Z)
+                return 0.0f; // No intersection
+            
+            // Calculate intersection volume
+            var intersectVolume = (intersectMax.X - intersectMin.X) * 
+                                (intersectMax.Y - intersectMin.Y) * 
+                                (intersectMax.Z - intersectMin.Z);
+            
+            // Calculate individual volumes
+            var volumeA = (maxA.X - minA.X) * (maxA.Y - minA.Y) * (maxA.Z - minA.Z);
+            var volumeB = (maxB.X - minB.X) * (maxB.Y - minB.Y) * (maxB.Z - minB.Z);
+            
+            // Return overlap ratio (intersection volume / average of both volumes)
+            var averageVolume = (volumeA + volumeB) / 2.0f;
+            return intersectVolume / averageVolume;
         }
 
         /// <summary>

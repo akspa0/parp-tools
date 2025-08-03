@@ -394,24 +394,45 @@ namespace WoWToolbox.Tests.Navigation.PM4
                                 // First get vertex count for the proper offset
                                 int localMsvtVertexCount = pm4File.MSVT.Vertices.Count;
 
-                                // The indices form triangle fans where idx0 is the central vertex
-                                for (int i = 0; i < msur.IndexCount - 2; i++)
+                                // --- Updated triangulation logic: handles triangles, quads, and n-gons ---
+                                int polyVertexCount = msur.IndexCount;
+                                var polyIndices = new List<uint>(polyVertexCount);
+                                for (int i = 0; i < polyVertexCount; i++)
                                 {
-                                    // Properly triangulate by reading the correct indices for each triangle
-                                    uint idx0 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex];
-                                    uint idx1 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i + 1];
-                                    uint idx2 = pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i + 2];
-                                    
-                                    if (idx0 < localMsvtVertexCount && 
-                                        idx1 < localMsvtVertexCount && 
-                                        idx2 < localMsvtVertexCount)
+                                    polyIndices.Add(pm4File.MSVI.Indices[(int)msur.MsviFirstIndex + i]);
+                                }
+
+                                // Validate indices lie within vertex buffer
+                                if (polyIndices.Any(idx => idx >= localMsvtVertexCount))
+                                {
+                                    continue; // skip malformed surface
+                                }
+
+                                // Triangles (3-verts) : single face
+                                if (polyVertexCount == 3)
+                                {
+                                    WriteFace(polyIndices[0], polyIndices[1], polyIndices[2]);
+                                }
+                                // Quads (4-verts) : split into two triangles (0-1-2) & (0-2-3)
+                                else if (polyVertexCount == 4)
+                                {
+                                    WriteFace(polyIndices[0], polyIndices[1], polyIndices[2]);
+                                    WriteFace(polyIndices[0], polyIndices[2], polyIndices[3]);
+                                }
+                                // N-gon (>4) : triangle fan from vertex 0
+                                else if (polyVertexCount > 4)
+                                {
+                                    for (int i = 1; i < polyVertexCount - 1; i++)
                                     {
-                                        // Add vertex offset to account for previous files' vertices
-                                        // Add 1 for OBJ's 1-based indexing
-                                        // Use triangle fan pattern with proper winding order 
-                                        combinedWithMscnWriter.WriteLine($"f {idx0 + 1 + totalVerticesOffset} {idx1 + 1 + totalVerticesOffset} {idx2 + 1 + totalVerticesOffset}");
-                                        facesWritten++;
+                                        WriteFace(polyIndices[0], polyIndices[i], polyIndices[i + 1]);
                                     }
+                                }
+
+                                // Local helper to emit a single OBJ face with correct offsets
+                                void WriteFace(uint a, uint b, uint c)
+                                {
+                                    combinedWithMscnWriter.WriteLine($"f {a + 1 + totalVerticesOffset} {b + 1 + totalVerticesOffset} {c + 1 + totalVerticesOffset}");
+                                    facesWritten++;
                                 }
                             }
                         }

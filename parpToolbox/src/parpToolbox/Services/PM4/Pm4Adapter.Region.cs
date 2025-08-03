@@ -21,6 +21,20 @@ public sealed partial class Pm4Adapter
     public Pm4Scene LoadRegion(string firstTilePath) => LoadRegion(firstTilePath, new Pm4LoadOptions());
 
     /// <summary>
+    /// Loads a specific PM4 tile by coordinates
+    /// </summary>
+    public Pm4Scene LoadSpecificTile(string tileDirectory, string prefix, int tileX, int tileY)
+    {
+        var tilePath = Path.Combine(tileDirectory, $"{prefix}_{tileX:D2}_{tileY:D2}.pm4");
+        if (!File.Exists(tilePath))
+        {
+            throw new FileNotFoundException($"Specified PM4 tile not found: {tilePath}");
+        }
+        
+        return Load(tilePath);
+    }
+
+    /// <summary>
     /// Loads a complete region of PM4 tiles based on the path to the first tile, merging
     /// vertices, indices, and related chunk data to resolve cross-tile references.
     /// </summary>

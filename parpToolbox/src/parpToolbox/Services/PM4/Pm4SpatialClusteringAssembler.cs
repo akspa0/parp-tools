@@ -28,6 +28,13 @@ namespace ParpToolbox.Services.PM4
             public int VertexCount => Vertices.Count;
             public int TriangleCount => TriangleIndices.Count / 3;
             public bool HasGeometry => Vertices.Count > 0 && TriangleIndices.Count > 0;
+            
+            // Added for WMO correlation
+            public Vector3 CenterPoint { get; set; }
+            public Vector3 BoundingBoxMin { get; set; }
+            public Vector3 BoundingBoxMax { get; set; }
+            public float SurfaceArea { get; set; }
+            public List<Vector3> MscnVertices { get; set; } = new();
         }
 
         public class ExportSummary
@@ -166,18 +173,33 @@ namespace ParpToolbox.Services.PM4
                     var buildingIndex = buildings.Count;
                     ConsoleLogger.WriteLine($"Building {buildingIndex + 1}: SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces, {triangleCount} triangles)");
                     
-                    // For now, use the original working approach to avoid performance regression
-                    // The SurfaceKey grouping already gives us meaningful building-scale objects
-                    var buildingEntries = new List<dynamic>();
+                    // Use the original hybrid building approach - calculate bounds of surfaces then find MSLK entries
+                    // Calculate bounds of surface group to find nearby structural elements
+                    var surfaceBounds = CalculateSurfaceGroupBounds(scene, surfaceIndices);
                     
-                    ConsoleLogger.WriteLine($"  Using surface-only approach for SurfaceKey 0x{surfaceKey:X8} ({surfaceIndices.Count} surfaces)");
-                    
-                    // Create building combining structural elements and surfaces from this SurfaceKey group
-                    var building = CreateHybridBuilding_StructuralPlusNearby(scene, buildingEntries, surfaceIndices, baseFileName, buildingIndex);
-                    building.Metadata["SurfaceKey"] = $"0x{surfaceKey:X8}";
-                    building.Metadata["SurfaceCount"] = surfaceIndices.Count;
-                    
-                    buildings.Add(building);
+                    if (surfaceBounds != null)
+                    {
+                        // Find structural elements near these surfaces using spatial proximity
+                        float proximityTolerance = 5.0f;
+                        
+                        // CRITICAL FIX: Find the actual MSLK structural elements near these surfaces
+                        // This is the key to resolving the exploded geometry issue
+                        var structuralElements = FindStructuralElementsNearBounds(scene, surfaceBounds.Value, proximityTolerance);
+                        
+                        // Log the process for debugging
+                        ConsoleLogger.WriteLine($"  Found {structuralElements.Count} structural elements for building {buildingIndex + 1}");
+                        
+                        // Create a hybrid building that includes both the surfaces and structural elements
+                        // This is critical to produce coherent building-scale objects
+                        var building = CreateHybridBuilding_StructuralPlusNearby(scene, structuralElements, surfaceIndices, baseFileName, buildingIndex);
+                        
+                        // Add surface key to metadata for traceability
+                        building.Metadata["SurfaceKey"] = $"0x{surfaceKey:X8}";
+                        building.Metadata["SurfaceCount"] = surfaceIndices.Count.ToString();
+                        building.Metadata["TriangleCount"] = triangleCount.ToString();
+                        
+                        buildings.Add(building);
+                    }
                 }
             }
             else
@@ -242,7 +264,7 @@ namespace ParpToolbox.Services.PM4
                     ExportBuildingToObj(building, objFilePath);
                     summary.SuccessfulExports++;
                     
-                    ConsoleLogger.WriteLine($"Exported {building.FileName}: {building.TriangleCount} triangles, {building.VertexCount} vertices → {objFileName}");
+                    ConsoleLogger.WriteLine($"Exported {building.FileName}: {building.TriangleCount} triangles, {building.VertexCount} vertices → {objFileName} | Metadata: {string.Join(", ", building.Metadata.Select(kv => $"{kv.Key}={kv.Value}"))}");
                 }
             }
 
@@ -254,6 +276,62 @@ namespace ParpToolbox.Services.PM4
             return summary;
         }
 
+        /// <summary>
+        /// Calculate bounding box of a surface group
+        /// </summary>
+        private (Vector3 min, Vector3 max)? CalculateSurfaceGroupBounds(ParpToolbox.Formats.PM4.Pm4Scene scene, List<int> surfaceIndices)
+        {
+            if (scene.Vertices == null || scene.Vertices.Count == 0 || surfaceIndices == null || surfaceIndices.Count == 0)
+                return null;
+                
+            Vector3? min = null;
+            Vector3? max = null;
+            
+            foreach (int surfaceIndex in surfaceIndices)
+            {
+                if (surfaceIndex >= 0 && surfaceIndex < scene.Surfaces.Count)
+                {
+                    var surface = scene.Surfaces[surfaceIndex];
+                    int firstIndex = (int)surface.MsviFirstIndex;
+                    int indexCount = surface.IndexCount;
+                    
+                    if (firstIndex >= 0 && indexCount > 0 && firstIndex + indexCount <= scene.Indices.Count)
+                    {
+                        for (int i = 0; i < indexCount && firstIndex + i < scene.Indices.Count; i++)
+                        {
+                            int vIdx = scene.Indices[firstIndex + i];
+                            if (vIdx >= 0 && vIdx < scene.Vertices.Count)
+                            {
+                                var vertex = scene.Vertices[vIdx];
+                                if (min == null)
+                                {
+                                    min = vertex;
+                                    max = vertex;
+                                }
+                                else
+                                {
+                                    min = new Vector3(
+                                        Math.Min(min.Value.X, vertex.X),
+                                        Math.Min(min.Value.Y, vertex.Y),
+                                        Math.Min(min.Value.Z, vertex.Z));
+                                        
+                                    max = new Vector3(
+                                        Math.Max(max.Value.X, vertex.X),
+                                        Math.Max(max.Value.Y, vertex.Y),
+                                        Math.Max(max.Value.Z, vertex.Z));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (min == null || max == null)
+                return null;
+                
+            return (min.Value, max.Value);
+        }
+        
         /// <summary>
         /// Calculate bounding box of structural elements (WORKING POC LOGIC)
         /// </summary>
@@ -530,6 +608,67 @@ namespace ParpToolbox.Services.PM4
         }
         
         /// <summary>
+        /// Find structural elements (MSLK entries) that are spatially near the given bounds
+        /// This is critical for creating coherent building-scale objects
+        /// </summary>
+        private List<dynamic> FindStructuralElementsNearBounds(ParpToolbox.Formats.PM4.Pm4Scene scene, (Vector3 min, Vector3 max) bounds, float tolerance)
+        {
+            var nearbyElements = new List<dynamic>();
+            
+            if (scene.Links == null || scene.Links.Count == 0)
+                return nearbyElements;
+                
+            // Expand bounds by tolerance
+            var expandedBounds = (
+                new Vector3(bounds.min.X - tolerance, bounds.min.Y - tolerance, bounds.min.Z - tolerance),
+                new Vector3(bounds.max.X + tolerance, bounds.max.Y + tolerance, bounds.max.Z + tolerance)
+            );
+            
+            // Find all MSLK entries with geometry that intersects with the expanded bounds
+            for (int i = 0; i < scene.Links.Count; i++)
+            {
+                var entry = scene.Links[i];
+                
+                // Only consider links with valid geometry
+                if (entry.MspiFirstIndex >= 0 && entry.MspiIndexCount > 0)
+                {
+                    int firstIdx = (int)entry.MspiFirstIndex;
+                    int indexCount = (int)entry.MspiIndexCount;
+                    
+                    if (firstIdx >= 0 && indexCount > 0 && firstIdx + indexCount <= scene.Indices.Count)
+                    {
+                        bool isInBounds = false;
+                        
+                        // Check if any vertex of this structural element is within bounds
+                        for (int j = 0; j < indexCount && !isInBounds && firstIdx + j < scene.Indices.Count; j++)
+                        {
+                            int vIdx = scene.Indices[firstIdx + j];
+                            
+                            if (vIdx >= 0 && vIdx < scene.Vertices.Count)
+                            {
+                                var vertex = scene.Vertices[vIdx];
+                                
+                                if (vertex.X >= expandedBounds.Item1.X && vertex.X <= expandedBounds.Item2.X &&
+                                    vertex.Y >= expandedBounds.Item1.Y && vertex.Y <= expandedBounds.Item2.Y &&
+                                    vertex.Z >= expandedBounds.Item1.Z && vertex.Z <= expandedBounds.Item2.Z)
+                                {
+                                    isInBounds = true;
+                                }
+                            }
+                        }
+                        
+                        if (isInBounds)
+                        {
+                            nearbyElements.Add(new { entry, index = i });
+                        }
+                    }
+                }
+            }
+            
+            return nearbyElements;
+        }
+        
+        /// <summary>
         /// Find MSUR surfaces that are spatially near the given bounds
         /// </summary>
         private List<int> FindMSURSurfacesNearBounds(ParpToolbox.Formats.PM4.Pm4Scene scene, (Vector3 min, Vector3 max) bounds, float tolerance)
@@ -661,4 +800,22 @@ namespace ParpToolbox.Services.PM4
 
     // Note: Coordinate transforms removed since we're using the already-processed
     // Vector3 vertices from Pm4Scene which have already been transformed
+}
+
+/// <summary>
+/// Simple axis-aligned bounding box for spatial calculations
+/// </summary>
+public struct BoundingBox
+{
+    public System.Numerics.Vector3 Min;
+    public System.Numerics.Vector3 Max;
+    
+    public BoundingBox(System.Numerics.Vector3 min, System.Numerics.Vector3 max)
+    {
+        Min = min;
+        Max = max;
+    }
+    
+    public System.Numerics.Vector3 Center => (Min + Max) * 0.5f;
+    public System.Numerics.Vector3 Size => Max - Min;
 }

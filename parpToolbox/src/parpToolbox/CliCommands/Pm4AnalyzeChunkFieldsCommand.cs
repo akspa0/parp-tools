@@ -65,7 +65,7 @@ namespace ParpToolbox.CliCommands
             catch (Exception ex)
             {
                 ConsoleLogger.WriteLine($"Error: {ex.Message}");
-                ConsoleLogger.WriteLine(ex.StackTrace);
+                ConsoleLogger.WriteLine(ex.StackTrace ?? "No stack trace available");
                 return 1;
             }
         }

@@ -135,6 +135,9 @@ try
             }
             return ParpToolbox.CliCommands.ExportCommand.Run(args, fileInfo.FullName).GetAwaiter().GetResult();
             
+        case "mscn-anchor":
+            return ParpToolbox.CliCommands.MscnAnchorAssemblerCommand.Run(args).GetAwaiter().GetResult();
+            
         case "test":
             if (string.IsNullOrEmpty(inputFile))
             {
@@ -464,7 +467,7 @@ try
             
         case "pm4-export-spatial-clustering":
             // Handle both --output=value and --output value formats
-            string spatialOutputArg = null;
+            string spatialOutputArg = string.Empty;
             var outputFlagIndex = Array.FindIndex(args, a => a == "--output" || a.StartsWith("--output="));
             if (outputFlagIndex >= 0)
             {
@@ -488,8 +491,8 @@ try
             break;
             
         case "pm4-export-scene-graph":
-            string sceneGraphInputPath = null;
-            string sceneGraphOutputPath = null;
+            string sceneGraphInputPath = string.Empty;
+            string sceneGraphOutputPath = string.Empty;
             
             // Parse arguments for scene graph export command
             for (int i = 1; i < args.Length; i++) // Start from 1 to skip command name
@@ -548,8 +551,8 @@ try
             break;
 
         case "pm4-analyze-data-banding":
-            string bandingInputPath = null;
-            string bandingOutputPath = null;
+            string bandingInputPath = string.Empty;
+            string bandingOutputPath = string.Empty;
             
             // Parse arguments for data banding command
             for (int i = 1; i < args.Length; i++) // Start from 1 to skip command name
@@ -596,8 +599,8 @@ try
             break;
 
         case "pm4-export-4d-objects":
-            string export4DInputPath = null;
-            string export4DOutputPath = null;
+            string export4DInputPath = string.Empty;
+            string export4DOutputPath = string.Empty;
             
             // Parse arguments for 4D export command
             for (int i = 1; i < args.Length; i++)

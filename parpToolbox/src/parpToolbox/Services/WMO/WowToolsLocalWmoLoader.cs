@@ -18,6 +18,16 @@ namespace ParpToolbox.Services.WMO
     {
         public (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) Load(string path, bool includeFacades = false)
         {
+            return LoadWithFilter(path, includeFacades, g => true);
+        }
+
+        public (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) LoadCollisionOnly(string path)
+        {
+            return LoadWithFilter(path, false, g => IsCollisionGroup(g));
+        }
+
+        private (IReadOnlyList<string> textures, IReadOnlyList<WmoGroup> groups) LoadWithFilter(string path, bool includeFacades, Func<MOGP, bool> groupFilter)
+        {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("Path cannot be null or empty", nameof(path));
 
@@ -36,6 +46,10 @@ namespace ParpToolbox.Services.WMO
                 {
                     var grp = wmo.group[gi];
                     var mogp = grp.mogp;
+
+                    // Apply group filter
+                    if (!groupFilter(mogp))
+                        continue;
 
                     if (mogp.vertices == null || mogp.indices == null)
                         continue; // skip empty groups
@@ -106,6 +120,12 @@ namespace ParpToolbox.Services.WMO
             }
 
             return (textures, groups);
+        }
+
+        private bool IsCollisionGroup(MOGP mogp)
+        {
+            // Check if group has unreachable or lod flags which indicate collision geometry
+            return (mogp.flags & (MOGPFlags.mogp_unreachable | MOGPFlags.mogp_lod)) != 0;
         }
     }
 }

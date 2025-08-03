@@ -34,6 +34,28 @@ public class AnalyzePm4KeysCommand
         var chunkType = invocationContext.ParseResult.GetValueForOption(ChunkTypeOption);
         var keyField = invocationContext.ParseResult.GetValueForOption(KeyFieldOption);
 
+        // Validate required arguments
+        if (string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("Error: Input path is required.");
+            return 1;
+        }
+        if (string.IsNullOrEmpty(outputPath))
+        {
+            Console.WriteLine("Error: Output path is required.");
+            return 1;
+        }
+        if (string.IsNullOrEmpty(chunkType))
+        {
+            Console.WriteLine("Error: Chunk type is required.");
+            return 1;
+        }
+        if (string.IsNullOrEmpty(keyField))
+        {
+            Console.WriteLine("Error: Key field is required.");
+            return 1;
+        }
+
         Console.WriteLine("=== PM4 Data Web Analysis ===");
         Console.WriteLine($"Input: {inputPath}");
         Console.WriteLine($"Output: {outputPath}");
