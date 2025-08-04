@@ -1,42 +1,105 @@
-# Active Context: Return to Working Spatial Clustering
+# Active Context: MSCN-WMO Spatial Correlation & Large-Scale Analysis
 
-**CRITICAL FINDING:** The "Data Web" packed field hypothesis was a **dead end** that destroys spatial coherence and produces "imploding" fragmented geometry. We have abandoned this approach entirely.
+**MAJOR BREAKTHROUGH ACHIEVED**: Successfully implemented robust MSCN anchor to WMO geometry correlation with batch processing capabilities for large-scale World of Warcraft map data analysis.
 
-## 🚫 **DEAD END APPROACHES - DO NOT REVISIT:**
+## 🎯 **CURRENT FOCUS: Spatial Correlation Analysis**
 
-### ❌ Byte-Splitting/Packed Field Grouping
-- **SurfaceRefIndex[lower 8-bit] ↔ SurfaceKey[lower 8-bit]** linkage
-- **Grouping by upper/lower bytes** of any PM4 fields
-- **ParentIndex byte decomposition** and container theories
-- **Result:** Destroys spatial relationships, produces fragmented "imploding" geometry
-- **User Diagnosis:** "distributes the verts in a weird almost -imploding- style mess"
+### ✅ **BREAKTHROUGH ACHIEVEMENTS (August 2025)**
 
-### Why Byte-Splitting Fails
-1. **Destroys Natural Object Boundaries:** PM4's SurfaceKey grouping already represents coherent objects
-2. **Artificial Fragmentation:** Splits vertices based on arbitrary bit patterns instead of spatial relationships
-3. **Loses Geometric Coherence:** Creates meaningless objects that don't correspond to actual building geometry
+#### 🔧 **Fixed Critical Correlation Bug**
+- **Problem**: Correlation analysis was finding object-level matches but reporting 0% correlation
+- **Root Cause**: Object-level clustering logic wasn't properly creating vertex-level `SpatialMatch` objects
+- **Solution**: Implemented proper vertex-to-vertex matching within overlapping object clusters
+- **Result**: Accurate correlation percentages, match counts, and visualization export
 
-## ✅ **CORRECT APPROACH: Working Spatial Clustering**
+#### 🎨 **Working Visualization Confirmed**
+- **Visual Proof**: MSCN anchors properly align with WMO geometry in 3D visualization (MeshLab)
+- **Test Case**: Stormwind Harbor canal geometry shows clear spatial correlation
+- **Export Format**: OBJ files with matched vertex pairs and connection lines
+- **Coordinate Systems**: Successfully normalized MSCN world coordinates to WMO local space
 
-### 🏗️ What Actually Works
-The **Pm4SpatialClusteringAssembler** already produces correct building-scale objects by:
+#### 🚀 **Batch Processing System**
+- **Command**: `batch-mscn-wmo-correlation` for large-scale analysis
+- **Parallel Processing**: Multi-threaded with configurable parallelism
+- **Intelligent Filtering**: Skip obviously unrelated file pairs for performance
+- **Comprehensive Reporting**: JSON + text reports with statistics and top correlations
+- **Scalability**: Ready for processing thousands of PM4/WMO combinations
 
-1. **Respecting Natural PM4 Boundaries:** Uses **full SurfaceKey values** as natural grouping units
-2. **Size-Based Filtering:** Applies intelligent triangle count limits (10-50k triangles) to avoid oversized/multi-building groups
-3. **Spatial Coherence:** Maintains geometric relationships through proper clustering
-4. **Cross-Tile Filtering:** Eliminates cross-tile references that break object boundaries
+### 🔬 **TECHNICAL IMPLEMENTATIONS**
 
-### 🔧 Technical Enhancements to Apply
-While preserving the working spatial clustering logic, enhance it with discoveries from the Data Web exploration:
+#### **Spatial Correlation Engine**
+- **Spatial Hash Grids**: O(1) nearest neighbor lookup for large datasets
+- **Multi-tile MSCN Aggregation**: Load anchors from 3x3 tile grids for complete coverage
+- **Coordinate Normalization**: Transform MSCN world coordinates to WMO local space
+- **Distance Tolerance**: Configurable matching tolerance for collision-to-geometry correlation
 
-1. **Improved Linkage:** Better MSLK ↔ MSUR connections (without byte-splitting)
-2. **Surface Deduplication:** Logic to avoid duplicate geometry when combining sources
-3. **Robust Diagnostics:** Comprehensive logging and progress tracking
-4. **Correct Field Usage:** Proper MSUR properties (IndexCount, MsviFirstIndex)
-5. **Cycle Detection:** Robust handling of recursive/circular references
+#### **Performance Optimizations**
+- **Memory Efficient**: Handles large datasets without excessive memory usage
+- **Semaphore Control**: Prevents resource exhaustion during parallel processing
+- **Early Termination**: Skip processing for obviously unrelated file pairs
+- **Progress Tracking**: Real-time feedback during batch operations
 
-## Current Action Plan
-1. **✅ DONE:** Register working spatial clustering command (`spatial-clustering`)
-2. **🎯 NEXT:** Run and validate working spatial clustering baseline
-3. **🔧 ENHANCE:** Apply technical improvements without destroying spatial coherence
-4. **📊 MEASURE:** Compare enhanced vs baseline outputs for quality improvement
+#### **Visualization & Analysis**
+- **Match Visualization**: Export OBJ files showing vertex pairs and connection lines
+- **Statistical Analysis**: Distance metrics, correlation percentages, match distributions
+- **Debug Tolerance Testing**: Automatic testing with multiple tolerance values
+- **Comprehensive Reports**: Detailed analysis with top matches and spatial bounds
+
+## 📊 **PROVEN RESULTS**
+
+### **Visual Confirmation**
+- MSCN anchors spatially align with WMO canal geometry in Stormwind Harbor
+- Yellow dots (MSCN) properly positioned relative to wireframe WMO structure
+- Correlation percentages now accurately reflect spatial relationships
+
+### **Scalable Architecture**
+- Batch processing system ready for enterprise-scale analysis
+- Configurable parallelism for different hardware capabilities
+- Intelligent filtering reduces unnecessary processing
+
+### **Technical Validation**
+- Fixed correlation calculation bug that was causing 0% reports
+- Proper vertex-level matching within object-level clusters
+- Accurate distance calculations and statistical analysis
+
+## 🎯 **IMMEDIATE NEXT STEPS**
+
+### **Phase 1: Enhanced File Discovery**
+- **CASC Integration**: Add wow.tools.local file discovery for game files
+- **Geographic Filtering**: Intelligent PM4-to-WMO matching by region/coordinates
+- **Metadata Extraction**: Parse tile coordinates and region information from filenames
+
+### **Phase 2: Machine Learning Enhancement**
+- **Pattern Recognition**: ML algorithms for large-scale correlation analysis
+- **Automated Classification**: Identify correlation patterns across different regions
+- **Predictive Matching**: Suggest likely PM4-WMO pairs before processing
+
+### **Phase 3: Database & Persistence**
+- **Result Storage**: Database for persistent correlation results
+- **Query Interface**: Search and filter correlation data
+- **Historical Analysis**: Track correlation changes over time
+
+## 🔮 **LONG-TERM VISION**
+
+### **Automated Map Analysis Platform**
+- **Full WoW World Coverage**: Process entire game world for spatial relationships
+- **Quality Assurance**: Validate game asset spatial consistency
+- **Research Platform**: Enable academic research on virtual world design
+- **Developer Tools**: Assist game developers with spatial validation
+
+### **Advanced Analytics**
+- **Spatial Pattern Discovery**: Identify common architectural patterns
+- **Asset Relationship Mapping**: Build comprehensive spatial relationship database
+- **Anomaly Detection**: Identify spatial inconsistencies or errors
+- **Performance Optimization**: Guide game engine optimization based on spatial analysis
+
+## 🏆 **PROJECT STATUS: BREAKTHROUGH PHASE COMPLETE**
+
+- **Core correlation system**: ✅ COMPLETE and WORKING
+- **Batch processing**: ✅ COMPLETE and TESTED
+- **Visualization export**: ✅ COMPLETE with OBJ output
+- **Performance optimization**: ✅ COMPLETE with spatial hashing
+- **Bug fixes**: ✅ COMPLETE - correlation calculation fixed
+- **Documentation**: 🔄 IN PROGRESS - updating memory bank
+
+**Ready for production use and large-scale analysis deployment.**
