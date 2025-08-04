@@ -31,6 +31,7 @@ if (args.Length == 0)
                       "  pm4-export-spatial-clustering Export PM4 objects using spatial clustering (with region loading)\n" +
                       "  pm4-export-scene-graph Export PM4 using scene graph traversal (BREAKTHROUGH APPROACH)\n" +
                       "  pm4-wmo-match         Perform PM4-to-WMO spatial correlation and matching analysis\n" +
+                      "  batch-mscn-wmo-correlation Batch correlate all PM4 MSCN anchors with all available WMO files\n" +
                       "  test       Run regression tests\n" +
                       "\nCommon flags:\n" +
                        "   --input <file>      Input file path\n" +
@@ -644,6 +645,12 @@ try
             
             await new Pm4Export4DObjectsCommand().RunAsync(export4DInputPath, export4DOutputPath);
             break;
+
+        case "mscn-wmo-compare":
+            return await MscnWmoComparisonCommand.Run(args);
+
+        case "batch-mscn-wmo-correlation":
+            return await BatchMscnWmoCorrelationCommand.CreateCommand().InvokeAsync(args.Skip(1).ToArray());
 
         default:
             Console.WriteLine($"Unknown command: {command}");
