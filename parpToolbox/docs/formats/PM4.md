@@ -1,5 +1,45 @@
 # PM4 Format Documentation
 
+## BREAKTHROUGH: PM4 Scene Graph Architecture
+
+**CRITICAL DISCOVERY**: PM4 files are fundamentally structured as **scene graphs** with hierarchical spatial organization and nested coordinate systems.
+
+### Scene Graph Structure
+
+```
+PM4 Scene Graph Hierarchy:
+MPRL (Building Root Nodes) - 458 buildings
+  ├─ Coordinate Transform Matrix
+  ├─ MSLK (Child Sub-objects) - ~13 per building
+  │   ├─ Local Transform
+  │   ├─ MSUR (Fine Geometry) → n-gon faces at full ADT resolution
+  │   └─ MSCN (Spatial Bounds) → 1/4096 scale spatial anchors
+  └─ Export as Single Unified Object
+```
+
+### Nested Coordinate Systems
+
+**All chunks exist within a single quadrant** of an XYZ coordinate system, but use different scaling and ground planes:
+
+- **MSCN Coordinates**: 1/4096 scale within quadrant (coarse spatial index)
+- **MSUR/MSVT/MSPI**: Full resolution (same scale as ADT terrain)
+- **Different Ground Planes**: Each coordinate space uses different orientations
+
+### Transform Requirements
+
+1. **Scale Transforms**: Convert between 1/4096 MSCN scale and full-resolution geometry
+2. **Coordinate System Transforms**: Convert between different ground plane orientations
+3. **Spatial Anchoring**: Use MSCN data to anchor/contain geometry from other chunks
+4. **Unified Export Space**: Transform all geometry into single coordinate system
+
+### Why Scene Graph Approach Works
+
+- **Leverages Built-in Optimizations**: PM4 is optimized for fast spatial queries
+- **Follows Hierarchical Structure**: MPRL → MSLK → geometry traversal
+- **Proper Transform Order**: Parent→child coordinate transforms
+- **Spatial Partitioning**: SurfaceKey as spatial index for fast queries
+- **LoD Integration**: MSCN coarse bounds → MSUR fine detail
+
 ## Verified Object Extraction Method
 
 ### Working Algorithm (Source: poc_exporter.cs)
