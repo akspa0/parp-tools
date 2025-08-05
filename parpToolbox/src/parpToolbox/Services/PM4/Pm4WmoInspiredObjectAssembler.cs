@@ -1,6 +1,7 @@
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4
@@ -164,7 +165,7 @@ namespace ParpToolbox.Services.PM4
             var vertex = scene.Vertices[(int)vertexIndex];
             
             // Apply WMO coordinate system transformation
-            return new Vector3(-vertex.X, vertex.Y, vertex.Z);
+            return CoordinateTransformationService.ApplyPm4Transformation(vertex);
         }
 
         /// <summary>

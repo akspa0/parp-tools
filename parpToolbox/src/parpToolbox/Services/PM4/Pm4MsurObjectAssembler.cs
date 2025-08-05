@@ -8,6 +8,7 @@ using System.Numerics;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Services.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 
@@ -48,7 +49,7 @@ internal static class Pm4MsurObjectAssembler
     private static Vector3 TransformMprlPosition(MprlChunk.Entry entry)
     {
         // PM4-relative transform: Rotate 90 degrees counter-clockwise to align with other chunks
-        return new Vector3(-entry.Position.Z, entry.Position.Y, entry.Position.X);
+        return CoordinateTransformationService.ApplyPm4Transformation(new Vector3(entry.Position.X, entry.Position.Y, entry.Position.Z));
     }
 
     /// <summary>
@@ -528,7 +529,7 @@ internal static class Pm4MsurObjectAssembler
         
         // Get raw vertex and apply legacy coordinate transform (Y,X,Z)
         var rawVertex = scene.Vertices[vertexIndex];
-        var transformedVertex = new Vector3(rawVertex.Y, rawVertex.X, rawVertex.Z);
+        var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(rawVertex);
         
         // Apply plane projection if needed (exact legacy logic)
         if (usePlane)
@@ -570,9 +571,9 @@ internal static class Pm4MsurObjectAssembler
             return -1; // Return invalid index to skip this vertex
         }
         
-        // Get raw vertex and apply legacy coordinate transform (Y,X,Z)
+        // Get raw vertex and apply unified coordinate transformation
         var rawVertex = scene.Vertices[vertexIndex];
-        var transformedVertex = new Vector3(rawVertex.Y, rawVertex.X, rawVertex.Z);
+        var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(rawVertex);
         
         // Check for zero coordinates before transformation and log them
         if (transformedVertex == Vector3.Zero)
@@ -751,7 +752,8 @@ internal static class Pm4MsurObjectAssembler
                     vertex = Vector3.Zero;
                 }
                 
-                writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+                writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
             }
             
             writer.WriteLine();

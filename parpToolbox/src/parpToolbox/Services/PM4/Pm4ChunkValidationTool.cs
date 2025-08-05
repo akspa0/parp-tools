@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {

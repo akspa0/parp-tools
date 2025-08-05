@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.CliCommands

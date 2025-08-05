@@ -56,7 +56,7 @@ namespace ParpToolbox.Services.PM4
                     ConsoleLogger.WriteLine($"[gltf] Warning: invalid vertex index {index}");
 
                 // Mirror X to convert WoW LH to glTF RH
-                return new VertexPositionNormal(new Vector3(-v.X, v.Y, v.Z), Vector3.UnitY);
+                return new VertexPositionNormal(CoordinateTransformationService.ApplyPm4Transformation(v), Vector3.UnitY);
             }
         }
     }
@@ -64,6 +64,7 @@ namespace ParpToolbox.Services.PM4
 using System.Numerics;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
@@ -128,7 +129,8 @@ internal static class GltfExporter
             }
 
             // Mirror X to convert left-handed WoW coords to glTF right-handed
-            return new VertexPositionNormal(new Vector3(-v.X, v.Y, v.Z), Vector3.UnitY);
+            var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(v);
+            return new VertexPositionNormal(new Vector3(transformedVertex.X, transformedVertex.Y, transformedVertex.Z), Vector3.UnitY);
         }
     }
 }
@@ -190,7 +192,7 @@ internal static class GltfExporter
             }
 
             // Mirror X to match OBJ path (WoW left-handed → glTF right-handed)
-            return new VertexPositionNormal(new Vector3(-v.X, v.Y, v.Z), Vector3.UnitY);
+            return new VertexPositionNormal(CoordinateTransformationService.ApplyPm4Transformation(v), Vector3.UnitY);
         }
     }
     {
@@ -220,7 +222,7 @@ internal static class GltfExporter
                     v = Vector3.Zero;
                     ConsoleLogger.WriteLine($"[gltf] Warning: invalid vertex index {globalIndex}");
                 }
-                return new VertexPositionNormal(new Vector3(-v.X, v.Y, v.Z), Vector3.UnitY);
+                return new VertexPositionNormal(CoordinateTransformationService.ApplyPm4Transformation(v), Vector3.UnitY);
             }
 
             int MapVertex(int globalIndex)
@@ -238,7 +240,7 @@ internal static class GltfExporter
                     }
 
                     // SharpGLTF expects right-handed; our OBJ exporter flips X so we do the same here.
-                    var vp = new VertexPositionNormal(new Vector3(-v.X, v.Y, v.Z), Vector3.UnitY);
+                    var vp = new VertexPositionNormal(CoordinateTransformationService.ApplyPm4Transformation(v), Vector3.UnitY);
                     localIdx = prim.AddVertex(vp);
                     vMap[globalIndex] = localIdx;
                 }

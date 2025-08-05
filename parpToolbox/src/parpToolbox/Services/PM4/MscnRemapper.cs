@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;
@@ -70,7 +71,8 @@ internal static class Pm4RawGeometryExporter
         // Write all vertices (with coordinate system fix)
         foreach (var vertex in scene.Vertices)
         {
-            writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+            var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+            writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
         }
         
         writer.WriteLine();
@@ -178,7 +180,8 @@ internal static class Pm4RawGeometryExporter
             foreach (var originalIndex in sortedVertices)
             {
                 var vertex = scene.Vertices[originalIndex];
-                writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+                writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
             }
             
             writer.WriteLine();

@@ -2,6 +2,7 @@ using System.Text.Json;
 using ParpToolbox.Utils;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {

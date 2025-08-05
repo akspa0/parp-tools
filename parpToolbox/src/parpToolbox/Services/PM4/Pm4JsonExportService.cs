@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {

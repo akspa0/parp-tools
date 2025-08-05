@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 /// <summary>
 /// Assembles PM4 objects using MPRR hierarchical grouping to combine component types into complete building objects.
@@ -281,7 +282,8 @@ internal static class Pm4HierarchicalObjectAssembler
                     vertex = Vector3.Zero;
                 }
                 
-                writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+                writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
             }
             
             writer.WriteLine();

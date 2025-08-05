@@ -35,6 +35,9 @@ namespace ParpToolbox.Formats.PM4
     /// <summary>Any additional raw chunks that were parsed but not yet surfaced, e.g. MSCN.</summary>
     public List<ParpToolbox.Formats.P4.Chunks.Common.IIffChunk> ExtraChunks { get; init; } = new();
 
+    /// <summary>MSCN vertices extracted from extra chunk (optional).</summary>
+    public List<System.Numerics.Vector3> MscnVertices { get; init; } = new();
+
     /// <summary>Raw binary chunk data captured during parsing for future-proofing and analysis.</summary>
     public Dictionary<string, byte[]> CapturedRawData { get; init; } = new();
 }

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;

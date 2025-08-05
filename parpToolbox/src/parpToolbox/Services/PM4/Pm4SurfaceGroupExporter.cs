@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4;
@@ -13,7 +14,7 @@ namespace ParpToolbox.Services.PM4;
 /// Clean, simple PM4 exporter that exports each surface group as a separate building object.
 /// Surface groups (MSUR.SurfaceGroupKey) are the correct object boundaries.
 /// </summary>
-internal static class Pm4SurfaceGroupExporter
+public static class Pm4SurfaceGroupExporter
 {
     /// <summary>
     /// Export PM4 surface groups as individual building objects.
@@ -152,7 +153,7 @@ internal static class Pm4SurfaceGroupExporter
         foreach (var vertexIndex in sortedVertices)
         {
             var vertex = scene.Vertices[vertexIndex];
-            buildingCenter += new Vector3(-vertex.X, vertex.Y, -vertex.Z);
+            buildingCenter += CoordinateTransformationService.ApplyPm4Transformation(vertex);
         }
         buildingCenter /= sortedVertices.Count;
         
@@ -175,7 +176,8 @@ internal static class Pm4SurfaceGroupExporter
         foreach (var originalIndex in sortedVertices)
         {
             var vertex = scene.Vertices[originalIndex];
-            writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {-vertex.Z:F6}"); // Fix X and Z axes
+            var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+            writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
         }
         
         writer.WriteLine();

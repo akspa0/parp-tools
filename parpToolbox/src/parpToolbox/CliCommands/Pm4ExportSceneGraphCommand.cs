@@ -2,6 +2,7 @@ using System;
 using System.CommandLine;
 using System.IO;
 using ParpToolbox.Utils;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Services.PM4;
 using ParpToolbox.Formats.PM4;
 

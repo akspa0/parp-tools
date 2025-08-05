@@ -6,6 +6,7 @@ using System.Numerics;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {
@@ -781,7 +782,7 @@ namespace ParpToolbox.Services.PM4
                 // Write vertices
                 foreach (var vertex in building.Vertices)
                 {
-                    writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}"); // Fix X-axis
+                    writer.WriteLine($"v {CoordinateTransformationService.ApplyPm4Transformation(vertex).X:F6} {CoordinateTransformationService.ApplyPm4Transformation(vertex).Y:F6} {CoordinateTransformationService.ApplyPm4Transformation(vertex).Z:F6}");
                 }
 
                 writer.WriteLine();

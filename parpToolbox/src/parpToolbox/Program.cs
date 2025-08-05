@@ -314,7 +314,37 @@ try
             return 0;
 
         case "pm4-export-json":
-            var outputArg = args.FirstOrDefault(a => a.StartsWith("--output"))?.Split('=')[1];
+            var outputArg = args.FirstOrDefault(a => a.StartsWith("--output"));
+            if (!string.IsNullOrEmpty(outputArg) && outputArg.Contains("="))
+            {
+                outputArg = outputArg.Split('=')[1];
+            }
+            else
+            {
+                // Handle case where output is provided as separate argument
+                var outputIndex = Array.IndexOf(args, "--output");
+                if (outputIndex != -1 && outputIndex + 1 < args.Length)
+                {
+                    outputArg = args[outputIndex + 1];
+                }
+                else
+                {
+                    outputArg = args.FirstOrDefault(a => a.StartsWith("-o"));
+                    if (!string.IsNullOrEmpty(outputArg) && outputArg.Contains("="))
+                    {
+                        outputArg = outputArg.Split('=')[1];
+                    }
+                    else if (!string.IsNullOrEmpty(outputArg) && outputArg.Length > 2)
+                    {
+                        outputArg = outputArg.Substring(2);
+                    }
+                    else
+                    {
+                        outputArg = null;
+                    }
+                }
+            }
+            
             if (string.IsNullOrEmpty(inputFile) || string.IsNullOrEmpty(outputArg))
             {
                 ConsoleLogger.WriteLine("Error: --input and --output are required for pm4-export-json command");

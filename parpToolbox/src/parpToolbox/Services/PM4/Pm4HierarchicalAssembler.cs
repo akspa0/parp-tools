@@ -6,6 +6,7 @@ using System.Numerics;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {
@@ -416,7 +417,7 @@ namespace ParpToolbox.Services.PM4
         private int GetOrAddVertex(List<Vector3> vertices, Dictionary<Vector3, int> lookup, Vector3 vertex)
         {
             // Apply X-axis inversion for OBJ format
-            Vector3 transformedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+            Vector3 transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
             
             if (lookup.TryGetValue(transformedVertex, out int index))
             {

@@ -3,6 +3,7 @@ namespace ParpToolbox.Services.PM4;
 
 using System.IO;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 /// <summary>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using parpToolbox.Models.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {

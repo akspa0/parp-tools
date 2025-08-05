@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.Services.PM4
@@ -403,7 +404,8 @@ namespace ParpToolbox.Services.PM4
             // Write vertices with X-axis flip
             foreach (var vertex in obj.Vertices)
             {
-                writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}");
+                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+                writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
             }
             
             // Write faces (1-based indices)

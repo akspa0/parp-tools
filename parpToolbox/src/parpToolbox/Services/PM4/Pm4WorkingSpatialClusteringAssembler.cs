@@ -6,6 +6,7 @@ using System.Numerics;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4
 {
@@ -269,7 +270,7 @@ namespace ParpToolbox.Services.PM4
                     {
                         // Apply X-axis flip for correct orientation
                         var vertex = scene.Vertices[spiIndex];
-                        var flippedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                        var flippedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
                         structuralVertices.Add(flippedVertex);
                     }
                 }
@@ -314,7 +315,7 @@ namespace ParpToolbox.Services.PM4
                         {
                             // Apply X-axis flip for correct orientation
                             var vertex = scene.Vertices[msviIndex];
-                            var flippedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                            var flippedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
                             surfaceVertices.Add(flippedVertex);
                         }
                     }
@@ -382,7 +383,7 @@ namespace ParpToolbox.Services.PM4
                         {
                             // Apply X-axis flip for correct orientation
                             var vertex = scene.Vertices[msviIndex];
-                            var flippedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                            var flippedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
                             surfaceVertices.Add(flippedVertex);
                         }
                     }
@@ -469,7 +470,7 @@ namespace ParpToolbox.Services.PM4
                         {
                             // Apply X-axis flip for correct orientation
                             var vertex = scene.Vertices[msviIndex];
-                            var flippedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                            var flippedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
                             surfaceVertices.Add(flippedVertex);
                         }
                     }
@@ -555,7 +556,7 @@ namespace ParpToolbox.Services.PM4
                         {
                             // Apply X-axis flip for correct orientation
                             var vertex = scene.Vertices[msviIndex];
-                            var flippedVertex = new Vector3(-vertex.X, vertex.Y, vertex.Z);
+                            var flippedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
                             surfaceVertices.Add(flippedVertex);
                         }
                     }

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 /// <summary>
 /// Exports the complete PM4 scene as a single cohesive building interior,
@@ -37,10 +38,11 @@ internal static class Pm4SceneExporter
         writer.WriteLine($"# MSLK Links: {scene.Links.Count}");
         writer.WriteLine();
         
-        // Write all vertices with coordinate system correction (flip X-axis)
+        // Write all vertices with coordinate system correction
         foreach (var vertex in scene.Vertices)
         {
-            writer.WriteLine($"v {-vertex.X:F6} {vertex.Y:F6} {vertex.Z:F6}");
+            var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+            writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
         }
         writer.WriteLine();
         

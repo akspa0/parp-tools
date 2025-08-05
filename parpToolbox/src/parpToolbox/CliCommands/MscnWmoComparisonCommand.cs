@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using ParpToolbox.Services.Coordinate;
 using System.Globalization;
 using ParpToolbox.Utils;
 using ParpToolbox.Formats.P4;
@@ -71,7 +72,7 @@ namespace ParpToolbox.CliCommands
                 List<Vector3> mscnVertices;
                 if (multiTile)
                 {
-                    mscnVertices = ExtractMscnAnchorsFromMultipleTiles(pm4FilePath);
+                    mscnVertices = ExtractMscnAnchorsFromNeighbourTiles(pm4FilePath);
                     ConsoleLogger.WriteLine($"Extracted {mscnVertices.Count} MSCN anchor points from multi-tile aggregation");
                 }
                 else
@@ -134,9 +135,134 @@ namespace ParpToolbox.CliCommands
             }
         }
 
+        private static List<Vector3> ExtractMscnAnchorsFromMultipleTiles_Legacy(string pm4FilePath)
+        {
+            var vertices = new List<Vector3>();
+            var rawVertices = new List<Vector3>(); // For raw data export
+            var normalizedVertices = new List<Vector3>(); // For normalized data export
+            
+            try
+            {
+                // Get directory containing the input PM4 file
+                string directoryPath = Path.GetDirectoryName(pm4FilePath) ?? ".";                
+                ConsoleLogger.WriteLine($"Loading PM4 tiles from directory: {directoryPath}");
+                
+                // Use the global tile loader to load all tiles in the directory
+                var globalScene = Pm4GlobalTileLoader.LoadRegion(directoryPath, "*.pm4");
+                
+                ConsoleLogger.WriteLine($"Loaded {globalScene.TotalLoadedTiles} tiles with {globalScene.GlobalVertices.Count} total vertices");
+                
+                // Convert global scene to standard scene for compatibility
+                var unifiedScene = Pm4GlobalTileLoader.ToStandardScene(globalScene);
+                
+                // Extract MSCN anchors from the unified scene using the same approach as single tile
+                // Find MSCN chunks in ExtraChunks
+                var mscnChunks = unifiedScene.ExtraChunks
+                    .Where(chunk => chunk.GetType().Name.Contains("Mscn"))
+                    .ToList();
+                
+                ConsoleLogger.WriteLine($"Found {mscnChunks.Count} MSCN chunks across all tiles");
+                
+                // Process the MSCN chunks using the same reflection-based approach as single tile
+                int totalVertexCount = 0;
+                foreach (var chunk in mscnChunks)
+                {
+                    ConsoleLogger.WriteLine($"Processing MSCN chunk: {chunk.GetType().Name}");
+                    
+                    // Use reflection to get vertices from MSCN chunk
+                    var verticesProperty = chunk.GetType().GetProperty("Vertices");
+                    ConsoleLogger.WriteLine($"Vertices property found: {verticesProperty != null}");
+                    
+                    if (verticesProperty != null)
+                    {
+                        var chunkVertices = verticesProperty.GetValue(chunk);
+                        
+                        if (chunkVertices != null)
+                        {
+                            // Try to iterate through the collection using reflection
+                            var enumerableInterface = chunkVertices.GetType().GetInterface("IEnumerable");
+                            if (enumerableInterface != null)
+                            {
+                                var vertexCount = 0;
+                                foreach (var vertex in (System.Collections.IEnumerable)chunkVertices)
+                                {
+                                    if (vertex != null)
+                                    {
+                                        // Get vertex properties using reflection
+                                        var vertexType = vertex.GetType();
+                                        object? xMember = vertexType.GetProperty("X") ?? (object?)vertexType.GetField("X");
+                                        object? yMember = vertexType.GetProperty("Y") ?? (object?)vertexType.GetField("Y");
+                                        object? zMember = vertexType.GetProperty("Z") ?? (object?)vertexType.GetField("Z");
+                                        
+                                        if (xMember != null && yMember != null && zMember != null)
+                                        {
+                                            var xVal = Convert.ToSingle(GetMemberValue(xMember, vertex));
+                                            var yVal = Convert.ToSingle(GetMemberValue(yMember, vertex));
+                                            var zVal = Convert.ToSingle(GetMemberValue(zMember, vertex));
+                                            
+                                            // Store raw vertex values for export
+                                            var rawVertex = new Vector3(xVal, yVal, zVal);
+                                            rawVertices.Add(rawVertex);
+                                            
+                                            // Create normalized vertices (divide X and Y by 533.33 as suggested)
+                                            const float normalizationFactor = 533.33f;
+                                            var normalizedVertex = new Vector3(
+                                                xVal / normalizationFactor,
+                                                yVal / normalizationFactor,
+                                                zVal
+                                            );
+                                            normalizedVertices.Add(normalizedVertex);
+                                            
+                                            // Apply coordinate transformation using unified service
+                                            var transformedVertex = CoordinateTransformationService.ApplyMscnTransformation(xVal, yVal, zVal);
+                                            
+                                            // Make coordinates relative by subtracting tile offset (17066 for world coordinates)
+                                            transformedVertex.X -= 17066.0f;
+                                            transformedVertex.Y -= 17066.0f;
+                                            
+                                            vertices.Add(transformedVertex);
+                                            vertexCount++;
+                                            totalVertexCount++;
+                                        }
+                                    }
+                                }
+                                ConsoleLogger.WriteLine($"Processed {vertexCount} vertices from this chunk");
+                            }
+                        }
+                    }
+                }
+                
+                // Export raw and normalized vertices to OBJ files for visual inspection
+                var outputDir = Path.Combine(Directory.GetCurrentDirectory(), "project_output", $"session_{DateTime.Now:yyyyMMdd_HHmmss}");
+                Directory.CreateDirectory(outputDir);
+                
+                // Export raw MSCN vertices
+                var rawObjPath = Path.Combine(outputDir, "mscn_raw_multi_tile.obj");
+                ExportVerticesAsObj(rawVertices, rawObjPath, "Raw Multi-Tile MSCN Vertices (Server/World Coordinates)").GetAwaiter().GetResult();
+                ConsoleLogger.WriteLine($"Exported raw multi-tile MSCN vertices to {rawObjPath}");
+                
+                // Export normalized MSCN vertices
+                var normalizedObjPath = Path.Combine(outputDir, "mscn_normalized_multi_tile.obj");
+                ExportVerticesAsObj(normalizedVertices, normalizedObjPath, "Normalized Multi-Tile MSCN Vertices (Divided by 533.33)").GetAwaiter().GetResult();
+                ConsoleLogger.WriteLine($"Exported normalized multi-tile MSCN vertices to {normalizedObjPath}");
+                
+                ConsoleLogger.WriteLine($"Extracted {vertices.Count} MSCN anchor vertices from multiple tiles");
+                ConsoleLogger.WriteLine($"Raw vertices: {rawVertices.Count}, Normalized vertices: {normalizedVertices.Count}");
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.WriteLine($"Error loading PM4 tiles: {ex.Message}");
+                ConsoleLogger.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            
+            return vertices;
+        }
+        
         public static List<Vector3> ExtractMscnAnchorsFromPm4(string pm4FilePath)
         {
             var vertices = new List<Vector3>();
+            var rawVertices = new List<Vector3>(); // Store raw vertices for export
+            var normalizedVertices = new List<Vector3>(); // Store normalized vertices for export
             
             try
             {
@@ -196,29 +322,69 @@ namespace ParpToolbox.CliCommands
                                             var yVal = Convert.ToSingle(GetMemberValue(yMember, vertex));
                                             var zVal = Convert.ToSingle(GetMemberValue(zMember, vertex));
                                             
-                                            // Apply coordinate transformation: MSCN uses Y,X,Z ordering with optional X-axis flip
-                                            // Transform from WoW coordinates (Y,X,Z) with X-axis flip
-                                            float x = -yVal;  // Flip X-axis
-                                            float y = xVal;   // Y becomes X
-                                            float z = zVal;   // Z remains Z
+                                            // Store raw vertex values for export
+                                            var rawVertex = new Vector3(xVal, yVal, zVal);
+                                            rawVertices.Add(rawVertex);
+                                            
+                                            // Create normalized vertices (divide X and Y by 533.33 as suggested)
+                                            const float normalizationFactor = 533.33f;
+                                            var normalizedVertex = new Vector3(
+                                                xVal / normalizationFactor,
+                                                yVal / normalizationFactor,
+                                                zVal
+                                            );
+                                            normalizedVertices.Add(normalizedVertex);
+                                            
+                                            // Log raw MSCN values before ANY transformation
+                                            if (vertexCount < 10)
+                                            {
+                                                ConsoleLogger.WriteLine($"Raw MSCN[{vertexCount}]: X={xVal:F2}, Y={yVal:F2}, Z={zVal:F2}");
+                                                ConsoleLogger.WriteLine($"Normalized MSCN[{vertexCount}]: X={normalizedVertex.X:F2}, Y={normalizedVertex.Y:F2}, Z={normalizedVertex.Z:F2}");
+                                            }
+                                            
+                                            // Apply coordinate transformation using unified service
+                                            var transformedVertex = CoordinateTransformationService.ApplyMscnTransformation(xVal, yVal, zVal);
+                                            
+                                            // Log values after transformation but before tile offset subtraction
+                                            if (vertexCount < 10)
+                                            {
+                                                ConsoleLogger.WriteLine($"Post-transform MSCN[{vertexCount}]: ({transformedVertex.X:F2}, {transformedVertex.Y:F2}, {transformedVertex.Z:F2})");
+                                            }
                                             
                                             // Make coordinates relative by subtracting tile offset (17066 for world coordinates)
-                                            x -= 17066.0f;
-                                            y -= 17066.0f;
+                                            transformedVertex.X -= 17066.0f;
+                                            transformedVertex.Y -= 17066.0f;
                                             
-                                            vertices.Add(new Vector3(x, y, z));
+                                            // No longer scaling MSCN vertices - using them directly
+                                            if (vertexCount < 10)
+                                            {
+                                                ConsoleLogger.WriteLine($"MSCN[{vertexCount}] (unscaled): ({transformedVertex.X:F2}, {transformedVertex.Y:F2}, {transformedVertex.Z:F2})");
+                                            }
+                                            
+                                            vertices.Add(transformedVertex);
                                             vertexCount++;
                                         }
                                         else
                                         {
-                                            if (vertexCount == 0) // Only log for first vertex
-                                            {
-                                                ConsoleLogger.WriteLine($"Could not find X, Y, Z members in vertex type {vertexType.Name}");
-                                            }
+                                            ConsoleLogger.WriteLine($"Could not find X, Y, Z members in vertex type {vertexType.Name}");
                                         }
                                     }
                                 }
                                 ConsoleLogger.WriteLine($"Processed {vertexCount} vertices from this chunk");
+                                
+                                // Export raw and normalized vertices to OBJ files for visual inspection
+                                var outputDir = Path.Combine(Directory.GetCurrentDirectory(), "project_output", $"session_{DateTime.Now:yyyyMMdd_HHmmss}");
+                                Directory.CreateDirectory(outputDir);
+                                
+                                // Export raw MSCN vertices
+                                var rawObjPath = Path.Combine(outputDir, "mscn_raw.obj");
+                                ExportVerticesAsObj(rawVertices, rawObjPath, "Raw MSCN Vertices (Server/World Coordinates)").GetAwaiter().GetResult();
+                                ConsoleLogger.WriteLine($"Exported raw MSCN vertices to {rawObjPath}");
+                                
+                                // Export normalized MSCN vertices
+                                var normalizedObjPath = Path.Combine(outputDir, "mscn_normalized.obj");
+                                ExportVerticesAsObj(normalizedVertices, normalizedObjPath, "Normalized MSCN Vertices (Divided by 533.33)").GetAwaiter().GetResult();
+                                ConsoleLogger.WriteLine($"Exported normalized MSCN vertices to {normalizedObjPath}");
                             }
                             else
                             {
@@ -235,6 +401,7 @@ namespace ParpToolbox.CliCommands
                 }
                 
                 ConsoleLogger.WriteLine($"Extracted {vertices.Count} MSCN anchor vertices");
+                ConsoleLogger.WriteLine($"Raw vertices: {rawVertices.Count}, Normalized vertices: {normalizedVertices.Count}");
             }
             catch (Exception ex)
             {
@@ -247,54 +414,171 @@ namespace ParpToolbox.CliCommands
         private static List<Vector3> ExtractMscnAnchorsFromMultipleTiles(string basePm4FilePath)
         {
             var allVertices = new List<Vector3>();
+            var rawVertices = new List<Vector3>();
+            var normalizedVertices = new List<Vector3>();
             
-            // Extract tile coordinates from filename (e.g., development_15_37.pm4 -> 15, 37)
-            var fileName = Path.GetFileNameWithoutExtension(basePm4FilePath);
-            var parts = fileName.Split('_');
-            
-            if (parts.Length < 3 || !int.TryParse(parts[^2], out int baseTileX) || !int.TryParse(parts[^1], out int baseTileY))
+            try
             {
-                ConsoleLogger.WriteLine($"Warning: Could not parse tile coordinates from {fileName}, falling back to single tile");
-                return ExtractMscnAnchorsFromPm4(basePm4FilePath);
-            }
-            
-            ConsoleLogger.WriteLine($"Base tile coordinates: {baseTileX}_{baseTileY}");
-            
-            // Define adjacent tile offsets (3x3 grid around base tile)
-            var tileOffsets = new (int dx, int dy)[] 
-            {
-                (-1, -1), (0, -1), (1, -1),
-                (-1,  0), (0,  0), (1,  0),
-                (-1,  1), (0,  1), (1,  1)
-            };
-            
-            var baseDir = Path.GetDirectoryName(basePm4FilePath) ?? ".";
-            var filePrefix = string.Join("_", parts.Take(parts.Length - 2));
-            
-            foreach (var (dx, dy) in tileOffsets)
-            {
-                var tileX = baseTileX + dx;
-                var tileY = baseTileY + dy;
-                var tileFileName = $"{filePrefix}_{tileX:D2}_{tileY:D2}.pm4";
-                var tileFilePath = Path.Combine(baseDir, tileFileName);
+                // Get directory containing the input PM4 file
+                string directoryPath = Path.GetDirectoryName(basePm4FilePath) ?? ".";
+                ConsoleLogger.WriteLine($"Loading PM4 tiles from directory: {directoryPath}");
                 
-                if (File.Exists(tileFilePath))
+                // METHOD 1: Use GlobalTileLoader to load all tiles in the directory
+                ConsoleLogger.WriteLine("Using GlobalTileLoader to load linked tiles...");
+                var globalScene = Pm4GlobalTileLoader.LoadRegion(directoryPath, "*.pm4");
+                
+                ConsoleLogger.WriteLine($"Loaded {globalScene.TotalLoadedTiles} tiles with {globalScene.GlobalVertices.Count} total vertices");
+                
+                // Convert global scene to standard scene for compatibility
+                var unifiedScene = Pm4GlobalTileLoader.ToStandardScene(globalScene);
+                
+                // Extract MSCN anchors from the unified scene
+                var mscnChunks = unifiedScene.ExtraChunks
+                    .Where(chunk => chunk.GetType().Name.Contains("Mscn"))
+                    .ToList();
+                
+                ConsoleLogger.WriteLine($"Found {mscnChunks.Count} MSCN chunks across all tiles");
+                
+                // Process the MSCN chunks
+                int totalVertexCount = 0;
+                foreach (var chunk in mscnChunks)
                 {
-                    ConsoleLogger.WriteLine($"Loading MSCN data from tile {tileX:D2}_{tileY:D2}...");
-                    try
+                    ConsoleLogger.WriteLine($"Processing MSCN chunk: {chunk.GetType().Name}");
+                    
+                    // Use reflection to get vertices from MSCN chunk
+                    var verticesProperty = chunk.GetType().GetProperty("Vertices");
+                    if (verticesProperty != null)
                     {
-                        var tileVertices = ExtractMscnAnchorsFromPm4(tileFilePath);
-                        allVertices.AddRange(tileVertices);
-                        ConsoleLogger.WriteLine($"  Added {tileVertices.Count} vertices from {tileFileName}");
-                    }
-                    catch (Exception ex)
-                    {
-                        ConsoleLogger.WriteLine($"  Warning: Failed to load {tileFileName}: {ex.Message}");
+                        var chunkVertices = verticesProperty.GetValue(chunk);
+                        
+                        if (chunkVertices != null)
+                        {
+                            // Try to iterate through the collection using reflection
+                            var enumerableInterface = chunkVertices.GetType().GetInterface("IEnumerable");
+                            if (enumerableInterface != null)
+                            {
+                                var vertexCount = 0;
+                                foreach (var vertex in (System.Collections.IEnumerable)chunkVertices)
+                                {
+                                    if (vertex != null)
+                                    {
+                                        // Get vertex properties using reflection
+                                        var vertexType = vertex.GetType();
+                                        object? xMember = vertexType.GetProperty("X") ?? (object?)vertexType.GetField("X");
+                                        object? yMember = vertexType.GetProperty("Y") ?? (object?)vertexType.GetField("Y");
+                                        object? zMember = vertexType.GetProperty("Z") ?? (object?)vertexType.GetField("Z");
+                                        
+                                        if (xMember != null && yMember != null && zMember != null)
+                                        {
+                                            var xVal = Convert.ToSingle(GetMemberValue(xMember, vertex));
+                                            var yVal = Convert.ToSingle(GetMemberValue(yMember, vertex));
+                                            var zVal = Convert.ToSingle(GetMemberValue(zMember, vertex));
+                                            
+                                            // Store raw vertex values for export
+                                            var rawVertex = new Vector3(xVal, yVal, zVal);
+                                            rawVertices.Add(rawVertex);
+                                            
+                                            // Create normalized vertices (divide X and Y by 533.33 as suggested)
+                                            const float normalizationFactor = 533.33f;
+                                            var normalizedVertex = new Vector3(
+                                                xVal / normalizationFactor,
+                                                yVal / normalizationFactor,
+                                                zVal
+                                            );
+                                            normalizedVertices.Add(normalizedVertex);
+                                            
+                                            // Apply coordinate transformation using unified service
+                                            var transformedVertex = CoordinateTransformationService.ApplyMscnTransformation(xVal, yVal, zVal);
+                                            
+                                            // Make coordinates relative by subtracting tile offset
+                                            transformedVertex.X -= 17066.0f;
+                                            transformedVertex.Y -= 17066.0f;
+                                            
+                                            allVertices.Add(transformedVertex);
+                                            vertexCount++;
+                                            totalVertexCount++;
+                                        }
+                                    }
+                                }
+                                ConsoleLogger.WriteLine($"Processed {vertexCount} vertices from this chunk");
+                            }
+                        }
                     }
                 }
-                else
+                
+                // Export raw and normalized vertices to OBJ files for visual inspection
+                var outputDir = Path.Combine(Directory.GetCurrentDirectory(), "project_output", $"session_{DateTime.Now:yyyyMMdd_HHmmss}");
+                Directory.CreateDirectory(outputDir);
+                
+                // Export raw MSCN vertices
+                var rawObjPath = Path.Combine(outputDir, "mscn_raw_multi_tile.obj");
+                ExportVerticesAsObj(rawVertices, rawObjPath, "Raw Multi-Tile MSCN Vertices (Server/World Coordinates)").GetAwaiter().GetResult();
+                ConsoleLogger.WriteLine($"Exported raw multi-tile MSCN vertices to {rawObjPath}");
+                
+                // Export normalized MSCN vertices
+                var normalizedObjPath = Path.Combine(outputDir, "mscn_normalized_multi_tile.obj");
+                ExportVerticesAsObj(normalizedVertices, normalizedObjPath, "Normalized Multi-Tile MSCN Vertices (Divided by 533.33)").GetAwaiter().GetResult();
+                ConsoleLogger.WriteLine($"Exported normalized multi-tile MSCN vertices to {normalizedObjPath}");
+                
+                ConsoleLogger.WriteLine($"Extracted {allVertices.Count} MSCN anchor vertices from multiple tiles");
+                ConsoleLogger.WriteLine($"Raw vertices: {rawVertices.Count}, Normalized vertices: {normalizedVertices.Count}");
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.WriteLine($"Error loading PM4 tiles: {ex.Message}");
+                ConsoleLogger.WriteLine($"Stack trace: {ex.StackTrace}");
+                
+                // Fallback to the legacy method if GlobalTileLoader fails
+                ConsoleLogger.WriteLine("Falling back to manual tile loading method...");
+                
+                // Extract tile coordinates from filename (e.g., development_15_37.pm4 -> 15, 37)
+                var fileName = Path.GetFileNameWithoutExtension(basePm4FilePath);
+                var parts = fileName.Split('_');
+                
+                if (parts.Length < 3 || !int.TryParse(parts[^2], out int baseTileX) || !int.TryParse(parts[^1], out int baseTileY))
                 {
-                    ConsoleLogger.WriteLine($"  Tile {tileX:D2}_{tileY:D2} not found: {tileFileName}");
+                    ConsoleLogger.WriteLine($"Warning: Could not parse tile coordinates from {fileName}, falling back to single tile");
+                    return ExtractMscnAnchorsFromPm4(basePm4FilePath);
+                }
+                
+                ConsoleLogger.WriteLine($"Base tile coordinates: {baseTileX}_{baseTileY}");
+                
+                // Define adjacent tile offsets (3x3 grid around base tile)
+                var tileOffsets = new (int dx, int dy)[] 
+                {
+                    (-1, -1), (0, -1), (1, -1),
+                    (-1,  0), (0,  0), (1,  0),
+                    (-1,  1), (0,  1), (1,  1)
+                };
+                
+                var baseDir = Path.GetDirectoryName(basePm4FilePath) ?? ".";
+                var filePrefix = string.Join("_", parts.Take(parts.Length - 2));
+                
+                foreach (var (dx, dy) in tileOffsets)
+                {
+                    var tileX = baseTileX + dx;
+                    var tileY = baseTileY + dy;
+                    var tileFileName = $"{filePrefix}_{tileX:D2}_{tileY:D2}.pm4";
+                    var tileFilePath = Path.Combine(baseDir, tileFileName);
+                    
+                    if (File.Exists(tileFilePath))
+                    {
+                        ConsoleLogger.WriteLine($"Loading MSCN data from tile {tileX:D2}_{tileY:D2}...");
+                        try
+                        {
+                            var tileVertices = ExtractMscnAnchorsFromPm4(tileFilePath);
+                            allVertices.AddRange(tileVertices);
+                            ConsoleLogger.WriteLine($"  Added {tileVertices.Count} vertices from {tileFileName}");
+                        }
+                        catch (Exception innerEx)
+                        {
+                            ConsoleLogger.WriteLine($"  Warning: Failed to load {tileFileName}: {innerEx.Message}");
+                        }
+                    }
+                    else
+                    {
+                        ConsoleLogger.WriteLine($"  Tile {tileX:D2}_{tileY:D2} not found: {tileFileName}");
+                    }
                 }
             }
             
@@ -422,7 +706,7 @@ namespace ParpToolbox.CliCommands
                 ConsoleLogger.WriteLine($"  Original filtered correlation: {filteredResult.MatchPercentage:F1}% ({filteredResult.Matches.Count} matches)");
                 
                 // Test 180-degree rotated filtered vertices
-                var rotatedFilteredVertices = filteredMscnVertices.Select(v => new Vector3(-v.X, -v.Y, v.Z)).ToList();
+                var rotatedFilteredVertices = filteredMscnVertices.Select(v => CoordinateTransformationService.Apply180DegreeRotation(v)).ToList();
                 var rotatedFilteredResult = AnalyzeObjectCorrelation(rotatedFilteredVertices, wmoVertices, tolerance, groupFilter);
                 ConsoleLogger.WriteLine($"  180° rotated filtered correlation: {rotatedFilteredResult.MatchPercentage:F1}% ({rotatedFilteredResult.Matches.Count} matches)");
                 
@@ -512,12 +796,9 @@ namespace ParpToolbox.CliCommands
             ConsoleLogger.WriteLine($"Normalized correlation: {normalizedResult.MatchPercentage:F1}% ({normalizedResult.Matches.Count} matches)");
             
             // Test normalized + 180-degree rotated correlation
-            var rotatedNormalizedVertices = normalizedMscnVertices.Select(v => {
-                // Rotate around WMO center
-                var relative = v - wmoBounds.Center;
-                var rotated = new Vector3(-relative.X, -relative.Y, relative.Z);
-                return rotated + wmoBounds.Center;
-            }).ToList();
+            var rotatedNormalizedVertices = normalizedMscnVertices.Select(v => 
+                CoordinateTransformationService.Apply180DegreeRotation(v, wmoBounds.Center)
+            ).ToList();
             
             var rotatedNormalizedResult = AnalyzeObjectCorrelation(rotatedNormalizedVertices, wmoVertices, tolerance, groupFilter);
             ConsoleLogger.WriteLine($"Normalized + 180° rotated correlation: {rotatedNormalizedResult.MatchPercentage:F1}% ({rotatedNormalizedResult.Matches.Count} matches)");
@@ -687,17 +968,42 @@ namespace ParpToolbox.CliCommands
                     ConsoleLogger.WriteLine($"Filtered to {filteredGroups.Count} groups matching '{groupFilter}'");
                 }
                 
-                // Extract vertices from filtered groups
+                ConsoleLogger.WriteLine($"Processing {filteredGroups.Count} filtered groups");
+                
+                // Instead of scaling down WMO vertices, we'll keep them at original scale
+                // and scale up MSCN vertices to match. This avoids precision issues from tiny values.
+                var debugCount = 0;
+                var totalProcessed = 0;
                 foreach (var group in filteredGroups)
                 {
+                    ConsoleLogger.WriteLine($"Processing group {group.Name} with {group.Vertices.Count} vertices");
                     var groupVertexCount = 0;
                     foreach (var vertex in group.Vertices)
                     {
+                        // Debug: Show first few original vertex values
+                        if (debugCount < 10)
+                        {
+                            ConsoleLogger.WriteLine($"Original WMO[{debugCount}]: ({vertex.X:F2}, {vertex.Y:F2}, {vertex.Z:F2})");
+                        }
+                        
+                        // Keep WMO vertices at original scale
+                        // No scaling or transformation needed at this stage
                         vertices.Add(vertex);
+                        
                         groupVertexCount++;
+                        debugCount++;
+                        totalProcessed++;
+                        
+                        // Safety check to prevent infinite loops
+                        if (totalProcessed > 1000000)
+                        {
+                            ConsoleLogger.WriteLine("Safety break: Processed over 1 million vertices");
+                            break;
+                        }
                     }
                     
                     ConsoleLogger.WriteLine($"Loaded {groupVertexCount} vertices from group {group.Name}");
+                    if (totalProcessed > 1000000) break;
                 }
                 
                 ConsoleLogger.WriteLine($"Total WMO vertices loaded: {vertices.Count}");
@@ -743,6 +1049,9 @@ namespace ParpToolbox.CliCommands
             float closestDistance = float.MaxValue;
             int closestIndex = -1;
             
+            // Early exit check for empty vertex list
+            if (wmoVertices.Count == 0) return (float.MaxValue, -1);
+            
             // Calculate the cell coordinates for the MSCN vertex
             var centerCell = (
                 (int)Math.Floor(mscnVertex.X / tolerance),
@@ -750,13 +1059,38 @@ namespace ParpToolbox.CliCommands
                 (int)Math.Floor(mscnVertex.Z / tolerance)
             );
             
-            // Search in a 3x3x3 neighborhood around the center cell
+            // First, check the center cell for an exact or very close match
+            // This can save a lot of time if there's a good match in the center cell
+            if (spatialGrid.TryGetValue(centerCell, out var centerVertices))
+            {
+                foreach (var vertexIndex in centerVertices)
+                {
+                    var distance = Vector3.Distance(mscnVertex, wmoVertices[vertexIndex]);
+                    if (distance < closestDistance)
+                    {
+                        closestDistance = distance;
+                        closestIndex = vertexIndex;
+                        
+                        // Early exit if we find a very close match
+                        if (distance < tolerance * 0.1f)
+                        {
+                            return (distance, vertexIndex);
+                        }
+                    }
+                }
+            }
+            
+            // If we didn't find a good match in center cell, search neighboring cells
+            // but skip the center cell since we already processed it
             for (int dx = -1; dx <= 1; dx++)
             {
                 for (int dy = -1; dy <= 1; dy++)
                 {
                     for (int dz = -1; dz <= 1; dz++)
                     {
+                        // Skip the center cell - we already processed it
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        
                         var cellKey = (centerCell.Item1 + dx, centerCell.Item2 + dy, centerCell.Item3 + dz);
                         
                         if (spatialGrid.TryGetValue(cellKey, out var vertexIndices))
@@ -768,6 +1102,12 @@ namespace ParpToolbox.CliCommands
                                 {
                                     closestDistance = distance;
                                     closestIndex = vertexIndex;
+                                    
+                                    // Early exit if we find a very close match
+                                    if (distance < tolerance * 0.1f)
+                                    {
+                                        return (distance, vertexIndex);
+                                    }
                                 }
                             }
                         }
@@ -783,16 +1123,48 @@ namespace ParpToolbox.CliCommands
             ConsoleLogger.WriteLine($"Creating spatial clusters from {vertices.Count} vertices with radius {clusterRadius}...");
             
             var clusters = new List<(Vector3 center, Vector3 size, int count)>();
-            var processed = new bool[vertices.Count];
             
-            // Create spatial hash grid for efficient neighbor finding
+            // Safety check for empty vertex list
+            if (vertices.Count == 0)
+            {
+                ConsoleLogger.WriteLine("No vertices to cluster");
+                return clusters;
+            }
+            
+            // Use a more reasonable cell size for the spatial grid
+            // Too large values cause poor performance, too small values may miss neighbors
+            var cellSize = clusterRadius * 2.0f; 
+            
+            // Performance optimization: if there are too many vertices, use sampling
+            const int maxVerticesToProcess = 50000;
+            var verticesToProcess = vertices;
+            if (vertices.Count > maxVerticesToProcess)
+            {
+                ConsoleLogger.WriteLine($"Sampling {maxVerticesToProcess} vertices from {vertices.Count} for clustering efficiency");
+                
+                // Sample vertices evenly
+                var sampledVertices = new List<Vector3>(maxVerticesToProcess);
+                var step = vertices.Count / maxVerticesToProcess;
+                for (int i = 0; i < vertices.Count; i += step)
+                {
+                    sampledVertices.Add(vertices[i]);
+                    if (sampledVertices.Count >= maxVerticesToProcess)
+                        break;
+                }
+                verticesToProcess = sampledVertices;
+                ConsoleLogger.WriteLine($"Sampled {verticesToProcess.Count} vertices for processing");
+            }
+            
+            // Create DBSCAN-like clustering with spatial hash grid for efficiency
+            var processed = new HashSet<int>(); // Use HashSet for faster lookups
             var spatialGrid = new Dictionary<(int, int, int), List<int>>();
-            var cellSize = clusterRadius; // Use cluster radius as cell size
             
             // Populate spatial grid
-            for (int i = 0; i < vertices.Count; i++)
+            ConsoleLogger.WriteLine("Building spatial hash grid...");
+            var startTime = DateTime.Now;
+            for (int i = 0; i < verticesToProcess.Count; i++)
             {
-                var vertex = vertices[i];
+                var vertex = verticesToProcess[i];
                 var cellKey = (
                     (int)Math.Floor(vertex.X / cellSize),
                     (int)Math.Floor(vertex.Y / cellSize),
@@ -804,23 +1176,50 @@ namespace ParpToolbox.CliCommands
                 spatialGrid[cellKey].Add(i);
             }
             
-            ConsoleLogger.WriteLine($"Created spatial grid with {spatialGrid.Count} cells");
+            var gridBuildTime = (DateTime.Now - startTime).TotalSeconds;
+            ConsoleLogger.WriteLine($"Created spatial grid with {spatialGrid.Count} cells in {gridBuildTime:F2} seconds");
             
-            // Process vertices using spatial grid
-            for (int i = 0; i < vertices.Count; i++)
+            // Set a reasonable timeout to prevent hanging
+            var timeout = TimeSpan.FromSeconds(30);
+            var clusteringStartTime = DateTime.Now;
+            
+            // Process vertices using spatial grid with timeout protection
+            ConsoleLogger.WriteLine("Finding clusters...");
+            int processedCount = 0;
+            int clusterCount = 0;
+            
+            for (int i = 0; i < verticesToProcess.Count; i++)
             {
-                if (processed[i]) continue;
+                // Check for timeout
+                if (DateTime.Now - clusteringStartTime > timeout)
+                {
+                    ConsoleLogger.WriteLine($"Clustering timed out after {timeout.TotalSeconds} seconds. Processed {processedCount}/{verticesToProcess.Count} vertices.");
+                    break;
+                }
+                
+                if (processed.Contains(i)) continue;
                 
                 var clusterVertices = new List<Vector3>();
                 var queue = new Queue<int>();
                 queue.Enqueue(i);
-                processed[i] = true;
+                processed.Add(i);
+                processedCount++;
+                
+                // Use a maximum cluster size to prevent very large clusters
+                const int maxClusterSize = 5000;
                 
                 // Find all vertices within cluster radius using spatial grid
-                while (queue.Count > 0)
+                while (queue.Count > 0 && clusterVertices.Count < maxClusterSize)
                 {
+                    // Check for timeout periodically
+                    if (clusterVertices.Count % 1000 == 0 && DateTime.Now - clusteringStartTime > timeout)
+                    {
+                        ConsoleLogger.WriteLine($"Clustering timed out while processing cluster {clusterCount}. Breaking early.");
+                        break;
+                    }
+                    
                     var currentIndex = queue.Dequeue();
-                    var currentVertex = vertices[currentIndex];
+                    var currentVertex = verticesToProcess[currentIndex];
                     clusterVertices.Add(currentVertex);
                     
                     // Check neighboring cells
@@ -830,7 +1229,7 @@ namespace ParpToolbox.CliCommands
                         (int)Math.Floor(currentVertex.Z / cellSize)
                     );
                     
-                    // Check 3x3x3 neighborhood
+                    // Check immediate neighborhood (instead of 3x3x3 which is expensive)
                     for (int dx = -1; dx <= 1; dx++)
                     {
                         for (int dy = -1; dy <= 1; dy++)
@@ -843,10 +1242,11 @@ namespace ParpToolbox.CliCommands
                                 {
                                     foreach (var vertexIndex in cellVertices)
                                     {
-                                        if (!processed[vertexIndex] && 
-                                            Vector3.Distance(currentVertex, vertices[vertexIndex]) <= clusterRadius)
+                                        if (!processed.Contains(vertexIndex) && 
+                                            Vector3.Distance(currentVertex, verticesToProcess[vertexIndex]) <= clusterRadius)
                                         {
-                                            processed[vertexIndex] = true;
+                                            processed.Add(vertexIndex);
+                                            processedCount++;
                                             queue.Enqueue(vertexIndex);
                                         }
                                     }
@@ -857,18 +1257,83 @@ namespace ParpToolbox.CliCommands
                 }
                 
                 // Calculate cluster bounds
-                if (clusterVertices.Count > 0)
+                if (clusterVertices.Count >= 5) // Ignore very small clusters (noise)
                 {
                     var bounds = CalculateBounds(clusterVertices);
                     clusters.Add((bounds.Center, bounds.Size, clusterVertices.Count));
+                    clusterCount++;
+                    
+                    // Log progress periodically
+                    if (clusterCount % 10 == 0 || clusters.Count == 1)
+                    {
+                        ConsoleLogger.WriteLine($"Created {clusterCount} clusters so far, processed {processedCount}/{verticesToProcess.Count} vertices");
+                    }
                 }
             }
             
-            ConsoleLogger.WriteLine($"Created {clusters.Count} spatial clusters");
+            var totalTime = (DateTime.Now - clusteringStartTime).TotalSeconds;
+            ConsoleLogger.WriteLine($"Created {clusters.Count} spatial clusters in {totalTime:F2} seconds");
             return clusters;
         }
         
 
+
+        /// <summary>
+        /// Aggregates MSCN anchor vertices from the base PM4 tile and its immediate
+        /// neighbours (3×3 grid). This method honours the user's expectation for the
+        /// --multi-tile flag without resorting to loading every PM4 in the directory.
+        /// </summary>
+        private static List<Vector3> ExtractMscnAnchorsFromNeighbourTiles(string basePm4FilePath)
+        {
+            var allVertices = new List<Vector3>();
+
+            // Derive tile coordinates from filename e.g. development_15_37.pm4 → 15,37
+            var fileName = Path.GetFileNameWithoutExtension(basePm4FilePath);
+            var parts = fileName.Split('_');
+            if (parts.Length < 3 || !int.TryParse(parts[^2], out int baseTileX) || !int.TryParse(parts[^1], out int baseTileY))
+            {
+                ConsoleLogger.WriteLine($"Warning: Could not parse tile coordinates from {fileName}. Falling back to single-tile mode.");
+                return ExtractMscnAnchorsFromPm4(basePm4FilePath);
+            }
+
+            var baseDir   = Path.GetDirectoryName(basePm4FilePath) ?? ".";
+            var filePrefix = string.Join("_", parts.Take(parts.Length - 2));
+
+            ConsoleLogger.WriteLine($"Loading MSCN anchors from base tile {baseTileX:D2}_{baseTileY:D2} and neighbours (3×3 grid)…");
+
+            var offsets = new (int dx,int dy)[]
+            {
+                (-1,-1),(0,-1),(1,-1),
+                (-1, 0),(0, 0),(1, 0),
+                (-1, 1),(0, 1),(1, 1)
+            };
+
+            foreach (var (dx,dy) in offsets)
+            {
+                int tileX = baseTileX + dx;
+                int tileY = baseTileY + dy;
+                var tilePath = Path.Combine(baseDir, $"{filePrefix}_{tileX:D2}_{tileY:D2}.pm4");
+                if (!File.Exists(tilePath))
+                {
+                    ConsoleLogger.WriteLine($"  Tile {tileX:D2}_{tileY:D2} not found – skipping");
+                    continue;
+                }
+
+                try
+                {
+                    var verts = ExtractMscnAnchorsFromPm4(tilePath);
+                    ConsoleLogger.WriteLine($"  Added {verts.Count} vertices from {Path.GetFileName(tilePath)}");
+                    allVertices.AddRange(verts);
+                }
+                catch (Exception ex)
+                {
+                    ConsoleLogger.WriteLine($"  Failed to load {Path.GetFileName(tilePath)}: {ex.Message}");
+                }
+            }
+
+            ConsoleLogger.WriteLine($"Neighbour-tile aggregation complete → {allVertices.Count} MSCN vertices");
+            return allVertices;
+        }
 
         private static object? GetMemberValue(object member, object instance)
         {
@@ -918,73 +1383,198 @@ namespace ParpToolbox.CliCommands
             var matchedMscnIndices = new HashSet<int>();
             var matchedWmoIndices = new HashSet<int>();
 
-            ConsoleLogger.WriteLine("Analyzing object-level correlation...");
+            // Safety check for empty input
+            if (mscnVertices.Count == 0 || wmoVertices.Count == 0)
+            {
+                ConsoleLogger.WriteLine("Warning: Empty vertex set detected. Skipping correlation.");
+                
+                // Update result with correct statistics for empty case
+                result.TotalMatches = 0;
+                result.TotalMscnVertices = mscnVertices.Count;
+                result.TotalWmoVertices = wmoVertices.Count;
+                result.MatchedMscnVertices = 0;
+                result.MatchedWmoVertices = 0;
+                result.MatchPercentage = 0;
+                
+                // Calculate spatial bounds (or empty bounds if no vertices)
+                result.MscnBounds = mscnVertices.Count > 0 ? CalculateBounds(mscnVertices) : (Vector3.Zero, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+                result.WmoBounds = wmoVertices.Count > 0 ? CalculateBounds(wmoVertices) : (Vector3.Zero, Vector3.Zero, Vector3.Zero, Vector3.Zero);
+                
+                return result;
+            }
+
+            ConsoleLogger.WriteLine($"Analyzing object-level correlation between {mscnVertices.Count} MSCN and {wmoVertices.Count} WMO vertices...");
+            
+            // Set a timeout for the entire correlation process
+            var timeout = TimeSpan.FromSeconds(60); // 1 minute timeout
+            var correlationStartTime = DateTime.Now;
+            
+            // Calculate spatial bounds once
+            var mscnBounds = CalculateBounds(mscnVertices);
+            var wmoBounds = CalculateBounds(wmoVertices);
+            
+            ConsoleLogger.WriteLine($"MSCN bounds: Center=({mscnBounds.Center.X:F2}, {mscnBounds.Center.Y:F2}, {mscnBounds.Center.Z:F2}), Size=({mscnBounds.Size.X:F2}, {mscnBounds.Size.Y:F2}, {mscnBounds.Size.Z:F2})");
+            ConsoleLogger.WriteLine($"WMO bounds: Center=({wmoBounds.Center.X:F2}, {wmoBounds.Center.Y:F2}, {wmoBounds.Center.Z:F2}), Size=({wmoBounds.Size.X:F2}, {wmoBounds.Size.Y:F2}, {wmoBounds.Size.Z:F2})");
+            
+            // Use a reasonable cluster radius - not too large
+            float clusterRadius = Math.Min(tolerance * 2.0f, 10.0f); // Cap at 10 units maximum
             
             // Create MSCN object clusters using spatial clustering
-            ConsoleLogger.WriteLine("Creating MSCN anchor clusters...");
-            var mscnClusters = CreateSpatialClusters(mscnVertices, tolerance * 2.0f); // Use larger radius for clustering
+            ConsoleLogger.WriteLine($"Creating MSCN anchor clusters with radius {clusterRadius}...");
+            
+            // Limit processing to manageable vertex count
+            var maxVerticesToProcess = Math.Min(mscnVertices.Count, 10000); // Cap at 10k vertices
+            List<Vector3> verticesToProcess;
+            
+            if (mscnVertices.Count > maxVerticesToProcess)
+            {
+                ConsoleLogger.WriteLine($"Large dataset detected. Sampling {maxVerticesToProcess} vertices from {mscnVertices.Count} total vertices.");
+                verticesToProcess = new List<Vector3>(maxVerticesToProcess);
+                var step = mscnVertices.Count / maxVerticesToProcess;
+                for (int i = 0; i < mscnVertices.Count; i += step)
+                {
+                    verticesToProcess.Add(mscnVertices[i]);
+                    if (verticesToProcess.Count >= maxVerticesToProcess)
+                        break;
+                }
+            }
+            else
+            {
+                verticesToProcess = mscnVertices;
+            }
+            
+            var mscnClusters = CreateSpatialClusters(verticesToProcess, clusterRadius);
             ConsoleLogger.WriteLine($"Created {mscnClusters.Count} MSCN clusters");
             
-            // Create WMO object representations (bounding boxes)
-            ConsoleLogger.WriteLine("Creating WMO object bounding boxes...");
-            var wmoBounds = CalculateBounds(wmoVertices);
-            ConsoleLogger.WriteLine($"WMO object bounds: Center=({wmoBounds.Center.X:F2}, {wmoBounds.Center.Y:F2}, {wmoBounds.Center.Z:F2}), Size=({wmoBounds.Size.X:F2}, {wmoBounds.Size.Y:F2}, {wmoBounds.Size.Z:F2})");
-            
-            // Compare MSCN clusters to WMO object properties and find actual vertex matches
-            ConsoleLogger.WriteLine("Comparing MSCN clusters to WMO object properties...");
-            int objectMatches = 0;
-            
-            // Build spatial hash grid for efficient WMO vertex lookup
+            // Build spatial hash grid for efficient WMO vertex lookup once
             var wmoSpatialGrid = BuildSpatialHashGrid(wmoVertices, tolerance);
+            
+            // Cap number of clusters to process for performance
+            var maxClustersToProcess = Math.Min(mscnClusters.Count, 100); // Cap at 100 clusters
+            if (mscnClusters.Count > maxClustersToProcess)
+            {
+                ConsoleLogger.WriteLine($"Processing first {maxClustersToProcess} clusters out of {mscnClusters.Count} total");
+                mscnClusters = mscnClusters.Take(maxClustersToProcess).ToList();
+            }
+            
+            // Process clusters with timeout protection
+            int objectMatches = 0;
+            int processedClusters = 0;
+            int totalMatchesFound = 0;
             
             foreach (var cluster in mscnClusters)
             {
+                // Check for timeout
+                if (DateTime.Now - correlationStartTime > timeout)
+                {
+                    ConsoleLogger.WriteLine($"Correlation timeout after {timeout.TotalSeconds} seconds. Processed {processedClusters}/{mscnClusters.Count} clusters.");
+                    break;
+                }
+                
+                processedClusters++;
+                if (processedClusters % 10 == 0)
+                {
+                    ConsoleLogger.WriteLine($"Processing cluster {processedClusters}/{mscnClusters.Count}...");
+                }
+                
                 var clusterCenter = cluster.center;
                 var clusterSize = cluster.size;
                 
-                // Check if cluster overlaps or is near WMO bounds
-                var distance = Vector3.Distance(clusterCenter, wmoBounds.Center);
-                var combinedSize = (clusterSize + wmoBounds.Size).Length();
-                
-                if (distance <= combinedSize * 0.5f) // Objects overlap or are close
+                // Skip very large clusters (likely noise or poorly formed)
+                if (clusterSize.Length() > tolerance * 20)
                 {
-                    objectMatches++;
-                    ConsoleLogger.WriteLine($"Object match: MSCN cluster at ({clusterCenter.X:F2}, {clusterCenter.Y:F2}, {clusterCenter.Z:F2}) overlaps with WMO object");
+                    ConsoleLogger.WriteLine($"Skipping oversized cluster at ({clusterCenter.X:F2}, {clusterCenter.Y:F2}, {clusterCenter.Z:F2}) with size {clusterSize.Length():F2}");
+                    continue;
+                }
+                
+                // Only check clusters that might reasonably overlap with WMO bounds
+                var distanceToBounds = Math.Max(0, Vector3.Distance(clusterCenter, wmoBounds.Center) - 
+                                             (clusterSize.Length() / 2 + wmoBounds.Size.Length() / 2));
+                
+                if (distanceToBounds > tolerance * 5) // Skip clusters that are too far from WMO bounds
+                    continue;
+                
+                objectMatches++;
+                
+                // Find MSCN vertices efficiently using index lookup rather than distance check
+                // Pre-compute cluster bounds
+                var clusterBoundsMin = new Vector3(
+                    clusterCenter.X - clusterSize.X/2,
+                    clusterCenter.Y - clusterSize.Y/2,
+                    clusterCenter.Z - clusterSize.Z/2
+                );
+                var clusterBoundsMax = new Vector3(
+                    clusterCenter.X + clusterSize.X/2,
+                    clusterCenter.Y + clusterSize.Y/2,
+                    clusterCenter.Z + clusterSize.Z/2
+                );
+                
+                // Add a small padding to ensure we catch all relevant vertices
+                clusterBoundsMin -= new Vector3(tolerance);
+                clusterBoundsMax += new Vector3(tolerance);
+                
+                // Build spatial hash for this specific cluster region (for MSCN vertices)
+                var clusterMscnGrid = new Dictionary<(int, int, int), List<int>>();
+                var cellSize = tolerance; // Use tolerance as cell size
+                
+                // Only process a limited batch of vertices per cluster
+                int mscnProcessed = 0;
+                int matchesInCluster = 0;
+                int maxVerticesPerCluster = 500; // Limit vertices per cluster
+                
+                // Process original MSCN vertices (not the sampled ones) but use spatial filtering
+                for (int mscnIndex = 0; mscnIndex < mscnVertices.Count && mscnProcessed < maxVerticesPerCluster; mscnIndex++)
+                {
+                    if (matchedMscnIndices.Contains(mscnIndex)) continue;
                     
-                    // Find actual vertex-to-vertex matches within this cluster region
-                    // Since we only have cluster center/size, search for MSCN vertices near the cluster center
-                    for (int mscnIndex = 0; mscnIndex < mscnVertices.Count; mscnIndex++)
+                    var mscnVertex = mscnVertices[mscnIndex];
+                    
+                    // Skip if outside cluster bounds (quick reject)
+                    if (mscnVertex.X < clusterBoundsMin.X || mscnVertex.X > clusterBoundsMax.X ||
+                        mscnVertex.Y < clusterBoundsMin.Y || mscnVertex.Y > clusterBoundsMax.Y ||
+                        mscnVertex.Z < clusterBoundsMin.Z || mscnVertex.Z > clusterBoundsMax.Z)
+                        continue;
+                    
+                    mscnProcessed++;
+                    
+                    // Find nearest WMO vertex using spatial grid
+                    var (nearestDistance, nearestWmoIndex) = FindNearestWmoVertex(mscnVertex, wmoVertices, wmoSpatialGrid, tolerance);
+                    
+                    // Accept match if within tolerance and not already matched
+                    if (nearestDistance <= tolerance && nearestWmoIndex >= 0 && !matchedWmoIndices.Contains(nearestWmoIndex))
                     {
-                        if (matchedMscnIndices.Contains(mscnIndex)) continue;
+                        // Found a valid vertex match
+                        matchedMscnIndices.Add(mscnIndex);
+                        matchedWmoIndices.Add(nearestWmoIndex);
+                        result.Matches.Add(new SpatialMatch 
+                        { 
+                            MscnIndex = mscnIndex, 
+                            MscnVertex = mscnVertex,
+                            WmoIndex = nearestWmoIndex, 
+                            WmoVertex = wmoVertices[nearestWmoIndex],
+                            Distance = nearestDistance 
+                        });
                         
-                        var mscnVertex = mscnVertices[mscnIndex];
+                        matchesInCluster++;
+                        totalMatchesFound++;
                         
-                        // Check if this MSCN vertex is within the cluster bounds
-                        var distanceToClusterCenter = Vector3.Distance(mscnVertex, clusterCenter);
-                        var clusterRadius = clusterSize.Length() * 0.5f; // Use half the diagonal as radius
-                        
-                        if (distanceToClusterCenter <= clusterRadius)
-                        {
-                            // This MSCN vertex is part of the matched cluster, find its nearest WMO match
-                            var (nearestDistance, nearestWmoIndex) = FindNearestWmoVertex(mscnVertex, wmoVertices, wmoSpatialGrid, tolerance);
-                            
-                            if (nearestDistance <= tolerance && nearestWmoIndex >= 0 && !matchedWmoIndices.Contains(nearestWmoIndex))
-                            {
-                                // Found a valid vertex match
-                                matchedMscnIndices.Add(mscnIndex);
-                                matchedWmoIndices.Add(nearestWmoIndex);
-                                result.Matches.Add(new SpatialMatch 
-                                { 
-                                    MscnIndex = mscnIndex, 
-                                    WmoIndex = nearestWmoIndex, 
-                                    Distance = nearestDistance 
-                                });
-                            }
-                        }
+                        // Early exit if we found enough matches in this cluster
+                        if (matchesInCluster >= 20) // Cap matches per cluster
+                            break;
                     }
+                }
+                
+                // Early exit check for overall matches
+                if (totalMatchesFound > 1000) // Cap total matches
+                {
+                    ConsoleLogger.WriteLine($"Found {totalMatchesFound} matches, stopping early for performance");
+                    break;
                 }
             }
             
+            var processingTime = (DateTime.Now - correlationStartTime).TotalSeconds;
+            ConsoleLogger.WriteLine($"Correlation completed in {processingTime:F1} seconds");
+            ConsoleLogger.WriteLine($"Processed {processedClusters} out of {mscnClusters.Count} clusters");
             ConsoleLogger.WriteLine($"Found {objectMatches} object-level matches out of {mscnClusters.Count} MSCN clusters");
             ConsoleLogger.WriteLine($"Found {result.Matches.Count} vertex-to-vertex matches within matched objects");
             
@@ -996,9 +1586,9 @@ namespace ParpToolbox.CliCommands
             result.MatchedWmoVertices = matchedWmoIndices.Count;
             result.MatchPercentage = result.TotalMscnVertices > 0 ? (float)result.MatchedMscnVertices / result.TotalMscnVertices * 100f : 0f;
 
-            // Calculate spatial bounds
-            result.MscnBounds = CalculateBounds(mscnVertices);
-            result.WmoBounds = CalculateBounds(wmoVertices);
+            // Store spatial bounds
+            result.MscnBounds = mscnBounds;
+            result.WmoBounds = wmoBounds;
 
             return result;
         }

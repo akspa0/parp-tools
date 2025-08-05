@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 /// <summary>
 /// Assembles complete PM4 building objects by following the MPRL → MSLK → MSUR relationship chain.

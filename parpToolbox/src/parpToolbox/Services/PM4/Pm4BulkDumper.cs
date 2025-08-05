@@ -8,6 +8,7 @@ using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 /// <summary>
 /// Writes a comprehensive dump of a <see cref="Pm4Scene"/>: CSV plus OBJ exports for several grouping strategies.

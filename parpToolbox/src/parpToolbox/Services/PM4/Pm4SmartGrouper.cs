@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 
 /// <summary>
 /// Smart grouping service for PM4 objects based on legacy research and MSLK pattern analysis.

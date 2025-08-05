@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Formats.P4.Chunks.Common;
+using ParpToolbox.Services.Coordinate;
 
 namespace ParpToolbox.Services.PM4;
 
@@ -500,7 +501,8 @@ internal static class Pm4RefinedHierarchicalObjectAssembler
                 
                 var vertex = scene.Vertices[originalIndex];
                 // Apply coordinate system correction
-                writer.WriteLine($"v {-vertex.X} {vertex.Y} {vertex.Z}");
+                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
+                writer.WriteLine($"v {transformedVertex.X} {transformedVertex.Y} {transformedVertex.Z}");
             }
             
             writer.WriteLine();

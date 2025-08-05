@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Text.Json;
 using ParpToolbox.Services;
 using ParpToolbox.Services.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 namespace ParpToolbox.CliCommands;

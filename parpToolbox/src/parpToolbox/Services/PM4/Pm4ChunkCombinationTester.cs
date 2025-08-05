@@ -7,6 +7,7 @@ using System.Linq;
 using System.Numerics;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
+using ParpToolbox.Services.Coordinate;
 using ParpToolbox.Utils;
 
 /// <summary>
