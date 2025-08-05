@@ -116,25 +116,30 @@ namespace PM4Rebuilder
         
         private static void ExportMslkCSV(List<MslkEntry> links, string path)
         {
-            var csv = new StringBuilder();
-            csv.AppendLine("Index,ParentIndex,ReferenceIndex,MspiFirstIndex,MspiIndexCount,SurfaceRefIndex,Unknown1,Unknown2,Unknown3,Unknown4,Unknown5,Unknown6,Unknown7,Unknown8");
+            if (links.Count == 0) return;
             
+            var csv = new StringBuilder();
+            
+            // Use reflection to get actual field names dynamically
+            var firstLink = links[0];
+            var properties = firstLink.GetType().GetProperties();
+            var propertyNames = new string[properties.Length];
+            for (int i = 0; i < properties.Length; i++)
+            {
+                propertyNames[i] = properties[i].Name;
+            }
+            
+            // Write header with Index + all actual field names
+            csv.AppendLine("Index," + string.Join(",", propertyNames));
+            
+            // Write data
             for (int i = 0; i < links.Count; i++)
             {
                 var link = links[i];
-                // Use reflection to get all possible fields including unknowns
-                var properties = link.GetType().GetProperties();
                 var values = new List<string> { i.ToString() };
                 
-                // Add known fields first
-                values.Add(link.ParentIndex.ToString());
-                values.Add(link.ReferenceIndex.ToString());
-                values.Add(link.MspiFirstIndex.ToString());
-                values.Add(link.MspiIndexCount.ToString());
-                values.Add(link.SurfaceRefIndex.ToString());
-                
-                // Add any other fields as unknowns
-                foreach (var prop in properties.Where(p => !new[] { "ParentIndex", "ReferenceIndex", "MspiFirstIndex", "MspiIndexCount", "SurfaceRefIndex" }.Contains(p.Name)))
+                // Add all fields through reflection
+                foreach (var prop in properties)
                 {
                     var value = prop.GetValue(link)?.ToString() ?? "";
                     values.Add(value);
@@ -179,7 +184,11 @@ namespace PM4Rebuilder
             // Use reflection to get actual field names
             var firstPlacement = placements[0];
             var properties = firstPlacement.GetType().GetProperties();
-            var propertyNames = properties.Select(p => p.Name).ToArray();
+            var propertyNames = new string[properties.Length];
+            for (int i = 0; i < properties.Length; i++)
+            {
+                propertyNames[i] = properties[i].Name;
+            }
             
             // Write header
             csv.AppendLine("Index," + string.Join(",", propertyNames));

@@ -10,7 +10,7 @@ namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-obj] [--single-tile]";
+        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-obj] [--single-tile] [--batch-all] [--batch-export-obj]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -20,7 +20,7 @@ namespace PM4Rebuilder
                 return 1;
             }
 
-            var inputPath = args[0];
+            string? inputPath = null;
             bool includeAdjacent = false;
             bool rawCoords = false;
             bool altTransform = false;
@@ -31,11 +31,13 @@ namespace PM4Rebuilder
             bool validateData = false;
             bool singleObj = false;
             bool singleTile = false;
+            bool batchAll = false;
+            bool batchExportObj = false;
             string? outDir = null;
             string? dumpDir = null;
 
-            // naïve arg parse
-            for (int i = 1; i < args.Length; i++)
+            // naïve arg parse - handle both input path and flags
+            for (int i = 0; i < args.Length; i++)
             {
                 switch (args[i])
                 {
@@ -81,6 +83,19 @@ namespace PM4Rebuilder
                     case "--single-tile":
                         singleTile = true;
                         break;
+                    case "--batch-all":
+                        batchAll = true;
+                        break;
+                    case "--batch-export-obj":
+                        batchExportObj = true;
+                        break;
+                    default:
+                        // If it's not a flag, treat it as input path
+                        if (!args[i].StartsWith("--") && inputPath == null)
+                        {
+                            inputPath = args[i];
+                        }
+                        break;
                 }
             }
 
@@ -103,6 +118,40 @@ namespace PM4Rebuilder
 
             try
             {
+                // Batch process ALL PM4 files if requested (data recovery mode)
+                if (batchAll)
+                {
+                    if (inputPath == null || !Directory.Exists(inputPath))
+                    {
+                        Console.WriteLine("ERROR: --batch-all requires a directory path containing PM4 files.");
+                        return 1;
+                    }
+                    
+                    Console.WriteLine("=== PM4 BATCH DATA RECOVERY ANALYSIS ===");
+                    Console.WriteLine("Processing ALL PM4 files for comprehensive data extraction...");
+                    return await Pm4BatchAnalyzer.ProcessAllFiles(inputPath, outDir);
+                }
+                
+                // Batch export OBJs using decoded field algorithm
+                if (batchExportObj)
+                {
+                    if (inputPath == null || !Directory.Exists(inputPath))
+                    {
+                        Console.WriteLine("ERROR: --batch-export-obj requires a directory path containing PM4 files.");
+                        return 1;
+                    }
+                    
+                    Console.WriteLine("=== PM4 BATCH OBJ EXPORT WITH DECODED FIELDS ===");
+                    Console.WriteLine("Exporting OBJs using HasGeometry flag and decoded field algorithm...");
+                    return await Pm4BatchObjExporter.ExportAllWithDecodedFields(inputPath, outDir);
+                }
+                
+                if (inputPath == null)
+                {
+                    Console.WriteLine("ERROR: Input path is required for non-batch operations.");
+                    return 1;
+                }
+                
                 var scene = await SceneLoaderHelper.LoadSceneAsync(inputPath, includeAdjacent, !rawCoords, altTransform);
                 Console.WriteLine($"Loaded scene: Vertices={scene.Vertices.Count}, Triangles={scene.Triangles.Count}");
 
