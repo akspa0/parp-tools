@@ -187,6 +187,38 @@ namespace ParpToolbox.Services.PM4.Database
     }
     
     /// <summary>
+    /// Represents a property record (MPRR) in the database.
+    /// MPRR contains the true building boundaries using sentinel values (Value1=65535).
+    /// </summary>
+    public class Pm4Property
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        public int Pm4FileId { get; set; }
+        public int GlobalIndex { get; set; }
+        
+        /// <summary>
+        /// First ushort value. When Value1=65535, acts as sentinel marker indicating object boundary.
+        /// </summary>
+        public ushort Value1 { get; set; }
+        
+        /// <summary>
+        /// Second ushort value. When following a sentinel marker, identifies component type.
+        /// </summary>
+        public ushort Value2 { get; set; }
+        
+        /// <summary>
+        /// True if this entry is a building boundary sentinel (Value1=65535).
+        /// </summary>
+        public bool IsBoundarySentinel { get; set; }
+        
+        // Navigation properties
+        [ForeignKey(nameof(Pm4FileId))]
+        public virtual Pm4File Pm4File { get; set; } = null!;
+    }
+    
+    /// <summary>
     /// Represents a surface group (spatial clustering result).
     /// </summary>
     public class Pm4SurfaceGroup

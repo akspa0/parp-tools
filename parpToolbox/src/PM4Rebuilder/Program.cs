@@ -11,7 +11,7 @@ namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--audit-only] [--per-object] [--global-obj] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-tile] [--batch-all] [--batch-export-obj]\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
+        private const string Usage = "Usage: PM4Rebuilder direct-export <pm4Input> [outDir]     - Direct PM4 to OBJ export (RECOMMENDED)\n       OR: PM4Rebuilder export-db <pm4Input> [outDir]       - Export PM4 data to SQLite database\n       OR: PM4Rebuilder export-buildings <scene.db> [outDir] - Export buildings from database to OBJ files\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -40,6 +40,22 @@ namespace PM4Rebuilder
                 ExploreHarness.Run(sceneExpl, exploreOut, exportObj: true);
                 PipelineLogger.Log("[EXPLORE] Completed automated exploration.");
                 return 0;
+            }
+
+            // Direct PM4 to OBJ export (recommended approach)
+            if (args[0].Equals("direct-export", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: direct-export command requires <pm4Input> argument.");
+                    return 1;
+                }
+                string pm4Input = args[1];
+                string outDirDirect = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "direct_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirDirect);
+                
+                int exitCode = DirectPm4Exporter.ExportBuildings(pm4Input, outDirDirect);
+                return exitCode;
             }
 
                         // Quick command shortcut: analyze-db <dbPath> [outDir]
@@ -107,14 +123,32 @@ namespace PM4Rebuilder
                 return exitCode;
             }
 
+            if (args[0].Equals("export-buildings", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: export-buildings command requires <scene.db> argument.");
+                    return 1;
+                }
+                string dbPath = args[1];
+                string outDirBuildings = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirBuildings);
+                int exitCode = BuildingLevelExporter.ExportAllBuildings(dbPath, outDirBuildings);
+                return exitCode;
+            }
+
             if (args[0].Equals("export-subcomponent", StringComparison.OrdinalIgnoreCase))
             {
                 if (args.Length < 3)
                 {
-                    Console.WriteLine("ERROR: export-subcomponent requires <dbPath> <ObjectId> [outObj]");
+                    Console.WriteLine("PM4Rebuilder - Command Line Interface");
+                    Console.WriteLine("Usage:");
+                    Console.WriteLine("  direct-export <pm4Input> [outDir]       - Direct PM4 to OBJ export (RECOMMENDED)");
+                    Console.WriteLine("  export-db <pm4Input> [outDir]           - Export PM4 data to SQLite database");
+                    Console.WriteLine("  export-buildings <scene.db> [outDir]    - Export buildings from database to OBJ files");
+                    Console.WriteLine("  export-subcomponent <dbPath> <ObjectId> [outObj] - Export single object to OBJ");
                     return 1;
                 }
-
                 string dbPath = args[1];
                 if (!uint.TryParse(args[2], out uint objectId))
                 {

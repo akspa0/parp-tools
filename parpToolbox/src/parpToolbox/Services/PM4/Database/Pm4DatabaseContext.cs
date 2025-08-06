@@ -24,6 +24,7 @@ namespace ParpToolbox.Services.PM4.Database
         public DbSet<Pm4Surface> Surfaces { get; set; } = null!;
         public DbSet<Pm4Link> Links { get; set; } = null!;
         public DbSet<Pm4Placement> Placements { get; set; } = null!;
+        public DbSet<Pm4Property> Properties { get; set; } = null!;
         public DbSet<Pm4SurfaceGroup> SurfaceGroups { get; set; } = null!;
         public DbSet<Pm4SurfaceGroupMember> SurfaceGroupMembers { get; set; } = null!;
         public DbSet<Pm4RawChunk> RawChunks { get; set; } = null!;

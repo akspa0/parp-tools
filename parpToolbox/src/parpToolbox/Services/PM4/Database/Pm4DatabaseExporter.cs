@@ -56,6 +56,7 @@ namespace ParpToolbox.Services.PM4.Database
             await ExportSurfacesAsync(context, pm4File.Id, scene.Surfaces, scene.Vertices);
             await ExportLinksAsync(context, pm4File.Id, scene.Links?.Cast<object>().ToList() ?? new List<object>());
             await ExportPlacementsAsync(context, pm4File.Id, scene.Placements?.Cast<object>().ToList() ?? new List<object>());
+            await ExportPropertiesAsync(context, pm4File.Id, scene.Properties?.Cast<object>().ToList() ?? new List<object>());
             await ExportSurfaceGroupsAsync(context, pm4File.Id, scene.Groups);
             
             // Export hierarchical container relationships as JSON (fast, bypasses SQLite bottlenecks)
@@ -1401,6 +1402,90 @@ namespace ParpToolbox.Services.PM4.Database
             );
             
             ConsoleLogger.WriteLine($"[JSON HIERARCHICAL EXPORT] Successfully exported {result.TotalContainers} hierarchical containers to: {outputPath}");
+        }
+        
+        /// <summary>
+        /// Exports MPRR properties to the database with optimized batch processing.
+        /// MPRR contains the definitive building boundaries using sentinel values (Value1=65535).
+        /// </summary>
+        private async Task ExportPropertiesAsync(Pm4DatabaseContext context, int pm4FileId, List<object> properties)
+        {
+            ConsoleLogger.WriteLine($"[CHUNK PROCESSING] Starting MPRR property export: {properties.Count:N0} entries");
+            
+            if (properties.Count == 0)
+            {
+                ConsoleLogger.WriteLine("[MPRR EXPORT] No MPRR properties found in scene data");
+                return;
+            }
+            
+            // Debug: Log first property structure
+            if (properties.Count > 0)
+            {
+                LogChunkStructure("MPRR", properties[0]);
+            }
+            
+            var startTime = DateTime.Now;
+            const int batchSize = 10000;
+            int sentinelCount = 0;
+            
+            // Disable change tracking for performance
+            context.ChangeTracker.AutoDetectChangesEnabled = false;
+            
+            for (int i = 0; i < properties.Count; i += batchSize)
+            {
+                var batchStartTime = DateTime.Now;
+                var endIndex = Math.Min(i + batchSize, properties.Count);
+                var batch = new List<Pm4Property>();
+                
+                for (int j = i; j < endIndex; j++)
+                {
+                    var property = properties[j];
+                    
+                    try
+                    {
+                        // Extract MPRR Entry fields using reflection
+                        var value1 = (ushort)(property.GetType().GetProperty("Value1")?.GetValue(property) ?? 0);
+                        var value2 = (ushort)(property.GetType().GetProperty("Value2")?.GetValue(property) ?? 0);
+                        
+                        bool isSentinel = value1 == 65535;
+                        if (isSentinel) sentinelCount++;
+                        
+                        var pm4Property = new Pm4Property
+                        {
+                            Pm4FileId = pm4FileId,
+                            GlobalIndex = j,
+                            Value1 = value1,
+                            Value2 = value2,
+                            IsBoundarySentinel = isSentinel
+                        };
+                        
+                        batch.Add(pm4Property);
+                    }
+                    catch (Exception ex)
+                    {
+                        ConsoleLogger.WriteLine($"[MPRR EXPORT] Error processing property {j}: {ex.Message}");
+                    }
+                }
+                
+                context.Properties.AddRange(batch);
+                await context.SaveChangesAsync();
+                context.ChangeTracker.Clear();
+                
+                var batchTime = DateTime.Now - batchStartTime;
+                var totalTime = DateTime.Now - startTime;
+                var progress = (double)endIndex / properties.Count;
+                var eta = progress > 0 ? TimeSpan.FromMilliseconds(totalTime.TotalMilliseconds / progress - totalTime.TotalMilliseconds) : TimeSpan.Zero;
+                
+                ConsoleLogger.WriteLine($"  Properties: {endIndex:N0}/{properties.Count:N0} ({progress:P1}) | Batch: {batchTime.TotalSeconds:F1}s | Total: {totalTime:mm\\:ss} | ETA: {eta:mm\\:ss}");
+            }
+            
+            // Re-enable change tracking
+            context.ChangeTracker.AutoDetectChangesEnabled = true;
+            
+            var finalTime = DateTime.Now - startTime;
+            ConsoleLogger.WriteLine($"Completed MPRR property export: {properties.Count:N0} properties in {finalTime:mm\\:ss}");
+            ConsoleLogger.WriteLine($"[MPRR ANALYSIS] Found {sentinelCount:N0} building boundary sentinels (Value1=65535)");
+            ConsoleLogger.WriteLine($"[MPRR ANALYSIS] Estimated {sentinelCount + 1:N0} building objects from sentinel boundaries");
         }
         
         #endregion
