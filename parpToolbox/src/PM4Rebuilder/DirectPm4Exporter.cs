@@ -103,9 +103,16 @@ public static class DirectPm4Exporter
             Console.WriteLine($"[DIRECT EXPORTER] Scene has {scene.Vertices.Count} vertices, {scene.Triangles.Count} triangles");
             Console.WriteLine($"[DIRECT EXPORTER] Scene has {scene.Groups.Count} surface groups for object-based grouping");
             
-            // Use PM4 surface groups for real object boundaries
-            if (scene.Groups.Count > 0)
+            // Use MSLK-driven building assembly for complete buildings
+            if (scene.Links.Count > 0 && scene.Groups.Count > 0)
             {
+                buildings = AssembleBuildingsFromMslkLinkage(scene);
+                Console.WriteLine($"[DIRECT EXPORTER] Created {buildings.Count} buildings from MSLK-driven assembly");
+            }
+            else if (scene.Groups.Count > 0)
+            {
+                // Fallback: individual surface groups (fragments)
+                Console.WriteLine($"[DIRECT EXPORTER] No MSLK data found, using surface group fragments");
                 for (int groupIndex = 0; groupIndex < scene.Groups.Count; groupIndex++)
                 {
                     var group = scene.Groups[groupIndex];
@@ -119,7 +126,7 @@ public static class DirectPm4Exporter
             }
             else
             {
-                // Fallback to triangle chunking if no surface groups available
+                // Final fallback to triangle chunking
                 Console.WriteLine($"[DIRECT EXPORTER] No surface groups found, falling back to triangle chunking");
                 buildings = ExtractBuildingsFromTriangleChunking(scene);
             }
@@ -130,6 +137,165 @@ public static class DirectPm4Exporter
         {
             Console.WriteLine($"[DIRECT EXPORTER ERROR] Failed to extract buildings: {ex.Message}");
             return buildings;
+        }
+    }
+    
+    /// <summary>
+    /// Assemble complete buildings using MSLK linkage data to aggregate MSUR surface fragments.
+    /// Groups MSLK entries by ParentId (building container) and collects all referenced surface fragments.
+    /// </summary>
+    private static List<DirectBuildingDefinition> AssembleBuildingsFromMslkLinkage(Pm4Scene scene)
+    {
+        var buildings = new List<DirectBuildingDefinition>();
+        
+        try
+        {
+            Console.WriteLine($"[DIRECT EXPORTER] MSLK-driven assembly: {scene.Links.Count} links, {scene.Groups.Count} surface groups");
+            
+            // Group MSLK entries by ParentId (building container)
+            var linksByParent = scene.Links
+                .Where(link => link.HasGeometry) // Only links with actual geometry
+                .GroupBy(link => link.ParentId)
+                .Where(group => group.Any()) // Skip empty groups
+                .ToList();
+            
+            Console.WriteLine($"[DIRECT EXPORTER] Found {linksByParent.Count} unique building containers (ParentId groups)");
+            
+            // Create surface group lookup for fast access
+            var surfaceGroupLookup = scene.Groups
+                .Select((group, index) => new { group, index })
+                .ToDictionary(x => x.index, x => x.group);
+            
+            int buildingId = 0;
+            foreach (var parentGroup in linksByParent)
+            {
+                var building = AssembleBuildingFromParentGroup(scene, buildingId, parentGroup.Key, parentGroup.ToList(), surfaceGroupLookup);
+                if (building != null && building.TriangleCount > 0)
+                {
+                    buildings.Add(building);
+                    buildingId++;
+                }
+            }
+            
+            return buildings;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DIRECT EXPORTER ERROR] MSLK assembly failed: {ex.Message}");
+            return buildings;
+        }
+    }
+    
+    /// <summary>
+    /// Assemble a complete building from a group of MSLK entries sharing the same ParentId.
+    /// </summary>
+    private static DirectBuildingDefinition? AssembleBuildingFromParentGroup(Pm4Scene scene, int buildingId, uint parentId, List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry> mslkEntries, Dictionary<int, ParpToolbox.Formats.PM4.SurfaceGroup> surfaceGroupLookup)
+    {
+        try
+        {
+            var building = new DirectBuildingDefinition
+            {
+                BuildingId = buildingId,
+                StartPropertyIndex = (int)parentId, // Use ParentId as identifier
+                EndPropertyIndex = (int)parentId,
+                Vertices = new List<(float X, float Y, float Z)>(),
+                Triangles = new List<(int V1, int V2, int V3)>()
+            };
+            
+            var usedVertexIndices = new HashSet<int>();
+            var aggregatedTriangles = new List<(int A, int B, int C)>();
+            
+            Console.WriteLine($"[DIRECT EXPORTER] Assembling building {buildingId} from ParentId {parentId} ({mslkEntries.Count} MSLK entries)");
+            
+            var surfaceGroupsUsed = new List<int>();
+            var vertexRangeTracker = new Dictionary<string, int>(); // Track which vertex pools are used
+            
+            // Process each MSLK entry to collect referenced surface fragments
+            foreach (var link in mslkEntries)
+            {
+                // Get surface reference (SurfaceRefIndex points to MSUR)
+                int surfaceRefIndex = link.SurfaceRefIndex;
+                
+                Console.WriteLine($"[DIAGNOSTIC] Building {buildingId}: MSLK entry references surface {surfaceRefIndex}");
+                
+                // Find the corresponding surface group
+                if (surfaceRefIndex >= 0 && surfaceRefIndex < scene.Groups.Count)
+                {
+                    surfaceGroupsUsed.Add(surfaceRefIndex);
+                    var surfaceGroup = scene.Groups[surfaceRefIndex];
+                    var groupFaces = surfaceGroup.Faces;
+                    
+                    Console.WriteLine($"[DIAGNOSTIC] Building {buildingId}: Surface {surfaceRefIndex} ('{surfaceGroup.Name}') has {groupFaces.Count} faces");
+                    
+                    if (groupFaces != null)
+                    {
+                        foreach (var face in groupFaces)
+                        {
+                            int a = face.A;
+                            int b = face.B;
+                            int c = face.C;
+                            
+                            // Track vertex pool usage
+                            TrackVertexPoolUsage(a, scene, vertexRangeTracker);
+                            TrackVertexPoolUsage(b, scene, vertexRangeTracker);
+                            TrackVertexPoolUsage(c, scene, vertexRangeTracker);
+                            
+                            aggregatedTriangles.Add((a, b, c));
+                            usedVertexIndices.Add(a);
+                            usedVertexIndices.Add(b);
+                            usedVertexIndices.Add(c);
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[DIAGNOSTIC WARNING] Building {buildingId}: Invalid surface reference {surfaceRefIndex} (out of range 0-{scene.Groups.Count-1})");
+                }
+            }
+            
+            // Log data source summary for this building
+            Console.WriteLine($"[DIAGNOSTIC] Building {buildingId} data sources:");
+            Console.WriteLine($"  - Surface groups used: [{string.Join(", ", surfaceGroupsUsed)}]");
+            Console.WriteLine($"  - Vertex pool usage: {string.Join(", ", vertexRangeTracker.Select(kv => $"{kv.Key}={kv.Value}"))}");
+            Console.WriteLine($"  - Total triangles: {aggregatedTriangles.Count}, vertices: {usedVertexIndices.Count}");
+            
+            // Check for potential cross-contamination indicators
+            if (surfaceGroupsUsed.Count > 10)
+            {
+                Console.WriteLine($"[CROSS-CONTAMINATION WARNING] Building {buildingId} uses {surfaceGroupsUsed.Count} surface groups - may be over-aggregating!");
+            }
+            
+            // Create vertex index mapping using proper vertex pool resolution
+            var vertexIndexMap = new Dictionary<int, int>();
+            Console.WriteLine($"[DIRECT EXPORTER] Building {buildingId}: aggregated {aggregatedTriangles.Count} triangles from {mslkEntries.Count} surface fragments");
+            
+            foreach (var vertexIndex in usedVertexIndices.OrderBy(x => x))
+            {
+                var vertex = ResolveVertexFromIndex(scene, vertexIndex);
+                if (vertex.HasValue)
+                {
+                    // Apply coordinate system fix: flip X-axis for proper orientation
+                    building.Vertices.Add((-vertex.Value.X, vertex.Value.Y, vertex.Value.Z));
+                    vertexIndexMap[vertexIndex] = building.Vertices.Count - 1;
+                }
+            }
+            
+            // Map triangles to building's vertex indices
+            foreach (var (A, B, C) in aggregatedTriangles)
+            {
+                if (vertexIndexMap.ContainsKey(A) && vertexIndexMap.ContainsKey(B) && vertexIndexMap.ContainsKey(C))
+                {
+                    building.Triangles.Add((vertexIndexMap[A], vertexIndexMap[B], vertexIndexMap[C]));
+                }
+            }
+            
+            building.TriangleCount = building.Triangles.Count;
+            return building;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DIRECT EXPORTER ERROR] Failed to assemble building {buildingId}: {ex.Message}");
+            return null;
         }
     }
     
@@ -168,18 +334,22 @@ public static class DirectPm4Exporter
                     usedVertexIndices.Add(c);
                 }
                 
-                // Create vertex index mapping using combined vertex sources
+                // Create vertex index mapping using proper vertex pool resolution
                 var vertexIndexMap = new Dictionary<int, int>();
-                var allVertices = CombineVertexSources(scene);
-                Console.WriteLine($"[DIRECT EXPORTER] Combined vertices: {scene.Vertices.Count} regular + {scene.MscnVertices.Count} MSCN = {allVertices.Count} total");
+                Console.WriteLine($"[DIRECT EXPORTER] Vertex pools: {scene.Vertices.Count} regular + {scene.MscnVertices.Count} MSCN");
+                Console.WriteLine($"[DIRECT EXPORTER] Index range: 0-{scene.Vertices.Count-1} = regular, {scene.Vertices.Count}+ = MSCN");
                 
                 foreach (var vertexIndex in usedVertexIndices.OrderBy(x => x))
                 {
-                    if (vertexIndex >= 0 && vertexIndex < allVertices.Count)
+                    var vertex = ResolveVertexFromIndex(scene, vertexIndex);
+                    if (vertex.HasValue)
                     {
-                        var vertex = allVertices[vertexIndex];
-                        building.Vertices.Add((vertex.X, vertex.Y, vertex.Z));
+                        building.Vertices.Add((vertex.Value.X, vertex.Value.Y, vertex.Value.Z));
                         vertexIndexMap[vertexIndex] = building.Vertices.Count - 1;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[DIRECT EXPORTER WARNING] Invalid vertex index {vertexIndex} (out of range)");
                     }
                 }
                 
@@ -260,15 +430,15 @@ public static class DirectPm4Exporter
                 usedVertexIndices.Add(C);
             }
             
-            // Create vertex index mapping using combined vertex sources
+            // Create vertex index mapping using proper vertex pool resolution
             var vertexIndexMap = new Dictionary<int, int>();
-            var allVertices = CombineVertexSources(scene);
             foreach (var vertexIndex in usedVertexIndices.OrderBy(x => x))
             {
-                if (vertexIndex >= 0 && vertexIndex < allVertices.Count)
+                var vertex = ResolveVertexFromIndex(scene, vertexIndex);
+                if (vertex.HasValue)
                 {
-                    var vertex = allVertices[vertexIndex];
-                    building.Vertices.Add((vertex.X, vertex.Y, vertex.Z));
+                    // Apply coordinate system fix: flip X-axis for proper orientation
+                    building.Vertices.Add((-vertex.Value.X, vertex.Value.Y, vertex.Value.Z));
                     vertexIndexMap[vertexIndex] = building.Vertices.Count - 1;
                 }
             }
@@ -293,22 +463,50 @@ public static class DirectPm4Exporter
     }
     
     /// <summary>
-    /// Combine regular scene vertices with MSCN vertices for complete geometry.
+    /// Resolve a vertex index to the correct vertex from the appropriate pool (regular or MSCN).
+    /// Indices 0 to scene.Vertices.Count-1 reference regular vertices.
+    /// Indices scene.Vertices.Count+ reference MSCN vertices.
     /// </summary>
-    private static List<System.Numerics.Vector3> CombineVertexSources(Pm4Scene scene)
+    private static System.Numerics.Vector3? ResolveVertexFromIndex(Pm4Scene scene, int index)
     {
-        var allVertices = new List<System.Numerics.Vector3>();
-        
-        // Add regular scene vertices first
-        allVertices.AddRange(scene.Vertices);
-        
-        // Add MSCN vertices (if any)
-        if (scene.MscnVertices.Count > 0)
+        // Regular vertex range: 0 to scene.Vertices.Count-1
+        if (index >= 0 && index < scene.Vertices.Count)
         {
-            allVertices.AddRange(scene.MscnVertices);
+            return scene.Vertices[index];
         }
         
-        return allVertices;
+        // MSCN vertex range: scene.Vertices.Count to scene.Vertices.Count + scene.MscnVertices.Count-1
+        int mscnIndex = index - scene.Vertices.Count;
+        if (mscnIndex >= 0 && mscnIndex < scene.MscnVertices.Count)
+        {
+            return scene.MscnVertices[mscnIndex];
+        }
+        
+        // Index out of range
+        return null;
+    }
+    
+    /// <summary>
+    /// Track vertex pool usage for diagnostic purposes.
+    /// Helps identify cross-contamination between buildings.
+    /// </summary>
+    private static void TrackVertexPoolUsage(int vertexIndex, Pm4Scene scene, Dictionary<string, int> tracker)
+    {
+        if (vertexIndex >= 0 && vertexIndex < scene.Vertices.Count)
+        {
+            // Regular vertex pool
+            tracker["regular"] = tracker.GetValueOrDefault("regular", 0) + 1;
+        }
+        else if (vertexIndex >= scene.Vertices.Count && vertexIndex < scene.Vertices.Count + scene.MscnVertices.Count)
+        {
+            // MSCN vertex pool
+            tracker["mscn"] = tracker.GetValueOrDefault("mscn", 0) + 1;
+        }
+        else
+        {
+            // Out of range
+            tracker["invalid"] = tracker.GetValueOrDefault("invalid", 0) + 1;
+        }
     }
     
     /// <summary>
