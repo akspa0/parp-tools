@@ -5,12 +5,13 @@ using System.Threading.Tasks;
 using ParpToolbox.Services.PM4;
 using ParpToolbox.Formats.PM4;
 using System.Collections.Generic;
+using PM4Rebuilder.Pipeline;
 
 namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-obj] [--single-tile] [--batch-all] [--batch-export-obj]";
+        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--audit-only] [--per-object] [--global-obj] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-tile] [--batch-all] [--batch-export-obj]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -18,6 +19,94 @@ namespace PM4Rebuilder
             {
                 Console.WriteLine("PM4Rebuilder – proof-of-concept object assembler\n" + Usage);
                 return 1;
+            }
+
+            // Quick command shortcut: explore <pm4Dir>
+            if (args[0].Equals("explore", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: explore command requires <pm4File|directory> argument.");
+                    return 1;
+                }
+
+                string exploreInput = args[1];
+                string exploreOut = Path.Combine(Directory.GetCurrentDirectory(), "pm4_explore_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(exploreOut);
+                PipelineLogger.Initialize(exploreOut);
+
+                var sceneExpl = await SceneLoaderHelper.LoadSceneAsync(exploreInput, includeAdjacent: false, applyTransform: true, altTransform: false);
+                PipelineLogger.Log($"[EXPLORE] Scene loaded: Vertices={sceneExpl.Vertices.Count}, Triangles={sceneExpl.Triangles.Count}");
+                ExploreHarness.Run(sceneExpl, exploreOut, exportObj: true);
+                PipelineLogger.Log("[EXPLORE] Completed automated exploration.");
+                return 0;
+            }
+
+                        // Quick command shortcut: analyze-db <dbPath> [outDir]
+            if (args[0].Equals("export-db", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: export-db command requires <pm4File|directory> argument.");
+                    return 1;
+                }
+                string pm4Input = args[1];
+                string outDirExport = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "pm4_db_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirExport);
+
+                // Load scene (single tile for now, no transforms)
+                var sceneExport = await SceneLoaderHelper.LoadSceneAsync(pm4Input, includeAdjacent:false, applyTransform:false, altTransform:false);
+                string dbPath = Path.Combine(outDirExport, "PM4_Scene_analysis.db");
+
+                var exporter = new ParpToolbox.Services.PM4.Database.Pm4DatabaseExporter(dbPath);
+                await exporter.ExportSceneAsync(sceneExport, Path.GetFileName(pm4Input), pm4Input);
+
+                Console.WriteLine($"[EXPORT-DB] Database written to {dbPath}");
+                return 0;
+            }
+
+            if (args[0].Equals("analyze-db", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: analyze-db command requires <dbPath> argument.");
+                    return 1;
+                }
+                string dbPath = args[1];
+                string outDirAnalyze = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "pm4_db_analysis", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirAnalyze);
+                int exitCode = DatabaseRelationshipAnalyzer.Analyze(dbPath, outDirAnalyze);
+                return exitCode;
+            }
+
+            if (args[0].Equals("export-subcomponent", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 3)
+                {
+                    Console.WriteLine("ERROR: export-subcomponent requires <dbPath> <ObjectId> [outObj]");
+                    return 1;
+                }
+
+                string dbPath = args[1];
+                if (!uint.TryParse(args[2], out uint objectId))
+                {
+                    Console.WriteLine("ERROR: <ObjectId> must be an unsigned integer.");
+                    return 1;
+                }
+                string outObj;
+                if (args.Length >= 4)
+                {
+                    outObj = args[3];
+                }
+                else
+                {
+                    string stampDir = Path.Combine(Directory.GetCurrentDirectory(), "project_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                    Directory.CreateDirectory(stampDir);
+                    outObj = Path.Combine(stampDir, $"subcomponent_{objectId}.obj");
+                }
+
+                SubComponentObjExporter.Export(dbPath, objectId, outObj);
+                return 0;
             }
 
             string? inputPath = null;
@@ -29,10 +118,14 @@ namespace PM4Rebuilder
             bool testTransforms = false;
             bool analyzeLinkage = false;
             bool validateData = false;
-            bool singleObj = false;
+            
             bool singleTile = false;
             bool batchAll = false;
             bool batchExportObj = false;
+            bool auditOnly = false;
+            bool perObject = false;
+            bool globalObj = false;
+            
             string? outDir = null;
             string? dumpDir = null;
 
@@ -77,8 +170,14 @@ namespace PM4Rebuilder
                     case "--validate-data":
                         validateData = true;
                         break;
-                    case "--single-obj":
-                        singleObj = true;
+                    case "--audit-only":
+                        auditOnly = true;
+                        break;
+                    case "--per-object":
+                        perObject = true; 
+                        break;
+                    case "--global-obj":
+                        globalObj = true; 
                         break;
                     case "--single-tile":
                         singleTile = true;
@@ -101,6 +200,12 @@ namespace PM4Rebuilder
 
             outDir ??= Path.Combine(Directory.GetCurrentDirectory(), "pm4rebuilder_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
             Directory.CreateDirectory(outDir);
+
+            // Initialize tee logger (console + file)
+            PipelineLogger.Initialize(outDir);
+
+            // Map new flags to existing behavior
+            combinedOutput = globalObj;
 
             // mutual exclusivity
             if (rawCoords && altTransform)
@@ -155,6 +260,21 @@ namespace PM4Rebuilder
                 var scene = await SceneLoaderHelper.LoadSceneAsync(inputPath, includeAdjacent, !rawCoords, altTransform);
                 Console.WriteLine($"Loaded scene: Vertices={scene.Vertices.Count}, Triangles={scene.Triangles.Count}");
 
+                // Step A: Chunk audit
+                ChunkAuditor.Audit(scene, outDir);
+                if (auditOnly)
+                {
+                    Console.WriteLine("Audit-only mode complete. No OBJ export performed.");
+                    return 0;
+                }
+
+                // Step B: Build object graph
+                var objects = ObjectGraphBuilder.Build(scene, outDir);
+                Console.WriteLine($"Resolved {objects.Count} objects after graph analysis");
+
+                // Step C: Geometry extraction & deduplication
+                GeometryExtractor.CleanGeometry(objects);
+
                 // Optionally dump MSCN diagnostics
                 if (dumpDir != null)
                 {
@@ -198,34 +318,33 @@ namespace PM4Rebuilder
                     return 0; // Exit after single tile export
                 }
 
-                // Assemble objects
-                var objects = Pm4ObjectAssembler.AssembleObjects(scene);
-                Console.WriteLine($"Assembled {objects.Count} candidate objects");
 
+
+                // Step D: OBJ writing
                 if (perChunkOutput)
                 {
                     // Use the authoritative exporter that understands MSUR↔MSVI↔MSLK linkage.
                     ParpToolbox.Services.PM4.Pm4SurfaceGroupExporter.ExportSurfaceGroupsFromScene(scene, outDir);
                 }
-                else if (combinedOutput)
+                else if (globalObj)
                 {
                     Directory.CreateDirectory(outDir);
                     string combinedPath = Path.Combine(outDir, "scene_combined.obj");
                     CombinedObjectExporter.Export(objects, scene, combinedPath);
                     Console.WriteLine($"Combined OBJ written to {combinedPath}");
                 }
-                else
+                else // per-object or merged single
                 {
                     // Export options: individual OBJs or single merged OBJ
-                    if (singleObj)
+                    if (!perObject)
                     {
-                        // Export all objects merged into a single OBJ file
+                        // Export merged single OBJ when per-object grouping disabled
                         ObjectExporter.ExportMergedSingleOBJ(objects, scene, outDir, "complete_pm4_export");
-                        Console.WriteLine($"[SINGLE OBJ] All {objects.Count} objects exported to single file: complete_pm4_export.obj");
+                        Console.WriteLine($"[MERGED OBJ] {objects.Count} objects exported as complete_pm4_export.obj");
                     }
                     else
                     {
-                        // Export each object to its own OBJ (default behavior)
+                        // Export each object to its own OBJ file for now (future: groups within tile file)
                         for (int i = 0; i < objects.Count; i++)
                         {
                             var obj = objects[i];
