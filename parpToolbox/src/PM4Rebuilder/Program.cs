@@ -11,7 +11,7 @@ namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--audit-only] [--per-object] [--global-obj] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-tile] [--batch-all] [--batch-export-obj]";
+        private const string Usage = "Usage: PM4Rebuilder <pm4File|directory> [--include-adjacent] [--out <dir>] [--dump-mscn <dir>] [--raw] [--alt] [--combined] [--per-chunk] [--audit-only] [--per-object] [--global-obj] [--test-transforms] [--analyze-linkage] [--validate-data] [--single-tile] [--batch-all] [--batch-export-obj]\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -76,6 +76,34 @@ namespace PM4Rebuilder
                 string outDirAnalyze = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "pm4_db_analysis", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
                 Directory.CreateDirectory(outDirAnalyze);
                 int exitCode = DatabaseRelationshipAnalyzer.Analyze(dbPath, outDirAnalyze);
+                return exitCode;
+            }
+
+            if (args[0].Equals("export-subcomponents", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: export-subcomponents command requires <scene.db> argument.");
+                    return 1;
+                }
+                string dbPath = args[1];
+                string outDirExport = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirExport);
+                int exitCode = BulkSubComponentExporter.ExportAll(dbPath, outDirExport);
+                return exitCode;
+            }
+
+            if (args[0].Equals("analyze-building-groups", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: analyze-building-groups command requires <scene.db> argument.");
+                    return 1;
+                }
+                string dbPath = args[1];
+                string outDirAnalyze = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "project_output", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirAnalyze);
+                int exitCode = BuildingAggregationAnalyzer.Analyze(dbPath, outDirAnalyze);
                 return exitCode;
             }
 

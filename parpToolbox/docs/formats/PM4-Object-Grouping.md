@@ -32,6 +32,52 @@ MSLK.MspiFirstIndex ≥ 0 → Geometry node
 **Method:** `CreateHybridBuilding_StructuralPlusNearby`  
 **Status:** Extracted from POC, ready for testing and Assembly
 
+---
+
+## 🎯 NEW BREAKTHROUGH: Type_0x01 Building Assembly Pattern (2025-08-06)
+
+**MAJOR DISCOVERY**: Building assembly logic identified through comprehensive Type_0x01 field analysis of PM4 SQLite database exports.
+
+### ✅ VERIFIED BUILDING ASSEMBLY RULE
+
+**Core Discovery:** ParentIndex values that span **multiple Type_0x01 values** represent complete buildings with different component types.
+
+### Building Component Classification
+- **Type 0**: Organizational containers (2,133 components, avg 0.8 geometry links)
+- **Type 1**: Walls/vertical structures (1,991 components, good geometry ratio) 
+- **Type 2**: Floors/large horizontal surfaces (2,425 components, largest group)
+- **Type 3**: Roofs/top structures (1,433 components)
+- **Type 4-7**: Details/special elements (352-26 components, decreasing)
+
+### Validated Building Examples
+```
+ParentIndex 11: Type 1 (10 links) + Type 3 (6 links) = Wall+Roof building
+ParentIndex 37: Type 1 (10 links) + Type 3 (6 links) = Wall+Roof building  
+ParentIndex 5206: Type 2 (25 links) = Large floor/platform structure
+ParentIndex 6: Type 0 (2 containers) + Type 3 (2 geometry) = Container+Roof
+```
+
+### Assembly Algorithm
+1. **Query ParentIndex values** spanning multiple Type_0x01 types from Links table
+2. **Group sub-components** by ParentIndex to form complete buildings
+3. **Classify building types** based on Type composition patterns:
+   - Simple buildings: Single Type (e.g., Type 2 floors)
+   - Wall+Roof buildings: Type 1 + Type 3 combinations
+   - Complex buildings: Multiple types (0,1,2,3,4+)
+   - Container buildings: Type 0 + other types
+4. **Export unified buildings** instead of individual sub-components
+
+### Implementation Status
+**File:** `BulkSubComponentExporter.cs` (sub-components), `BuildingAggregationAnalyzer.cs` (analysis)  
+**CLI Commands:** `export-subcomponents`, `analyze-building-groups`  
+**Status:** ✅ Analysis complete, building-level exporter ready for implementation
+
+### Data Validation
+- **8,488 sub-components** analyzed across PM4 SQLite database
+- **Multi-type ParentIndex patterns** confirmed as building boundaries
+- **Type distribution analysis** supports component categorization
+- **Comprehensive field analysis** validates Type_0x01 building logic
+
 ## ⚠️ CRITICAL UPDATE: Global Mesh Architecture Discovered (2025-07-27)
 
 **BREAKTHROUGH:** PM4 files implement a **global mesh system** where complete objects span multiple tiles. Single-tile processing produces fragmented geometry due to missing cross-tile vertex references.

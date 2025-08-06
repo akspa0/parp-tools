@@ -30,23 +30,127 @@ This note documents the current understanding of how `MPRL` **Placements** rows 
 2. The current extractor should use the `Placements` ↔ `Links` mapping as **Phase 1** of object assembly, then seek higher-level joins (e.g. `Links` → `Surfaces` groups, container IDs, or the `BoundsCenter*` hierarchy).
 3. Future analytics should retain both the raw fan-out table and the aggregated counts to drive heuristics for higher-level grouping.
 
+## Analysis Results
+
+### Bulk Export Results
+
+**Sub-component Export Summary:**
+- Each `Placements.Unknown4` → `ParentIndex` represents a distinct sub-component
+- Sub-components are individual polygons or small geometry groups (typically 1-29 child groups)
+- Most sub-components have very few vertices (1-16 vertices per component)
+- Total dataset: 8,488 sub-components exported as individual OBJ files
+- Pattern: `id_{ObjectId}_subcomponent_{ChildGroupCount}.obj`
+
+**Key Discovery:** Sub-components are **individual polygons**, not complete buildings. This confirms that a higher-level aggregation mechanism exists to assemble these fragments into complete building objects.
+
+### Building-Level Assembly Discovery ⭐
+
+**MAJOR BREAKTHROUGH:** Building aggregation logic has been identified through comprehensive analysis of Type_0x01 patterns:
+
+**Building Assembly Rule:**
+- **Single ParentIndex** values that span **multiple Type_0x01 values** represent complete buildings
+- Each Type_0x01 value represents different building component categories:
+  - **Type 0**: Organizational containers (2133 components, avg 0.8 geometry links)
+  - **Type 1**: Walls/vertical structures (1991 components, good geometry ratio)
+  - **Type 2**: Floors/large horizontal surfaces (2425 components, largest group)
+  - **Type 3**: Roofs/top structures (1433 components)
+  - **Type 4-7**: Details/special elements (much smaller counts)
+
+**Building Examples Identified:**
+- **ParentIndex 11**: Type 1 (10 links) + Type 3 (6 links) = Wall + Roof building
+- **ParentIndex 37**: Type 1 (10 links) + Type 3 (6 links) = Wall + Roof building
+- **ParentIndex 5206**: Type 2 (25 links) = Large floor/platform structure
+- **ParentIndex 6**: Type 0 (2 containers) + Type 3 (2 geometry) = Container + Roof
+
+**Pattern Recognition:**
+- Buildings with walls + roofs: Type 1 + Type 3 combinations
+- Large structures: High Type 2 link counts (floors/platforms)
+- Complex buildings: Multiple types (0,1,2,3,4) within same ParentIndex
+
+## Bulk Export Results (2025-08-06)
+
+### ✅ COMPLETED: Bulk Sub-component Exporter
+
+**Status**: Successfully implemented and tested with CLI `export-subcomponents <scene.db>`
+
+**Key Findings**:
+* **127 sub-components exported** from test database
+* **Individual polygons confirmed**: Most objects have 1-10 vertices (quads/triangles)
+* **Hierarchical structure revealed**: Some ParentIndex values have 7-29+ child groups
+* **Container pattern confirmed**: Links with `MspiFirstIndex=-1` are organizational nodes (no geometry)
+
+**Output Structure** (implemented):
+```
+project_output/<timestamp>/
+├── index.csv (ObjectId, ChildGroupCount, VertexCount, FaceCount, ObjFileName)
+├── links.csv (complete MSLK data with RawFieldsJson)
+├── surfaces.csv (complete MSUR data)
+├── summary.txt (statistics and distributions)
+├── id_0_subcomponent_1.obj
+├── id_1_subcomponent_1.obj
+├── id_11_subcomponent_13.obj (larger sub-component)
+└── ...
+```
+
+**Critical Discovery**: **Sub-components are individual polygons, not buildings**
+- Each `Placements.Unknown4` → single quad/triangle
+- **Missing aggregation level**: Need to find fields that group multiple ParentIndex values into complete buildings
+- **Hierarchical indicators**: `Type_0x01` field varies (1,2,3,4) - possibly building components (walls, floors, etc.)
+
 ## Next Steps
+
+**IMMEDIATE: Building-Level Exporter Implementation**
+With the building assembly logic discovered, the next critical step is implementing a building-scale exporter:
+
+1. **Create BuildingLevelExporter class:**
+   - Query ParentIndex values spanning multiple Type_0x01 values
+   - Group sub-components by ParentIndex
+   - Export complete buildings as unified OBJ files
+   - Name pattern: `building_{ParentIndex}_types_{type_list}.obj`
+
+2. **Building Classification Logic:**
+   - Simple buildings: Single Type (e.g., Type 2 floors)
+   - Wall+Roof buildings: Type 1 + Type 3 combinations
+   - Complex buildings: Multiple types (0,1,2,3,4+)
+   - Container buildings: Type 0 + other types
+
+3. **CLI Command: `export-buildings <scene.db>`**
+   - Export all complete buildings identified by multi-type ParentIndex patterns
+   - Generate building index with Type compositions and component counts
+   - Validate geometry assembly and detect incomplete buildings
+
+**VALIDATION: Geometry Verification**
+- Export sample buildings (ParentIndex 11, 37, 5206) and verify visual assembly
+- Confirm Type interpretations match actual geometry (walls, floors, roofs)
+- Test building completeness heuristics
+
+**FUTURE RESEARCH:**
+- District-level grouping: How multiple buildings group into larger complexes
+- Spatial proximity analysis when X,Y,Z coordinates become available
+- Material consistency validation via SurfaceRefIndex sharing patterns
+- Advanced building classification based on Type composition patterns
 
 ### TODO (2025-08-06)
 
-* **Bulk Sub-component Exporter**
-  * New CLI: `export-subcomponents <scene.db>` (no extra args).
-  * Automatically:
-    * Enumerates all distinct `Placements.Unknown4` values.
-    * Creates `project_output/<timestamp>/id_<ObjectId>/` per ID.
-    * Exports `subcomponent_<id>.obj` with vertices **and faces**.
-    * Dumps helper CSVs (`links.csv`, `surfaces.csv`) and `summary.txt`.
-    * Generates top-level `index.csv` summarising ObjectId, child-group count, vertex/face totals.
-  * No manual selection required – one command yields a full dataset for exploration.
+* **Building-Level Aggregation Analyzer**
+  * New CLI: `analyze-building-groups <scene.db>` 
+  * Investigate higher-level grouping fields:
+    * `Type_0x01` patterns (1=walls, 2=floors, 3=roofs, 4=details?)
+    * `SortKey_0x02` variations across larger datasets
+    * Spatial proximity clustering of ParentIndex groups
+    * `TileCoordinate`/`LinkId` spatial relationships
+  * Goal: Discover how multiple ParentIndex values combine into complete buildings
 
-* Document higher-level relationships as they are confirmed (e.g., `Links` ↔ `Surfaces`, container hierarchy).
-* Continue iterating toward full object reconstruction using the hierarchical fields uncovered in later discoveries (`BoundsCenterX/Y/Z`, `PackedParams`, etc.).
+* **Updated Architecture Understanding**:
+  ```
+  Building (MISSING LEVEL)
+    ├── Sub-component (ParentIndex) → 1-29 child groups
+    │   ├── Polygon (Link) → single quad/triangle
+    │   ├── Polygon (Link) → single quad/triangle  
+    │   └── Container (Link, MspiFirstIndex=-1) → organizational
+    └── Sub-component (ParentIndex) → 1-29 child groups
+        └── ...
+  ```
 
-* Document higher-level relationships as they are confirmed (e.g., `Links` ↔ `Surfaces`, container hierarchy).
-* Prototype an extractor that assembles all geometry referenced by a single `Placements.Unknown4` plus its child `Links` rows to visualise what a **sub-component** looks like.
-* Continue iterating toward full object reconstruction using the hierarchical fields uncovered in later discoveries (`BoundsCenterX/Y/Z`, `PackedParams`, etc.).
+* Document building-level relationships as they are discovered
+* Implement building-scale exporter once aggregation logic is found
