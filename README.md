@@ -1,6 +1,13 @@
 # parp-tools
 Tools for analyzing World of Warcraft files
 
+parpToolbox/src/PM4Rebuilder - A complete tool for parsing PM4 files into exportable objects. Includes lots of analysis tooling too.
+
+parpToolbox - Base library for PM4/PD4/WMO reading, with tons of tests and analysis tooling for understanding the PM4 file format.
+
+```
+# Old tools
+
 PM4Tool/WoWToolbox - a PM4/PD4 file decoder with support for reading from ADT and WMO assets for identifying data in the PM4 or PD4 file formats. Currently a working proof of concept. Supports leaked development pm4 files and the cataclysm-era split ADT files for analysis. We use WotLK 3.3.5 assets (wmo/m2) for mesh comparison.
 
 ProjectArcane - Extemely work-in-progress re-write, based on the wowdev wiki documentation
