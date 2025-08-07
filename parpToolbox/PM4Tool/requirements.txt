@@ -1,0 +1,5 @@
+clone Warcraft.NET and DBCD into the lib folder
+https://github.com/ModernWoWTools/Warcraft.NET
+https://github.com/wowdev/DBCD
+
+Requires .NET 8.0
