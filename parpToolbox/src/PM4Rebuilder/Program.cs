@@ -11,7 +11,7 @@ namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder direct-export <pm4Input> [outDir]     - Direct PM4 to OBJ export (RECOMMENDED)\n       OR: PM4Rebuilder export-db <pm4Input> [outDir]       - Export PM4 data to SQLite database\n       OR: PM4Rebuilder export-buildings <scene.db> [outDir] - Export buildings from database to OBJ files\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
+        private const string Usage = "Usage: PM4Rebuilder bulk-export <pm4Directory> [outDir]    - WORKING! Bulk direct export of all PM4 files (RECOMMENDED)\n       OR: PM4Rebuilder direct-export <pm4Input> [outDir]     - Direct PM4 to OBJ export (single file)\n       OR: PM4Rebuilder unified-export <pm4Directory> [outDir] - Unified PM4 Architecture Export (BROKEN)\n       OR: PM4Rebuilder export-db <pm4Input> [outDir]       - Export PM4 data to SQLite database\n       OR: PM4Rebuilder export-buildings <scene.db> [outDir] - Export buildings from database to OBJ files\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -42,7 +42,79 @@ namespace PM4Rebuilder
                 return 0;
             }
 
-            // Direct PM4 to OBJ export (recommended approach)
+            // NEW: Bulk direct export - runs direct-export on all PM4 files
+            if (args[0].Equals("bulk-export", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: bulk-export command requires <pm4Directory> argument.");
+                    return 1;
+                }
+                string pm4Dir = args[1];
+                string outDirBulk = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "bulk_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirBulk);
+                
+                int exitCode = BulkDirectExporter.ExportAllBuildings(pm4Dir, outDirBulk);
+                return exitCode;
+            }
+
+            // NEW! Unified PM4 Architecture Export (LATEST)
+            if (args[0].Equals("unified-export", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: unified-export command requires <pm4Directory> argument.");
+                    Console.WriteLine("Usage: PM4Rebuilder unified-export <pm4Directory> [outDir] [strategy]");
+                    Console.WriteLine("  pm4Directory: Directory containing PM4 files");
+                    Console.WriteLine("  outDir: Output directory (optional)");
+                    Console.WriteLine("  strategy: per-building|per-tile|unified (optional, default: per-building)");
+                    return 1;
+                }
+
+                string pm4Directory = args[1];
+                string outDirUnified = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "unified_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                string strategyArg = args.Length >= 4 ? args[3] : "per-building";
+
+                // Parse export strategy
+                PM4ExportStrategy strategy = PM4ExportStrategy.PerBuilding;
+                if (strategyArg.Equals("per-tile", StringComparison.OrdinalIgnoreCase))
+                    strategy = PM4ExportStrategy.PerTile;
+                else if (strategyArg.Equals("unified", StringComparison.OrdinalIgnoreCase))
+                    strategy = PM4ExportStrategy.Unified;
+
+                Console.WriteLine($"[UNIFIED EXPORT] Starting PM4 Unified Architecture Export...");
+                Console.WriteLine($"[UNIFIED EXPORT] PM4 Directory: {pm4Directory}");
+                Console.WriteLine($"[UNIFIED EXPORT] Output Directory: {outDirUnified}");
+                Console.WriteLine($"[UNIFIED EXPORT] Strategy: {strategy}");
+
+                try
+                {
+                    var summary = await UnifiedPM4Exporter.ExportBuildingsAsync(pm4Directory, outDirUnified, strategy);
+                    
+                    Console.WriteLine();
+                    Console.WriteLine("UNIFIED EXPORT SUMMARY:");
+                    Console.WriteLine($"  Success: {summary.Success}");
+                    Console.WriteLine($"  Buildings: {summary.BuildingCount}");
+                    Console.WriteLine($"  Files: {summary.ExportedFileCount}");
+                    Console.WriteLine($"  Duration: {summary.TotalDuration.TotalSeconds:F1}s");
+                    Console.WriteLine($"  Quality: {summary.Quality.OverallQuality}");
+                    
+                    if (summary.ValidationIssues.Any())
+                    {
+                        Console.WriteLine($"  Validation Issues: {summary.ValidationIssues.Count}");
+                    }
+                    
+                    return summary.Success ? 0 : 1;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[UNIFIED EXPORT ERROR] {ex.Message}");
+                    Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                    return 1;
+                }
+            }
+
+            // Direct PM4 to OBJ export (legacy approach)
             if (args[0].Equals("direct-export", StringComparison.OrdinalIgnoreCase))
             {
                 if (args.Length < 2)

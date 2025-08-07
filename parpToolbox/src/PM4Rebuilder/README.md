@@ -8,11 +8,17 @@ PM4Rebuilder provides multiple approaches for extracting and exporting geometry 
 
 ## Features
 
-### 🏗️ **Direct PM4 to OBJ Exporter** ⭐ *Latest Feature*
-- **Purpose**: Export PM4 scenes as multiple building-level OBJ files
+### 🚀 **Bulk PM4 to OBJ Exporter** ⭐ *Recommended*
+- **Purpose**: Export all PM4 files in a directory as building-level OBJ files
+- **Approach**: Runs proven direct-export on every PM4 file
+- **Output**: Organized folders with individual OBJ files per building/object
+- **Status**: ✅ *Working and validated - 502 files exported successfully*
+
+### 🏗️ **Direct PM4 to OBJ Exporter**
+- **Purpose**: Export single PM4 scene as multiple building-level OBJ files
 - **Approach**: Direct PM4 processing without database intermediary
 - **Output**: Individual OBJ files per building/object
-- **Status**: ⚠️ *Active development - grouping refinements ongoing*
+- **Status**: ✅ *Working - used by bulk-export pipeline*
 
 ### 🗄️ **Database-Driven Building Exporter**
 - **Purpose**: Export buildings from SQLite database using MPRR sentinel boundaries
@@ -28,7 +34,37 @@ PM4Rebuilder provides multiple approaches for extracting and exporting geometry 
 
 ## Commands
 
-### `direct-export` - Direct PM4 to Multiple OBJ Files
+### `bulk-export` - Bulk PM4 to Multiple OBJ Files ⭐ *Recommended*
+```bash
+dotnet run -- bulk-export <pm4_directory> [output_directory]
+```
+
+**Example:**
+```bash
+dotnet run -- bulk-export "data/development/" "bulk_exported_buildings"
+```
+
+**Features:**
+- Processes all PM4 files in a directory automatically
+- Creates organized output with separate folders per tile
+- Uses proven direct-export pipeline for each file
+- Provides progress tracking and success/failure counts
+- Handles errors gracefully and continues processing
+
+**Output Structure:**
+```
+bulk_exported_buildings/
+├── development_00_00/
+│   ├── building_000_triangles_375.obj
+│   ├── building_001_triangles_376.obj
+│   └── ...
+├── development_00_01/
+│   ├── building_000_triangles_423.obj
+│   └── ...
+└── ...
+```
+
+### `direct-export` - Single PM4 to Multiple OBJ Files
 ```bash
 dotnet run -- direct-export <pm4_file_path> <output_directory>
 ```
@@ -38,6 +74,8 @@ dotnet run -- direct-export <pm4_file_path> <output_directory>
 dotnet run -- direct-export "data/development_00_00.pm4" "exported_buildings"
 ```
 
+**Use Case:** Single file processing or testing
+
 **Current Behavior:**
 - Loads PM4 scene directly (bypasses database)
 - Groups geometry using MSLK linkage data and MSUR surface fragments
@@ -46,8 +84,8 @@ dotnet run -- direct-export "data/development_00_00.pm4" "exported_buildings"
 - Includes diagnostic logging for troubleshooting
 
 **Known Issues:**
-- Over-aggregation: Some buildings contain mixed geometry
-- Cross-contamination: Objects may include unrelated surfaces
+- Some cross-tile references missing (surface data from adjacent tiles)
+- Objects may have incomplete geometry due to distributed PM4 data
 - Grouping refinement needed for optimal building boundaries
 
 ### `export-buildings` - Database-Driven Building Export
@@ -205,6 +243,35 @@ Set environment or enable verbose logging to see:
   - Vertex pool usage: regular=1200, mscn=400
 [CROSS-CONTAMINATION WARNING] Building 0 uses 12 surface groups - may be over-aggregating!
 ```
+
+## TODO / Future Work
+
+### 🔍 **Critical: Missing Geometry Investigation**
+**Priority: High**
+
+Despite successful bulk exports, exported models are incomplete and missing significant MSUR/MPRR/MSCN geometry data. The raw PM4 files contain sufficient data to support complete models, but our selection/extraction logic is not capturing it properly.
+
+**Investigation Areas:**
+- **Container/Index Selection**: Review how we traverse MSUR surface containers and index into geometry pools
+- **Unknown Field Processing**: Many PM4 chunk fields marked as "Unknown" may contain critical geometry references or selection criteria
+- **Cross-tile Reference Resolution**: Some geometry may be distributed across multiple PM4 tiles and requires global resolution
+- **MPRR Sentinel Boundaries**: MPRR data may contain additional geometry grouping/selection logic not currently utilized
+- **MSCN Linkage Data**: MSCN chunks may provide missing linkage information for complete object assembly
+
+**Symptoms:**
+- Buildings export successfully but appear incomplete/fragmented
+- Triangle counts are reasonable (375-654K) but don't represent full structures
+- Cross-tile surface reference warnings indicate missing data resolution
+- Direct-export shows "Invalid surface reference" warnings for many surfaces
+
+**Approach:**
+1. **Comprehensive Field Analysis**: Document all Unknown fields across MSUR/MPRR/MSCN chunks with data correlation
+2. **Container Traversal Audit**: Verify we're correctly processing all surface containers and geometry pools
+3. **Cross-tile Data Mapping**: Implement global surface/vertex resolution system
+4. **Reference Legacy Tools**: Compare extraction logic with known-working WoW model exporters
+5. **Data Completeness Validation**: Quantify what percentage of raw data we're successfully extracting
+
+---
 
 ## Contributing
 
