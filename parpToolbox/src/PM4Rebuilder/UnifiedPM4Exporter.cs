@@ -443,10 +443,10 @@ public static class UnifiedPM4Exporter
 
             Console.WriteLine($"[UNIFIED ASSEMBLER] Found {linksByParent.Count} unique parent objects");
 
-            int buildingId = 0;
+            uint buildingId = 0;
             foreach (var parentGroup in linksByParent)
             {
-                var building = AssembleBuildingFromParentGroup(unifiedMap, buildingId, parentGroup.Key.Value, parentGroup.ToList());
+                var building = AssembleBuildingFromParentGroup(unifiedMap, parentGroup.Key.Value, parentGroup.ToList());
                 if (building != null && building.TriangleCount > 0)
                 {
                     buildings.Add(building);
@@ -492,39 +492,84 @@ public static class UnifiedPM4Exporter
         }
     }
 
-    private static PM4Building? AssembleBuildingFromParentGroup(PM4UnifiedMap unifiedMap, int buildingId, uint parentIndex, List<MslkEntry> links)
+    private static PM4Building? AssembleBuildingFromParentGroup(PM4UnifiedMap unifiedMap, uint buildingId, List<MslkEntry> links)
     {
         try
         {
-            var vertices = new List<Vector3>();
-            var triangles = new List<(int, int, int)>();
+            var building = new PM4Building
+            {
+                BuildingId = buildingId,
+                SourceLinks = links,
+                Vertices = new List<Vector3>(),
+                Indices = new List<uint>(),
+                SourceSurfaces = new List<MsurChunk.Entry>()
+            };
 
+            // Use a dictionary to map global vertex indices to local indices for deduplication
+            var vertexIndexMap = new Dictionary<(float, float, float), int>();
+            var nextLocalIndex = 0;
+            
+            Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Assembling building {buildingId} from {links.Count} links");
+
+            // Process each link to extract geometry
             foreach (var link in links)
             {
-                // Extract triangles from this link using global surface/vertex pools
-                var linkTriangles = ExtractTrianglesFromLink(unifiedMap, link);
-                
-                int vertexOffset = vertices.Count;
-                foreach (var (v1, v2, v3) in linkTriangles.triangles)
+                // Skip container nodes (no geometry)
+                if (IsContainerNode(link))
                 {
-                    triangles.Add((v1 + vertexOffset, v2 + vertexOffset, v3 + vertexOffset));
+                    Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Skipping container node link");
+                    continue;
                 }
-                vertices.AddRange(linkTriangles.vertices);
+
+                // Extract triangles from this link
+                var (linkVertices, linkTriangles) = ExtractTrianglesFromLink(unifiedMap, link);
+                
+                Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Link contributed {linkVertices.Count} vertices and {linkTriangles.Count} triangles");
+
+                if (linkVertices.Count > 0 && linkTriangles.Count > 0)
+                {
+                    // Remap vertices with deduplication
+                    var localIndexRemapping = new List<int>();
+                    
+                    foreach (var vertex in linkVertices)
+                    {
+                        var vertexKey = (vertex.X, vertex.Y, vertex.Z);
+                        
+                        if (vertexIndexMap.TryGetValue(vertexKey, out var existingIndex))
+                        {
+                            // Vertex already exists, use existing index
+                            localIndexRemapping.Add(existingIndex);
+                        }
+                        else
+                        {
+                            // Add new vertex and create mapping
+                            vertexIndexMap[vertexKey] = nextLocalIndex;
+                            localIndexRemapping.Add(nextLocalIndex);
+                            building.Vertices.Add(vertex);
+                            nextLocalIndex++;
+                        }
+                    }
+                    
+                    // Add triangles with remapped indices
+                    foreach (var (v1, v2, v3) in linkTriangles)
+                    {
+                        if (v1 < localIndexRemapping.Count && v2 < localIndexRemapping.Count && v3 < localIndexRemapping.Count)
+                        {
+                            building.Indices.Add((uint)localIndexRemapping[v1]);
+                            building.Indices.Add((uint)localIndexRemapping[v2]);
+                            building.Indices.Add((uint)localIndexRemapping[v3]);
+                        }
+                    }
+                }
             }
-
-            if (triangles.Count == 0)
-                return null;
-
-            return new PM4Building
-            {
-                BuildingId = (uint)buildingId,
-                Vertices = vertices,
-                Indices = triangles.SelectMany(t => new[] { (uint)t.Item1, (uint)t.Item2, (uint)t.Item3 }).ToList(),
-                Position = Vector3.Zero
-            };
+            
+            Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Building {buildingId} assembled with {building.Vertices.Count} vertices and {building.Indices.Count / 3} triangles");
+            
+            return building;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[UNIFIED ASSEMBLER ERROR] Failed to assemble building {buildingId}: {ex.Message}");
             return null;
         }
     }
@@ -571,23 +616,78 @@ public static class UnifiedPM4Exporter
             var firstIndexProp = surface.GetType().GetProperty("MsviFirstIndex") ?? surface.GetType().GetProperty("FirstIndex");
             var indexCountProp = surface.GetType().GetProperty("IndexCount");
             
+            // Also check for MSPI properties as an alternative
+            var mspiFirstIndexProp = surface.GetType().GetProperty("MspiFirstIndex");
+            
             if (firstIndexProp?.GetValue(surface) is uint firstIndex && 
                 indexCountProp?.GetValue(surface) is uint indexCount)
             {
-                // Extract vertices and build triangles
-                for (uint i = 0; i < indexCount && (firstIndex + i) < unifiedMap.GlobalMSVIIndices.Count; i += 3)
+                Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Surface {surfaceIndex} using MSVI pool: firstIndex={firstIndex}, indexCount={indexCount}");
+                
+                // Extract vertices and build triangles from MSVI pool
+                for (uint i = 0; i < indexCount && (firstIndex + i + 2) < unifiedMap.GlobalMSVIIndices.Count; i += 3)
                 {
                     var i1 = unifiedMap.GlobalMSVIIndices[(int)(firstIndex + i)];
                     var i2 = unifiedMap.GlobalMSVIIndices[(int)(firstIndex + i + 1)];
                     var i3 = unifiedMap.GlobalMSVIIndices[(int)(firstIndex + i + 2)];
 
+                    Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Triangle indices: {i1}, {i2}, {i3}");
+                    
+                    // Check if indices are valid for MSVT vertices
                     if (i1 < unifiedMap.GlobalMSVTVertices.Count && i2 < unifiedMap.GlobalMSVTVertices.Count && i3 < unifiedMap.GlobalMSVTVertices.Count)
                     {
                         int baseIdx = vertices.Count;
-                        vertices.Add(unifiedMap.GlobalMSVTVertices[(int)i1]);
-                        vertices.Add(unifiedMap.GlobalMSVTVertices[(int)i2]);
-                        vertices.Add(unifiedMap.GlobalMSVTVertices[(int)i3]);
+                        var v1 = unifiedMap.GlobalMSVTVertices[(int)i1];
+                        var v2 = unifiedMap.GlobalMSVTVertices[(int)i2];
+                        var v3 = unifiedMap.GlobalMSVTVertices[(int)i3];
+                        
+                        // Apply coordinate system fix: flip X-axis for proper orientation (like DirectPm4Exporter)
+                        vertices.Add(new Vector3(-v1.X, v1.Y, v1.Z));
+                        vertices.Add(new Vector3(-v2.X, v2.Y, v2.Z));
+                        vertices.Add(new Vector3(-v3.X, v3.Y, v3.Z));
+                        
                         triangles.Add((baseIdx, baseIdx + 1, baseIdx + 2));
+                        Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Added triangle from MSVT pool");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[UNIFIED ASSEMBLER WARNING] Invalid MSVT vertex indices: {i1}, {i2}, {i3} (max: {unifiedMap.GlobalMSVTVertices.Count})");
+                    }
+                }
+            }
+            else if (mspiFirstIndexProp?.GetValue(surface) is int mspiFirstIndex && mspiFirstIndex >= 0 &&
+                     indexCountProp?.GetValue(surface) is uint mspiIndexCount)
+            {
+                Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Surface {surfaceIndex} using MSPI pool: firstIndex={mspiFirstIndex}, indexCount={mspiIndexCount}");
+                
+                // Extract vertices and build triangles from MSPI pool (references MSPV vertices)
+                for (uint i = 0; i < mspiIndexCount && (mspiFirstIndex + i + 2) < unifiedMap.GlobalMSPIIndices.Count; i += 3)
+                {
+                    var i1 = unifiedMap.GlobalMSPIIndices[mspiFirstIndex + (int)i];
+                    var i2 = unifiedMap.GlobalMSPIIndices[mspiFirstIndex + (int)i + 1];
+                    var i3 = unifiedMap.GlobalMSPIIndices[mspiFirstIndex + (int)i + 2];
+
+                    Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] MSPI Triangle indices: {i1}, {i2}, {i3}");
+                    
+                    // Check if indices are valid for MSPV vertices
+                    if (i1 < unifiedMap.GlobalMSPVVertices.Count && i2 < unifiedMap.GlobalMSPVVertices.Count && i3 < unifiedMap.GlobalMSPVVertices.Count)
+                    {
+                        int baseIdx = vertices.Count;
+                        var v1 = unifiedMap.GlobalMSPVVertices[(int)i1];
+                        var v2 = unifiedMap.GlobalMSPVVertices[(int)i2];
+                        var v3 = unifiedMap.GlobalMSPVVertices[(int)i3];
+                        
+                        // Apply coordinate system fix: flip X-axis for proper orientation (like DirectPm4Exporter)
+                        vertices.Add(new Vector3(-v1.X, v1.Y, v1.Z));
+                        vertices.Add(new Vector3(-v2.X, v2.Y, v2.Z));
+                        vertices.Add(new Vector3(-v3.X, v3.Y, v3.Z));
+                        
+                        triangles.Add((baseIdx, baseIdx + 1, baseIdx + 2));
+                        Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Added triangle from MSPV pool");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[UNIFIED ASSEMBLER WARNING] Invalid MSPV vertex indices: {i1}, {i2}, {i3} (max: {unifiedMap.GlobalMSPVVertices.Count})");
                     }
                 }
             }
@@ -605,12 +705,63 @@ public static class UnifiedPM4Exporter
                 Console.WriteLine($"[UNIFIED ASSEMBLER WARNING] Surface {surfaceIndex} missing geometry parameters");
             }
 
+            Console.WriteLine($"[UNIFIED ASSEMBLER DEBUG] Extracted {vertices.Count} vertices and {triangles.Count} triangles from surface {surfaceIndex}");
             return (vertices, triangles);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[UNIFIED ASSEMBLER ERROR] Failed to extract triangles from link: {ex.Message}");
             return (vertices, triangles);
+        }
+    }
+    
+    /// <summary>
+    /// Extract ParentIndex from MSLK link entry using reflection.
+    /// This is the building identifier that groups related surface fragments.
+    /// </summary>
+    private static uint GetParentIndex(dynamic link)
+    {
+        try
+        {
+            // Try to get ParentIndex property (most common)
+            var parentIndexProp = link.GetType().GetProperty("ParentIndex");
+            if (parentIndexProp != null)
+            {
+                var value = parentIndexProp.GetValue(link);
+                return value switch
+                {
+                    uint u => u,
+                    int i when i >= 0 => (uint)i,
+                    ushort us => us,
+                    short s when s >= 0 => (uint)s,
+                    byte b => b,
+                    _ => 0
+                };
+            }
+            
+            // Fallback to ParentId if ParentIndex not found
+            var parentIdProp = link.GetType().GetProperty("ParentId");
+            if (parentIdProp != null)
+            {
+                var value = parentIdProp.GetValue(link);
+                return value switch
+                {
+                    uint u => u,
+                    int i when i >= 0 => (uint)i,
+                    ushort us => us,
+                    short s when s >= 0 => (uint)s,
+                    byte b => b,
+                    _ => 0
+                };
+            }
+            
+            Console.WriteLine($"[UNIFIED ASSEMBLER WARNING] Link missing ParentIndex/ParentId property");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[UNIFIED ASSEMBLER ERROR] Failed to extract ParentIndex: {ex.Message}");
+            return 0;
         }
     }
 }

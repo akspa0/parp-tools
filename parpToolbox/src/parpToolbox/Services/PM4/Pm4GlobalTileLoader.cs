@@ -142,9 +142,22 @@ namespace ParpToolbox.Services.PM4
                 // Add surfaces (adjusted for global index offset)
                 foreach (var surface in tile.Scene.Surfaces)
                 {
-                    // For now, add the original surface - proper adjustment will be implemented later
-                    // TODO: Adjust MsviFirstIndex to account for global index offset
-                    globalScene.GlobalSurfaces.Add(surface);
+                    // Clone and adjust MsviFirstIndex to account for the global index offset
+                    var s = new ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry
+                    {
+                        GroupKey = surface.GroupKey,
+                        IndexCount = surface.IndexCount,
+                        AttributeMask = surface.AttributeMask,
+                        Padding_0x03 = surface.Padding_0x03,
+                        Nx = surface.Nx,
+                        Ny = surface.Ny,
+                        Nz = surface.Nz,
+                        Height = surface.Height,
+                        MsviFirstIndex = surface.MsviFirstIndex + (uint)currentIndexOffset,
+                        MdosIndex = surface.MdosIndex,
+                        CompositeKey = surface.CompositeKey
+                    };
+                    globalScene.GlobalSurfaces.Add(s);
                 }
                 
                 // Add links (may need adjustment for global references)
