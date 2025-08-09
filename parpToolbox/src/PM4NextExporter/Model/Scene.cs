@@ -13,6 +13,7 @@ namespace PM4NextExporter.Model
         public List<Vector3> Vertices { get; init; } = new();
         public List<int> Indices { get; init; } = new();
         public List<MsurChunk.Entry> Surfaces { get; init; } = new();
+        public List<Vector3> MscnVertices { get; init; } = new();
 
         // Convenience counts
         public int VertexCount => Vertices?.Count ?? 0;
@@ -23,7 +24,8 @@ namespace PM4NextExporter.Model
             SourcePath = sourcePath,
             Vertices = new List<Vector3>(),
             Indices = new List<int>(),
-            Surfaces = new List<MsurChunk.Entry>()
+            Surfaces = new List<MsurChunk.Entry>(),
+            MscnVertices = new List<Vector3>()
         };
 
         public static Scene FromPm4Scene(Pm4Scene pm4, string sourcePath) => new Scene
@@ -31,7 +33,8 @@ namespace PM4NextExporter.Model
             SourcePath = sourcePath,
             Vertices = pm4.Vertices ?? new List<Vector3>(),
             Indices = pm4.Indices ?? new List<int>(),
-            Surfaces = pm4.Surfaces ?? new List<MsurChunk.Entry>()
+            Surfaces = pm4.Surfaces ?? new List<MsurChunk.Entry>(),
+            MscnVertices = pm4.MscnVertices ?? new List<Vector3>()
         };
     }
 }

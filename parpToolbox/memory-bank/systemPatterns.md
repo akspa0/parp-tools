@@ -17,8 +17,8 @@
 - **Dependency-Light CLI:** To avoid issues with unstable or complex external packages, command-line argument parsing is handled with a simple, manual implementation directly within `Program.cs`. This provides sufficient functionality for the tool's needs while minimizing external dependencies.
 
 ## PM4 / PD4 Data Handling
-- **Per-Tile Processing:** PM4 data must be processed on a per-tile basis. Each tile is loaded into an isolated `Pm4Scene` to prevent cross-tile data contamination during analysis and eventual export.
-- **"Data Web" Analysis:** The current primary focus is on analyzing the complex web of interconnected keys within and between PM4 chunks. All exporter development is secondary to fully decoding this data structure.
+- **Per-Tile Processing:** PM4 tiles are loaded into a unified `Pm4SceneLoader` that supports single-tile or multi-tile (3×3 grid) contexts, ensuring complete vertex coverage across tile boundaries.
+- **Modular Exporter Pipeline:** Primary focus is the **PM4 Next Exporter** – a modular pipeline (SceneLoader → Assembler(s) → DiagnosticsService → Exporter) that preserves **all** chunk data (MSUR, MSCN, MSLK, MPRL, etc.), produces deep diagnostics (CSV/JSON), and supports per-object OBJ (legacy-parity) and future glTF outputs.
 
 ## Testing & Validation
 - **Real Data Testing:** All new tests written for `parpToolbox` must use real game data to ensure the system is validated against real-world conditions.

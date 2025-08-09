@@ -111,7 +111,10 @@ namespace PM4NextExporter.Cli
             // Diagnostics
             if (options.CsvDiagnostics)
             {
-                DiagnosticsService.WriteSnapshotCsv(options.CsvOut ?? outDir, "run_snapshot");
+                var diagDir = options.CsvOut ?? outDir;
+                DiagnosticsService.WriteSurfaceCsv(diagDir, scene);
+                DiagnosticsService.WriteCompositeSummaryCsv(diagDir, scene);
+                DiagnosticsService.WriteMscnCsv(diagDir, scene);
                 Log(" diagnostics CSV written");
             }
 
