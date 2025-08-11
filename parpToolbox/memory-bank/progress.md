@@ -1,5 +1,23 @@
 # Progress for parpToolbox
 
+## PM4NextExporter Status (2025-08-10)
+
+### What Works
+- **Composite-hierarchy** assembler is default and active.
+- **OBJ orientation**: face winding fixed for X-mirror parity.
+- **Per-tile export (baseline)**: generates OBJs per tile (merged for now).
+- **Assembler tagging**: each `AssembledObject` has `Meta.tileId/tileX/tileY` (dominant tile).
+- **Export-time projection**: `--project-local` optional centroid translation.
+- **MSCN controls**: `--no-remap` (skip), `--export-mscn-obj` (point cloud) for quick QA.
+
+### What’s Left
+- **Refactor PerTileObjExporter** to export one OBJ per tile composed of distinct assembled objects (preserve boundaries), using `Meta.tileId`.
+- Optional: naming suffixes with tile coords.
+
+### Known Issues
+- Composite-hierarchy merges repeated instances by design; acceptable for now.
+- Current per-tile exporter merges geometry; refactor pending.
+
 ## Strategic Pivot: "Data Web" Analysis (2025-07-30)
 
 All previous development on the "Data Web" analysis has been paused. A fundamental re-evaluation of our approach has led to a complete strategic pivot back to spatial clustering. Our previous assumptions about the "Data Web" were incorrect, leading to fragmented and incomplete results.

@@ -11,6 +11,12 @@ namespace PM4NextExporter.Exporters
     {
         public static void Export(IEnumerable<AssembledObject> objects, string outDir, bool legacyParity = false)
         {
+            // Back-compat wrapper
+            Export(objects, outDir, legacyParity, projectLocal: false);
+        }
+
+        public static void Export(IEnumerable<AssembledObject> objects, string outDir, bool legacyParity, bool projectLocal)
+        {
             Directory.CreateDirectory(outDir);
             var objectsDir = Path.Combine(outDir, "objects");
             Directory.CreateDirectory(objectsDir);
@@ -40,11 +46,25 @@ namespace PM4NextExporter.Exporters
                     sw.WriteLine($"o {name}");
 
                     // vertices
+                    System.Numerics.Vector3 origin = default;
+                    if (projectLocal && verts.Count > 0)
+                    {
+                        double sx = 0, sy = 0, sz = 0;
+                        for (int i = 0; i < verts.Count; i++)
+                        {
+                            var v0 = verts[i];
+                            sx += v0.X; sy += v0.Y; sz += v0.Z;
+                        }
+                        origin = new System.Numerics.Vector3((float)(sx / verts.Count), (float)(sy / verts.Count), (float)(sz / verts.Count));
+                    }
                     for (int i = 0; i < verts.Count; i++)
                     {
                         var v = verts[i];
-                        var x = invertX ? -v.X : v.X;
-                        sw.WriteLine("v " + x.ToString(ci) + " " + v.Y.ToString(ci) + " " + v.Z.ToString(ci));
+                        var vx = v.X - origin.X;
+                        var vy = v.Y - origin.Y;
+                        var vz = v.Z - origin.Z;
+                        var x = invertX ? -vx : vx;
+                        sw.WriteLine("v " + x.ToString(ci) + " " + vy.ToString(ci) + " " + vz.ToString(ci));
                     }
 
                     // faces (1-based)
@@ -56,7 +76,15 @@ namespace PM4NextExporter.Exporters
                             skipped++;
                             continue;
                         }
-                        sw.WriteLine($"f {a + 1} {b + 1} {c + 1}");
+                        // Preserve face orientation when mirroring X by swapping winding
+                        if (invertX)
+                        {
+                            sw.WriteLine($"f {a + 1} {c + 1} {b + 1}");
+                        }
+                        else
+                        {
+                            sw.WriteLine($"f {a + 1} {b + 1} {c + 1}");
+                        }
                         written++;
                     }
                 }

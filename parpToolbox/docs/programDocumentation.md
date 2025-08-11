@@ -52,6 +52,14 @@
 - `gma` - Global mesh analysis
 - `qa` - Quality analysis
 
+## PM4NextExporter (2025-08-10)
+
+- **Default assembler**: composite-hierarchy.
+- **Per-tile export**: `--export-tiles` writes tile OBJs. Current behavior merges geometry; refactor pending to output distinct assembled objects per tile.
+- **Projection**: `--project-local` applies an export-time centroid translation (optional).
+- **MSCN controls**: `--export-mscn-obj` (point OBJ), `--no-remap` to skip remapping.
+- **Legacy parity**: `--legacy-obj-parity` for winding/naming parity.
+
 ### WMO Processing
 - `wmo` - Export WMO to OBJ format
 

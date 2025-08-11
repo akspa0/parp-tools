@@ -3,6 +3,13 @@
 **Date**: 2025-08-04  
 **Objective**: Fully integrate and export complete PM4 tile geometry by unifying MSCN, MSVT, MSVI, MSLK, and MSUR chunk data
 
+## PM4NextExporter Current Status (2025-08-10)
+- **Composite-hierarchy** is the default and most accurate assembler; instance path removed.
+- **Per-tile exporter** exists (merged geometry). Refactor pending to emit one OBJ per tile composed of distinct assembled objects.
+- **Assembler tagging**: objects carry `Meta.tileId/tileX/tileY` for tile grouping.
+- **MSCN remap** integrated in global loader; `--no-remap` available.
+- **Minimal flags**: `--project-local`, `--export-tiles`, `--export-mscn-obj`, `--legacy-obj-parity`.
+
 ## 🎯 Current Goal
 Validate single global tile OBJ export and complete the PM4 geometry reconstruction project.
 

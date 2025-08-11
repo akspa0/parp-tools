@@ -20,6 +20,10 @@
 - **Per-Tile Processing:** PM4 tiles are loaded into a unified `Pm4SceneLoader` that supports single-tile or multi-tile (3×3 grid) contexts, ensuring complete vertex coverage across tile boundaries.
 - **Modular Exporter Pipeline:** Primary focus is the **PM4 Next Exporter** – a modular pipeline (SceneLoader → Assembler(s) → DiagnosticsService → Exporter) that preserves **all** chunk data (MSUR, MSCN, MSLK, MPRL, etc.), produces deep diagnostics (CSV/JSON), and supports per-object OBJ (legacy-parity) and future glTF outputs.
 
+### New Patterns (2025-08-10)
+- **Assembler tile tagging**: Assemblers compute a dominant tile for each `AssembledObject` and set `Meta["tileId"|"tileX"|"tileY"]` from surface→index→tile mappings.
+- **Exporter grouping preference**: Exporters performing per-tile outputs should group objects by `AssembledObject.Meta.tileId` rather than raw index slicing to preserve object boundaries.
+
 ## Testing & Validation
 - **Real Data Testing:** All new tests written for `parpToolbox` must use real game data to ensure the system is validated against real-world conditions.
 

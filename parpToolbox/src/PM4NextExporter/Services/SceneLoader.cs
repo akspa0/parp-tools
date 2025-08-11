@@ -5,7 +5,7 @@ namespace PM4NextExporter.Services
 {
     internal sealed class SceneLoader
     {
-        internal Scene LoadSingleTile(string inputPath, bool includeAdjacent)
+        internal Scene LoadSingleTile(string inputPath, bool includeAdjacent, bool applyMscnRemap)
         {
             // Accept either a single PM4 file or a directory.
             // When includeAdjacent is true, aggregate all tiles in the directory of the input.
@@ -19,7 +19,7 @@ namespace PM4NextExporter.Services
                     if (includeAdjacent)
                     {
                         // Load entire region directory
-                        var global = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.LoadRegion(inputPath);
+                        var global = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.LoadRegion(inputPath, "*.pm4", applyMscnRemap);
                         var unifiedScene = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.ToStandardScene(global);
                         return Scene.FromPm4Scene(unifiedScene, inputPath);
                     }
@@ -38,7 +38,7 @@ namespace PM4NextExporter.Services
                     if (includeAdjacent)
                     {
                         var dir = System.IO.Path.GetDirectoryName(inputPath) ?? ".";
-                        var global = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.LoadRegion(dir);
+                        var global = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.LoadRegion(dir, "*.pm4", applyMscnRemap);
                         var unifiedScene = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.ToStandardScene(global);
                         return Scene.FromPm4Scene(unifiedScene, dir);
                     }

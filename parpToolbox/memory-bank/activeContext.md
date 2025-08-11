@@ -1,5 +1,18 @@
 # Active Context: MSCN-WMO Spatial Correlation & Large-Scale Analysis
 
+## PM4NextExporter — Current Focus (2025-08-10)
+
+- **Composite-hierarchy is default** assembly path; instance variant removed per simplification.
+- **Assembler tagging**: `CompositeHierarchyAssembler` sets `AssembledObject.Meta["tileId"|"tileX"|"tileY"]` using dominant tile derived from surfaces→indices→tile offsets.
+- **Per-tile OBJ export**: baseline implemented; currently merges by tile. Refactor in progress to output one OBJ per tile composed of distinct assembled objects (preserve boundaries).
+- **Coordinate projection**: `--project-local` implemented; optional export-time normalization (centroid translation) for both per-object and per-tile paths.
+- **MSCN controls**: `--no-remap` (optional skip), `--export-mscn-obj` (point OBJ) available for minimal, reversible visualization.
+
+### Immediate Next Steps
+
+- Finish refactor of `PerTileObjExporter` to group/export assembled objects per tile, using `AssembledObject.Meta.tileId`.
+- Keep knobs minimal; no new diagnostics unless explicitly requested.
+
 **MAJOR BREAKTHROUGH ACHIEVED**: Successfully implemented robust MSCN anchor to WMO geometry correlation with batch processing capabilities for large-scale World of Warcraft map data analysis.
 
 ## 🎯 **CURRENT FOCUS: MSCN Vertex Extraction & Diagnostics Fix**
