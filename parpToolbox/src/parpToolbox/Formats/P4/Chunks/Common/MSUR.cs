@@ -37,16 +37,10 @@ public sealed class MsurChunk : IIffChunk, IBinarySerializable
         public byte GroupKey;              // Formerly FlagsOrUnknown_0x00
 
         /// <summary>Number of indices for this surface in the MSVI chunk.</summary>
-        public byte IndexCount;            // Triangle index count (offset 0x01)
+        public int IndexCount;             // Triangle index count (little-endian 16-bit at offsets 0x01-0x02)
 
-        /// <summary>
-        /// Secondary grouping field that further subdivides objects (e.g., by floor or architectural section).
-        /// Bit 0x80 appears to indicate possible liquid surfaces.
-        /// </summary>
-        public byte AttributeMask;         // Formerly Unknown_0x02
-
-        /// <summary>Padding byte, always 0 in version 48.</summary>
-        public byte Padding_0x03;          // Padding (offset 0x03)
+        /// <summary>Raw byte at offset 0x03 (semantics unknown).</summary>
+        public byte Unknown03;             // Raw field @0x03, semantics TBD
 
         /// <summary>Surface normal X component.</summary>
         public float Nx;                   // Normal X (offset 0x04)
@@ -57,8 +51,8 @@ public sealed class MsurChunk : IIffChunk, IBinarySerializable
         /// <summary>Surface normal Z component.</summary>
         public float Nz;                   // Normal Z (offset 0x0C)
 
-        /// <summary>Plane D value or surface height.</summary>
-        public float Height;               // Surface height (offset 0x10)
+        /// <summary>Raw float at offset 0x10 (semantics unknown).</summary>
+        public float Float10;              // Raw field @0x10, semantics TBD
 
         /// <summary>First index in the MSVI chunk for this surface.</summary>
         public uint MsviFirstIndex;        // MSVI first index (offset 0x14)
@@ -69,52 +63,9 @@ public sealed class MsurChunk : IIffChunk, IBinarySerializable
         /// <summary>32-bit composite key that may contain encoded surface parameters.</summary>
         public uint CompositeKey;          // Formerly PackedParams (offset 0x1C)
 
-        // Convenience accessors expected by adapters/exporters
-        
-        /// <summary>
-        /// <summary>
-        /// Alias for GroupKey, representing the primary grouping key.
-        /// This is the most reliable field for coherent object grouping in PM4 files.
-        /// </summary>
-        /// <remarks>
-        /// Values typically indicate object types:
-        /// - 0-32: Building exteriors
-        /// - 33-64: Building interiors
-        /// - 65-128: Terrain elements
-        /// - 128+: Special objects or world elements
-        /// </remarks>
-        public byte SurfaceGroupKey => GroupKey;
-        
-        /// <summary>
-        /// Indicates whether this surface is part of an M2 model bucket.
-        /// M2 buckets typically have SurfaceGroupKey = 0x00.
-        /// </summary>
-        public bool IsM2Bucket => SurfaceGroupKey == 0x00;
-        
-        /// <summary>
-        /// Alias for AttributeMask, representing surface attributes and subdivision within object types.
-        /// </summary>
-        public byte SurfaceAttributeMask => AttributeMask;
-        
-        /// <summary>
-        /// Indicates whether this surface might represent a liquid surface based on bit 0x80.
-        /// </summary>
-        public bool IsLiquidCandidate => (AttributeMask & 0x80) != 0;
-        
-        /// <summary>
-        /// The complete 32-bit composite surface key used for legacy grouping.
-        /// This is less effective than using GroupKey and AttributeMask directly.
-        /// </summary>
+        // Minimal helpers without semantic claims
         public uint SurfaceKey => CompositeKey;
-
-        /// <summary>
-        /// High 16 bits of the CompositeKey field, useful for coarse grouping.
-        /// </summary>
         public ushort SurfaceKeyHigh16 => (ushort)(CompositeKey >> 16);
-        
-        /// <summary>
-        /// Low 16 bits of the CompositeKey field, useful for fine-grained grouping.
-        /// </summary>
         public ushort SurfaceKeyLow16  => (ushort)(CompositeKey & 0xFFFF);
     }
 
@@ -145,13 +96,13 @@ public sealed class MsurChunk : IIffChunk, IBinarySerializable
             var e = new Entry
             {
                 GroupKey = br.ReadByte(),
-                IndexCount = br.ReadByte(),
-                AttributeMask = br.ReadByte(),
-                Padding_0x03 = br.ReadByte(),
+                // IndexCount is 16-bit little-endian across the next two bytes
+                IndexCount = br.ReadByte() | (br.ReadByte() << 8),
+                Unknown03 = br.ReadByte(),
                 Nx = br.ReadSingle(),
                 Ny = br.ReadSingle(),
                 Nz = br.ReadSingle(),
-                Height = br.ReadSingle(),
+                Float10 = br.ReadSingle(),
                 MsviFirstIndex = br.ReadUInt32(),
                 MdosIndex = br.ReadUInt32(),
                 CompositeKey = br.ReadUInt32()

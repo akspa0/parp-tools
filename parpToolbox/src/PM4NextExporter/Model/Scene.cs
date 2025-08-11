@@ -27,6 +27,8 @@ namespace PM4NextExporter.Model
         public Dictionary<int, int> TileIndexOffsetByTileId { get; init; } = new();
         public Dictionary<int, int> TileVertexCountByTileId { get; init; } = new();
         public Dictionary<int, int> TileIndexCountByTileId { get; init; } = new();
+        // Original tile coordinates as parsed from filenames
+        public Dictionary<int, TileCoord> TileCoordByTileId { get; init; } = new();
 
         // Convenience counts
         public int VertexCount => Vertices?.Count ?? 0;
@@ -45,7 +47,8 @@ namespace PM4NextExporter.Model
             TileVertexOffsetByTileId = new Dictionary<int, int>(),
             TileIndexOffsetByTileId = new Dictionary<int, int>(),
             TileVertexCountByTileId = new Dictionary<int, int>(),
-            TileIndexCountByTileId = new Dictionary<int, int>()
+            TileIndexCountByTileId = new Dictionary<int, int>(),
+            TileCoordByTileId = new Dictionary<int, TileCoord>()
         };
 
         public static Scene FromPm4Scene(Pm4Scene pm4, string sourcePath) => new Scene
@@ -61,7 +64,8 @@ namespace PM4NextExporter.Model
             TileVertexOffsetByTileId = pm4.TileVertexOffsetByTileId ?? new Dictionary<int, int>(),
             TileIndexOffsetByTileId = pm4.TileIndexOffsetByTileId ?? new Dictionary<int, int>(),
             TileVertexCountByTileId = pm4.TileVertexCountByTileId ?? new Dictionary<int, int>(),
-            TileIndexCountByTileId = pm4.TileIndexCountByTileId ?? new Dictionary<int, int>()
+            TileIndexCountByTileId = pm4.TileIndexCountByTileId ?? new Dictionary<int, int>(),
+            TileCoordByTileId = pm4.TileCoordByTileId ?? new Dictionary<int, TileCoord>()
         };
     }
 }

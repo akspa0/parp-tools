@@ -124,11 +124,36 @@ namespace PM4NextExporter.Assembly
                 }
             }
 
-            var groups = scene.Surfaces.GroupBy(s => Top24(s.CompositeKey)).OrderBy(g => g.Key);
-
-            foreach (var grp in groups)
+            // 1) Partition by tile to prevent cross-tile merging (which created long horizontal slices)
+            var byTile = scene.Surfaces.GroupBy(s =>
             {
-                var baseName = $"CK_{grp.Key >> 8:X6}"; // retained but not used in final name; kept for context
+                if (s.MsviFirstIndex > int.MaxValue) return (int?)null;
+                int first = unchecked((int)s.MsviFirstIndex);
+                return GetTileIdForIndex(scene.TileIndexOffsetByTileId, first);
+            })
+            .OrderBy(g => g.Key.HasValue ? 0 : 1)
+            .ThenBy(g => g.Key);
+
+            foreach (var tileGroup in byTile)
+            {
+                int? groupTileId = tileGroup.Key;
+                // Precompute tile prefix once per tile group using original coords if available
+                string tilePrefix = string.Empty;
+                if (options.NameObjectsWithTile && groupTileId.HasValue)
+                {
+                    if (scene.TileCoordByTileId != null && scene.TileCoordByTileId.TryGetValue(groupTileId.Value, out var coord))
+                    {
+                        tilePrefix = $"X{coord.X:00}_Y{coord.Y:00}_";
+                    }
+                    // else: leave empty to avoid guessing
+                }
+
+                // 2) Within tile, group by top 24-bit CompositeKey
+                var groups = tileGroup.GroupBy(s => Top24(s.CompositeKey)).OrderBy(g => g.Key);
+
+                foreach (var grp in groups)
+                {
+                    var baseName = $"CK_{grp.Key >> 8:X6}"; // retained but not used in final name; kept for context
                 if (options.CkSplitByType)
                 {
                     // Partition this CK24 group by per-surface type tag
@@ -144,14 +169,12 @@ namespace PM4NextExporter.Assembly
                         var orientGroups = sub.GroupBy(s => Low8(s.CompositeKey)).OrderBy(g => g.Key);
                         foreach (var orient in orientGroups)
                         {
-                            var suffix = options.NameObjectsWithTile ? TileSuffixForSurfaces(orient, scene) : string.Empty;
                             // Derive 12+12 view from a representative surface in this orient variant
                             var rep = orient.First();
                             uint key = rep.CompositeKey;
                             int hi12 = (int)((key >> 12) & 0xFFF);
                             int lo12 = (int)(key & 0xFFF);
-                            // Convert tile suffix "_Xxx_Yyy" into a prefix "Xxx_Yyy_" for better sorting by location
-                            var tilePrefix = string.IsNullOrEmpty(suffix) ? string.Empty : (suffix.TrimStart('_') + "_");
+                            // Use the tile group's prefix (authoritative tile)
                             var name = $"{tilePrefix}CK12_{hi12:03X}_{lo12:03X}_T{sub.Key:X2}_O{orient.Key:X2}";
                             var localVerts = new List<System.Numerics.Vector3>();
                             var localTris = new List<(int,int,int)>();
@@ -183,12 +206,16 @@ namespace PM4NextExporter.Assembly
                             if (localTris.Count>0)
                             {
                                 var obj = new AssembledObject(name, localVerts, localTris);
-                                var dom = DominantTileIdForSurfaces(orient, scene);
-                                if (dom.HasValue)
+                                // super-object membership from orientation key
+                                obj.Meta["superObjectId"] = $"O{orient.Key:X2}";
+                                if (groupTileId.HasValue)
                                 {
-                                    obj.Meta["tileId"] = dom.Value.ToString();
-                                    obj.Meta["tileX"] = (dom.Value % TileGridSize).ToString();
-                                    obj.Meta["tileY"] = (dom.Value / TileGridSize).ToString();
+                                    obj.Meta["tileId"] = groupTileId.Value.ToString();
+                                    if (scene.TileCoordByTileId != null && scene.TileCoordByTileId.TryGetValue(groupTileId.Value, out var coord))
+                                    {
+                                        obj.Meta["tileX"] = coord.X.ToString();
+                                        obj.Meta["tileY"] = coord.Y.ToString();
+                                    }
                                 }
                                 result.Add(obj);
                             }
@@ -201,12 +228,11 @@ namespace PM4NextExporter.Assembly
                     var orientGroups = grp.GroupBy(s => Low8(s.CompositeKey)).OrderBy(g => g.Key);
                     foreach (var orient in orientGroups)
                     {
-                        var suffix = options.NameObjectsWithTile ? TileSuffixForSurfaces(orient, scene) : string.Empty;
                         var rep = orient.First();
                         uint key = rep.CompositeKey;
                         int hi12 = (int)((key >> 12) & 0xFFF);
                         int lo12 = (int)(key & 0xFFF);
-                        var tilePrefix = string.IsNullOrEmpty(suffix) ? string.Empty : (suffix.TrimStart('_') + "_");
+                        // Use the tile group's prefix (authoritative tile)
                         var name = $"{tilePrefix}CK12_{hi12:03X}_{lo12:03X}_O{orient.Key:X2}";
                         var localVerts = new List<System.Numerics.Vector3>();
                         var localTris = new List<(int,int,int)>();
@@ -238,16 +264,21 @@ namespace PM4NextExporter.Assembly
                         if (localTris.Count>0)
                         {
                             var obj = new AssembledObject(name, localVerts, localTris);
-                            var dom = DominantTileIdForSurfaces(orient, scene);
-                            if (dom.HasValue)
+                            // super-object membership from orientation key
+                            obj.Meta["superObjectId"] = $"O{orient.Key:X2}";
+                            if (groupTileId.HasValue)
                             {
-                                obj.Meta["tileId"] = dom.Value.ToString();
-                                obj.Meta["tileX"] = (dom.Value % TileGridSize).ToString();
-                                obj.Meta["tileY"] = (dom.Value / TileGridSize).ToString();
+                                obj.Meta["tileId"] = groupTileId.Value.ToString();
+                                if (scene.TileCoordByTileId != null && scene.TileCoordByTileId.TryGetValue(groupTileId.Value, out var coord))
+                                {
+                                    obj.Meta["tileX"] = coord.X.ToString();
+                                    obj.Meta["tileY"] = coord.Y.ToString();
+                                }
                             }
                             result.Add(obj);
                         }
                     }
+                }
                 }
             }
             return result;

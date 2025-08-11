@@ -15,7 +15,7 @@ namespace PM4NextExporter.Exporters
             var verts = scene.MscnVertices ?? new List<System.Numerics.Vector3>();
             if (verts.Count == 0) return;
 
-            var invertX = legacyParity; // default: no flip; flip only with legacy parity
+            var invertX = !legacyParity; // default: flip X; disable only with legacy parity
             var ci = CultureInfo.InvariantCulture;
 
             var mscnDir = Path.Combine(outDir, "mscn");

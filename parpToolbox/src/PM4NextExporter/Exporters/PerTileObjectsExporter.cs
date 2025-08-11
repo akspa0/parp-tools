@@ -19,7 +19,7 @@ namespace PM4NextExporter.Exporters
             Directory.CreateDirectory(tilesDir);
 
             var ci = CultureInfo.InvariantCulture;
-            const bool invertX = true; // Always mirror X at object-level for per-tile exports to correct quadrant
+            var invertX = !legacyParity; // default: flip X; disable only with legacy parity
 
             // Group assembled objects by explicit tileX/tileY where available; fallback to tileId
             var groups = new Dictionary<(int X, int Y), List<AssembledObject>>();

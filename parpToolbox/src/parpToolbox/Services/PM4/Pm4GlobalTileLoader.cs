@@ -213,6 +213,7 @@ namespace ParpToolbox.Services.PM4
             var tileIndexOffsetByTileId = new Dictionary<int, int>();
             var tileVertexCountByTileId = new Dictionary<int, int>();
             var tileIndexCountByTileId = new Dictionary<int, int>();
+            var tileCoordByTileId = new Dictionary<int, ParpToolbox.Formats.PM4.TileCoord>();
             foreach (var kvp in ordered)
             {
                 var coord = kvp.Key;
@@ -231,6 +232,8 @@ namespace ParpToolbox.Services.PM4
                     tileIndexOffsetByTileId[tileId] = iOff;
                 tileVertexCountByTileId[tileId] = tile.Scene.Vertices?.Count ?? 0;
                 tileIndexCountByTileId[tileId] = tile.Scene.Indices?.Count ?? 0;
+                // Preserve original X/Y exactly as parsed from filenames
+                tileCoordByTileId[tileId] = new ParpToolbox.Formats.PM4.TileCoord(coord.X, coord.Y);
             }
 
             return new Pm4Scene
@@ -249,6 +252,7 @@ namespace ParpToolbox.Services.PM4
                 TileIndexOffsetByTileId = tileIndexOffsetByTileId,
                 TileVertexCountByTileId = tileVertexCountByTileId,
                 TileIndexCountByTileId = tileIndexCountByTileId
+                , TileCoordByTileId = tileCoordByTileId
             };
         }
 
