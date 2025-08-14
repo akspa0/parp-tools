@@ -6,10 +6,11 @@ using ParpToolbox.Formats.P4.Chunks.Common;
 namespace PM4NextExporter.Assembly
 {
     /// <summary>
-    /// Experimental assembler that groups surfaces by the upper 24-bits of MSUR.CompositeKey.
-    /// Idea: CompositeKey (SurfaceKey) encodes a 4-byte hierarchy.  Masking off the lowest byte
-    /// tends to merge sub-components belonging to a single placed object while still separating
-    /// neighbouring objects.  This is a heuristic until we wire in full MSLK container logic.
+    /// Assembler that groups surfaces by MSUR.CompositeKey with selectable split modes.
+    /// Default groups by the full 32-bit CompositeKey. Alternate modes:
+    ///  - Hi24: group by upper 24 bits
+    ///  - Low8: group by low 8 bits
+    ///  - Hi24ThenLow8: first by upper 24, then split by low 8
     /// </summary>
     internal sealed class CompositeHierarchyAssembler : IAssembler
     {
@@ -45,62 +46,64 @@ namespace PM4NextExporter.Assembly
                     }
                 }
 
-                // 2) Within tile, group by top 24-bit CompositeKey
-                var groups = tileGroup.GroupBy(s => Top24(s.CompositeKey)).OrderBy(g => g.Key);
-
-                foreach (var grp in groups)
+                // 2) Within tile, group according to options.CkSplit
+                switch (options.CkSplit)
                 {
-                    // 3) Split by low-8 orientation and assemble
-                    var orientGroups = grp.GroupBy(s => Low8(s.CompositeKey)).OrderBy(g => g.Key);
-                    foreach (var orient in orientGroups)
+                    case CkSplitMode.Full:
                     {
-                        // Derive 12+12 view from a representative surface
-                        var rep = orient.First();
-                        uint key = rep.CompositeKey;
-                        int hi12 = (int)((key >> 12) & 0xFFF);
-                        int lo12 = (int)(key & 0xFFF);
-                        var name = $"{tilePrefix}CK12_{hi12:03X}_{lo12:03X}_O{orient.Key:X2}";
-
-                        var localVerts = new List<System.Numerics.Vector3>();
-                        var localTris = new List<(int,int,int)>();
-                        var map = new Dictionary<int,int>();
-
-                        foreach (var surf in orient)
+                        var groups = tileGroup.GroupBy(s => s.CompositeKey).OrderBy(g => g.Key);
+                        foreach (var grp in groups)
                         {
-                            if (surf.MsviFirstIndex > int.MaxValue) continue;
-                            int first = unchecked((int)surf.MsviFirstIndex);
-                            int count = surf.IndexCount;
-                            if (first < 0 || count < 3 || first + count > indices.Count) continue;
-                            int triCnt = count / 3;
-                            for (int t = 0; t < triCnt; t++)
+                            var rep = grp.First();
+                            uint key = rep.CompositeKey;
+                            var name = $"{tilePrefix}CK_{key:X8}";
+                            AssembleGroup(grp, name, Low8(key), groupTileId, scene, verts, indices, result);
+                        }
+                        break;
+                    }
+                    case CkSplitMode.Hi24:
+                    {
+                        var groups = tileGroup.GroupBy(s => Top24(s.CompositeKey)).OrderBy(g => g.Key);
+                        foreach (var grp in groups)
+                        {
+                            var rep = grp.First();
+                            uint key = rep.CompositeKey;
+                            uint hi24 = Top24(key) >> 8;
+                            var name = $"{tilePrefix}CK24_{hi24:X6}";
+                            AssembleGroup(grp, name, Low8(key), groupTileId, scene, verts, indices, result);
+                        }
+                        break;
+                    }
+                    case CkSplitMode.Low8:
+                    {
+                        var groups = tileGroup.GroupBy(s => Low8(s.CompositeKey)).OrderBy(g => g.Key);
+                        foreach (var grp in groups)
+                        {
+                            var rep = grp.First();
+                            uint key = rep.CompositeKey;
+                            var name = $"{tilePrefix}O{grp.Key:X2}";
+                            AssembleGroup(grp, name, grp.Key, groupTileId, scene, verts, indices, result);
+                        }
+                        break;
+                    }
+                    case CkSplitMode.Hi24ThenLow8:
+                    default:
+                    {
+                        var hi24Groups = tileGroup.GroupBy(s => Top24(s.CompositeKey)).OrderBy(g => g.Key);
+                        foreach (var grp in hi24Groups)
+                        {
+                            var orientGroups = grp.GroupBy(s => Low8(s.CompositeKey)).OrderBy(g => g.Key);
+                            foreach (var orient in orientGroups)
                             {
-                                int baseIdx = first + t*3;
-                                int a = indices[baseIdx];
-                                int b = indices[baseIdx+1];
-                                int c = indices[baseIdx+2];
-                                if (a<0||b<0||c<0||a>=verts.Count||b>=verts.Count||c>=verts.Count) continue;
-                                int la = Map(a, verts, localVerts, map);
-                                int lb = Map(b, verts, localVerts, map);
-                                int lc = Map(c, verts, localVerts, map);
-                                localTris.Add((la,lb,lc));
+                                var rep = orient.First();
+                                uint key = rep.CompositeKey;
+                                int hi12 = (int)((key >> 12) & 0xFFF);
+                                int lo12 = (int)(key & 0xFFF);
+                                var name = $"{tilePrefix}CK12_{hi12:03X}_{lo12:03X}_O{orient.Key:X2}";
+                                AssembleGroup(orient, name, orient.Key, groupTileId, scene, verts, indices, result);
                             }
                         }
-
-                        if (localTris.Count > 0)
-                        {
-                            var obj = new AssembledObject(name, localVerts, localTris);
-                            obj.Meta["superObjectId"] = $"O{orient.Key:X2}";
-                            if (groupTileId.HasValue)
-                            {
-                                obj.Meta["tileId"] = groupTileId.Value.ToString();
-                                if (scene.TileCoordByTileId != null && scene.TileCoordByTileId.TryGetValue(groupTileId.Value, out var coord))
-                                {
-                                    obj.Meta["tileX"] = coord.X.ToString();
-                                    obj.Meta["tileY"] = coord.Y.ToString();
-                                }
-                            }
-                            result.Add(obj);
-                        }
+                        break;
                     }
                 }
             }
@@ -121,6 +124,58 @@ namespace PM4NextExporter.Assembly
                 if (absoluteIndex >= offset && absoluteIndex < offset + count) return tileId;
             }
             return null;
+        }
+
+        private static void AssembleGroup(
+            IEnumerable<MsurChunk.Entry> group,
+            string name,
+            byte superId,
+            int? groupTileId,
+            Scene scene,
+            List<System.Numerics.Vector3> verts,
+            List<int> indices,
+            List<AssembledObject> result)
+        {
+            var localVerts = new List<System.Numerics.Vector3>();
+            var localTris = new List<(int,int,int)>();
+            var map = new Dictionary<int,int>();
+
+            foreach (var surf in group)
+            {
+                if (surf.MsviFirstIndex > int.MaxValue) continue;
+                int first = unchecked((int)surf.MsviFirstIndex);
+                int count = surf.IndexCount;
+                if (first < 0 || count < 3 || first + count > indices.Count) continue;
+                int triCnt = count / 3;
+                for (int t = 0; t < triCnt; t++)
+                {
+                    int baseIdx = first + t*3;
+                    int a = indices[baseIdx];
+                    int b = indices[baseIdx+1];
+                    int c = indices[baseIdx+2];
+                    if (a<0||b<0||c<0||a>=verts.Count||b>=verts.Count||c>=verts.Count) continue;
+                    int la = Map(a, verts, localVerts, map);
+                    int lb = Map(b, verts, localVerts, map);
+                    int lc = Map(c, verts, localVerts, map);
+                    localTris.Add((la,lb,lc));
+                }
+            }
+
+            if (localTris.Count > 0)
+            {
+                var obj = new AssembledObject(name, localVerts, localTris);
+                obj.Meta["superObjectId"] = $"O{superId:X2}";
+                if (groupTileId.HasValue)
+                {
+                    obj.Meta["tileId"] = groupTileId.Value.ToString();
+                    if (scene.TileCoordByTileId != null && scene.TileCoordByTileId.TryGetValue(groupTileId.Value, out var coord))
+                    {
+                        obj.Meta["tileX"] = coord.X.ToString();
+                        obj.Meta["tileY"] = coord.Y.ToString();
+                    }
+                }
+                result.Add(obj);
+            }
         }
 
         private static int Map(int gIdx, List<System.Numerics.Vector3> gVerts, List<System.Numerics.Vector3> lVerts, Dictionary<int,int> map)

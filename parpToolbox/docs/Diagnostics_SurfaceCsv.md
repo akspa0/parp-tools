@@ -9,19 +9,13 @@ The file is written to the selected diagnostics output directory ( `--csv-out <d
 | Column | Description |
 |--------|-------------|
 | `index` | Zero-based position of the surface entry inside the loaded scene collection. |
-| `compositeKey` | Full 32-bit CompositeKey of the MSUR surface, rendered as hexadecimal `0xAABBCCDD`. |
-| `byteAA` | Highest-order byte (bits 24-31) of `compositeKey`. |
-| `byteBB` | Bits 16-23 of `compositeKey`. |
-| `byteCC` | Bits 8-15 of `compositeKey`. |
-| `byteDD` | Lowest-order byte (bits 0-7) of `compositeKey`. |
-| `surfaceKeyHigh16` | Upper 16 bits of `compositeKey` (bytes AA-BB) kept for quick grouping compatibility. |
+| `compositeKey` | Full 24-bit CompositeKey of the MSUR surface, rendered as hexadecimal `0xABCDEF`. |
 | `msviFirstIndex` | Starting index inside the global triangle index buffer for this surface. |
 | `indexCount` | Number of indices (triangles × 3) belonging to the surface. |
 | `groupKey` | Primary grouping byte (formerly `FlagsOrUnknown_0x00`) indicating surface/object category. |
 
 ## Usage Hints
 * Import into Excel, Google Sheets, or Python/Pandas for analysis.
-* Grouping by `surfaceKeyHigh16` quickly reveals the distribution of geometry across high-level objects.
 * Correlate `indexCount` with your assembly strategy to detect outlier surfaces (e.g., tiny or unusually large meshes).
 * Join with other chunk dumps (future `mslk.csv`, `mprl.csv` etc.) using `compositeKey` once those diagnostics are added.
 
@@ -40,4 +34,4 @@ This file lists **all** MSCN vertex anchors extracted from the loaded tiles.  It
 This CSV enables offline correlation between collision anchors (MSCN) and surface geometry (MSUR/MSLK/MPRL). Join on `tileId` to relate anchors back to surfaces loaded from the same grid cell.
 
 ---
-_Last updated: 2025-08-08_
+_Last updated: 2025-08-14_

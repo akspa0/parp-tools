@@ -63,6 +63,7 @@ namespace PM4NextExporter.Cli
             Log($" audit-only: {options.AuditOnly}");
             Log($" no-remap: {options.NoRemap}");
             Log($" name-with-tile: {options.NameObjectsWithTile}");
+            Log($" ck-split: {options.CkSplit}");
             if (options.Correlates.Count > 0)
                 Log($" correlate: {string.Join(",", options.Correlates.Select(c => c.Item1 + ":" + c.Item2))}");
 
@@ -92,7 +93,6 @@ namespace PM4NextExporter.Cli
                 AssemblyStrategy.Parent16 => new Parent16Assembler(),
                 _ => new ParentHierarchyAssembler()
             };
-
             var assembled = assembler.Assemble(scene, options).ToList();
             Log($" assembled objects: {assembled.Count}");
 
@@ -142,6 +142,9 @@ namespace PM4NextExporter.Cli
                         break;
                     case "--assembly":
                         opts.AssemblyStrategy = ParseAssembly(NextOrThrow(args, ref i, a));
+                        break;
+                    case "--ck-split":
+                        opts.CkSplit = ParseCkSplit(NextOrThrow(args, ref i, a));
                         break;
                     case "--group":
                         opts.GroupKeys.Add(ParseGroup(NextOrThrow(args, ref i, a)));
@@ -223,7 +226,7 @@ namespace PM4NextExporter.Cli
                 "composite-hierarchy-8bit" => Model.AssemblyStrategy.ContainerHierarchy8Bit,
                 "composite-bytepair" => Model.AssemblyStrategy.CompositeBytePair,
                 "parent16" => Model.AssemblyStrategy.Parent16,
-                _ => throw new ArgumentException("--assembly must be parent-index|msur-indexcount|surface-key|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16")
+                _ => throw new ArgumentException("--assembly value not recognized")
             };
 
         private static Model.GroupKey ParseGroup(string s)
@@ -240,6 +243,16 @@ namespace PM4NextExporter.Cli
                 _ => throw new ArgumentException("--group value not recognized")
             };
 
+        private static Model.CkSplitMode ParseCkSplit(string s)
+            => s.ToLowerInvariant() switch
+            {
+                "full" => Model.CkSplitMode.Full,
+                "hi24" => Model.CkSplitMode.Hi24,
+                "low8" => Model.CkSplitMode.Low8,
+                "hi24-then-low8" => Model.CkSplitMode.Hi24ThenLow8,
+                _ => throw new ArgumentException("--ck-split must be full|hi24|low8|hi24-then-low8")
+            };
+
         private static void PrintHelp()
         {
             Console.WriteLine($@"{ToolName}
@@ -247,6 +260,7 @@ Usage:
   {ToolName} <pm4Input|directory> [--out <dir>] [--include-adjacent] [--format obj|gltf|glb]
   [--assembly parent-index|msur-indexcount|surface-key|composite-hierarchy|container-hierarchy-8bit|composite-hierarchy-8bit|composite-bytepair|parent16]
   [--group parent16|parent16-container|parent16-object|surface|flags|type|sortkey|tile]
+  [--ck-split full|hi24|low8|hi24-then-low8]
   [--parent16-swap] [--csv-diagnostics] [--csv-out <dir>] [--name-with-tile] [--correlate <keyA:keyB>]
   [--batch] [--legacy-obj-parity] [--audit-only] [--no-remap]
 ");

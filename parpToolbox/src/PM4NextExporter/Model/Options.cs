@@ -6,6 +6,7 @@ namespace PM4NextExporter.Model
     internal enum ExportFormat { Obj, Gltf, Glb }
     internal enum AssemblyStrategy { ParentIndex, MsurIndexCount, SurfaceKey, CompositeHierarchy, ContainerHierarchy8Bit, CompositeBytePair, Parent16 }
     internal enum GroupKey { Parent16, Parent16Container, Parent16Object, Surface, Flags, Type, SortKey, Tile }
+    internal enum CkSplitMode { Full, Hi24, Low8, Hi24ThenLow8 }
 
     internal sealed class Options
     {
@@ -23,6 +24,7 @@ namespace PM4NextExporter.Model
         public AssemblyStrategy AssemblyStrategy { get; set; } = AssemblyStrategy.ParentIndex;
         public List<GroupKey> GroupKeys { get; } = new();
         public bool Parent16Swap { get; set; }
+        public CkSplitMode CkSplit { get; set; } = CkSplitMode.Full;
 
         // Cross-tile / audit
         public bool IncludeAdjacent { get; set; }
