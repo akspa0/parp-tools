@@ -62,23 +62,7 @@ namespace PM4NextExporter.Cli
             Log($" parent16-swap: {options.Parent16Swap}");
             Log($" audit-only: {options.AuditOnly}");
             Log($" no-remap: {options.NoRemap}");
-            if (options.CkSplitByType)
-            {
-                Log($" ck-split-by-type: {options.CkSplitByType}");
-            }
-            if (options.ExportMscnObj)
-            {
-                Log($" export-mscn-obj: {options.ExportMscnObj}");
-            }
-            if (options.NameObjectsWithTile)
-            {
-                Log($" name-with-tile: {options.NameObjectsWithTile}");
-            }
-            if (options.AssemblyStrategy == AssemblyStrategy.MslkParent)
-            {
-                Log($" mslk-parent-min-tris: {options.MslkParentMinTriangles}");
-                Log($" mslk-parent-allow-fallback: {options.MslkParentAllowFallbackScan}");
-            }
+            Log($" name-with-tile: {options.NameObjectsWithTile}");
             if (options.Correlates.Count > 0)
                 Log($" correlate: {string.Join(",", options.Correlates.Select(c => c.Item1 + ":" + c.Item2))}");
 
@@ -93,8 +77,8 @@ namespace PM4NextExporter.Cli
 
             // Minimal pipeline wiring
             var loader = new SceneLoader();
-            var scene = loader.LoadSingleTile(options.InputPath!, options.IncludeAdjacent, applyMscnRemap: !options.NoRemap);
-            Log($" scene: vertices={scene.VertexCount} surfaces={scene.SurfaceCount} mscn={scene.MscnVertices?.Count ?? 0}");
+            var scene = loader.LoadSingleTile(options.InputPath!, options.IncludeAdjacent);
+            Log($" scene: vertices={scene.VertexCount} surfaces={scene.SurfaceCount}");
             
             // Choose assembler
             IAssembler assembler = options.AssemblyStrategy switch
@@ -102,31 +86,12 @@ namespace PM4NextExporter.Cli
                 AssemblyStrategy.ParentIndex => new ParentHierarchyAssembler(),
                 AssemblyStrategy.MsurIndexCount => new MsurIndexCountAssembler(),
                 AssemblyStrategy.SurfaceKey => new SurfaceKeyAssembler(),
-                AssemblyStrategy.SurfaceKeyAA => new SurfaceKeyAAAssembler(),
                 AssemblyStrategy.CompositeHierarchy => new CompositeHierarchyAssembler(),
                 AssemblyStrategy.ContainerHierarchy8Bit => new ContainerHierarchy8BitAssembler(),
                 AssemblyStrategy.CompositeBytePair => new CompositeBytePairAssembler(),
                 AssemblyStrategy.Parent16 => new Parent16Assembler(),
-                AssemblyStrategy.MslkParent => new MslkParentAssembler(),
-                AssemblyStrategy.MslkInstance => new MslkInstanceAssembler(false),
-                AssemblyStrategy.MslkInstanceCk24 => new MslkInstanceAssembler(true),
-                _ => new CompositeHierarchyAssembler()
+                _ => new ParentHierarchyAssembler()
             };
-
-            // Guidance: MSLK parent assembler is experimental; resolves surfaces via MSPI first-index + tile offsets
-            if (options.AssemblyStrategy == AssemblyStrategy.MslkParent)
-            {
-                Log("[info] Using MSLK parent assembly (experimental): groups by ParentId and resolves surfaces via tile index offsets.");
-                Log("[hint] Use --mslk-parent-min-tris <N> (e.g., 300-1000) to suppress tiny fragments.");
-                Log("[hint] Disable cross-tile fallback scan by default; enable with --mslk-parent-allow-fallback if necessary.");
-            }
-
-            // Guidance: SurfaceKey can merge unrelated objects; composite-hierarchy is usually more accurate
-            if (options.AssemblyStrategy == AssemblyStrategy.SurfaceKey)
-            {
-                Log("[hint] SurfaceKey grouping may merge unrelated objects into the same OBJ.");
-                Log("[hint] For more accurate per-object outputs, consider --assembly composite-hierarchy.");
-            }
 
             var assembled = assembler.Assemble(scene, options).ToList();
             Log($" assembled objects: {assembled.Count}");
@@ -135,31 +100,13 @@ namespace PM4NextExporter.Cli
             switch (options.Format)
             {
                 case ExportFormat.Obj:
-                    PM4NextExporter.Exporters.ObjExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal);
+                    PM4NextExporter.Exporters.ObjExporter.Export(assembled, outDir, options.LegacyObjParity);
                     Log(" exported OBJ");
-                    if (options.ExportTiles)
-                    {
-                        // Per-tile export grouped by assembled object metadata to preserve object boundaries
-                        if (options.ProjectLocal)
-                        {
-                            Log("[info] per-tile OBJ export preserves global coordinates; --project-local is ignored for tiles");
-                        }
-                        Log("[info] per-tile OBJ uses global coordinates (no local projection). Object-level X mirroring matches OBJ export and is controlled by --legacy-obj-parity");
-                        PM4NextExporter.Exporters.PerTileObjectsExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal);
-                        Log(" exported per-tile OBJ");
-                    }
                     break;
                 case ExportFormat.Gltf:
                 case ExportFormat.Glb:
                     Log("[warn] glTF/GLB export not implemented yet");
                     break;
-            }
-
-            // Optional: export MSCN vertices as separate OBJ layers for validation
-            if (options.ExportMscnObj)
-            {
-                PM4NextExporter.Exporters.MscnObjExporter.Export(scene, outDir, options.LegacyObjParity, options.NameObjectsWithTile);
-                Log(" exported MSCN OBJ layers");
             }
 
             // Diagnostics
@@ -168,18 +115,7 @@ namespace PM4NextExporter.Cli
                 var diagDir = options.CsvOut ?? outDir;
                 DiagnosticsService.WriteSurfaceCsv(diagDir, scene);
                 DiagnosticsService.WriteCompositeSummaryCsv(diagDir, scene);
-                DiagnosticsService.WriteMslkLinksCsv(diagDir, scene);
-                var mscnCount = scene.MscnVertices?.Count ?? 0;
-                if (mscnCount == 0)
-                {
-                    Log("[warn] MSCN vertices empty; skipping mscn_vertices.csv");
-                }
-                else
-                {
-                    DiagnosticsService.WriteMscnCsv(diagDir, scene);
-                }
-                DiagnosticsService.WriteAssemblyCoverageCsv(diagDir, assembled);
-                DiagnosticsService.WriteSurfaceParentHitsCsv(diagDir, scene);
+                DiagnosticsService.WriteMscnCsv(diagDir, scene);
                 Log(" diagnostics CSV written");
             }
 
@@ -222,6 +158,9 @@ namespace PM4NextExporter.Cli
                     case "--csv-diagnostics":
                         opts.CsvDiagnostics = true;
                         break;
+                    case "--name-with-tile":
+                        opts.NameObjectsWithTile = true;
+                        break;
                     case "--csv-out":
                         opts.CsvOut = NextOrThrow(args, ref i, a);
                         break;
@@ -233,29 +172,6 @@ namespace PM4NextExporter.Cli
                         break;
                     case "--no-remap":
                         opts.NoRemap = true;
-                        break;
-                    case "--ck-split-by-type":
-                        opts.CkSplitByType = true;
-                        break;
-                    case "--export-mscn-obj":
-                        opts.ExportMscnObj = true;
-                        break;
-                    case "--project-local":
-                        opts.ProjectLocal = true;
-                        break;
-                    case "--export-tiles":
-                        opts.ExportTiles = true;
-                        break;
-                    case "--name-with-tile":
-                        opts.NameObjectsWithTile = true;
-                        break;
-                    case "--mslk-parent-min-tris":
-                        if (!int.TryParse(NextOrThrow(args, ref i, a), out var minTris) || minTris < 0)
-                            throw new ArgumentException("--mslk-parent-min-tris requires a non-negative integer");
-                        opts.MslkParentMinTriangles = minTris;
-                        break;
-                    case "--mslk-parent-allow-fallback":
-                        opts.MslkParentAllowFallbackScan = true;
                         break;
                     case "--correlate":
                         var pair = NextOrThrow(args, ref i, a);
@@ -302,16 +218,12 @@ namespace PM4NextExporter.Cli
                 "parent-index" => Model.AssemblyStrategy.ParentIndex,
                 "msur-indexcount" => Model.AssemblyStrategy.MsurIndexCount,
                 "surface-key" => Model.AssemblyStrategy.SurfaceKey,
-                "surface-key-aa" => Model.AssemblyStrategy.SurfaceKeyAA,
                 "composite-hierarchy" => Model.AssemblyStrategy.CompositeHierarchy,
                 "container-hierarchy-8bit" => Model.AssemblyStrategy.ContainerHierarchy8Bit,
                 "composite-hierarchy-8bit" => Model.AssemblyStrategy.ContainerHierarchy8Bit,
                 "composite-bytepair" => Model.AssemblyStrategy.CompositeBytePair,
                 "parent16" => Model.AssemblyStrategy.Parent16,
-                "mslk-parent" => Model.AssemblyStrategy.MslkParent,
-                "mslk-instance" => Model.AssemblyStrategy.MslkInstance,
-                "mslk-instance+ck24" => Model.AssemblyStrategy.MslkInstanceCk24,
-                _ => throw new ArgumentException("--assembly must be parent-index|msur-indexcount|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24")
+                _ => throw new ArgumentException("--assembly must be parent-index|msur-indexcount|surface-key|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16")
             };
 
         private static Model.GroupKey ParseGroup(string s)
@@ -330,14 +242,13 @@ namespace PM4NextExporter.Cli
 
         private static void PrintHelp()
         {
-            Console.WriteLine(@$"{ToolName}
+            Console.WriteLine($@"{ToolName}
 Usage:
   {ToolName} <pm4Input|directory> [--out <dir>] [--include-adjacent] [--format obj|gltf|glb]
-  [--assembly parent-index|msur-indexcount|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24]
+  [--assembly parent-index|msur-indexcount|surface-key|composite-hierarchy|container-hierarchy-8bit|composite-hierarchy-8bit|composite-bytepair|parent16]
   [--group parent16|parent16-container|parent16-object|surface|flags|type|sortkey|tile]
-          [--parent16-swap] [--csv-diagnostics] [--csv-out <dir>] [--correlate <keyA:keyB>]
-  [--batch] [--legacy-obj-parity] [--audit-only] [--no-remap] [--ck-split-by-type]
-  [--mslk-parent-min-tris <N>] [--mslk-parent-allow-fallback] [--export-mscn-obj] [--export-tiles] [--project-local] [--name-with-tile]
+  [--parent16-swap] [--csv-diagnostics] [--csv-out <dir>] [--name-with-tile] [--correlate <keyA:keyB>]
+  [--batch] [--legacy-obj-parity] [--audit-only] [--no-remap]
 ");
         }
     }

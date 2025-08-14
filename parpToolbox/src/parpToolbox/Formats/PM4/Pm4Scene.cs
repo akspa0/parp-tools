@@ -1,6 +1,8 @@
 namespace ParpToolbox.Formats.PM4
 {
     using System.Collections.Generic;
+    /// <summary>Simple value type to hold original tile coordinates exactly as parsed from filenames.</summary>
+    public readonly record struct TileCoord(int X, int Y);
     /// <summary>
     /// Immutable high-level representation of a PM4 file after parsing and adaption.
     /// Will be populated by <see cref="ParpToolbox.Services.PM4.Pm4Adapter"/>.
@@ -38,13 +40,11 @@ namespace ParpToolbox.Formats.PM4
 
     /// <summary>MSCN vertices extracted from extra chunk (optional).</summary>
     public List<System.Numerics.Vector3> MscnVertices { get; init; } = new();
-
-    /// <summary>When loading regions, records the tile linear index (Y*64+X) for each MSCN vertex, parallel to <see cref="MscnVertices"/>.</summary>
+    /// <summary>Parallel list of tile IDs (linear Y*64+X) corresponding to each MSCN vertex entry.</summary>
     public List<int> MscnVertexTileIds { get; init; } = new();
 
     /// <summary>Raw binary chunk data captured during parsing for future-proofing and analysis.</summary>
     public Dictionary<string, byte[]> CapturedRawData { get; init; } = new();
-
     /// <summary>Tile vertex offset (global vertex start) keyed by linear tile id (Y*64+X)</summary>
     public Dictionary<int, int> TileVertexOffsetByTileId { get; init; } = new();
     /// <summary>Tile index offset (global index start) keyed by linear tile id (Y*64+X)</summary>
@@ -53,6 +53,8 @@ namespace ParpToolbox.Formats.PM4
     public Dictionary<int, int> TileVertexCountByTileId { get; init; } = new();
     /// <summary>Tile index count keyed by linear tile id (Y*64+X)</summary>
     public Dictionary<int, int> TileIndexCountByTileId { get; init; } = new();
+    /// <summary>Original tile coordinates keyed by linear tile id, preserving exact X/Y from filenames.</summary>
+    public Dictionary<int, TileCoord> TileCoordByTileId { get; init; } = new();
 }
 
 /// <summary>Represents a contiguous set of indices defined by an MSUR entry.</summary>

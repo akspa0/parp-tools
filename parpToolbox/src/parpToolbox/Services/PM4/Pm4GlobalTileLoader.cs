@@ -64,7 +64,7 @@ namespace ParpToolbox.Services.PM4
         /// <summary>
         /// Loads all PM4/PD4 files in a directory as a unified global scene.
         /// </summary>
-        public static GlobalScene LoadRegion(string directoryPath, string filePattern = "*.pm4", bool applyMscnRemap = true)
+        public static GlobalScene LoadRegion(string directoryPath, string filePattern = "*.pm4")
         {
             ConsoleLogger.WriteLine($"Loading PM4/PD4 region from: {directoryPath}");
             ConsoleLogger.WriteLine($"File pattern: {filePattern}");
@@ -88,7 +88,7 @@ namespace ParpToolbox.Services.PM4
                     loadedTiles.Add(tile);
                     globalScene.LoadedTiles[coordinate] = tile;
                     
-                    ConsoleLogger.WriteLine($"  Loaded tile ({coordinate.X}, {coordinate.Y}): {scene.Vertices.Count} vertices, {scene.Surfaces.Count} surfaces, mscn={scene.MscnVertices?.Count ?? 0}");
+                    ConsoleLogger.WriteLine($"  Loaded tile ({coordinate.X}, {coordinate.Y}): {scene.Vertices.Count} vertices, {scene.Surfaces.Count} surfaces");
                 }
                 catch (Exception ex)
                 {
@@ -98,26 +98,10 @@ namespace ParpToolbox.Services.PM4
             
             ConsoleLogger.WriteLine($"Successfully loaded {loadedTiles.Count} tiles out of {MAX_TILES} possible tiles");
             ConsoleLogger.WriteLine($"Missing tiles: {globalScene.TotalMissingTiles}");
-            try
-            {
-                var totalMscn = loadedTiles.Sum(t => t.Scene.MscnVertices?.Count ?? 0);
-                ConsoleLogger.WriteLine($"Total MSCN vertices across loaded tiles: {totalMscn}");
-            }
-            catch { /* best-effort summary */ }
             
             // Build unified global scene
             BuildGlobalScene(globalScene, loadedTiles);
-            // Apply cross-tile MSCN remapping so indices that reference the exterior
-            // vertex pool are resolved consistently for all region/global loads.
-            if (applyMscnRemap)
-            {
-                ApplyMscnRemap(globalScene);
-            }
-            else
-            {
-                ConsoleLogger.WriteLine("[GlobalTileLoader] MSCN remap disabled by caller");
-            }
-
+            
             return globalScene;
         }
         
@@ -163,12 +147,11 @@ namespace ParpToolbox.Services.PM4
                     {
                         GroupKey = surface.GroupKey,
                         IndexCount = surface.IndexCount,
-                        AttributeMask = surface.AttributeMask,
-                        Padding_0x03 = surface.Padding_0x03,
+                        Unknown03 = surface.Unknown03,
                         Nx = surface.Nx,
                         Ny = surface.Ny,
                         Nz = surface.Nz,
-                        Height = surface.Height,
+                        Float10 = surface.Float10,
                         MsviFirstIndex = surface.MsviFirstIndex + (uint)currentIndexOffset,
                         MdosIndex = surface.MdosIndex,
                         CompositeKey = surface.CompositeKey
@@ -213,6 +196,7 @@ namespace ParpToolbox.Services.PM4
             var tileIndexOffsetByTileId = new Dictionary<int, int>();
             var tileVertexCountByTileId = new Dictionary<int, int>();
             var tileIndexCountByTileId = new Dictionary<int, int>();
+            var tileCoordByTileId = new Dictionary<int, ParpToolbox.Formats.PM4.TileCoord>();
             foreach (var kvp in ordered)
             {
                 var coord = kvp.Key;
@@ -231,6 +215,8 @@ namespace ParpToolbox.Services.PM4
                     tileIndexOffsetByTileId[tileId] = iOff;
                 tileVertexCountByTileId[tileId] = tile.Scene.Vertices?.Count ?? 0;
                 tileIndexCountByTileId[tileId] = tile.Scene.Indices?.Count ?? 0;
+                // Preserve original X/Y exactly as parsed from filenames
+                tileCoordByTileId[tileId] = new ParpToolbox.Formats.PM4.TileCoord(coord.X, coord.Y);
             }
 
             return new Pm4Scene
@@ -248,89 +234,9 @@ namespace ParpToolbox.Services.PM4
                 TileVertexOffsetByTileId = tileVertexOffsetByTileId,
                 TileIndexOffsetByTileId = tileIndexOffsetByTileId,
                 TileVertexCountByTileId = tileVertexCountByTileId,
-                TileIndexCountByTileId = tileIndexCountByTileId
+                TileIndexCountByTileId = tileIndexCountByTileId,
+                TileCoordByTileId = tileCoordByTileId
             };
-        }
-
-        /// <summary>
-        /// Appends aggregated MSCN vertices to the global vertex list and remaps indices
-        /// that reference the MSCN pool. This mirrors the behavior of <see cref="MscnRemapper"/>
-        /// used in <see cref="Pm4Adapter.LoadRegion(string, Pm4LoadOptions)"/>, ensuring
-        /// consistent cross-tile resolution for the global loader path.
-        /// </summary>
-        private static void ApplyMscnRemap(GlobalScene globalScene)
-        {
-            try
-            {
-                // Aggregate MSCN vertices across tiles in deterministic order (Y then X)
-                var ordered = globalScene.LoadedTiles
-                    .OrderBy(kvp => kvp.Key.Y)
-                    .ThenBy(kvp => kvp.Key.X)
-                    .ToList();
-
-                var aggregatedMscn = new List<Vector3>();
-                foreach (var kvp in ordered)
-                {
-                    var list = kvp.Value.Scene.MscnVertices ?? new List<Vector3>();
-                    if (list.Count > 0)
-                        aggregatedMscn.AddRange(list);
-                }
-
-                if (aggregatedMscn.Count == 0)
-                {
-                    ConsoleLogger.WriteLine("[GlobalTileLoader] No MSCN vertices found; skipping cross-tile remap");
-                    return;
-                }
-
-                int originalCount = globalScene.GlobalVertices.Count;
-
-                // Append MSCN vertices using (Y, X, Z) to preserve expected nested-space orientation
-                foreach (var v in aggregatedMscn)
-                {
-                    globalScene.GlobalVertices.Add(new Vector3(v.Y, v.X, v.Z));
-                }
-
-                // Remap indices per-tile based on the tile's local vertex threshold.
-                // Rationale: after global aggregation, tile-local out-of-bounds indices
-                // may no longer exceed the global render-vertex count, so a global
-                // threshold check misses them. By reconstructing the original tile-local
-                // index (globalIndex - tileVertexOffset) we can identify MSCN references
-                // as (localIdx >= tileVertexCount).
-                int remappedCount = 0;
-                int mscnCount = aggregatedMscn.Count;
-                int mscnStartIndex = originalCount;
-
-                foreach (var kvp in ordered)
-                {
-                    var coord = kvp.Key;
-                    var tile = kvp.Value.Scene;
-                    int tileVertStart = globalScene.TileVertexOffsets[coord];
-                    int tileVertCount = tile.Vertices.Count;
-                    int tileIndexStart = globalScene.TileIndexOffsets[coord];
-                    int tileIndexCount = tile.Indices.Count;
-                    int tileIndexEndExclusive = tileIndexStart + tileIndexCount;
-
-                    for (int i = tileIndexStart; i < tileIndexEndExclusive; i++)
-                    {
-                        int gIdx = globalScene.GlobalIndices[i];
-                        int localIdx = gIdx - tileVertStart; // reconstruct original tile-local index
-                        if (localIdx >= tileVertCount)
-                        {
-                            int mscnOffset = (localIdx - tileVertCount) % mscnCount;
-                            if (mscnOffset < 0) mscnOffset += mscnCount; // ensure positive modulo
-                            globalScene.GlobalIndices[i] = mscnStartIndex + mscnOffset;
-                            remappedCount++;
-                        }
-                    }
-                }
-
-                ConsoleLogger.WriteLine($"[GlobalTileLoader] MSCN remap: appended {mscnCount:N0} vertices, remapped {remappedCount:N0} indices");
-            }
-            catch (Exception ex)
-            {
-                // Fail-safe: never break loads due to remap; just log and continue
-                ConsoleLogger.WriteLine($"[GlobalTileLoader] MSCN remap failed: {ex.Message}");
-            }
         }
     }
 }

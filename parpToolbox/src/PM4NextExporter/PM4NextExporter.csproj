@@ -12,8 +12,4 @@
     <!-- Reference shared parpToolbox utilities (ProjectOutput, etc.) -->
     <ProjectReference Include="..\parpToolbox\parpToolbox.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <!-- Exclude deprecated/disabled instance partitioner from compilation -->
-    <Compile Remove="Assembly\CompositeHierarchyInstanceAssembler.cs" />
-  </ItemGroup>
 </Project>

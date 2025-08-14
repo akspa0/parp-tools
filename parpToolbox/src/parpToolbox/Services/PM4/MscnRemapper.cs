@@ -44,8 +44,8 @@ internal static class MscnRemapper
             return;
 
         int originalCount = scene.Vertices.Count;
-        // Append MSCN vertices using (Y, X, Z). This matches historical behavior and
-        // preserves expected nested-space orientation relative to render geometry.
+        // Append MSCN vertices (apply same Y,X,Z transform convention)
+        // These vertices represent the shared vertices that may be referenced across tiles
         foreach (var v in mscn.Vertices)
         {
             scene.Vertices.Add(new System.Numerics.Vector3(v.Y, v.X, v.Z));
