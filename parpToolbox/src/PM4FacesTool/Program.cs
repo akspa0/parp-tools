@@ -74,6 +74,126 @@ internal static class Program
         }
     }
 
+    private static void ExportTypeAttrInstances(
+        Pm4Scene scene,
+        string objectsDir,
+        Options opts,
+        string outDir,
+        List<string> coverageCsv,
+        List<ObjectIndexEntry> objectIndex)
+    {
+        var groups = scene.Surfaces
+            .Select((e, i) => (e, i))
+            .GroupBy(x => new { x.e.GroupKey, x.e.AttributeMask })
+            .OrderBy(g => g.Key.GroupKey)
+            .ThenBy(g => g.Key.AttributeMask);
+
+        foreach (var g in groups)
+        {
+            var surfaceSceneIndices = g.Select(x => x.i).ToList();
+            int n = surfaceSceneIndices.Count;
+            if (n == 0) continue;
+
+            var groupDir = Path.Combine(objectsDir, $"TYPE_{g.Key.GroupKey:D3}", $"ATTR_{g.Key.AttributeMask:D3}");
+            Directory.CreateDirectory(groupDir);
+
+            // Build vertex -> list(local surface indices) map within this type+attr bucket
+            var vertToSurfs = new Dictionary<int, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                int sIdx = surfaceSceneIndices[i];
+                var surf = scene.Surfaces[sIdx];
+                if (surf.MsviFirstIndex > int.MaxValue) continue;
+                int first = unchecked((int)surf.MsviFirstIndex);
+                int count = surf.IndexCount;
+                if (first < 0 || count < 3 || first + count > scene.Indices.Count) continue;
+
+                var used = new HashSet<int>();
+                for (int k = 0; k < count; k++)
+                {
+                    int v = scene.Indices[first + k];
+                    if (v < 0 || v >= scene.Vertices.Count) continue;
+                    if (!used.Add(v)) continue;
+                    if (!vertToSurfs.TryGetValue(v, out var list)) { list = new List<int>(); vertToSurfs[v] = list; }
+                    list.Add(i); // local index inside this TYPE+ATTR group
+                }
+            }
+
+            // DSU on local indices for this type+attr
+            var dsu = new DSU(n);
+            foreach (var kv in vertToSurfs)
+            {
+                var list = kv.Value;
+                if (list.Count <= 1) continue;
+                int root = list[0];
+                for (int i = 1; i < list.Count; i++) dsu.Union(root, list[i]);
+            }
+
+            // Gather components as lists of scene-surface-indices
+            var compToSurfaces = new Dictionary<int, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                int r = dsu.Find(i);
+                if (!compToSurfaces.TryGetValue(r, out var lst)) { lst = new List<int>(); compToSurfaces[r] = lst; }
+                lst.Add(surfaceSceneIndices[i]);
+            }
+
+            // Export each component
+            int compIndex = 0;
+            foreach (var comp in compToSurfaces.Values)
+            {
+                var items = comp.Select(si => (scene.Surfaces[si], si)).ToList();
+                string name = $"TYPE_{g.Key.GroupKey:D3}_ATTR_{g.Key.AttributeMask:D3}_inst_{compIndex:D5}";
+                string safe = SanitizeFileName(name);
+                string objPath = Path.Combine(groupDir, safe + ".obj");
+
+                // Optional filtering to reduce tiny instance outputs
+                int triEstimate = items.Sum(it => (int)it.Item1.IndexCount) / 3;
+                bool skipWrite = opts.CkMinTris > 0 && triEstimate < opts.CkMinTris;
+
+                int writtenFaces = 0;
+                int skippedFaces = 0;
+                if (!skipWrite)
+                {
+                    AssembleAndWrite(scene, items, objPath, opts, out writtenFaces, out skippedFaces);
+                }
+
+                // Coverage row for quick visibility
+                coverageCsv.Add(string.Join(',',
+                    $"group:{name}",
+                    items.First().Item1.GroupKey,
+                    items.First().Item1.CompositeKey,
+                    items.Min(it => (int)it.Item1.MsviFirstIndex) + "-" + items.Max(it => (int)it.Item1.MsviFirstIndex),
+                    items.Sum(it => (int)it.Item1.IndexCount),
+                    writtenFaces,
+                    skippedFaces,
+                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(Path.Combine(objectsDir, ".."), objPath)))));
+
+                // Add to object index if not skipped
+                if (!skipWrite)
+                {
+                    objectIndex.Add(new ObjectIndexEntry
+                    {
+                        Id = $"typeattr:{g.Key.GroupKey:D3}:{g.Key.AttributeMask:D3}:inst:{compIndex:D5}",
+                        Name = name,
+                        Group = "type-attr-instance",
+                        ObjPath = Path.GetRelativePath(outDir, objPath),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        FacesWritten = writtenFaces,
+                        FacesSkipped = skippedFaces,
+                        SurfaceIndices = items.Select(t => t.si).ToList(),
+                        IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
+                        IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
+                        FlipX = opts.LegacyParity
+                    });
+                }
+
+                compIndex++;
+            }
+        }
+    }
+
     private static void ProcessOne(string firstTilePath, Options opts)
     {
         if (string.IsNullOrWhiteSpace(firstTilePath) || !File.Exists(firstTilePath))
@@ -127,7 +247,16 @@ internal static class Program
         {
             ExportCompositeInstances(scene, objectsDir, opts, outDir, coverageCsv, objectIndex);
         }
-        else if (opts.GroupBy.Equals("groupkey", StringComparison.OrdinalIgnoreCase))
+        else if (opts.GroupBy.Equals("type-instance", StringComparison.OrdinalIgnoreCase))
+        {
+            ExportTypeInstances(scene, objectsDir, opts, outDir, coverageCsv, objectIndex);
+        }
+        else if (opts.GroupBy.Equals("type-attr-instance", StringComparison.OrdinalIgnoreCase))
+        {
+            ExportTypeAttrInstances(scene, objectsDir, opts, outDir, coverageCsv, objectIndex);
+        }
+        else if (opts.GroupBy.Equals("groupkey", StringComparison.OrdinalIgnoreCase) ||
+                 opts.GroupBy.Equals("type", StringComparison.OrdinalIgnoreCase))
         {
             var grouped = scene.Surfaces
                 .Select((e, i) => (e, i))
@@ -363,6 +492,125 @@ internal static class Program
 
         File.WriteAllLines(Path.Combine(outDir, "ck_instances.csv"), instCsv);
         File.WriteAllLines(Path.Combine(outDir, "instance_members.csv"), membersCsv);
+    }
+
+    private static void ExportTypeInstances(
+        Pm4Scene scene,
+        string objectsDir,
+        Options opts,
+        string outDir,
+        List<string> coverageCsv,
+        List<ObjectIndexEntry> objectIndex)
+    {
+        var groups = scene.Surfaces
+            .Select((e, i) => (e, i))
+            .GroupBy(x => x.e.GroupKey)
+            .OrderBy(g => g.Key);
+
+        foreach (var g in groups)
+        {
+            var surfaceSceneIndices = g.Select(x => x.i).ToList();
+            int n = surfaceSceneIndices.Count;
+            if (n == 0) continue;
+
+            var groupDir = Path.Combine(objectsDir, $"TYPE_{g.Key:D3}");
+            Directory.CreateDirectory(groupDir);
+
+            // Build vertex -> list(local surface indices) map within this type
+            var vertToSurfs = new Dictionary<int, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                int sIdx = surfaceSceneIndices[i];
+                var surf = scene.Surfaces[sIdx];
+                if (surf.MsviFirstIndex > int.MaxValue) continue;
+                int first = unchecked((int)surf.MsviFirstIndex);
+                int count = surf.IndexCount;
+                if (first < 0 || count < 3 || first + count > scene.Indices.Count) continue;
+
+                var used = new HashSet<int>();
+                for (int k = 0; k < count; k++)
+                {
+                    int v = scene.Indices[first + k];
+                    if (v < 0 || v >= scene.Vertices.Count) continue;
+                    if (!used.Add(v)) continue;
+                    if (!vertToSurfs.TryGetValue(v, out var list)) { list = new List<int>(); vertToSurfs[v] = list; }
+                    list.Add(i); // local index inside this TYPE group
+                }
+            }
+
+            // DSU on local indices for this type
+            var dsu = new DSU(n);
+            foreach (var kv in vertToSurfs)
+            {
+                var list = kv.Value;
+                if (list.Count <= 1) continue;
+                int root = list[0];
+                for (int i = 1; i < list.Count; i++) dsu.Union(root, list[i]);
+            }
+
+            // Gather components as lists of scene-surface-indices
+            var compToSurfaces = new Dictionary<int, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                int r = dsu.Find(i);
+                if (!compToSurfaces.TryGetValue(r, out var lst)) { lst = new List<int>(); compToSurfaces[r] = lst; }
+                lst.Add(surfaceSceneIndices[i]);
+            }
+
+            // Export each component
+            int compIndex = 0;
+            foreach (var comp in compToSurfaces.Values)
+            {
+                var items = comp.Select(si => (scene.Surfaces[si], si)).ToList();
+                string name = $"TYPE_{g.Key:D3}_inst_{compIndex:D5}";
+                string safe = SanitizeFileName(name);
+                string objPath = Path.Combine(groupDir, safe + ".obj");
+
+                // Optional filtering to reduce tiny instance outputs
+                int triEstimate = items.Sum(it => (int)it.Item1.IndexCount) / 3;
+                bool skipWrite = opts.CkMinTris > 0 && triEstimate < opts.CkMinTris;
+
+                int writtenFaces = 0;
+                int skippedFaces = 0;
+                if (!skipWrite)
+                {
+                    AssembleAndWrite(scene, items, objPath, opts, out writtenFaces, out skippedFaces);
+                }
+
+                // Coverage row for quick visibility
+                coverageCsv.Add(string.Join(',',
+                    $"group:{name}",
+                    items.First().Item1.GroupKey,
+                    items.First().Item1.CompositeKey,
+                    items.Min(it => (int)it.Item1.MsviFirstIndex) + "-" + items.Max(it => (int)it.Item1.MsviFirstIndex),
+                    items.Sum(it => (int)it.Item1.IndexCount),
+                    writtenFaces,
+                    skippedFaces,
+                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(Path.Combine(objectsDir, ".."), objPath)))));
+
+                // Add to object index if not skipped
+                if (!skipWrite)
+                {
+                    objectIndex.Add(new ObjectIndexEntry
+                    {
+                        Id = $"type:{g.Key:D3}:inst:{compIndex:D5}",
+                        Name = name,
+                        Group = "type-instance",
+                        ObjPath = Path.GetRelativePath(outDir, objPath),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        FacesWritten = writtenFaces,
+                        FacesSkipped = skippedFaces,
+                        SurfaceIndices = items.Select(t => t.si).ToList(),
+                        IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
+                        IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
+                        FlipX = opts.LegacyParity
+                    });
+                }
+
+                compIndex++;
+            }
+        }
     }
 
     private sealed class DSU
