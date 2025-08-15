@@ -183,11 +183,12 @@ namespace ParpToolbox.Services.PM4
             Triangles = tris.ToList(),
             Surfaces = (msur?.Entries ?? Array.Empty<MsurChunk.Entry>()).ToList(),
             Spis = mspi != null ? new List<MspiChunk> { mspi } : new List<MspiChunk>(),
-            Indices = (msvi?.Indices ?? Array.Empty<int>()).ToList(),
+            Indices = (msvi?.Indices ?? mspi?.Indices ?? Array.Empty<int>()).ToList(),
             Groups = groups.ToList(),
             Links = (mslk?.Entries ?? Array.Empty<MslkEntry>()).ToList(),
             Properties = (mprr?.Entries ?? Array.Empty<MprrChunk.Entry>()).ToList(),
             Placements = (mprl?.Entries ?? Array.Empty<MprlChunk.Entry>()).ToList(),
+            MscnVertices = mscn?.Vertices?.ToList() ?? new List<Vector3>(),
             ExtraChunks = mscn != null ? new List<IIffChunk>{ mscn } : new List<IIffChunk>()
         };
         
@@ -217,6 +218,42 @@ namespace ParpToolbox.Services.PM4
         }
         
         return scene;
+
+        // local helper
+        static List<Vector3> ExtractMscnVertices(object mscn)
+        {
+            var list = new List<Vector3>();
+            var type = mscn.GetType();
+            // Try public methods first
+            var getCount = type.GetMethod("GetVectorCount");
+            var getVector = type.GetMethod("GetVector");
+            if (getCount != null && getVector != null)
+            {
+                int count = (int)getCount.Invoke(mscn, null)!;
+                for (int i = 0; i < count; i++)
+                {
+                    var v4 = (System.Numerics.Vector4)getVector.Invoke(mscn, new object[]{i})!;
+                    list.Add(new Vector3(v4.X, v4.Y, v4.Z));
+                }
+                return list;
+            }
+            // fallback: attempt to read private _data field (byte[])
+            var dataField = type.GetField("_data", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (dataField?.GetValue(mscn) is byte[] raw && raw.Length >=16)
+            {
+                int count = raw.Length / 16;
+                for (int i = 0; i < count; i++)
+                {
+                    int offset = i*16;
+                    float x = BitConverter.ToSingle(raw, offset);
+                    float y = BitConverter.ToSingle(raw, offset+4);
+                    float z = BitConverter.ToSingle(raw, offset+8);
+                    // skip w
+                    list.Add(new Vector3(x,y,z));
+                }
+            }
+            return list;
+        }
     }
     
     /// <inheritdoc/>

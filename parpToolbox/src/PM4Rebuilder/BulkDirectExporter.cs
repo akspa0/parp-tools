@@ -7,6 +7,7 @@ namespace PM4Rebuilder;
 /// <summary>
 /// Bulk direct PM4 exporter that runs the working DirectPm4Exporter on all PM4 files in a directory.
 /// This provides a reliable bulk export solution using the proven direct-export pipeline.
+/// Includes deduplication to prevent excessive disk usage from duplicate geometry.
 /// </summary>
 public static class BulkDirectExporter
 {
@@ -80,6 +81,10 @@ public static class BulkDirectExporter
             Console.WriteLine($"  ✅ Successful: {successCount} files");
             Console.WriteLine($"  ❌ Failed: {failureCount} files");
             Console.WriteLine($"  📁 Output directory: {outputDirectory}");
+
+            // Final pass: remove duplicate OBJ meshes (identical geometry hashes)
+            Console.WriteLine("[BULK EXPORTER] Running deduplication pass on exported OBJs…");
+            ObjDeduplicator.Deduplicate(outputDirectory, deleteDuplicates: true);
             
             return failureCount > 0 ? 1 : 0;
         }

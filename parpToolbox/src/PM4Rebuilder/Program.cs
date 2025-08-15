@@ -11,7 +11,7 @@ namespace PM4Rebuilder
 {
     internal static class Program
     {
-        private const string Usage = "Usage: PM4Rebuilder bulk-export <pm4Directory> [outDir]    - WORKING! Bulk direct export of all PM4 files (RECOMMENDED)\n       OR: PM4Rebuilder direct-export <pm4Input> [outDir]     - Direct PM4 to OBJ export (single file)\n       OR: PM4Rebuilder unified-export <pm4Directory> [outDir] - Unified PM4 Architecture Export (BROKEN)\n       OR: PM4Rebuilder export-db <pm4Input> [outDir]       - Export PM4 data to SQLite database\n       OR: PM4Rebuilder export-buildings <scene.db> [outDir] - Export buildings from database to OBJ files\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
+        private const string Usage = "Usage: PM4Rebuilder bulk-export <pm4Directory> [outDir]    - WORKING! Bulk direct export of all PM4 files (RECOMMENDED)\n       OR: PM4Rebuilder hierarchical-export <pm4Input> [outDir] - NEW! Hierarchical export with correct building assembly\n       OR: PM4Rebuilder mslk-hierarchy <pm4Input> [outDir] [summaryOnly=true] - NEW! Visualize and analyze MSLK hierarchy structure\n       OR: PM4Rebuilder diagnostics <pm4Input> [outDir]      - Generate comprehensive diagnostics on PM4 structure\n       OR: PM4Rebuilder direct-export <pm4Input> [outDir]     - Direct PM4 to OBJ export (single file)\n       OR: PM4Rebuilder export-db <pm4Input> [outDir]       - Export PM4 data to SQLite database\n       OR: PM4Rebuilder export-buildings <scene.db> [outDir] - Export buildings from database to OBJ files\n       OR: PM4Rebuilder export-subcomponents <scene.db> [outDir]\n       OR: PM4Rebuilder analyze-building-groups <scene.db> [outDir]";
 
         public static async Task<int> Main(string[] args)
         {
@@ -58,62 +58,71 @@ namespace PM4Rebuilder
                 return exitCode;
             }
 
-            // NEW! Unified PM4 Architecture Export (LATEST)
-            if (args[0].Equals("unified-export", StringComparison.OrdinalIgnoreCase))
+
+            // NEW: Hierarchical export with correct building assembly
+            if (args[0].Equals("hierarchical-export", StringComparison.OrdinalIgnoreCase))
             {
                 if (args.Length < 2)
                 {
-                    Console.WriteLine("ERROR: unified-export command requires <pm4Directory> argument.");
-                    Console.WriteLine("Usage: PM4Rebuilder unified-export <pm4Directory> [outDir] [strategy]");
-                    Console.WriteLine("  pm4Directory: Directory containing PM4 files");
-                    Console.WriteLine("  outDir: Output directory (optional)");
-                    Console.WriteLine("  strategy: per-building|per-tile|unified (optional, default: per-building)");
+                    Console.WriteLine("ERROR: hierarchical-export command requires <pm4Input> argument.");
                     return 1;
                 }
-
-                string pm4Directory = args[1];
-                string outDirUnified = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "unified_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-                string strategyArg = args.Length >= 4 ? args[3] : "per-building";
-
-                // Parse export strategy
-                PM4ExportStrategy strategy = PM4ExportStrategy.PerBuilding;
-                if (strategyArg.Equals("per-tile", StringComparison.OrdinalIgnoreCase))
-                    strategy = PM4ExportStrategy.PerTile;
-                else if (strategyArg.Equals("unified", StringComparison.OrdinalIgnoreCase))
-                    strategy = PM4ExportStrategy.Unified;
-
-                Console.WriteLine($"[UNIFIED EXPORT] Starting PM4 Unified Architecture Export...");
-                Console.WriteLine($"[UNIFIED EXPORT] PM4 Directory: {pm4Directory}");
-                Console.WriteLine($"[UNIFIED EXPORT] Output Directory: {outDirUnified}");
-                Console.WriteLine($"[UNIFIED EXPORT] Strategy: {strategy}");
-
-                try
-                {
-                    var summary = await UnifiedPM4Exporter.ExportBuildingsAsync(pm4Directory, outDirUnified, strategy);
-                    
-                    Console.WriteLine();
-                    Console.WriteLine("UNIFIED EXPORT SUMMARY:");
-                    Console.WriteLine($"  Success: {summary.Success}");
-                    Console.WriteLine($"  Buildings: {summary.BuildingCount}");
-                    Console.WriteLine($"  Files: {summary.ExportedFileCount}");
-                    Console.WriteLine($"  Duration: {summary.TotalDuration.TotalSeconds:F1}s");
-                    Console.WriteLine($"  Quality: {summary.Quality.OverallQuality}");
-                    
-                    if (summary.ValidationIssues.Any())
-                    {
-                        Console.WriteLine($"  Validation Issues: {summary.ValidationIssues.Count}");
-                    }
-                    
-                    return summary.Success ? 0 : 1;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[UNIFIED EXPORT ERROR] {ex.Message}");
-                    Console.WriteLine($"Stack trace: {ex.StackTrace}");
-                    return 1;
-                }
+                string pm4Input = args[1];
+                string outDirHierarchical = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "hierarchical_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirHierarchical);
+                
+                Console.WriteLine("[HIERARCHICAL EXPORT] Starting hierarchical PM4 export with correct building assembly");
+                Console.WriteLine($"[HIERARCHICAL EXPORT] Input: {pm4Input}");
+                Console.WriteLine($"[HIERARCHICAL EXPORT] Output directory: {outDirHierarchical}");
+                
+                int exitCode = Pm4HierarchicalExporter.ExportBuildings(pm4Input, outDirHierarchical);
+                return exitCode;
             }
-
+            
+            // NEW: MSLK hierarchy visualization and analysis
+            if (args[0].Equals("mslk-hierarchy", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: mslk-hierarchy command requires <pm4Input> argument.");
+                    return 1;
+                }
+                string pm4Input = args[1];
+                string outDirMslk = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "mslk_hierarchy", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirMslk);
+                
+                // Default to summary-only mode to prevent excessive output
+                bool summaryOnly = args.Length >= 4 ? bool.Parse(args[3]) : true;
+                
+                Console.WriteLine("[MSLK HIERARCHY] Starting MSLK hierarchy visualization and analysis");
+                Console.WriteLine($"[MSLK HIERARCHY] Input: {pm4Input}");
+                Console.WriteLine($"[MSLK HIERARCHY] Output directory: {outDirMslk}");
+                Console.WriteLine($"[MSLK HIERARCHY] Summary only mode: {summaryOnly}");
+                
+                int exitCode = Pm4MslkHierarchyVisualizer.VisualizeHierarchy(pm4Input, outDirMslk, summaryOnly);
+                return exitCode;
+            }
+            
+            // NEW: Generate comprehensive diagnostics on PM4 structure
+            if (args[0].Equals("diagnostics", StringComparison.OrdinalIgnoreCase))
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("ERROR: diagnostics command requires <pm4Input> argument.");
+                    return 1;
+                }
+                string pm4Input = args[1];
+                string outDirDiagnostics = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "pm4_diagnostics", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDirDiagnostics);
+                
+                Console.WriteLine("[PM4 DIAGNOSTICS] Starting comprehensive PM4 structure analysis");
+                Console.WriteLine($"[PM4 DIAGNOSTICS] Input: {pm4Input}");
+                Console.WriteLine($"[PM4 DIAGNOSTICS] Output directory: {outDirDiagnostics}");
+                
+                int exitCode = Pm4DiagnosticTool.RunDiagnostics(pm4Input, outDirDiagnostics);
+                return exitCode;
+            }
+            
             // Direct PM4 to OBJ export (legacy approach)
             if (args[0].Equals("direct-export", StringComparison.OrdinalIgnoreCase))
             {
@@ -125,8 +134,10 @@ namespace PM4Rebuilder
                 string pm4Input = args[1];
                 string outDirDirect = args.Length >= 3 ? args[2] : Path.Combine(Directory.GetCurrentDirectory(), "direct_export", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
                 Directory.CreateDirectory(outDirDirect);
-                
-                int exitCode = DirectPm4Exporter.ExportBuildings(pm4Input, outDirDirect);
+                // Optional flags: --include-adjacent or --region
+                bool includeAdjacentDirect = args.Any(a => a.Equals("--include-adjacent", StringComparison.OrdinalIgnoreCase) || a.Equals("--region", StringComparison.OrdinalIgnoreCase));
+                Console.WriteLine($"[DIRECT-EXPORT] includeAdjacent: {includeAdjacentDirect}");
+                int exitCode = DirectPm4Exporter.ExportBuildings(pm4Input, outDirDirect, includeAdjacentDirect);
                 return exitCode;
             }
 

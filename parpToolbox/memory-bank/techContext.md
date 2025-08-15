@@ -19,3 +19,17 @@
 
 ## Output Management
 - The `ProjectOutput` utility has been implemented. It directs all generated files (e.g., OBJ exports) to a unified, timestamped `project_output` directory, preventing contamination of source data folders.
+
+## PM4NextExporter – Current CLI Flags (2025-08-10)
+- `--assembly composite-hierarchy` (default)
+- `--ck-split-by-type` (optional split)
+- `--export-tiles` (per-tile OBJs)
+- `--project-local` (projection-based centroid translation at export time)
+- `--export-mscn-obj` (MSCN point OBJ export)
+- `--no-remap` (skip cross-tile MSCN remapping)
+- `--legacy-obj-parity` (legacy winding/naming parity)
+
+## Scene Model Extensions
+- `TileVertexOffsetByTileId`, `TileVertexCountByTileId`, `TileIndexOffsetByTileId`, `TileIndexCountByTileId` for per-tile slicing.
+- Aggregated `MscnVertices` and post-build MSCN remapping in `Pm4GlobalTileLoader`.
+- `AssembledObject.Meta["tileId"|"tileX"|"tileY"]` for per-object dominant tile grouping.
