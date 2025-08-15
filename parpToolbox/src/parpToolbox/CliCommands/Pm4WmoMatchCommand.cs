@@ -58,7 +58,7 @@ namespace ParpToolbox.CliCommands
 
                 // Initialize FileProvider with a default build to avoid ArgumentNullException
                 // This is required for the wow.tools.local WMO reader to function properly
-                var wmoDirectory = Path.GetDirectoryName(wmoPath);
+                var wmoDirectory = Path.GetDirectoryName(wmoPath) ?? Directory.GetCurrentDirectory();
                 var localProvider = new LocalFileProvider(wmoDirectory);
                 FileProvider.SetProvider(localProvider, "local");
                 FileProvider.SetDefaultBuild("local");
@@ -338,7 +338,7 @@ namespace ParpToolbox.CliCommands
                 serviceCollection.AddTransient<Pm4WmoMatcher>();
 
                 var serviceProvider = serviceCollection.BuildServiceProvider();
-                var matcher = serviceProvider.GetService<Pm4WmoMatcher>();
+                var matcher = serviceProvider.GetRequiredService<Pm4WmoMatcher>();
 
                 // Perform correlation
                 var results = matcher.Correlate(pm4Buildings, wmoPath);
