@@ -24,6 +24,7 @@ internal static class Program
         double CkAllowUnlinkedRatio,
         int CkMinTris,
         bool CkMergeComponents,
+        bool CkMonolithic,
         bool ExportGltf,
         bool ExportGlb
     );
@@ -149,7 +150,14 @@ internal static class Program
                 string tileSuffix = domTile.HasValue ? $"_t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : string.Empty;
                 string name = $"attr_{g.Key.AttributeMask:D3}_type_{g.Key.GroupKey:D3}_ck{g.Key.Ck24:X6}_inst_{compIndex:D5}{tileSuffix}";
                 string safe = SanitizeFileName(name);
-                string objPath = Path.Combine(groupDir, safe + ".obj");
+                // Bucket by tile subfolder
+                string folder = domTile.HasValue ? $"t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : "t_unknown";
+                // Then bucket by dominant object id
+                int domObj = DominantObjectIdFor(items.Select(it => it.Item1));
+                string objFolder = domObj > 0 ? $"obj_{domObj:D5}" : "obj_unknown";
+                string objDir = Path.Combine(objectsDir, folder, objFolder);
+                Directory.CreateDirectory(objDir);
+                string objPath = Path.Combine(objDir, safe + ".obj");
 
                 // Optional filtering to reduce tiny instance outputs
                 int triEstimate = items.Sum(it => (int)it.Item1.IndexCount) / 3;
@@ -189,7 +197,10 @@ internal static class Program
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = opts.LegacyParity
+                        FlipX = opts.LegacyParity,
+                        IsWalkable = (g.Key.GroupKey == 16 && g.Key.AttributeMask == 2),
+                        IsM2 = (g.Key.GroupKey == 3 && g.Key.AttributeMask == 1 && g.Key.Ck24 == 0),
+                        Ck24 = g.Key.Ck24
                     });
                 }
 
@@ -226,6 +237,9 @@ internal static class Program
         Directory.CreateDirectory(objectsDir);
         var tilesDir = Path.Combine(outDir, "tiles");
         Directory.CreateDirectory(tilesDir);
+
+        // Emit lightweight diagnostics for MSUR.Height variability
+        EmitMsurHeightDiagnostics(scene, outDir);
 
         Console.WriteLine($"[pm4-faces] Export strategy: objects={opts.GroupBy}, tiles=on");
         Console.WriteLine($"[pm4-faces] Scene: Vertices={scene.Vertices.Count}, Indices={scene.Indices.Count}, Surfaces={scene.Surfaces.Count}, Tiles={scene.TileIndexOffsetByTileId.Count}");
@@ -335,6 +349,60 @@ internal static class Program
         ExportTiles(scene, tilesDir, opts, outDir, tileCsv, tileIndex, prefix);
         File.WriteAllLines(Path.Combine(outDir, "tile_coverage.csv"), tileCsv);
 
+        // Walkable summary (type=016 & attr=002) by tile folder and CK24
+        var walkable = objectIndex.Where(o => o.Group == "type-attr-instance" && o.IsWalkable);
+        var walkSummary = new Dictionary<(string Tile, string Ck24), (int Count, int Faces)>();
+        foreach (var o in walkable)
+        {
+            string pathNorm = (o.ObjPath ?? string.Empty).Replace('\\', '/');
+            string tile = "t_unknown";
+            var pathParts = pathNorm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var p in pathParts)
+            {
+                if (p.Length == 6 && p[0] == 't' && char.IsDigit(p[1]) && char.IsDigit(p[2]) && p[3] == '_' && char.IsDigit(p[4]) && char.IsDigit(p[5]))
+                {
+                    tile = p; break;
+                }
+            }
+            string ck = $"{o.Ck24:X6}";
+            var key = (tile, ck);
+            if (!walkSummary.TryGetValue(key, out var agg)) agg = (0, 0);
+            walkSummary[key] = (agg.Count + 1, agg.Faces + o.FacesWritten);
+        }
+        var walkCsv = new List<string> { "tile,ck24,objects,faces" };
+        foreach (var kv in walkSummary.OrderBy(k => k.Key.Tile).ThenBy(k => k.Key.Ck24))
+        {
+            walkCsv.Add(string.Join(',', kv.Key.Tile, $"0x{kv.Key.Ck24}", kv.Value.Count, kv.Value.Faces));
+        }
+        File.WriteAllLines(Path.Combine(outDir, "walkable_coverage.csv"), walkCsv);
+
+        // M2 summary (type=003 & attr=001 & ck24=0) by tile folder and CK24
+        var m2 = objectIndex.Where(o => o.Group == "type-attr-instance" && o.IsM2);
+        var m2Summary = new Dictionary<(string Tile, string Ck24), (int Count, int Faces)>();
+        foreach (var o in m2)
+        {
+            string pathNorm = (o.ObjPath ?? string.Empty).Replace('\\', '/');
+            string tile = "t_unknown";
+            var pathParts = pathNorm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var p in pathParts)
+            {
+                if (p.Length == 6 && p[0] == 't' && char.IsDigit(p[1]) && char.IsDigit(p[2]) && p[3] == '_' && char.IsDigit(p[4]) && char.IsDigit(p[5]))
+                {
+                    tile = p; break;
+                }
+            }
+            string ck = $"{o.Ck24:X6}";
+            var key = (tile, ck);
+            if (!m2Summary.TryGetValue(key, out var agg)) agg = (0, 0);
+            m2Summary[key] = (agg.Count + 1, agg.Faces + o.FacesWritten);
+        }
+        var m2Csv = new List<string> { "tile,ck24,objects,faces" };
+        foreach (var kv in m2Summary.OrderBy(k => k.Key.Tile).ThenBy(k => k.Key.Ck24))
+        {
+            m2Csv.Add(string.Join(',', kv.Key.Tile, $"0x{kv.Key.Ck24}", kv.Value.Count, kv.Value.Faces));
+        }
+        File.WriteAllLines(Path.Combine(outDir, "m2_coverage.csv"), m2Csv);
+
         // Write JSON indexes
         var jsonOpts = new JsonSerializerOptions { WriteIndented = true };
         File.WriteAllText(Path.Combine(outDir, "objects_index.json"), JsonSerializer.Serialize(objectIndex, jsonOpts));
@@ -370,14 +438,77 @@ internal static class Program
             var groupDir = Path.Combine(objectsDir, $"CK_{g.Key:X6}");
             Directory.CreateDirectory(groupDir);
 
-            // If requested, we retain per-object DSU components (no monolithic merged OBJ)
-            if (opts.CkMergeComponents)
+            // If requested, export a single merged (monolithic) OBJ per CK24 and skip per-component outputs
+            if (opts.CkMonolithic)
             {
-                Console.WriteLine($"[pm4-faces] --ck-merge-components: retaining per-object DSU components for CK_{g.Key:X6} (no monolithic OBJ).");
-            }
+                var allItems = g.Select(x => (scene.Surfaces[x.i], x.i)).ToList();
+                string name = $"CK_{g.Key:X6}_merged";
+                string safe = SanitizeFileName(name);
+                string objPath = Path.Combine(groupDir, safe + ".obj");
 
-            var localIndexBySceneSurface = new Dictionary<int, int>(n);
-            for (int i = 0; i < n; i++) localIndexBySceneSurface[surfaceSceneIndices[i]] = i;
+                // Optional filtering (estimate triangles from MSUR.IndexCount)
+                int triEstimate = allItems.Sum(it => (int)it.Item1.IndexCount) / 3;
+                bool skipWrite = opts.CkMinTris > 0 && triEstimate < opts.CkMinTris;
+
+                int writtenFaces = 0;
+                int skippedFaces = 0;
+                if (!skipWrite)
+                {
+                    AssembleAndWrite(scene, allItems, objPath, opts, out writtenFaces, out skippedFaces);
+                }
+
+                // Log one instance row and all membership rows
+                instCsv.Add(string.Join(',',
+                    $"0x{g.Key:X6}",
+                    0,
+                    allItems.Count,
+                    writtenFaces,
+                    skippedFaces,
+                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(outDir, objPath)))));
+
+                foreach (var (entry, idx) in allItems)
+                {
+                    membersCsv.Add(string.Join(',',
+                        $"0x{g.Key:X6}",
+                        0,
+                        idx,
+                        entry.MsviFirstIndex,
+                        entry.IndexCount));
+                }
+
+                // Coverage row
+                coverageCsv.Add(string.Join(',',
+                    $"group:{name}",
+                    allItems.First().Item1.GroupKey,
+                    allItems.First().Item1.CompositeKey,
+                    allItems.Min(it => (int)it.Item1.MsviFirstIndex) + "-" + allItems.Max(it => (int)it.Item1.MsviFirstIndex),
+                    allItems.Sum(it => (int)it.Item1.IndexCount),
+                    writtenFaces,
+                    skippedFaces,
+                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(Path.Combine(objectsDir, ".."), objPath)))));
+
+                // Add to object index if not skipped
+                if (!skipWrite)
+                {
+                    objectIndex.Add(new ObjectIndexEntry
+                    {
+                        Id = $"ck24:{g.Key:X6}:merged",
+                        Name = name,
+                        Group = "composite-monolithic",
+                        ObjPath = Path.GetRelativePath(outDir, objPath),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        FacesWritten = writtenFaces,
+                        FacesSkipped = skippedFaces,
+                        SurfaceIndices = allItems.Select(t => t.i).ToList(),
+                        IndexFirst = allItems.Min(it => (int)it.Item1.MsviFirstIndex),
+                        IndexCount = allItems.Sum(it => (int)it.Item1.IndexCount),
+                        FlipX = opts.LegacyParity // objects flip only with legacyParity in current pipeline
+                    });
+                }
+
+                continue; // skip per-component path for this CK24
+            }
 
             // Build vertex -> list(local surface indices) map
             var vertToSurfs = new Dictionary<int, List<int>>();
@@ -572,7 +703,14 @@ internal static class Program
                 string tileSuffix = domTile.HasValue ? $"_t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : string.Empty;
                 string name = $"type_{g.Key.GroupKey:D3}_ck{g.Key.Ck24:X6}_inst_{compIndex:D5}{tileSuffix}";
                 string safe = SanitizeFileName(name);
-                string objPath = Path.Combine(groupDir, safe + ".obj");
+                // Bucket by tile subfolder
+                string folder = domTile.HasValue ? $"t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : "t_unknown";
+                // Then bucket by dominant object id
+                int domObj = DominantObjectIdFor(items.Select(it => it.Item1));
+                string objFolder = domObj > 0 ? $"obj_{domObj:D5}" : "obj_unknown";
+                string objDir = Path.Combine(objectsDir, folder, objFolder);
+                Directory.CreateDirectory(objDir);
+                string objPath = Path.Combine(objDir, safe + ".obj");
 
                 // Optional filtering to reduce tiny instance outputs
                 int triEstimate = items.Sum(it => (int)it.Item1.IndexCount) / 3;
@@ -883,6 +1021,7 @@ internal static class Program
         double ckAllowUnlinkedRatio = 0.5;
         int ckMinTris = 0;
         bool ckMergeComponents = false;
+        bool ckMonolithic = false;
         bool exportGltf = false;
         bool exportGlb = false;
 
@@ -931,6 +1070,9 @@ internal static class Program
                 case "--ck-merge-components":
                     ckMergeComponents = true;
                     break;
+                case "--ck-monolithic":
+                    ckMonolithic = true;
+                    break;
                 case "--gltf":
                     exportGltf = true;
                     break;
@@ -944,14 +1086,15 @@ internal static class Program
         }
 
         if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, exportGltf, exportGlb);
+        return new Options(input, outDir, legacy, projectLocal, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb);
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|surface|groupkey|composite] [--legacy-parity] [--project-local] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--gltf] [--glb]");
+        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|surface|groupkey|composite] [--legacy-parity] [--project-local] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb]");
         Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
         Console.WriteLine("  --ck-merge-components: retain per-object DSU components under each CK24 (no monolithic merged OBJ).");
+        Console.WriteLine("  --ck-monolithic: export a single merged OBJ per CK24 (skip per-component DSU objects).");
         Console.WriteLine("  --gltf / --glb: also export glTF 2.0 (.gltf+.bin) and/or GLB alongside OBJ outputs.");
     }
 
@@ -969,6 +1112,55 @@ internal static class Program
             return '"' + s.Replace("\"", "\"\"") + '"';
         }
         return s;
+    }
+
+    private static void EmitMsurHeightDiagnostics(Pm4Scene scene, string outDir)
+    {
+        try
+        {
+            var heights = scene.Surfaces.Select(s => s.Height).ToList();
+            int total = heights.Count;
+            int zeros = heights.Count(h => h == 0f);
+            int nonzeros = total - zeros;
+            float min = total > 0 ? heights.Min() : 0f;
+            float max = total > 0 ? heights.Max() : 0f;
+
+            // Unique value counts
+            var counts = new Dictionary<float, int>();
+            foreach (var h in heights)
+            {
+                if (!counts.TryGetValue(h, out var c)) c = 0;
+                counts[h] = c + 1;
+            }
+
+            // Overview CSV
+            var overview = new List<string>
+            {
+                "total,unique,zeros,nonzeros,min,max",
+                string.Join(',',
+                    total.ToString(CultureInfo.InvariantCulture),
+                    counts.Count.ToString(CultureInfo.InvariantCulture),
+                    zeros.ToString(CultureInfo.InvariantCulture),
+                    nonzeros.ToString(CultureInfo.InvariantCulture),
+                    min.ToString("G9", CultureInfo.InvariantCulture),
+                    max.ToString("G9", CultureInfo.InvariantCulture))
+            };
+            File.WriteAllLines(Path.Combine(outDir, "msur_height_overview.csv"), overview);
+
+            // Values CSV (sorted by height)
+            var lines = new List<string> { "height,count" };
+            foreach (var kv in counts.OrderBy(k => k.Key))
+            {
+                lines.Add(string.Join(',',
+                    kv.Key.ToString("G9", CultureInfo.InvariantCulture),
+                    kv.Value.ToString(CultureInfo.InvariantCulture)));
+            }
+            File.WriteAllLines(Path.Combine(outDir, "msur_height_values.csv"), lines);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[pm4-faces] Failed to emit MSUR height diagnostics: {ex.Message}");
+        }
     }
 
     private static uint CK24(uint key)
@@ -1018,6 +1210,36 @@ internal static class Program
         return bestTile >= 0 ? bestTile : null;
     }
 
+    private static int DominantObjectIdFor(IEnumerable<MsurChunk.Entry> entries)
+    {
+        if (entries == null) return -1;
+
+        var counts = new Dictionary<int, int>();
+        foreach (var e in entries)
+        {
+            int id = e.IndexCount; // MSUR IndexCount acts as object identifier
+            if (id <= 0) continue; // ignore zero to avoid obj_000
+            if (!counts.TryGetValue(id, out var c)) c = 0;
+            counts[id] = c + 1; // frequency-based dominance
+        }
+
+        if (counts.Count == 0) return -1;
+
+        int bestId = -1;
+        int bestCount = -1;
+        foreach (var kv in counts)
+        {
+            // prefer higher frequency; tie-breaker: larger id for determinism
+            if (kv.Value > bestCount || (kv.Value == bestCount && kv.Key > bestId))
+            {
+                bestId = kv.Key;
+                bestCount = kv.Value;
+            }
+        }
+
+        return bestId;
+    }
+
     private static string SessionNameFrom(string firstTilePath)
     {
         var parent = Path.GetFileName(Path.GetDirectoryName(firstTilePath) ?? "");
@@ -1040,6 +1262,9 @@ internal static class Program
         public int IndexFirst { get; set; }
         public int IndexCount { get; set; }
         public bool FlipX { get; set; }
+        public bool IsWalkable { get; set; }
+        public bool IsM2 { get; set; }
+        public uint Ck24 { get; set; }
     }
 
     private sealed class TileIndexEntry
