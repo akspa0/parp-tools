@@ -84,9 +84,10 @@ internal static class Program
     {
         var groups = scene.Surfaces
             .Select((e, i) => (e, i))
-            .GroupBy(x => new { x.e.GroupKey, x.e.AttributeMask })
+            .GroupBy(x => new { x.e.GroupKey, x.e.AttributeMask, Ck24 = CK24(x.e.CompositeKey) })
             .OrderBy(g => g.Key.GroupKey)
-            .ThenBy(g => g.Key.AttributeMask);
+            .ThenBy(g => g.Key.AttributeMask)
+            .ThenBy(g => g.Key.Ck24);
 
         foreach (var g in groups)
         {
@@ -94,7 +95,7 @@ internal static class Program
             int n = surfaceSceneIndices.Count;
             if (n == 0) continue;
 
-            var groupDir = Path.Combine(objectsDir, $"TYPE_{g.Key.GroupKey:D3}", $"ATTR_{g.Key.AttributeMask:D3}");
+            var groupDir = objectsDir; // flatten: no TYPE/ATTR subfolders
             Directory.CreateDirectory(groupDir);
 
             // Build vertex -> list(local surface indices) map within this type+attr bucket
@@ -143,7 +144,10 @@ internal static class Program
             foreach (var comp in compToSurfaces.Values)
             {
                 var items = comp.Select(si => (scene.Surfaces[si], si)).ToList();
-                string name = $"TYPE_{g.Key.GroupKey:D3}_ATTR_{g.Key.AttributeMask:D3}_inst_{compIndex:D5}";
+                // Determine dominant tile for this component (optional)
+                int? domTile = DominantTileIdFor(scene, items.Select(it => it.Item1));
+                string tileSuffix = domTile.HasValue ? $"_t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : string.Empty;
+                string name = $"attr_{g.Key.AttributeMask:D3}_type_{g.Key.GroupKey:D3}_ck{g.Key.Ck24:X6}_inst_{compIndex:D5}{tileSuffix}";
                 string safe = SanitizeFileName(name);
                 string objPath = Path.Combine(groupDir, safe + ".obj");
 
@@ -174,7 +178,7 @@ internal static class Program
                 {
                     objectIndex.Add(new ObjectIndexEntry
                     {
-                        Id = $"typeattr:{g.Key.GroupKey:D3}:{g.Key.AttributeMask:D3}:inst:{compIndex:D5}",
+                        Id = $"typeattr:{g.Key.GroupKey:D3}:{g.Key.AttributeMask:D3}:ck24:{g.Key.Ck24:X6}:inst:{compIndex:D5}",
                         Name = name,
                         Group = "type-attr-instance",
                         ObjPath = Path.GetRelativePath(outDir, objPath),
@@ -504,8 +508,9 @@ internal static class Program
     {
         var groups = scene.Surfaces
             .Select((e, i) => (e, i))
-            .GroupBy(x => x.e.GroupKey)
-            .OrderBy(g => g.Key);
+            .GroupBy(x => new { x.e.GroupKey, Ck24 = CK24(x.e.CompositeKey) })
+            .OrderBy(g => g.Key.GroupKey)
+            .ThenBy(g => g.Key.Ck24);
 
         foreach (var g in groups)
         {
@@ -513,7 +518,7 @@ internal static class Program
             int n = surfaceSceneIndices.Count;
             if (n == 0) continue;
 
-            var groupDir = Path.Combine(objectsDir, $"TYPE_{g.Key:D3}");
+            var groupDir = objectsDir; // flatten: no TYPE subfolders
             Directory.CreateDirectory(groupDir);
 
             // Build vertex -> list(local surface indices) map within this type
@@ -562,7 +567,10 @@ internal static class Program
             foreach (var comp in compToSurfaces.Values)
             {
                 var items = comp.Select(si => (scene.Surfaces[si], si)).ToList();
-                string name = $"TYPE_{g.Key:D3}_inst_{compIndex:D5}";
+                // Determine dominant tile for this component (optional)
+                int? domTile = DominantTileIdFor(scene, items.Select(it => it.Item1));
+                string tileSuffix = domTile.HasValue ? $"_t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : string.Empty;
+                string name = $"type_{g.Key.GroupKey:D3}_ck{g.Key.Ck24:X6}_inst_{compIndex:D5}{tileSuffix}";
                 string safe = SanitizeFileName(name);
                 string objPath = Path.Combine(groupDir, safe + ".obj");
 
@@ -593,7 +601,7 @@ internal static class Program
                 {
                     objectIndex.Add(new ObjectIndexEntry
                     {
-                        Id = $"type:{g.Key:D3}:inst:{compIndex:D5}",
+                        Id = $"type:{g.Key.GroupKey:D3}:ck24:{g.Key.Ck24:X6}:inst:{compIndex:D5}",
                         Name = name,
                         Group = "type-instance",
                         ObjPath = Path.GetRelativePath(outDir, objPath),
@@ -961,6 +969,53 @@ internal static class Program
             return '"' + s.Replace("\"", "\"\"") + '"';
         }
         return s;
+    }
+
+    private static uint CK24(uint key)
+    {
+        return (key & 0xFFFFFF00u) >> 8;
+    }
+
+    private static int? DominantTileIdFor(Pm4Scene scene, IEnumerable<MsurChunk.Entry> entries)
+    {
+        if (scene.TileIndexOffsetByTileId.Count == 0 || scene.TileIndexCountByTileId.Count == 0)
+            return null;
+
+        // Build quick lookup for tile index ranges
+        var ranges = new List<(int TileId, int Start, int End)>();
+        foreach (var kv in scene.TileIndexOffsetByTileId)
+        {
+            int tileId = kv.Key;
+            int start = kv.Value;
+            if (!scene.TileIndexCountByTileId.TryGetValue(tileId, out int count)) continue;
+            ranges.Add((tileId, start, start + count));
+        }
+        if (ranges.Count == 0) return null;
+
+        var weights = new Dictionary<int, int>();
+        foreach (var e in entries)
+        {
+            int first = unchecked((int)e.MsviFirstIndex);
+            if (first < 0) continue;
+            foreach (var r in ranges)
+            {
+                if (first >= r.Start && first < r.End)
+                {
+                    if (!weights.TryGetValue(r.TileId, out var w)) w = 0;
+                    weights[r.TileId] = w + Math.Max(1, (int)e.IndexCount);
+                    break;
+                }
+            }
+        }
+        if (weights.Count == 0) return null;
+
+        int bestTile = -1;
+        int bestW = -1;
+        foreach (var kv in weights)
+        {
+            if (kv.Value > bestW) { bestW = kv.Value; bestTile = kv.Key; }
+        }
+        return bestTile >= 0 ? bestTile : null;
     }
 
     private static string SessionNameFrom(string firstTilePath)
