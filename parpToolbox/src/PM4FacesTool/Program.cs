@@ -18,6 +18,9 @@ internal static class Program
         string OutDir,
         bool LegacyParity,
         bool ProjectLocal,
+        bool SnapToPlane,
+        float HeightScale,
+        bool HeightFitReport,
         string GroupBy,
         bool Batch,
         bool CkUseMslk,
@@ -26,7 +29,8 @@ internal static class Program
         bool CkMergeComponents,
         bool CkMonolithic,
         bool ExportGltf,
-        bool ExportGlb
+        bool ExportGlb,
+        bool NoMscnRemap
     );
 
     public static int Main(string[] args)
@@ -167,7 +171,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
                 }
 
                 // Coverage row for quick visibility
@@ -189,15 +193,15 @@ internal static class Program
                         Id = $"typeattr:{g.Key.GroupKey:D3}:{g.Key.AttributeMask:D3}:ck24:{g.Key.Ck24:X6}:inst:{compIndex:D5}",
                         Name = name,
                         Group = "type-attr-instance",
-                        ObjPath = Path.GetRelativePath(outDir, objPath),
-                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                         FacesWritten = writtenFaces,
                         FacesSkipped = skippedFaces,
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = opts.LegacyParity,
+                        FlipX = true,
                         IsWalkable = (g.Key.GroupKey == 16 && g.Key.AttributeMask == 2),
                         IsM2 = (g.Key.GroupKey == 3 && g.Key.AttributeMask == 1 && g.Key.Ck24 == 0),
                         Ck24 = g.Key.Ck24
@@ -228,7 +232,7 @@ internal static class Program
             Console.WriteLine($"[pm4-faces] Single-file mode: loading only tile '{pattern}'");
         }
 
-        var global = Pm4GlobalTileLoader.LoadRegion(dir, pattern);
+        var global = Pm4GlobalTileLoader.LoadRegion(dir, pattern, !opts.NoMscnRemap);
         var scene = Pm4GlobalTileLoader.ToStandardScene(global);
 
         var outDir = Path.Combine(opts.OutDir, SessionNameFrom(firstTilePath));
@@ -240,6 +244,10 @@ internal static class Program
 
         // Emit lightweight diagnostics for MSUR.Height variability
         EmitMsurHeightDiagnostics(scene, outDir);
+        if (opts.HeightFitReport)
+        {
+            EmitHeightFitReport(scene, outDir);
+        }
 
         Console.WriteLine($"[pm4-faces] Export strategy: objects={opts.GroupBy}, tiles=on");
         Console.WriteLine($"[pm4-faces] Scene: Vertices={scene.Vertices.Count}, Indices={scene.Indices.Count}, Surfaces={scene.Surfaces.Count}, Tiles={scene.TileIndexOffsetByTileId.Count}");
@@ -324,17 +332,22 @@ internal static class Program
                     Id = $"surface:{idx:D6}",
                     Name = safe,
                     Group = "surface",
-                    ObjPath = Path.GetRelativePath(outDir, objPath),
-                    GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                    GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                    ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                    GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                    GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                     FacesWritten = written,
                     FacesSkipped = skipped,
                     SurfaceIndices = new List<int> { idx },
                     IndexFirst = (int)entry.MsviFirstIndex,
                     IndexCount = entry.IndexCount,
-                    FlipX = opts.LegacyParity // objects flip only with legacyParity in current pipeline
+                    FlipX = true
                 });
             }
+        }
+        else if (opts.GroupBy.Equals("render-mesh", StringComparison.OrdinalIgnoreCase) ||
+                 opts.GroupBy.Equals("surfaces-all", StringComparison.OrdinalIgnoreCase))
+        {
+            // Skip object exports; rely solely on tile exports below.
         }
         else
         {
@@ -434,17 +447,19 @@ internal static class Program
             int n = surfaceSceneIndices.Count;
             if (n == 0) continue;
 
-            // Shard outputs by CK24 subdirectory to avoid huge flat directories
-            var groupDir = Path.Combine(objectsDir, $"CK_{g.Key:X6}");
-            Directory.CreateDirectory(groupDir);
+            // Flatten: do not create per-CK subfolders; we will bucket by dominant tile folder later
 
             // If requested, export a single merged (monolithic) OBJ per CK24 and skip per-component outputs
             if (opts.CkMonolithic)
             {
                 var allItems = g.Select(x => (scene.Surfaces[x.i], x.i)).ToList();
-                string name = $"CK_{g.Key:X6}_merged";
+                // Place merged object in dominant tile folder; no per-CK subfolder
+                int? domTile = DominantTileIdFor(scene, allItems.Select(it => it.Item1));
+                string folder = domTile.HasValue ? $"t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : "t_unknown";
+                Directory.CreateDirectory(Path.Combine(objectsDir, folder));
+                string name = $"ck{g.Key:X6}_merged";
                 string safe = SanitizeFileName(name);
-                string objPath = Path.Combine(groupDir, safe + ".obj");
+                string objPath = Path.Combine(objectsDir, folder, safe + ".obj");
 
                 // Optional filtering (estimate triangles from MSUR.IndexCount)
                 int triEstimate = allItems.Sum(it => (int)it.Item1.IndexCount) / 3;
@@ -454,7 +469,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, allItems, objPath, opts, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, allItems, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
                 }
 
                 // Log one instance row and all membership rows
@@ -495,15 +510,15 @@ internal static class Program
                         Id = $"ck24:{g.Key:X6}:merged",
                         Name = name,
                         Group = "composite-monolithic",
-                        ObjPath = Path.GetRelativePath(outDir, objPath),
-                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                         FacesWritten = writtenFaces,
                         FacesSkipped = skippedFaces,
                         SurfaceIndices = allItems.Select(t => t.i).ToList(),
                         IndexFirst = allItems.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = allItems.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = opts.LegacyParity // objects flip only with legacyParity in current pipeline
+                        FlipX = true
                     });
                 }
 
@@ -556,9 +571,13 @@ internal static class Program
             foreach (var comp in compToSurfaces.Values)
             {
                 var items = comp.Select(si => (scene.Surfaces[si], si)).ToList();
-                string name = $"CK_{g.Key:X6}_inst_{compIndex:D5}";
+                // Place instance object in dominant tile folder; no per-CK subfolder
+                int? domTile = DominantTileIdFor(scene, items.Select(it => it.Item1));
+                string folder = domTile.HasValue ? $"t{domTile.Value % 64:D2}_{domTile.Value / 64:D2}" : "t_unknown";
+                Directory.CreateDirectory(Path.Combine(objectsDir, folder));
+                string name = $"ck{g.Key:X6}_inst_{compIndex:D5}";
                 string safe = SanitizeFileName(name);
-                string objPath = Path.Combine(groupDir, safe + ".obj");
+                string objPath = Path.Combine(objectsDir, folder, safe + ".obj");
 
                 // Optional filtering to reduce tiny instance outputs
                 int triEstimate = items.Sum(it => (int)it.Item1.IndexCount) / 3;
@@ -568,7 +587,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
                 }
 
                 // Log instance row and membership rows
@@ -611,15 +630,15 @@ internal static class Program
                         Id = $"ck24:{g.Key:X6}:inst:{compIndex - 1:D5}",
                         Name = name,
                         Group = "composite-instance",
-                        ObjPath = Path.GetRelativePath(outDir, objPath),
-                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                         FacesWritten = writtenFaces,
                         FacesSkipped = skippedFaces,
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = opts.LegacyParity // objects flip only with legacyParity in current pipeline
+                        FlipX = true
                     });
                 }
             }
@@ -720,7 +739,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
                 }
 
                 // Coverage row for quick visibility
@@ -742,15 +761,15 @@ internal static class Program
                         Id = $"type:{g.Key.GroupKey:D3}:ck24:{g.Key.Ck24:X6}:inst:{compIndex:D5}",
                         Name = name,
                         Group = "type-instance",
-                        ObjPath = Path.GetRelativePath(outDir, objPath),
-                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                        ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                        GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                        GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                         FacesWritten = writtenFaces,
                         FacesSkipped = skippedFaces,
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = opts.LegacyParity
+                        FlipX = true
                     });
                 }
 
@@ -795,7 +814,7 @@ internal static class Program
     {
         var safe = SanitizeFileName(groupName);
         var objPath = Path.Combine(objectsDir, safe + ".obj");
-        AssembleAndWrite(scene, items, objPath, opts, out var written, out var skipped);
+        AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out var written, out var skipped);
 
         // Aggregate a simple coverage row
         int triCount = items.Sum(it => (int)it.entry.IndexCount);
@@ -825,7 +844,7 @@ internal static class Program
             SurfaceIndices = items.Select(t => t.index).ToList(),
             IndexFirst = firstMin,
             IndexCount = triCount,
-            FlipX = opts.LegacyParity // objects flip only with legacyParity in current pipeline
+            FlipX = true
         });
     }
 
@@ -838,46 +857,95 @@ internal static class Program
         out int facesSkipped)
     {
         // Build local vertex/triangle lists from global scene for these surfaces
-        var g2l = new Dictionary<int, int>(4096);
         var localVerts = new List<Vector3>(4096);
         var localTris = new List<(int A, int B, int C)>(4096);
 
         int skipped = 0, written = 0;
 
-        foreach (var (entry, _) in items)
+        if (!opts.SnapToPlane)
         {
-            int first = unchecked((int)entry.MsviFirstIndex);
-            int count = entry.IndexCount;
-            if (first < 0 || count <= 0) continue;
-
-            int end = Math.Min(scene.Indices.Count, first + count);
-            for (int i = first; i + 2 < end; i += 3)
+            // Original behavior: single global-vertex dedup map
+            var g2l = new Dictionary<int, int>(4096);
+            foreach (var (entry, _) in items)
             {
-                int ga = scene.Indices[i];
-                int gb = scene.Indices[i + 1];
-                int gc = scene.Indices[i + 2];
+                int first = unchecked((int)entry.MsviFirstIndex);
+                int count = entry.IndexCount;
+                if (first < 0 || count <= 0) continue;
 
-                if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
-                    !TryMap(scene, gb, g2l, localVerts, out var lb) ||
-                    !TryMap(scene, gc, g2l, localVerts, out var lc))
+                int end = Math.Min(scene.Indices.Count, first + count);
+                for (int i = first; i + 2 < end; i += 3)
                 {
-                    skipped++;
-                    continue;
-                }
+                    int ga = scene.Indices[i];
+                    int gb = scene.Indices[i + 1];
+                    int gc = scene.Indices[i + 2];
 
-                localTris.Add((la, lb, lc));
-                written++;
+                    if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
+                        !TryMap(scene, gb, g2l, localVerts, out var lb) ||
+                        !TryMap(scene, gc, g2l, localVerts, out var lc))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    // Skip degenerate faces (duplicate local vertex indices)
+                    if (la == lb || lb == lc || lc == la)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    localTris.Add((la, lb, lc));
+                    written++;
+                }
             }
         }
-        // Objects respect legacy parity; do not force X-flip for objects
-        ObjWriter.Write(objPath, localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, false);
+        else
+        {
+            // Plane snapping: per-surface+vertex key to avoid cross-surface dedup conflicts
+            var g2l = new Dictionary<long, int>(4096);
+            foreach (var (entry, idx) in items)
+            {
+                int first = unchecked((int)entry.MsviFirstIndex);
+                int count = entry.IndexCount;
+                if (first < 0 || count <= 0) continue;
+
+                int end = Math.Min(scene.Indices.Count, first + count);
+                for (int i = first; i + 2 < end; i += 3)
+                {
+                    int ga = scene.Indices[i];
+                    int gb = scene.Indices[i + 1];
+                    int gc = scene.Indices[i + 2];
+
+                    long sKey = (long)(uint)idx; // stable per-surface key
+                    if (!TryMapProjected(scene, entry, sKey, ga, opts.HeightScale, g2l, localVerts, out var la) ||
+                        !TryMapProjected(scene, entry, sKey, gb, opts.HeightScale, g2l, localVerts, out var lb) ||
+                        !TryMapProjected(scene, entry, sKey, gc, opts.HeightScale, g2l, localVerts, out var lc))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    // Skip degenerate faces (duplicate local vertex indices)
+                    if (la == lb || lb == lc || lc == la)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    localTris.Add((la, lb, lc));
+                    written++;
+                }
+            }
+        }
+        // Always flip X for objects to match tiles and legacy orientation
+        ObjWriter.Write(objPath, localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
         if (opts.ExportGltf)
         {
-            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, false);
+            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
         }
         if (opts.ExportGlb)
         {
-            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, false);
+            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
         }
         facesWritten = written;
         facesSkipped = skipped;
@@ -909,6 +977,13 @@ internal static class Program
             if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
                 !TryMap(scene, gb, g2l, localVerts, out var lb) ||
                 !TryMap(scene, gc, g2l, localVerts, out var lc))
+            {
+                skipped++;
+                continue;
+            }
+
+            // Skip degenerate faces (duplicate local vertex indices)
+            if (la == lb || lb == lc || lc == la)
             {
                 skipped++;
                 continue;
@@ -946,6 +1021,142 @@ internal static class Program
             localVerts.Add(scene.Vertices[g]);
         }
         return true;
+    }
+
+    private static bool TryMapProjected(
+        Pm4Scene scene,
+        MsurChunk.Entry entry,
+        long surfaceKey,
+        int g,
+        float heightScale,
+        Dictionary<long, int> g2l,
+        List<Vector3> localVerts,
+        out int local)
+    {
+        local = -1;
+        if (g < 0 || g >= scene.Vertices.Count) return false;
+        long key = (surfaceKey << 32) | (uint)g;
+        if (!g2l.TryGetValue(key, out local))
+        {
+            Vector3 v = scene.Vertices[g];
+            Vector3 n = new Vector3(entry.Nx, entry.Ny, entry.Nz);
+            float n2 = n.LengthSquared();
+            if (n2 > 1e-12f)
+            {
+                // Correct projection using unnormalized plane: dot(N, v) = H'
+                float H = entry.Height * (heightScale == 0f ? 1f : heightScale);
+                float d = (Vector3.Dot(n, v) - H) / n2;
+                v -= n * d;
+            }
+            local = localVerts.Count;
+            g2l[key] = local;
+            localVerts.Add(v);
+        }
+        return true;
+    }
+
+    // Evaluate candidate scales for MSUR.Height by measuring plane residuals across all surfaces
+    private static void EmitHeightFitReport(Pm4Scene scene, string outDir)
+    {
+        try
+        {
+            // Candidate scales to test
+            var candidates = new float[] { 1.0f, 0.02777778f, 0.0625f, 36.0f, -1.0f, -0.02777778f, -36.0f };
+            const float epsilon = 0.01f; // world units
+
+            // Pre-collect per-surface unique vertex indices to speed residual computation
+            int surfCount = scene.Surfaces.Count;
+            var surfVerts = new List<int>[surfCount];
+            for (int si = 0; si < surfCount; si++)
+            {
+                var s = scene.Surfaces[si];
+                int first = unchecked((int)s.MsviFirstIndex);
+                int count = s.IndexCount;
+                if (first < 0 || count <= 0 || first + count > scene.Indices.Count)
+                {
+                    surfVerts[si] = new List<int>();
+                    continue;
+                }
+                var set = new HashSet<int>();
+                for (int k = 0; k < count; k++)
+                {
+                    int gi = scene.Indices[first + k];
+                    if (gi >= 0 && gi < scene.Vertices.Count) set.Add(gi);
+                }
+                surfVerts[si] = set.Count == 0 ? new List<int>() : set.ToList();
+            }
+
+            var lines = new List<string>();
+            lines.Add("scale,total_surfaces,with_data,mean_abs_residual,median_abs_residual,p95_abs_residual,max_abs_residual,ok_ratio(<0.01)");
+
+            foreach (var scale in candidates)
+            {
+                var perSurfaceAbsMean = new List<float>(surfCount);
+                int withData = 0;
+                int okCount = 0;
+                float maxAbs = 0f;
+                double sumAbs = 0.0;
+
+                for (int si = 0; si < surfCount; si++)
+                {
+                    var entry = scene.Surfaces[si];
+                    var verts = surfVerts[si];
+                    if (verts == null || verts.Count == 0) continue;
+
+                    Vector3 n = new(entry.Nx, entry.Ny, entry.Nz);
+                    float n2 = n.LengthSquared();
+                    if (n2 <= 1e-12f) continue;
+
+                    float H = entry.Height * (scale == 0f ? 1f : scale);
+                    double acc = 0.0;
+                    foreach (var gi in verts)
+                    {
+                        var v = scene.Vertices[gi];
+                        float r = Vector3.Dot(n, v) - H; // residual
+                        float ar = MathF.Abs(r);
+                        if (ar > maxAbs) maxAbs = ar;
+                        acc += ar;
+                    }
+                    float meanAbs = (float)(acc / verts.Count);
+                    perSurfaceAbsMean.Add(meanAbs);
+                    withData++;
+                    if (meanAbs < epsilon) okCount++;
+                    sumAbs += meanAbs;
+                }
+
+                float median = 0f, p95 = 0f;
+                if (perSurfaceAbsMean.Count > 0)
+                {
+                    perSurfaceAbsMean.Sort();
+                    int mIdx = perSurfaceAbsMean.Count / 2;
+                    median = perSurfaceAbsMean[perSurfaceAbsMean.Count % 2 == 1
+                        ? mIdx
+                        : (int)Math.Clamp(mIdx - 1, 0, perSurfaceAbsMean.Count - 1)];
+                    int p95Idx = (int)Math.Clamp(Math.Ceiling(0.95 * perSurfaceAbsMean.Count) - 1, 0, perSurfaceAbsMean.Count - 1);
+                    p95 = perSurfaceAbsMean[p95Idx];
+                }
+
+                float mean = withData > 0 ? (float)(sumAbs / withData) : 0f;
+                float okRatio = withData > 0 ? (float)okCount / withData : 0f;
+
+                lines.Add(string.Join(',',
+                    scale.ToString("G9", CultureInfo.InvariantCulture),
+                    surfCount.ToString(CultureInfo.InvariantCulture),
+                    withData.ToString(CultureInfo.InvariantCulture),
+                    mean.ToString("G9", CultureInfo.InvariantCulture),
+                    median.ToString("G9", CultureInfo.InvariantCulture),
+                    p95.ToString("G9", CultureInfo.InvariantCulture),
+                    maxAbs.ToString("G9", CultureInfo.InvariantCulture),
+                    okRatio.ToString("G9", CultureInfo.InvariantCulture)));
+            }
+
+            File.WriteAllLines(Path.Combine(outDir, "msur_plane_fit.csv"), lines);
+            Console.WriteLine("[pm4-faces] Wrote msur_plane_fit.csv (height-fit report)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[pm4-faces] Failed to emit height fit report: {ex.Message}");
+        }
     }
 
     private static void ExportTiles(
@@ -997,9 +1208,9 @@ internal static class Program
             {
                 TileId = tileId,
                 Name = name,
-                ObjPath = Path.GetRelativePath(outDir, objPath),
-                GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")) : null,
-                GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")) : null,
+                ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
+                GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
+                GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
                 StartIndex = start,
                 IndexCount = count,
                 FacesWritten = written,
@@ -1015,6 +1226,9 @@ internal static class Program
         string outDir = Path.Combine(Environment.CurrentDirectory, "project_output", "pm4faces_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture));
         bool legacy = false;
         bool projectLocal = false;
+        bool snapToPlane = false;
+        float heightScale = 1.0f;
+        bool heightFitReport = false;
         string groupBy = "composite-instance"; // composite-instance | surface | groupkey | composite
         bool batch = false;
         bool ckUseMslk = false;
@@ -1024,6 +1238,7 @@ internal static class Program
         bool ckMonolithic = false;
         bool exportGltf = false;
         bool exportGlb = false;
+        bool noMscnRemap = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1043,6 +1258,19 @@ internal static class Program
                     break;
                 case "--project-local":
                     projectLocal = true;
+                    break;
+                case "--snap-to-plane":
+                    snapToPlane = true;
+                    break;
+                case "--height-scale":
+                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
+                    {
+                        heightScale = hs;
+                        i++;
+                    }
+                    break;
+                case "--height-fit-report":
+                    heightFitReport = true;
                     break;
                 case "--group-by":
                     groupBy = i + 1 < args.Length ? args[++i] : groupBy;
@@ -1079,6 +1307,9 @@ internal static class Program
                 case "--glb":
                     exportGlb = true;
                     break;
+                case "--no-mscn-remap":
+                    noMscnRemap = true;
+                    break;
                 case "--help":
                 case "-h":
                     return null;
@@ -1086,16 +1317,22 @@ internal static class Program
         }
 
         if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb);
+        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, noMscnRemap);
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|surface|groupkey|composite] [--legacy-parity] [--project-local] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb]");
+        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--no-mscn-remap]");
         Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
+        Console.WriteLine("  --snap-to-plane: project vertices to each surface's MSUR plane (experimental; off by default).");
+        Console.WriteLine("  --height-scale: multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36, 0.0625 for 1/16).");
+        Console.WriteLine("  --height-fit-report: emit msur_plane_fit.csv with residuals for candidate height scales (no behavior change).");
         Console.WriteLine("  --ck-merge-components: retain per-object DSU components under each CK24 (no monolithic merged OBJ).");
         Console.WriteLine("  --ck-monolithic: export a single merged OBJ per CK24 (skip per-component DSU objects).");
         Console.WriteLine("  --gltf / --glb: also export glTF 2.0 (.gltf+.bin) and/or GLB alongside OBJ outputs.");
+        Console.WriteLine("  --no-mscn-remap: disable global MSCN vertex remapping during region load (advanced; default is enabled).");
+        Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; rely solely on tile exports.");
+        Console.WriteLine("  Note: X-axis flipping is always applied by default across tiles and objects; --legacy-parity is not required for flipping.");
     }
 
     private static string SanitizeFileName(string name)
