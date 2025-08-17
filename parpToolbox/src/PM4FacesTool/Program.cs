@@ -30,6 +30,7 @@ internal static class Program
         bool CkMonolithic,
         bool ExportGltf,
         bool ExportGlb,
+        bool RenderMeshMerged,
         bool NoMscnRemap
     );
 
@@ -347,7 +348,18 @@ internal static class Program
         else if (opts.GroupBy.Equals("render-mesh", StringComparison.OrdinalIgnoreCase) ||
                  opts.GroupBy.Equals("surfaces-all", StringComparison.OrdinalIgnoreCase))
         {
-            // Skip object exports; rely solely on tile exports below.
+            // Skip object exports; also emit a single merged render mesh and rely on tile exports below.
+            try
+            {
+                string mergedPath = Path.Combine(tilesDir, "render_mesh.obj");
+                Console.WriteLine($"[pm4-faces] Emitting merged render mesh: {mergedPath}");
+                AssembleAndWriteFromIndexRange(scene, 0, scene.Indices.Count, mergedPath, opts, true, out var mergedWritten, out var mergedSkipped);
+                Console.WriteLine($"[pm4-faces] Merged render mesh faces: written={mergedWritten} skipped={mergedSkipped}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[pm4-faces] Failed to emit merged render mesh: {ex.Message}");
+            }
         }
         else
         {
@@ -357,6 +369,24 @@ internal static class Program
         }
 
         File.WriteAllLines(Path.Combine(outDir, "surface_coverage.csv"), coverageCsv);
+
+        // If requested, emit a merged render mesh alongside any group-by mode
+        if (opts.RenderMeshMerged &&
+            !opts.GroupBy.Equals("render-mesh", StringComparison.OrdinalIgnoreCase) &&
+            !opts.GroupBy.Equals("surfaces-all", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                string mergedPath = Path.Combine(tilesDir, "render_mesh.obj");
+                Console.WriteLine($"[pm4-faces] Emitting merged render mesh (flag): {mergedPath}");
+                AssembleAndWriteFromIndexRange(scene, 0, scene.Indices.Count, mergedPath, opts, true, out var mergedWritten, out var mergedSkipped);
+                Console.WriteLine($"[pm4-faces] Merged render mesh (flag) faces: written={mergedWritten} skipped={mergedSkipped}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[pm4-faces] Failed to emit merged render mesh (flag): {ex.Message}");
+            }
+        }
 
         // Always export tiles as a separate set; preserve original prefix and XY suffix
         ExportTiles(scene, tilesDir, opts, outDir, tileCsv, tileIndex, prefix);
@@ -1235,9 +1265,10 @@ internal static class Program
         double ckAllowUnlinkedRatio = 0.5;
         int ckMinTris = 0;
         bool ckMergeComponents = false;
-        bool ckMonolithic = false;
+        bool ckMonolithic = true;
         bool exportGltf = false;
         bool exportGlb = false;
+        bool renderMeshMerged = false;
         bool noMscnRemap = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -1307,6 +1338,9 @@ internal static class Program
                 case "--glb":
                     exportGlb = true;
                     break;
+                case "--render-mesh-merged":
+                    renderMeshMerged = true;
+                    break;
                 case "--no-mscn-remap":
                     noMscnRemap = true;
                     break;
@@ -1317,21 +1351,23 @@ internal static class Program
         }
 
         if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, noMscnRemap);
+        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap);
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--no-mscn-remap]");
+        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap]");
         Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
         Console.WriteLine("  --snap-to-plane: project vertices to each surface's MSUR plane (experimental; off by default).");
         Console.WriteLine("  --height-scale: multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36, 0.0625 for 1/16).");
         Console.WriteLine("  --height-fit-report: emit msur_plane_fit.csv with residuals for candidate height scales (no behavior change).");
         Console.WriteLine("  --ck-merge-components: retain per-object DSU components under each CK24 (no monolithic merged OBJ).");
         Console.WriteLine("  --ck-monolithic: export a single merged OBJ per CK24 (skip per-component DSU objects).");
+        Console.WriteLine("  Default: composite-instance object export with CK24 monolithic enabled; use --ck-merge-components to retain per-component outputs.");
         Console.WriteLine("  --gltf / --glb: also export glTF 2.0 (.gltf+.bin) and/or GLB alongside OBJ outputs.");
         Console.WriteLine("  --no-mscn-remap: disable global MSCN vertex remapping during region load (advanced; default is enabled).");
-        Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; rely solely on tile exports.");
+        Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; emit tiles and a single merged 'render_mesh.obj'.");
+        Console.WriteLine("  --render-mesh-merged: also emit a single merged 'render_mesh.obj' alongside any group-by mode (useful with object exports).");
         Console.WriteLine("  Note: X-axis flipping is always applied by default across tiles and objects; --legacy-parity is not required for flipping.");
     }
 
