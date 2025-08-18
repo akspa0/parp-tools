@@ -900,32 +900,30 @@ internal static class Program
             {
                 int first = unchecked((int)entry.MsviFirstIndex);
                 int count = entry.IndexCount;
-                if (first < 0 || count <= 0) continue;
+                if (first < 0 || count < 3) continue;
 
                 int end = Math.Min(scene.Indices.Count, first + count);
-                for (int i = first; i + 2 < end; i += 3)
+                int polyCount = end - first;
+                if (polyCount < 3) continue;
+
+                // Collect polygon indices for this MSUR entry
+                int[] poly = new int[polyCount];
+                for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                if (polyCount == 3)
                 {
-                    int ga = scene.Indices[i];
-                    int gb = scene.Indices[i + 1];
-                    int gc = scene.Indices[i + 2];
-
-                    if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
-                        !TryMap(scene, gb, g2l, localVerts, out var lb) ||
-                        !TryMap(scene, gc, g2l, localVerts, out var lc))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    // Skip degenerate faces (duplicate local vertex indices)
-                    if (la == lb || lb == lc || lc == la)
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    localTris.Add((la, lb, lc));
-                    written++;
+                    EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, localVerts, localTris, ref written, ref skipped);
+                }
+                else if (polyCount == 4)
+                {
+                    EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, localVerts, localTris, ref written, ref skipped);
+                    EmitTriMapped(scene, poly[0], poly[2], poly[3], g2l, localVerts, localTris, ref written, ref skipped);
+                }
+                else
+                {
+                    // Triangle fan: (0, i, i+1)
+                    for (int i = 1; i + 1 < polyCount; i++)
+                        EmitTriMapped(scene, poly[0], poly[i], poly[i + 1], g2l, localVerts, localTris, ref written, ref skipped);
                 }
             }
         }
@@ -937,33 +935,32 @@ internal static class Program
             {
                 int first = unchecked((int)entry.MsviFirstIndex);
                 int count = entry.IndexCount;
-                if (first < 0 || count <= 0) continue;
+                if (first < 0 || count < 3) continue;
 
                 int end = Math.Min(scene.Indices.Count, first + count);
-                for (int i = first; i + 2 < end; i += 3)
+                int polyCount = end - first;
+                if (polyCount < 3) continue;
+
+                // Collect polygon indices for this MSUR entry
+                int[] poly = new int[polyCount];
+                for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                long sKey = (long)(uint)idx; // stable per-surface key
+
+                if (polyCount == 3)
                 {
-                    int ga = scene.Indices[i];
-                    int gb = scene.Indices[i + 1];
-                    int gc = scene.Indices[i + 2];
-
-                    long sKey = (long)(uint)idx; // stable per-surface key
-                    if (!TryMapProjected(scene, entry, sKey, ga, opts.HeightScale, g2l, localVerts, out var la) ||
-                        !TryMapProjected(scene, entry, sKey, gb, opts.HeightScale, g2l, localVerts, out var lb) ||
-                        !TryMapProjected(scene, entry, sKey, gc, opts.HeightScale, g2l, localVerts, out var lc))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    // Skip degenerate faces (duplicate local vertex indices)
-                    if (la == lb || lb == lc || lc == la)
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    localTris.Add((la, lb, lc));
-                    written++;
+                    EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2l, localVerts, localTris, ref written, ref skipped);
+                }
+                else if (polyCount == 4)
+                {
+                    EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2l, localVerts, localTris, ref written, ref skipped);
+                    EmitTriProjected(scene, entry, sKey, poly[0], poly[2], poly[3], opts.HeightScale, g2l, localVerts, localTris, ref written, ref skipped);
+                }
+                else
+                {
+                    // Triangle fan: (0, i, i+1)
+                    for (int i = 1; i + 1 < polyCount; i++)
+                        EmitTriProjected(scene, entry, sKey, poly[0], poly[i], poly[i + 1], opts.HeightScale, g2l, localVerts, localTris, ref written, ref skipped);
                 }
             }
         }
@@ -1083,6 +1080,51 @@ internal static class Program
             localVerts.Add(v);
         }
         return true;
+    }
+
+    // Helper to emit one triangle (non-snap) with mapping and degenerate filtering
+    private static void EmitTriMapped(
+        Pm4Scene scene,
+        int ga,
+        int gb,
+        int gc,
+        Dictionary<int, int> g2l,
+        List<Vector3> localVerts,
+        List<(int A, int B, int C)> localTris,
+        ref int written,
+        ref int skipped)
+    {
+        if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
+            !TryMap(scene, gb, g2l, localVerts, out var lb) ||
+            !TryMap(scene, gc, g2l, localVerts, out var lc))
+        { skipped++; return; }
+        if (la == lb || lb == lc || lc == la) { skipped++; return; }
+        localTris.Add((la, lb, lc));
+        written++;
+    }
+
+    // Helper to emit one triangle (snap-to-plane) with mapping and degenerate filtering
+    private static void EmitTriProjected(
+        Pm4Scene scene,
+        MsurChunk.Entry entry,
+        long surfaceKey,
+        int ga,
+        int gb,
+        int gc,
+        float heightScale,
+        Dictionary<long, int> g2l,
+        List<Vector3> localVerts,
+        List<(int A, int B, int C)> localTris,
+        ref int written,
+        ref int skipped)
+    {
+        if (!TryMapProjected(scene, entry, surfaceKey, ga, heightScale, g2l, localVerts, out var la) ||
+            !TryMapProjected(scene, entry, surfaceKey, gb, heightScale, g2l, localVerts, out var lb) ||
+            !TryMapProjected(scene, entry, surfaceKey, gc, heightScale, g2l, localVerts, out var lc))
+        { skipped++; return; }
+        if (la == lb || lb == lc || lc == la) { skipped++; return; }
+        localTris.Add((la, lb, lc));
+        written++;
     }
 
     // Evaluate candidate scales for MSUR.Height by measuring plane residuals across all surfaces
@@ -1221,9 +1263,110 @@ internal static class Program
             string name = $"{tilePrefix}_{x:D2}_{y:D2}";
             string objPath = Path.Combine(tilesDir, SanitizeFileName(name) + ".obj");
 
-            // Force X-axis flip for tile exports and log mapping
-            Console.WriteLine($"[pm4-faces][tile] id={tileId} name={name} start={start} count={count}");
-            AssembleAndWriteFromIndexRange(scene, start, count, objPath, opts, true, out var written, out var skipped);
+            Console.WriteLine($"[pm4-faces][tile] assembling-from-objects id={tileId} name={name} start={start} count={count}");
+
+            // Gather all surfaces whose first index falls within this tile's index range
+            int end = start + count;
+            var surfacesInTile = new List<(MsurChunk.Entry entry, int index)>();
+            for (int si = 0; si < scene.Surfaces.Count; si++)
+            {
+                var s = scene.Surfaces[si];
+                int first = unchecked((int)s.MsviFirstIndex);
+                int scount = s.IndexCount;
+                if (first < 0 || scount < 3) continue;
+                if (first >= start && first < end)
+                {
+                    surfacesInTile.Add((s, si));
+                }
+            }
+
+            // Group by object identifier (MSUR.IndexCount per discovery) to avoid cross-object vertex dedup
+            var groups = surfacesInTile
+                .GroupBy(t => t.entry.IndexCount)
+                .OrderBy(g => g.Key);
+
+            var tileVerts = new List<Vector3>(Math.Max(4096, surfacesInTile.Count * 2));
+            var tileTris = new List<(int A, int B, int C)>(Math.Max(4096, count / 3));
+            int written = 0, skipped = 0;
+
+            foreach (var g in groups)
+            {
+                if (opts.SnapToPlane)
+                {
+                    // Per-object map; keys combine per-surface key with vertex id inside EmitTriProjected
+                    var g2lPlane = new Dictionary<long, int>(4096);
+                    foreach (var (entry, index) in g)
+                    {
+                        int first = unchecked((int)entry.MsviFirstIndex);
+                        int icount = entry.IndexCount;
+                        if (first < 0 || icount < 3) continue;
+
+                        int iend = Math.Min(scene.Indices.Count, first + icount);
+                        int polyCount = iend - first;
+                        if (polyCount < 3) continue;
+
+                        int[] poly = new int[polyCount];
+                        for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                        long sKey = (long)(uint)index; // stable per-surface key
+
+                        if (polyCount == 3)
+                        {
+                            EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                        else if (polyCount == 4)
+                        {
+                            EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
+                            EmitTriProjected(scene, entry, sKey, poly[0], poly[2], poly[3], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                        else
+                        {
+                            for (int i = 1; i + 1 < polyCount; i++)
+                                EmitTriProjected(scene, entry, sKey, poly[0], poly[i], poly[i + 1], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                    }
+                }
+                else
+                {
+                    // Fresh mapping per object to preserve object boundaries
+                    var g2l = new Dictionary<int, int>(1024);
+                    foreach (var (entry, _) in g)
+                    {
+                        int first = unchecked((int)entry.MsviFirstIndex);
+                        int icount = entry.IndexCount;
+                        if (first < 0 || icount < 3) continue;
+
+                        int iend = Math.Min(scene.Indices.Count, first + icount);
+                        int polyCount = iend - first;
+                        if (polyCount < 3) continue;
+
+                        int[] poly = new int[polyCount];
+                        for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                        if (polyCount == 3)
+                        {
+                            EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                        else if (polyCount == 4)
+                        {
+                            EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, tileVerts, tileTris, ref written, ref skipped);
+                            EmitTriMapped(scene, poly[0], poly[2], poly[3], g2l, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                        else
+                        {
+                            for (int i = 1; i + 1 < polyCount; i++)
+                                EmitTriMapped(scene, poly[0], poly[i], poly[i + 1], g2l, tileVerts, tileTris, ref written, ref skipped);
+                        }
+                    }
+                }
+            }
+
+            // Force X-axis flip for tile exports
+            ObjWriter.Write(objPath, tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
+            if (opts.ExportGltf)
+                GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
+            if (opts.ExportGlb)
+                GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
 
             tileCsv.Add(string.Join(',',
                 tileId,
