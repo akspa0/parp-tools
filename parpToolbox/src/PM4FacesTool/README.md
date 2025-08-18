@@ -4,6 +4,8 @@ Export PM4 tile geometry to OBJ with optional glTF 2.0 outputs and detailed expo
 
 This tool supports both single-tile export and batch export across a directory, produces per-object and per-tile assets, and writes JSON/CSV indexes for downstream processing and validation.
 
+Assembly strategy: tiles and the merged render mesh are built object-first (grouping by `MSUR.IndexCount`) to avoid cross-object vertex deduplication and preserve complete faces/surfaces.
+
 ## Build & Run
 
 - Requires: .NET 9 SDK
@@ -25,12 +27,16 @@ This tool supports both single-tile export and batch export across a directory, 
 - `--input|-i <tile.pm4|dir>` Input PM4 file (single) or directory (with `--batch`).
 - `--out <dir>` Output root. Defaults to `project_output/pm4faces_YYYYMMDD_HHmmss`.
 - `--batch` Process all tiles in input directory that share the same prefix.
-- `--group-by <composite-instance|surface|groupkey|composite>` Object grouping strategy.
+- `--group-by <composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh|surfaces-all>` Object grouping strategy. `render-mesh`/`surfaces-all` emits a single merged mesh using object-first assembly.
+- `--render-mesh-merged` Emit a merged `render_mesh.obj` alongside any group-by mode.
+- `--snap-to-plane` Project vertices to each surface's MSUR plane (optional; off by default).
+- `--height-scale <float>` Multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36).
+- `--no-mscn-remap` Disable MSCN vertex remap during region load (often improves face completeness).
 - `--legacy-parity` Apply legacy X-flip/parity for objects (tiles always force X-flip).
 - `--project-local` Recenters geometry about the mean before export.
 - `--ck-use-mslk` Use MSLK linkage hints when building composite instances.
 - `--ck-allow-unlinked-ratio <0..1>` Threshold for allowing unlinked surfaces in an instance.
-- `--ck-min-tris <int>` Minimum triangles per component to include.
+- `--ck-min-tris <int>` Minimum triangles per component to include (use `0` to preserve anchors).
 - `--ck-merge-components` Keep per-object DSU components under each CK24 (no monolithic merged OBJ).
 - `--gltf` Also export glTF 2.0 JSON (`.gltf`) with external binary (`.bin`).
 - `--glb` Also export binary glTF (`.glb`).
@@ -47,8 +53,9 @@ Within the session directory (e.g., `project_output/pm4faces_YYYYMMDD_HHmmss/<Ti
   - `*.obj` Always written
   - `*.gltf` + `*.bin` When `--gltf` is set
   - `*.glb` When `--glb` is set
-- `tiles/` Per-tile exports by index range (always flip X for consistent orientation)
+- `tiles/` Per-tile exports assembled object-first (always flip X for consistent orientation)
   - Same optional glTF/GLB outputs as above
+  - `render_mesh.obj` when `--group-by render-mesh|surfaces-all` is used, or when `--render-mesh-merged` is provided
 - `surface_coverage.csv` Per-surface export coverage and face counts
 - `tile_coverage.csv` Per-tile export coverage and face counts
 - `ck_instances.csv` Component instance summary per CK24 (composite-instance mode)
@@ -109,6 +116,8 @@ Each entry:
 - `groupkey`: Groups by `MSUR.GroupKey`.
 - `composite`: Groups by full `MSUR.CompositeKey`.
 - `surface`: One file per `MSUR` surface.
+- `render-mesh`: Emits a single merged mesh using object-first assembly.
+- `surfaces-all`: Emits a single merged mesh using object-first assembly.
 
 Planned: `surfacekey` mode using `MSUR.SurfaceKey` as identity.
 
@@ -125,6 +134,10 @@ Planned: `surfacekey` mode using `MSUR.SurfaceKey` as identity.
 - Batch region, group by composite key:
   ```bash
   dotnet run --project src/PM4FacesTool -- -i "C:\Data\RegionDir" --batch --group-by composite --gltf
+  ```
+- Real data, recommended quick check (anchors preserved, MSCN remap off, merged mesh alongside tiles/objects):
+  ```bash
+  dotnet run --project src/PM4FacesTool -c Release -- --input ".\test_data\original_development\development_00_00.pm4" --batch --no-mscn-remap --ck-min-tris 0 --render-mesh-merged
   ```
 
 ## Validation Checklist

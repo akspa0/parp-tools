@@ -351,10 +351,7 @@ internal static class Program
             // Skip object exports; also emit a single merged render mesh and rely on tile exports below.
             try
             {
-                string mergedPath = Path.Combine(tilesDir, "render_mesh.obj");
-                Console.WriteLine($"[pm4-faces] Emitting merged render mesh: {mergedPath}");
-                AssembleAndWriteFromIndexRange(scene, 0, scene.Indices.Count, mergedPath, opts, true, out var mergedWritten, out var mergedSkipped);
-                Console.WriteLine($"[pm4-faces] Merged render mesh faces: written={mergedWritten} skipped={mergedSkipped}");
+                ExportRenderMeshMerged(scene, tilesDir, opts);
             }
             catch (Exception ex)
             {
@@ -377,10 +374,7 @@ internal static class Program
         {
             try
             {
-                string mergedPath = Path.Combine(tilesDir, "render_mesh.obj");
-                Console.WriteLine($"[pm4-faces] Emitting merged render mesh (flag): {mergedPath}");
-                AssembleAndWriteFromIndexRange(scene, 0, scene.Indices.Count, mergedPath, opts, true, out var mergedWritten, out var mergedSkipped);
-                Console.WriteLine($"[pm4-faces] Merged render mesh (flag) faces: written={mergedWritten} skipped={mergedSkipped}");
+                ExportRenderMeshMerged(scene, tilesDir, opts);
             }
             catch (Exception ex)
             {
@@ -450,6 +444,100 @@ internal static class Program
         var jsonOpts = new JsonSerializerOptions { WriteIndented = true };
         File.WriteAllText(Path.Combine(outDir, "objects_index.json"), JsonSerializer.Serialize(objectIndex, jsonOpts));
         File.WriteAllText(Path.Combine(outDir, "tiles_index.json"), JsonSerializer.Serialize(tileIndex, jsonOpts));
+    }
+
+    private static void ExportRenderMeshMerged(
+        Pm4Scene scene,
+        string tilesDir,
+        Options opts)
+    {
+        string mergedPath = Path.Combine(tilesDir, "render_mesh.obj");
+        Console.WriteLine($"[pm4-faces] Emitting merged render mesh (object-first): {mergedPath}");
+
+        var surfacesAll = scene.Surfaces.Select((e, i) => (e, i)).ToList();
+        var groups = surfacesAll
+            .GroupBy(t => t.e.IndexCount)
+            .OrderBy(g => g.Key);
+
+        var verts = new List<Vector3>(Math.Max(8192, scene.Surfaces.Count * 2));
+        var tris = new List<(int A, int B, int C)>(Math.Max(8192, scene.Indices.Count / 3));
+        int written = 0, skipped = 0;
+
+        foreach (var g in groups)
+        {
+            if (opts.SnapToPlane)
+            {
+                var g2lPlane = new Dictionary<long, int>(4096);
+                foreach (var (entry, index) in g)
+                {
+                    int first = unchecked((int)entry.MsviFirstIndex);
+                    int count = entry.IndexCount;
+                    if (first < 0 || count < 3) continue;
+                    int end = Math.Min(scene.Indices.Count, first + count);
+                    int polyCount = end - first;
+                    if (polyCount < 3) continue;
+
+                    int[] poly = new int[polyCount];
+                    for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                    long sKey = (long)(uint)index;
+
+                    if (polyCount == 3)
+                    {
+                        EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, verts, tris, ref written, ref skipped);
+                    }
+                    else if (polyCount == 4)
+                    {
+                        EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, verts, tris, ref written, ref skipped);
+                        EmitTriProjected(scene, entry, sKey, poly[0], poly[2], poly[3], opts.HeightScale, g2lPlane, verts, tris, ref written, ref skipped);
+                    }
+                    else
+                    {
+                        for (int i = 1; i + 1 < polyCount; i++)
+                            EmitTriProjected(scene, entry, sKey, poly[0], poly[i], poly[i + 1], opts.HeightScale, g2lPlane, verts, tris, ref written, ref skipped);
+                    }
+                }
+            }
+            else
+            {
+                var g2l = new Dictionary<int, int>(1024);
+                foreach (var (entry, _) in g)
+                {
+                    int first = unchecked((int)entry.MsviFirstIndex);
+                    int count = entry.IndexCount;
+                    if (first < 0 || count < 3) continue;
+                    int end = Math.Min(scene.Indices.Count, first + count);
+                    int polyCount = end - first;
+                    if (polyCount < 3) continue;
+
+                    int[] poly = new int[polyCount];
+                    for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
+
+                    if (polyCount == 3)
+                    {
+                        EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, verts, tris, ref written, ref skipped);
+                    }
+                    else if (polyCount == 4)
+                    {
+                        EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, verts, tris, ref written, ref skipped);
+                        EmitTriMapped(scene, poly[0], poly[2], poly[3], g2l, verts, tris, ref written, ref skipped);
+                    }
+                    else
+                    {
+                        for (int i = 1; i + 1 < polyCount; i++)
+                            EmitTriMapped(scene, poly[0], poly[i], poly[i + 1], g2l, verts, tris, ref written, ref skipped);
+                    }
+                }
+            }
+        }
+
+        ObjWriter.Write(mergedPath, verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+        if (opts.ExportGltf)
+            GltfWriter.WriteGltf(Path.ChangeExtension(mergedPath, ".gltf"), verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+        if (opts.ExportGlb)
+            GltfWriter.WriteGlb(Path.ChangeExtension(mergedPath, ".glb"), verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+
+        Console.WriteLine($"[pm4-faces] Merged render mesh faces: written={written} skipped={skipped}");
     }
 
     private static void ExportCompositeInstances(
