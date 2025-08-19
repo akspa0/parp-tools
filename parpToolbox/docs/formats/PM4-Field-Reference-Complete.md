@@ -53,10 +53,17 @@ The MSUR chunk defines surface records that direct interpretation of `MSVI` inde
 
 | Field Name | Type | Description |
 |------------|------|-------------|
-| `SurfaceKey` | uint32 | Surface identifier (semantics may vary by dataset) |
-| `MsviFirstIndex` | uint32 | Starting index in `MSVI` for this surface |
-| `IndexCount` | uint16 | Number of indices for this surface (diagnostic for grouping/visualization) |
-| Additional attributes | Various | Attribute masks/flags; exact semantics under investigation |
+| `SurfaceGroupKey (0x00)` | uint8 | Dataset‑dependent grouping/flags. Diagnostic; semantics under investigation. |
+| `IndexCount (0x01)` | uint8 | Number of indices for this surface. Diagnostic only; not an object identifier. |
+| `SurfaceAttrMask (0x02)` | uint8 | Attribute bitmask/flags. Semantics under investigation. |
+| `Padding (0x03)` | uint8 | Observed 0. |
+| `Nx (0x04)` | float | Surface normal X component. |
+| `Ny (0x08)` | float | Surface normal Y component. |
+| `Nz (0x0C)` | float | Surface normal Z component. |
+| `Height (0x10)` | float | Plane D or surface height. |
+| `MsviFirstIndex (0x14)` | uint32 | First index in `MSVI` for this surface. |
+| `MdosIndex (0x18)` | uint32 | Reference to MDOS where present. Dataset‑dependent; non‑normative. |
+| `CompositeKey (0x1C)` | uint32 | 32‑bit composite key. Often analyzed as Hi16/Lo16; exact semantics under investigation. |
 
 ### Notes:
 - Attribute masks/flags are dataset-dependent; semantics remain under investigation.

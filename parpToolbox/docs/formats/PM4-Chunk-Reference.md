@@ -74,12 +74,20 @@ Each chunk follows the IFF format:
 ### MSUR (Surface Records)
 - **Purpose**: Geometry subdivision and material assignment
 - **Structure**: 32-byte entries
-- **Key Fields**:
-  - `SurfaceKey`: Subdivision level identifier (1,301 unique values)
-  - `MsviFirstIndex`: Starting index in MSVI
-  - `IndexCount`: Number of indices for this surface
-  - `IsM2Bucket`: Flag for overlay models (should be ignored)
-- **Important**: SurfaceKey represents subdivision levels, NOT object groups
+- **Layout (offsets)**:
+  - `0x00 uint8  SurfaceGroupKey` — Dataset‑dependent grouping/flags. Diagnostic; semantics under investigation.
+  - `0x01 uint8  IndexCount` — Number of indices for this surface. Diagnostic only; not an object identifier.
+  - `0x02 uint8  SurfaceAttrMask` — Attribute bitmask/flags. Semantics under investigation.
+  - `0x03 uint8  Padding` — Observed 0.
+  - `0x04 float  Nx`, `0x08 float Ny`, `0x0C float Nz` — Surface normal.
+  - `0x10 float  Height` — Plane D or surface height.
+  - `0x14 uint32 MsviFirstIndex` — First index in `MSVI` for this surface.
+  - `0x18 uint32 MdosIndex` — Reference to MDOS where present. Dataset‑dependent; non‑normative.
+  - `0x1C uint32 CompositeKey` — 32‑bit composite key. Often analyzed as Hi16/Lo16 for convenience; exact semantics remain under investigation.
+
+Notes:
+- Treat `IndexCount` as diagnostic only; do not group objects by this value.
+- Hi16/Lo16 analysis of `CompositeKey` is a software convenience and non‑normative.
 
 ### MSLK (Link Table)
 - **Purpose**: Hierarchical linking between placements and geometry

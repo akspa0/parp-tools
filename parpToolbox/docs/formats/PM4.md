@@ -206,7 +206,7 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 4. **MSUR** defines surface geometry. `IndexCount` is diagnostic only; not an object identifier.
 
 ### Implementation Notes:
-- Group geometry by **MSUR.IndexCount** to get complete building objects
+- Do not group geometry by **MSUR.IndexCount**; it is diagnostic only. Prefer placement→link traversal per `PM4-Spec.md` and `PM4_Assembly_Relationships.md`.
 - ParentIndex/ReferenceIndex grouping produces fragments, not complete objects
 - Apply X-axis inversion (`-vertex.X`) for correct coordinate system orientation
 
@@ -220,11 +220,13 @@ Using a glTF scene enables:
 * Efficient transmission (binary, Draco compression, etc.)
 * Broad tooling support in game engines and viewers compared to Wavefront OBJ
 
-### Proposed Mapping
+Note: Follow `PM4_Assembly_Relationships.md` and the canonical `PM4-Spec.md` for authoritative assembly rules (placements via `MPRL.Unknown4` ↔ `MSLK.ParentIndex`, container detection via `MSLK.MspiFirstIndex = -1`, surfaces via `MSUR` → `MSVI`).
+
+### Proposed Mapping (placement-based)
 | PM4 concept | glTF element |
 |-------------|-------------|
-| Assembled object (`IndexCount`) | `Node` + `Mesh` |
-| Sub-objects / sub-surfaces (`SurfaceGroupKey` ≥ 20) | Child `Node`s |
+| Placement group (`MPRL.Unknown4` / `MSLK.ParentIndex`) | `Node` + `Mesh` container |
+| Surfaces (`MSUR` → `MSVI` ranges) | Mesh primitives within the node's mesh |
 | Vertex positions | `POSITION` accessor (float32) |
 | Triangles | `indices` accessor (uint32) |
 | Normals (Nx,Ny,Nz) | `NORMAL` accessor |
@@ -243,6 +245,8 @@ Implementation work is tracked in the project plan (see *Evaluate/integrate glTF
 PM4 files use the standard WoW chunk-based format with FourCC identifiers. All chunk headers are stored in little-endian byte order.
 
 ## Chunk Specifications
+
+> Legacy notice: The structs in this section are historical samples and may contain inaccuracies. They are preserved for context only. For authoritative definitions and offsets, see the canonical spec: [PM4-Spec.md](PM4-Spec.md).
 
 ### MVER - Version
 ```c
@@ -351,18 +355,16 @@ struct MSUR {
     float nx, ny, nz;            // Surface normal
     float height;                // Plane D or surface height
     uint32_t msvi_first_index;   // First index in MSVI for this surface
-    uint32_t mdos_index;         // MDOS reference
-    uint32_t surface_key;        // 32-bit composite key (packed_params) - this is wrong, it is two 16-bit keys.
+    uint32_t mdos_index;         // MDOS reference where present (dataset-dependent; non-normative)
+    uint32_t composite_key;      // 32-bit composite key. Hi16/Lo16 split is an analysis convenience; semantics under investigation.
 };
 ```
 
 **Deprecated legacy claim:** The `index_count` field (offset 0x01) was previously treated as a primary object identifier. Current guidance: treat `index_count` as diagnostic only; see `PM4-Spec.md`.
 
-**Implementation Aliases:**
-- `is_m2_bucket` = `surface_group_key == 0x00`
-- `is_liquid_candidate` = `(surface_attr_mask & 0x80) != 0`
-- `surface_key_high16` = `surface_key >> 16`
-- `surface_key_low16` = `surface_key & 0xFFFF`
+**Non‑normative analysis aliases:**
+- `composite_key_high16 = composite_key >> 16`
+- `composite_key_low16 = composite_key & 0xFFFF`
 
 **[Deprecated] Object Assembly Logic:** Legacy grouping by `MSUR.IndexCount` is not authoritative. See `PM4_Assembly_Relationships.md` for current assembly guidance.
 

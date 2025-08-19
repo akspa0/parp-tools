@@ -61,9 +61,21 @@ Notes:
 - Value1 = `65535` (`0xFFFF`) are sentinel separators between property sections. They do not define building/object boundaries.
 
 ### MSUR (Surface Records)
-- IndexCount: Present. Useful for diagnostics/visualization. It is not a definitive object identifier.
-- MSUR directs how MSVI index ranges are interpreted (face counts/offsets and attributes).
-- Attribute masks/flags: Present. Exact semantics are dataset‑dependent and remain under investigation.
+MSUR directs how `MSVI` index ranges are interpreted (face counts/offsets and attributes). The following field layout reflects verified offsets; semantics for some fields remain under investigation.
+
+- `0x00 uint8 SurfaceGroupKey` — Dataset‑dependent grouping/flags. Diagnostic; semantics under investigation.
+- `0x01 uint8 IndexCount` — Number of indices for this surface. Diagnostic only; not an object identifier.
+- `0x02 uint8 SurfaceAttrMask` — Attribute bitmask/flags. Semantics under investigation.
+- `0x03 uint8 Padding` — Observed 0.
+- `0x04 float Nx`, `0x08 float Ny`, `0x0C float Nz` — Surface normal.
+- `0x10 float Height` — Plane D or surface height.
+- `0x14 uint32 MsviFirstIndex` — First index in `MSVI` for this surface.
+- `0x18 uint32 MdosIndex` — Reference to MDOS where present. Dataset‑dependent; non‑normative.
+- `0x1C uint32 CompositeKey` — 32‑bit composite key. Often analyzed as Hi16/Lo16 for convenience; exact semantics remain under investigation.
+
+Notes:
+- Treat `IndexCount` as diagnostic only; do not group objects by this value.
+- Attribute masks/flags (`SurfaceAttrMask`, and potentially encodings within `CompositeKey`) are dataset‑dependent and subject to further evidence.
 
 ### MSCN (Spatial/Collision Metadata)
 - MSCN provides additional vertex-like data used as spatial anchors/metadata. It is not directly indexed by face records. Treat it as non-rendering metadata unless proven otherwise.
