@@ -17,7 +17,7 @@ using ParpToolbox.Utils;
 /// as documented in legacy notes and CSV analysis. Applies MPRL placement transformations
 /// to correctly position geometry in world space.
 /// </summary>
-internal static class Pm4MsurObjectAssembler
+public static class Pm4MsurObjectAssembler
 {
     /// <summary>
     /// Represents a complete building object assembled using MSUR SurfaceGroupKey grouping.

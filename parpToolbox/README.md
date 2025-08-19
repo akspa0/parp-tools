@@ -166,6 +166,34 @@ The parpToolbox implements multiple PM4 export approaches, each optimized for di
 
 4. **Per-Object Export** (`export --per-object`): Exports each surface group as a separate OBJ file.
 
+## GLB-RAW Export (parpDataHarvester)
+
+Use the GLB-RAW exporter to pack raw PM4 geometry into GLB for quick inspection.
+
+```bash
+# Per-region (recommended: resolves cross-tile MSCN remaps)
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --per-region --mode objects
+
+# Optional: flip X for visualization parity
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --per-region --mode objects --flip-x
+
+# Per-tile (no cross-tile remap; may miss geometry)
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --mode surfaces
+```
+
+Notes:
+- Positions are written as-is by default (no X-axis flip). Use `--flip-x` only if needed.
+- Per-region uses `Pm4GlobalTileLoader` to aggregate vertices and apply MSCN remapping.
+- `RawGeometryAssembler` clamps index slices, drops invalid triangles, and prints diagnostics
+  (clamped slices, dropped triangles, emitted triangles).
+- GLB uses a default double-sided material to avoid backface culling issues when mirroring.
+
 ## WMO Processing
 
 ### Basic WMO Export
@@ -278,7 +306,7 @@ project_output/
 
 1. **Incomplete Geometry**: Use region loading mode (default) instead of single-tile mode
 2. **Fragmented Objects**: Ensure cross-tile references are resolved
-3. **Coordinate System Issues**: Apply X-axis inversion (-vertex.X) for proper orientation
+3. **Coordinate System Issues**: For GLB-RAW exports, use `--flip-x` if visualization parity requires X inversion (default is no flip)
 4. **Memory Issues**: Process smaller regions or use single-tile mode for analysis
 
 ### Diagnostic Commands

@@ -116,3 +116,23 @@
 - **Documentation**: 🔄 IN PROGRESS - updating memory bank
 
 **Ready for production use and large-scale analysis deployment.**
+
+## Update (2025-08-18): Current Focus – PM4 MSCN Analyzer
+
+We are initiating a dedicated analyzer tool to investigate MSCN relations to MSLK/MSUR and the role of MPRR as range/linkage metadata.
+
+Planned separate console app: `src/PM4MscnAnalyzer/`
+
+Planned commands:
+- `mscn-dump` — export MSCN points CSV (region-aware)
+- `object-centroids` — group by `MSLK.ParentIndex_0x04` and emit centroids/AABBs
+- `mprr-dump` — raw MPRR fields (for schema discovery)
+- `mscn-associate` — kNN-based MSCN↔object association with thresholds and optional MPRR gating
+- `glb-overlay` (optional) — visual overlay of MSCN markers and centroid links
+
+Outputs will be written under `project_output/mscn_analysis/<session>/` with CSVs and optional `overlay.glb`.
+
+Next steps:
+1. Scaffold project and implement `mscn-dump`, `object-centroids`.
+2. Implement `mprr-dump`, `mscn-associate`.
+3. Optional GLB overlay and write `docs/Diagnostics_MSCN.md`.
