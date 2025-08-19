@@ -2,7 +2,16 @@
 
 _Last updated: 2025-08-08_
 
-This document captures the confirmed relationships between core PM4 chunks and how they are used to reconstruct coherent game objects. Keep it up-to-date whenever we discover new fields.
+## 2025-08-19 Rewrite Preface
+
+Updated to reflect current guidance:
+
+- **Per-tile processing (Confirmed)**: Assemble one PM4 tile at a time; do not unify tiles into a global scene.
+- **Hierarchical containers (Strong Evidence)**: Use BoundsCenterX/Y/Z as container/object/level identifiers; treat `MSLK.MspiFirstIndex = -1` as container nodes and traverse to geometry-bearing links.
+- **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
+- **MPRR (Confirmed)**: `Value1 = 65535` acts as property separators, not building boundaries.
+
+See unified errata: [PM4-Errata.md](PM4-Errata.md)
 
 ---
 
@@ -19,15 +28,17 @@ This document captures the confirmed relationships between core PM4 chunks and h
 | **MPRL** | `Unknown4` | Placement → geometry mapping (`ParentIndex`). |
 | **MPRR** | `Value1` | Sentinel `65535` marks property separators. |
 
+Note: BoundsCenterX/Y/Z (container/object/level identifiers) guide container traversal.
+
 ---
 
 ## 2. Proven Grouping Strategies
 
-### 2.1 Surface-Key Strategy (recommended)
-* Group by `MSUR.SurfaceKeyHigh16` (upper 16 bits of `CompositeKey`).
-* Produces **one OBJ per placed object** (building, terrain section).
-* Merge surfaces within the same key; ignore `SurfaceKeyLow16` unless we need finer splits.
-* Robust against interior/exterior mixing; retains ~38k-650k triangles per building.
+### 2.1 Container Traversal (recommended)
+* Identify container nodes via `MSLK.MspiFirstIndex = -1` and BoundsCenterX/Y/Z ranges.
+* Traverse container hierarchy to collect geometry-bearing links.
+* Map to placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`.
+* Assemble faces from `MSUR → MSVI`. Export per tile.
 
 ### 2.2 Index-Count Strategy (legacy research)
 * Group by `MSUR.IndexCount`.
@@ -36,19 +47,49 @@ This document captures the confirmed relationships between core PM4 chunks and h
 ### 2.3 Parent-Index Hierarchy
 * Start with `MSLK.ParentIndex` → `MPRL.Unknown4` mapping.
 * Recursively include child `MSLK` where `MspiFirstIndex != -1`.
-* Produces acceptable object shapes but misses cross-tile data and yields more fragments than Surface-Key.
+* Use as supplemental to container traversal; still diagnostic.
 
 ---
 
-## 3. Cross-Tile Vertex Resolution
-* PM4 tiles reference vertices outside their own MSVT buffer.
-* Load region with `Pm4GlobalTileLoader` → rebases each surface’s `MsviFirstIndex` by per-tile `IndexOffset`.
-* Without this step ~64 % of vertices are out-of-bounds (see _Critical PM4 Data Loss Discovery_ memory).
+## Analyzer sample: MSLK geometry signatures
+
+The following is a representative slice from the analyzer output `project_output/mscn_analysis_20250819_022908/mscn_analysis_20250819_022800_20250819_022908/objects/mslk_geom_signatures.csv` around the current working window. It shows the distribution of MSLK geometry signature IDs and their counts. Note: container nodes (`MSLK.MspiFirstIndex = -1`) generally do not contribute to geometry signature counts; inclusion depends on the analyzer's signature definition.
+
+Legend:
+- `signature`: Analyzer-computed identifier for an MSLK geometry signature pattern
+- `count`: Number of MSLK entries with that signature in this session
+
+```csv
+signature,count
+379,92
+166,90
+171,90
+314,89
+66,89
+656,89
+103,89
+74,88
+141,88
+61,88
+265,88
+313,88
+155,87
+501,87
+239,87
+```
+
+Note: This sample is provided to illustrate the heavy-tailed distribution typical of geometry-bearing `MSLK` signatures. Use it alongside container traversal and the `MPRL.Unknown4 ↔ MSLK.ParentIndex` link when reasoning about assembly.
+
+---
+
+## [Deprecated] Cross-Tile Vertex Resolution
+* Avoid unifying tiles into a global vertex pool.
+* Process one tile at a time; treat cross-tile references as non-rendering metadata unless proven otherwise.
 
 ---
 
 ## 4. Implementation Notes
-* `SurfaceKeyAssembler` (new): implements the Surface-Key strategy, re-uses global vertex validation/remap logic.
+* `ContainerTraversalAssembler`: implements container traversal; uses `MSLK` container detection and `MPRL` mapping.
 * `MsurIndexCountAssembler`: keeps IndexCount grouping for diagnostic purposes.
 * All assemblers **skip triangles containing invalid vertex indices** to avoid (0,0,0) phantom vertices.
 * OBJ exporter inverts X by default; use `--legacy-obj-parity` to disable.
@@ -57,8 +98,8 @@ This document captures the confirmed relationships between core PM4 chunks and h
 
 ## 5. CLI Cheatsheet
 ```
-# Per-object (recommended)
-dotnet run --project src/PM4NextExporter -- <mytile.pm4> --assembly surface-key --include-adjacent
+# Per-object (recommended per tile)
+dotnet run --project src/PM4NextExporter -- <mytile.pm4> --assembly container-traversal
 
 # IndexCount diagnostic view
 dotnet run --project src/PM4NextExporter -- <mytile.pm4> --assembly msur-indexcount
@@ -67,6 +108,6 @@ dotnet run --project src/PM4NextExporter -- <mytile.pm4> --assembly msur-indexco
 ---
 
 ## 6. TODO
-* Evaluate whether we need to merge multiple `SurfaceKeyHigh16` values that belong to the same building via MPRL placements.
-* Snapshot tests for Surface-Key grouping vs legacy exporter SHA.
+* Verify BoundsCenterX/Y/Z traversal with additional tiles.
+* Snapshot tests for container traversal grouping vs legacy exporter SHA.
 * Document MSLK container-node detection logic once implemented.

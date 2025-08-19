@@ -1,6 +1,21 @@
 # PM4 Format Documentation
 
-## 🎉 MAJOR UPDATE: Complete Field Analysis (2025-08-05)
+## 2025-08-19 Rewrite Preface
+This page is now a LEGACY STUB. Authoritative PM4 documentation has moved to the canonical specification:
+
+- PM4 Specification (Canonical): [PM4-Spec.md](PM4-Spec.md)
+
+The content below is retained for historical reference only and may contain deprecated or overconfident claims. Prefer the canonical spec above for all current guidance.
+
+### Errata & history
+
+See Deprecated Claims in the canonical spec: [PM4-Spec.md#deprecated-or-disproven-claims](PM4-Spec.md#deprecated-or-disproven-claims)
+
+Previous claims about “global multi-tile vertex pools,” “MPRR defining building boundaries,” and “fully decoded fields” are deprecated. The legacy sections below are kept for historical context; prefer the canonical spec above.
+
+---
+
+## MAJOR UPDATE: Complete Field Analysis (2025-08-05)
 
 **BREAKTHROUGH**: Successfully analyzed **502 PM4 files** with **100% success rate**, decoding ALL unknown fields through comprehensive cross-file pattern analysis.
 

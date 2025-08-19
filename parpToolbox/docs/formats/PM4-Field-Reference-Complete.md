@@ -1,5 +1,17 @@
 # PM4 Field Reference - Complete Analysis Results
 
+## 2025-08-19 Rewrite Preface
+
+Updated to reflect current, verified understanding:
+
+- **Per-tile processing (Confirmed)**: Process each PM4 tile independently; do not merge tiles into one scene.
+- **Hierarchical containers (Strong Evidence)**: BoundsCenterX/Y/Z act as container/object/level identifiers; assembly is via container traversal.
+- **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`; `MSLK.MspiFirstIndex = -1` indicates container/grouping nodes.
+- **MPRR (Confirmed)**: `Value1 = 65535` are property separators, not building boundaries.
+- **Field status**: Some fields remain partially understood; confidence levels are noted in per-file docs. The legacy sections below are preserved for history and may contain deprecated claims (e.g., "fully decoded").
+
+See unified errata: [PM4-Errata.md](PM4-Errata.md)
+
 **Generated from comprehensive batch analysis of 502 PM4 files**  
 **Date**: 2025-08-05  
 **Data Recovery Success Rate**: 100% (502/502 files processed)
