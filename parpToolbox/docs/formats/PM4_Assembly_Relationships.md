@@ -7,7 +7,7 @@ _Last updated: 2025-08-08_
 Updated to reflect current guidance:
 
 - **Per-tile processing (Confirmed)**: Assemble one PM4 tile at a time; do not unify tiles into a global scene.
-- **Hierarchical containers (Strong Evidence)**: Use BoundsCenterX/Y/Z as container/object/level identifiers; treat `MSLK.MspiFirstIndex = -1` as container nodes and traverse to geometry-bearing links.
+- **Hierarchical containers (Confirmed)**: Identify containers via `MSLK.MspiFirstIndex = -1` and traverse to geometry-bearing links.
 - **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
 - **MPRR (Confirmed)**: `Value1 = 65535` acts as property separators, not building boundaries.
 
@@ -19,26 +19,25 @@ See unified errata: [PM4-Errata.md](PM4-Errata.md)
 
 | Chunk | Field | Size | Purpose |
 |-------|-------|------|---------|
-| **MSUR** | `IndexCount` (byte @0x01) | indices/triangles in MSVI | **Primary object-id** used by legacy tools, good baseline grouping but still yields sub-objects (floor slices, roofs, etc.). |
-| **MSUR** | `CompositeKey` (`SurfaceKey`) | uint32 @0x1C | **High-16 bits (`SurfaceKeyHigh16`) correspond to a whole placed object** (building, terrain piece). Low-16 bits often subdivide by ornaments or broken windows, etc. |
-| **MSUR** | `GroupKey` (`FlagsOrUnknown_0x00`) | byte @0x00 | Broad object category (exterior, interior, terrain, etc.). |
-| **MSUR** | `AttributeMask` (`Unknown_0x02`) | byte @0x02 | Surface subtype, bit `0x80` marks liquid candidates. |
-| **MSLK** | `ParentIndex` (uint32 @0x04) | Link to placement (`MPRL.Unknown4`). Container nodes have `MspiFirstIndex = -1`. |
-| **MSLK** | `MspiFirstIndex` / `MspiIndexCount` | Geometry slice inside global index buffer. |
-| **MPRL** | `Unknown4` | Placement → geometry mapping (`ParentIndex`). |
-| **MPRR** | `Value1` | Sentinel `65535` marks property separators. |
+| **MSUR** | `IndexCount` | varies | Diagnostic only; useful for visualization, not an object identifier. |
+| **MSUR** | `SurfaceKey` | uint32 | Surface identifier; semantics dataset-dependent and under investigation. |
+| **MSUR** | Attributes/Flags | various | Attribute masks/flags exist; exact semantics under investigation. |
+| **MSLK** | `ParentIndex` | uint32 | Links to placement (`MPRL.Unknown4`). Container nodes have `MspiFirstIndex = -1`. |
+| **MSLK** | `MspiFirstIndex` / `MspiIndexCount` | int32 / uint32 | Geometry slice indices (signed first index; `-1` = container). |
+| **MPRL** | `Unknown4` | uint32 | Placement → geometry mapping (`ParentIndex`). |
+| **MPRR** | `Value1` | uint16 | Sentinel `65535` marks property separators. |
 
-Note: BoundsCenterX/Y/Z (container/object/level identifiers) guide container traversal.
+Note: Container traversal is driven by `MSLK.MspiFirstIndex = -1`; avoid relying on unverified coordinate heuristics.
 
 ---
 
 ## 2. Proven Grouping Strategies
 
 ### 2.1 Container Traversal (recommended)
-* Identify container nodes via `MSLK.MspiFirstIndex = -1` and BoundsCenterX/Y/Z ranges.
-* Traverse container hierarchy to collect geometry-bearing links.
-* Map to placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`.
-* Assemble faces from `MSUR → MSVI`. Export per tile.
+1. **Per-tile processing**: Isolate each PM4 tile
+2. **Container traversal**: Use `MSLK` container nodes (`MspiFirstIndex = -1`) to drive assembly
+3. **Placement mapping**: `MPRL.Unknown4 ↔ MSLK.ParentIndex`
+4. **Faces from MSUR → MSVI**; treat `MSUR.IndexCount` as diagnostic
 
 ### 2.2 Index-Count Strategy (legacy research)
 * Group by `MSUR.IndexCount`.
@@ -108,6 +107,6 @@ dotnet run --project src/PM4NextExporter -- <mytile.pm4> --assembly msur-indexco
 ---
 
 ## 6. TODO
-* Verify BoundsCenterX/Y/Z traversal with additional tiles.
+* Verify container traversal on additional tiles.
 * Snapshot tests for container traversal grouping vs legacy exporter SHA.
 * Document MSLK container-node detection logic once implemented.

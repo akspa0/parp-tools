@@ -7,6 +7,8 @@ This page is now a LEGACY STUB. Authoritative PM4 documentation has moved to the
 
 The content below is retained for historical reference only and may contain deprecated or overconfident claims. Prefer the canonical spec above for all current guidance.
 
+> Note: All sections below marked as [Deprecated] are preserved for historical context and are not authoritative. See `PM4-Spec.md` for current guidance.
+
 ### Errata & history
 
 See Deprecated Claims in the canonical spec: [PM4-Spec.md#deprecated-or-disproven-claims](PM4-Spec.md#deprecated-or-disproven-claims)
@@ -15,7 +17,9 @@ Previous claims about “global multi-tile vertex pools,” “MPRR defining bui
 
 ---
 
-## MAJOR UPDATE: Complete Field Analysis (2025-08-05)
+## [Deprecated] Complete Field Analysis (2025-08-05)
+
+> Deprecated legacy content retained for history. Some claims contradict the canonical spec and should not be used. See `PM4-Spec.md`.
 
 **BREAKTHROUGH**: Successfully analyzed **502 PM4 files** with **100% success rate**, decoding ALL unknown fields through comprehensive cross-file pattern analysis.
 
@@ -59,7 +63,9 @@ Based on complete field analysis:
 
 ---
 
-## BREAKTHROUGH: PM4 Scene Graph Architecture
+## [Deprecated] Scene Graph Architecture (legacy)
+
+> Deprecated legacy analysis retained for history. Prefer the canonical spec for current architecture and assembly guidance.
 
 **CRITICAL DISCOVERY**: PM4 files are fundamentally structured as **scene graphs** with hierarchical spatial organization and nested coordinate systems.
 
@@ -99,7 +105,9 @@ MPRL (Building Root Nodes) - 458 buildings
 - **Spatial Partitioning**: SurfaceKey as spatial index for fast queries
 - **LoD Integration**: MSCN coarse bounds → MSUR fine detail
 
-## Verified Object Extraction Method
+## [Deprecated] Verified Object Extraction Method
+
+> Historical algorithm retained for context. Not authoritative.
 
 ### Working Algorithm (Source: poc_exporter.cs)
 **Spatial Clustering Approach** - Combines hierarchical grouping with spatial proximity
@@ -153,9 +161,9 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 - **Multi-object complexity**: Single PM4 can contain data for multiple objects/structures
 - **Interior MODF System**: PM4 acts as an "interior MODF" placing building components inside structures
 
-## Object Assembly Methodology (BREAKTHROUGH VALIDATED – 2025-07-27)
+## [Deprecated] Object Assembly Methodology (2025-07-27)
 
-**ARCHITECTURAL BREAKTHROUGH (2025-07-27 03:00):** PM4 files implement a **global mesh system** requiring **multi-tile processing** for complete geometry assembly.
+**Deprecated legacy claim:** Prior notes asserted a global-mesh, multi-tile requirement for geometry assembly. Current guidance: process strictly per tile and treat cross-tile references as non-rendering metadata unless proven otherwise (see `PM4-Spec.md`).
 
 ### **Global Mesh Architecture Confirmed:**
 
@@ -195,7 +203,7 @@ PM4 files are complex, phased model descriptor files that serve as server-side s
 1. **MPRL** defines object placements (positions + type IDs in Unknown4)
 2. **MSLK** links placements to geometry via ParentIndex → MPRL.Unknown4
 3. **MPRR** provides segmented properties between sentinel markers
-4. **MSUR** defines surface geometry with **IndexCount as the object identifier**
+4. **MSUR** defines surface geometry. `IndexCount` is diagnostic only; not an object identifier.
 
 ### Implementation Notes:
 - Group geometry by **MSUR.IndexCount** to get complete building objects
@@ -337,7 +345,7 @@ struct MSVI {
 ```c
 struct MSUR {
     uint8_t surface_group_key;   // Group key / flags (flags_or_unknown_0x00)
-    uint8_t index_count;         // **OBJECT IDENTIFIER** - Critical for PM4 object assembly
+    uint8_t index_count;         // Diagnostic only; not an object identifier (see PM4-Spec.md)
     uint8_t surface_attr_mask;   // Attribute mask (unknown_0x02)
     uint8_t padding;             // Always 0
     float nx, ny, nz;            // Surface normal
@@ -348,7 +356,7 @@ struct MSUR {
 };
 ```
 
-**CRITICAL DISCOVERY**: The `index_count` field (offset 0x01) is the **primary object identifier** for PM4 object assembly. All surfaces with the same `index_count` value belong to the same building object.
+**Deprecated legacy claim:** The `index_count` field (offset 0x01) was previously treated as a primary object identifier. Current guidance: treat `index_count` as diagnostic only; see `PM4-Spec.md`.
 
 **Implementation Aliases:**
 - `is_m2_bucket` = `surface_group_key == 0x00`
@@ -356,11 +364,7 @@ struct MSUR {
 - `surface_key_high16` = `surface_key >> 16`
 - `surface_key_low16` = `surface_key & 0xFFFF`
 
-**Object Assembly Logic:**
-1. Group all MSUR entries by their `index_count` value
-2. For each group, collect all associated MSLK links via surface index matching
-3. Extract geometry from MSLK → MSPI triangles
-4. Result: Complete building objects instead of fragments
+**[Deprecated] Object Assembly Logic:** Legacy grouping by `MSUR.IndexCount` is not authoritative. See `PM4_Assembly_Relationships.md` for current assembly guidance.
 
 ### MPRL - Property List
 ```c

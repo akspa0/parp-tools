@@ -5,7 +5,7 @@
 This chunk reference has been updated to reflect current understanding:
 
 - **Per-tile processing (Confirmed)**: Process each PM4 tile independently. Do not build a unified global scene across tiles.
-- **Hierarchical containers (Strong Evidence)**: Container/object/level identifiers (via BoundsCenterX/Y/Z) drive assembly; container nodes have `MSLK.MspiFirstIndex = -1`.
+- **Hierarchical containers (Confirmed)**: Identify containers via `MSLK.MspiFirstIndex = -1` and traverse to geometry-bearing links.
 - **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
 - **MPRR sentinels (Confirmed)**: `MPRR.Value1 = 65535` are property separators, not building boundaries.
 
@@ -85,11 +85,14 @@ Each chunk follows the IFF format:
 - **Purpose**: Hierarchical linking between placements and geometry
 - **Structure**: 20-byte entries
 - **Key Fields**:
-  - `ParentIndex`: Links to MPRL.Unknown4 (98.8% overlap confirmed)
-  - `MspiFirstIndex`: Geometry start index
+  - `ParentIndex`: Links to `MPRL.Unknown4` (confirmed mapping)
+  - `MspiFirstIndex`: Signed index offset; `-1` indicates a container node (no geometry)
   - `MspiIndexCount`: Geometry index count
-  - `LinkIdRaw`: 32-bit coordinate field
-- **Coverage**: 125.3% over-indexing indicates hierarchical relationships
+  - `SurfaceRefIndex`: Reference into `MSUR` for surface properties
+  - `ReferenceIndex`: Single 32-bit field; any High/Low split is software-derived
+  - `LinkIdPadding`: Always `0xFFFF`
+  - `LinkIdTileX`, `LinkIdTileY`: Encode PM4 tile grid coordinates
+ - **Coverage**: 125.3% over-indexing indicates hierarchical relationships
 
 ## Object Definition Chunks
 
@@ -168,7 +171,7 @@ Legacy guidance on multi-tile/global pipelines and MPRR-based grouping is preser
 
 ### ✅ Correct Approach
 1. **Per-tile processing**: Build an isolated scene per PM4 tile
-2. **Hierarchical container traversal**: Use `BoundsCenterX/Y/Z` ranges and `MSLK.MspiFirstIndex = -1` to traverse containers; map placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`
+2. **Hierarchical container traversal**: Identify containers via `MSLK.MspiFirstIndex = -1`; map placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`
 3. **Use MSUR/MSVI for faces**: Treat `MSUR.IndexCount` as diagnostic, not an object identifier
 
 ## Conclusion

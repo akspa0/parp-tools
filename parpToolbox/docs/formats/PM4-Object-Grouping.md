@@ -5,7 +5,7 @@
 Updated guidance:
 
 - **Per-tile processing (Confirmed)**: Process one PM4 tile at a time. Do not unify tiles into a global scene.
-- **Hierarchical containers (Strong Evidence)**: Use BoundsCenterX/Y/Z as container/object/level identifiers. Traverse containers; treat `MSLK.MspiFirstIndex = -1` as container nodes.
+- **Hierarchical containers (Confirmed)**: Identify containers via `MSLK.MspiFirstIndex = -1`; traverse to geometry-bearing links.
 - **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
 - **MPRR (Confirmed)**: `Value1 = 65535` are property separators, not building boundaries.
 - **MSUR.IndexCount (Diagnostic)**: Useful for quick views; not authoritative for object identity.
@@ -14,7 +14,7 @@ See unified errata: [PM4-Errata.md](PM4-Errata.md)
 
 ### Recommended: Container Traversal (2025-08-19)
 
-1. Identify container nodes via `MSLK.MspiFirstIndex = -1` and BoundsCenterX/Y/Z ranges.
+1. Identify container nodes via `MSLK.MspiFirstIndex = -1`.
 2. Traverse container hierarchy to collect child geometry links (`MSLK` with geometry).
 3. Map to placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex` and assemble faces from `MSUR → MSVI`.
 4. Export per tile; avoid cross-tile merges.
@@ -199,24 +199,21 @@ public class MprrBuildingGrouper
 
 ## 📚 Historical Approaches (Deprecated)
 
-**⚠️ The following methods are documented for historical reference but are now superseded by MPRR sentinel grouping.**
+**⚠️ The following methods are documented for historical reference and are not recommended. Container traversal (above) is the current approach.**
 
 ### ❌ Spatial Clustering (Obsolete)
 - **Problem:** Required complex spatial tolerance calculations
 - **Scale:** Produced fragmented objects, not complete buildings
 - **Status:** Superseded by MPRR method
 
-### ❌ Container-Based Grouping (Obsolete) 
-- **Problem:** Used MSLK MspiFirstIndex = -1 markers
-- **Scale:** Still produced fragments, not building-scale objects
-- **Status:** Superseded by MPRR method
+> Note: Earlier notes labeling container-based grouping as obsolete were incorrect. Container traversal via `MSLK.MspiFirstIndex = -1` is the recommended approach.
 
 ### ❌ Type_0x01 Assembly Patterns (Obsolete)
 - **Problem:** Complex multi-type component classification
 - **Scale:** Theoretical only, never achieved realistic building scales
 - **Status:** Superseded by MPRR method
 
-**CONCLUSION (Deprecated):** MPRR sentinel-based grouping is not recommended. MPRR.Value1=65535 are property separators, not building/object boundaries.
+**CONCLUSION (Deprecated):** MPRR sentinel-based grouping is not recommended. `MPRR.Value1 = 65535` are property separators, not building/object boundaries.
 
 ### Data Analysis Results
 From `development_00_00.pm4` analysis:
@@ -261,8 +258,7 @@ From `development_00_00.pm4` analysis:
 ## Assembly Algorithm (Updated)
 
 ### 1. Traverse Container Hierarchy
-- Identify container nodes via `MSLK.MspiFirstIndex = -1` and BoundsCenterX/Y/Z ranges
-- Collect child geometry links from `MSLK` entries with geometry
+ - Identify container nodes via `MSLK.MspiFirstIndex = -1`.
 
 ### 2. Map Placements to Geometry
 - Use `MPRL.Unknown4 ↔ MSLK.ParentIndex` to map placements to geometry links
@@ -324,6 +320,6 @@ PM4 files reference vertices from adjacent tiles, requiring region loading:
 Recommended approach:
 
 1. **Per-tile processing**: Isolate each PM4 tile
-2. **Container traversal**: Use `MSLK` container nodes and BoundsCenterX/Y/Z to drive assembly
+2. **Container traversal**: Use `MSLK` container nodes (`MspiFirstIndex = -1`) to drive assembly
 3. **Placement mapping**: `MPRL.Unknown4 ↔ MSLK.ParentIndex`
 4. **Faces from MSUR → MSVI**; treat `MSUR.IndexCount` as diagnostic
