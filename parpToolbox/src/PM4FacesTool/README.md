@@ -102,6 +102,13 @@ Each entry:
 }
 ```
 
+## Canonical References
+
+- PM4 Format: ../../docs/formats/PM4.md
+- PM4 Chunk Reference: ../../docs/formats/PM4-Chunk-Reference.md
+- PM4 Field Reference (Complete): ../../docs/formats/PM4-Field-Reference-Complete.md
+- PM4 Assembly Relationships: ../../docs/formats/PM4_Assembly_Relationships.md
+
 ## Coordinate System & Flipping
 
 - **Tiles**: Always force X-flip with winding swap to preserve normals.

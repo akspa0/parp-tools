@@ -101,6 +101,13 @@ dotnet run --project src/PM4NextExporter -- "development_00_00.pm4" \
 - Per-tile export: preserves global coordinates; `--project-local` is ignored for per-tile
 - Log file: `<outDir>/run.log`
 
+## Canonical References
+
+- PM4 Format: ../../docs/formats/PM4.md
+- PM4 Chunk Reference: ../../docs/formats/PM4-Chunk-Reference.md
+- PM4 Field Reference (Complete): ../../docs/formats/PM4-Field-Reference-Complete.md
+- PM4 Assembly Relationships: ../../docs/formats/PM4_Assembly_Relationships.md
+
 ## See Also
 
 - parpToolbox (core, analysis CLI): `src/parpToolbox/`

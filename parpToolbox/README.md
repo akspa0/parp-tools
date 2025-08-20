@@ -297,8 +297,10 @@ project_output/
 
 - [PM4 Format](docs/formats/PM4.md) - Comprehensive PM4 format specification
 - [PM4 Chunk Reference](docs/formats/PM4-Chunk-Reference.md) - Detailed chunk structure documentation
-- [Object Grouping](docs/formats/PM4-Object-Grouping.md) - Verified object assembly methods
-- [Surface Fields](docs/MSUR_FIELDS.md) - MSUR chunk field analysis
+- [PM4 Field Reference (Complete)](docs/formats/PM4-Field-Reference-Complete.md)
+- [PM4 Assembly Relationships](docs/formats/PM4_Assembly_Relationships.md)
+- [PM4 Object Grouping](docs/formats/PM4-Object-Grouping.md) - Verified object assembly methods
+- Archived (historical): [Surface Fields analysis](docs/_archive/MSUR_FIELDS.md)
 
 ## Troubleshooting
 
