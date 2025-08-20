@@ -39,10 +39,12 @@ flowchart TD
 
     %% --- Cross-tile Note ---
     classDef note fill:#fff5b1,stroke:#b59f00,stroke-dasharray: 4 2;
-    CROSS_NOTE[("Cross-tile links: some MSLK entries reference vertices in adjacent tiles → need global loader")]
+    CROSS_NOTE[("Cross-tile links exist; exporter operates per tile. Cross-tile references are not part of per-tile geometry assembly.\nSee PM4_Assembly_Relationships.md for guidance.")]
     class CROSS_NOTE note
     MSLK --- CROSS_NOTE
 ```
+
+See [PM4_Assembly_Relationships.md](formats/PM4_Assembly_Relationships.md) for guidance.
 
 ## Legend
 * **MPRL.Unknown4**  – unique building identifier (root of hierarchy).
@@ -52,6 +54,22 @@ flowchart TD
 * Dashed call-out highlights *cross-tile* references responsible for out-of-bounds indices.
 
 ---
+
+## Canonical References
+
+- [PM4.md](formats/PM4.md)
+- [PM4-Chunk-Reference.md](formats/PM4-Chunk-Reference.md)
+- [PM4-Field-Reference-Complete.md](formats/PM4-Field-Reference-Complete.md)
+- [PM4-Object-Grouping.md](formats/PM4-Object-Grouping.md)
+- [PM4_Assembly_Relationships.md](formats/PM4_Assembly_Relationships.md)
+
+### Archival References (historical only)
+
+Archival references are retained for historical context; prefer the canonical docs above for authoritative information.
+
+- [pm4-chunk-structure.md](../PM4Tool/docs/pm4/pm4-chunk-structure.md)
+- [pm4-mesh-extraction.md](../PM4Tool/docs/pm4/pm4-mesh-extraction.md)
+- [pm4_pd4_chunks.md](../PM4Tool/docs/pm4_pd4_chunks.md)
 
 ### Reading the Graph
 1. Start at an `MPRL` placement (left).  Its **Unknown4** field is the building key.

@@ -1,19 +1,40 @@
 # PM4 Format Documentation
 
-## 2025-08-19 Rewrite Preface
-This page is now a LEGACY STUB. Authoritative PM4 documentation has moved to the canonical specification:
+## Canonical Overview (Last Updated: 2025-08-19)
+This page now serves as the high-level entry point for PM4. Authoritative definitions live in the canonical spec and related reference docs.
 
+Key principles:
+- PM4 is a placement + geometry system processed per tile (no global multi-tile geometry assembly).
+- Object assembly is placement-driven: `MPRL.Unknown4` ↔ `MSLK.ParentIndex` with containers where `MSLK.MspiFirstIndex = -1`.
+- `MSUR` defines surface geometry; fields like `IndexCount` are diagnostic and not object identifiers.
+
+Authoritative references:
 - PM4 Specification (Canonical): [PM4-Spec.md](PM4-Spec.md)
+- Assembly Relationships: [PM4_Assembly_Relationships.md](PM4_Assembly_Relationships.md)
+- Field Reference: [PM4-Field-Reference-Complete.md](PM4-Field-Reference-Complete.md)
+- Chunk Reference: [PM4-Chunk-Reference.md](PM4-Chunk-Reference.md)
+- Object Grouping: [PM4-Object-Grouping.md](PM4-Object-Grouping.md)
+- Errata: [PM4-Errata.md](PM4-Errata.md)
 
-The content below is retained for historical reference only and may contain deprecated or overconfident claims. Prefer the canonical spec above for all current guidance.
+Archived documentation (historical only; inaccurate):
+- MSUR fields analysis: [../_archive/MSUR_FIELDS.md](../_archive/MSUR_FIELDS.md)
+- PM4/PD4 early notes: [../../PM4Tool/docs/_archive/pm4_pd4_chunks.md](../../PM4Tool/docs/_archive/pm4_pd4_chunks.md)
+- Legacy chunk structure: [../../PM4Tool/docs/_archive/pm4-chunk-structure.md](../../PM4Tool/docs/_archive/pm4-chunk-structure.md)
+- Legacy mesh extraction: [../../PM4Tool/docs/_archive/pm4-mesh-extraction.md](../../PM4Tool/docs/_archive/pm4-mesh-extraction.md)
+- Dev log (historical): [../_archive/DirectPM4Exporter-Development-Log.md](../_archive/DirectPM4Exporter-Development-Log.md)
 
-> Note: All sections below marked as [Deprecated] are preserved for historical context and are not authoritative. See `PM4-Spec.md` for current guidance.
+Warning: The archived documents linked above are no longer true or contain very inaccurate information. They are provided only for historical context. Always prefer the references listed above.
+
+---
+
+## Legacy and Historical Notes
+The sections below are retained for historical context and may contain deprecated or disproven claims. Prefer the canonical references above for current guidance.
 
 ### Errata & history
 
 See Deprecated Claims in the canonical spec: [PM4-Spec.md#deprecated-or-disproven-claims](PM4-Spec.md#deprecated-or-disproven-claims)
 
-Previous claims about “global multi-tile vertex pools,” “MPRR defining building boundaries,” and “fully decoded fields” are deprecated. The legacy sections below are kept for historical context; prefer the canonical spec above.
+Previous claims about “global multi-tile vertex pools,” “MPRR defining building boundaries,” and “fully decoded fields” are deprecated.
 
 ---
 
