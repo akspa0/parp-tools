@@ -4,18 +4,19 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using PM4NextExporter.Model;
+using PM4NextExporter.Services;
 
 namespace PM4NextExporter.Exporters
 {
     internal static class MscnObjExporter
     {
-        public static void Export(Scene scene, string outDir, bool legacyParity, bool nameWithTile)
+        public static void Export(Scene scene, string outDir, bool legacyParity, bool nameWithTile, bool alignWithMscn)
         {
             if (scene == null) return;
             var verts = scene.MscnVertices ?? new List<System.Numerics.Vector3>();
             if (verts.Count == 0) return;
 
-            var invertX = legacyParity; // default: no flip; flip only with legacy parity
+            var mirrorX = TransformConfig.ShouldMirrorX(ExporterKind.Mscn, legacyParity, alignWithMscn);
             var ci = CultureInfo.InvariantCulture;
 
             var mscnDir = Path.Combine(outDir, "mscn");
@@ -34,7 +35,7 @@ namespace PM4NextExporter.Exporters
                 for (int i = 0; i < verts.Count; i++)
                 {
                     var v = verts[i];
-                    var vx = invertX ? -v.X : v.X;
+                    var vx = mirrorX ? -v.X : v.X;
                     sw.WriteLine("v " + vx.ToString(ci) + " " + v.Y.ToString(ci) + " " + v.Z.ToString(ci));
                 }
                 // emit points so viewers render vertices
@@ -69,7 +70,7 @@ namespace PM4NextExporter.Exporters
                 foreach (var gi in indices)
                 {
                     var v = verts[gi];
-                    var vx = invertX ? -v.X : v.X;
+                    var vx = mirrorX ? -v.X : v.X;
                     sw.WriteLine("v " + vx.ToString(ci) + " " + v.Y.ToString(ci) + " " + v.Z.ToString(ci));
                     localCount++;
                 }

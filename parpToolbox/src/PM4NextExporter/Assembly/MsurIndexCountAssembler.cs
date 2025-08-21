@@ -68,7 +68,13 @@ namespace PM4NextExporter.Assembly
 
                 if (localTris.Count > 0 && localVerts.Count > 0)
                 {
-                    result.Add(new AssembledObject(name, localVerts, localTris));
+                    var obj = new AssembledObject(name, localVerts, localTris);
+                    // Record grouping key for downstream attribution without name-parsing
+                    obj.Meta["msur.indexcount"] = g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    // Record which global vertex indices were used (for diagnostics; not required for MSCN attribution)
+                    foreach (var gi in map.Keys)
+                        obj.SourceGlobalIndices.Add(gi);
+                    result.Add(obj);
                 }
             }
 

@@ -1,5 +1,17 @@
 # PM4 Field Reference - Complete Analysis Results
 
+## 2025-08-19 Rewrite Preface
+
+Updated to reflect current, verified understanding:
+
+- **Per-tile processing (Confirmed)**: Process each PM4 tile independently; do not merge tiles into one scene.
+- **Hierarchical containers (Confirmed)**: Identify container/group nodes via `MSLK.MspiFirstIndex = -1`; traverse to geometry-bearing links.
+- **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`; `MSLK.MspiFirstIndex = -1` indicates container/grouping nodes.
+- **MPRR (Confirmed)**: `Value1 = 65535` are property separators, not building boundaries.
+- **Field status**: Some fields remain partially understood; confidence levels are noted in per-file docs. The legacy sections below are preserved for history and may contain deprecated claims (e.g., "fully decoded").
+
+See unified errata: [PM4-Errata.md](PM4-Errata.md)
+
 **Generated from comprehensive batch analysis of 502 PM4 files**  
 **Date**: 2025-08-05  
 **Data Recovery Success Rate**: 100% (502/502 files processed)
@@ -15,74 +27,62 @@ This document represents the most comprehensive analysis of PM4 format fields ev
 
 All previously unknown fields have been decoded and their patterns identified through cross-file analysis.
 
-## MSLK Chunk - Surface Links (Fully Decoded)
+## MSLK Chunk - Surface Links
 
-The MSLK chunk links object placements to surface geometry. All fields now identified:
+The MSLK chunk links object placements to surface geometry. Verified key fields:
 
-| Field Name | Type | Pattern | Description |
-|------------|------|---------|-------------|
-| `Flags_0x00` | uint8 | 17-20 | **Geometry State Flags**: 17=container, 18-20=different geometry types |
-| `Type_0x01` | uint8 | 0-4 | **Object Type Classification**: 0-4 represent different building/structure types |
-| `SortKey_0x02` | uint16 | 0+ | **Rendering Order Key**: Controls draw order for overlapping geometry |
-| `ParentId` | uint16 | 0+ | **Hierarchical Parent ID**: Links to parent container objects |
-| `MspiFirstIndex` | int32 | -1 or 0+ | **Index Buffer Offset**: -1 = no geometry, 0+ = start index in MSVI |
-| `MspiIndexCount` | uint32 | 0 or 4+ | **Index Count**: 0 = no geometry, 4+ = triangle count × 3 |
-| `TileCoordsRaw` | uint32 | 0xFFFF0000 | **Raw Tile Coordinates**: Encoded tile boundary information |
-| `SurfaceRefIndex` | uint32 | 0+ | **MSUR Reference**: Index into MSUR chunk for surface properties |
-| `Unknown_0x12` | uint16 | 32768 | **Universal Flag**: Always 32768 (0x8000) - likely geometry enabled flag |
-| `ParentIndex` | uint32 | 0+ | **MPRL Link**: Matches MPRL.Unknown4 for object placement linkage |
-| `ReferenceIndex` | uint32 | 0+ | **Master Reference**: Primary linkage index for object assembly |
-| `ReferenceIndexHigh` | uint16 | 0+ | **High 16 bits**: Upper portion of packed 32-bit index |
-| `ReferenceIndexLow` | uint16 | 0+ | **Low 16 bits**: Lower portion of packed 32-bit index |
-| `LinkIdPadding` | uint16 | 65535 | **Padding**: Always 0xFFFF |
-| `LinkIdTileY` | uint8 | 0+ | **Tile Y Coordinate**: Y position in tile grid |
-| `LinkIdTileX` | uint8 | 0+ | **Tile X Coordinate**: X position in tile grid |
-| `HasValidTileCoordinates` | bool | True/False | **Coordinate Validity**: Whether tile coordinates are valid |
-| `TileCoordinate` | uint16 | 0+ | **Packed Tile Coord**: Encoded tile position |
-| `LinkSubKey` | uint16 | 0+ | **Sub-object Key**: For multi-part objects |
-| `HasGeometry` | bool | True/False | **🔑 CRITICAL**: Whether this entry has renderable geometry |
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `ParentIndex` | uint32 | Placement linkage; equals `MPRL.Unknown4` (confirmed) |
+| `MspiFirstIndex` | int32 | Signed index offset; `-1` indicates container/group node (no geometry) |
+| `MspiIndexCount` | uint32 | Number of indices associated with this link |
+| `SurfaceRefIndex` | uint32 | Reference into `MSUR` for surface properties |
+| `ReferenceIndex` | uint32 | Single 32-bit field used as a linkage/reference index |
+| `LinkIdPadding` | uint16 | Always `0xFFFF` |
+| `LinkIdTileX` | uint8 | Encoded tile X coordinate |
+| `LinkIdTileY` | uint8 | Encoded tile Y coordinate |
 
 ### Key Relationships:
 - **`MSLK.ParentIndex` ↔ `MPRL.Unknown4`**: Primary object placement linkage
-- **`MSLK.SurfaceRefIndex` ↔ `MSUR.Index`**: Surface properties linkage
-- **`HasGeometry = False`**: Container/grouping nodes with no geometry
-- **`MspiFirstIndex = -1`**: Indicates container nodes (no index buffer data)
+- **`MSLK.SurfaceRefIndex` ↔ `MSUR`**: Surface properties linkage
+- **`MspiFirstIndex = -1`**: Indicates container/group nodes (no index buffer data)
 
-## MSUR Chunk - Surface Properties (Fully Decoded)
+## MSUR Chunk - Surface Properties
 
-The MSUR chunk defines surface rendering properties and geometry references:
+The MSUR chunk defines surface records that direct interpretation of `MSVI` index ranges and carry attributes:
 
-| Field Name | Type | Pattern | Description |
-|------------|------|---------|-------------|
-| `SurfaceKey` | uint32 | Varies | **Surface Identifier**: Unique key for surface type |
-| `IndexCount` | uint16 | 1-7 | **🔑 N-gon Count**: Number of vertices (1=point, 3=triangle, 4=quad, etc.) |
-| `StartIndex` | uint32 | 0+ | **Index Buffer Start**: Offset into MSVI index buffer |
-| Additional fields via reflection | Various | Various | **Surface Properties**: Material, texture, and rendering flags |
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `SurfaceGroupKey (0x00)` | uint8 | Dataset‑dependent grouping/flags. Diagnostic; semantics under investigation. |
+| `IndexCount (0x01)` | uint8 | Number of indices for this surface. Diagnostic only; not an object identifier. |
+| `SurfaceAttrMask (0x02)` | uint8 | Attribute bitmask/flags. Semantics under investigation. |
+| `Padding (0x03)` | uint8 | Observed 0. |
+| `Nx (0x04)` | float | Surface normal X component. |
+| `Ny (0x08)` | float | Surface normal Y component. |
+| `Nz (0x0C)` | float | Surface normal Z component. |
+| `Height (0x10)` | float | Plane D or surface height. |
+| `MsviFirstIndex (0x14)` | uint32 | First index in `MSVI` for this surface. |
+| `MdosIndex (0x18)` | uint32 | Reference to MDOS where present. Dataset‑dependent; non‑normative. |
+| `CompositeKey (0x1C)` | uint32 | 32‑bit composite key. Often analyzed as Hi16/Lo16; exact semantics under investigation. |
 
-### Critical Patterns Discovered:
-- **Repeating Triplets**: Values like `"1116401852","17034","61628"` appear consistently across files
-  - These represent **global surface/material library IDs**
-  - **Surface Type Classification System** used across all tiles
-  - **Consistent material properties** for similar building elements
+### Notes:
+- Attribute masks/flags are dataset-dependent; semantics remain under investigation.
 
 ### IndexCount Distribution:
 - **1-3**: Simple geometry (points, lines, triangles)
 - **4**: Quads (most common for building surfaces)
 - **5-7**: Complex N-gons (architectural details)
 
-## MPRL Chunk - Object Placements (Fully Decoded)
+## MPRL Chunk - Object Placements
 
-The MPRL chunk defines object placement in 3D world space:
+The MPRL chunk defines object placements:
 
-| Field Name | Type | Pattern | Description |
-|------------|------|---------|-------------|
-| `X`, `Y`, `Z` | float | Varies | **World Coordinates**: Object position in world space |
-| `Unknown0` | uint16 | 0 | **Reserved**: Always 0 |
-| `Unknown2` | int16 | -1 | **Parent Link**: Always -1, possibly reserved parent reference |
-| `Unknown4` | uint32 | 573, 577, etc. | **🔑 Object Type ID**: Classification of placed object type |
-| `Unknown6` | uint16 | 32768 | **Universal Flag**: Always 32768 (0x8000) - placement enabled flag |
-| `Unknown14` | uint16 | 0-3 | **Sub-type**: Variant or configuration ID within object type |
-| `Unknown16` | uint16 | 0 | **Reserved**: Always 0 |
+| Field Name | Type | Description |
+|------------|------|-------------|
+| `X`, `Y`, `Z` | float | Placement position (local tile space). World orientation/parity is exporter concern. |
+| `Unknown4` | uint32 | Placement identifier linking to `MSLK.ParentIndex` (confirmed) |
+| `Unknown6` | uint16 | Observed constant `32768` in real data (non-normative) |
+| Other fields | Various | Additional flags/values present; semantics remain partially understood |
 
 ### Key Patterns:
 - **Object Type Classification**:
@@ -98,23 +98,19 @@ The MPRL chunk defines object placement in 3D world space:
 
 ## MSVT Chunk - Vertices
 
-3D vertex positions in world coordinate space:
+3D vertex positions:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `X`, `Y`, `Z` | float | **World coordinates** - final transformed positions |
+| `X`, `Y`, `Z` | float | Vertex positions as stored in the file |
 
-**Total across all files**: 1,134,074 vertices
+**Example dataset**: 1,134,074 vertices (non-normative)
 
 ## MSVI Chunk - Index Buffer
 
-Triangle indices referencing MSVT vertices:
+Triangle indices referencing `MSVT` vertices. Bit width/packing may vary by variant; see `MSPI` for packed-indices form.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| Index | uint32 | **Vertex index** into MSVT array |
-
-**Total across all files**: 1,930,146 indices (643,382 triangles)
+**Example dataset**: 1,930,146 indices (non-normative)
 
 ## Cross-File Pattern Analysis
 
@@ -123,35 +119,27 @@ Triangle indices referencing MSVT vertices:
 - **193/502 files empty** - Expected for unpopulated regions
 - **Perfect data integrity** - All files parsed successfully
 
-### Global Consistency Patterns:
-1. **Surface Material Library**: Repeating MSUR triplets indicate global material system
-2. **Object Type Library**: MPRL Unknown4 values are consistent object type classifications
-3. **Coordinate System Unity**: All files use same world coordinate space
-4. **Flag Consistency**: Unknown6=32768, Unknown_0x12=32768 universal across all files
+### Global Consistency Patterns (example observations):
+1. Repeating MSUR attribute patterns across tiles
+2. Stable placement identifiers (`Unknown4`) across datasets
+3. Observed constant flags (e.g., `Unknown6 = 32768`) in real data
 
 ### Tile System Architecture:
-- **Tile-based placement**: LinkIdTileX/Y encode tile grid positions
-- **Cross-tile references**: Objects can span multiple tiles
-- **Global indexing**: Vertex indices reference global vertex pools
+- **Tile-based placement**: `LinkIdTileX/Y` encode tile grid positions
+- **Cross-tile references**: May appear; treat as non-rendering metadata unless proven otherwise in a given workflow
 
 ## Object Assembly Algorithm
 
-Based on field analysis, the correct object assembly algorithm is:
+Normative assembly model:
 
-1. **Filter by HasGeometry**: Only process MSLK entries with `HasGeometry = True`
-2. **Group by ParentIndex**: Use `MSLK.ParentIndex` to group related surfaces
-3. **Link to Placement**: Match `MSLK.ParentIndex` with `MPRL.Unknown4` for world positioning
-4. **Assemble Surfaces**: Use `MSLK.SurfaceRefIndex` to get MSUR properties
-5. **Build Geometry**: Use `MSUR.StartIndex` and `IndexCount` to extract triangles from MSVI
-6. **Apply Transforms**: Position using MPRL coordinates
+1. **Container detection**: Treat `MSLK.MspiFirstIndex = -1` as container/group nodes (no geometry)
+2. **Placement mapping**: Map placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`
+3. **Face assembly**: Use `MSUR` to direct interpretation of `MSVI` index ranges (diagnostic grouping only)
+4. **Per-tile processing**: Assemble per tile; do not merge tiles into a global scene
 
 ## Unknown Field Summary
 
-All previously unknown fields now have identified purposes:
-
-### MSLK Unknowns → **DECODED**:
-- All 22 fields now have clear meanings and purposes
-- Critical discovery: `HasGeometry` flag is key to assembly logic
+Verified key fields are listed in the sections above. Several fields remain partially understood and are under investigation. Derived/convenience fields (e.g., `HasGeometry`) are not part of the raw spec and should be computed downstream if needed.
 
 ### MSUR Unknowns → **DECODED**:
 - Surface material library system identified
@@ -164,10 +152,8 @@ All previously unknown fields now have identified purposes:
 ## Implementation Status
 
 ### Completed:
-- ✅ **100% field identification** across all chunk types
-- ✅ **Cross-file pattern analysis** complete
-- ✅ **Linkage relationships** confirmed
-- ✅ **Data recovery** from 502 files successful
+- ✅ **Linkage relationships** confirmed (e.g., `MPRL.Unknown4 = MSLK.ParentIndex`)
+- ✅ **Cross-file analyses** executed across large datasets (non-normative evidence)
 
 ### Next Steps:
 - 🔄 **OBJ Export**: Apply new field knowledge to export complete objects

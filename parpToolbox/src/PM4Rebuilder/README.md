@@ -283,10 +283,17 @@ This project is under active development. Key areas for contribution:
 
 ## Documentation
 
-- **Development Log**: `docs/DirectPM4Exporter-Development-Log.md`
+- **Archived (historical)**: `docs/_archive/DirectPM4Exporter-Development-Log.md`
 - **Technical Issues**: `docs/PM4-Building-Assembly-Issues.md`  
 - **PM4 Format Docs**: `docs/formats/` directory
 - **Building Export Plans**: `docs/BuildingLevelExporter_Plan.md`
+
+### Canonical References
+
+- PM4 Format: ../../docs/formats/PM4.md
+- PM4 Chunk Reference: ../../docs/formats/PM4-Chunk-Reference.md
+- PM4 Field Reference (Complete): ../../docs/formats/PM4-Field-Reference-Complete.md
+- PM4 Assembly Relationships: ../../docs/formats/PM4_Assembly_Relationships.md
 
 ---
 

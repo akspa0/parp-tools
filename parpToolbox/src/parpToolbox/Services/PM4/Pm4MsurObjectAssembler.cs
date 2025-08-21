@@ -17,7 +17,7 @@ using ParpToolbox.Utils;
 /// as documented in legacy notes and CSV analysis. Applies MPRL placement transformations
 /// to correctly position geometry in world space.
 /// </summary>
-internal static class Pm4MsurObjectAssembler
+public static class Pm4MsurObjectAssembler
 {
     /// <summary>
     /// Represents a complete building object assembled using MSUR SurfaceGroupKey grouping.
@@ -26,7 +26,10 @@ internal static class Pm4MsurObjectAssembler
         byte SurfaceGroupKey,          // MSUR.SurfaceGroupKey - the actual object identifier
         int SurfaceCount,              // Number of surfaces in this object
         List<(int A, int B, int C)> Triangles, // All triangles for this object
-        Vector3 BoundingCenter,        // Calculated center point
+        List<Vector3> Vertices,        // Consolidated vertex list for export
+        Vector3 BoundingCenter,        // Geometry centroid (diagnostic)
+        Vector3 PlacementCenter,       // Placement centroid (scene/world space)
+        int PlacementCount,            // Number of unique placements aggregated
         int VertexCount,
         string ObjectType              // Descriptive name based on surface properties
     );
@@ -59,37 +62,36 @@ internal static class Pm4MsurObjectAssembler
     private static List<MprlMslkMapping> BuildMprlMslkMappings(Pm4Scene scene)
     {
         var mappings = new List<MprlMslkMapping>();
-        
-        ConsoleLogger.WriteLine($"Building placementIdx→MSLK.Parent mappings fast ({scene.Placements.Count} placements, {scene.Links.Count} links)...");
 
-        // Pre-index links by ParentIndex for O(1) lookup
-        var linksByParent = scene.Links
-            .GroupBy(l => l.ParentIndex)
+        ConsoleLogger.WriteLine($"Building MPRL.Unknown4 ↔ MSLK.ParentIndex mappings ({scene.Placements.Count} placements, {scene.Links.Count} links)...");
+
+        // Index placements by Unknown4 (cast to uint for direct comparison with ParentIndex)
+        var placementsByKey = scene.Placements
+            .Select((p, i) => (Index: i, Entry: p))
+            .GroupBy(t => (uint)t.Entry.Unknown4)
             .ToDictionary(g => g.Key, g => g.ToList());
-        
-        foreach (var kvp in linksByParent)
+
+        int linkWithMatches = 0;
+        foreach (var link in scene.Links)
         {
-            uint placementKey = kvp.Key;
-            if (placementKey >= scene.Placements.Count)
-                continue; // safety guard – some ParentIndex values exceed placement rows (rare)
-
-            var matches = kvp.Value;
-            var mprlEntry = scene.Placements[(int)placementKey];
-            ConsoleLogger.WriteLine($"  placementIdx {placementKey} → {matches.Count} MSLK matches");
-
-            foreach (var link in matches)
+            if (placementsByKey.TryGetValue(link.ParentIndex, out var plist))
             {
-                mappings.Add(new MprlMslkMapping(
-                    (int)placementKey,
-                    placementKey,
-                    link.ParentIndex,
-                    TransformMprlPosition(mprlEntry),
-                    mprlEntry
-                ));
+                linkWithMatches++;
+                foreach (var t in plist)
+                {
+                    var pos = TransformMprlPosition(t.Entry);
+                    mappings.Add(new MprlMslkMapping(
+                        t.Index,
+                        (uint)t.Entry.Unknown4,
+                        link.ParentIndex,
+                        pos,
+                        t.Entry
+                    ));
+                }
             }
         }
-        
-        ConsoleLogger.WriteLine($"Built {mappings.Count} placement→link mappings (fast)");
+
+        ConsoleLogger.WriteLine($"Built {mappings.Count} placement→link mappings across {linkWithMatches} links");
         return mappings;
     }
 
@@ -101,7 +103,7 @@ internal static class Pm4MsurObjectAssembler
     {
         var assembledObjects = new List<MsurObject>();
         
-        ConsoleLogger.WriteLine($"Assembling PM4 objects using SurfaceGroupKey grouping with MPRL transformations...");
+        ConsoleLogger.WriteLine($"Assembling PM4 building objects via MSLK.ParentIndex (mapped from MPRL.Unknown4) with placement transforms...");
         ConsoleLogger.WriteLine($"  MSUR surfaces: {scene.Surfaces.Count}");
         ConsoleLogger.WriteLine($"  MSLK links: {scene.Links.Count}");
         ConsoleLogger.WriteLine($"  MPRL placements: {scene.Placements.Count}");
@@ -147,119 +149,109 @@ internal static class Pm4MsurObjectAssembler
                 list.Add(link);
             }
         }
+        // Build reverse mapping: ParentIndex -> set of MSUR surfaces linked via MSLK nodes
+        var surfacesByParent = new Dictionary<uint, HashSet<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry>>();
+        foreach (var kvp in linksBySurface)
+        {
+            var surface = kvp.Key;
+            foreach (var link in kvp.Value)
+            {
+                if (!surfacesByParent.TryGetValue(link.ParentIndex, out var set))
+                {
+                    set = new HashSet<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry>();
+                    surfacesByParent[link.ParentIndex] = set;
+                }
+                set.Add(surface);
+            }
+        }
 
-        // Process each MSUR surface individually, then group by SurfaceGroupKey
-        var objectsByIndexCount = new Dictionary<int, List<(Vector3[] vertices, int[] faces)>>();
-        
+        ConsoleLogger.WriteLine($"  Found {surfacesByParent.Count} distinct MSLK.ParentIndex groups (buildings)");
+
         // Track vertex index usage for debugging
         int maxVertexIndexSeen = -1;
         int outOfBoundsCount = 0;
-        
-        ConsoleLogger.WriteLine($"  Processing {scene.Surfaces.Count} individual MSUR surfaces...");
-        
-        foreach (var surface in scene.Surfaces)
-        {
-            // Skip surfaces without geometry
-            if (surface.IndexCount <= 0)
-                continue;
-            
-            // Extract geometry for this specific surface only
-            var surfaceVertices = new List<Vector3>();
-            var surfaceFaces = new List<int>();
-            
-            // Build transform list for this surface based on linked MSLK parent indices
-            List<Vector3> transforms = new() { Vector3.Zero }; // default
-            if (linksBySurface.TryGetValue(surface, out var linkedNodes))
-            {
-                var parentIds = linkedNodes.Select(l => l.ParentIndex).Distinct().ToHashSet();
-                var matched = mprlMappings.Where(m => parentIds.Contains(m.MslkParentIndex)).ToList();
-                if (matched.Count > 0)
-                {
-                    transforms = matched.Select(m => m.Position).ToList();
-                }
-            }
 
-            ExtractSurfaceTrianglesWithTransforms(surface, scene, transforms, surfaceVertices, surfaceFaces, ref maxVertexIndexSeen, ref outOfBoundsCount);
-            
-            if (surfaceVertices.Count > 0 && surfaceFaces.Count > 0)
-            {
-                // Group by MSUR.IndexCount (0x01 field) per discovery of full-object grouping
-                int objectKey = surface.IndexCount;
-                if (!objectsByIndexCount.TryGetValue(objectKey, out var surfaceList))
-                {
-                    surfaceList = new List<(Vector3[], int[])>();
-                    objectsByIndexCount[objectKey] = surfaceList;
-                }
-
-                surfaceList.Add((surfaceVertices.ToArray(), surfaceFaces.ToArray()));
-            }
-        }
-        
-        ConsoleLogger.WriteLine($"  Found {objectsByIndexCount.Count} distinct IndexCount groups (complete objects)");
-        
-        // Assemble each object by consolidating all surfaces with the same SurfaceGroupKey
-        foreach (var (indexCount, surfaceList) in objectsByIndexCount)
+        foreach (var (parentIndex, surfaceSet) in surfacesByParent)
         {
             var consolidatedVertices = new List<Vector3>();
             var consolidatedFaces = new List<int>();
-            
-            ConsoleLogger.WriteLine($"    Processing IndexCount {indexCount} with {surfaceList.Count} surfaces");
-            
-            // Consolidate all surfaces for this IndexCount into a single object
-            foreach (var (surfaceVertices, surfaceFaces) in surfaceList)
+
+            // Placement transforms for this building (from MPRL mappings)
+            var transforms = mprlMappings
+                .Where(m => m.MslkParentIndex == parentIndex)
+                .Select(m => m.Position)
+                .ToList();
+            if (transforms.Count == 0) transforms = new List<Vector3> { Vector3.Zero };
+
+            ConsoleLogger.WriteLine($"    Building ParentIndex=0x{parentIndex:X8}: {surfaceSet.Count} surfaces, {transforms.Count} placements");
+
+            foreach (var surface in surfaceSet)
             {
-                int vertexOffset = consolidatedVertices.Count;
-                
-                // Add vertices
-                consolidatedVertices.AddRange(surfaceVertices);
-                
-                // Add faces with proper vertex offset
-                for (int i = 0; i < surfaceFaces.Length; i++)
+                if (surface.IndexCount <= 0) continue;
+                ExtractSurfaceTrianglesWithTransforms(
+                    surface,
+                    scene,
+                    transforms,
+                    consolidatedVertices,
+                    consolidatedFaces,
+                    ref maxVertexIndexSeen,
+                    ref outOfBoundsCount);
+            }
+
+            if (consolidatedVertices.Count == 0 || consolidatedFaces.Count == 0)
+                continue;
+
+            // Calculate centers
+            var boundingCenter = CalculateBoundingCenter(consolidatedVertices);
+
+            // Placement centroid/count (dedup transforms)
+            Vector3 placementCenter = boundingCenter;
+            int placementCount = 0;
+            {
+                var uniq = new Dictionary<string, Vector3>();
+                foreach (var v in transforms)
                 {
-                    consolidatedFaces.Add(surfaceFaces[i] + vertexOffset);
+                    var key = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6},{1:F6},{2:F6}", v.X, v.Y, v.Z);
+                    if (!uniq.ContainsKey(key)) uniq[key] = v;
+                }
+                placementCount = uniq.Count;
+                if (placementCount > 0)
+                {
+                    var sum = Vector3.Zero;
+                    foreach (var v in uniq.Values) sum += v;
+                    placementCenter = sum / placementCount;
                 }
             }
-            
-            if (consolidatedVertices.Count > 0)
+
+            // Convert face list to triangles
+            var triangles = new List<(int A, int B, int C)>();
+            for (int i = 0; i < consolidatedFaces.Count; i += 3)
             {
-                ConsoleLogger.WriteLine($"      Consolidated {consolidatedVertices.Count} vertices and {consolidatedFaces.Count} face indices for IndexCount {indexCount}");
-                
-                // Calculate bounding center from processed vertices
-                var boundingCenter = CalculateBoundingCenter(consolidatedVertices);
-                var objectType = GetObjectTypeName((uint)indexCount);
-                
-                // Convert faces to triangles for compatibility
-                var triangles = new List<(int A, int B, int C)>();
-                for (int i = 0; i < consolidatedFaces.Count; i += 3)
+                if (i + 2 < consolidatedFaces.Count)
                 {
-                    if (i + 2 < consolidatedFaces.Count)
-                    {
-                        triangles.Add((consolidatedFaces[i], consolidatedFaces[i + 1], consolidatedFaces[i + 2]));
-                    }
-                }
-                
-                byte groupKey = 0; // placeholder since grouping now by IndexCount only
-                var msurObject = new MsurObject(
-                    SurfaceGroupKey: groupKey,
-                    SurfaceCount: surfaceList.Count,
-                    Triangles: triangles,
-                    BoundingCenter: boundingCenter,
-                    VertexCount: consolidatedVertices.Count,
-                    ObjectType: objectType
-                );
-                
-                assembledObjects.Add(msurObject);
-                
-                ConsoleLogger.WriteLine($"      Object IndexCount={indexCount}: {triangles.Count} triangles, {consolidatedVertices.Count} vertices, {surfaceList.Count} surfaces");
-                
-                if (triangles.Count == 0)
-                {
-                    ConsoleLogger.WriteLine($"        WARNING: No triangles generated for IndexCount {indexCount}!");
+                    triangles.Add((consolidatedFaces[i], consolidatedFaces[i + 1], consolidatedFaces[i + 2]));
                 }
             }
+
+            byte groupKey = 0; // Not meaningful across merged surfaces
+            var msurObject = new MsurObject(
+                SurfaceGroupKey: groupKey,
+                SurfaceCount: surfaceSet.Count,
+                Triangles: triangles,
+                Vertices: consolidatedVertices,
+                BoundingCenter: boundingCenter,
+                PlacementCenter: placementCenter,
+                PlacementCount: placementCount,
+                VertexCount: consolidatedVertices.Count,
+                ObjectType: $"Building_Parent_{parentIndex:X8}"
+            );
+
+            assembledObjects.Add(msurObject);
+
+            ConsoleLogger.WriteLine($"      Built Building ParentIndex=0x{parentIndex:X8}: {triangles.Count} triangles, {consolidatedVertices.Count} vertices, {surfaceSet.Count} surfaces");
         }
-        
-        ConsoleLogger.WriteLine($"Assembled {assembledObjects.Count} complete building objects");
+
+        ConsoleLogger.WriteLine($"Assembled {assembledObjects.Count} building objects");
         
         // Log vertex index statistics for debugging
         ConsoleLogger.WriteLine($"Vertex Index Statistics:");
@@ -271,6 +263,209 @@ internal static class Pm4MsurObjectAssembler
             ConsoleLogger.WriteLine($"  ERROR: {outOfBoundsCount} vertex indices were out of bounds - data loss occurred!");
         }
         
+        return assembledObjects;
+    }
+
+    /// <summary>
+    /// Assembles PM4 objects by grouping geometry using MSUR.CompositeKey (32-bit key).
+    /// Mirrors the flow of AssembleObjectsByMsurIndex, but swaps grouping key to CompositeKey.
+    /// Applies MPRL placement transforms via MSLK link mapping for correct world positioning.
+    /// </summary>
+    public static List<MsurObject> AssembleObjectsByCompositeKey(Pm4Scene scene)
+    {
+        var assembledObjects = new List<MsurObject>();
+
+        ConsoleLogger.WriteLine($"Assembling PM4 objects using CompositeKey grouping with MPRL transformations...");
+        ConsoleLogger.WriteLine($"  MSUR surfaces: {scene.Surfaces.Count}");
+        ConsoleLogger.WriteLine($"  MSLK links: {scene.Links.Count}");
+        ConsoleLogger.WriteLine($"  MPRL placements: {scene.Placements.Count}");
+        ConsoleLogger.WriteLine($"  Scene vertices: {scene.Vertices.Count} (indices 0-{scene.Vertices.Count - 1})");
+        ConsoleLogger.WriteLine($"  Scene indices: {scene.Indices.Count}");
+
+        // Build MPRL to MSLK mappings for transformation application
+        var mprlMappings = BuildMprlMslkMappings(scene);
+
+        // --- Build quick lookup: surface index ranges ----
+        var surfaceRanges = scene.Surfaces.Select(s => new
+        {
+            Surface = s,
+            Start = (int)s.MsviFirstIndex,
+            End = (int)s.MsviFirstIndex + s.IndexCount - 1
+        }).OrderBy(r => r.Start).ToArray();
+        var surfaceStarts = surfaceRanges.Select(r => r.Start).ToArray();
+
+        // --- Map MSLK geometry nodes to owning surfaces ---
+        var linksBySurface = new Dictionary<ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry, List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>>();
+        foreach (var link in scene.Links.OfType<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>())
+        {
+            if (link.MspiFirstIndex < 0 || link.MspiIndexCount == 0)
+                continue; // skip non-geometry nodes
+
+            int nodeStart = link.MspiFirstIndex;
+            int nodeEnd   = link.MspiFirstIndex + link.MspiIndexCount - 1;
+
+            // Binary search to find candidate surface by start index
+            int idx = Array.BinarySearch(surfaceStarts, nodeStart);
+            if (idx < 0) idx = ~idx - 1; // previous range
+            if (idx < 0) continue;
+
+            var range = surfaceRanges[idx];
+            if (nodeStart >= range.Start && nodeEnd <= range.End)
+            {
+                var owner = range.Surface;
+                if (!linksBySurface.TryGetValue(owner, out var list))
+                {
+                    list = new List<ParpToolbox.Formats.P4.Chunks.Common.MslkEntry>();
+                    linksBySurface[owner] = list;
+                }
+                list.Add(link);
+            }
+        }
+
+        // Process each MSUR surface individually, then group by CompositeKey
+        var objectsByComposite = new Dictionary<uint, List<(Vector3[] vertices, int[] faces)>>();
+        var placementsByComposite = new Dictionary<uint, List<Vector3>>();
+
+        int maxVertexIndexSeen = -1;
+        int outOfBoundsCount = 0;
+
+        ConsoleLogger.WriteLine($"  Processing {scene.Surfaces.Count} individual MSUR surfaces...");
+
+        foreach (var surface in scene.Surfaces)
+        {
+            if (surface.IndexCount <= 0)
+                continue;
+
+            var surfaceVertices = new List<Vector3>();
+            var surfaceFaces = new List<int>();
+
+            // Build transform list for this surface based on linked MSLK parent indices
+            List<Vector3> geomTransforms = new() { Vector3.Zero }; // default if no placements
+            List<Vector3> placementTransforms = new();              // only real placements
+            if (linksBySurface.TryGetValue(surface, out var linkedNodes))
+            {
+                var parentIds = linkedNodes.Select(l => l.ParentIndex).Distinct().ToHashSet();
+                var matched = mprlMappings.Where(m => parentIds.Contains(m.MslkParentIndex)).ToList();
+                if (matched.Count > 0)
+                {
+                    geomTransforms = matched.Select(m => m.Position).ToList();
+                    placementTransforms = geomTransforms;
+                }
+            }
+
+            ExtractSurfaceTrianglesWithTransforms(surface, scene, geomTransforms, surfaceVertices, surfaceFaces, ref maxVertexIndexSeen, ref outOfBoundsCount);
+
+            if (surfaceVertices.Count > 0 && surfaceFaces.Count > 0)
+            {
+                uint compositeKey = surface.CompositeKey;
+                if (!objectsByComposite.TryGetValue(compositeKey, out var surfaceList))
+                {
+                    surfaceList = new List<(Vector3[], int[])>();
+                    objectsByComposite[compositeKey] = surfaceList;
+                }
+                surfaceList.Add((surfaceVertices.ToArray(), surfaceFaces.ToArray()));
+
+                if (placementTransforms.Count > 0)
+                {
+                    if (!placementsByComposite.TryGetValue(compositeKey, out var plist))
+                    {
+                        plist = new List<Vector3>();
+                        placementsByComposite[compositeKey] = plist;
+                    }
+                    plist.AddRange(placementTransforms);
+                }
+            }
+        }
+
+        ConsoleLogger.WriteLine($"  Found {objectsByComposite.Count} distinct CompositeKey groups (complete objects)");
+
+        foreach (var (compositeKey, surfaceList) in objectsByComposite)
+        {
+            var consolidatedVertices = new List<Vector3>();
+            var consolidatedFaces = new List<int>();
+
+            ConsoleLogger.WriteLine($"    Processing CompositeKey 0x{compositeKey:X8} with {surfaceList.Count} surfaces");
+
+            foreach (var (surfaceVertices, surfaceFaces) in surfaceList)
+            {
+                int vertexOffset = consolidatedVertices.Count;
+                consolidatedVertices.AddRange(surfaceVertices);
+                for (int i = 0; i < surfaceFaces.Length; i++)
+                {
+                    consolidatedFaces.Add(surfaceFaces[i] + vertexOffset);
+                }
+            }
+
+            if (consolidatedVertices.Count > 0)
+            {
+                ConsoleLogger.WriteLine($"      Consolidated {consolidatedVertices.Count} vertices and {consolidatedFaces.Count} face indices for CompositeKey 0x{compositeKey:X8}");
+
+                var boundingCenter = CalculateBoundingCenter(consolidatedVertices);
+
+                Vector3 placementCenter = boundingCenter; // fallback
+                int placementCount = 0;
+                if (placementsByComposite.TryGetValue(compositeKey, out var pList) && pList.Count > 0)
+                {
+                    var uniq = new Dictionary<string, Vector3>();
+                    foreach (var v in pList)
+                    {
+                        var key = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F6},{1:F6},{2:F6}", v.X, v.Y, v.Z);
+                        if (!uniq.ContainsKey(key)) uniq[key] = v;
+                    }
+                    placementCount = uniq.Count;
+                    if (placementCount > 0)
+                    {
+                        var sum = Vector3.Zero;
+                        foreach (var v in uniq.Values) sum += v;
+                        placementCenter = sum / placementCount;
+                    }
+                }
+
+                var triangles = new List<(int A, int B, int C)>();
+                for (int i = 0; i < consolidatedFaces.Count; i += 3)
+                {
+                    if (i + 2 < consolidatedFaces.Count)
+                    {
+                        triangles.Add((consolidatedFaces[i], consolidatedFaces[i + 1], consolidatedFaces[i + 2]));
+                    }
+                }
+
+                // groupKey not meaningful under composite grouping - set to 0
+                byte groupKey = 0;
+                var msurObject = new MsurObject(
+                    SurfaceGroupKey: groupKey,
+                    SurfaceCount: surfaceList.Count,
+                    Triangles: triangles,
+                    Vertices: consolidatedVertices,
+                    BoundingCenter: boundingCenter,
+                    PlacementCenter: placementCenter,
+                    PlacementCount: placementCount,
+                    VertexCount: consolidatedVertices.Count,
+                    ObjectType: $"Composite_{compositeKey:X8}"
+                );
+
+                assembledObjects.Add(msurObject);
+
+                ConsoleLogger.WriteLine($"      Object CompositeKey=0x{compositeKey:X8}: {triangles.Count} triangles, {consolidatedVertices.Count} vertices, {surfaceList.Count} surfaces");
+                if (triangles.Count == 0)
+                {
+                    ConsoleLogger.WriteLine($"        WARNING: No triangles generated for CompositeKey 0x{compositeKey:X8}!");
+                }
+            }
+        }
+
+        ConsoleLogger.WriteLine($"Assembled {assembledObjects.Count} composite-key objects");
+
+        // Log vertex index statistics for debugging
+        ConsoleLogger.WriteLine($"Vertex Index Statistics:");
+        ConsoleLogger.WriteLine($"  Scene has vertices 0-{scene.Vertices.Count - 1} ({scene.Vertices.Count} total)");
+        ConsoleLogger.WriteLine($"  Max vertex index accessed: {maxVertexIndexSeen}");
+        ConsoleLogger.WriteLine($"  Out-of-bounds vertex accesses: {outOfBoundsCount}");
+        if (outOfBoundsCount > 0)
+        {
+            ConsoleLogger.WriteLine($"  ERROR: {outOfBoundsCount} vertex indices were out of bounds - data loss occurred!");
+        }
+
         return assembledObjects;
     }
 
@@ -331,7 +526,10 @@ internal static class Pm4MsurObjectAssembler
                 SurfaceGroupKey: (byte)(selectorKey >> 8),
                 SurfaceCount: surfaceBatches.Count,
                 Triangles: tris,
+                Vertices: consolidatedVerts,
                 BoundingCenter: center,
+                PlacementCenter: center,
+                PlacementCount: 0,
                 VertexCount: consolidatedVerts.Count,
                 ObjectType: $"Selector_{selectorKey:X4}");
             assembledObjects.Add(obj);
@@ -417,7 +615,7 @@ internal static class Pm4MsurObjectAssembler
     /// Extracts triangles from a surface with MPRL transformation support.
     /// Applies MPRL placement transformations to correctly position geometry in world space.
     /// </summary>
-    // Extract triangles applying one or more translation transforms (MPRL positions)
+    // Extract triangles applying one or more translation transforms (replicated per transform)
     private static void ExtractSurfaceTrianglesWithTransforms(
         ParpToolbox.Formats.P4.Chunks.Common.MsurChunk.Entry surface,
         Pm4Scene scene,
@@ -442,63 +640,64 @@ internal static class Pm4MsurObjectAssembler
         
         // Apply each provided transform (often one, sometimes many)
         var applicableTransforms = transforms.Count > 0 ? transforms : new List<Vector3>{Vector3.Zero};
-        // number of transforms only used for logging
         if (applicableTransforms.Count > 1)
         {
             ConsoleLogger.WriteLine($"    Surface SurfaceGroupKey={surface.SurfaceGroupKey}: {applicableTransforms.Count} placement transforms");
-            ConsoleLogger.WriteLine($"    Surface SurfaceGroupKey={surface.SurfaceGroupKey}: Found {applicableTransforms.Count} MPRL transforms");
         }
-        
+
         // Extract triangles for this surface with proper bounds checking
         int startIndex = (int)surface.MsviFirstIndex;
         int indexCount = (int)surface.IndexCount;
-        
+
         // Validate index bounds before processing
         if (startIndex < 0 || startIndex >= scene.Indices.Count)
         {
             ConsoleLogger.WriteLine($"Warning: Surface has invalid start index {startIndex} (scene has {scene.Indices.Count} indices)");
             return;
         }
-        
+
         if (startIndex + indexCount > scene.Indices.Count)
         {
             ConsoleLogger.WriteLine($"Warning: Surface index range [{startIndex}, {startIndex + indexCount}) exceeds scene indices ({scene.Indices.Count})");
             indexCount = scene.Indices.Count - startIndex;
         }
-        
-        // Build vertex mapping for this surface to avoid duplicate vertices
-        var vertexMap = new Dictionary<int, int>();
-        
-        for (int i = 0; i < indexCount; i += 3)
+
+        foreach (var offset in applicableTransforms)
         {
-            int m = startIndex + i;
-            if (m + 2 >= scene.Indices.Count) break; // Final bounds check
-            
-            int aIdx = scene.Indices[m];
-            int bIdx = scene.Indices[m + 1];
-            int cIdx = scene.Indices[m + 2];
-            
-            // Track max vertex index for debugging
-            maxVertexIndexSeen = Math.Max(maxVertexIndexSeen, Math.Max(aIdx, Math.Max(bIdx, cIdx)));
-            
-            // Add vertices with plane projection, MPRL transformation, and proper local indexing
-            int localA = GetOrAddVertexWithTransform(aIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, applicableTransforms, ref outOfBoundsCount);
-            int localB = GetOrAddVertexWithTransform(bIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, applicableTransforms, ref outOfBoundsCount);
-            int localC = GetOrAddVertexWithTransform(cIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, applicableTransforms, ref outOfBoundsCount);
-            
-            // Only add valid triangles - skip any triangles with invalid vertex indices
-            if (localA >= 0 && localB >= 0 && localC >= 0)
+            // Build vertex mapping per transform to replicate geometry for each placement
+            var vertexMap = new Dictionary<int, int>();
+
+            for (int i = 0; i < indexCount; i += 3)
             {
-                faces.Add(localA);
-                faces.Add(localB);
-                faces.Add(localC);
-            }
-            else
-            {
-                // Log skipped triangles for debugging
-                if (outOfBoundsCount <= 10) // Only log first few to avoid spam
+                int m = startIndex + i;
+                if (m + 2 >= scene.Indices.Count) break; // Final bounds check
+
+                int aIdx = scene.Indices[m];
+                int bIdx = scene.Indices[m + 1];
+                int cIdx = scene.Indices[m + 2];
+
+                // Track max vertex index for debugging
+                maxVertexIndexSeen = Math.Max(maxVertexIndexSeen, Math.Max(aIdx, Math.Max(bIdx, cIdx)));
+
+                // Add vertices with plane projection, MPRL transformation, and proper local indexing
+                int localA = GetOrAddVertexWithTransform(aIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, offset, ref outOfBoundsCount);
+                int localB = GetOrAddVertexWithTransform(bIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, offset, ref outOfBoundsCount);
+                int localC = GetOrAddVertexWithTransform(cIdx, scene, vertices, vertexMap, usePlane, finalNormal, surface.Height, offset, ref outOfBoundsCount);
+
+                // Only add valid triangles - skip any triangles with invalid vertex indices
+                if (localA >= 0 && localB >= 0 && localC >= 0)
                 {
-                    ConsoleLogger.WriteLine($"      Skipped triangle with invalid vertices: A={localA}, B={localB}, C={localC} (indices: {aIdx}, {bIdx}, {cIdx})");
+                    faces.Add(localA);
+                    faces.Add(localB);
+                    faces.Add(localC);
+                }
+                else
+                {
+                    // Log skipped triangles for debugging
+                    if (outOfBoundsCount <= 10) // Only log first few to avoid spam
+                    {
+                        ConsoleLogger.WriteLine($"      Skipped triangle with invalid vertices: A={localA}, B={localB}, C={localC} (indices: {aIdx}, {bIdx}, {cIdx})");
+                    }
                 }
             }
         }
@@ -551,8 +750,8 @@ internal static class Pm4MsurObjectAssembler
     /// Applies MPRL placement transformations to correctly position geometry in world space.
     /// </summary>
     private static int GetOrAddVertexWithTransform(int vertexIndex, Pm4Scene scene, List<Vector3> vertices,
-        Dictionary<int, int> vertexMap, bool usePlane, Vector3 normal, float surfaceHeight, 
-        List<Vector3> transforms, ref int outOfBoundsCount)
+        Dictionary<int, int> vertexMap, bool usePlane, Vector3 normal, float surfaceHeight,
+        Vector3 offset, ref int outOfBoundsCount)
     {
         // Check if vertex is already in the local pool
         if (vertexMap.TryGetValue(vertexIndex, out int existingLocalIndex))
@@ -591,22 +790,12 @@ internal static class Pm4MsurObjectAssembler
             transformedVertex -= normal * d;
         }
         
-        // Apply MPRL transformations if available
-        if (transforms.Any())
+        // Apply the provided placement offset (per-instance replication)
+        if (offset != Vector3.Zero && vertices.Count < 5) // Only log first few vertices to avoid spam
         {
-            // For now, apply the first available transformation
-            // TODO: Implement proper hierarchical transformation logic
-            var offset = transforms.First();
-            
-            // Apply MPRL position offset
-            transformedVertex += offset;
-            
-            // Log transformation for debugging
-            if (vertices.Count < 5) // Only log first few vertices to avoid spam
-            {
-                ConsoleLogger.WriteLine($"      Applied MPRL transform: vertex[{vertexIndex}] offset by {offset}");
-            }
+            ConsoleLogger.WriteLine($"      Applied MPRL transform: vertex[{vertexIndex}] offset by {offset}");
         }
+        transformedVertex += offset;
         
         // Final check for zero coordinates after all transformations
         if (transformedVertex == Vector3.Zero)
@@ -718,51 +907,21 @@ internal static class Pm4MsurObjectAssembler
             writer.WriteLine($"# Vertices: {obj.VertexCount}");
             writer.WriteLine();
             
-            // Write vertices used by this object (with coordinate fix)
-            var vertexMapping = new Dictionary<int, int>();
-            // Filter out triangles that reference missing vertices (can occur in single-tile mode)
-            var validTriangles = obj.Triangles
-                .Where(t => t.A < scene.Vertices.Count && t.B < scene.Vertices.Count && t.C < scene.Vertices.Count)
-                .ToList();
-            var skippedCount = obj.Triangles.Count - validTriangles.Count;
-            if (skippedCount > 0)
-                ConsoleLogger.WriteLine($"        Skipped {skippedCount} triangles with out-of-range vertex indices (tile boundary).\n");
-            // Note: cannot mutate init-only property. We'll use 'validTriangles' directly for export.
-
-            var usedVertices = validTriangles
-                .SelectMany(t => new[] { t.A, t.B, t.C })
-                .Distinct()
-                .OrderBy(i => i)
-                .ToList();
-            
-            for (int i = 0; i < usedVertices.Count; i++)
+            // Write vertices directly from the assembled object (already transformed and placed)
+            for (int i = 0; i < obj.Vertices.Count; i++)
             {
-                int originalIndex = usedVertices[i];
-                vertexMapping[originalIndex] = i + 1; // OBJ uses 1-based indexing
-                
-                // The PM4 adapter already provides unified vertex data in scene.Vertices
-                Vector3 vertex;
-                if (originalIndex < scene.Vertices.Count)
-                {
-                    vertex = scene.Vertices[originalIndex];
-                }
-                else
-                {
-                    ConsoleLogger.WriteLine($"Warning: Invalid vertex index {originalIndex}, max: {scene.Vertices.Count - 1}");
-                    vertex = Vector3.Zero;
-                }
-                
-                var transformedVertex = CoordinateTransformationService.ApplyPm4Transformation(vertex);
-                writer.WriteLine($"v {transformedVertex.X:F6} {transformedVertex.Y:F6} {transformedVertex.Z:F6}");
+                var v = obj.Vertices[i];
+                writer.WriteLine($"v {v.X:F6} {v.Y:F6} {v.Z:F6}");
             }
             
             writer.WriteLine();
             writer.WriteLine($"g {obj.ObjectType}");
             
             // Write faces
-            foreach (var (a, b, c) in validTriangles)
+            foreach (var (a, b, c) in obj.Triangles)
             {
-                writer.WriteLine($"f {vertexMapping[a]} {vertexMapping[b]} {vertexMapping[c]}");
+                // OBJ uses 1-based indexing
+                writer.WriteLine($"f {a + 1} {b + 1} {c + 1}");
             }
             
             writer.WriteLine();

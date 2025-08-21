@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using PM4NextExporter.Model;
+using PM4NextExporter.Services;
 
 namespace PM4NextExporter.Exporters
 {
@@ -11,7 +12,7 @@ namespace PM4NextExporter.Exporters
     {
         private const int TileGridSize = 64; // must match assembler/grid sizing
 
-        public static void Export(IEnumerable<AssembledObject> objects, string outDir, bool legacyParity, bool projectLocal)
+        public static void Export(IEnumerable<AssembledObject> objects, string outDir, bool legacyParity, bool projectLocal, bool alignWithMscn)
         {
             if (objects == null) return;
             Directory.CreateDirectory(outDir);
@@ -19,7 +20,8 @@ namespace PM4NextExporter.Exporters
             Directory.CreateDirectory(tilesDir);
 
             var ci = CultureInfo.InvariantCulture;
-            const bool invertX = true; // Always mirror X at object-level for per-tile exports to correct quadrant
+            // Default behavior was "always mirror"; preserve unless aligning with MSCN dictates otherwise
+            var mirrorDefault = TransformConfig.ShouldMirrorX(ExporterKind.PerTileObjects, legacyParity, alignWithMscn);
 
             // Group assembled objects by explicit tileX/tileY where available; fallback to tileId
             var groups = new Dictionary<(int X, int Y), List<AssembledObject>>();
@@ -64,15 +66,33 @@ namespace PM4NextExporter.Exporters
                     var verts = o.Vertices ?? new List<System.Numerics.Vector3>();
                     var tris = o.Triangles ?? new List<(int A, int B, int C)>();
 
-                    // write vertices for this object (global coordinates; always mirror X to correct quadrant)
+                    // Determine center for aligned mirroring (per object)
+                    float centerRelX = 0f;
+                    if (alignWithMscn && mirrorDefault && verts.Count > 0)
+                    {
+                        double sx = 0;
+                        for (int i = 0; i < verts.Count; i++) sx += verts[i].X;
+                        var centerX = (float)(sx / verts.Count);
+                        centerRelX = centerX - origin.X;
+                    }
+
+                    // write vertices for this object (global coordinates)
                     for (int i = 0; i < verts.Count; i++)
                     {
                         var v = verts[i];
                         var vx = v.X - origin.X;
                         var vy = v.Y - origin.Y;
                         var vz = v.Z - origin.Z;
-                        var x = invertX ? -vx : vx;
-                        sw.WriteLine("v " + x.ToString(ci) + " " + vy.ToString(ci) + " " + vz.ToString(ci));
+                        float x;
+                        if (alignWithMscn)
+                        {
+                            x = TransformConfig.MirrorX(vx, centerRelX, mirrorDefault);
+                        }
+                        else
+                        {
+                            x = mirrorDefault ? -vx : vx;
+                        }
+                        sw.WriteLine("v " + x.ToString("G9", ci) + " " + vy.ToString("G9", ci) + " " + vz.ToString("G9", ci));
                     }
 
                     // write faces for this object (indices are local to this object's vertex list)
@@ -83,7 +103,7 @@ namespace PM4NextExporter.Exporters
                         {
                             continue; // skip malformed
                         }
-                        if (invertX)
+                        if (mirrorDefault)
                         {
                             sw.WriteLine($"f {vOffset + a + 1} {vOffset + c + 1} {vOffset + b + 1}");
                         }

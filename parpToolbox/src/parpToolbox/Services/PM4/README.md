@@ -1,4 +1,6 @@
 # PM4 MSUR Grouping Tool
+ 
+> Note: This describes a historical MSUR-based grouping utility and does not resolve cross-tile references. Prefer PM4NextExporter for current PM4 exports. See Canonical References below for authoritative docs.
 
 ## Overview
 This tool provides optimized grouping of PM4 geometry using MSUR raw fields to produce coherent 3D object assemblies. After extensive testing of multiple grouping strategies, the MSUR raw fields approach consistently produces the most meaningful object grouping results, especially when dealing with fragmented tile data.
@@ -58,3 +60,10 @@ parpToolbox pm4-test-grouping development_22_18.pm4
 ```
 
 This command will process the `development_22_18.pm4` file and output grouped objects to the project_output directory.
+
+## Canonical References
+
+- PM4 Format: ../../../../docs/formats/PM4.md
+- PM4 Chunk Reference: ../../../../docs/formats/PM4-Chunk-Reference.md
+- PM4 Field Reference (Complete): ../../../../docs/formats/PM4-Field-Reference-Complete.md
+- PM4 Assembly Relationships: ../../../../docs/formats/PM4_Assembly_Relationships.md

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace PM4NextExporter.Model
 {
     internal enum ExportFormat { Obj, Gltf, Glb }
-    internal enum AssemblyStrategy { ParentIndex, MsurIndexCount, SurfaceKey, SurfaceKeyAA, CompositeHierarchy, ContainerHierarchy8Bit, CompositeBytePair, Parent16, MslkParent, MslkInstance, MslkInstanceCk24 }
+    internal enum AssemblyStrategy { ParentIndex, MsurIndexCount, MsurCompositeKey, SurfaceKey, SurfaceKeyAA, CompositeHierarchy, ContainerHierarchy8Bit, CompositeBytePair, Parent16, MslkParent, MslkInstance, MslkInstanceCk24 }
     internal enum GroupKey { Parent16, Parent16Container, Parent16Object, Surface, Flags, Type, SortKey, Tile }
 
     internal sealed class Options
@@ -26,6 +26,8 @@ namespace PM4NextExporter.Model
         public bool CkSplitByType { get; set; }
         // Optional: export MSCN vertices as separate per-tile OBJ layers
         public bool ExportMscnObj { get; set; }
+        // Optional: export per-object MSCN sidecars (OBJ points and CSV) next to object OBJs
+        public bool ExportObjectMscn { get; set; }
         // Optional: append pm4 tile coords (xx/yy) to object names
         public bool NameObjectsWithTile { get; set; }
         // Optional: export one OBJ per PM4 tile into a subfolder
@@ -44,6 +46,9 @@ namespace PM4NextExporter.Model
         public bool AuditOnly { get; set; }
         public bool NoRemap { get; set; }
 
+        // MSCN-only: skip mesh assembly/export and process per tile
+        public bool MscnOnly { get; set; }
+
         // Diagnostics
         public bool CsvDiagnostics { get; set; }
         public string? CsvOut { get; set; }
@@ -51,5 +56,11 @@ namespace PM4NextExporter.Model
 
         // Batch
         public bool Batch { get; set; }
+
+        // Coordinate alignment
+        // When true, exporters apply a centered X-mirror to preserve orientation
+        // without moving tiles/objects to another quadrant. Defaults to false to
+        // preserve existing behavior.
+        public bool AlignWithMscn { get; set; }
     }
 }

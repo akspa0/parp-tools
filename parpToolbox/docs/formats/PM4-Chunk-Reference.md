@@ -1,6 +1,19 @@
 # PM4 Chunk Reference
 
-## 🚨 CRITICAL ARCHITECTURE BREAKTHROUGH (2025-07-27)
+## 2025-08-19 Rewrite Preface
+
+This chunk reference has been updated to reflect current understanding:
+
+- **Per-tile processing (Confirmed)**: Process each PM4 tile independently. Do not build a unified global scene across tiles.
+- **Hierarchical containers (Confirmed)**: Identify containers via `MSLK.MspiFirstIndex = -1` and traverse to geometry-bearing links.
+- **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
+- **MPRR sentinels (Confirmed)**: `MPRR.Value1 = 65535` are property separators, not building boundaries.
+
+See unified errata: [PM4-Errata.md](PM4-Errata.md)
+
+Legacy content below is preserved for historical context and may contain deprecated claims.
+
+## [Deprecated] CRITICAL ARCHITECTURE BREAKTHROUGH (2025-07-27)
 
 **GLOBAL MESH SYSTEM DISCOVERED:** PM4 chunks implement a **cross-tile linkage system** requiring **multi-tile processing** for complete geometry assembly.
 
@@ -49,7 +62,7 @@ Each chunk follows the IFF format:
 - **Purpose**: Triangle indices referencing MSVT vertices
 - **Structure**: Array of 16-bit indices
 - **Triangulation**: Automatic conversion to triangle list
-- **Cross-Tile References**: May reference vertices in adjacent tiles (requires region loading)
+- **Notes**: Indices reference vertices within the current tile's data scope for per-tile processing workflows
 
 ### MSPI (Packed Indices)
 - **Purpose**: Alternative index storage
@@ -61,33 +74,43 @@ Each chunk follows the IFF format:
 ### MSUR (Surface Records)
 - **Purpose**: Geometry subdivision and material assignment
 - **Structure**: 32-byte entries
-- **Key Fields**:
-  - `SurfaceKey`: Subdivision level identifier (1,301 unique values)
-  - `MsviFirstIndex`: Starting index in MSVI
-  - `IndexCount`: Number of indices for this surface
-  - `IsM2Bucket`: Flag for overlay models (should be ignored)
-- **Important**: SurfaceKey represents subdivision levels, NOT object groups
+- **Layout (offsets)**:
+  - `0x00 uint8  SurfaceGroupKey` — Dataset‑dependent grouping/flags. Diagnostic; semantics under investigation.
+  - `0x01 uint8  IndexCount` — Number of indices for this surface. Diagnostic only; not an object identifier.
+  - `0x02 uint8  SurfaceAttrMask` — Attribute bitmask/flags. Semantics under investigation.
+  - `0x03 uint8  Padding` — Observed 0.
+  - `0x04 float  Nx`, `0x08 float Ny`, `0x0C float Nz` — Surface normal.
+  - `0x10 float  Height` — Plane D or surface height.
+  - `0x14 uint32 MsviFirstIndex` — First index in `MSVI` for this surface.
+  - `0x18 uint32 MdosIndex` — Reference to MDOS where present. Dataset‑dependent; non‑normative.
+  - `0x1C uint32 CompositeKey` — 32‑bit composite key. Often analyzed as Hi16/Lo16 for convenience; exact semantics remain under investigation.
+
+Notes:
+- Treat `IndexCount` as diagnostic only; do not group objects by this value.
+- Hi16/Lo16 analysis of `CompositeKey` is a software convenience and non‑normative.
 
 ### MSLK (Link Table)
 - **Purpose**: Hierarchical linking between placements and geometry
 - **Structure**: 20-byte entries
 - **Key Fields**:
-  - `ParentIndex`: Links to MPRL.Unknown4 (98.8% overlap confirmed)
-  - `MspiFirstIndex`: Geometry start index
+  - `ParentIndex`: Links to `MPRL.Unknown4` (confirmed mapping)
+  - `MspiFirstIndex`: Signed index offset; `-1` indicates a container node (no geometry)
   - `MspiIndexCount`: Geometry index count
-  - `LinkIdRaw`: 32-bit coordinate field
-- **Coverage**: 125.3% over-indexing indicates hierarchical relationships
+  - `SurfaceRefIndex`: Reference into `MSUR` for surface properties
+  - `ReferenceIndex`: Single 32-bit field; any High/Low split is software-derived
+  - `LinkIdPadding`: Always `0xFFFF`
+  - `LinkIdTileX`, `LinkIdTileY`: Encode PM4 tile grid coordinates
+ - **Coverage**: 125.3% over-indexing indicates hierarchical relationships
 
 ## Object Definition Chunks
 
-### MPRR (Properties Record) ⭐ **CRITICAL FOR OBJECT GROUPING**
-- **Purpose**: Defines true object boundaries using sentinel markers
+- ### MPRR (Properties Record)
+- **Purpose**: Records segmented properties. Sentinel markers separate property blocks, not building/object boundaries.
 - **Structure**: 4-byte entries (2 ushort values)
 - **Key Pattern**: 
-  - `Value1 = 65535 (0xFFFF)`: Sentinel marker separating objects
-  - `Value2`: Component type identifier
-- **Object Count**: ~15,400 building objects per PM4 file
-- **Data Scale**: 81,936 properties with 15,427 sentinels
+  - `Value1 = 65535 (0xFFFF)`: Sentinel marker separating property sections
+  - `Value2`: Component/property type identifier
+  - **Data Scale**: 81,936 properties with 15,427 sentinels (example dataset)
 
 ### MPRL (Placement List) ⭐ **OBJECT INSTANCE SYSTEM**
 - **Purpose**: Object instance positions with LOD control and state management
@@ -105,48 +128,9 @@ Each chunk follows the IFF format:
 - **Coordinate System**: Local tile space, requires XX*533.33 + YY*533.33 offset for world coordinates
 - **Important**: Sophisticated object management system with LOD, not simple placements
 
-## Cross-Tile Reference System (BREAKTHROUGH VALIDATED)
+## [Deprecated] Cross-Tile Reference System / Global Mesh Architecture
 
-### **Cross-Tile Vertex Resolution**
-- **Purpose**: **Direct cross-tile vertex references** in MSVI indices (no separate chunk needed)
-- **Mathematical Pattern**: **Perfect sequential ranges** with zero gap
-  - **Local vertices**: 0-63,297 (63,298 total)
-  - **Cross-tile vertices**: 63,298-126,594 (63,297 total)
-- **Processing**: Requires **multi-tile loading** to resolve 58.4% of triangle geometry
-- **No MSCN chunk**: Cross-tile vertices accessed directly via **adjacent PM4 tiles**
-
-### **Surface Encoding System**
-- **GroupKey 3**: Spatial coordinates, local tile geometry
-- **GroupKey 18**: Mixed data, boundary objects spanning tiles
-- **GroupKey 19**: Encoded linkage data, cross-tile references (74% of surfaces)
-- **BoundsMaxZ**: Hex-encoded tile/object references in encoded groups
-
-## Global Mesh Architecture and Data Flow
-
-### **Multi-Tile Assembly Pipeline** (Updated 2025-07-27)
-```
-Directory-wide PM4 Loading → Global Vertex Pool
-    ↓
-MPRR (sentinels) → Object Groups
-    ↓
-MPRL (placements) → Component Instances  
-    ↓
-MSLK (links) → Geometry References
-    ↓
-MSUR (surfaces) → GroupKey-based interpretation (spatial/encoded/mixed)
-    ↓
-MSVI (indices) + Cross-tile vertex resolution → Complete Geometry
-```
-
-### Key Relationships (Updated with Global Mesh Breakthrough)
-1. **MPRR.Value1=65535** separates object groups
-2. **MPRR.Value2** identifies component types within objects
-3. **MPRL.Unknown4 ↔ MSLK.ParentIndex** (98.8% overlap)
-4. **MSLK** links component instances to geometry fragments
-5. **MSUR.GroupKey** determines field interpretation: spatial (3), mixed (18), encoded (19)
-6. **MSVI** references **both local and cross-tile vertices** (58.4% cross-tile triangles)
-7. **Cross-tile vertex pattern**: Perfect sequential ranges 63,298-126,594 from adjacent tiles
-8. **Surface encoding**: BoundsMaxZ in GroupKey 19/18 = hex-encoded linkage, not coordinates
+The following sections previously described a multi-tile/global processing model with cross-tile vertex resolution and GroupKey-driven encoding. These claims are deprecated for object assembly workflows. Current guidance is to process PM4 strictly per tile and assemble objects via hierarchical container traversal. See rewrite preface and unified errata for details.
 
 ## Data Analysis Results
 
@@ -165,28 +149,9 @@ MSVI (indices) + Cross-tile vertex resolution → Complete Geometry
 - **Vertex Usage**: 98.8% (minimal unused vertices)
 - **MPRL-MSLK Overlap**: 98.8% (confirmed relationship)
 
-## Implementation Notes (Global Mesh Architecture)
+## [Deprecated] Implementation Notes (Global Mesh Architecture)
 
-### **Multi-Tile Processing (MANDATORY)**
-PM4 files implement a **global mesh system** requiring directory-wide processing:
-1. **Load adjacent PM4 tiles** to resolve cross-tile vertex references (58.4% of triangles)
-2. **Build global vertex pool** combining local (0-63,297) + cross-tile (63,298-126,594)
-3. **No separate chunks needed**: Cross-tile vertices accessed directly from adjacent tiles
-4. **Perfect sequential pattern**: Zero gap between local and cross-tile vertex ranges
-
-### **Surface Encoding-Aware Processing**
-1. **GroupKey interpretation**: Check MSUR.GroupKey to determine field meaning
-2. **Spatial data (GroupKey 3)**: Process as normal coordinates
-3. **Mixed data (GroupKey 18)**: Handle boundary objects spanning tiles
-4. **Encoded data (GroupKey 19)**: Decode BoundsMaxZ hex values for linkage info
-5. **95.5% consistency**: GroupKey 19 encoding is highly systematic
-
-### **Complete Object Assembly Strategy**
-1. **Parse MPRR sentinels** to identify object boundaries
-2. **Resolve cross-tile vertices** from adjacent PM4 files
-3. **Decode surface encoding** based on GroupKey values
-4. **Map components to geometry** via MPRL→MSLK→MSUR chain
-5. **Assemble complete objects** with full cross-tile geometry
+Legacy guidance on multi-tile/global pipelines and MPRR-based grouping is preserved for history only and should not be used for current implementations.
 
 ### Performance Considerations
 - **Large Objects**: Building objects can contain 600K+ triangles
@@ -208,20 +173,20 @@ PM4 files implement a **global mesh system** requiring directory-wide processing
 ## Common Pitfalls
 
 ### ❌ Incorrect Approaches
-1. **Surface Group Grouping**: MSUR.SurfaceKey represents subdivisions, not objects
-2. **Placement Instance Grouping**: MPRL entries are instances, not definitions
-3. **Single-Tile Loading**: Results in 64% data loss from missing cross-tile references
+1. **Treating MPRR as object boundaries**: MPRR are property separators only
+2. **Surface group as object ID**: MSUR.SurfaceKey are subdivisions, not objects
+3. **Global/unified scene building**: Merging tiles into one scene causes fragmentation
 
 ### ✅ Correct Approach
-1. **MPRR-Based Grouping**: Use Value1=65535 sentinels for object boundaries
-2. **Hierarchical Assembly**: Combine all component types within object groups
-3. **Region Loading**: Load complete tile regions for cross-tile vertex resolution
+1. **Per-tile processing**: Build an isolated scene per PM4 tile
+2. **Hierarchical container traversal**: Identify containers via `MSLK.MspiFirstIndex = -1`; map placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex`
+3. **Use MSUR/MSVI for faces**: Treat `MSUR.IndexCount` as diagnostic, not an object identifier
 
 ## Conclusion
 
-PM4 chunk relationships form a complex instanced geometry system where:
-- **MPRR defines object boundaries** (not surface groups or placements)
-- **Cross-tile loading is essential** for complete geometry
-- **Hierarchical assembly produces realistic building objects** (not fragments)
+PM4 chunk relationships support a hierarchical, per-tile assembly workflow:
+- **MPRR separates property sections**, not building/object boundaries
+- **Container traversal** via `MSLK` and placement mapping via `MPRL.Unknown4 ↔ MSLK.ParentIndex` drives assembly
+- **Faces** come from `MSUR → MSVI`; treat `IndexCount` as diagnostic only
 
-Understanding these relationships is crucial for successful PM4 object extraction and export.
+See the rewrite preface and unified errata for the authoritative guidance.

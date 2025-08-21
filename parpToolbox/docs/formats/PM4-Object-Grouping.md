@@ -1,14 +1,31 @@
-# PM4 Object Grouping - DEFINITIVE GUIDE
+# PM4 Object Grouping
 
-## 🎯 BREAKTHROUGH: MPRR Sentinel-Based Building Boundaries
+## 2025-08-19 Rewrite Preface
 
-**DEFINITIVE DISCOVERY (2025-08-06)**: The MPRR chunk contains the true building boundary system using sentinel values that produce complete building-scale objects.
+Updated guidance:
 
-### ✅ THE CORRECT METHOD: MPRR Sentinel Grouping
+- **Per-tile processing (Confirmed)**: Process one PM4 tile at a time. Do not unify tiles into a global scene.
+- **Hierarchical containers (Confirmed)**: Identify containers via `MSLK.MspiFirstIndex = -1`; traverse to geometry-bearing links.
+- **Placement link (Confirmed)**: `MPRL.Unknown4` equals `MSLK.ParentIndex`.
+- **MPRR (Confirmed)**: `Value1 = 65535` are property separators, not building boundaries.
+- **MSUR.IndexCount (Diagnostic)**: Useful for quick views; not authoritative for object identity.
 
-**Status:** ✅ **VERIFIED** - Most effective method for grouping PM4 geometry into coherent building-scale objects  
-**Scale:** Produces realistic building objects with **38,000-654,000 triangles** per building  
-**Source:** Direct analysis of parpToolbox MPRR chunk parser implementation
+See unified errata: [PM4-Errata.md](PM4-Errata.md)
+
+### Recommended: Container Traversal (2025-08-19)
+
+1. Identify container nodes via `MSLK.MspiFirstIndex = -1`.
+2. Traverse container hierarchy to collect child geometry links (`MSLK` with geometry).
+3. Map to placements via `MPRL.Unknown4 ↔ MSLK.ParentIndex` and assemble faces from `MSUR → MSVI`.
+4. Export per tile; avoid cross-tile merges.
+
+## [Deprecated] MPRR Sentinel-Based Building Boundaries
+
+The following section is preserved for historical context. MPRR.Value1=65535 are now treated as property separators, not building/object boundaries.
+
+### Deprecated Content
+
+This section is preserved for historical context. Do not use MPRR sentinel grouping for object boundaries; use container traversal and the `MPRL.Unknown4 ↔ MSLK.ParentIndex` mapping instead.
 
 ### Core Principle: Sentinel Markers Define Building Boundaries
 
@@ -22,21 +39,13 @@ Sentinel Pattern:
   Value2 = Component type (when following sentinel)
 ```
 
-### Verified Statistics from PM4 Analysis:
-- **~81,936 MPRR properties total**
-- **~15,427 sentinel markers (Value1=65535)**  
-- **~15,428 building objects** separated by sentinels
-- **Building scale: 38K-654K triangles** (realistic architecture)
+### Notes
+- Typical scale example: 81,936 properties with 15,427 sentinels observed in one dataset. Sentinels separate property sections, not objects.
 
-### Algorithm: Building Boundary Detection
+### Algorithm: Deprecated
+Legacy algorithm content removed. See "Recommended: Container Traversal" above for the current approach.
 
-1. **Parse MPRR chunk entries** in sequential order
-2. **Identify sentinel markers** where `Value1 = 65535`
-3. **Group all entries between consecutive sentinels** as single building
-4. **Extract geometry from all components** within each sentinel-defined group
-5. **Export unified building object** with complete triangle set
-
-### Implementation Pattern:
+### Implementation Pattern (Deprecated):
 
 ```csharp
 // Building boundary detection using MPRR sentinels
@@ -66,7 +75,7 @@ if (currentBuilding.Any())
 }
 ```
 
-### MPRR Database Integration
+### MPRR Database Integration (Deprecated)
 
 To use MPRR sentinel grouping, the database schema must include property records:
 
@@ -82,7 +91,7 @@ CREATE TABLE Properties (
 );
 ```
 
-### Building Assembly Query
+### Building Assembly Query (Deprecated)
 
 ```sql
 -- Find building boundaries using MPRR sentinels
@@ -96,14 +105,14 @@ WHERE Pm4FileId = @fileId
 ORDER BY GlobalIndex;
 ```
 
-### Implementation Requirements
+### Implementation Requirements (Deprecated)
 
 1. **Database Export:** Extend `Pm4DatabaseExporter` to include MPRR chunk data
 2. **Property Parsing:** Implement `ExportPropertiesAsync` method
 3. **Building Grouper:** Use sentinel boundaries instead of container logic
 4. **Geometry Assembly:** Collect all triangles between sentinel markers
 
-### Performance Characteristics
+### Performance Characteristics (Deprecated)
 
 - **Memory Efficient:** Sequential processing, no complex spatial queries
 - **Deterministic:** Same building boundaries every time
@@ -190,25 +199,21 @@ public class MprrBuildingGrouper
 
 ## 📚 Historical Approaches (Deprecated)
 
-**⚠️ The following methods are documented for historical reference but are now superseded by MPRR sentinel grouping.**
+**⚠️ The following methods are documented for historical reference and are not recommended. Container traversal (above) is the current approach.**
 
 ### ❌ Spatial Clustering (Obsolete)
 - **Problem:** Required complex spatial tolerance calculations
 - **Scale:** Produced fragmented objects, not complete buildings
 - **Status:** Superseded by MPRR method
 
-### ❌ Container-Based Grouping (Obsolete) 
-- **Problem:** Used MSLK MspiFirstIndex = -1 markers
-- **Scale:** Still produced fragments, not building-scale objects
-- **Status:** Superseded by MPRR method
+> Note: Earlier notes labeling container-based grouping as obsolete were incorrect. Container traversal via `MSLK.MspiFirstIndex = -1` is the recommended approach.
 
 ### ❌ Type_0x01 Assembly Patterns (Obsolete)
 - **Problem:** Complex multi-type component classification
 - **Scale:** Theoretical only, never achieved realistic building scales
 - **Status:** Superseded by MPRR method
 
-**CONCLUSION:** MPRR sentinel-based grouping is the **definitive solution** for PM4 building assembly, producing realistic building-scale objects (38K-654K triangles) with simple, reliable implementation.
-**MPRR chunk contains the true object boundaries** using sentinel values (Value1=65535) that separate geometry into complete building objects.
+**CONCLUSION (Deprecated):** MPRR sentinel-based grouping is not recommended. `MPRR.Value1 = 65535` are property separators, not building/object boundaries.
 
 ### Data Analysis Results
 From `development_00_00.pm4` analysis:
@@ -220,10 +225,9 @@ From `development_00_00.pm4` analysis:
 ## Chunk Relationships
 
 ### MPRR (Properties Record)
-- **Purpose**: Defines object boundaries and hierarchical grouping
+- **Purpose**: Records segmented properties; sentinel markers separate property sections, not building/object boundaries
 - **Structure**: Pairs of ushort values (Value1, Value2)
-- **Key Pattern**: Value1=65535 acts as sentinel/separator between objects
-- **Object Count**: ~15,400 building objects per PM4 file
+- **Key Pattern**: Value1=65535 acts as sentinel/separator between property blocks
 
 ### MPRL (Placement List) ⭐ **DECODED OBJECT INSTANCE SYSTEM**
 - **Purpose**: Object instance management with LOD control and state flags
@@ -251,78 +255,22 @@ From `development_00_00.pm4` analysis:
 - **Key Insight**: These are **subdivision levels**, not object groups
 - **Pattern**: 518,092 surfaces with only 1,301 unique SurfaceKeys
 
-## Assembly Algorithm
+## Assembly Algorithm (Updated)
 
-### 1. Parse MPRR Object Groups
-```csharp
-// Identify object boundaries using Value1=65535 sentinels
-var objectGroups = new Dictionary<int, List<ushort>>();
-int currentGroup = 0;
-var currentComponents = new List<ushort>();
+### 1. Traverse Container Hierarchy
+ - Identify container nodes via `MSLK.MspiFirstIndex = -1`.
 
-foreach (var property in scene.Properties)
-{
-    if (property.Value1 == 65535) // Sentinel marker
-    {
-        if (currentComponents.Count > 0)
-        {
-            objectGroups[currentGroup++] = currentComponents.ToList();
-            currentComponents.Clear();
-        }
-    }
-    else
-    {
-        currentComponents.Add(property.Value2); // Component type
-    }
-}
-```
+### 2. Map Placements to Geometry
+- Use `MPRL.Unknown4 ↔ MSLK.ParentIndex` to map placements to geometry links
 
-### 2. Map Component Types to Geometry
-```csharp
-// Group MPRL placements by component type
-var placementsByType = scene.Placements
-    .GroupBy(p => p.Unknown4)
-    .ToDictionary(g => g.Key, g => g.ToList());
-
-// Link to geometry via MSLK.ParentIndex
-var linksByParentIndex = scene.Links
-    .Where(link => link.ParentIndex > 0 && link.MspiIndexCount > 0)
-    .GroupBy(link => link.ParentIndex)
-    .ToDictionary(g => g.Key, g => g.ToList());
-```
-
-### 3. Assemble Complete Objects
-```csharp
-foreach (var (objectId, componentTypes) in objectGroups)
-{
-    var objectTriangles = new List<(int A, int B, int C)>();
-    
-    // Collect geometry from all component types in this object
-    foreach (var componentType in componentTypes)
-    {
-        if (linksByParentIndex.TryGetValue(componentType, out var geometryLinks))
-        {
-            // Extract triangles from linked geometry
-            foreach (var link in geometryLinks)
-            {
-                // Add triangles from link.MspiFirstIndex to link.MspiIndexCount
-            }
-        }
-    }
-    
-    // Create complete building object
-    var buildingObject = new HierarchicalObject(
-        objectId, componentTypes, objectTriangles, 
-        boundingCenter, vertexCount, objectType
-    );
-}
-```
+### 3. Assemble Faces
+- Extract faces via `MSUR → MSVI` using indices from surface records
+- Treat `MSUR.IndexCount` as diagnostic only, not an object identifier
 
 ## Implementation
 
 ### CLI Commands
-- `pm4-mprr-objects`: Export building objects using MPRR hierarchical grouping
-- `pm4-analyze-data`: Analyze PM4 chunk relationships and MPRR patterns
+- `pm4-analyze-data`: Analyze PM4 chunk relationships
 
 ### Key Classes
 - `Pm4HierarchicalObjectAssembler`: Main assembly logic
@@ -369,11 +317,9 @@ PM4 files reference vertices from adjacent tiles, requiring region loading:
 
 ## Conclusion
 
-The PM4 object grouping problem has been solved through MPRR-based hierarchical assembly. The key insights:
+Recommended approach:
 
-1. **MPRR sentinels define true object boundaries**
-2. **MPRL placements are instances, not definitions**
-3. **Cross-tile vertex resolution is essential**
-4. **Hierarchical assembly produces building-scale objects**
-
-This approach transforms PM4 exports from fragmented geometry into complete, realistic building objects suitable for 3D visualization and analysis.
+1. **Per-tile processing**: Isolate each PM4 tile
+2. **Container traversal**: Use `MSLK` container nodes (`MspiFirstIndex = -1`) to drive assembly
+3. **Placement mapping**: `MPRL.Unknown4 ↔ MSLK.ParentIndex`
+4. **Faces from MSUR → MSVI**; treat `MSUR.IndexCount` as diagnostic

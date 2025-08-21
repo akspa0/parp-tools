@@ -2,6 +2,79 @@
 
 A comprehensive toolkit for analyzing and extracting World of Warcraft PM4 and WMO files with advanced spatial correlation capabilities.
 
+## Tooling Overview
+
+- **parpToolbox**: Core library + analysis/diagnostics CLI for PM4/PD4/WMO. Provides research exporters, analysis tools, correlation utilities, and diagnostics.
+- **PM4NextExporter**: Focused PM4 export CLI (`pm4next-export`) with multiple assembly strategies and robust per-object/per-tile exporting. Prefer this for PM4 exports.
+
+All tools write outputs exclusively to timestamped directories under `project_output/`, with logs captured in `run.log`.
+
+### Which CLI should I use?
+
+- **Export PM4 to OBJ (current path)**: Use `PM4NextExporter`. See `src/PM4NextExporter/README.md`.
+- **Analyze PM4/PD4, WMO export, correlation, diagnostics**: Use parpToolbox commands (this README).
+
+### Build & Run Quickstart
+
+```bash
+# Build repository
+dotnet build
+
+# Run PM4NextExporter (preferred for PM4 export)
+dotnet run --project src/PM4NextExporter -- "development_00_00.pm4" --format obj
+
+# Run parpToolbox CLI (analysis/diagnostics)
+dotnet run --project src/parpToolbox -- analyze "development_00_00.pm4" --report
+```
+
+For PM4NextExporter usage and options, see: `src/PM4NextExporter/README.md`.
+
+## parpToolbox CLI Command Index
+
+- **Primary**
+  - `analyze` — Analyze PM4/PD4 files; generate reports/DB
+  - `export` — Export PM4/PD4/WMO to OBJ/MTL (research/legacy paths)
+  - `wmo` — Export WMO; supports `--split-groups`, `--collision`, `--facades`
+  - `test` — Run regression/validation tests
+
+- **PM4 analysis and diagnostics**
+  - `pm4-analyze-fields` — Chunk field distribution analysis
+  - `analyze-pm4-keys` — Key-like fields (Data Web model) analysis
+  - `diagnose-linkage` — Cross-chunk linkage diagnostics
+  - `analyze-surfacerefindex` — MSUR surface-ref index patterns
+  - `analyze-mprl-fields` — MPRL field statistics
+  - `analyze-mslk-fields` — MSLK field statistics
+  - `chunk-validation` (`cv`) — Validate MSUR chunk integrity
+  - `pm4-analyze-data-banding` — Data banding analysis
+  - `surface-encoding-analysis` (`sea`) — Surface encoding patterns
+  - `bounds-decoder` (`bd`) — Decode surface bounds
+  - `hierarchical-decoder` (`hd`) — Container hierarchy analysis
+  - `global-mesh-analysis` / `gma`, `mprl-analysis` / `mfa` — Global mesh and MPRL analyses
+  - `export-pm4-dataweb` — Export structured PM4 Data Web dataset
+
+- **PM4 exporters (research/experimental)**
+  - `pm4-export-scene-graph` — Scene graph traversal export
+  - `pm4-export-spatial-clustering` — Spatial clustering export
+  - `refined-hierarchical-export` — Refined hierarchical grouping
+  - `spatial-clustering`, `diagnostic-spatial-clustering`, `enhanced-diagnostic-spatial`, `fixed-spatial-clustering` — Clustering diagnostics
+  - `pm4-export-4d-objects` — Experimental 4D object exporter
+  - `pm4-export-json` — Export PM4 to JSON/DB/aux files
+
+- **Correlation**
+  - `pm4-wmo-match` — Spatial match PM4 to WMO geometry
+  - `mscn-wmo-compare` — Compare MSCN anchors to WMO
+  - `batch-mscn-wmo-correlation` — Batch correlation across directories
+
+- **Utilities**
+  - `chunk-test` — Explore chunk combination patterns
+  - `mprl-pattern-analysis` (`mpa`) — Analyze MPRL patterns (DB)
+  - `mslk-pattern-analysis` (`mla`) — Analyze MSLK patterns (DB)
+  - `quality-analysis` (`qa`) — Data quality metrics
+
+Notes:
+- Legacy command aliases are supported with deprecation warnings; prefer unified commands above.
+- All commands write to timestamped `project_output/` directories and log to `run.log` inside each session.
+
 ## Core Capabilities
 
 ### PM4 Processing
@@ -35,6 +108,9 @@ dotnet build
 ```
 
 ## PM4 Processing
+
+Prefer the dedicated PM4 export CLI: `PM4NextExporter` (`src/PM4NextExporter/README.md`).
+The commands below refer to parpToolbox's analysis/experimental exporters.
 
 ### Basic Export
 
@@ -89,6 +165,34 @@ The parpToolbox implements multiple PM4 export approaches, each optimized for di
 3. **WMO-Inspired Export** (`pm4-export-wmo-inspired`): Applies WMO organizational logic to PM4 data for familiar export structure.
 
 4. **Per-Object Export** (`export --per-object`): Exports each surface group as a separate OBJ file.
+
+## GLB-RAW Export (parpDataHarvester)
+
+Use the GLB-RAW exporter to pack raw PM4 geometry into GLB for quick inspection.
+
+```bash
+# Per-region (recommended: resolves cross-tile MSCN remaps)
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --per-region --mode objects
+
+# Optional: flip X for visualization parity
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --per-region --mode objects --flip-x
+
+# Per-tile (no cross-tile remap; may miss geometry)
+dotnet run --project src/parpDataHarvester/parpDataHarvester.csproj -- \
+  export-glb-raw --in ".\\test_data\\original_development" --out ".\\project_output\\glb_raw" \
+  --mode surfaces
+```
+
+Notes:
+- Positions are written as-is by default (no X-axis flip). Use `--flip-x` only if needed.
+- Per-region uses `Pm4GlobalTileLoader` to aggregate vertices and apply MSCN remapping.
+- `RawGeometryAssembler` clamps index slices, drops invalid triangles, and prints diagnostics
+  (clamped slices, dropped triangles, emitted triangles).
+- GLB uses a default double-sided material to avoid backface culling issues when mirroring.
 
 ## WMO Processing
 
@@ -193,8 +297,10 @@ project_output/
 
 - [PM4 Format](docs/formats/PM4.md) - Comprehensive PM4 format specification
 - [PM4 Chunk Reference](docs/formats/PM4-Chunk-Reference.md) - Detailed chunk structure documentation
-- [Object Grouping](docs/formats/PM4-Object-Grouping.md) - Verified object assembly methods
-- [Surface Fields](docs/MSUR_FIELDS.md) - MSUR chunk field analysis
+- [PM4 Field Reference (Complete)](docs/formats/PM4-Field-Reference-Complete.md)
+- [PM4 Assembly Relationships](docs/formats/PM4_Assembly_Relationships.md)
+- [PM4 Object Grouping](docs/formats/PM4-Object-Grouping.md) - Verified object assembly methods
+- Archived (historical): [Surface Fields analysis](docs/_archive/MSUR_FIELDS.md)
 
 ## Troubleshooting
 
@@ -202,7 +308,7 @@ project_output/
 
 1. **Incomplete Geometry**: Use region loading mode (default) instead of single-tile mode
 2. **Fragmented Objects**: Ensure cross-tile references are resolved
-3. **Coordinate System Issues**: Apply X-axis inversion (-vertex.X) for proper orientation
+3. **Coordinate System Issues**: For GLB-RAW exports, use `--flip-x` if visualization parity requires X inversion (default is no flip)
 4. **Memory Issues**: Process smaller regions or use single-tile mode for analysis
 
 ### Diagnostic Commands
