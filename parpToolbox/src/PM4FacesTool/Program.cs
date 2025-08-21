@@ -38,7 +38,11 @@ internal static class Program
         float RotZDeg,
         float TranslateX,
         float TranslateY,
-        float TranslateZ
+        float TranslateZ,
+        bool MscnSidecar,
+        int MscnPreRotZ,
+        string MscnPreFlip,
+        string MscnBasis
     );
 
     public static int Main(string[] args)
@@ -451,6 +455,80 @@ internal static class Program
         var jsonOpts = new JsonSerializerOptions { WriteIndented = true };
         File.WriteAllText(Path.Combine(outDir, "objects_index.json"), JsonSerializer.Serialize(objectIndex, jsonOpts));
         File.WriteAllText(Path.Combine(outDir, "tiles_index.json"), JsonSerializer.Serialize(tileIndex, jsonOpts));
+
+        // Optional: MSCN sidecar export
+        if (opts.MscnSidecar)
+        {
+            try
+            {
+                ExportMscnSidecar(scene, outDir, opts);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[pm4-faces] MSCN sidecar failed: {ex.Message}");
+            }
+        }
+    }
+
+    private static void ExportMscnSidecar(Pm4Scene scene, string outDir, Options opts)
+    {
+        var mdir = Path.Combine(outDir, "mscn");
+        Directory.CreateDirectory(mdir);
+
+        var header = "tile_id,tile_x,tile_y,count,obj_path";
+        var rows = new List<string> { header };
+
+        var verts = scene.MscnVertices ?? new List<Vector3>();
+        var tileIds = scene.MscnVertexTileIds ?? new List<int>();
+        if (verts.Count == 0 || tileIds.Count != verts.Count)
+        {
+            // Emit empty counts file to signal no MSCN data
+            File.WriteAllLines(Path.Combine(mdir, "mscn_counts.csv"), rows);
+            Console.WriteLine("[pm4-faces] No MSCN vertices available for sidecar export.");
+            return;
+        }
+
+        // Log MSCN pre-transform selection
+        Console.WriteLine($"[pm4-faces] MSCN pre-transform: basis='{opts.MscnBasis}', rotZ={opts.MscnPreRotZ} deg, flip='{opts.MscnPreFlip}'");
+
+        // Group points by tileId
+        var groups = new Dictionary<int, List<Vector3>>();
+        for (int i = 0; i < verts.Count; i++)
+        {
+            int tid = tileIds[i];
+            if (!groups.TryGetValue(tid, out var list)) { list = new List<Vector3>(); groups[tid] = list; }
+            list.Add(verts[i]);
+        }
+
+        foreach (var kv in groups)
+        {
+            int tileId = kv.Key;
+            int tileX = tileId % 64;
+            int tileY = tileId / 64;
+            var local = new List<Vector3>(kv.Value);
+
+            // Optional MSCN-only pre-transform (basis canonicalization, then rotate around Z and/or mirror), then apply mesh pipeline
+            ApplyMscnPreTransform(local, opts.MscnPreRotZ, opts.MscnPreFlip, opts.MscnBasis);
+            // Apply same transform pipeline as meshes
+            ApplyProjectLocal(local, opts.ProjectLocal);
+            ApplyGlobalTransform(local, opts);
+
+            string name = $"mscn_t{tileX:D2}_{tileY:D2}";
+            string objPath = Path.Combine(mdir, name + ".obj");
+
+            // Write as vertices-only OBJ (no triangles)
+            ObjWriter.Write(objPath, local, new List<(int A, int B, int C)>(), legacyParity: false, projectLocal: false, forceFlipX: false);
+
+            rows.Add(string.Join(',',
+                tileId.ToString(CultureInfo.InvariantCulture),
+                tileX.ToString(CultureInfo.InvariantCulture),
+                tileY.ToString(CultureInfo.InvariantCulture),
+                local.Count.ToString(CultureInfo.InvariantCulture),
+                Path.GetRelativePath(outDir, objPath).Replace("\\", "/")));
+        }
+
+        File.WriteAllLines(Path.Combine(mdir, "mscn_counts.csv"), rows);
+        Console.WriteLine($"[pm4-faces] MSCN sidecar: tiles={groups.Count}, points={verts.Count}");
     }
 
     private static void ExportRenderMeshMerged(
@@ -1558,6 +1636,15 @@ internal static class Program
         bool flipXEnabled = true; // default preserves current behavior
         float rotXDeg = 0f, rotYDeg = 0f, rotZDeg = 0f;
         float tx = 0f, ty = 0f, tz = 0f;
+        bool mscnSidecar = false;
+        int mscnPreRotZ = 0; // degrees, multiples of 90 recommended
+        string mscnPreFlip = "none"; // none|x|y|z|xy|xz|yz|xyz
+        string mscnBasis = "legacy"; // legacy=negxy, remap=swapxy
+        bool mscnNoDefaults = false; // suppress implicit MSCN defaults
+        bool userSetMscnPreRotZ = false; // track explicit CLI set
+        bool userSetMscnPreFlip = false; // track explicit CLI set
+        // Accumulate multiple --mscn-pre-flip occurrences into a bitmask (x=1,y=2,z=4)
+        int mscnFlipMask = 0; bool mscnFlipFlagsSeen = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1632,6 +1719,46 @@ internal static class Program
                 case "--no-mscn-remap":
                     noMscnRemap = true;
                     break;
+                case "--mscn-sidecar":
+                    mscnSidecar = true;
+                    break;
+                case "--no-mscn-defaults":
+                    mscnNoDefaults = true;
+                    break;
+                case "--mscn-basis":
+                    if (i + 1 < args.Length)
+                    {
+                        var b = (args[++i] ?? "legacy").Trim().ToLowerInvariant();
+                        if (b == "legacy" || b == "remap") mscnBasis = b; else Console.WriteLine($"[pm4-faces] Warning: unknown --mscn-basis '{b}', expected legacy|remap. Using 'legacy'.");
+                    }
+                    break;
+                case "--mscn-pre-rotz":
+                    if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var rzDeg))
+                    { mscnPreRotZ = rzDeg; userSetMscnPreRotZ = true; i++; }
+                    break;
+                case "--mscn-pre-flip":
+                    if (i + 1 < args.Length)
+                    {
+                        var token = (args[++i] ?? "none").Trim().ToLowerInvariant();
+                        userSetMscnPreFlip = true; mscnFlipFlagsSeen = true;
+                        switch (token)
+                        {
+                            case "none": break;
+                            case "x": mscnFlipMask |= 1; break;
+                            case "y": mscnFlipMask |= 2; break;
+                            case "z": mscnFlipMask |= 4; break;
+                            case "xy": mscnFlipMask |= 1 | 2; break;
+                            case "xz": mscnFlipMask |= 1 | 4; break;
+                            case "yz": mscnFlipMask |= 2 | 4; break;
+                            case "xyz": mscnFlipMask |= 1 | 2 | 4; break;
+                            default:
+                                Console.WriteLine($"[pm4-faces] Warning: unknown --mscn-pre-flip '{token}', expected none|x|y|z|xy|xz|yz|xyz. Ignoring.");
+                                break;
+                        }
+                        // Keep last token in case we don't aggregate; will be overwritten if we saw any flags
+                        mscnPreFlip = token;
+                    }
+                    break;
                 case "--no-flip-x":
                     flipXEnabled = false;
                     break;
@@ -1662,13 +1789,57 @@ internal static class Program
             }
         }
 
+        // Aggregate multi-flag MSCN flips into canonical string if the user supplied any
+        if (mscnFlipFlagsSeen)
+        {
+            mscnPreFlip = mscnFlipMask switch
+            {
+                0 => "none",
+                1 => "x",
+                2 => "y",
+                4 => "z",
+                3 => "xy",
+                5 => "xz",
+                6 => "yz",
+                7 => "xyz",
+                _ => "none",
+            };
+        }
+
+        // Apply implicit MSCN defaults for sidecar exports unless suppressed or explicitly set
+        if (mscnSidecar && !mscnNoDefaults)
+        {
+            bool appliedRot = false, appliedFlip = false;
+            if (!userSetMscnPreRotZ) { mscnPreRotZ = 90; appliedRot = true; }
+            if (!userSetMscnPreFlip) { mscnPreFlip = "xy"; appliedFlip = true; }
+            if (appliedRot || appliedFlip)
+            {
+                Console.WriteLine($"[pm4-faces] MSCN defaults applied: rotZ={mscnPreRotZ} deg, flip='{mscnPreFlip}' (override via flags or use --no-mscn-defaults)");
+            }
+            else
+            {
+                // Defaults not applied because user specified one or both pre-transform flags
+                var reasons = new List<string>();
+                if (userSetMscnPreRotZ) reasons.Add("mscn-pre-rotz");
+                if (userSetMscnPreFlip) reasons.Add("mscn-pre-flip");
+                if (reasons.Count > 0)
+                {
+                    Console.WriteLine($"[pm4-faces] MSCN defaults skipped (user provided {string.Join(" & ", reasons)}).");
+                }
+            }
+        }
+        else if (mscnSidecar && mscnNoDefaults)
+        {
+            Console.WriteLine("[pm4-faces] MSCN defaults suppressed by --no-mscn-defaults.");
+        }
+
         if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap, flipXEnabled, rotXDeg, rotYDeg, rotZDeg, tx, ty, tz);
+        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap, flipXEnabled, rotXDeg, rotYDeg, rotZDeg, tx, ty, tz, mscnSidecar, mscnPreRotZ, mscnPreFlip, mscnBasis);
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap] [--no-flip-x] [--rotate-x <deg>] [--rotate-y <deg>] [--rotate-z <deg>] [--translate <dx> <dy> <dz>]");
+        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap] [--mscn-sidecar] [--no-mscn-defaults] [--mscn-basis legacy|remap] [--mscn-pre-rotz <deg>] [--mscn-pre-flip none|x|y|z|xy|xz|yz|xyz] [--no-flip-x] [--rotate-x <deg>] [--rotate-y <deg>] [--rotate-z <deg>] [--translate <dx> <dy> <dz>]");
         Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
         Console.WriteLine("  --snap-to-plane: project vertices to each surface's MSUR plane (experimental; off by default).");
         Console.WriteLine("  --height-scale: multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36, 0.0625 for 1/16).");
@@ -1678,6 +1849,11 @@ internal static class Program
         Console.WriteLine("  Default: composite-instance object export with CK24 monolithic enabled; use --ck-merge-components to retain per-component outputs.");
         Console.WriteLine("  --gltf / --glb: also export glTF 2.0 (.gltf+.bin) and/or GLB alongside OBJ outputs.");
         Console.WriteLine("  --no-mscn-remap: disable global MSCN vertex remapping during region load (advanced; default is enabled).");
+        Console.WriteLine("  --mscn-sidecar: export per-tile MSCN points (OBJ under 'mscn/') and 'mscn_counts.csv' alongside other outputs.");
+        Console.WriteLine("  --mscn-basis: choose MSCN canonicalization before pre-rotz/flip: 'legacy' = (-X,-Y,Z), 'remap' = (Y,X,Z). Default 'legacy'.");
+        Console.WriteLine("  MSCN defaults: with --mscn-sidecar, defaults apply unless overridden: --mscn-pre-rotz 90 and --mscn-pre-flip xy. Use --no-mscn-defaults to disable.");
+        Console.WriteLine("  --mscn-pre-rotz: apply additional Z rotation ONLY to MSCN points before normal pipeline (normalized to 0/90/180/270).");
+        Console.WriteLine("  --mscn-pre-flip: mirror axes ONLY for MSCN points before normal pipeline; one of none,x,y,z,xy,xz,yz,xyz.");
         Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; emit tiles and a single merged 'render_mesh.obj'.");
         Console.WriteLine("  --render-mesh-merged: also emit a single merged 'render_mesh.obj' alongside any group-by mode (useful with object exports).");
         Console.WriteLine("  Transforms: X-flip is ON by default (use --no-flip-x to disable). Rotations apply in order X -> Y -> Z (degrees). --translate applies global offset.");
@@ -1883,6 +2059,90 @@ internal static class Program
         for (int i = 0; i < verts.Count; i++)
         {
             verts[i] = verts[i] - mean;
+        }
+    }
+
+    private static void CanonicalizeMscnAxes(List<Vector3> verts, string basis)
+    {
+        if (verts == null || verts.Count == 0) return;
+        for (int i = 0; i < verts.Count; i++)
+        {
+            var v = verts[i];
+            // Basis selection:
+            //  - legacy: negate X and Y, preserve Z  => (-X, -Y, Z)
+            //  - remap:  swap X and Y, preserve signs => (Y, X, Z)
+            switch ((basis ?? "legacy").Trim().ToLowerInvariant())
+            {
+                case "remap":
+                    verts[i] = new Vector3(v.Y, v.X, v.Z);
+                    break;
+                case "legacy":
+                default:
+                    if (!string.IsNullOrWhiteSpace(basis) && basis.Trim().ToLowerInvariant() != "legacy")
+                        Console.WriteLine($"[pm4-faces] Warning: unknown MSCN basis '{basis}', defaulting to 'legacy'.");
+                    verts[i] = new Vector3(-v.X, -v.Y, v.Z);
+                    break;
+            }
+        }
+    }
+
+    private static void ApplyMscnPreTransform(List<Vector3> verts, int rotZDeg, string flip, string basis)
+    {
+        if (verts == null || verts.Count == 0) return;
+
+        // First, bring MSCN points into the canonical basis used by meshes (prior fix)
+        CanonicalizeMscnAxes(verts, basis);
+
+        // Normalize rotation to right angles
+        int r = rotZDeg;
+        r %= 360; if (r < 0) r += 360;
+        int rNorm = ((int)MathF.Round(r / 90f)) * 90;
+        rNorm %= 360;
+        if (rNorm != r && rotZDeg != 0)
+        {
+            Console.WriteLine($"[pm4-faces] Note: --mscn-pre-rotz normalized from {rotZDeg} to {rNorm} (right-angle).");
+        }
+
+        // Build rotation (Z only)
+        if (rNorm != 0)
+        {
+            float rad = rNorm * (MathF.PI / 180f);
+            var rz = Matrix4x4.CreateRotationZ(rad);
+            for (int i = 0; i < verts.Count; i++)
+            {
+                verts[i] = Vector3.Transform(verts[i], rz);
+            }
+        }
+
+        // Determine flip axes
+        string f = (flip ?? "none").Trim().ToLowerInvariant();
+        bool fx = false, fy = false, fz = false;
+        switch (f)
+        {
+            case "none":
+            case "":
+                break;
+            case "x": fx = true; break;
+            case "y": fy = true; break;
+            case "z": fz = true; break;
+            case "xy": fx = fy = true; break;
+            case "xz": fx = fz = true; break;
+            case "yz": fy = fz = true; break;
+            default:
+                Console.WriteLine($"[pm4-faces] Warning: unknown --mscn-pre-flip '{flip}', expected none|x|y|z|xy|xz|yz. Ignoring.");
+                break;
+        }
+
+        if (fx || fy || fz)
+        {
+            for (int i = 0; i < verts.Count; i++)
+            {
+                var v = verts[i];
+                if (fx) v.X = -v.X;
+                if (fy) v.Y = -v.Y;
+                if (fz) v.Z = -v.Z;
+                verts[i] = v;
+            }
         }
     }
 
