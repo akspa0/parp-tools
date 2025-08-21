@@ -25,15 +25,19 @@ Assembly strategy: tiles and the merged render mesh are built object-first (grou
 ## CLI Options
 
 - `--input|-i <tile.pm4|dir>` Input PM4 file (single) or directory (with `--batch`).
-- `--out <dir>` Output root. Defaults to `project_output/pm4faces_YYYYMMDD_HHmmss`.
+- `--out|--out-dir <dir>` Output root. Defaults to `<CWD>/pm4faces_out/` and final exports land in `<CWD>/pm4faces_out/<TileName>/`.
 - `--batch` Process all tiles in input directory that share the same prefix.
 - `--group-by <composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh|surfaces-all>` Object grouping strategy. `render-mesh`/`surfaces-all` emits a single merged mesh using object-first assembly.
 - `--render-mesh-merged` Emit a merged `render_mesh.obj` alongside any group-by mode.
 - `--snap-to-plane` Project vertices to each surface's MSUR plane (optional; off by default).
 - `--height-scale <float>` Multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36).
 - `--no-mscn-remap` Disable MSCN vertex remap during region load (often improves face completeness).
-- `--legacy-parity` Apply legacy X-flip/parity for objects (tiles always force X-flip).
 - `--project-local` Recenters geometry about the mean before export.
+- `--flip-x` Globally mirror X during transform application (objects and tiles when transforms are enabled).
+- `--flip-y` Globally mirror Y during transform application (objects and tiles when transforms are enabled).
+- `--tiles-apply-transforms` Apply global transforms to tile OBJs (default OFF). When OFF, tiles export in raw scene space with legacy writer parity.
+- `--rot-x|--rot-y|--rot-z <deg>` Apply rotations (degrees) around axes.
+- `--translate-x|--translate-y|--translate-z <meters>` Apply translations.
 - `--ck-use-mslk` Use MSLK linkage hints when building composite instances.
 - `--ck-allow-unlinked-ratio <0..1>` Threshold for allowing unlinked surfaces in an instance.
 - `--ck-min-tris <int>` Minimum triangles per component to include (use `0` to preserve anchors).
@@ -47,13 +51,13 @@ Notes:
 
 ## Output Layout
 
-Within the session directory (e.g., `project_output/pm4faces_YYYYMMDD_HHmmss/<TileName>/`):
+Within the session directory (default: `<CWD>/pm4faces_out/<TileName>/`):
 
 - `objects/` Per-object exports according to `--group-by`.
   - `*.obj` Always written
   - `*.gltf` + `*.bin` When `--gltf` is set
   - `*.glb` When `--glb` is set
-- `tiles/` Per-tile exports assembled object-first (always flip X for consistent orientation)
+- `tiles/` Per-tile exports assembled object-first
   - Same optional glTF/GLB outputs as above
   - `render_mesh.obj` when `--group-by render-mesh|surfaces-all` is used, or when `--render-mesh-merged` is provided
 - `surface_coverage.csv` Per-surface export coverage and face counts
@@ -98,7 +102,7 @@ Each entry:
   "IndexCount": 65536,                // index count for this tile
   "FacesWritten": 21845,
   "FacesSkipped": 0,
-  "FlipX": true                       // tiles always force X-flip
+  "FlipX": true                       // true when transforms are disabled (legacy writer parity); otherwise equals --flip-x
 }
 ```
 
@@ -111,8 +115,9 @@ Each entry:
 
 ## Coordinate System & Flipping
 
-- **Tiles**: Always force X-flip with winding swap to preserve normals.
-- **Objects**: Currently flip only when `--legacy-parity` is provided.
+- **Objects**: Global transforms always apply. No legacy writer parity; flips controlled by `--flip-x`/`--flip-y`. Triangle winding is swapped when an odd number of single-axis mirrors occurs (XOR of FlipX and FlipY).
+- **Tiles (default)**: When `--tiles-apply-transforms` is OFF, tiles export in raw scene space with legacy writer parity at the writer level (X-flip with winding swap). Global transforms are disabled for tiles in this mode.
+- **Tiles (transformed)**: When `--tiles-apply-transforms` is ON, tiles apply the same global transforms as objects and do not use legacy writer parity; flips are controlled by `--flip-x`/`--flip-y` with parity-aware winding swap.
 - **glTF/GLB**: Mirrors OBJ behavior (same flips and winding), and supports `--project-local` recentering.
 
 ## Grouping Modes
@@ -131,21 +136,29 @@ Planned: `surfacekey` mode using `MSUR.SurfaceKey` as identity.
 ## Examples
 
 - Single tile, OBJ only:
-  ```bash
-  dotnet run --project src/PM4FacesTool -- -i "C:\Data\Zone_10_12.pm4"
-  ```
+```bash
+dotnet run --project src/PM4FacesTool -- -i "C:\Data\Zone_10_12.pm4"
+```
+- Single tile with global Y flip and transformed tiles (no legacy parity on tiles):
+```bash
+dotnet run --project src/PM4FacesTool -- -i "C:\Data\Zone_10_12.pm4" --flip-y --tiles-apply-transforms
+```
 - Single tile with glTF + GLB and composite-instance grouping:
-  ```bash
-  dotnet run --project src/PM4FacesTool -- -i "C:\Data\Zone_10_12.pm4" --group-by composite-instance --gltf --glb
-  ```
+```bash
+dotnet run --project src/PM4FacesTool -- -i "C:\Data\Zone_10_12.pm4" --group-by composite-instance --gltf --glb
+```
 - Batch region, group by composite key:
-  ```bash
-  dotnet run --project src/PM4FacesTool -- -i "C:\Data\RegionDir" --batch --group-by composite --gltf
-  ```
+```bash
+dotnet run --project src/PM4FacesTool -- -i "C:\Data\RegionDir" --batch --group-by composite --gltf
+```
+- Default tile legacy parity (no transforms on tiles) with object transforms and X flip:
+```bash
+dotnet run --project src/PM4FacesTool -- -i ".\test_data\original_development\development_00_00.pm4" --batch --flip-x
+```
 - Real data, recommended quick check (anchors preserved, MSCN remap off, merged mesh alongside tiles/objects):
-  ```bash
-  dotnet run --project src/PM4FacesTool -c Release -- --input ".\test_data\original_development\development_00_00.pm4" --batch --no-mscn-remap --ck-min-tris 0 --render-mesh-merged
-  ```
+```bash
+dotnet run --project src/PM4FacesTool -c Release -- --input ".\test_data\original_development\development_00_00.pm4" --batch --no-mscn-remap --ck-min-tris 0 --render-mesh-merged
+```
 
 ## Validation Checklist
 

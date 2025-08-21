@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Numerics;
 using System.Text.RegularExpressions;
+using PM4NextExporter.Services;
 using WoWToolbox.Core.Navigation.PM4;
 using WoWToolbox.Core.Navigation.PM4.Chunks;
 
@@ -15,7 +16,6 @@ namespace WoWToolbox.Core.v2.Services.PM4
     /// </summary>
     public static class UnifiedQuiltExporter
     {
-        private const float AdtTileSize = 533.3333f; // Same constant used elsewhere
         private static readonly Regex TileRegex = new("_(?<x>\\d{2})_(?<y>\\d{2})\\.pm4$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private enum ChunkKind { MSVT, MSPV, MSCN, MPRL }
@@ -54,8 +54,8 @@ namespace WoWToolbox.Core.v2.Services.PM4
             {
                 for (int tileX = 0; tileX < 64; tileX++)
                 {
-                    float offsetX = tileX * AdtTileSize;
-                    float offsetY = (63 - tileY) * AdtTileSize; // north-up
+                    float offsetX = (float)(tileX * CoordinateUtils.BlockSize);
+                    float offsetY = (float)((63 - tileY) * CoordinateUtils.BlockSize); // north-up
 
                     if (!fileByTile.TryGetValue((tileX, tileY), out var pm4Path))
                         continue; // non-existent tile, skip
@@ -67,6 +67,7 @@ namespace WoWToolbox.Core.v2.Services.PM4
                     WriteChunk(writer, "MSPV", pm4.MSPV?.Vertices, v => Pm4CoordinateTransforms.FromMspvVertex(v), offsetX, offsetY, ref vertexCount, tileX, tileY);
                     WriteChunk(writer, "MSVT", pm4.MSVT?.Vertices, v => Pm4CoordinateTransforms.FromMsvtVertexSimple(v), offsetX, offsetY, ref vertexCount, tileX, tileY);
                     WriteChunk(writer, "MSCN", pm4.MSCN?.ExteriorVertices, v => Pm4CoordinateTransforms.FromMscnVertex(v), offsetX, offsetY, ref vertexCount, tileX, tileY);
+                    WriteChunk(writer, "MPRL", pm4.MPRL?.Entries, e => Pm4CoordinateTransforms.FromMprlEntry(e), offsetX, offsetY, ref vertexCount, tileX, tileY);
                 }
             }
         }

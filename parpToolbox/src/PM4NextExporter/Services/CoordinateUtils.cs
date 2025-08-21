@@ -6,10 +6,10 @@ namespace PM4NextExporter.Services
     /// Coordinate utilities to correlate PM4/ADT coordinate spaces.
     /// Non-invasive helpers for diagnostics and analysis.
     /// </summary>
-    internal static class CoordinateUtils
+    public static class CoordinateUtils
     {
         // ADT constants (see wowdev.wiki ADT_v18 docs)
-        public const double BlockSize = 533.3333333333334; // yards per 64x64 block
+        public const double BlockSize = 533.3333333333334; // yards per 64x64 block (1600 ft)
         public const double WorldExtent = 17066.666666666668; // half-width of map in yards (±extent)
         public const int BlocksPerAxis = 64;
         public const int BlockCenter = 32; // center block index

@@ -8,6 +8,7 @@ using System.Text.Json;
 using ParpToolbox.Formats.P4.Chunks.Common;
 using ParpToolbox.Formats.PM4;
 using ParpToolbox.Services.PM4;
+using ParpToolbox.Services.Geometry;
 
 namespace PM4FacesTool;
 
@@ -31,8 +32,11 @@ internal static class Program
         bool ExportGltf,
         bool ExportGlb,
         bool RenderMeshMerged,
+        bool TilesApplyTransforms,
+        bool MscnFollowTiles,
         bool NoMscnRemap,
         bool FlipXEnabled,
+        bool FlipYEnabled,
         float RotXDeg,
         float RotYDeg,
         float RotZDeg,
@@ -88,6 +92,320 @@ internal static class Program
         {
             Console.Error.WriteLine("[pm4-faces] ERROR: " + ex);
             return 1;
+        }
+    }
+
+    // Simple CLI parser to keep the tool functional
+    private static Options? ParseArgs(string[] args)
+    {
+        string input = string.Empty;
+        string outDir = Path.Combine(Directory.GetCurrentDirectory(), "pm4faces_out");
+        bool legacyParity = false;
+        bool projectLocal = false;
+        bool snapToPlane = false;
+        float heightScale = 1.0f;
+        bool heightFitReport = false;
+        string groupBy = "composite-instance";
+        bool batch = false;
+        bool ckUseMslk = true;
+        double ckAllowUnlinkedRatio = 0.05;
+        int ckMinTris = 1;
+        bool ckMergeComponents = true;
+        bool ckMonolithic = false;
+        bool exportGltf = false;
+        bool exportGlb = false;
+        bool renderMeshMerged = false;
+        bool noMscnRemap = false;
+        bool flipXEnabled = false;
+        bool flipYEnabled = false;
+        bool tilesApplyTransforms = false;
+        bool mscnFollowTiles = true;
+        float rotX = 0, rotY = 0, rotZ = 0;
+        float tx = 0, ty = 0, tz = 0;
+        bool mscnSidecar = false;
+        int mscnPreRotZ = 0;
+        string mscnPreFlip = "none";
+        string mscnBasis = "legacy";
+
+        // Positional path support (first non-flag)
+        int i = 0;
+        while (i < args.Length)
+        {
+            var a = args[i];
+            if (!a.StartsWith("--"))
+            {
+                if (string.IsNullOrEmpty(input)) input = a;
+                else outDir = a;
+                i++; continue;
+            }
+
+            string next(int ofs = 1) => (i + ofs < args.Length) ? args[i + ofs] : string.Empty;
+
+            switch (a.ToLowerInvariant())
+            {
+                case "--input": input = next(); i += 2; break;
+                case "--out": case "--out-dir": outDir = next(); i += 2; break;
+                case "--legacy-parity": legacyParity = true; i++; break;
+                case "--project-local": projectLocal = true; i++; break;
+                case "--snap-to-plane": snapToPlane = true; i++; break;
+                case "--height-scale": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out heightScale); i += 2; break;
+                case "--height-fit-report": heightFitReport = true; i++; break;
+                case "--group-by": groupBy = next(); i += 2; break;
+                case "--batch": batch = true; i++; break;
+                case "--ck-use-mslk": ckUseMslk = true; i++; break;
+                case "--ck-allow-unlinked-ratio": double.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out ckAllowUnlinkedRatio); i += 2; break;
+                case "--ck-min-tris": int.TryParse(next(), NumberStyles.Integer, CultureInfo.InvariantCulture, out ckMinTris); i += 2; break;
+                case "--ck-merge-components": ckMergeComponents = true; i++; break;
+                case "--ck-monolithic": ckMonolithic = true; i++; break;
+                case "--export-gltf": exportGltf = true; i++; break;
+                case "--export-glb": exportGlb = true; i++; break;
+                case "--render-mesh-merged": renderMeshMerged = true; i++; break;
+                case "--no-mscn-remap": noMscnRemap = true; i++; break;
+                case "--flip-x": flipXEnabled = true; i++; break;
+                case "--flip-y": flipYEnabled = true; i++; break;
+                case "--tiles-apply-transforms": tilesApplyTransforms = true; i++; break;
+                case "--mscn-follow-tiles": mscnFollowTiles = true; i++; break;
+                case "--no-mscn-follow-tiles": mscnFollowTiles = false; i++; break;
+                case "--rot-x": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out rotX); i += 2; break;
+                case "--rot-y": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out rotY); i += 2; break;
+                case "--rot-z": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out rotZ); i += 2; break;
+                case "--translate-x": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out tx); i += 2; break;
+                case "--translate-y": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out ty); i += 2; break;
+                case "--translate-z": float.TryParse(next(), NumberStyles.Float, CultureInfo.InvariantCulture, out tz); i += 2; break;
+                case "--mscn-sidecar": mscnSidecar = true; i++; break;
+                case "--mscn-pre-rotz": int.TryParse(next(), NumberStyles.Integer, CultureInfo.InvariantCulture, out mscnPreRotZ); i += 2; break;
+                case "--mscn-pre-flip": mscnPreFlip = next(); i += 2; break;
+                case "--mscn-basis": mscnBasis = next(); i += 2; break;
+                case "--help": PrintHelp(); return null;
+                default:
+                    // Ignore unknown flags for forward-compat
+                    i++; break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(input))
+            return null;
+
+        // Derive default outDir next to input if not explicitly provided
+        if (!Path.IsPathRooted(outDir) && !outDir.Contains(Path.DirectorySeparatorChar) && !outDir.Contains(Path.AltDirectorySeparatorChar))
+        {
+            var inpDir = Directory.Exists(input) ? input : Path.GetDirectoryName(input) ?? Directory.GetCurrentDirectory();
+            outDir = Path.Combine(inpDir, outDir);
+        }
+
+        return new Options(
+            input,
+            outDir,
+            legacyParity,
+            projectLocal,
+            snapToPlane,
+            heightScale,
+            heightFitReport,
+            groupBy,
+            batch,
+            ckUseMslk,
+            ckAllowUnlinkedRatio,
+            ckMinTris,
+            ckMergeComponents,
+            ckMonolithic,
+            exportGltf,
+            exportGlb,
+            renderMeshMerged,
+            tilesApplyTransforms,
+            mscnFollowTiles,
+            noMscnRemap,
+            flipXEnabled,
+            flipYEnabled,
+            rotX,
+            rotY,
+            rotZ,
+            tx,
+            ty,
+            tz,
+            mscnSidecar,
+            mscnPreRotZ,
+            mscnPreFlip,
+            mscnBasis
+        );
+    }
+
+    private static void PrintHelp()
+    {
+        Console.WriteLine("pm4-faces usage:\n  pm4-faces <input.pm4|dir> [outDir] [--group-by <mode>] [--export-gltf] [--export-glb] [--render-mesh-merged]\n  Transforms: --project-local --flip-x --flip-y --rot-x <deg> --rot-y <deg> --rot-z <deg> --translate-x <m> --translate-y <m> --translate-z <m>\n  Tiles: --tiles-apply-transforms (apply global transforms to tile OBJs; default is raw, legacy-parity flipped)\n  MSCN: --mscn-sidecar --mscn-follow-tiles|--no-mscn-follow-tiles (default: follow) --mscn-pre-rotz <deg> --mscn-pre-flip <axes> --mscn-basis <legacy|remap>\n  Misc: --snap-to-plane --height-scale <f> --height-fit-report --batch");
+    }
+
+    // Transform helpers bridging CLI options to core services
+    private static GeometryTransformService.TransformOptions ToTransformOptions(Options opts)
+    {
+        return new GeometryTransformService.TransformOptions
+        {
+            ProjectLocal = opts.ProjectLocal,
+            FlipXEnabled = opts.FlipXEnabled,
+            FlipYEnabled = opts.FlipYEnabled,
+            RotXDeg = opts.RotXDeg,
+            RotYDeg = opts.RotYDeg,
+            RotZDeg = opts.RotZDeg,
+            TranslateX = opts.TranslateX,
+            TranslateY = opts.TranslateY,
+            TranslateZ = opts.TranslateZ
+        };
+    }
+
+    private static MscnTransformService.MscnBasis ParseMscnBasis(string basis)
+    {
+        var b = (basis ?? "legacy").Trim().ToLowerInvariant();
+        return b == "remap" ? MscnTransformService.MscnBasis.Remap : MscnTransformService.MscnBasis.Legacy;
+    }
+
+    private static MscnTransformService.FlipAxes ParseFlipAxes(string flip)
+    {
+        var f = (flip ?? "none").Trim().ToLowerInvariant();
+        return f switch
+        {
+            "x" => MscnTransformService.FlipAxes.X,
+            "y" => MscnTransformService.FlipAxes.Y,
+            "z" => MscnTransformService.FlipAxes.Z,
+            "xy" => MscnTransformService.FlipAxes.XY,
+            "xz" => MscnTransformService.FlipAxes.XZ,
+            "yz" => MscnTransformService.FlipAxes.YZ,
+            _ => MscnTransformService.FlipAxes.None
+        };
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var clean = new char[name.Length];
+        int j = 0;
+        foreach (var ch in name)
+        {
+            clean[j++] = invalid.Contains(ch) ? '_' : ch;
+        }
+        return new string(clean, 0, j);
+    }
+
+    private static string EscapeCsv(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        bool needs = s.Contains(',') || s.Contains('"') || s.Contains('\n');
+        if (!needs) return s;
+        return '"' + s.Replace("\"", "\"\"") + '"';
+    }
+
+    private static void EmitMsurHeightDiagnostics(Pm4Scene scene, string outDir)
+    {
+        try
+        {
+            // Lightweight placeholder to keep compatibility; detailed report is in EmitHeightFitReport
+            var path = Path.Combine(outDir, "msur_height_diag.csv");
+            var lines = new List<string> { "surfaces,total_indices" };
+            lines.Add(string.Join(',', scene.Surfaces.Count.ToString(CultureInfo.InvariantCulture), scene.Indices.Count.ToString(CultureInfo.InvariantCulture)));
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[pm4-faces] Failed to emit msur_height_diag.csv: {ex.Message}");
+        }
+    }
+
+    private static void ExportTiles(
+        Pm4Scene scene,
+        string tilesDir,
+        Options opts,
+        string outDir,
+        List<string> tileCsv,
+        List<TileIndexEntry> tileIndex,
+        string prefix)
+    {
+        // Generate one OBJ per tile using object-first assembly of surfaces whose first index falls within the tile range
+        Directory.CreateDirectory(tilesDir);
+
+        // Build quick list of surfaces with their scene index for selection per tile
+        var surfaces = scene.Surfaces.Select((e, i) => (entry: e, idx: i)).ToList();
+
+        foreach (var kv in scene.TileIndexOffsetByTileId)
+        {
+            int tileId = kv.Key;
+            int start = kv.Value;
+            if (!scene.TileIndexCountByTileId.TryGetValue(tileId, out int count)) count = 0;
+            int end = start + Math.Max(0, count);
+
+            int tileX = tileId % 64;
+            int tileY = tileId / 64;
+
+            // Select surfaces whose first index falls into this tile's index range
+            var items = new List<(MsurChunk.Entry entry, int idx)>();
+            foreach (var s in surfaces)
+            {
+                int first = unchecked((int)s.entry.MsviFirstIndex);
+                if (first >= start && first < end)
+                {
+                    items.Add((s.entry, s.idx));
+                }
+            }
+
+            string nameCore = $"{prefix}_t{tileX:D2}_{tileY:D2}";
+            string safe = SanitizeFileName(nameCore);
+            string objPath = Path.Combine(tilesDir, safe + ".obj");
+
+            int writtenFaces = 0;
+            int skippedFaces = 0;
+            bool wroteFile = false;
+
+            if (items.Count > 0)
+            {
+                if (opts.TilesApplyTransforms)
+                {
+                    // Apply the same global transforms as objects; no legacy writer parity
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out writtenFaces, out skippedFaces);
+                    wroteFile = (writtenFaces > 0);
+                }
+                else
+                {
+                    // Default: raw scene space, disable global transforms, fix legacy parity at writer level
+                    var tileOpts = opts with
+                    {
+                        FlipXEnabled = false,
+                        FlipYEnabled = false,
+                        RotXDeg = 0,
+                        RotYDeg = 0,
+                        RotZDeg = 0,
+                        TranslateX = 0,
+                        TranslateY = 0,
+                        TranslateZ = 0,
+                        SnapToPlane = false,
+                        ProjectLocal = false
+                    };
+                    AssembleAndWrite(scene, items, objPath, tileOpts, writerLegacyParity: true, out writtenFaces, out skippedFaces);
+                    wroteFile = (writtenFaces > 0);
+                }
+            }
+
+            string relObj = wroteFile ? Path.GetRelativePath(outDir, objPath).Replace("\\", "/") : string.Empty;
+
+            // CSV row
+            tileCsv.Add(string.Join(',',
+                tileId.ToString(CultureInfo.InvariantCulture),
+                start.ToString(CultureInfo.InvariantCulture),
+                Math.Max(0, count).ToString(CultureInfo.InvariantCulture),
+                writtenFaces.ToString(CultureInfo.InvariantCulture),
+                skippedFaces.ToString(CultureInfo.InvariantCulture),
+                relObj));
+
+            // JSON index entry
+            tileIndex.Add(new TileIndexEntry
+            {
+                TileId = tileId,
+                Name = $"t{tileX:D2}_{tileY:D2}",
+                ObjPath = relObj,
+                GltfPath = (wroteFile && opts.ExportGltf) ? Path.ChangeExtension(relObj, ".gltf") : null,
+                GlbPath = (wroteFile && opts.ExportGlb) ? Path.ChangeExtension(relObj, ".glb") : null,
+                StartIndex = start,
+                IndexCount = Math.Max(0, count),
+                FacesWritten = writtenFaces,
+                FacesSkipped = skippedFaces,
+                FlipX = opts.TilesApplyTransforms ? opts.FlipXEnabled : true
+            });
         }
     }
 
@@ -183,7 +501,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out writtenFaces, out skippedFaces);
                 }
 
                 // Coverage row for quick visibility
@@ -195,7 +513,7 @@ internal static class Program
                     items.Sum(it => (int)it.Item1.IndexCount),
                     writtenFaces,
                     skippedFaces,
-                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(Path.Combine(objectsDir, ".."), objPath)))));
+                    (skipWrite ? string.Empty : EscapeCsv(Path.GetRelativePath(outDir, objPath)))));
 
                 // Add to object index if not skipped
                 if (!skipWrite)
@@ -254,6 +572,9 @@ internal static class Program
         var tilesDir = Path.Combine(outDir, "tiles");
         Directory.CreateDirectory(tilesDir);
 
+        // Log resolved output paths for traceability
+        Console.WriteLine($"[pm4-faces] Output paths:\n  outDir={outDir}\n  objectsDir={objectsDir}\n  tilesDir={tilesDir}");
+
         // Emit lightweight diagnostics for MSUR.Height variability
         EmitMsurHeightDiagnostics(scene, outDir);
         if (opts.HeightFitReport)
@@ -263,6 +584,15 @@ internal static class Program
 
         Console.WriteLine($"[pm4-faces] Export strategy: objects={opts.GroupBy}, tiles=on");
         Console.WriteLine($"[pm4-faces] Scene: Vertices={scene.Vertices.Count}, Indices={scene.Indices.Count}, Surfaces={scene.Surfaces.Count}, Tiles={scene.TileIndexOffsetByTileId.Count}");
+        // Log tiles pipeline decision for traceability
+        if (opts.TilesApplyTransforms)
+        {
+            Console.WriteLine("[pm4-faces] Tiles: applying global transforms (flip/rot/translate); legacy parity OFF");
+        }
+        else
+        {
+            Console.WriteLine("[pm4-faces] Tiles: raw geometry; global transforms IGNORED for tiles; legacy X parity at writer ON");
+        }
 
         var coverageCsv = new List<string>
         {
@@ -327,7 +657,7 @@ internal static class Program
             {
                 var safe = SanitizeFileName($"surface_{idx:D6}_g{entry.GroupKey:D3}_ck{entry.CompositeKey:X8}");
                 var objPath = Path.Combine(objectsDir, safe + ".obj");
-                AssembleAndWrite(scene, new[] {(entry, idx)}, objPath, opts, out var written, out var skipped);
+                AssembleAndWrite(scene, new[] {(entry, idx)}, objPath, opts, writerLegacyParity: false, out var written, out var skipped);
                 coverageCsv.Add(string.Join(',',
                     idx,
                     entry.GroupKey,
@@ -488,7 +818,7 @@ internal static class Program
             return;
         }
 
-        // Log MSCN pre-transform selection
+        // Log MSCN pre-transform selection (MSCN-only step before mesh pipeline decisions)
         Console.WriteLine($"[pm4-faces] MSCN pre-transform: basis='{opts.MscnBasis}', rotZ={opts.MscnPreRotZ} deg, flip='{opts.MscnPreFlip}'");
 
         // Group points by tileId
@@ -507,17 +837,29 @@ internal static class Program
             int tileY = tileId / 64;
             var local = new List<Vector3>(kv.Value);
 
-            // Optional MSCN-only pre-transform (basis canonicalization, then rotate around Z and/or mirror), then apply mesh pipeline
-            ApplyMscnPreTransform(local, opts.MscnPreRotZ, opts.MscnPreFlip, opts.MscnBasis);
-            // Apply same transform pipeline as meshes
-            ApplyProjectLocal(local, opts.ProjectLocal);
-            ApplyGlobalTransform(local, opts);
+            // Optional MSCN-only pre-transform (basis canonicalization, then rotate around Z and/or mirror)
+            MscnTransformService.PreTransform(local, opts.MscnPreRotZ, ParseFlipAxes(opts.MscnPreFlip), ParseMscnBasis(opts.MscnBasis));
 
+            // Decide MSCN effective pipeline based on tiles export mode and follow-tiles flag
+            bool followTilesRaw = opts.MscnFollowTiles && !opts.TilesApplyTransforms;
             string name = $"mscn_t{tileX:D2}_{tileY:D2}";
             string objPath = Path.Combine(mdir, name + ".obj");
 
-            // Write as vertices-only OBJ (no triangles)
-            ObjWriter.Write(objPath, local, new List<(int A, int B, int C)>(), legacyParity: false, projectLocal: false, forceFlipX: false);
+            if (followTilesRaw)
+            {
+                // Follow tiles in raw mode: skip global transforms and enforce legacy X parity at writer level
+                // Do NOT apply project-local recentring either, to remain in the same space as raw tiles
+                Console.WriteLine("[pm4-faces] MSCN follow-tiles: raw tile space; skip global transforms; writer forced X parity ON");
+                ObjWriter.Write(objPath, local, new List<(int A, int B, int C)>(), legacyParity: false, projectLocal: false, forceFlipX: true);
+            }
+            else
+            {
+                // Standard: apply same mesh pipeline (project-local + global) so MSCN matches transformed meshes/tiles
+                GeometryTransformService.ApplyProjectLocal(local, opts.ProjectLocal);
+                GeometryTransformService.ApplyGlobal(local, ToTransformOptions(opts));
+                Console.WriteLine("[pm4-faces] MSCN standard pipeline: project-local=" + opts.ProjectLocal + ", global transforms applied");
+                ObjWriter.Write(objPath, local, new List<(int A, int B, int C)>(), legacyParity: false, projectLocal: false, forceFlipX: false);
+            }
 
             rows.Add(string.Join(',',
                 tileId.ToString(CultureInfo.InvariantCulture),
@@ -617,9 +959,9 @@ internal static class Program
         }
 
         // Apply project-local recentering then configurable global transform for merged render mesh
-        ApplyProjectLocal(verts, opts.ProjectLocal);
-        ApplyGlobalTransform(verts, opts);
-        if (opts.FlipXEnabled)
+        GeometryTransformService.ApplyProjectLocal(verts, opts.ProjectLocal);
+        GeometryTransformService.ApplyGlobal(verts, ToTransformOptions(opts));
+        if (opts.FlipXEnabled ^ opts.FlipYEnabled)
         {
             for (int i = 0; i < tris.Count; i++)
             {
@@ -664,25 +1006,16 @@ internal static class Program
             if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
                 !TryMap(scene, gb, g2l, localVerts, out var lb) ||
                 !TryMap(scene, gc, g2l, localVerts, out var lc))
-            {
-                skipped++;
-                continue;
-            }
-
-            // Skip degenerate faces (duplicate local vertex indices)
+            { skipped++; continue; }
             if (la == lb || lb == lc || lc == la)
-            {
-                skipped++;
-                continue;
-            }
-
+            { skipped++; continue; }
             localTris.Add((la, lb, lc));
             written++;
         }
         // Apply project-local recentering then configurable global transform for index-range exports
-        ApplyProjectLocal(localVerts, opts.ProjectLocal);
-        ApplyGlobalTransform(localVerts, opts);
-        if (opts.FlipXEnabled)
+        GeometryTransformService.ApplyProjectLocal(localVerts, opts.ProjectLocal);
+        GeometryTransformService.ApplyGlobal(localVerts, ToTransformOptions(opts));
+        if (opts.FlipXEnabled ^ opts.FlipYEnabled)
         {
             for (int i = 0; i < localTris.Count; i++)
             {
@@ -750,7 +1083,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, allItems, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, allItems, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out writtenFaces, out skippedFaces);
                 }
 
                 // Log one instance row and all membership rows
@@ -868,7 +1201,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out writtenFaces, out skippedFaces);
                 }
 
                 // Log instance row and membership rows
@@ -1020,7 +1353,7 @@ internal static class Program
                 int skippedFaces = 0;
                 if (!skipWrite)
                 {
-                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out writtenFaces, out skippedFaces);
+                    AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out writtenFaces, out skippedFaces);
                 }
 
                 // Coverage row for quick visibility
@@ -1095,7 +1428,7 @@ internal static class Program
     {
         var safe = SanitizeFileName(groupName);
         var objPath = Path.Combine(objectsDir, safe + ".obj");
-        AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, out var written, out var skipped);
+        AssembleAndWrite(scene, items, objPath, opts with { SnapToPlane = false }, writerLegacyParity: false, out var written, out var skipped);
 
         // Aggregate a simple coverage row
         int triCount = items.Sum(it => (int)it.entry.IndexCount);
@@ -1134,6 +1467,7 @@ internal static class Program
         IEnumerable<(MsurChunk.Entry entry, int index)> items,
         string objPath,
         Options opts,
+        bool writerLegacyParity,
         out int facesWritten,
         out int facesSkipped)
     {
@@ -1157,7 +1491,6 @@ internal static class Program
                 int polyCount = end - first;
                 if (polyCount < 3) continue;
 
-                // Collect polygon indices for this MSUR entry
                 int[] poly = new int[polyCount];
                 for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
 
@@ -1192,7 +1525,6 @@ internal static class Program
                 int polyCount = end - first;
                 if (polyCount < 3) continue;
 
-                // Collect polygon indices for this MSUR entry
                 int[] poly = new int[polyCount];
                 for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
 
@@ -1216,9 +1548,9 @@ internal static class Program
             }
         }
         // Apply project-local recentering then configurable global transform
-        ApplyProjectLocal(localVerts, opts.ProjectLocal);
-        ApplyGlobalTransform(localVerts, opts);
-        if (opts.FlipXEnabled)
+        GeometryTransformService.ApplyProjectLocal(localVerts, opts.ProjectLocal);
+        GeometryTransformService.ApplyGlobal(localVerts, ToTransformOptions(opts));
+        if (opts.FlipXEnabled ^ opts.FlipYEnabled)
         {
             // Preserve normals by swapping winding when a reflection is applied
             for (int i = 0; i < localTris.Count; i++)
@@ -1228,15 +1560,15 @@ internal static class Program
             }
         }
 
-        // Writers receive geometry already transformed; disable their flip
-        ObjWriter.Write(objPath, localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+        // Writers receive geometry already transformed; optionally apply legacy parity at writer level
+        ObjWriter.Write(objPath, localVerts, localTris, legacyParity: writerLegacyParity, projectLocal: false, forceFlipX: false);
         if (opts.ExportGltf)
         {
-            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, legacyParity: writerLegacyParity, projectLocal: false, forceFlipX: false);
         }
         if (opts.ExportGlb)
         {
-            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, legacyParity: writerLegacyParity, projectLocal: false, forceFlipX: false);
         }
         facesWritten = written;
         facesSkipped = skipped;
@@ -1308,7 +1640,8 @@ internal static class Program
             !TryMap(scene, gb, g2l, localVerts, out var lb) ||
             !TryMap(scene, gc, g2l, localVerts, out var lc))
         { skipped++; return; }
-        if (la == lb || lb == lc || lc == la) { skipped++; return; }
+        if (la == lb || lb == lc || lc == la)
+        { skipped++; return; }
         localTris.Add((la, lb, lc));
         written++;
     }
@@ -1332,7 +1665,8 @@ internal static class Program
             !TryMapProjected(scene, entry, surfaceKey, gb, heightScale, g2l, localVerts, out var lb) ||
             !TryMapProjected(scene, entry, surfaceKey, gc, heightScale, g2l, localVerts, out var lc))
         { skipped++; return; }
-        if (la == lb || lb == lc || lc == la) { skipped++; return; }
+        if (la == lb || lb == lc || lc == la)
+        { skipped++; return; }
         localTris.Add((la, lb, lc));
         written++;
     }
@@ -1441,491 +1775,6 @@ internal static class Program
         }
     }
 
-    private static void ExportTiles(
-        Pm4Scene scene,
-        string tilesDir,
-        Options opts,
-        string outDir,
-        List<string> tileCsv,
-        List<TileIndexEntry> tileIndex,
-        string tilePrefix)
-    {
-        if (scene.TileIndexOffsetByTileId.Count == 0)
-        {
-            Console.WriteLine("[pm4-faces] No tile index metadata present; skipping tile export.");
-            return;
-        }
-
-        foreach (var kv in scene.TileIndexOffsetByTileId.OrderBy(k => k.Key))
-        {
-            int tileId = kv.Key;
-            int start = kv.Value;
-            if (!scene.TileIndexCountByTileId.TryGetValue(tileId, out int count))
-            {
-                // If count missing, try to infer a safe bound (skip if not available)
-                Console.WriteLine($"[pm4-faces] Missing index count for tile {tileId}; skipping.");
-                continue;
-            }
-
-            // Derive name from tileId -> (x,y) using original prefix
-            int x = tileId % 64;
-            int y = tileId / 64;
-            string name = $"{tilePrefix}_{x:D2}_{y:D2}";
-            string objPath = Path.Combine(tilesDir, SanitizeFileName(name) + ".obj");
-
-            Console.WriteLine($"[pm4-faces][tile] assembling-from-objects id={tileId} name={name} start={start} count={count}");
-
-            // Gather all surfaces whose first index falls within this tile's index range
-            int end = start + count;
-            var surfacesInTile = new List<(MsurChunk.Entry entry, int index)>();
-            for (int si = 0; si < scene.Surfaces.Count; si++)
-            {
-                var s = scene.Surfaces[si];
-                int first = unchecked((int)s.MsviFirstIndex);
-                int scount = s.IndexCount;
-                if (first < 0 || scount < 3) continue;
-                if (first >= start && first < end)
-                {
-                    surfacesInTile.Add((s, si));
-                }
-            }
-
-            // Group by object identifier (MSUR.IndexCount per discovery) to avoid cross-object vertex dedup
-            var groups = surfacesInTile
-                .GroupBy(t => t.entry.IndexCount)
-                .OrderBy(g => g.Key);
-
-            var tileVerts = new List<Vector3>(Math.Max(4096, surfacesInTile.Count * 2));
-            var tileTris = new List<(int A, int B, int C)>(Math.Max(4096, count / 3));
-            int written = 0, skipped = 0;
-
-            foreach (var g in groups)
-            {
-                if (opts.SnapToPlane)
-                {
-                    // Per-object map; keys combine per-surface key with vertex id inside EmitTriProjected
-                    var g2lPlane = new Dictionary<long, int>(4096);
-                    foreach (var (entry, index) in g)
-                    {
-                        int first = unchecked((int)entry.MsviFirstIndex);
-                        int icount = entry.IndexCount;
-                        if (first < 0 || icount < 3) continue;
-
-                        int iend = Math.Min(scene.Indices.Count, first + icount);
-                        int polyCount = iend - first;
-                        if (polyCount < 3) continue;
-
-                        int[] poly = new int[polyCount];
-                        for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
-
-                        long sKey = (long)(uint)index; // stable per-surface key
-
-                        if (polyCount == 3)
-                        {
-                            EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                        else if (polyCount == 4)
-                        {
-                            EmitTriProjected(scene, entry, sKey, poly[0], poly[1], poly[2], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
-                            EmitTriProjected(scene, entry, sKey, poly[0], poly[2], poly[3], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                        else
-                        {
-                            for (int i = 1; i + 1 < polyCount; i++)
-                                EmitTriProjected(scene, entry, sKey, poly[0], poly[i], poly[i + 1], opts.HeightScale, g2lPlane, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                    }
-                }
-                else
-                {
-                    // Fresh mapping per object to preserve object boundaries
-                    var g2l = new Dictionary<int, int>(1024);
-                    foreach (var (entry, _) in g)
-                    {
-                        int first = unchecked((int)entry.MsviFirstIndex);
-                        int icount = entry.IndexCount;
-                        if (first < 0 || icount < 3) continue;
-
-                        int iend = Math.Min(scene.Indices.Count, first + icount);
-                        int polyCount = iend - first;
-                        if (polyCount < 3) continue;
-
-                        int[] poly = new int[polyCount];
-                        for (int k = 0; k < polyCount; k++) poly[k] = scene.Indices[first + k];
-
-                        if (polyCount == 3)
-                        {
-                            EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                        else if (polyCount == 4)
-                        {
-                            EmitTriMapped(scene, poly[0], poly[1], poly[2], g2l, tileVerts, tileTris, ref written, ref skipped);
-                            EmitTriMapped(scene, poly[0], poly[2], poly[3], g2l, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                        else
-                        {
-                            for (int i = 1; i + 1 < polyCount; i++)
-                                EmitTriMapped(scene, poly[0], poly[i], poly[i + 1], g2l, tileVerts, tileTris, ref written, ref skipped);
-                        }
-                    }
-                }
-            }
-
-            // Apply project-local recentering then configurable global transform for tile exports
-            ApplyProjectLocal(tileVerts, opts.ProjectLocal);
-            ApplyGlobalTransform(tileVerts, opts);
-            if (opts.FlipXEnabled)
-            {
-                for (int i = 0; i < tileTris.Count; i++)
-                {
-                    var t = tileTris[i];
-                    tileTris[i] = (t.A, t.C, t.B);
-                }
-            }
-            ObjWriter.Write(objPath, tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
-            if (opts.ExportGltf)
-                GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
-            if (opts.ExportGlb)
-                GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
-
-            tileCsv.Add(string.Join(',',
-                tileId,
-                start,
-                count,
-                written,
-                skipped,
-                EscapeCsv(Path.GetRelativePath(outDir, objPath))));
-
-            // Add to tile index
-            tileIndex.Add(new TileIndexEntry
-            {
-                TileId = tileId,
-                Name = name,
-                ObjPath = Path.GetRelativePath(outDir, objPath).Replace("\\", "/"),
-                GltfPath = opts.ExportGltf ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".gltf")).Replace("\\", "/") : null,
-                GlbPath = opts.ExportGlb ? Path.GetRelativePath(outDir, Path.ChangeExtension(objPath, ".glb")).Replace("\\", "/") : null,
-                StartIndex = start,
-                IndexCount = count,
-                FacesWritten = written,
-                FacesSkipped = skipped,
-                FlipX = opts.FlipXEnabled
-            });
-        }
-    }
-
-    private static Options? ParseArgs(string[] args)
-    {
-        string input = string.Empty;
-        string outDir = Path.Combine(Environment.CurrentDirectory, "project_output", "pm4faces_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture));
-        bool legacy = false;
-        bool projectLocal = false;
-        bool snapToPlane = false;
-        float heightScale = 1.0f;
-        bool heightFitReport = false;
-        string groupBy = "composite-instance"; // composite-instance | surface | groupkey | composite
-        bool batch = false;
-        bool ckUseMslk = false;
-        double ckAllowUnlinkedRatio = 0.5;
-        int ckMinTris = 0;
-        bool ckMergeComponents = false;
-        bool ckMonolithic = true;
-        bool exportGltf = false;
-        bool exportGlb = false;
-        bool renderMeshMerged = false;
-        bool noMscnRemap = false;
-        bool flipXEnabled = true; // default preserves current behavior
-        float rotXDeg = 0f, rotYDeg = 0f, rotZDeg = 0f;
-        float tx = 0f, ty = 0f, tz = 0f;
-        bool mscnSidecar = false;
-        int mscnPreRotZ = 0; // degrees, multiples of 90 recommended
-        string mscnPreFlip = "none"; // none|x|y|z|xy|xz|yz|xyz
-        string mscnBasis = "legacy"; // legacy=negxy, remap=swapxy
-        bool mscnNoDefaults = false; // suppress implicit MSCN defaults
-        bool userSetMscnPreRotZ = false; // track explicit CLI set
-        bool userSetMscnPreFlip = false; // track explicit CLI set
-        // Accumulate multiple --mscn-pre-flip occurrences into a bitmask (x=1,y=2,z=4)
-        int mscnFlipMask = 0; bool mscnFlipFlagsSeen = false;
-
-        for (int i = 0; i < args.Length; i++)
-        {
-            var a = args[i];
-            switch (a)
-            {
-                case "--input":
-                case "-i":
-                    input = i + 1 < args.Length ? args[++i] : input;
-                    break;
-                case "--out":
-                case "-o":
-                    outDir = i + 1 < args.Length ? args[++i] : outDir;
-                    break;
-                case "--legacy-parity":
-                    legacy = true;
-                    break;
-                case "--project-local":
-                    projectLocal = true;
-                    break;
-                case "--snap-to-plane":
-                    snapToPlane = true;
-                    break;
-                case "--height-scale":
-                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var hs))
-                    {
-                        heightScale = hs;
-                        i++;
-                    }
-                    break;
-                case "--height-fit-report":
-                    heightFitReport = true;
-                    break;
-                case "--group-by":
-                    groupBy = i + 1 < args.Length ? args[++i] : groupBy;
-                    break;
-                case "--batch":
-                    batch = true;
-                    break;
-                case "--ck-use-mslk":
-                    ckUseMslk = true;
-                    break;
-                case "--ck-allow-unlinked-ratio":
-                    if (i + 1 < args.Length && double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio))
-                    {
-                        ckAllowUnlinkedRatio = Math.Clamp(ratio, 0.0, 1.0);
-                        i++;
-                    }
-                    break;
-                case "--ck-min-tris":
-                    if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var minT))
-                    {
-                        ckMinTris = Math.Max(0, minT);
-                        i++;
-                    }
-                    break;
-                case "--ck-merge-components":
-                    ckMergeComponents = true;
-                    break;
-                case "--ck-monolithic":
-                    ckMonolithic = true;
-                    break;
-                case "--gltf":
-                    exportGltf = true;
-                    break;
-                case "--glb":
-                    exportGlb = true;
-                    break;
-                case "--render-mesh-merged":
-                    renderMeshMerged = true;
-                    break;
-                case "--no-mscn-remap":
-                    noMscnRemap = true;
-                    break;
-                case "--mscn-sidecar":
-                    mscnSidecar = true;
-                    break;
-                case "--no-mscn-defaults":
-                    mscnNoDefaults = true;
-                    break;
-                case "--mscn-basis":
-                    if (i + 1 < args.Length)
-                    {
-                        var b = (args[++i] ?? "legacy").Trim().ToLowerInvariant();
-                        if (b == "legacy" || b == "remap") mscnBasis = b; else Console.WriteLine($"[pm4-faces] Warning: unknown --mscn-basis '{b}', expected legacy|remap. Using 'legacy'.");
-                    }
-                    break;
-                case "--mscn-pre-rotz":
-                    if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var rzDeg))
-                    { mscnPreRotZ = rzDeg; userSetMscnPreRotZ = true; i++; }
-                    break;
-                case "--mscn-pre-flip":
-                    if (i + 1 < args.Length)
-                    {
-                        var token = (args[++i] ?? "none").Trim().ToLowerInvariant();
-                        userSetMscnPreFlip = true; mscnFlipFlagsSeen = true;
-                        switch (token)
-                        {
-                            case "none": break;
-                            case "x": mscnFlipMask |= 1; break;
-                            case "y": mscnFlipMask |= 2; break;
-                            case "z": mscnFlipMask |= 4; break;
-                            case "xy": mscnFlipMask |= 1 | 2; break;
-                            case "xz": mscnFlipMask |= 1 | 4; break;
-                            case "yz": mscnFlipMask |= 2 | 4; break;
-                            case "xyz": mscnFlipMask |= 1 | 2 | 4; break;
-                            default:
-                                Console.WriteLine($"[pm4-faces] Warning: unknown --mscn-pre-flip '{token}', expected none|x|y|z|xy|xz|yz|xyz. Ignoring.");
-                                break;
-                        }
-                        // Keep last token in case we don't aggregate; will be overwritten if we saw any flags
-                        mscnPreFlip = token;
-                    }
-                    break;
-                case "--no-flip-x":
-                    flipXEnabled = false;
-                    break;
-                case "--rotate-x":
-                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rx))
-                    { rotXDeg = rx; i++; }
-                    break;
-                case "--rotate-y":
-                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var ry))
-                    { rotYDeg = ry; i++; }
-                    break;
-                case "--rotate-z":
-                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rz))
-                    { rotZDeg = rz; i++; }
-                    break;
-                case "--translate":
-                    if (i + 3 < args.Length &&
-                        float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var _tx) &&
-                        float.TryParse(args[i + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out var _ty) &&
-                        float.TryParse(args[i + 3], NumberStyles.Float, CultureInfo.InvariantCulture, out var _tz))
-                    {
-                        tx = _tx; ty = _ty; tz = _tz; i += 3;
-                    }
-                    break;
-                case "--help":
-                case "-h":
-                    return null;
-            }
-        }
-
-        // Aggregate multi-flag MSCN flips into canonical string if the user supplied any
-        if (mscnFlipFlagsSeen)
-        {
-            mscnPreFlip = mscnFlipMask switch
-            {
-                0 => "none",
-                1 => "x",
-                2 => "y",
-                4 => "z",
-                3 => "xy",
-                5 => "xz",
-                6 => "yz",
-                7 => "xyz",
-                _ => "none",
-            };
-        }
-
-        // Apply implicit MSCN defaults for sidecar exports unless suppressed or explicitly set
-        if (mscnSidecar && !mscnNoDefaults)
-        {
-            bool appliedRot = false, appliedFlip = false;
-            if (!userSetMscnPreRotZ) { mscnPreRotZ = 90; appliedRot = true; }
-            if (!userSetMscnPreFlip) { mscnPreFlip = "xy"; appliedFlip = true; }
-            if (appliedRot || appliedFlip)
-            {
-                Console.WriteLine($"[pm4-faces] MSCN defaults applied: rotZ={mscnPreRotZ} deg, flip='{mscnPreFlip}' (override via flags or use --no-mscn-defaults)");
-            }
-            else
-            {
-                // Defaults not applied because user specified one or both pre-transform flags
-                var reasons = new List<string>();
-                if (userSetMscnPreRotZ) reasons.Add("mscn-pre-rotz");
-                if (userSetMscnPreFlip) reasons.Add("mscn-pre-flip");
-                if (reasons.Count > 0)
-                {
-                    Console.WriteLine($"[pm4-faces] MSCN defaults skipped (user provided {string.Join(" & ", reasons)}).");
-                }
-            }
-        }
-        else if (mscnSidecar && mscnNoDefaults)
-        {
-            Console.WriteLine("[pm4-faces] MSCN defaults suppressed by --no-mscn-defaults.");
-        }
-
-        if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap, flipXEnabled, rotXDeg, rotYDeg, rotZDeg, tx, ty, tz, mscnSidecar, mscnPreRotZ, mscnPreFlip, mscnBasis);
-    }
-
-    private static void PrintHelp()
-    {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap] [--mscn-sidecar] [--no-mscn-defaults] [--mscn-basis legacy|remap] [--mscn-pre-rotz <deg>] [--mscn-pre-flip none|x|y|z|xy|xz|yz|xyz] [--no-flip-x] [--rotate-x <deg>] [--rotate-y <deg>] [--rotate-z <deg>] [--translate <dx> <dy> <dz>]");
-        Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
-        Console.WriteLine("  --snap-to-plane: project vertices to each surface's MSUR plane (experimental; off by default).");
-        Console.WriteLine("  --height-scale: multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36, 0.0625 for 1/16).");
-        Console.WriteLine("  --height-fit-report: emit msur_plane_fit.csv with residuals for candidate height scales (no behavior change).");
-        Console.WriteLine("  --ck-merge-components: retain per-object DSU components under each CK24 (no monolithic merged OBJ).");
-        Console.WriteLine("  --ck-monolithic: export a single merged OBJ per CK24 (skip per-component DSU objects).");
-        Console.WriteLine("  Default: composite-instance object export with CK24 monolithic enabled; use --ck-merge-components to retain per-component outputs.");
-        Console.WriteLine("  --gltf / --glb: also export glTF 2.0 (.gltf+.bin) and/or GLB alongside OBJ outputs.");
-        Console.WriteLine("  --no-mscn-remap: disable global MSCN vertex remapping during region load (advanced; default is enabled).");
-        Console.WriteLine("  --mscn-sidecar: export per-tile MSCN points (OBJ under 'mscn/') and 'mscn_counts.csv' alongside other outputs.");
-        Console.WriteLine("  --mscn-basis: choose MSCN canonicalization before pre-rotz/flip: 'legacy' = (-X,-Y,Z), 'remap' = (Y,X,Z). Default 'legacy'.");
-        Console.WriteLine("  MSCN defaults: with --mscn-sidecar, defaults apply unless overridden: --mscn-pre-rotz 90 and --mscn-pre-flip xy. Use --no-mscn-defaults to disable.");
-        Console.WriteLine("  --mscn-pre-rotz: apply additional Z rotation ONLY to MSCN points before normal pipeline (normalized to 0/90/180/270).");
-        Console.WriteLine("  --mscn-pre-flip: mirror axes ONLY for MSCN points before normal pipeline; one of none,x,y,z,xy,xz,yz,xyz.");
-        Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; emit tiles and a single merged 'render_mesh.obj'.");
-        Console.WriteLine("  --render-mesh-merged: also emit a single merged 'render_mesh.obj' alongside any group-by mode (useful with object exports).");
-        Console.WriteLine("  Transforms: X-flip is ON by default (use --no-flip-x to disable). Rotations apply in order X -> Y -> Z (degrees). --translate applies global offset.");
-        Console.WriteLine("  Transform pipeline: if --project-local is set, vertices are mean-centered first, then global transforms (flip/rotate/translate) are applied.");
-        Console.WriteLine("  Writers receive already transformed geometry (no additional recentering or flipping is performed by writers).");
-    }
-
-    private static string SanitizeFileName(string name)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var s = string.Join("_", name.Split(invalid, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
-        return string.IsNullOrWhiteSpace(s) ? "object" : s;
-    }
-
-    private static string EscapeCsv(string s)
-    {
-        if (s.Contains(',') || s.Contains('"') || s.Contains('\n'))
-        {
-            return '"' + s.Replace("\"", "\"\"") + '"';
-        }
-        return s;
-    }
-
-    private static void EmitMsurHeightDiagnostics(Pm4Scene scene, string outDir)
-    {
-        try
-        {
-            var heights = scene.Surfaces.Select(s => s.Height).ToList();
-            int total = heights.Count;
-            int zeros = heights.Count(h => h == 0f);
-            int nonzeros = total - zeros;
-            float min = total > 0 ? heights.Min() : 0f;
-            float max = total > 0 ? heights.Max() : 0f;
-
-            // Unique value counts
-            var counts = new Dictionary<float, int>();
-            foreach (var h in heights)
-            {
-                if (!counts.TryGetValue(h, out var c)) c = 0;
-                counts[h] = c + 1;
-            }
-
-            // Overview CSV
-            var overview = new List<string>
-            {
-                "total,unique,zeros,nonzeros,min,max",
-                string.Join(',',
-                    total.ToString(CultureInfo.InvariantCulture),
-                    counts.Count.ToString(CultureInfo.InvariantCulture),
-                    zeros.ToString(CultureInfo.InvariantCulture),
-                    nonzeros.ToString(CultureInfo.InvariantCulture),
-                    min.ToString("G9", CultureInfo.InvariantCulture),
-                    max.ToString("G9", CultureInfo.InvariantCulture))
-            };
-            File.WriteAllLines(Path.Combine(outDir, "msur_height_overview.csv"), overview);
-
-            // Values CSV (sorted by height)
-            var lines = new List<string> { "height,count" };
-            foreach (var kv in counts.OrderBy(k => k.Key))
-            {
-                lines.Add(string.Join(',',
-                    kv.Key.ToString("G9", CultureInfo.InvariantCulture),
-                    kv.Value.ToString(CultureInfo.InvariantCulture)));
-            }
-            File.WriteAllLines(Path.Combine(outDir, "msur_height_values.csv"), lines);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[pm4-faces] Failed to emit MSUR height diagnostics: {ex.Message}");
-        }
-    }
-
     private static uint CK24(uint key)
     {
         return (key & 0xFFFFFF00u) >> 8;
@@ -1933,7 +1782,7 @@ internal static class Program
 
     private static int? DominantTileIdFor(Pm4Scene scene, IEnumerable<MsurChunk.Entry> entries)
     {
-        if (scene.TileIndexOffsetByTileId.Count == 0 || scene.TileIndexCountByTileId.Count == 0)
+        if (scene.TileIndexOffsetByTileId.Count == 0)
             return null;
 
         // Build quick lookup for tile index ranges
