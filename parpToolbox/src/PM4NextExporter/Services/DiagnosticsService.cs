@@ -182,7 +182,7 @@ namespace PM4NextExporter.Services
             Directory.CreateDirectory(outDir);
             var path = Path.Combine(outDir, "mscn_vertices.csv");
             using var writer = new StreamWriter(path, false, System.Text.Encoding.UTF8);
-            writer.WriteLine("index,x,y,z,xCanonical,yCanonical,zCanonical,tileId,worldA_X,worldA_Y,blockA_X,blockA_Y,worldB_X,worldB_Y,blockB_X,blockB_Y");
+            writer.WriteLine("index,x,y,z,xCanonical,yCanonical,zCanonical,tileId,tileX,tileY,worldA_X,worldA_Y,blockA_X,blockA_Y,worldB_X,worldB_Y,blockB_X,blockB_Y");
 
             // Determine per-vertex tileId mapping if available; otherwise attempt best-effort fallback for single-tile loads
             var tileIds = (scene.MscnTileIds != null && scene.MscnTileIds.Count == scene.MscnVertices.Count)
@@ -208,6 +208,8 @@ namespace PM4NextExporter.Services
                 var v = scene.MscnVertices[i];
                 var world = new System.Numerics.Vector3(v.Y, -v.X, v.Z);
                 int tileId = tileIds != null ? tileIds[i] : fallbackTileId;
+                int tileXOut = tileId >= 0 ? (tileId % 64) : -1;
+                int tileYOut = tileId >= 0 ? (tileId / 64) : -1;
                 // Server->world candidate transforms on raw server axes (per ADT_v18 docs)
                 var (worldAX, worldAY) = CoordinateUtils.ServerAxisToWorldCandidates(v.X);
                 var tmp = CoordinateUtils.ServerAxisToWorldCandidates(v.Y);
@@ -220,7 +222,7 @@ namespace PM4NextExporter.Services
                 int bAy = CoordinateUtils.ClampBlock(CoordinateUtils.WorldAxisToBlockIndex(wAy));
                 int bBx = CoordinateUtils.ClampBlock(CoordinateUtils.WorldAxisToBlockIndex(wBx));
                 int bBy = CoordinateUtils.ClampBlock(CoordinateUtils.WorldAxisToBlockIndex(wBy));
-                writer.WriteLine(string.Join(',', i, v.X, v.Y, v.Z, world.X, world.Y, world.Z, tileId, wAx, wAy, bAx, bAy, wBx, wBy, bBx, bBy));
+                writer.WriteLine(string.Join(',', i, v.X, v.Y, v.Z, world.X, world.Y, world.Z, tileId, tileXOut, tileYOut, wAx, wAy, bAx, bAy, wBx, wBy, bBx, bBy));
             }
         }
 

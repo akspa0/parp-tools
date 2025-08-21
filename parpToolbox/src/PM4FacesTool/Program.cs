@@ -31,7 +31,14 @@ internal static class Program
         bool ExportGltf,
         bool ExportGlb,
         bool RenderMeshMerged,
-        bool NoMscnRemap
+        bool NoMscnRemap,
+        bool FlipXEnabled,
+        float RotXDeg,
+        float RotYDeg,
+        float RotZDeg,
+        float TranslateX,
+        float TranslateY,
+        float TranslateZ
     );
 
     public static int Main(string[] args)
@@ -202,7 +209,7 @@ internal static class Program
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = true,
+                        FlipX = opts.FlipXEnabled,
                         IsWalkable = (g.Key.GroupKey == 16 && g.Key.AttributeMask == 2),
                         IsM2 = (g.Key.GroupKey == 3 && g.Key.AttributeMask == 1 && g.Key.Ck24 == 0),
                         Ck24 = g.Key.Ck24
@@ -341,7 +348,7 @@ internal static class Program
                     SurfaceIndices = new List<int> { idx },
                     IndexFirst = (int)entry.MsviFirstIndex,
                     IndexCount = entry.IndexCount,
-                    FlipX = true
+                    FlipX = opts.FlipXEnabled
                 });
             }
         }
@@ -531,13 +538,91 @@ internal static class Program
             }
         }
 
-        ObjWriter.Write(mergedPath, verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+        // Apply project-local recentering then configurable global transform for merged render mesh
+        ApplyProjectLocal(verts, opts.ProjectLocal);
+        ApplyGlobalTransform(verts, opts);
+        if (opts.FlipXEnabled)
+        {
+            for (int i = 0; i < tris.Count; i++)
+            {
+                var t = tris[i];
+                tris[i] = (t.A, t.C, t.B);
+            }
+        }
+
+        // Writers receive geometry already transformed
+        ObjWriter.Write(mergedPath, verts, tris, legacyParity: false, projectLocal: false, forceFlipX: false);
         if (opts.ExportGltf)
-            GltfWriter.WriteGltf(Path.ChangeExtension(mergedPath, ".gltf"), verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+            GltfWriter.WriteGltf(Path.ChangeExtension(mergedPath, ".gltf"), verts, tris, legacyParity: false, projectLocal: false, forceFlipX: false);
         if (opts.ExportGlb)
-            GltfWriter.WriteGlb(Path.ChangeExtension(mergedPath, ".glb"), verts, tris, opts.LegacyParity, opts.ProjectLocal, true);
+            GltfWriter.WriteGlb(Path.ChangeExtension(mergedPath, ".glb"), verts, tris, legacyParity: false, projectLocal: false, forceFlipX: false);
 
         Console.WriteLine($"[pm4-faces] Merged render mesh faces: written={written} skipped={skipped}");
+    }
+
+    private static void AssembleAndWriteFromIndexRange(
+        Pm4Scene scene,
+        int startIndex,
+        int indexCount,
+        string objPath,
+        Options opts,
+        bool forceFlipX,
+        out int facesWritten,
+        out int facesSkipped)
+    {
+        var g2l = new Dictionary<int, int>(4096);
+        var localVerts = new List<Vector3>(4096);
+        var localTris = new List<(int A, int B, int C)>(Math.Max(0, indexCount / 3));
+
+        int skipped = 0, written = 0;
+        int start = Math.Max(0, startIndex);
+        int end = Math.Min(scene.Indices.Count, start + Math.Max(0, indexCount));
+        for (int i = start; i + 2 < end; i += 3)
+        {
+            int ga = scene.Indices[i];
+            int gb = scene.Indices[i + 1];
+            int gc = scene.Indices[i + 2];
+
+            if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
+                !TryMap(scene, gb, g2l, localVerts, out var lb) ||
+                !TryMap(scene, gc, g2l, localVerts, out var lc))
+            {
+                skipped++;
+                continue;
+            }
+
+            // Skip degenerate faces (duplicate local vertex indices)
+            if (la == lb || lb == lc || lc == la)
+            {
+                skipped++;
+                continue;
+            }
+
+            localTris.Add((la, lb, lc));
+            written++;
+        }
+        // Apply project-local recentering then configurable global transform for index-range exports
+        ApplyProjectLocal(localVerts, opts.ProjectLocal);
+        ApplyGlobalTransform(localVerts, opts);
+        if (opts.FlipXEnabled)
+        {
+            for (int i = 0; i < localTris.Count; i++)
+            {
+                var t = localTris[i];
+                localTris[i] = (t.A, t.C, t.B);
+            }
+        }
+        ObjWriter.Write(objPath, localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+        if (opts.ExportGltf)
+        {
+            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+        }
+        if (opts.ExportGlb)
+        {
+            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
+        }
+        facesWritten = written;
+        facesSkipped = skipped;
     }
 
     private static void ExportCompositeInstances(
@@ -636,7 +721,7 @@ internal static class Program
                         SurfaceIndices = allItems.Select(t => t.i).ToList(),
                         IndexFirst = allItems.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = allItems.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = true
+                        FlipX = opts.FlipXEnabled
                     });
                 }
 
@@ -756,7 +841,7 @@ internal static class Program
                         SurfaceIndices = items.Select(t => t.si).ToList(),
                         IndexFirst = items.Min(it => (int)it.Item1.MsviFirstIndex),
                         IndexCount = items.Sum(it => (int)it.Item1.IndexCount),
-                        FlipX = true
+                        FlipX = opts.FlipXEnabled
                     });
                 }
             }
@@ -1052,69 +1137,28 @@ internal static class Program
                 }
             }
         }
-        // Always flip X for objects to match tiles and legacy orientation
-        ObjWriter.Write(objPath, localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
+        // Apply project-local recentering then configurable global transform
+        ApplyProjectLocal(localVerts, opts.ProjectLocal);
+        ApplyGlobalTransform(localVerts, opts);
+        if (opts.FlipXEnabled)
+        {
+            // Preserve normals by swapping winding when a reflection is applied
+            for (int i = 0; i < localTris.Count; i++)
+            {
+                var t = localTris[i];
+                localTris[i] = (t.A, t.C, t.B);
+            }
+        }
+
+        // Writers receive geometry already transformed; disable their flip
+        ObjWriter.Write(objPath, localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
         if (opts.ExportGltf)
         {
-            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
+            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
         }
         if (opts.ExportGlb)
         {
-            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, true);
-        }
-        facesWritten = written;
-        facesSkipped = skipped;
-    }
-
-    private static void AssembleAndWriteFromIndexRange(
-        Pm4Scene scene,
-        int startIndex,
-        int indexCount,
-        string objPath,
-        Options opts,
-        bool forceFlipX,
-        out int facesWritten,
-        out int facesSkipped)
-    {
-        var g2l = new Dictionary<int, int>(4096);
-        var localVerts = new List<Vector3>(4096);
-        var localTris = new List<(int A, int B, int C)>(Math.Max(0, indexCount / 3));
-
-        int skipped = 0, written = 0;
-        int start = Math.Max(0, startIndex);
-        int end = Math.Min(scene.Indices.Count, start + Math.Max(0, indexCount));
-        for (int i = start; i + 2 < end; i += 3)
-        {
-            int ga = scene.Indices[i];
-            int gb = scene.Indices[i + 1];
-            int gc = scene.Indices[i + 2];
-
-            if (!TryMap(scene, ga, g2l, localVerts, out var la) ||
-                !TryMap(scene, gb, g2l, localVerts, out var lb) ||
-                !TryMap(scene, gc, g2l, localVerts, out var lc))
-            {
-                skipped++;
-                continue;
-            }
-
-            // Skip degenerate faces (duplicate local vertex indices)
-            if (la == lb || lb == lc || lc == la)
-            {
-                skipped++;
-                continue;
-            }
-
-            localTris.Add((la, lb, lc));
-            written++;
-        }
-        ObjWriter.Write(objPath, localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, forceFlipX);
-        if (opts.ExportGltf)
-        {
-            GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, forceFlipX);
-        }
-        if (opts.ExportGlb)
-        {
-            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, opts.LegacyParity, opts.ProjectLocal, forceFlipX);
+            GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), localVerts, localTris, legacyParity: false, projectLocal: false, forceFlipX: false);
         }
         facesWritten = written;
         facesSkipped = skipped;
@@ -1449,12 +1493,22 @@ internal static class Program
                 }
             }
 
-            // Force X-axis flip for tile exports
-            ObjWriter.Write(objPath, tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
+            // Apply project-local recentering then configurable global transform for tile exports
+            ApplyProjectLocal(tileVerts, opts.ProjectLocal);
+            ApplyGlobalTransform(tileVerts, opts);
+            if (opts.FlipXEnabled)
+            {
+                for (int i = 0; i < tileTris.Count; i++)
+                {
+                    var t = tileTris[i];
+                    tileTris[i] = (t.A, t.C, t.B);
+                }
+            }
+            ObjWriter.Write(objPath, tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
             if (opts.ExportGltf)
-                GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
+                GltfWriter.WriteGltf(Path.ChangeExtension(objPath, ".gltf"), tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
             if (opts.ExportGlb)
-                GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), tileVerts, tileTris, opts.LegacyParity, opts.ProjectLocal, true);
+                GltfWriter.WriteGlb(Path.ChangeExtension(objPath, ".glb"), tileVerts, tileTris, legacyParity: false, projectLocal: false, forceFlipX: false);
 
             tileCsv.Add(string.Join(',',
                 tileId,
@@ -1476,7 +1530,7 @@ internal static class Program
                 IndexCount = count,
                 FacesWritten = written,
                 FacesSkipped = skipped,
-                FlipX = true
+                FlipX = opts.FlipXEnabled
             });
         }
     }
@@ -1501,6 +1555,9 @@ internal static class Program
         bool exportGlb = false;
         bool renderMeshMerged = false;
         bool noMscnRemap = false;
+        bool flipXEnabled = true; // default preserves current behavior
+        float rotXDeg = 0f, rotYDeg = 0f, rotZDeg = 0f;
+        float tx = 0f, ty = 0f, tz = 0f;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -1575,6 +1632,30 @@ internal static class Program
                 case "--no-mscn-remap":
                     noMscnRemap = true;
                     break;
+                case "--no-flip-x":
+                    flipXEnabled = false;
+                    break;
+                case "--rotate-x":
+                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rx))
+                    { rotXDeg = rx; i++; }
+                    break;
+                case "--rotate-y":
+                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var ry))
+                    { rotYDeg = ry; i++; }
+                    break;
+                case "--rotate-z":
+                    if (i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var rz))
+                    { rotZDeg = rz; i++; }
+                    break;
+                case "--translate":
+                    if (i + 3 < args.Length &&
+                        float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var _tx) &&
+                        float.TryParse(args[i + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out var _ty) &&
+                        float.TryParse(args[i + 3], NumberStyles.Float, CultureInfo.InvariantCulture, out var _tz))
+                    {
+                        tx = _tx; ty = _ty; tz = _tz; i += 3;
+                    }
+                    break;
                 case "--help":
                 case "-h":
                     return null;
@@ -1582,12 +1663,12 @@ internal static class Program
         }
 
         if (string.IsNullOrWhiteSpace(input)) return null;
-        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap);
+        return new Options(input, outDir, legacy, projectLocal, snapToPlane, heightScale, heightFitReport, groupBy, batch, ckUseMslk, ckAllowUnlinkedRatio, ckMinTris, ckMergeComponents, ckMonolithic, exportGltf, exportGlb, renderMeshMerged, noMscnRemap, flipXEnabled, rotXDeg, rotYDeg, rotZDeg, tx, ty, tz);
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap]");
+        Console.WriteLine("pm4-faces export --input <tile.pm4|dir> [--out <dir>] [--batch] [--group-by composite-instance|type-instance|type-attr-instance|surface|groupkey|composite|render-mesh] [--legacy-parity] [--project-local] [--snap-to-plane] [--height-scale <float>] [--height-fit-report] [--ck-use-mslk] [--ck-allow-unlinked-ratio <0..1>] [--ck-min-tris <int>] [--ck-merge-components] [--ck-monolithic] [--gltf] [--glb] [--render-mesh-merged] [--no-mscn-remap] [--no-flip-x] [--rotate-x <deg>] [--rotate-y <deg>] [--rotate-z <deg>] [--translate <dx> <dy> <dz>]");
         Console.WriteLine("  Single-file input: loads ONLY that tile. Use --batch to process all tiles with the same prefix.");
         Console.WriteLine("  --snap-to-plane: project vertices to each surface's MSUR plane (experimental; off by default).");
         Console.WriteLine("  --height-scale: multiply MSUR Height by this factor during snapping (e.g., 0.02777778 for 1/36, 0.0625 for 1/16).");
@@ -1599,7 +1680,9 @@ internal static class Program
         Console.WriteLine("  --no-mscn-remap: disable global MSCN vertex remapping during region load (advanced; default is enabled).");
         Console.WriteLine("  Group-by 'render-mesh' (alias 'surfaces-all'): skip object exports; emit tiles and a single merged 'render_mesh.obj'.");
         Console.WriteLine("  --render-mesh-merged: also emit a single merged 'render_mesh.obj' alongside any group-by mode (useful with object exports).");
-        Console.WriteLine("  Note: X-axis flipping is always applied by default across tiles and objects; --legacy-parity is not required for flipping.");
+        Console.WriteLine("  Transforms: X-flip is ON by default (use --no-flip-x to disable). Rotations apply in order X -> Y -> Z (degrees). --translate applies global offset.");
+        Console.WriteLine("  Transform pipeline: if --project-local is set, vertices are mean-centered first, then global transforms (flip/rotate/translate) are applied.");
+        Console.WriteLine("  Writers receive already transformed geometry (no additional recentering or flipping is performed by writers).");
     }
 
     private static string SanitizeFileName(string name)
@@ -1783,5 +1866,50 @@ internal static class Program
         public int FacesWritten { get; set; }
         public int FacesSkipped { get; set; }
         public bool FlipX { get; set; }
+    }
+
+    private static void ApplyProjectLocal(List<Vector3> verts, bool projectLocal)
+    {
+        if (!projectLocal || verts == null || verts.Count == 0) return;
+        double sx = 0, sy = 0, sz = 0;
+        for (int i = 0; i < verts.Count; i++)
+        {
+            sx += verts[i].X;
+            sy += verts[i].Y;
+            sz += verts[i].Z;
+        }
+        double inv = 1.0 / Math.Max(1, verts.Count);
+        var mean = new Vector3((float)(sx * inv), (float)(sy * inv), (float)(sz * inv));
+        for (int i = 0; i < verts.Count; i++)
+        {
+            verts[i] = verts[i] - mean;
+        }
+    }
+
+    private static void ApplyGlobalTransform(List<Vector3> verts, Options opts)
+    {
+        if (verts == null || verts.Count == 0) return;
+
+        bool doFlip = opts.FlipXEnabled;
+        bool doRotX = MathF.Abs(opts.RotXDeg) > 1e-6f;
+        bool doRotY = MathF.Abs(opts.RotYDeg) > 1e-6f;
+        bool doRotZ = MathF.Abs(opts.RotZDeg) > 1e-6f;
+        bool doTrans = MathF.Abs(opts.TranslateX) > 1e-6f || MathF.Abs(opts.TranslateY) > 1e-6f || MathF.Abs(opts.TranslateZ) > 1e-6f;
+
+        Matrix4x4 rx = doRotX ? Matrix4x4.CreateRotationX(opts.RotXDeg * (MathF.PI / 180f)) : Matrix4x4.Identity;
+        Matrix4x4 ry = doRotY ? Matrix4x4.CreateRotationY(opts.RotYDeg * (MathF.PI / 180f)) : Matrix4x4.Identity;
+        Matrix4x4 rz = doRotZ ? Matrix4x4.CreateRotationZ(opts.RotZDeg * (MathF.PI / 180f)) : Matrix4x4.Identity;
+        Vector3 t = doTrans ? new Vector3(opts.TranslateX, opts.TranslateY, opts.TranslateZ) : default;
+
+        for (int i = 0; i < verts.Count; i++)
+        {
+            var v = verts[i];
+            if (doFlip) v = new Vector3(-v.X, v.Y, v.Z);
+            if (doRotX) v = Vector3.Transform(v, rx);
+            if (doRotY) v = Vector3.Transform(v, ry);
+            if (doRotZ) v = Vector3.Transform(v, rz);
+            if (doTrans) v += t;
+            verts[i] = v;
+        }
     }
 }

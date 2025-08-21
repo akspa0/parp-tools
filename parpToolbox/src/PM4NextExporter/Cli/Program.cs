@@ -62,6 +62,12 @@ namespace PM4NextExporter.Cli
             Log($" parent16-swap: {options.Parent16Swap}");
             Log($" audit-only: {options.AuditOnly}");
             Log($" no-remap: {options.NoRemap}");
+            Log($" align-with-mscn: {options.AlignWithMscn}");
+            if (options.AlignWithMscn)
+            {
+                Log("[info] --align-with-mscn: Mesh exporters mirror X centered per object/tile to preserve orientation without quadrant flips.");
+                Log("[info] --align-with-mscn: This takes precedence over --legacy-obj-parity for meshes. MSCN outputs remain unmirrored.");
+            }
             if (options.CkSplitByType)
             {
                 Log($" ck-split-by-type: {options.CkSplitByType}");
@@ -70,9 +76,17 @@ namespace PM4NextExporter.Cli
             {
                 Log($" export-mscn-obj: {options.ExportMscnObj}");
             }
+            if (options.ExportObjectMscn)
+            {
+                Log($" export-object-mscn: {options.ExportObjectMscn}");
+            }
             if (options.NameObjectsWithTile)
             {
                 Log($" name-with-tile: {options.NameObjectsWithTile}");
+            }
+            if (options.MscnOnly)
+            {
+                Log($" mscn-only: {options.MscnOnly}");
             }
             if (options.AssemblyStrategy == AssemblyStrategy.MslkParent)
             {
@@ -91,6 +105,76 @@ namespace PM4NextExporter.Cli
                 return 0;
             }
 
+            // MSCN-only short-circuit: iterate per tile, skip mesh assembly/export
+            if (options.MscnOnly)
+            {
+                Log("[info] MSCN-only mode: skipping mesh assembly/export, processing per tile.");
+                var loader2 = new SceneLoader();
+                var inputs = new List<string>();
+                if (Directory.Exists(options.InputPath!))
+                {
+                    inputs.AddRange(Directory.GetFiles(options.InputPath!, "*.pm4"));
+                }
+                else if (File.Exists(options.InputPath!))
+                {
+                    inputs.Add(options.InputPath!);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"[error] Input path not found: {options.InputPath}");
+                    return 2;
+                }
+
+                inputs.Sort(StringComparer.OrdinalIgnoreCase);
+                int processed = 0;
+                foreach (var file in inputs)
+                {
+                    // Derive a per-tile output subfolder to avoid file overwrite
+                    string subName;
+                    try
+                    {
+                        var coord = ParpToolbox.Services.PM4.Pm4GlobalTileLoader.TileCoordinate.FromFileName(Path.GetFileName(file));
+                        subName = $"tile_X{coord.X:00}_Y{coord.Y:00}";
+                    }
+                    catch
+                    {
+                        subName = Path.GetFileNameWithoutExtension(file);
+                    }
+                    var perTileOutDir = Path.Combine(outDir, subName);
+                    Directory.CreateDirectory(perTileOutDir);
+
+                    var perTileScene = loader2.LoadSingleTile(file, includeAdjacent: false, applyMscnRemap: !options.NoRemap);
+                    Log($" [mscn-only] tile='{Path.GetFileName(file)}' mscn={perTileScene.MscnVertices?.Count ?? 0}");
+
+                    if (options.ExportMscnObj)
+                    {
+                        PM4NextExporter.Exporters.MscnObjExporter.Export(perTileScene, perTileOutDir, options.LegacyObjParity, options.NameObjectsWithTile, options.AlignWithMscn);
+                        Log("  exported MSCN OBJ");
+                    }
+
+                    if (options.CsvDiagnostics)
+                    {
+                        var perTileCsvDir = options.CsvOut != null ? Path.Combine(options.CsvOut, subName) : perTileOutDir;
+                        Directory.CreateDirectory(perTileCsvDir);
+                        var mscnCount = perTileScene.MscnVertices?.Count ?? 0;
+                        if (mscnCount == 0)
+                        {
+                            Log("  [warn] MSCN vertices empty; skipping mscn_vertices.csv");
+                        }
+                        else
+                        {
+                            DiagnosticsService.WriteMscnCsv(perTileCsvDir, perTileScene);
+                            Log("  wrote mscn_vertices.csv");
+                        }
+                    }
+
+                    processed++;
+                }
+
+                Log($"[info] MSCN-only completed. tiles={processed}");
+                return 0;
+            }
+
             // Minimal pipeline wiring
             var loader = new SceneLoader();
             var scene = loader.LoadSingleTile(options.InputPath!, options.IncludeAdjacent, applyMscnRemap: !options.NoRemap);
@@ -101,6 +185,7 @@ namespace PM4NextExporter.Cli
             {
                 AssemblyStrategy.ParentIndex => new ParentHierarchyAssembler(),
                 AssemblyStrategy.MsurIndexCount => new MsurIndexCountAssembler(),
+                AssemblyStrategy.MsurCompositeKey => new MsurCompositeKeyAssembler(),
                 AssemblyStrategy.SurfaceKey => new SurfaceKeyAssembler(),
                 AssemblyStrategy.SurfaceKeyAA => new SurfaceKeyAAAssembler(),
                 AssemblyStrategy.CompositeHierarchy => new CompositeHierarchyAssembler(),
@@ -135,7 +220,7 @@ namespace PM4NextExporter.Cli
             switch (options.Format)
             {
                 case ExportFormat.Obj:
-                    PM4NextExporter.Exporters.ObjExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal);
+                    PM4NextExporter.Exporters.ObjExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal, options.AlignWithMscn);
                     Log(" exported OBJ");
                     if (options.ExportTiles)
                     {
@@ -144,8 +229,8 @@ namespace PM4NextExporter.Cli
                         {
                             Log("[info] per-tile OBJ export preserves global coordinates; --project-local is ignored for tiles");
                         }
-                        Log("[info] per-tile OBJ uses global coordinates (no local projection). Object-level X mirroring matches OBJ export and is controlled by --legacy-obj-parity");
-                        PM4NextExporter.Exporters.PerTileObjectsExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal);
+                        Log("[info] per-tile OBJ uses global coordinates (no local projection). Object-level X mirroring matches OBJ export and is controlled by --legacy-obj-parity; when --align-with-mscn is set, mirroring is centered per tile");
+                        PM4NextExporter.Exporters.PerTileObjectsExporter.Export(assembled, outDir, options.LegacyObjParity, options.ProjectLocal, options.AlignWithMscn);
                         Log(" exported per-tile OBJ");
                     }
                     break;
@@ -155,10 +240,27 @@ namespace PM4NextExporter.Cli
                     break;
             }
 
+            // Per-object MSCN sidecars (OBJ points + CSV)
+            if (options.ExportObjectMscn)
+            {
+                var mscnCount = scene.MscnVertices?.Count ?? 0;
+                if (mscnCount == 0)
+                {
+                    Log("[warn] MSCN vertices empty; skipping per-object MSCN sidecars");
+                }
+                else
+                {
+                    var remapApplied = !options.NoRemap; // mirrors how we invoked the loader
+                    var attrib = PM4NextExporter.Services.MscnAttribution.Attribute(scene, assembled, remapApplied);
+                    PM4NextExporter.Exporters.ObjectMscnSidecarExporter.Export(scene, assembled, attrib, outDir, options.LegacyObjParity, options.NameObjectsWithTile, options.AlignWithMscn);
+                    Log(" exported per-object MSCN sidecars");
+                }
+            }
+
             // Optional: export MSCN vertices as separate OBJ layers for validation
             if (options.ExportMscnObj)
             {
-                PM4NextExporter.Exporters.MscnObjExporter.Export(scene, outDir, options.LegacyObjParity, options.NameObjectsWithTile);
+                PM4NextExporter.Exporters.MscnObjExporter.Export(scene, outDir, options.LegacyObjParity, options.NameObjectsWithTile, options.AlignWithMscn);
                 Log(" exported MSCN OBJ layers");
             }
 
@@ -234,11 +336,17 @@ namespace PM4NextExporter.Cli
                     case "--no-remap":
                         opts.NoRemap = true;
                         break;
+                    case "--mscn-only":
+                        opts.MscnOnly = true;
+                        break;
                     case "--ck-split-by-type":
                         opts.CkSplitByType = true;
                         break;
                     case "--export-mscn-obj":
                         opts.ExportMscnObj = true;
+                        break;
+                    case "--export-object-mscn":
+                        opts.ExportObjectMscn = true;
                         break;
                     case "--project-local":
                         opts.ProjectLocal = true;
@@ -248,6 +356,9 @@ namespace PM4NextExporter.Cli
                         break;
                     case "--name-with-tile":
                         opts.NameObjectsWithTile = true;
+                        break;
+                    case "--align-with-mscn":
+                        opts.AlignWithMscn = true;
                         break;
                     case "--mslk-parent-min-tris":
                         if (!int.TryParse(NextOrThrow(args, ref i, a), out var minTris) || minTris < 0)
@@ -301,6 +412,7 @@ namespace PM4NextExporter.Cli
             {
                 "parent-index" => Model.AssemblyStrategy.ParentIndex,
                 "msur-indexcount" => Model.AssemblyStrategy.MsurIndexCount,
+                "msur-compositekey" => Model.AssemblyStrategy.MsurCompositeKey,
                 "surface-key" => Model.AssemblyStrategy.SurfaceKey,
                 "surface-key-aa" => Model.AssemblyStrategy.SurfaceKeyAA,
                 "composite-hierarchy" => Model.AssemblyStrategy.CompositeHierarchy,
@@ -311,7 +423,7 @@ namespace PM4NextExporter.Cli
                 "mslk-parent" => Model.AssemblyStrategy.MslkParent,
                 "mslk-instance" => Model.AssemblyStrategy.MslkInstance,
                 "mslk-instance+ck24" => Model.AssemblyStrategy.MslkInstanceCk24,
-                _ => throw new ArgumentException("--assembly must be parent-index|msur-indexcount|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24")
+                _ => throw new ArgumentException("--assembly must be parent-index|msur-indexcount|msur-compositekey|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24")
             };
 
         private static Model.GroupKey ParseGroup(string s)
@@ -333,11 +445,15 @@ namespace PM4NextExporter.Cli
             Console.WriteLine(@$"{ToolName}
 Usage:
   {ToolName} <pm4Input|directory> [--out <dir>] [--include-adjacent] [--format obj|gltf|glb]
-  [--assembly parent-index|msur-indexcount|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24]
+  [--assembly parent-index|msur-indexcount|msur-compositekey|surface-key|surface-key-aa|composite-hierarchy|container-hierarchy-8bit|composite-bytepair|parent16|mslk-parent|mslk-instance|mslk-instance+ck24]
   [--group parent16|parent16-container|parent16-object|surface|flags|type|sortkey|tile]
           [--parent16-swap] [--csv-diagnostics] [--csv-out <dir>] [--correlate <keyA:keyB>]
   [--batch] [--legacy-obj-parity] [--audit-only] [--no-remap] [--ck-split-by-type]
-  [--mslk-parent-min-tris <N>] [--mslk-parent-allow-fallback] [--export-mscn-obj] [--export-tiles] [--project-local] [--name-with-tile]
+  [--mslk-parent-min-tris <N>] [--mslk-parent-allow-fallback] [--export-mscn-obj] [--export-object-mscn] [--mscn-only] [--export-tiles] [--project-local] [--name-with-tile] [--align-with-mscn]
+
+Flags:
+  --align-with-mscn        Align mesh exporters with MSCN's +X/+Y/+Z by applying centered X-mirroring per object/tile.
+                           Overrides --legacy-obj-parity for mesh mirroring; MSCN outputs remain unmirrored.
 ");
         }
     }
