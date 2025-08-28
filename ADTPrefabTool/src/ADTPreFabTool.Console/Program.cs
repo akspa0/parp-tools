@@ -317,7 +317,7 @@ namespace ADTPreFabTool
                             }
 
                             // Build unified entry list including legacy "second copy" minimaps for very old versions
-                            var allEntries = new List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5)>();
+                            var allEntries = new List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)>();
                             var tileHash = new Dictionary<(string,int,int), string>();
                             var duplicateOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // fullPath -> duplicateOfFullPath
                             // Seed with TRS entries first (authoritative)
@@ -325,7 +325,7 @@ namespace ADTPreFabTool
                             {
                                 string md5 = ComputeFileMD5(e.fullPath);
                                 tileHash[(e.mapName.ToLowerInvariant(), e.tileX, e.tileY)] = md5;
-                                allEntries.Add((e.mapName, e.tileX, e.tileY, e.fullPath, "trs", false, "", md5));
+                                allEntries.Add((e.mapName, e.tileX, e.tileY, e.fullPath, "trs", false, "", md5, ""));
                             }
                             // WMO-named tiles from World/Minimaps (if available)
                             if (!string.IsNullOrWhiteSpace(worldMinimapRoot) && Directory.Exists(worldMinimapRoot))
@@ -333,24 +333,8 @@ namespace ADTPreFabTool
                                 foreach (var w in ScanWorldMinimaps(worldMinimapRoot!))
                                 {
                                     string md5 = ComputeFileMD5(w.fullPath);
-                                    var key = (w.mapName.ToLowerInvariant(), w.tileX, w.tileY);
-                                    if (tileHash.TryGetValue(key, out var existing))
-                                    {
-                                        if (string.Equals(existing, md5, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            duplicateOf[w.fullPath] = allEntries.First(e => e.mapName.Equals(w.mapName, StringComparison.OrdinalIgnoreCase) && e.tileX==w.tileX && e.tileY==w.tileY).fullPath;
-                                            continue;
-                                        }
-                                        else
-                                        {
-                                            // Different content for same key; keep as alt variant from wmo source
-                                            allEntries.Add((w.mapName, w.tileX, w.tileY, w.fullPath, "wmo", true, w.wmoAsset, md5));
-                                            continue;
-                                        }
-                                    }
-                                    // Not present yet -> add as primary for this key
-                                    tileHash[key] = md5;
-                                    allEntries.Add((w.mapName, w.tileX, w.tileY, w.fullPath, "wmo", false, w.wmoAsset, md5));
+                                    // For WMO, do not dedup by (mapName,X,Y); preserve each path as its own output
+                                    allEntries.Add((w.mapName, w.tileX, w.tileY, w.fullPath, "wmo", false, w.wmoAsset, md5, w.relPng));
                                 }
                             }
                             // If version is one of the legacy ones, scan alt layout
@@ -368,13 +352,13 @@ namespace ADTPreFabTool
                                         }
                                         else
                                         {
-                                            allEntries.Add((mapName,tileX,tileY,fullPath,"alt", true, "", md5));
+                                            allEntries.Add((mapName,tileX,tileY,fullPath,"alt", true, "", md5, ""));
                                         }
                                     }
                                     else
                                     {
                                         tileHash[key] = md5;
-                                        allEntries.Add((mapName,tileX,tileY,fullPath,"alt", false, "", md5));
+                                        allEntries.Add((mapName,tileX,tileY,fullPath,"alt", false, "", md5, ""));
                                     }
                                 }
                             }
@@ -387,8 +371,18 @@ namespace ADTPreFabTool
                                 {
                                     try
                                     {
-                                        string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
-                                        string targetPng = Path.Combine(minimapCacheDir, e.mapName, fileName);
+                                        string targetPng;
+                                        if (e.sourceKind == "wmo" && !string.IsNullOrWhiteSpace(e.wmoRelPng))
+                                        {
+                                            // Write under dedicated wmo hierarchy using original stem
+                                            var rel = e.wmoRelPng.Replace("/", Path.DirectorySeparatorChar.ToString());
+                                            targetPng = Path.Combine(minimapCacheDir, rel);
+                                        }
+                                        else
+                                        {
+                                            string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
+                                            targetPng = Path.Combine(minimapCacheDir, e.mapName, fileName);
+                                        }
                                         string? targetDir = Path.GetDirectoryName(targetPng);
                                         if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
                                         if (File.Exists(targetPng)) { skipped++; continue; }
@@ -532,7 +526,7 @@ namespace ADTPreFabTool
             string? minimapRoot,
             string? pngCacheRoot,
             bool includePng,
-            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5)> allEntries,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
             Dictionary<string,string> duplicateOf)
         {
             // Write an index CSV: includes blp_path and optional png_path (if decoded/cached)
@@ -540,7 +534,7 @@ namespace ADTPreFabTool
             Directory.CreateDirectory(dir);
             var sb = new StringBuilder();
             sb.AppendLine("mapName,tileX,tileY,source_kind,duplicate_of,wmo_asset,content_md5,blp_path,png_path");
-            foreach (var e in allEntries.OrderBy(e => e.mapName).ThenBy(e => e.tileY).ThenBy(e => e.tileX).ThenBy(e=> e.sourceKind))
+            foreach (var e in allEntries.OrderBy(e => e.sourceKind).ThenBy(e => e.mapName).ThenBy(e => e.tileY).ThenBy(e => e.tileX))
             {
                 string blp = e.fullPath.Replace("\\", "/");
                 string png = "";
@@ -548,8 +542,17 @@ namespace ADTPreFabTool
                 {
                     try
                     {
-                        string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
-                        string targetPng = Path.Combine(pngCacheRoot!, e.mapName, fileName);
+                        string targetPng;
+                        if (e.sourceKind == "wmo" && !string.IsNullOrWhiteSpace(e.wmoRelPng))
+                        {
+                            var rel = e.wmoRelPng.Replace("/", Path.DirectorySeparatorChar.ToString());
+                            targetPng = Path.Combine(pngCacheRoot!, rel);
+                        }
+                        else
+                        {
+                            string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
+                            targetPng = Path.Combine(pngCacheRoot!, e.mapName, fileName);
+                        }
                         if (File.Exists(targetPng)) png = targetPng.Replace("\\", "/");
                     }
                     catch { }
@@ -561,7 +564,7 @@ namespace ADTPreFabTool
             System.Console.WriteLine($"Wrote minimap_index.csv with {allEntries.Count} rows");
         }
 
-        private static void GenerateSeedTemplate(string runDir, string inputDir, HashSet<(int tx,int ty)> tileSet, (int x1,int y1,int x2,int y2)? tileRange)
+        private static void GenerateSeedTemplate(string runDir, string inputPath, HashSet<(int tx,int ty)> tileSet, (int x1,int y1,int x2,int y2)? tileRange)
         {
             string dir = Path.Combine(runDir, "seeding");
             Directory.CreateDirectory(dir);
@@ -570,7 +573,7 @@ namespace ADTPreFabTool
             w.WriteLine("tile, tileX, tileY, chunkX, chunkY, gx, gy");
 
             var enumOption = SearchOption.AllDirectories;
-            foreach (var adtPath in Directory.EnumerateFiles(inputDir, "*.adt", enumOption))
+            foreach (var adtPath in Directory.EnumerateFiles(inputPath, "*.adt", enumOption))
             {
                 var stem = Path.GetFileNameWithoutExtension(adtPath);
                 if (!ParseTileXYFromStem(stem, out int tileX, out int tileY)) continue;
@@ -743,6 +746,45 @@ namespace ADTPreFabTool
             return null;
         }
 
+        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath,string wmoAsset,string relPng)> ScanWorldMinimaps(string worldMinimapRoot)
+        {
+            // Recursively enumerate .blp and infer (mapName, tileX, tileY) and wmoAsset from path
+            var results = new List<(string,int,int,string,string,string)>();
+            if (!Directory.Exists(worldMinimapRoot)) return results;
+            foreach (var blp in Directory.EnumerateFiles(worldMinimapRoot, "*.blp", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(worldMinimapRoot, blp);
+                var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (parts.Length < 2) continue; // need at least top-level dir and a filename
+                // If path starts with wmo/..., use the second segment (continent) as mapName; else use first segment
+                string mapName = parts[0].Equals("wmo", StringComparison.OrdinalIgnoreCase)
+                    ? (parts.Length > 1 ? parts[1] : "wmo")
+                    : parts[0];
+                string stem = Path.GetFileNameWithoutExtension(blp);
+                // Parse last two numeric groups as X,Y
+                var m = Regex.Match(stem, @".*_(\d+)_(\d+)$", RegexOptions.IgnoreCase);
+                if (!m.Success || !int.TryParse(m.Groups[1].Value, out var tx) || !int.TryParse(m.Groups[2].Value, out var ty)) continue;
+                string relDir = Path.GetDirectoryName(rel)?.Replace("\\", "/") ?? ""; // directory under World/Minimaps
+                string wmoAsset = relDir; // full directory path under World/Minimaps
+                // Strip leading 'wmo/' from relDir for output rooting
+                string relDirNoPrefix = relDir;
+                if (!string.IsNullOrEmpty(relDirNoPrefix))
+                {
+                    var segs = relDirNoPrefix.Split('/');
+                    if (segs.Length > 0 && segs[0].Equals("wmo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        relDirNoPrefix = string.Join('/', segs.Skip(1));
+                    }
+                }
+                // Build relative PNG path under cache: wmo/<relDirNoPrefix>/<stem>.png
+                string relPng = string.IsNullOrEmpty(relDirNoPrefix)
+                    ? Path.Combine("wmo", Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/")
+                    : Path.Combine("wmo", relDirNoPrefix, Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/");
+                results.Add((mapName, tx, ty, blp, wmoAsset, relPng));
+            }
+            return results;
+        }
+
         private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath)> ScanAltMinimapFolders(string minimapRoot)
         {
             var results = new List<(string,int,int,string)>();
@@ -777,27 +819,6 @@ namespace ADTPreFabTool
             using var fs = File.OpenRead(path);
             var hash = md5.ComputeHash(fs);
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-        }
-
-        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath,string wmoAsset)> ScanWorldMinimaps(string worldMinimapRoot)
-        {
-            // Recursively enumerate .blp and infer (mapName, tileX, tileY) and wmoAsset from path
-            var results = new List<(string,int,int,string,string)>();
-            if (!Directory.Exists(worldMinimapRoot)) return results;
-            foreach (var blp in Directory.EnumerateFiles(worldMinimapRoot, "*.blp", SearchOption.AllDirectories))
-            {
-                var rel = Path.GetRelativePath(worldMinimapRoot, blp);
-                var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (parts.Length < 2) continue; // need at least mapName/filename
-                string mapName = parts[0];
-                string stem = Path.GetFileNameWithoutExtension(blp);
-                // Parse last two numeric groups as X,Y
-                var m = Regex.Match(stem, @".*_(\d+)_(\d+)$", RegexOptions.IgnoreCase);
-                if (!m.Success || !int.TryParse(m.Groups[1].Value, out var tx) || !int.TryParse(m.Groups[2].Value, out var ty)) continue;
-                string wmoAsset = Path.GetDirectoryName(rel)?.Replace("\\", "/") ?? ""; // directory under World/Minimaps
-                results.Add((mapName, tx, ty, blp, wmoAsset));
-            }
-            return results;
         }
     }
 }

@@ -1,6 +1,6 @@
-# ADTPreFabTool — Terrain Extraction and GLB Outputs
+# ADTPreFabTool — Terrain Extraction, Minimap Decoding, and GLB Outputs
 
-This repository contains tools to extract terrain meshes from WoW ADT files and export standard assets (OBJ/GLB) along with a lightweight per-file manifest for downstream tools.
+This repository contains tools to extract terrain meshes from WoW ADT files, decode minimap tiles (ADT and WMO), and export standard assets (OBJ/GLB) along with a lightweight per-file manifest for downstream tools.
 
 ## Prerequisites
 
@@ -24,6 +24,17 @@ git submodule init
 git submodule update
 cd ../..
 ```
+
+## Features
+
+- Extracts ADT terrain to OBJ and optional GLB/GLTF
+- Builds per-file and aggregated manifests for downstream workflows
+- Decodes minimaps from multiple sources:
+  - TRS-based tiles via `textures/Minimap/md5translate.txt`
+  - Legacy ALT layout under `textures/Minimap/<MapName>/`
+  - WMO tiles under `World/Minimaps/**` with preserved folder hierarchy
+
+Uses real data files from `test_data/` for examples.
 
 ## Data Layout Overview
 
@@ -70,6 +81,65 @@ dotnet build src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj -c Release
 - OBJ: import into Blender, MeshLab, or any OBJ-capable tool.
 - GLB: view in Windows 3D Viewer, Blender, Babylon Sandbox, or three.js editors.
 - The manifest is provided for downstream processing or custom viewers; this repo no longer includes a bundled viewer.
+
+## Minimap Cache Structure
+
+When `--decode-minimap` is used, the cache is populated at:
+
+```
+<cache_root>/_cache/<data-version>/minimap_png/
+```
+
+- ADT tiles (TRS / legacy ALT):
+  - `<MapName>/<MapName>_<X>_<Y>.png`
+  - Alternate differing content: `<MapName>/<MapName>_<X>_<Y>__alt.png`
+
+- WMO tiles (preserved hierarchy):
+  - `wmo/<relative_path_under_World/Minimaps>/<original_stem>.png`
+  - Example: `wmo/transports/passengership/passengership_00_00_00.png`
+
+CSV `minimap_index.csv` (written to each run folder when `--export-minimap-overlays`) includes columns:
+
+```
+mapName,tileX,tileY,source_kind,duplicate_of,wmo_asset,content_md5,blp_path,png_path
+```
+
+Notes:
+- ADT: de-dup precedence TRS > ALT for identical (MapName,X,Y). Differing content produces `__alt`.
+- WMO: every file path becomes its own PNG; we only skip if that exact output already exists.
+
+## Quick Start (real test data)
+
+Prepare minimaps and export overlays:
+
+```bash
+dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
+  "test_data/0.6.0/tree/World/Maps/Azeroth" \
+  "./project_output" \
+  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
+  --trs "test_data/0.6.0/tree/textures/Minimap/md5translate.txt" \
+  --data-version 0.6.0 \
+  --cache-root "./cachedMinimaps" \
+  --decode-minimap \
+  --export-minimap-overlays
+```
+
+Explicit WMO root:
+
+```bash
+dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
+  "test_data/0.6.0/tree/World/Maps/Azeroth" \
+  "./project_output" \
+  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
+  --trs "test_data/0.6.0/tree/textures/Minimap/md5translate.txt" \
+  --world-minimap-root "test_data/0.6.0/tree/World/Minimaps" \
+  --data-version 0.6.0 \
+  --cache-root "./cachedMinimaps" \
+  --decode-minimap \
+  --export-minimap-overlays
+```
+
+Typical OBJ/GLB extraction remains the same; see `docs/CLI.md` for flags.
 
 ## Future Improvements
 
