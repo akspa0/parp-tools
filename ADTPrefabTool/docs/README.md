@@ -7,6 +7,24 @@ This repository contains tools to extract terrain meshes from WoW ADT files and 
 - .NET SDK 9.0 or later
 - Windows recommended
 
+## Setup
+
+This project depends on external libraries that must be cloned as submodules.
+
+From the repository root:
+
+```bash
+# Clone the required repositories into the lib/ directory
+git clone https://github.com/Marlamin/wow.tools.local lib/wow.tools.local
+git clone https://github.com/Kruithne/wow.export lib/wow.export
+
+# Initialize and update submodules for wow.tools.local
+cd lib/wow.tools.local
+git submodule init
+git submodule update
+cd ../..
+```
+
 ## Data Layout Overview
 
 When exporting per-file GLBs and a manifest, the output directory contains:
