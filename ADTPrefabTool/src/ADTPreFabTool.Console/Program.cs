@@ -12,6 +12,10 @@ using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 using System.Text.RegularExpressions;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Formats.Png;
+using BLPSharp;
 
 namespace ADTPreFabTool
 {
@@ -24,7 +28,7 @@ namespace ADTPreFabTool
 
             if (args.Length < 1)
             {
-                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap]");
+                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>]");
                 System.Console.WriteLine("Defaults (directory input): --recursive --glb-per-file --manifest --timestamped --chunks-manifest --meta");
                 System.Console.WriteLine("Examples:");
                 System.Console.WriteLine("  ADTPreFabTool.Console \"path/to/terrain.adt\" \"output/\" --glb");
@@ -71,6 +75,7 @@ namespace ADTPreFabTool
             string? dataVersion = null; // e.g., 0.6.0
             string? cacheRoot = null;   // root for caches (defaults to outputRoot)
             bool decodeMinimap = args.Any(a => a.Equals("--decode-minimap", StringComparison.OrdinalIgnoreCase));
+            string? worldMinimapRoot = null; // optional: World/Minimaps root for WMO-named tiles
 
             // Allow overrides
             if (args.Any(a => a.Equals("--no-recursive", StringComparison.OrdinalIgnoreCase))) recursive = false;
@@ -201,6 +206,10 @@ namespace ADTPreFabTool
                 {
                     cacheRoot = args[i + 1];
                 }
+                if (args[i].Equals("--world-minimap-root", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    worldMinimapRoot = args[i + 1];
+                }
             }
 
             // Apply similarity percentage mappings if provided
@@ -263,6 +272,19 @@ namespace ADTPreFabTool
                                 {
                                     System.Console.WriteLine("No md5translate file found under minimap root; skipping TRS parsing.");
                                 }
+                                // Auto-detect World/Minimaps if not provided
+                                if (string.IsNullOrWhiteSpace(worldMinimapRoot))
+                                {
+                                    try
+                                    {
+                                        // Try to locate ../../World/Minimaps relative to textures/Minimap
+                                        var texturesDir = Directory.GetParent(minimapRoot!);
+                                        var treeRoot = texturesDir?.Parent; // .../tree
+                                        var candidate = treeRoot != null ? Path.Combine(treeRoot.FullName, "World", "Minimaps") : null;
+                                        if (!string.IsNullOrEmpty(candidate) && Directory.Exists(candidate)) worldMinimapRoot = candidate;
+                                    }
+                                    catch { }
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -270,37 +292,157 @@ namespace ADTPreFabTool
                             }
                         }
 
-                        // Minimal cache scaffolding (no decoding yet)
+                        // Versioned cache scaffolding + optional decoding (preserve TRS folder structure)
                         if (!string.IsNullOrWhiteSpace(minimapRoot))
                         {
-                            string versionTag = dataVersion ?? FindVersionTagFromPath(minimapRoot!) ?? "unknown";
+                            // Prefer explicit --data-version, else infer from input folder, else minimap root
+                            string versionTag = dataVersion ?? FindVersionTagFromPath(inputPath) ?? FindVersionTagFromPath(minimapRoot!) ?? "unknown";
                             string cacheBase = cacheRoot ?? outputRoot;
                             string minimapCacheDir = Path.Combine(cacheBase, "_cache", versionTag, "minimap_png");
                             Directory.CreateDirectory(minimapCacheDir);
+                            // Ensure per-entry directories mirroring TRS relative paths
+                            if (minimapEntries.Count > 0)
+                            {
+                                foreach (var e in minimapEntries)
+                                {
+                                    try
+                                    {
+                                        string rel = Path.GetRelativePath(minimapRoot!, e.fullPath);
+                                        string? relDir = Path.GetDirectoryName(rel);
+                                        string targetDir = string.IsNullOrEmpty(relDir) ? minimapCacheDir : Path.Combine(minimapCacheDir, relDir);
+                                        Directory.CreateDirectory(targetDir);
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            // Build unified entry list including legacy "second copy" minimaps for very old versions
+                            var allEntries = new List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5)>();
+                            var tileHash = new Dictionary<(string,int,int), string>();
+                            var duplicateOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // fullPath -> duplicateOfFullPath
+                            // Seed with TRS entries first (authoritative)
+                            foreach (var e in minimapEntries)
+                            {
+                                string md5 = ComputeFileMD5(e.fullPath);
+                                tileHash[(e.mapName.ToLowerInvariant(), e.tileX, e.tileY)] = md5;
+                                allEntries.Add((e.mapName, e.tileX, e.tileY, e.fullPath, "trs", false, "", md5));
+                            }
+                            // WMO-named tiles from World/Minimaps (if available)
+                            if (!string.IsNullOrWhiteSpace(worldMinimapRoot) && Directory.Exists(worldMinimapRoot))
+                            {
+                                foreach (var w in ScanWorldMinimaps(worldMinimapRoot!))
+                                {
+                                    string md5 = ComputeFileMD5(w.fullPath);
+                                    var key = (w.mapName.ToLowerInvariant(), w.tileX, w.tileY);
+                                    if (tileHash.TryGetValue(key, out var existing))
+                                    {
+                                        if (string.Equals(existing, md5, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            duplicateOf[w.fullPath] = allEntries.First(e => e.mapName.Equals(w.mapName, StringComparison.OrdinalIgnoreCase) && e.tileX==w.tileX && e.tileY==w.tileY).fullPath;
+                                            continue;
+                                        }
+                                        else
+                                        {
+                                            // Different content for same key; keep as alt variant from wmo source
+                                            allEntries.Add((w.mapName, w.tileX, w.tileY, w.fullPath, "wmo", true, w.wmoAsset, md5));
+                                            continue;
+                                        }
+                                    }
+                                    // Not present yet -> add as primary for this key
+                                    tileHash[key] = md5;
+                                    allEntries.Add((w.mapName, w.tileX, w.tileY, w.fullPath, "wmo", false, w.wmoAsset, md5));
+                                }
+                            }
+                            // If version is one of the legacy ones, scan alt layout
+                            if (versionTag == "0.5.3" || versionTag == "0.5.5" || versionTag == "0.6.0")
+                            {
+                                foreach (var (mapName,tileX,tileY,fullPath) in ScanAltMinimapFolders(minimapRoot!))
+                                {
+                                    string md5 = ComputeFileMD5(fullPath);
+                                    var key = (mapName.ToLowerInvariant(),tileX,tileY);
+                                    if (tileHash.TryGetValue(key, out var existing))
+                                    {
+                                        if (string.Equals(existing, md5, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            duplicateOf[fullPath] = allEntries.First(e => e.mapName==mapName && e.tileX==tileX && e.tileY==tileY).fullPath;
+                                        }
+                                        else
+                                        {
+                                            allEntries.Add((mapName,tileX,tileY,fullPath,"alt", true, "", md5));
+                                        }
+                                    }
+                                    else
+                                    {
+                                        tileHash[key] = md5;
+                                        allEntries.Add((mapName,tileX,tileY,fullPath,"alt", false, "", md5));
+                                    }
+                                }
+                            }
+
+                            // Decode BLP→PNG once into cache if requested
+                            if (decodeMinimap && allEntries.Count > 0)
+                            {
+                                int decoded = 0; int skipped = 0; int failed = 0; int logged = 0;
+                                foreach (var e in allEntries)
+                                {
+                                    try
+                                    {
+                                        string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
+                                        string targetPng = Path.Combine(minimapCacheDir, e.mapName, fileName);
+                                        string? targetDir = Path.GetDirectoryName(targetPng);
+                                        if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
+                                        if (File.Exists(targetPng)) { skipped++; continue; }
+
+                                        using (var fs = File.OpenRead(e.fullPath))
+                                        using (var blp = new BLPFile(fs))
+                                        {
+                                            var pixels = blp.GetPixels(0, out var w, out var h);
+                                            using var img = Image.LoadPixelData<Bgra32>(pixels, w, h);
+                                            img.SaveAsPng(targetPng);
+                                        }
+                                        decoded++;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        failed++;
+                                        if (logged < 5)
+                                        {
+                                            System.Console.WriteLine($"Decode fail: {e.fullPath} -> {ex.Message}");
+                                            logged++;
+                                        }
+                                    }
+                                }
+                                System.Console.WriteLine($"Decoded minimaps: {decoded} new, {skipped} cached, {failed} failed");
+                            }
+
                             var manifest = new StringBuilder();
                             manifest.AppendLine("{");
                             manifest.AppendLine($"  \"version\": \"{versionTag}\",");
                             manifest.AppendLine($"  \"minimapRoot\": \"{minimapRoot!.Replace("\\", "/")}\",");
                             manifest.AppendLine($"  \"trsPath\": \"{(trsPath ?? "").Replace("\\", "/")}\",");
+                            if (!string.IsNullOrWhiteSpace(worldMinimapRoot)) manifest.AppendLine($"  \"worldMinimapRoot\": \"{worldMinimapRoot.Replace("\\", "/")}\",");
                             manifest.AppendLine($"  \"decoded\": {decodeMinimap.ToString().ToLowerInvariant()},");
-                            manifest.AppendLine($"  \"entries\": {minimapEntries.Count}");
+                            manifest.AppendLine($"  \"entries\": {(minimapEntries.Count)}");
+                            // counts per source
+                            var c_trs = allEntries.Count(e => e.sourceKind=="trs");
+                            var c_wmo = allEntries.Count(e => e.sourceKind=="wmo");
+                            var c_alt = allEntries.Count(e => e.sourceKind=="alt");
+                            manifest.AppendLine($"  ,\"counts\": {{ \"trs\": {c_trs}, \"wmo\": {c_wmo}, \"alt\": {c_alt}, \"duplicates\": {duplicateOf.Count} }}");
                             manifest.AppendLine("}");
                             File.WriteAllText(Path.Combine(minimapCacheDir, "cache_manifest.json"), manifest.ToString());
                             System.Console.WriteLine($"Cache ready at: {minimapCacheDir}");
+
+                            // Export overlays CSV with optional png_path
+                            if (exportMinimapOverlays)
+                            {
+                                ExportMinimapOverlaysV2(runDir, minimapEntries, minimapRoot!, minimapCacheDir, decodeMinimap, allEntries, duplicateOf);
+                            }
                         }
 
-                        // Seed/overlay helpers
-                        if (exportMinimapOverlays)
-                        {
-                            ExportMinimapOverlays(runDir, minimapEntries);
-                        }
+                        // Generate seed template CSV
                         if (generateSeedTemplate)
                         {
                             GenerateSeedTemplate(runDir, inputPath, tileSet, tileRange);
-                        }
-                        if (superblockPatterns)
-                        {
-                            ProcessSuperblockPatternsGlobal(inputPath, runDir, tileSet, tileRange, superblockSizes, seedsCsvPath, edgeTrimMax, deltaExport);
                         }
                     }
                     else if (prefabScan)
@@ -384,20 +526,39 @@ namespace ADTPreFabTool
             return results;
         }
 
-        private static void ExportMinimapOverlays(string runDir, List<(string mapName,int tileX,int tileY,string fullPath)> entries)
+        private static void ExportMinimapOverlaysV2(
+            string runDir,
+            List<(string mapName,int tileX,int tileY,string fullPath)> trsEntries,
+            string? minimapRoot,
+            string? pngCacheRoot,
+            bool includePng,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5)> allEntries,
+            Dictionary<string,string> duplicateOf)
         {
-            // Minimal implementation: write an index CSV to locate images and assist seed authoring.
-            // Image decoding to PNG can be added later if needed.
+            // Write an index CSV: includes blp_path and optional png_path (if decoded/cached)
             string dir = Path.Combine(runDir, "minimap_overlay");
             Directory.CreateDirectory(dir);
             var sb = new StringBuilder();
-            sb.AppendLine("mapName,tileX,tileY,blp_path");
-            foreach (var e in entries.OrderBy(e => e.mapName).ThenBy(e => e.tileY).ThenBy(e => e.tileX))
+            sb.AppendLine("mapName,tileX,tileY,source_kind,duplicate_of,wmo_asset,content_md5,blp_path,png_path");
+            foreach (var e in allEntries.OrderBy(e => e.mapName).ThenBy(e => e.tileY).ThenBy(e => e.tileX).ThenBy(e=> e.sourceKind))
             {
-                sb.AppendLine($"{e.mapName},{e.tileX},{e.tileY},\"{e.fullPath.Replace("\\", "/")}\"");
+                string blp = e.fullPath.Replace("\\", "/");
+                string png = "";
+                if (includePng && !string.IsNullOrWhiteSpace(minimapRoot) && !string.IsNullOrWhiteSpace(pngCacheRoot))
+                {
+                    try
+                    {
+                        string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
+                        string targetPng = Path.Combine(pngCacheRoot!, e.mapName, fileName);
+                        if (File.Exists(targetPng)) png = targetPng.Replace("\\", "/");
+                    }
+                    catch { }
+                }
+                string dup = duplicateOf.TryGetValue(e.fullPath, out var ofp) ? ofp.Replace("\\", "/") : "";
+                sb.AppendLine($"{e.mapName},{e.tileX},{e.tileY},{e.sourceKind},\"{dup}\",\"{e.wmoAsset}\",{e.md5},\"{blp}\",\"{png}\"");
             }
             File.WriteAllText(Path.Combine(dir, "minimap_index.csv"), sb.ToString());
-            System.Console.WriteLine($"Wrote minimap_index.csv with {entries.Count} rows");
+            System.Console.WriteLine($"Wrote minimap_index.csv with {allEntries.Count} rows");
         }
 
         private static void GenerateSeedTemplate(string runDir, string inputDir, HashSet<(int tx,int ty)> tileSet, (int x1,int y1,int x2,int y2)? tileRange)
@@ -580,6 +741,63 @@ namespace ADTPreFabTool
             }
             catch { }
             return null;
+        }
+
+        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath)> ScanAltMinimapFolders(string minimapRoot)
+        {
+            var results = new List<(string,int,int,string)>();
+            if (!Directory.Exists(minimapRoot)) return results;
+            foreach (var dir in Directory.EnumerateDirectories(minimapRoot))
+            {
+                string mapName = Path.GetFileName(dir);
+                foreach (var blp in Directory.EnumerateFiles(dir, "*.blp", SearchOption.TopDirectoryOnly))
+                {
+                    var stem = Path.GetFileNameWithoutExtension(blp);
+                    var m = Regex.Match(stem, "^map_(\\d+)[ _](\\d+)$", RegexOptions.IgnoreCase);
+                    if (m.Success && int.TryParse(m.Groups[1].Value, out var tx) && int.TryParse(m.Groups[2].Value, out var ty))
+                    {
+                        results.Add((mapName, tx, ty, blp));
+                    }
+                    else
+                    {
+                        var m2 = Regex.Match(stem, "^(.*)_(\\d+)_(\\d+)_(\\d+)$", RegexOptions.IgnoreCase);
+                        if (m2.Success && int.TryParse(m2.Groups[3].Value, out var tx2) && int.TryParse(m2.Groups[4].Value, out var ty2))
+                        {
+                            results.Add((mapName, tx2, ty2, blp));
+                        }
+                    }
+                }
+            }
+            return results;
+        }
+
+        private static string ComputeFileMD5(string path)
+        {
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            using var fs = File.OpenRead(path);
+            var hash = md5.ComputeHash(fs);
+            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+        }
+
+        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath,string wmoAsset)> ScanWorldMinimaps(string worldMinimapRoot)
+        {
+            // Recursively enumerate .blp and infer (mapName, tileX, tileY) and wmoAsset from path
+            var results = new List<(string,int,int,string,string)>();
+            if (!Directory.Exists(worldMinimapRoot)) return results;
+            foreach (var blp in Directory.EnumerateFiles(worldMinimapRoot, "*.blp", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(worldMinimapRoot, blp);
+                var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (parts.Length < 2) continue; // need at least mapName/filename
+                string mapName = parts[0];
+                string stem = Path.GetFileNameWithoutExtension(blp);
+                // Parse last two numeric groups as X,Y
+                var m = Regex.Match(stem, @".*_(\d+)_(\d+)$", RegexOptions.IgnoreCase);
+                if (!m.Success || !int.TryParse(m.Groups[1].Value, out var tx) || !int.TryParse(m.Groups[2].Value, out var ty)) continue;
+                string wmoAsset = Path.GetDirectoryName(rel)?.Replace("\\", "/") ?? ""; // directory under World/Minimaps
+                results.Add((mapName, tx, ty, blp, wmoAsset));
+            }
+            return results;
         }
     }
 }
