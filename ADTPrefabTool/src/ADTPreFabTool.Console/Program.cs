@@ -12,6 +12,7 @@ using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 using SharpGLTF.Transforms;
+using SharpGLTF.Memory;
 using System.Text.RegularExpressions;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -29,7 +30,7 @@ namespace ADTPreFabTool
 
             if (args.Length < 1)
             {
-                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>] [--export-minimap-grid] [--yflip|--no-yflip] [--export-chunk-selection] [--select-tile Map:tx:ty] [--select-chunks cx,cy;cx,cy] [--export-minimap-obj] [--export-minimap-glb]");
+                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>] [--export-minimap-grid] [--yflip|--no-yflip] [--xflip|--no-xflip] [--export-chunk-selection] [--select-tile Map:tx:ty] [--select-chunks cx,cy;cx,cy] [--export-minimap-obj] [--export-minimap-glb]");
                 System.Console.WriteLine("Defaults (directory input): --recursive --glb-per-file --manifest --timestamped --chunks-manifest --meta --yflip (use --no-yflip to disable)");
                 System.Console.WriteLine("Examples:");
                 System.Console.WriteLine("  ADTPreFabTool.Console \"path/to/terrain.adt\" \"output/\" --glb");
@@ -82,6 +83,10 @@ namespace ADTPreFabTool
             bool yFlip = true;
             if (args.Any(a => a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) yFlip = false;
             else if (args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase))) yFlip = true; // explicit opt-in (default)
+            // xFlip defaults to false; use --xflip to enable
+            bool xFlip = false;
+            if (args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase))) xFlip = true;
+            else if (args.Any(a => a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) xFlip = false; // explicit opt-out
             bool exportChunkSelection = args.Any(a => a.Equals("--export-chunk-selection", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapObj = args.Any(a => a.Equals("--export-minimap-obj", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapGlb = args.Any(a => a.Equals("--export-minimap-glb", StringComparison.OrdinalIgnoreCase));
@@ -466,13 +471,13 @@ namespace ADTPreFabTool
                             // Minimap OBJ export: textured XZ plane with cached PNG
                             if (exportMinimapObj)
                             {
-                                ExportMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip);
+                                ExportMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip, xFlip);
                             }
 
                             // Minimap GLB export: single GLB per tile, per-chunk nodes, shared minimap material
                             if (exportMinimapGlb)
                             {
-                                ExportMinimapGLB(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip);
+                                ExportMinimapGLB(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip, xFlip);
                             }
                         }
 
@@ -984,11 +989,12 @@ namespace ADTPreFabTool
         private static void ExportMinimapOBJ(
             string runDir,
             string minimapCacheDir,
-            string inputMapDir,
+            string inputPath,
             List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
             HashSet<(int tx,int ty)> tileSet,
             (int x1,int y1,int x2,int y2)? tileRange,
-            bool yFlip)
+            bool yFlip,
+            bool xFlip)
         {
             var adtTiles = allEntries
                 .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
@@ -1020,7 +1026,7 @@ namespace ADTPreFabTool
                 {
                     var enumOption = SearchOption.AllDirectories;
                     string pattern = $"{mapName}_{tx}_{ty}.adt";
-                    foreach (var f in Directory.EnumerateFiles(inputMapDir, "*.adt", enumOption))
+                    foreach (var f in Directory.EnumerateFiles(inputPath, "*.adt", enumOption))
                     {
                         if (string.Equals(Path.GetFileName(f), pattern, StringComparison.OrdinalIgnoreCase)) { adtPath = f; break; }
                     }
@@ -1104,11 +1110,12 @@ namespace ADTPreFabTool
                 {
                     var p = positions[i];
                     // WoW coords: X (north), Y (west). Our p: x=worldY, z=worldX.
-                    // Minimap u increases to the right (east) -> decrease with worldY (west positive)
-                    float u = (maxX - p.x) / spanX; // maxY - worldY over spanY
+                    // Minimap u increases to the right (east) -> increase with worldY (west positive)
+                    float u = (p.x - minX) / spanX; 
                     // Minimap v increases downward -> decrease with worldX (north positive)
-                    float v = (maxZ - p.z) / spanZ; // maxX - worldX over spanX
+                    float v = (maxZ - p.z) / spanZ; 
                     if (yFlip) v = 1f - v;
+                    if (xFlip) u = 1f - u;
                     uvs.Add((u, v));
                 }
 
@@ -1197,11 +1204,12 @@ namespace ADTPreFabTool
         private static void ExportMinimapGLB(
             string runDir,
             string minimapCacheDir,
-            string inputMapDir,
+            string inputPath,
             List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
             HashSet<(int tx,int ty)> tileSet,
             (int x1,int y1,int x2,int y2)? tileRange,
-            bool yFlip)
+            bool yFlip,
+            bool xFlip)
         {
             var adtTiles = allEntries
                 .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
@@ -1233,7 +1241,7 @@ namespace ADTPreFabTool
                 {
                     var enumOption = SearchOption.AllDirectories;
                     string pattern = $"{mapName}_{tx}_{ty}.adt";
-                    foreach (var f in Directory.EnumerateFiles(inputMapDir, "*.adt", enumOption))
+                    foreach (var f in Directory.EnumerateFiles(inputPath, "*.adt", enumOption))
                     {
                         if (string.Equals(Path.GetFileName(f), pattern, StringComparison.OrdinalIgnoreCase)) { adtPath = f; break; }
                     }
@@ -1294,8 +1302,20 @@ namespace ADTPreFabTool
 
                 // Build scene and material
                 var scene = new SceneBuilder();
-                // Keep minimal and version-agnostic: untextured PBR material (texture hookup can be added once API is confirmed)
                 var mat = new MaterialBuilder("Minimap").WithMetallicRoughness();
+                try
+                {
+                    if (!string.IsNullOrEmpty(srcPng))
+                    {
+                        var bytes = File.ReadAllBytes(srcPng);
+                        var chan = mat.UseChannel(KnownChannel.BaseColor);
+                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes));
+                    }
+                }
+                catch
+                {
+                    // fall back to untextured if any issue occurs
+                }
 
                 // For each chunk, create a node and mesh
                 foreach (var (ix, iy, verts) in perChunkPositions)
@@ -1308,9 +1328,10 @@ namespace ADTPreFabTool
                     foreach (var p in verts)
                     {
                         if (float.IsNaN(p.x)) { texcoords.Add((0,0)); continue; }
-                        float u = (maxX - p.x) / spanX;
+                        float u = (p.x - minX) / spanX;
                         float v = (maxZ - p.z) / spanZ;
                         if (yFlip) v = 1f - v;
+                        if (xFlip) u = 1f - u;
                         texcoords.Add((u, v));
                     }
 
@@ -1350,19 +1371,19 @@ namespace ADTPreFabTool
 
                         if (!isHole)
                         {
+                            int baseIndex = 0;
                             int i0 = j;
-                            int a = i0;
-                            int b = i0 - 9;
-                            int c = i0 + 8;
-                            int d = i0 - 8;
-                            int e = i0 + 9;
-
-                            // Build vertex builders
-                            var va = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[a].z, verts[a].x, verts[a].y)), new VertexTexture1(new Vector2(texcoords[a].u, texcoords[a].v)));
-                            var vb = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[b].z, verts[b].x, verts[b].y)), new VertexTexture1(new Vector2(texcoords[b].u, texcoords[b].v)));
-                            var vc = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[c].z, verts[c].x, verts[c].y)), new VertexTexture1(new Vector2(texcoords[c].u, texcoords[c].v)));
-                            var vd = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[d].z, verts[d].x, verts[d].y)), new VertexTexture1(new Vector2(texcoords[d].u, texcoords[d].v)));
-                            var ve = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[e].z, verts[e].x, verts[e].y)), new VertexTexture1(new Vector2(texcoords[e].u, texcoords[e].v)));
+                            int a = baseIndex + i0 + 1;
+                            int b = baseIndex + (i0 - 9) + 1;
+                            int c = baseIndex + (i0 + 8) + 1;
+                            int d = baseIndex + (i0 - 8) + 1;
+                            int e = baseIndex + (i0 + 9) + 1;
+                            // use v/vt same indices
+                            var va = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[a - 1].z, verts[a - 1].x, verts[a - 1].y)), new VertexTexture1(new Vector2(texcoords[a - 1].u, texcoords[a - 1].v)));
+                            var vb = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[b - 1].z, verts[b - 1].x, verts[b - 1].y)), new VertexTexture1(new Vector2(texcoords[b - 1].u, texcoords[b - 1].v)));
+                            var vc = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[c - 1].z, verts[c - 1].x, verts[c - 1].y)), new VertexTexture1(new Vector2(texcoords[c - 1].u, texcoords[c - 1].v)));
+                            var vd = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[d - 1].z, verts[d - 1].x, verts[d - 1].y)), new VertexTexture1(new Vector2(texcoords[d - 1].u, texcoords[d - 1].v)));
+                            var ve = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[e - 1].z, verts[e - 1].x, verts[e - 1].y)), new VertexTexture1(new Vector2(texcoords[e - 1].u, texcoords[e - 1].v)));
 
                             prim.AddTriangle(va, vb, vc);
                             prim.AddTriangle(va, vd, vb);
