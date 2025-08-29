@@ -30,7 +30,7 @@ namespace ADTPreFabTool
 
             if (args.Length < 1)
             {
-                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>] [--export-minimap-grid] [--yflip|--no-yflip] [--xflip|--no-xflip] [--export-chunk-selection] [--select-tile Map:tx:ty] [--select-chunks cx,cy;cx,cy] [--export-minimap-obj] [--export-minimap-glb]");
+                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>] [--export-minimap-grid] [--yflip|--no-yflip] [--xflip|--no-xflip] [--export-chunk-selection] [--select-tile Map:tx:ty] [--select-chunks cx,cy;cx,cy] [--export-minimap-obj] [--export-minimap-glb] [--export-merged]");
                 System.Console.WriteLine("Defaults (directory input): --recursive --glb-per-file --manifest --timestamped --chunks-manifest --meta --yflip (use --no-yflip to disable)");
                 System.Console.WriteLine("Examples:");
                 System.Console.WriteLine("  ADTPreFabTool.Console \"path/to/terrain.adt\" \"output/\" --glb");
@@ -90,6 +90,7 @@ namespace ADTPreFabTool
             bool exportChunkSelection = args.Any(a => a.Equals("--export-chunk-selection", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapObj = args.Any(a => a.Equals("--export-minimap-obj", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapGlb = args.Any(a => a.Equals("--export-minimap-glb", StringComparison.OrdinalIgnoreCase));
+            bool exportMerged = args.Any(a => a.Equals("--export-merged", StringComparison.OrdinalIgnoreCase));
             string? selectTile = null; // format: MapName:tx:ty
             string? selectChunks = null; // format: cx,cy;cx,cy
 
@@ -271,7 +272,7 @@ namespace ADTPreFabTool
                     }
                     Directory.CreateDirectory(runDir);
 
-                    if (superblockPatterns || exportMinimapOverlays || generateSeedTemplate || exportMinimapGrid || exportChunkSelection || exportMinimapObj || exportMinimapGlb)
+                    if (superblockPatterns || exportMinimapOverlays || generateSeedTemplate || exportMinimapGrid || exportChunkSelection || exportMinimapObj || exportMinimapGlb || exportMerged)
                     {
                         // Optional TRS parsing for minimap support
                         List<(string mapName,int tileX,int tileY,string fullPath)> minimapEntries = new();
@@ -484,6 +485,22 @@ namespace ADTPreFabTool
                                 if (!args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) glbXFlip = true;   // GLB default: horizontal flip
                                 if (!args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) glbYFlip = false;  // GLB default: vertical flip
                                 ExportMinimapGLB(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, glbYFlip, glbXFlip);
+                            }
+
+                            // Merged exports: single OBJ+MTL and single GLB for the selection
+                            if (exportMerged)
+                            {
+                                // OBJ merged uses CLI flips as-is (defaults already set: yFlip=true, xFlip=true)
+                                bool objXFlip = xFlip;
+                                bool objYFlip = yFlip;
+                                MergeMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, objYFlip, objXFlip);
+
+                                // GLB merged uses GLB-specific defaults unless explicitly overridden
+                                bool mGlbXFlip = xFlip;
+                                bool mGlbYFlip = yFlip;
+                                if (!args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) mGlbXFlip = true;
+                                if (!args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) mGlbYFlip = false;
+                                ExportMinimapGLBMerged(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, mGlbYFlip, mGlbXFlip);
                             }
                         }
 
@@ -776,6 +793,7 @@ namespace ADTPreFabTool
                         string targetPng;
                         if (e.sourceKind == "wmo" && !string.IsNullOrWhiteSpace(e.wmoRelPng))
                         {
+                            // Write under dedicated wmo hierarchy using original stem
                             var rel = e.wmoRelPng.Replace("/", Path.DirectorySeparatorChar.ToString());
                             targetPng = Path.Combine(pngCacheRoot!, rel);
                         }
@@ -1269,10 +1287,10 @@ namespace ADTPreFabTool
                 var adt = adtReader.adtfile;
 
                 // First pass: collect per-chunk positions and global bounds for UVs
-                const float TILE_SIZE = 533.333333f;
-                const float CHUNK_SIZE = TILE_SIZE / 16f;
-                const float UNIT_SIZE = CHUNK_SIZE / 8f;
-                const float UNIT_SIZE_HALF = UNIT_SIZE / 2f;
+                const float TILE_SIZE2 = 533.333333f;
+                const float CHUNK_SIZE2 = TILE_SIZE2 / 16f;
+                const float UNIT_SIZE2 = CHUNK_SIZE2 / 8f;
+                const float UNIT_SIZE_HALF2 = UNIT_SIZE2 / 2f;
 
                 var perChunkPositions = new List<(int ix,int iy,List<(float x,float y,float z)> verts)>();
                 float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
@@ -1289,16 +1307,16 @@ namespace ADTPreFabTool
                         int colCount = isShort ? 8 : 9;
                         for (int col = 0; col < colCount; col++)
                         {
-                            float vx = chunk.header.position.Y - (col * UNIT_SIZE);
-                            if (isShort) vx -= UNIT_SIZE_HALF;
+                            float vx = chunk.header.position.Y - (col * UNIT_SIZE2);
+                            if (isShort) vx -= UNIT_SIZE_HALF2;
                             float vy = chunk.vertices.vertices[idx] + chunk.header.position.Z;
-                            float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF);
+                            float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF2);
                             verts.Add((vx, vy, vz));
                             if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
                             if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
                             idx++;
                         }
-                        if (isShort) { /* conceptual pad to keep 9 per row alignment for indexing */ verts.Add((float.NaN,float.NaN,float.NaN)); }
+                        if (isShort) { verts.Add((float.NaN,float.NaN,float.NaN)); }
                     }
                     perChunkPositions.Add(((int)chunk.header.indexX, (int)chunk.header.indexY, verts));
                 }
@@ -1409,6 +1427,443 @@ namespace ADTPreFabTool
                 done++;
             }
             System.Console.WriteLine($"Minimap GLB export: {done} written, {missingPng} missing PNGs, {missingAdt} missing ADTs");
+        }
+
+        // Merged OBJ exporter: single OBJ+MTL with per-tile groups and materials; textures copied next to OBJ
+        private static void MergeMinimapOBJ(
+            string runDir,
+            string minimapCacheDir,
+            string inputPath,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
+            HashSet<(int tx,int ty)> tileSet,
+            (int x1,int y1,int x2,int y2)? tileRange,
+            bool yFlip,
+            bool xFlip)
+        {
+            var adtTiles = allEntries
+                .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
+                .GroupBy(e => (mapName: e.mapName, tileX: e.tileX, tileY: e.tileY))
+                .Select(g => g.Key)
+                .OrderBy(t => t.mapName).ThenBy(t => t.tileX).ThenBy(t => t.tileY)
+                .ToList();
+
+            // Filter selection
+            var selected = adtTiles.Where(t => tileSet.Count == 0 && tileRange == null
+                                               || tileSet.Contains((t.tileX, t.tileY))
+                                               || (tileRange != null && t.tileX >= tileRange.Value.x1 && t.tileX <= tileRange.Value.x2 && t.tileY >= tileRange.Value.y1 && t.tileY <= tileRange.Value.y2))
+                                   .ToList();
+            if (selected.Count == 0) { System.Console.WriteLine("Merged OBJ: no tiles selected."); return; }
+
+            // Determine output naming
+            var maps = selected.Select(t => t.mapName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            string outRoot = Path.Combine(runDir, "minimap_obj_merged");
+            Directory.CreateDirectory(outRoot);
+            string baseName;
+            if (maps.Count == 1 && tileRange != null)
+            {
+                baseName = $"{maps[0]}_{tileRange.Value.x1}_{tileRange.Value.y1}__{tileRange.Value.x2}_{tileRange.Value.y2}";
+            }
+            else if (maps.Count == 1)
+            {
+                // Range not explicitly provided; name by first..last in sorted order
+                var x1 = selected.Min(t => t.tileX); var y1 = selected.Min(t => t.tileY);
+                var x2 = selected.Max(t => t.tileX); var y2 = selected.Max(t => t.tileY);
+                baseName = $"{maps[0]}_{x1}_{y1}__{x2}_{y2}";
+            }
+            else
+            {
+                baseName = "merged_minimaps";
+            }
+            string objPath = Path.Combine(outRoot, baseName + ".obj");
+            string mtlPath = Path.Combine(outRoot, baseName + ".mtl");
+
+            using var objWriter = new StreamWriter(objPath, false);
+            using var mtlWriter = new StreamWriter(mtlPath, false);
+            objWriter.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+
+            long vOff = 0; long vtOff = 0; // normals not used
+
+            const float TILE_SIZE2 = 533.333333f;
+            const float CHUNK_SIZE2 = TILE_SIZE2 / 16f;
+            const float UNIT_SIZE2 = CHUNK_SIZE2 / 8f;
+            const float UNIT_SIZE_HALF2 = UNIT_SIZE2 / 2f;
+
+            int tilesWritten = 0; int missingPng = 0; int missingAdt = 0;
+
+            foreach (var (mapName, tx, ty) in selected)
+            {
+                // Locate cached minimap PNG
+                string pngMain = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}.png");
+                string pngAlt = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}__alt.png");
+                string srcPng = File.Exists(pngMain) ? pngMain : (File.Exists(pngAlt) ? pngAlt : "");
+                if (string.IsNullOrEmpty(srcPng)) { missingPng++; }
+
+                // Find matching ADT file under the input map dir (recursive)
+                string? adtPath = null;
+                try
+                {
+                    foreach (var f in Directory.EnumerateFiles(inputPath, "*.adt", SearchOption.AllDirectories))
+                    {
+                        if (string.Equals(Path.GetFileName(f), $"{mapName}_{tx}_{ty}.adt", StringComparison.OrdinalIgnoreCase)) { adtPath = f; break; }
+                    }
+                }
+                catch { }
+                if (string.IsNullOrWhiteSpace(adtPath) || !File.Exists(adtPath)) { missingAdt++; continue; }
+
+                // Copy texture next to merged OBJ for portability
+                string texFileName = $"{mapName}_{tx}_{ty}.png";
+                string texOutPath = Path.Combine(outRoot, texFileName);
+                if (!string.IsNullOrEmpty(srcPng)) { try { if (!File.Exists(texOutPath)) File.Copy(srcPng, texOutPath, false); } catch { } }
+
+                // Write/append material for this tile
+                string mtlName = $"{mapName}_{tx}_{ty}";
+                mtlWriter.WriteLine($"newmtl {mtlName}");
+                mtlWriter.WriteLine("Kd 1 1 1");
+                if (!string.IsNullOrEmpty(srcPng)) mtlWriter.WriteLine($"map_Kd {texFileName}");
+                mtlWriter.WriteLine();
+
+                // Read ADT and build geometry
+                var adtReader = new ADTReader();
+                using (var stream = File.OpenRead(adtPath))
+                {
+                    adtReader.ReadRootFile(stream, WoWFormatLib.Structs.WDT.MPHDFlags.wdt_has_maid);
+                }
+                var adt = adtReader.adtfile;
+
+                // First pass for bounds and positions per chunk
+                var positions = new List<(float x,float y,float z)>();
+                var chunkStartIndex = new List<int>();
+                float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+                float minZ = float.PositiveInfinity, maxZ = float.NegativeInfinity;
+
+                foreach (var chunk in adt.chunks)
+                {
+                    if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0)
+                    {
+                        chunkStartIndex.Add(positions.Count);
+                        continue;
+                    }
+                    chunkStartIndex.Add(positions.Count);
+
+                    int idx = 0;
+                    for (int row = 0; row < 17; row++)
+                    {
+                        bool isShort = (row % 2) == 1;
+                        int colCount = isShort ? 8 : 9;
+                        for (int col = 0; col < colCount; col++)
+                        {
+                            float vx = chunk.header.position.Y - (col * UNIT_SIZE2);
+                            if (isShort) vx -= UNIT_SIZE_HALF2;
+                            float vy = chunk.vertices.vertices[idx] + chunk.header.position.Z;
+                            float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF2);
+                            positions.Add((vx, vy, vz));
+                            if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
+                            if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
+                            idx++;
+                        }
+                    }
+                }
+
+                float spanX = Math.Max(1e-6f, maxX - minX);
+                float spanZ = Math.Max(1e-6f, maxZ - minZ);
+
+                // UVs aligned to bounds
+                var uvs = new List<(float u,float v)>(positions.Count);
+                for (int i = 0; i < positions.Count; i++)
+                {
+                    var p = positions[i];
+                    float u = (p.x - minX) / spanX;
+                    float v = (maxZ - p.z) / spanZ;
+                    if (yFlip) v = 1f - v;
+                    if (xFlip) u = 1f - u;
+                    uvs.Add((u, v));
+                }
+
+                // Write group + material header for this tile
+                objWriter.WriteLine($"g {mapName}_{tx}_{ty}");
+                objWriter.WriteLine($"usemtl {mtlName}");
+
+                // Emit vertices
+                for (int i = 0; i < positions.Count; i++)
+                {
+                    var p = positions[i];
+                    objWriter.WriteLine($"v {p.z:F6} {p.x:F6} {p.y:F6}");
+                }
+                for (int i = 0; i < uvs.Count; i++)
+                {
+                    var t = uvs[i];
+                    objWriter.WriteLine($"vt {t.u.ToString(CultureInfo.InvariantCulture)} {t.v.ToString(CultureInfo.InvariantCulture)}");
+                }
+
+                // Emit faces with offsets
+                int chunkIndex = 0;
+                foreach (var chunk in adt.chunks)
+                {
+                    if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0) { chunkIndex++; continue; }
+
+                    for (int j = 9, xx = 0, yy = 0; j < 145; j++, xx++)
+                    {
+                        if (xx >= 8) { xx = 0; yy++; }
+
+                        bool isHole = true;
+                        if (((uint)chunk.header.flags & 0x10000u) == 0)
+                        {
+                            int current = 1 << ((xx / 2) + (yy / 2) * 4);
+                            if ((chunk.header.holesLowRes & current) == 0) isHole = false;
+                        }
+                        else
+                        {
+                            byte holeByte = yy switch
+                            {
+                                0 => chunk.header.holesHighRes_0,
+                                1 => chunk.header.holesHighRes_1,
+                                2 => chunk.header.holesHighRes_2,
+                                3 => chunk.header.holesHighRes_3,
+                                4 => chunk.header.holesHighRes_4,
+                                5 => chunk.header.holesHighRes_5,
+                                6 => chunk.header.holesHighRes_6,
+                                _ => chunk.header.holesHighRes_7,
+                            };
+                            if (((holeByte >> xx) & 1) == 0) isHole = false;
+                        }
+
+                        if (!isHole)
+                        {
+                            int baseIndex = chunkStartIndex[chunkIndex];
+                            int i0 = j;
+                            int a = (int)(vOff + baseIndex + i0 + 1);
+                            int b = (int)(vOff + baseIndex + (i0 - 9) + 1);
+                            int c = (int)(vOff + baseIndex + (i0 + 8) + 1);
+                            int d = (int)(vOff + baseIndex + (i0 - 8) + 1);
+                            int e = (int)(vOff + baseIndex + (i0 + 9) + 1);
+                            objWriter.WriteLine($"f {a}/{a} {b}/{b} {c}/{c}");
+                            objWriter.WriteLine($"f {a}/{a} {d}/{d} {b}/{b}");
+                            objWriter.WriteLine($"f {a}/{a} {e}/{e} {d}/{d}");
+                            objWriter.WriteLine($"f {a}/{a} {c}/{c} {e}/{e}");
+                        }
+
+                        if (((j + 1) % (9 + 8)) == 0) j += 9;
+                    }
+
+                    chunkIndex++;
+                }
+
+                vOff += positions.Count;
+                vtOff += uvs.Count;
+                tilesWritten++;
+            }
+
+            objWriter.Flush();
+            mtlWriter.Flush();
+            System.Console.WriteLine($"Merged OBJ written: {objPath} ({tilesWritten} tiles, {missingPng} missing PNGs, {missingAdt} missing ADTs)");
+        }
+
+        // Merged GLB exporter: single GLB with per-tile parent node and per-chunk child nodes
+        private static void ExportMinimapGLBMerged(
+            string runDir,
+            string minimapCacheDir,
+            string inputPath,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
+            HashSet<(int tx,int ty)> tileSet,
+            (int x1,int y1,int x2,int y2)? tileRange,
+            bool yFlip,
+            bool xFlip)
+        {
+            var adtTiles = allEntries
+                .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
+                .GroupBy(e => (mapName: e.mapName, tileX: e.tileX, tileY: e.tileY))
+                .Select(g => g.Key)
+                .OrderBy(t => t.mapName).ThenBy(t => t.tileX).ThenBy(t => t.tileY)
+                .ToList();
+
+            var selected = adtTiles.Where(t => tileSet.Count == 0 && tileRange == null
+                                               || tileSet.Contains((t.tileX, t.tileY))
+                                               || (tileRange != null && t.tileX >= tileRange.Value.x1 && t.tileX <= tileRange.Value.x2 && t.tileY >= tileRange.Value.y1 && t.tileY <= tileRange.Value.y2))
+                                   .ToList();
+            if (selected.Count == 0) { System.Console.WriteLine("Merged GLB: no tiles selected."); return; }
+
+            var maps = selected.Select(t => t.mapName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            string outRoot = Path.Combine(runDir, "minimap_glb_merged");
+            Directory.CreateDirectory(outRoot);
+            string baseName;
+            if (maps.Count == 1 && tileRange != null)
+            {
+                baseName = $"{maps[0]}_{tileRange.Value.x1}_{tileRange.Value.y1}__{tileRange.Value.x2}_{tileRange.Value.y2}";
+            }
+            else if (maps.Count == 1)
+            {
+                var x1 = selected.Min(t => t.tileX); var y1 = selected.Min(t => t.tileY);
+                var x2 = selected.Max(t => t.tileX); var y2 = selected.Max(t => t.tileY);
+                baseName = $"{maps[0]}_{x1}_{y1}__{x2}_{y2}";
+            }
+            else
+            {
+                baseName = "merged_minimaps";
+            }
+            string glbPath = Path.Combine(outRoot, baseName + ".glb");
+
+            var scene = new SceneBuilder();
+            int tilesAdded = 0; int missingPng = 0; int missingAdt = 0;
+
+            foreach (var (mapName, tx, ty) in selected)
+            {
+                // Prepare per-tile material
+                string pngMain = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}.png");
+                string pngAlt = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}__alt.png");
+                string srcPng = File.Exists(pngMain) ? pngMain : (File.Exists(pngAlt) ? pngAlt : "");
+                if (string.IsNullOrEmpty(srcPng)) { missingPng++; }
+
+                var mat = new MaterialBuilder($"{mapName}_{tx}_{ty}").WithMetallicRoughness();
+                try
+                {
+                    if (!string.IsNullOrEmpty(srcPng))
+                    {
+                        var bytes = File.ReadAllBytes(srcPng);
+                        var chan = mat.UseChannel(KnownChannel.BaseColor);
+                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes));
+                    }
+                }
+                catch { }
+
+                // Read ADT
+                string? adtPath = null;
+                try
+                {
+                    foreach (var f in Directory.EnumerateFiles(inputPath, "*.adt", SearchOption.AllDirectories))
+                    {
+                        if (string.Equals(Path.GetFileName(f), $"{mapName}_{tx}_{ty}.adt", StringComparison.OrdinalIgnoreCase)) { adtPath = f; break; }
+                    }
+                }
+                catch { }
+                if (string.IsNullOrWhiteSpace(adtPath) || !File.Exists(adtPath)) { missingAdt++; continue; }
+
+                var adtReader = new ADTReader();
+                using (var stream = File.OpenRead(adtPath))
+                {
+                    adtReader.ReadRootFile(stream, WoWFormatLib.Structs.WDT.MPHDFlags.wdt_has_maid);
+                }
+                var adt = adtReader.adtfile;
+
+                const float TILE_SIZE2 = 533.333333f;
+                const float CHUNK_SIZE2 = TILE_SIZE2 / 16f;
+                const float UNIT_SIZE2 = CHUNK_SIZE2 / 8f;
+                const float UNIT_SIZE_HALF2 = UNIT_SIZE2 / 2f;
+
+                // Collect positions per chunk and bounds
+                var perChunkPositions = new List<(int ix,int iy,List<(float x,float y,float z)> verts)>();
+                float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+                float minZ = float.PositiveInfinity, maxZ = float.NegativeInfinity;
+
+                foreach (var chunk in adt.chunks)
+                {
+                    if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0) continue;
+                    var verts = new List<(float x,float y,float z)>(145);
+                    int idx = 0;
+                    for (int row = 0; row < 17; row++)
+                    {
+                        bool isShort = (row % 2) == 1;
+                        int colCount = isShort ? 8 : 9;
+                        for (int col = 0; col < colCount; col++)
+                        {
+                            float vx = chunk.header.position.Y - (col * UNIT_SIZE2);
+                            if (isShort) vx -= UNIT_SIZE_HALF2;
+                            float vy = chunk.vertices.vertices[idx] + chunk.header.position.Z;
+                            float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF2);
+                            verts.Add((vx, vy, vz));
+                            if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
+                            if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
+                            idx++;
+                        }
+                        if (isShort) { verts.Add((float.NaN,float.NaN,float.NaN)); }
+                    }
+                    perChunkPositions.Add(((int)chunk.header.indexX, (int)chunk.header.indexY, verts));
+                }
+
+                float spanX = Math.Max(1e-6f, maxX - minX);
+                float spanZ = Math.Max(1e-6f, maxZ - minZ);
+
+                // Create a parent node for the tile
+                var tileNode = new NodeBuilder($"{mapName}_{tx}_{ty}");
+                scene.AddNode(tileNode);
+
+                // Build meshes per chunk under this tile node
+                foreach (var (ix, iy, verts) in perChunkPositions)
+                {
+                    var mesh = new MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>($"MCNK_{ix}_{iy}");
+                    var prim = mesh.UsePrimitive(mat);
+
+                    // UVs
+                    var texcoords = new List<(float u,float v)>(verts.Count);
+                    foreach (var p in verts)
+                    {
+                        if (float.IsNaN(p.x)) { texcoords.Add((0,0)); continue; }
+                        float u = (p.x - minX) / spanX;
+                        float v = (maxZ - p.z) / spanZ;
+                        if (yFlip) v = 1f - v;
+                        if (xFlip) u = 1f - u;
+                        texcoords.Add((u, v));
+                    }
+
+                    var chunk = adt.chunks.FirstOrDefault(c => (int)c.header.indexX == ix && (int)c.header.indexY == iy);
+                    if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0) continue;
+
+                    for (int j = 9, xx = 0, yy = 0; j < 145; j++, xx++)
+                    {
+                        if (xx >= 8) { xx = 0; yy++; }
+                        bool isHole = true;
+                        if (((uint)chunk.header.flags & 0x10000u) == 0)
+                        {
+                            int current = 1 << ((xx / 2) + (yy / 2) * 4);
+                            if ((chunk.header.holesLowRes & current) == 0) isHole = false;
+                        }
+                        else
+                        {
+                            byte holeByte = yy switch
+                            {
+                                0 => chunk.header.holesHighRes_0,
+                                1 => chunk.header.holesHighRes_1,
+                                2 => chunk.header.holesHighRes_2,
+                                3 => chunk.header.holesHighRes_3,
+                                4 => chunk.header.holesHighRes_4,
+                                5 => chunk.header.holesHighRes_5,
+                                6 => chunk.header.holesHighRes_6,
+                                _ => chunk.header.holesHighRes_7,
+                            };
+                            if (((holeByte >> xx) & 1) == 0) isHole = false;
+                        }
+
+                        if (!isHole)
+                        {
+                            int baseIndex = 0;
+                            int i0 = j;
+                            int a = baseIndex + i0 + 1;
+                            int b = baseIndex + (i0 - 9) + 1;
+                            int c = baseIndex + (i0 + 8) + 1;
+                            int d = baseIndex + (i0 - 8) + 1;
+                            int e = baseIndex + (i0 + 9) + 1;
+                            var va = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[a - 1].z, verts[a - 1].x, verts[a - 1].y)), new VertexTexture1(new Vector2(texcoords[a - 1].u, texcoords[a - 1].v)));
+                            var vb = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[b - 1].z, verts[b - 1].x, verts[b - 1].y)), new VertexTexture1(new Vector2(texcoords[b - 1].u, texcoords[b - 1].v)));
+                            var vc = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[c - 1].z, verts[c - 1].x, verts[c - 1].y)), new VertexTexture1(new Vector2(texcoords[c - 1].u, texcoords[c - 1].v)));
+                            var vd = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[d - 1].z, verts[d - 1].x, verts[d - 1].y)), new VertexTexture1(new Vector2(texcoords[d - 1].u, texcoords[d - 1].v)));
+                            var ve = new VertexBuilder<VertexPosition, VertexTexture1, VertexEmpty>(new VertexPosition(new Vector3(verts[e - 1].z, verts[e - 1].x, verts[e - 1].y)), new VertexTexture1(new Vector2(texcoords[e - 1].u, texcoords[e - 1].v)));
+                            prim.AddTriangle(va, vb, vc);
+                            prim.AddTriangle(va, vd, vb);
+                            prim.AddTriangle(va, ve, vd);
+                            prim.AddTriangle(va, vc, ve);
+                        }
+                        if (((j + 1) % (9 + 8)) == 0) j += 9;
+                    }
+
+                    // Attach mesh under tile node
+                    scene.AddRigidMesh(mesh, tileNode);
+                }
+
+                tilesAdded++;
+            }
+
+            var model = scene.ToGltf2();
+            model.SaveGLB(glbPath);
+            System.Console.WriteLine($"Merged GLB written: {glbPath} ({tilesAdded} tiles)");
         }
     }
 }
