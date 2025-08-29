@@ -1,5 +1,6 @@
 using System.Text;
 using AlphaWDTReader.Model;
+using AlphaWDTReader.IO;
 
 namespace AlphaWDTReader.Readers;
 
@@ -7,16 +8,13 @@ public static class AlphaMcinReader
 {
     public static int? CountPresentChunks(string filePath, AlphaMainEntry tile)
     {
-        if (tile.Offset == 0 || tile.Size == 0) return null;
+        if (tile.Offset == 0) return null;
         using var fs = File.OpenRead(filePath);
         using var br = new BinaryReader(fs, Encoding.ASCII, leaveOpen: false);
         long start = tile.Offset;
-        long end = Math.Min(fs.Length, start + tile.Size);
+        long end = (tile.Size == 0) ? fs.Length : Math.Min(fs.Length, start + tile.Size);
         if (start >= fs.Length || start + 8 > end) return null;
         fs.Position = start;
-
-        const uint MHDR = 0x5244484Du; // 'MHDR'
-        const uint MCIN = 0x4E49434Du; // 'MCIN'
 
         // First pass: find MHDR in tile region
         while (fs.Position + 8 <= end)
@@ -34,12 +32,12 @@ public static class AlphaMcinReader
                 continue;
             }
 
-            if (fourcc == MHDR)
+            if (AlphaFourCC.Matches(fourcc, AlphaFourCC.MHDR))
             {
-                // MHDR payload: first 4 bytes Flags, next 4 bytes OfsMCIN (relative to ADT start)
+                // Alpha MHDR payload: first 4 bytes is mcinOffset (relative to ADT start)
                 if (payload + 8 <= blockEnd)
                 {
-                    fs.Position = payload + 4;
+                    fs.Position = payload + 0;
                     uint ofsMcin = br.ReadUInt32();
                     long mcinPos = start + ofsMcin;
                     if (mcinPos + 8 <= end)
@@ -49,7 +47,7 @@ public static class AlphaMcinReader
                         uint mcinSize = br.ReadUInt32();
                         long mcinPayload = fs.Position;
                         long mcinEnd = mcinPayload + mcinSize;
-                        if (mcinFour == MCIN && mcinEnd <= end && mcinSize > 0)
+                        if (AlphaFourCC.Matches(mcinFour, AlphaFourCC.MCIN) && mcinEnd <= end && mcinSize > 0)
                         {
                             int entrySize = (int)(mcinSize / 256);
                             if (entrySize <= 0) return 0;
@@ -90,7 +88,7 @@ public static class AlphaMcinReader
                 continue;
             }
 
-            if (fourcc == MCIN)
+            if (AlphaFourCC.Matches(fourcc, AlphaFourCC.MCIN))
             {
                 int entrySize = (int)(size / 256);
                 if (entrySize <= 0) return null;

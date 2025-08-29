@@ -1,5 +1,6 @@
 using System.Text;
 using AlphaWDTReader.Model;
+using AlphaWDTReader.IO;
 
 namespace AlphaWDTReader.Readers;
 
@@ -14,39 +15,48 @@ public static class AlphaChunkIndexer
         using var fs = File.OpenRead(filePath);
         using var br = new BinaryReader(fs, Encoding.ASCII, leaveOpen: false);
         long tileStart = tile.Offset;
-        long tileEnd = Math.Min(fs.Length, tileStart + tile.Size);
-
-        const uint MCNK = 0x4B4E434Du; // 'MCNK'
-        const uint MCVT = 0x5456434Du; // 'MCVT'
-        const uint MCNR = 0x524E434Du; // 'MCNR'
-        const uint MCLQ = 0x514C434Du; // 'MCLQ'
+        long fileEnd = fs.Length;
+        long limitEnd = tile.Size > 0 ? Math.Min(fileEnd, tileStart + tile.Size) : fileEnd; // Alpha: Size may be 0
 
         foreach (var ofs in chunkOffsets)
         {
-            if (ofs + 8 > tileEnd) continue;
+            if (ofs < 0 || ofs + 8 > limitEnd) continue;
             fs.Position = ofs;
             uint four = br.ReadUInt32();
             uint size = br.ReadUInt32();
             long payload = fs.Position;
             long blockEnd = payload + size;
-            if (four != MCNK || blockEnd > tileEnd || size == 0) continue;
+            if (!AlphaFourCC.Matches(four, AlphaFourCC.MCNK) || size == 0 || blockEnd > limitEnd) continue;
+
+            // Alpha MCNK header is 0x80 bytes at the start of the MCNK payload
+            const int headerSize = 0x80;
+            if (payload + headerSize > blockEnd) continue;
+            fs.Position = payload;
+            var header = br.ReadBytes(headerSize);
+            int mcvtRel = BitConverter.ToInt32(header, 0x18);
+            int mcnrRel = BitConverter.ToInt32(header, 0x1C);
+            int mclqRel = BitConverter.ToInt32(header, 0x68);
+            int chunksSize = BitConverter.ToInt32(header, 0x64);
 
             long foundMcvt = 0, foundMcnr = 0, foundMclq = 0;
             uint sizeMcvt = 0, sizeMcnr = 0, sizeMclq = 0;
 
-            long scanPos = payload;
-            while (scanPos + 8 <= blockEnd)
+            if (mcvtRel >= 0)
             {
-                fs.Position = scanPos;
-                uint subFour = br.ReadUInt32();
-                uint subSize = br.ReadUInt32();
-                long subPayload = fs.Position;
-                long subEnd = subPayload + subSize;
-                if (subEnd > blockEnd) break;
-                if (subFour == MCVT) { foundMcvt = subPayload; sizeMcvt = subSize; }
-                else if (subFour == MCNR) { foundMcnr = subPayload; sizeMcnr = subSize; }
-                else if (subFour == MCLQ) { foundMclq = subPayload; sizeMclq = subSize; }
-                scanPos = subEnd;
+                long mcvtAbs = payload + headerSize + mcvtRel;
+                if (mcvtAbs + 580 <= blockEnd) { foundMcvt = mcvtAbs; sizeMcvt = 580; }
+            }
+            if (mcnrRel >= 0)
+            {
+                long mcnrAbs = payload + headerSize + mcnrRel;
+                // Alpha MCNR payload commonly 448 bytes
+                if (mcnrAbs + 448 <= blockEnd) { foundMcnr = mcnrAbs; sizeMcnr = 448; }
+            }
+            if (mclqRel > 0 && chunksSize > 0)
+            {
+                long mclqAbs = payload + headerSize + mclqRel;
+                int mclqLen = Math.Max(0, chunksSize - mclqRel);
+                if (mclqLen > 0 && mclqAbs + mclqLen <= blockEnd) { foundMclq = mclqAbs; sizeMclq = (uint)mclqLen; }
             }
 
             indices.Add(new AlphaChunkIndex

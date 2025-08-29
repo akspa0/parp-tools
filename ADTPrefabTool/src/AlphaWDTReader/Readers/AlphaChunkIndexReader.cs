@@ -1,5 +1,6 @@
 using System.Text;
 using AlphaWDTReader.Model;
+using AlphaWDTReader.IO;
 
 namespace AlphaWDTReader.Readers;
 
@@ -8,16 +9,13 @@ public static class AlphaChunkIndexReader
     public static List<long> GetChunkOffsets(string filePath, AlphaMainEntry tile)
     {
         var offsets = new List<long>();
-        if (tile.Offset == 0 || tile.Size == 0) return offsets;
+        if (tile.Offset == 0) return offsets;
 
         using var fs = File.OpenRead(filePath);
         using var br = new BinaryReader(fs, Encoding.ASCII, leaveOpen: false);
         long start = tile.Offset;
-        long end = Math.Min(fs.Length, start + tile.Size);
+        long end = (tile.Size == 0) ? fs.Length : Math.Min(fs.Length, start + tile.Size);
         if (start >= fs.Length || start + 8 > end) return offsets;
-
-        const uint MHDR = 0x5244484Du; // 'MHDR'
-        const uint MCIN = 0x4E49434Du; // 'MCIN'
 
         // Helper local to read MCIN table at a known position
         List<long> ReadMcinAt(long mcinPos)
@@ -28,7 +26,7 @@ public static class AlphaChunkIndexReader
             uint mcinSize = br.ReadUInt32();
             long mcinPayload = fs.Position;
             long mcinEnd = mcinPayload + mcinSize;
-            if (mcinFour != MCIN || mcinEnd > end || mcinSize == 0) return list;
+            if (!AlphaFourCC.Matches(mcinFour, AlphaFourCC.MCIN) || mcinEnd > end || mcinSize == 0) return list;
             int entrySize = (int)(mcinSize / 256);
             if (entrySize <= 0) return list;
             for (int i = 0; i < 256; i++)
@@ -40,7 +38,7 @@ public static class AlphaChunkIndexReader
                 uint size = br.ReadUInt32();
                 if (ofsMcnk != 0 && size != 0)
                 {
-                    list.Add(start + ofsMcnk);
+                    list.Add(ofsMcnk);
                 }
             }
             return list;
@@ -62,13 +60,13 @@ public static class AlphaChunkIndexReader
                 fs.Position = blockPos + 4;
                 continue;
             }
-            if (fourcc == MHDR)
+            if (AlphaFourCC.Matches(fourcc, AlphaFourCC.MHDR))
             {
                 if (payload + 8 <= blockEnd)
                 {
-                    fs.Position = payload + 4; // skip Flags
+                    fs.Position = payload + 0; // Alpha MHDR: first int is mcinOffset
                     uint ofsMcin = br.ReadUInt32();
-                    long mcinPos = start + ofsMcin;
+                    long mcinPos = payload + ofsMcin; // relative to MHDR payload base
                     if (mcinPos + 8 <= end)
                     {
                         offsets = ReadMcinAt(mcinPos);
@@ -96,7 +94,7 @@ public static class AlphaChunkIndexReader
                 fs.Position = pos + 4;
                 continue;
             }
-            if (fourcc == MCIN)
+            if (AlphaFourCC.Matches(fourcc, AlphaFourCC.MCIN))
             {
                 offsets = ReadMcinAt(pos);
                 return offsets;
