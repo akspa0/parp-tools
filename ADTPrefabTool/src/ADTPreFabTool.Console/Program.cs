@@ -83,10 +83,10 @@ namespace ADTPreFabTool
             bool yFlip = true;
             if (args.Any(a => a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) yFlip = false;
             else if (args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase))) yFlip = true; // explicit opt-in (default)
-            // xFlip defaults to false; use --xflip to enable
-            bool xFlip = false;
-            if (args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase))) xFlip = true;
-            else if (args.Any(a => a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) xFlip = false; // explicit opt-out
+            // xFlip defaults to true; use --no-xflip to disable
+            bool xFlip = true;
+            if (args.Any(a => a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) xFlip = false;
+            else if (args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase))) xFlip = true; // explicit opt-in (default)
             bool exportChunkSelection = args.Any(a => a.Equals("--export-chunk-selection", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapObj = args.Any(a => a.Equals("--export-minimap-obj", StringComparison.OrdinalIgnoreCase));
             bool exportMinimapGlb = args.Any(a => a.Equals("--export-minimap-glb", StringComparison.OrdinalIgnoreCase));
@@ -471,13 +471,19 @@ namespace ADTPreFabTool
                             // Minimap OBJ export: textured XZ plane with cached PNG
                             if (exportMinimapObj)
                             {
-                                ExportMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip, xFlip);
+                                bool objXFlip = xFlip; // OBJ uses CLI defaults as-is
+                                bool objYFlip = yFlip;
+                                ExportMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, objYFlip, objXFlip);
                             }
 
                             // Minimap GLB export: single GLB per tile, per-chunk nodes, shared minimap material
                             if (exportMinimapGlb)
                             {
-                                ExportMinimapGLB(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip, xFlip);
+                                bool glbXFlip = xFlip; // GLB may get different defaults if not explicitly set
+                                bool glbYFlip = yFlip;
+                                if (!args.Any(a => a.Equals("--xflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-xflip", StringComparison.OrdinalIgnoreCase))) glbXFlip = true;   // GLB default: horizontal flip
+                                if (!args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) glbYFlip = false;  // GLB default: vertical flip
+                                ExportMinimapGLB(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, glbYFlip, glbXFlip);
                             }
                         }
 
