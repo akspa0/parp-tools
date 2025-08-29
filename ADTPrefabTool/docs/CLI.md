@@ -22,6 +22,7 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
   [--meta|--no-meta] [--similarity-only]
   [--minimap-root <path>] [--trs <path>] [--world-minimap-root <path>] [--data-version <ver>] [--cache-root <path>] [--decode-minimap]
   [--export-minimap-overlays] [--export-minimap-obj] [--export-minimap-glb] [--yflip|--no-yflip]
+  [--export-merged]
 ```
 
 - `adt_file_or_folder_path`:
@@ -51,159 +52,74 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
 - `--cache-root <path>`           Cache base directory. Default: under output root.
 - `--decode-minimap`              Decode BLP minimaps to PNG into cache.
 - `--export-minimap-overlays`     Export `minimap_index.csv` describing all discovered tiles.
-- `--export-minimap-obj`          Generate per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh.
-- `--export-minimap-glb`          Generate one GLB per tile using the real ADT terrain mesh; each MCNK chunk is a separate node. Current build exports untextured PBR.
+- `--export-minimap-obj`          Generate per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh. UVs are slightly inset to minimize tile seams.
+- `--export-minimap-glb`          Generate one GLB per tile using the real ADT terrain mesh; each MCNK chunk is a separate node. Uses the tile's minimap PNG as BaseColor with a clamped sampler; UVs are slightly inset to minimize tile seams.
 - `--yflip | --no-yflip`          Flip V to match minimap orientation (default: `--yflip`); use `--no-yflip` to disable.
-
-Notes:
-- `--glb`/`--gltf` apply to single-file mode (`ProcessADTFile`).
-- `--glb-per-file`/`--manifest` apply to directory mode (`ProcessADTDirectory`).
-- Defaults (directory input): `--recursive --glb-per-file --manifest --yflip` (use `--no-yflip` to disable V flip on minimap texture).
-
-## Outputs
-
-Single-file mode (`terrain_improved.obj` in output directory):
-- `terrain_improved.obj`   Improved triangulation mesh for the ADT
-- Optional: `<stem>.glb` or `<stem>.gltf` when `--glb` or `--gltf`
-- `terrain_patterns.txt`   Pattern analysis for that file
-
-Directory mode (merged outputs + per-file optional):
-- `terrain_merged.obj`     Combined OBJ from all ADTs
-- `terrain_patterns.txt`   Aggregated pattern report
-- Optional per-file GLBs with `--glb-per-file`: `<stem>.glb`
-- Optional manifest with `--manifest`: `tiles_manifest.json` (NDJSON)
-
-### Minimap cache structure (when `--decode-minimap`)
-
-Cache root: `<cache_root>/_cache/<data-version>/minimap_png/`
-
-- ADT tiles (TRS / legacy ALT):
-  - `<MapName>/<MapName>_<X>_<Y>.png`
-  - Alternate differing content for same (MapName,X,Y): `<MapName>/<MapName>_<X>_<Y>__alt.png`
-
-- WMO tiles (preserved hierarchy):
-  - `wmo/<relative_path_under_World/Minimaps>/<original_stem>.png`
-  - Example: `wmo/transports/passengership/passengership_00_00_00.png`
-
-De-duplication behavior:
-- ADT: TRS > ALT precedence for same (MapName,X,Y). Identical content is not decoded twice; differing content produces `__alt`.
-- WMO: every file path produces its own output (even if MD5 matches others). We only skip if that exact PNG already exists.
-
-### Minimap-textured Terrain OBJ Export (`--export-minimap-obj`)
-
-Generates per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh.
-
-Outputs in run folder:
-- `minimap_obj/<Map>/<Map>_<X>_<Y>.obj|.mtl|.png`
-
-Flags:
-- `--yflip` (default): flip V to match minimap orientation; use `--no-yflip` to disable.
-- `--tiles X_Y,...` or `--tile-range x1,y1,x2,y2` to limit tiles.
-
-Example:
-```bash
-dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
-  "test_data/0.6.0/tree/World/Maps/Azeroth" \
-  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
-  --data-version 0.6.0 \
-  --cache-root "./cachedMinimaps" \
-  --decode-minimap \
-  --export-minimap-obj \
-  --tiles 30_42,31_42
-```
+- `--export-merged`              Generate one merged OBJ+MTL and one merged GLB containing all selected tiles.
 
 ### Per‑tile GLB Export (`--export-minimap-glb`)
-
-Generates a single GLB per tile using the real ADT terrain mesh, with one node per MCNK chunk.
-
-Outputs in run folder:
-- `minimap_glb/<Map>/<Map>_<X>_<Y>.glb`
-
-Flags:
-- `--yflip` (default): flip V to match minimap orientation; use `--no-yflip` to disable.
+{{ ... }}
 - `--tiles X_Y,...` or `--tile-range x1,y1,x2,y2` to limit tiles.
 
 Notes:
-- Current version exports an untextured PBR material. Minimap texture hookup may be added in a later update.
+**Texturing & seam mitigation**
+- BaseColor is sourced from the tile's minimap PNG.
+- Texture sampler is set to CLAMP_TO_EDGE (GLB) to avoid sampling outside tile textures.
+- UVs are slightly inset by 0.0025 to reduce bilinear bleed along tile borders (applies to OBJ and GLB paths).
 
 Example:
 ```bash
-dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
-  "test_data/0.6.0/tree/World/Maps/Azeroth" \
-  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
-  --data-version 0.6.0 \
-  --cache-root "./cachedMinimaps" \
-  --decode-minimap \
-  --export-minimap-glb \
-  --tiles 30_42
+{{ ... }}
 ```
 
-## Manifest Details
-
-When `--manifest` is used, each processed ADT appends a line to `tiles_manifest.json` in the output directory:
-
-```json
-{"file":"<name>.adt","glb":"<stem>.glb","aabb":[minX,minY,minZ,maxX,maxY,maxZ]}
-```
-
-- Coordinates are Z-up: `[minX, minY, minZ, maxX, maxY, maxZ]`
-- NDJSON format: one JSON object per line, no commas, no surrounding array
-- Intended for downstream tools or custom viewers; this repo does not include a built-in viewer
-
-## Examples
-
-- Process a single file to OBJ + GLB:
-```bash
-ADTPreFabTool.Console "test_data/Kalidar/Kalidar_30_23.adt" output2a --glb
-```
-
-- Process a directory using defaults (recursive + per-file GLBs + manifest):
-```bash
-ADTPreFabTool.Console "test_data/Kalidar" output3
-```
-
-- Process a directory non-recursively and opt out of per-file GLBs and manifest:
-```bash
-ADTPreFabTool.Console "test_data/Kalidar" output3 --no-recursive --no-glb-per-file --no-manifest
-```
-
-- Decode minimaps with TRS and auto-detected WMO root, export CSV index:
-```bash
-dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
-  "test_data/0.6.0/tree/World/Maps/Azeroth" \
-  "./project_output" \
-  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
-  --trs "test_data/0.6.0/tree/textures/Minimap/md5translate.txt" \
-  --data-version 0.6.0 \
-  --cache-root "./cachedMinimaps" \
-  --decode-minimap \
-  --export-minimap-overlays
-```
-
-- Decode minimaps with explicit WMO root:
-```bash
-dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
-  "test_data/0.6.0/tree/World/Maps/Azeroth" \
-  "./project_output" \
-  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
-  --trs "test_data/0.6.0/tree/textures/Minimap/md5translate.txt" \
-  --world-minimap-root "test_data/0.6.0/tree/World/Minimaps" \
-  --data-version 0.6.0 \
-  --cache-root "./cachedMinimaps" \
-  --decode-minimap \
-  --export-minimap-overlays
-```
-
-## Viewing Outputs
-
-- Open `.glb` in Windows 3D Viewer, Blender, Babylon Sandbox, or any GLB-capable viewer.
-- Import `.obj` in Blender, MeshLab, or similar tools.
-
-## Implementation Notes
-
-- Code paths:
-  - `Program.ProcessADTFile(...)` for single file
-  - `Program.ProcessADTDirectory(...)` for directory
-  - OBJ writer uses wow.export triangulation patterns
-  - GLB export uses SharpGLTF Toolkit (`BuildGlbForADT`)
-- Coordinate system is Z-up in both OBJ/GLB and the manifest.
+### Merged Minimap OBJ Export (`--export-merged`)
++
++Generates a single OBJ+MTL containing all selected tiles. Each tile is a separate group and uses a distinct material referencing its minimap PNG placed next to the merged OBJ.
++
++Seam mitigation:
++- UVs inset by 0.0025 to reduce filtering bleed across tile edges.
++
++Flips:
++- Defaults: `xFlip=true`, `yFlip=true` unless overridden by `--xflip/--no-xflip` and `--yflip/--no-yflip`.
++
++Selection:
++- Use `--tiles X_Y,...` and/or `--tile-range x1,y1,x2,y2`.
++
++Example:
++```bash
++dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
++  "test_data/0.6.0/tree/World/Maps/Azeroth" \
++  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
++  --data-version 0.6.0 \
++  --cache-root "./cachedMinimaps" \
++  --decode-minimap \
++  --export-merged \
++  --tile-range 30,42,32,43
++```
++
++### Merged Minimap GLB Export (`--export-merged`)
++
++Generates a single GLB scene containing all selected tiles. Each tile is a parent node (`Map_tx_ty`) with up to 256 child nodes (one per MCNK chunk) using that tile’s minimap texture as BaseColor.
++
++Seam mitigation:
++- Texture sampler uses CLAMP_TO_EDGE.
++- UVs inset by 0.0025 to reduce filtering bleed.
++
++Flips:
++- Defaults: `xFlip=true`, `yFlip=false` for GLB unless overridden.
++
++Selection:
++- Use `--tiles X_Y,...` and/or `--tile-range x1,y1,x2,y2`.
++
++Example:
++```bash
++dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
++  "test_data/0.6.0/tree/World/Maps/Azeroth" \
++  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
++  --data-version 0.6.0 \
++  --cache-root "./cachedMinimaps" \
++  --decode-minimap \
++  --export-merged \
++  --tiles 30_42,31_42
++```
+{{ ... }}

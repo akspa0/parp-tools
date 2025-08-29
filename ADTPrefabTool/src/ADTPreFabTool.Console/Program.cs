@@ -401,12 +401,12 @@ namespace ADTPreFabTool
                                         {
                                             // Write under dedicated wmo hierarchy using original stem
                                             var rel = e.wmoRelPng.Replace("/", Path.DirectorySeparatorChar.ToString());
-                                            targetPng = Path.Combine(minimapCacheDir, rel);
+                                            targetPng = Path.Combine(minimapCacheDir!, rel);
                                         }
                                         else
                                         {
                                             string fileName = e.altSuffix ? $"{e.mapName}_{e.tileX}_{e.tileY}__alt.png" : $"{e.mapName}_{e.tileX}_{e.tileY}.png";
-                                            targetPng = Path.Combine(minimapCacheDir, e.mapName, fileName);
+                                            targetPng = Path.Combine(minimapCacheDir!, e.mapName, fileName);
                                         }
                                         string? targetDir = Path.GetDirectoryName(targetPng);
                                         if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
@@ -1130,16 +1130,19 @@ namespace ADTPreFabTool
 
                 // Prepare UVs from original positions (texture stays as-is)
                 var uvs = new List<(float u, float v)>(positions.Count);
+                const float eps = 2.5e-3f;
                 for (int i = 0; i < positions.Count; i++)
                 {
                     var p = positions[i];
                     // WoW coords: X (north), Y (west). Our p: x=worldY, z=worldX.
                     // Minimap u increases to the right (east) -> increase with worldY (west positive)
-                    float u = (p.x - minX) / spanX; 
+                    float u = (p.x - minX) / spanX;
                     // Minimap v increases downward -> decrease with worldX (north positive)
-                    float v = (maxZ - p.z) / spanZ; 
+                    float v = (maxZ - p.z) / spanZ;
                     if (yFlip) v = 1f - v;
                     if (xFlip) u = 1f - u;
+                    u = Math.Clamp(u, eps, 1f - eps);
+                    v = Math.Clamp(v, eps, 1f - eps);
                     uvs.Add((u, v));
                 }
 
@@ -1333,7 +1336,8 @@ namespace ADTPreFabTool
                     {
                         var bytes = File.ReadAllBytes(srcPng);
                         var chan = mat.UseChannel(KnownChannel.BaseColor);
-                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes));
+                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes))
+                            .WithSampler(SharpGLTF.Schema2.TextureWrapMode.CLAMP_TO_EDGE, SharpGLTF.Schema2.TextureWrapMode.CLAMP_TO_EDGE);
                     }
                 }
                 catch
@@ -1349,6 +1353,7 @@ namespace ADTPreFabTool
 
                     // Generate UVs parallel to verts list (skip padded NaNs)
                     var texcoords = new List<(float u,float v)>(verts.Count);
+                    const float eps = 2.5e-3f;
                     foreach (var p in verts)
                     {
                         if (float.IsNaN(p.x)) { texcoords.Add((0,0)); continue; }
@@ -1356,6 +1361,8 @@ namespace ADTPreFabTool
                         float v = (maxZ - p.z) / spanZ;
                         if (yFlip) v = 1f - v;
                         if (xFlip) u = 1f - u;
+                        u = Math.Clamp(u, eps, 1f - eps);
+                        v = Math.Clamp(v, eps, 1f - eps);
                         texcoords.Add((u, v));
                     }
 
@@ -1569,6 +1576,7 @@ namespace ADTPreFabTool
 
                 // UVs aligned to bounds
                 var uvs = new List<(float u,float v)>(positions.Count);
+                const float eps = 2.5e-3f;
                 for (int i = 0; i < positions.Count; i++)
                 {
                     var p = positions[i];
@@ -1576,6 +1584,8 @@ namespace ADTPreFabTool
                     float v = (maxZ - p.z) / spanZ;
                     if (yFlip) v = 1f - v;
                     if (xFlip) u = 1f - u;
+                    u = Math.Clamp(u, eps, 1f - eps);
+                    v = Math.Clamp(v, eps, 1f - eps);
                     uvs.Add((u, v));
                 }
 
@@ -1720,7 +1730,8 @@ namespace ADTPreFabTool
                     {
                         var bytes = File.ReadAllBytes(srcPng);
                         var chan = mat.UseChannel(KnownChannel.BaseColor);
-                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes));
+                        chan.UseTexture().WithPrimaryImage((ImageBuilder)new MemoryImage(bytes))
+                            .WithSampler(SharpGLTF.Schema2.TextureWrapMode.CLAMP_TO_EDGE, SharpGLTF.Schema2.TextureWrapMode.CLAMP_TO_EDGE);
                     }
                 }
                 catch { }
@@ -1794,6 +1805,7 @@ namespace ADTPreFabTool
 
                     // UVs
                     var texcoords = new List<(float u,float v)>(verts.Count);
+                    const float eps = 2.5e-3f;
                     foreach (var p in verts)
                     {
                         if (float.IsNaN(p.x)) { texcoords.Add((0,0)); continue; }
@@ -1801,6 +1813,8 @@ namespace ADTPreFabTool
                         float v = (maxZ - p.z) / spanZ;
                         if (yFlip) v = 1f - v;
                         if (xFlip) u = 1f - u;
+                        u = Math.Clamp(u, eps, 1f - eps);
+                        v = Math.Clamp(v, eps, 1f - eps);
                         texcoords.Add((u, v));
                     }
 
