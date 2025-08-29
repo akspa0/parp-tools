@@ -33,6 +33,7 @@ cd ../..
   - TRS-based tiles via `textures/Minimap/md5translate.txt`
   - Legacy ALT layout under `textures/Minimap/<MapName>/`
   - WMO tiles under `World/Minimaps/**` with preserved folder hierarchy
+- Per‑tile GLB export for minimap runs: one `.glb` per tile with a node per MCNK chunk (`--export-minimap-glb`)
 
 Uses real data files from `test_data/` for examples.
 
@@ -81,6 +82,7 @@ dotnet build src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj -c Release
 - OBJ: import into Blender, MeshLab, or any OBJ-capable tool.
 - GLB: view in Windows 3D Viewer, Blender, Babylon Sandbox, or three.js editors.
 - The manifest is provided for downstream processing or custom viewers; this repo no longer includes a bundled viewer.
+- Minimap GLB export writes to `project_output/<RunStamp>/minimap_glb/<Map>/<Map>_<X>_<Y>.glb`. See `docs/CLI.md` for `--export-minimap-glb` usage and examples.
 
 ## Minimap Cache Structure
 

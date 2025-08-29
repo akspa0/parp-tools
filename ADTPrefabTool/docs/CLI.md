@@ -21,7 +21,7 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
   [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest]
   [--meta|--no-meta] [--similarity-only]
   [--minimap-root <path>] [--trs <path>] [--world-minimap-root <path>] [--data-version <ver>] [--cache-root <path>] [--decode-minimap]
-  [--export-minimap-overlays] [--export-minimap-obj] [--yflip|--no-yflip]
+  [--export-minimap-overlays] [--export-minimap-obj] [--export-minimap-glb] [--yflip|--no-yflip]
 ```
 
 - `adt_file_or_folder_path`:
@@ -52,6 +52,7 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
 - `--decode-minimap`              Decode BLP minimaps to PNG into cache.
 - `--export-minimap-overlays`     Export `minimap_index.csv` describing all discovered tiles.
 - `--export-minimap-obj`          Generate per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh.
+- `--export-minimap-glb`          Generate one GLB per tile using the real ADT terrain mesh; each MCNK chunk is a separate node. Current build exports untextured PBR.
 - `--yflip | --no-yflip`          Flip V to match minimap orientation (default: `--yflip`); use `--no-yflip` to disable.
 
 Notes:
@@ -109,6 +110,32 @@ dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
   --decode-minimap \
   --export-minimap-obj \
   --tiles 30_42,31_42
+```
+
+### Per‑tile GLB Export (`--export-minimap-glb`)
+
+Generates a single GLB per tile using the real ADT terrain mesh, with one node per MCNK chunk.
+
+Outputs in run folder:
+- `minimap_glb/<Map>/<Map>_<X>_<Y>.glb`
+
+Flags:
+- `--yflip` (default): flip V to match minimap orientation; use `--no-yflip` to disable.
+- `--tiles X_Y,...` or `--tile-range x1,y1,x2,y2` to limit tiles.
+
+Notes:
+- Current version exports an untextured PBR material. Minimap texture hookup may be added in a later update.
+
+Example:
+```bash
+dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
+  "test_data/0.6.0/tree/World/Maps/Azeroth" \
+  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
+  --data-version 0.6.0 \
+  --cache-root "./cachedMinimaps" \
+  --decode-minimap \
+  --export-minimap-glb \
+  --tiles 30_42
 ```
 
 ## Manifest Details
