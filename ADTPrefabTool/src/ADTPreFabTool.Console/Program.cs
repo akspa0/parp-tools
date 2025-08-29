@@ -28,8 +28,8 @@ namespace ADTPreFabTool
 
             if (args.Length < 1)
             {
-                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>]");
-                System.Console.WriteLine("Defaults (directory input): --recursive --glb-per-file --manifest --timestamped --chunks-manifest --meta");
+                System.Console.WriteLine("Usage: ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory_or_root] [--recursive|--no-recursive] [--no-comments] [--glb] [--gltf] [--glb-per-file|--no-glb-per-file] [--manifest|--no-manifest] [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest] [--meta|--no-meta] [--similarity-only] [--tiles x_y,...] [--tile-range x1,y1,x2,y2] [--max-hamming N] [--chunk-min-similarity S] [--prefab-scan] [--prefab-sizes 2x2,4x4,...] [--prefab-stride N] [--prefab-max-hamming N] [--prefab-min-similarity S] [--prefab-min-ruggedness R] [--prefab-min-edge-density E] [--prefab-cross-tiles|--no-prefab-cross-tiles] [--export-matches] [--export-prefab-matches] [--export-max N] [--superblock-patterns] [--superblock-sizes 12x12,...] [--seeds <path>] [--edge-trim-max N] [--delta-export] [--minimap-root <path>] [--trs <path>] [--export-minimap-overlays] [--generate-seed-template] [--data-version V] [--cache-root <path>] [--decode-minimap] [--world-minimap-root <path>] [--export-minimap-grid] [--yflip|--no-yflip] [--export-chunk-selection] [--select-tile Map:tx:ty] [--select-chunks cx,cy;cx,cy] [--export-minimap-obj]");
+                System.Console.WriteLine("Defaults (directory input): --recursive --glb-per-file --manifest --timestamped --chunks-manifest --meta --yflip (use --no-yflip to disable)");
                 System.Console.WriteLine("Examples:");
                 System.Console.WriteLine("  ADTPreFabTool.Console \"path/to/terrain.adt\" \"output/\" --glb");
                 System.Console.WriteLine("  ADTPreFabTool.Console \"path/to/map_folder\" --output-root project_output --timestamped");
@@ -76,6 +76,15 @@ namespace ADTPreFabTool
             string? cacheRoot = null;   // root for caches (defaults to outputRoot)
             bool decodeMinimap = args.Any(a => a.Equals("--decode-minimap", StringComparison.OrdinalIgnoreCase));
             string? worldMinimapRoot = null; // optional: World/Minimaps root for WMO-named tiles
+            bool exportMinimapGrid = args.Any(a => a.Equals("--export-minimap-grid", StringComparison.OrdinalIgnoreCase));
+            // yFlip defaults to true; use --no-yflip to disable
+            bool yFlip = true;
+            if (args.Any(a => a.Equals("--no-yflip", StringComparison.OrdinalIgnoreCase))) yFlip = false;
+            else if (args.Any(a => a.Equals("--yflip", StringComparison.OrdinalIgnoreCase))) yFlip = true; // explicit opt-in (default)
+            bool exportChunkSelection = args.Any(a => a.Equals("--export-chunk-selection", StringComparison.OrdinalIgnoreCase));
+            bool exportMinimapObj = args.Any(a => a.Equals("--export-minimap-obj", StringComparison.OrdinalIgnoreCase));
+            string? selectTile = null; // format: MapName:tx:ty
+            string? selectChunks = null; // format: cx,cy;cx,cy
 
             // Allow overrides
             if (args.Any(a => a.Equals("--no-recursive", StringComparison.OrdinalIgnoreCase))) recursive = false;
@@ -210,6 +219,14 @@ namespace ADTPreFabTool
                 {
                     worldMinimapRoot = args[i + 1];
                 }
+                if (args[i].Equals("--select-tile", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    selectTile = args[i + 1];
+                }
+                if (args[i].Equals("--select-chunks", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    selectChunks = args[i + 1];
+                }
             }
 
             // Apply similarity percentage mappings if provided
@@ -247,7 +264,7 @@ namespace ADTPreFabTool
                     }
                     Directory.CreateDirectory(runDir);
 
-                    if (superblockPatterns || exportMinimapOverlays || generateSeedTemplate)
+                    if (superblockPatterns || exportMinimapOverlays || generateSeedTemplate || exportMinimapGrid || exportChunkSelection || exportMinimapObj)
                     {
                         // Optional TRS parsing for minimap support
                         List<(string mapName,int tileX,int tileY,string fullPath)> minimapEntries = new();
@@ -431,6 +448,24 @@ namespace ADTPreFabTool
                             {
                                 ExportMinimapOverlaysV2(runDir, minimapEntries, minimapRoot!, minimapCacheDir, decodeMinimap, allEntries, duplicateOf);
                             }
+
+                            // Grid overlay export for ADT tiles only
+                            if (exportMinimapGrid)
+                            {
+                                ExportGridOverlays(runDir, minimapCacheDir, allEntries, tileSet, tileRange, yFlip);
+                            }
+
+                            // Chunk selection export (stub: persist selection list)
+                            if (exportChunkSelection)
+                            {
+                                ExportSelectedChunks(runDir, minimapCacheDir, allEntries, selectTile, selectChunks, yFlip);
+                            }
+
+                            // Minimap OBJ export: textured XZ plane with cached PNG
+                            if (exportMinimapObj)
+                            {
+                                ExportMinimapOBJ(runDir, minimapCacheDir, inputPath, allEntries, tileSet, tileRange, yFlip);
+                            }
                         }
 
                         // Generate seed template CSV
@@ -520,6 +555,183 @@ namespace ADTPreFabTool
             return results;
         }
 
+        private static void ExportGridOverlays(
+            string runDir,
+            string minimapCacheDir,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
+            HashSet<(int tx,int ty)> tileSet,
+            (int x1,int y1,int x2,int y2)? tileRange,
+            bool yFlip)
+        {
+            // Group by mapName, then pick ADT tiles matching filters
+            var adtTiles = allEntries
+                .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
+                .GroupBy(e => (mapName: e.mapName, tileX: e.tileX, tileY: e.tileY))
+                .Select(g => g.Key)
+                .ToList();
+
+            string outDir = Path.Combine(runDir, "minimap_grid_overlays");
+            Directory.CreateDirectory(outDir);
+
+            int done = 0, missing = 0;
+            foreach (var (mapName, tx, ty) in adtTiles.OrderBy(t => t.mapName).ThenBy(t => t.tileX).ThenBy(t => t.tileY))
+            {
+                bool include = tileSet.Count == 0 && tileRange == null
+                    || tileSet.Contains((tx, ty))
+                    || (tileRange != null && tx >= tileRange.Value.x1 && tx <= tileRange.Value.x2 && ty >= tileRange.Value.y1 && ty <= tileRange.Value.y2);
+                if (!include) continue;
+
+                string pngMain = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}.png");
+                string pngAlt = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}__alt.png");
+                string src = File.Exists(pngMain) ? pngMain : (File.Exists(pngAlt) ? pngAlt : "");
+                if (string.IsNullOrEmpty(src)) { missing++; continue; }
+
+                string dst = Path.Combine(outDir, $"{mapName}_{tx}_{ty}__grid.png");
+                try
+                {
+                    using var img = Image.Load<Bgra32>(src);
+                    DrawGridInPlace(img, 16, yFlip);
+                    img.SaveAsPng(dst);
+                    done++;
+                }
+                catch (Exception ex)
+                {
+                    System.Console.WriteLine($"Grid overlay failed for {src}: {ex.Message}");
+                }
+            }
+            System.Console.WriteLine($"Grid overlays: {done} written, {missing} missing source PNGs");
+        }
+
+        private static void DrawGridInPlace(Image<Bgra32> img, int cells, bool yFlip)
+        {
+            int w = img.Width;
+            int h = img.Height;
+            int stepX = Math.Max(1, w / cells);
+            int stepY = Math.Max(1, h / cells);
+            var line = new Bgra32(255, 0, 0, 255); // red
+
+            // Vertical lines
+            for (int x = 0; x <= w; x += stepX)
+            {
+                int xx = Math.Min(x, w - 1);
+                for (int y = 0; y < h; y++) img[xx, y] = line;
+            }
+            // Horizontal lines
+            for (int y = 0; y <= h; y += stepY)
+            {
+                int yy = Math.Min(y, h - 1);
+                for (int x = 0; x < w; x++) img[x, yy] = line;
+            }
+        }
+
+        private static void ExportSelectedChunks(
+            string runDir,
+            string minimapCacheDir,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
+            string? selectTile,
+            string? selectChunks,
+            bool yFlip)
+        {
+            if (string.IsNullOrWhiteSpace(selectTile) || string.IsNullOrWhiteSpace(selectChunks))
+            {
+                System.Console.WriteLine("--export-chunk-selection requires --select-tile Map:tx:ty and --select-chunks cx,cy;cx,cy");
+                return;
+            }
+            // Parse tile spec
+            var tparts = selectTile.Split(':');
+            if (tparts.Length != 3 || !int.TryParse(tparts[1], out var tx) || !int.TryParse(tparts[2], out var ty))
+            {
+                System.Console.WriteLine("Invalid --select-tile format. Use MapName:tx:ty");
+                return;
+            }
+            string map = tparts[0];
+
+            // Parse chunk list
+            var chunks = new List<(int cx,int cy)>();
+            foreach (var item in selectChunks.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = item.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                if (p.Length == 2 && int.TryParse(p[0], out var cx) && int.TryParse(p[1], out var cy))
+                {
+                    if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16) chunks.Add((cx, cy));
+                }
+            }
+            if (chunks.Count == 0)
+            {
+                System.Console.WriteLine("No valid chunks parsed from --select-chunks");
+                return;
+            }
+
+            // Ensure PNG exists (optional visual reference)
+            string pngMain = Path.Combine(minimapCacheDir, map, $"{map}_{tx}_{ty}.png");
+            string pngAlt = Path.Combine(minimapCacheDir, map, $"{map}_{tx}_{ty}__alt.png");
+            string src = File.Exists(pngMain) ? pngMain : (File.Exists(pngAlt) ? pngAlt : "");
+            if (string.IsNullOrEmpty(src))
+            {
+                System.Console.WriteLine("Warning: no cached PNG found for selected tile; proceeding with CSV export only.");
+            }
+
+            // Write a simple CSV dataset for the selection
+            string outDir = Path.Combine(runDir, "chunk_selections");
+            Directory.CreateDirectory(outDir);
+            string csvPath = Path.Combine(outDir, $"{map}_{tx}_{ty}_selection.csv");
+            using (var w = new StreamWriter(csvPath, false, Encoding.UTF8))
+            {
+                w.WriteLine("mapName,tileX,tileY,chunkX,chunkY");
+                foreach (var (cx, cy) in chunks)
+                {
+                    w.WriteLine($"{map},{tx},{ty},{cx},{cy}");
+                }
+            }
+
+            // Optional: produce a visualization PNG highlighting selected chunks
+            if (!string.IsNullOrEmpty(src))
+            {
+                try
+                {
+                    using var img = Image.Load<Bgra32>(src);
+                    HighlightChunksInPlace(img, chunks, yFlip);
+                    string dst = Path.Combine(outDir, $"{map}_{tx}_{ty}_selection.png");
+                    img.SaveAsPng(dst);
+                }
+                catch (Exception ex)
+                {
+                    System.Console.WriteLine($"Selection preview failed: {ex.Message}");
+                }
+            }
+
+            // Stub: actual mesh sub-export to OBJ/GLB would map these MCNKs in the ADT file
+            System.Console.WriteLine($"Selection persisted: {csvPath} (mesh export TODO)");
+        }
+
+        private static void HighlightChunksInPlace(Image<Bgra32> img, List<(int cx,int cy)> chunks, bool yFlip)
+        {
+            int w = img.Width, h = img.Height;
+            int stepX = Math.Max(1, w / 16);
+            int stepY = Math.Max(1, h / 16);
+            var tint = new Bgra32(0, 255, 0, 80); // semi-transparent green
+
+            foreach (var (cx, cy) in chunks)
+            {
+                int px = cx * stepX;
+                int py = (yFlip ? (15 - cy) : cy) * stepY;
+                for (int y = py; y < Math.Min(py + stepY, h); y++)
+                {
+                    for (int x = px; x < Math.Min(px + stepX, w); x++)
+                    {
+                        // Simple alpha blend over existing pixel
+                        var p = img[x, y];
+                        byte a = tint.A;
+                        img[x, y] = new Bgra32(
+                            (byte)((tint.R * a + p.R * (255 - a)) / 255),
+                            (byte)((tint.G * a + p.G * (255 - a)) / 255),
+                            (byte)((tint.B * a + p.B * (255 - a)) / 255),
+                            p.A);
+                    }
+                }
+            }
+        }
+
         private static void ExportMinimapOverlaysV2(
             string runDir,
             List<(string mapName,int tileX,int tileY,string fullPath)> trsEntries,
@@ -597,60 +809,75 @@ namespace ADTPreFabTool
             System.Console.WriteLine($"Wrote seeding helpers: {chunkIndexPath} and seeds_template.csv");
         }
 
-        private static List<(int gx,int gy,int w,int h,string label)> ReadSeedsCsv(string seedsCsvPath)
+        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath,string wmoAsset,string relPng)> ScanWorldMinimaps(string worldMinimapRoot)
         {
-            var list = new List<(int,int,int,int,string)>();
-            foreach (var raw in File.ReadAllLines(seedsCsvPath))
+            // Recursively enumerate .blp and infer (mapName, tileX, tileY) and wmoAsset from path
+            var results = new List<(string,int,int,string,string,string)>();
+            if (!Directory.Exists(worldMinimapRoot)) return results;
+            foreach (var blp in Directory.EnumerateFiles(worldMinimapRoot, "*.blp", SearchOption.AllDirectories))
             {
-                var line = raw.Trim();
-                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("gx,")) continue;
-                var p = line.Split(',');
-                if (p.Length < 4) continue;
-                if (int.TryParse(p[0], out int gx) && int.TryParse(p[1], out int gy) && int.TryParse(p[2], out int w) && int.TryParse(p[3], out int h))
+                var rel = Path.GetRelativePath(worldMinimapRoot, blp);
+                var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (parts.Length < 2) continue; // need at least top-level dir and a filename
+                // If path starts with wmo/..., use the second segment (continent) as mapName; else use first segment
+                string mapName = parts[0].Equals("wmo", StringComparison.OrdinalIgnoreCase)
+                    ? (parts.Length > 1 ? parts[1] : "wmo")
+                    : parts[0];
+                string stem = Path.GetFileNameWithoutExtension(blp);
+                // Parse last two numeric groups as X,Y
+                var m = Regex.Match(stem, @".*_(\d+)_(\d+)$", RegexOptions.IgnoreCase);
+                if (!m.Success || !int.TryParse(m.Groups[1].Value, out var tx) || !int.TryParse(m.Groups[2].Value, out var ty)) continue;
+                string relDir = Path.GetDirectoryName(rel)?.Replace("\\", "/") ?? ""; // directory under World/Minimaps
+                string wmoAsset = relDir; // full directory path under World/Minimaps
+                // Strip leading 'wmo/' from relDir for output rooting
+                string relDirNoPrefix = relDir;
+                if (!string.IsNullOrEmpty(relDirNoPrefix))
                 {
-                    string label = p.Length > 4 ? string.Join(',', p.Skip(4)).Trim() : "";
-                    list.Add((gx, gy, w, h, label));
+                    var segs = relDirNoPrefix.Split('/');
+                    if (segs.Length > 0 && segs[0].Equals("wmo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        relDirNoPrefix = string.Join('/', segs.Skip(1));
+                    }
+                }
+                // Build relative PNG path under cache: wmo/<relDirNoPrefix>/<stem>.png
+                string relPng = string.IsNullOrEmpty(relDirNoPrefix)
+                    ? Path.Combine("wmo", Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/")
+                    : Path.Combine("wmo", relDirNoPrefix, Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/");
+                results.Add((mapName, tx, ty, blp, wmoAsset, relPng));
+            }
+            return results;
+        }
+
+        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath)> ScanAltMinimapFolders(string minimapRoot)
+        {
+            var results = new List<(string,int,int,string)>();
+            if (!Directory.Exists(minimapRoot)) return results;
+            foreach (var dir in Directory.EnumerateDirectories(minimapRoot))
+            {
+                string mapName = Path.GetFileName(dir);
+                foreach (var blp in Directory.EnumerateFiles(dir, "*.blp", SearchOption.TopDirectoryOnly))
+                {
+                    var stem = Path.GetFileNameWithoutExtension(blp);
+                    var m = Regex.Match(stem, "^map_(\\d+)[ _](\\d+)$", RegexOptions.IgnoreCase);
+                    if (!m.Success && !Regex.IsMatch(stem, "^(.*)_(\\d+)_(\\d+)_(\\d+)$", RegexOptions.IgnoreCase)) continue;
+                    var m2 = Regex.Match(stem, "^(.*)_(\\d+)_(\\d+)_(\\d+)$", RegexOptions.IgnoreCase);
+                    if (m2.Success && int.TryParse(m2.Groups[3].Value, out var tx2) && int.TryParse(m2.Groups[4].Value, out var ty2))
+                    {
+                        results.Add((mapName, tx2, ty2, blp));
+                    }
                 }
             }
-            return list;
+            return results;
         }
 
-        private static void ProcessSuperblockPatternsGlobal(
-            string inputDir,
-            string runDir,
-            HashSet<(int tx,int ty)> tileSet,
-            (int x1,int y1,int x2,int y2)? tileRange,
-            List<(int w,int h)> sizes,
-            string? seedsCsvPath,
-            int edgeTrimMax,
-            bool deltaExport)
+        private static string ComputeFileMD5(string path)
         {
-            System.Console.WriteLine("Superblock patterns: seeds-first workflow");
-            var seeds = new List<(int gx,int gy,int w,int h,string label)>();
-            if (!string.IsNullOrWhiteSpace(seedsCsvPath) && File.Exists(seedsCsvPath))
-            {
-                seeds = ReadSeedsCsv(seedsCsvPath!);
-                System.Console.WriteLine($"Loaded {seeds.Count} seeds from {seedsCsvPath}");
-            }
-            else
-            {
-                System.Console.WriteLine("No seeds provided; currently seed-first mode expects --seeds. Skipping.");
-                return;
-            }
-
-            // TODO: Build global chunk grid and token map (reuse existing ComputeChunkGrid8/feature hashing) and implement:
-            //  - window signature build for each seed
-            //  - candidate search with optional 8-way canonicalization
-            //  - nibble alignment in range [0..edgeTrimMax] per side
-            //  - similarity check and delta export (optional)
-
-            string outDir = Path.Combine(runDir, "prefab_match_exports");
-            Directory.CreateDirectory(outDir);
-            File.WriteAllText(Path.Combine(outDir, "prefab_superblock_stats.json"), "{\n  \"status\": \"seed-stub\"\n}\n");
-            System.Console.WriteLine("Superblock stub completed (implementation TODO)");
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            using var fs = File.OpenRead(path);
+            var hash = md5.ComputeHash(fs);
+            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }
 
-        // === Restored minimal stubs to satisfy calls from Main() ===
         private static bool ParseTileXYFromStem(string stem, out int x, out int y)
         {
             x = 0; y = 0;
@@ -746,79 +973,217 @@ namespace ADTPreFabTool
             return null;
         }
 
-        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath,string wmoAsset,string relPng)> ScanWorldMinimaps(string worldMinimapRoot)
+        private static void ExportMinimapOBJ(
+            string runDir,
+            string minimapCacheDir,
+            string inputMapDir,
+            List<(string mapName,int tileX,int tileY,string fullPath,string sourceKind,bool altSuffix,string wmoAsset,string md5,string wmoRelPng)> allEntries,
+            HashSet<(int tx,int ty)> tileSet,
+            (int x1,int y1,int x2,int y2)? tileRange,
+            bool yFlip)
         {
-            // Recursively enumerate .blp and infer (mapName, tileX, tileY) and wmoAsset from path
-            var results = new List<(string,int,int,string,string,string)>();
-            if (!Directory.Exists(worldMinimapRoot)) return results;
-            foreach (var blp in Directory.EnumerateFiles(worldMinimapRoot, "*.blp", SearchOption.AllDirectories))
+            var adtTiles = allEntries
+                .Where(e => e.sourceKind == "trs" || e.sourceKind == "alt")
+                .GroupBy(e => (mapName: e.mapName, tileX: e.tileX, tileY: e.tileY))
+                .Select(g => g.Key)
+                .OrderBy(t => t.mapName).ThenBy(t => t.tileX).ThenBy(t => t.tileY)
+                .ToList();
+
+            string outRoot = Path.Combine(runDir, "minimap_obj");
+            Directory.CreateDirectory(outRoot);
+
+            int done = 0, missingPng = 0, missingAdt = 0;
+            foreach (var (mapName, tx, ty) in adtTiles)
             {
-                var rel = Path.GetRelativePath(worldMinimapRoot, blp);
-                var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (parts.Length < 2) continue; // need at least top-level dir and a filename
-                // If path starts with wmo/..., use the second segment (continent) as mapName; else use first segment
-                string mapName = parts[0].Equals("wmo", StringComparison.OrdinalIgnoreCase)
-                    ? (parts.Length > 1 ? parts[1] : "wmo")
-                    : parts[0];
-                string stem = Path.GetFileNameWithoutExtension(blp);
-                // Parse last two numeric groups as X,Y
-                var m = Regex.Match(stem, @".*_(\d+)_(\d+)$", RegexOptions.IgnoreCase);
-                if (!m.Success || !int.TryParse(m.Groups[1].Value, out var tx) || !int.TryParse(m.Groups[2].Value, out var ty)) continue;
-                string relDir = Path.GetDirectoryName(rel)?.Replace("\\", "/") ?? ""; // directory under World/Minimaps
-                string wmoAsset = relDir; // full directory path under World/Minimaps
-                // Strip leading 'wmo/' from relDir for output rooting
-                string relDirNoPrefix = relDir;
-                if (!string.IsNullOrEmpty(relDirNoPrefix))
+                bool include = tileSet.Count == 0 && tileRange == null
+                    || tileSet.Contains((tx, ty))
+                    || (tileRange != null && tx >= tileRange.Value.x1 && tx <= tileRange.Value.x2 && ty >= tileRange.Value.y1 && ty <= tileRange.Value.y2);
+                if (!include) continue;
+
+                // Locate cached minimap PNG
+                string pngMain = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}.png");
+                string pngAlt = Path.Combine(minimapCacheDir, mapName, $"{mapName}_{tx}_{ty}__alt.png");
+                string srcPng = File.Exists(pngMain) ? pngMain : (File.Exists(pngAlt) ? pngAlt : "");
+                if (string.IsNullOrEmpty(srcPng)) { missingPng++; /* we'll still export geometry without texture */ }
+
+                // Find matching ADT file under the input map dir (recursive)
+                string? adtPath = null;
+                try
                 {
-                    var segs = relDirNoPrefix.Split('/');
-                    if (segs.Length > 0 && segs[0].Equals("wmo", StringComparison.OrdinalIgnoreCase))
+                    var enumOption = SearchOption.AllDirectories;
+                    string pattern = $"{mapName}_{tx}_{ty}.adt";
+                    foreach (var f in Directory.EnumerateFiles(inputMapDir, "*.adt", enumOption))
                     {
-                        relDirNoPrefix = string.Join('/', segs.Skip(1));
+                        if (string.Equals(Path.GetFileName(f), pattern, StringComparison.OrdinalIgnoreCase)) { adtPath = f; break; }
                     }
                 }
-                // Build relative PNG path under cache: wmo/<relDirNoPrefix>/<stem>.png
-                string relPng = string.IsNullOrEmpty(relDirNoPrefix)
-                    ? Path.Combine("wmo", Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/")
-                    : Path.Combine("wmo", relDirNoPrefix, Path.GetFileNameWithoutExtension(blp) + ".png").Replace("\\", "/");
-                results.Add((mapName, tx, ty, blp, wmoAsset, relPng));
-            }
-            return results;
-        }
+                catch { }
 
-        private static IEnumerable<(string mapName,int tileX,int tileY,string fullPath)> ScanAltMinimapFolders(string minimapRoot)
-        {
-            var results = new List<(string,int,int,string)>();
-            if (!Directory.Exists(minimapRoot)) return results;
-            foreach (var dir in Directory.EnumerateDirectories(minimapRoot))
-            {
-                string mapName = Path.GetFileName(dir);
-                foreach (var blp in Directory.EnumerateFiles(dir, "*.blp", SearchOption.TopDirectoryOnly))
+                if (string.IsNullOrWhiteSpace(adtPath) || !File.Exists(adtPath)) { missingAdt++; continue; }
+
+                string outDir = Path.Combine(outRoot, mapName);
+                Directory.CreateDirectory(outDir);
+                string baseName = $"{mapName}_{tx}_{ty}";
+                string objPath = Path.Combine(outDir, baseName + ".obj");
+                string mtlPath = Path.Combine(outDir, baseName + ".mtl");
+                string texFileName = baseName + ".png";
+                string texOutPath = Path.Combine(outDir, texFileName);
+
+                // Copy texture next to OBJ for simple relative referencing (if present)
+                if (!string.IsNullOrEmpty(srcPng)) { try { if (!File.Exists(texOutPath)) File.Copy(srcPng, texOutPath, false); } catch { } }
+
+                // Prepare MTL (always write; mesh can be viewed untextured if no PNG)
+                var mtl = new StringBuilder();
+                mtl.AppendLine("# Minimap material");
+                mtl.AppendLine("newmtl Minimap");
+                mtl.AppendLine("Kd 1.000 1.000 1.000");
+                if (!string.IsNullOrEmpty(srcPng)) mtl.AppendLine($"map_Kd {texFileName}");
+                File.WriteAllText(mtlPath, mtl.ToString());
+
+                // Read ADT and emit real terrain mesh with UVs normalized to tile extents
+                var adtReader = new ADTReader();
+                using (var stream = File.OpenRead(adtPath))
                 {
-                    var stem = Path.GetFileNameWithoutExtension(blp);
-                    var m = Regex.Match(stem, "^map_(\\d+)[ _](\\d+)$", RegexOptions.IgnoreCase);
-                    if (m.Success && int.TryParse(m.Groups[1].Value, out var tx) && int.TryParse(m.Groups[2].Value, out var ty))
+                    adtReader.ReadRootFile(stream, WoWFormatLib.Structs.WDT.MPHDFlags.wdt_has_maid);
+                }
+                var adt = adtReader.adtfile;
+
+                // First pass: compute vertex positions and bounds (X/Z) to create UVs
+                const float TILE_SIZE = 533.333333f;
+                const float CHUNK_SIZE = TILE_SIZE / 16f;
+                const float UNIT_SIZE = CHUNK_SIZE / 8f;
+                const float UNIT_SIZE_HALF = UNIT_SIZE / 2f;
+
+                var positions = new List<(float x, float y, float z)>();
+                var chunkStartIndex = new List<int>(); // starting vertex index per chunk
+                float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+                float minZ = float.PositiveInfinity, maxZ = float.NegativeInfinity;
+
+                foreach (var chunk in adt.chunks)
+                {
+                    if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0)
                     {
-                        results.Add((mapName, tx, ty, blp));
+                        chunkStartIndex.Add(positions.Count);
+                        continue;
                     }
-                    else
+                    chunkStartIndex.Add(positions.Count);
+
+                    int idx = 0;
+                    for (int row = 0; row < 17; row++)
                     {
-                        var m2 = Regex.Match(stem, "^(.*)_(\\d+)_(\\d+)_(\\d+)$", RegexOptions.IgnoreCase);
-                        if (m2.Success && int.TryParse(m2.Groups[3].Value, out var tx2) && int.TryParse(m2.Groups[4].Value, out var ty2))
+                        bool isShort = (row % 2) == 1;
+                        int colCount = isShort ? 8 : 9;
+                        for (int col = 0; col < colCount; col++)
                         {
-                            results.Add((mapName, tx2, ty2, blp));
+                            float vx = chunk.header.position.Y - (col * UNIT_SIZE);
+                            if (isShort) vx -= UNIT_SIZE_HALF;
+                            float vy = chunk.vertices.vertices[idx] + chunk.header.position.Z;
+                            float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF);
+                            positions.Add((vx, vy, vz));
+                            if (vx < minX) minX = vx; if (vx > maxX) maxX = vx;
+                            if (vz < minZ) minZ = vz; if (vz > maxZ) maxZ = vz;
+                            idx++;
                         }
                     }
                 }
-            }
-            return results;
-        }
 
-        private static string ComputeFileMD5(string path)
-        {
-            using var md5 = System.Security.Cryptography.MD5.Create();
-            using var fs = File.OpenRead(path);
-            var hash = md5.ComputeHash(fs);
-            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                float spanX = Math.Max(1e-6f, maxX - minX);
+                float spanZ = Math.Max(1e-6f, maxZ - minZ);
+
+                // Prepare UVs from original positions (texture stays as-is)
+                var uvs = new List<(float u, float v)>(positions.Count);
+                for (int i = 0; i < positions.Count; i++)
+                {
+                    var p = positions[i];
+                    // WoW coords: X (north), Y (west). Our p: x=worldY, z=worldX.
+                    // Minimap u increases to the right (east) -> decrease with worldY (west positive)
+                    float u = (maxX - p.x) / spanX; // maxY - worldY over spanY
+                    // Minimap v increases downward -> decrease with worldX (north positive)
+                    float v = (maxZ - p.z) / spanZ; // maxX - worldX over spanX
+                    if (yFlip) v = 1f - v;
+                    uvs.Add((u, v));
+                }
+
+                // Write OBJ with v, vt and faces (respecting holes)
+                using (var fs = new FileStream(objPath, FileMode.Create, FileAccess.Write, FileShare.Read))
+                using (var writer = new StreamWriter(fs))
+                {
+                    writer.WriteLine("# ADT Terrain Mesh (Textured with minimap)");
+                    writer.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+                    writer.WriteLine("usemtl Minimap");
+
+                    // v and vt in same order so indices match
+                    for (int i = 0; i < positions.Count; i++)
+                    {
+                        var p = positions[i];
+                        writer.WriteLine($"v {p.z:F6} {p.x:F6} {p.y:F6}");
+                    }
+                    for (int i = 0; i < uvs.Count; i++)
+                    {
+                        var t = uvs[i];
+                        writer.WriteLine($"vt {t.u.ToString(CultureInfo.InvariantCulture)} {t.v.ToString(CultureInfo.InvariantCulture)}");
+                    }
+
+                    int totalVertices = 0;
+                    int chunkIndex = 0;
+                    foreach (var chunk in adt.chunks)
+                    {
+                        if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0) { chunkIndex++; continue; }
+
+                        // Faces: follow the same indexing pattern as old AppendADTMesh
+                        for (int j = 9, xx = 0, yy = 0; j < 145; j++, xx++)
+                        {
+                            if (xx >= 8) { xx = 0; yy++; }
+
+                            bool isHole = true;
+                            if (((uint)chunk.header.flags & 0x10000u) == 0)
+                            {
+                                int current = 1 << ((xx / 2) + (yy / 2) * 4);
+                                if ((chunk.header.holesLowRes & current) == 0) isHole = false;
+                            }
+                            else
+                            {
+                                byte holeByte = yy switch
+                                {
+                                    0 => chunk.header.holesHighRes_0,
+                                    1 => chunk.header.holesHighRes_1,
+                                    2 => chunk.header.holesHighRes_2,
+                                    3 => chunk.header.holesHighRes_3,
+                                    4 => chunk.header.holesHighRes_4,
+                                    5 => chunk.header.holesHighRes_5,
+                                    6 => chunk.header.holesHighRes_6,
+                                    _ => chunk.header.holesHighRes_7,
+                                };
+                                if (((holeByte >> xx) & 1) == 0) isHole = false;
+                            }
+
+                            if (!isHole)
+                            {
+                                int baseIndex = chunkStartIndex[chunkIndex];
+                                int i0 = j;
+                                int a = baseIndex + i0 + 1;
+                                int b = baseIndex + (i0 - 9) + 1;
+                                int c = baseIndex + (i0 + 8) + 1;
+                                int d = baseIndex + (i0 - 8) + 1;
+                                int e = baseIndex + (i0 + 9) + 1;
+                                // use v/vt same indices
+                                writer.WriteLine($"f {a}/{a} {b}/{b} {c}/{c}");
+                                writer.WriteLine($"f {a}/{a} {d}/{d} {b}/{b}");
+                                writer.WriteLine($"f {a}/{a} {e}/{e} {d}/{d}");
+                                writer.WriteLine($"f {a}/{a} {c}/{c} {e}/{e}");
+                            }
+
+                            if (((j + 1) % (9 + 8)) == 0) j += 9;
+                        }
+
+                        totalVertices += 145;
+                        chunkIndex++;
+                    }
+                }
+
+                done++;
+            }
+            System.Console.WriteLine($"Minimap OBJ export (terrain mesh): {done} written, {missingPng} missing PNGs, {missingAdt} missing ADTs");
         }
     }
 }

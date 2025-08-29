@@ -108,6 +108,39 @@ Notes:
 - ADT: de-dup precedence TRS > ALT for identical (MapName,X,Y). Differing content produces `__alt`.
 - WMO: every file path becomes its own PNG; we only skip if that exact output already exists.
 
+## Minimap‑textured Terrain OBJ Export
+
+You can export the real ADT terrain mesh per tile and texture it with the cached minimap PNGs.
+
+Outputs go under the run folder:
+
+- `minimap_obj/<MapName>/<MapName>_<X>_<Y>.obj`
+- `minimap_obj/<MapName>/<MapName>_<X>_<Y>.mtl`
+- `minimap_obj/<MapName>/<MapName>_<X>_<Y>.png` (copied from cache when available)
+
+Notes:
+- UVs are aligned to WoW’s coordinate system; V is flipped by default for correct orientation.
+- `--yflip` is ON by default. Use `--no-yflip` to disable.
+
+Example (using real test data in this repo):
+
+```bash
+dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
+  "test_data/0.6.0/tree/World/Maps/Azeroth" \
+  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
+  --data-version 0.6.0 \
+  --cache-root "./cachedMinimaps" \
+  --decode-minimap \
+  --export-minimap-obj \
+  --tiles 30_42,31_42
+```
+
+Opt out of the default V flip if needed:
+
+```bash
+... --export-minimap-obj --tiles 30_42 --no-yflip
+```
+
 ## Quick Start (real test data)
 
 Prepare minimaps and export overlays:

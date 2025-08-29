@@ -21,7 +21,7 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
   [--output-root <path>] [--timestamped|--no-timestamp] [--chunks-manifest|--no-chunks-manifest]
   [--meta|--no-meta] [--similarity-only]
   [--minimap-root <path>] [--trs <path>] [--world-minimap-root <path>] [--data-version <ver>] [--cache-root <path>] [--decode-minimap]
-  [--export-minimap-overlays]
+  [--export-minimap-overlays] [--export-minimap-obj] [--yflip|--no-yflip]
 ```
 
 - `adt_file_or_folder_path`:
@@ -51,11 +51,13 @@ ADTPreFabTool.Console <adt_file_or_folder_path> [output_directory] [--recursive|
 - `--cache-root <path>`           Cache base directory. Default: under output root.
 - `--decode-minimap`              Decode BLP minimaps to PNG into cache.
 - `--export-minimap-overlays`     Export `minimap_index.csv` describing all discovered tiles.
+- `--export-minimap-obj`          Generate per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh.
+- `--yflip | --no-yflip`          Flip V to match minimap orientation (default: `--yflip`); use `--no-yflip` to disable.
 
 Notes:
 - `--glb`/`--gltf` apply to single-file mode (`ProcessADTFile`).
 - `--glb-per-file`/`--manifest` apply to directory mode (`ProcessADTDirectory`).
-- Defaults (directory input): `--recursive --glb-per-file --manifest`.
+- Defaults (directory input): `--recursive --glb-per-file --manifest --yflip` (use `--no-yflip` to disable V flip on minimap texture).
 
 ## Outputs
 
@@ -85,6 +87,29 @@ Cache root: `<cache_root>/_cache/<data-version>/minimap_png/`
 De-duplication behavior:
 - ADT: TRS > ALT precedence for same (MapName,X,Y). Identical content is not decoded twice; differing content produces `__alt`.
 - WMO: every file path produces its own output (even if MD5 matches others). We only skip if that exact PNG already exists.
+
+### Minimap-textured Terrain OBJ Export (`--export-minimap-obj`)
+
+Generates per-tile OBJ/MTL textured with cached minimap PNG, using the real ADT terrain mesh.
+
+Outputs in run folder:
+- `minimap_obj/<Map>/<Map>_<X>_<Y>.obj|.mtl|.png`
+
+Flags:
+- `--yflip` (default): flip V to match minimap orientation; use `--no-yflip` to disable.
+- `--tiles X_Y,...` or `--tile-range x1,y1,x2,y2` to limit tiles.
+
+Example:
+```bash
+dotnet run --project src/ADTPreFabTool.Console/ADTPreFabTool.Console.csproj \
+  "test_data/0.6.0/tree/World/Maps/Azeroth" \
+  --minimap-root "test_data/0.6.0/tree/textures/Minimap" \
+  --data-version 0.6.0 \
+  --cache-root "./cachedMinimaps" \
+  --decode-minimap \
+  --export-minimap-obj \
+  --tiles 30_42,31_42
+```
 
 ## Manifest Details
 
