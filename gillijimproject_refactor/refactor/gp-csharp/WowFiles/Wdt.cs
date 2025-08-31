@@ -1,4 +1,6 @@
 using GillijimProject.Utilities;
+using GillijimProject.WowFiles.Terrain;
+using GillijimProject.WowFiles.Objects;
 
 namespace GillijimProject.WowFiles;
 
@@ -78,5 +80,101 @@ public sealed class Wdt
     public McvtAlphaReader ReadMcvt(long absoluteOffset)
     {
         return McvtAlphaReader.ReadFrom(_fs, absoluteOffset);
+    }
+
+    // New parser methods for integrated chunk types
+    
+    /// <summary>
+    /// Parse MCLY (Alpha layer data) chunk at the specified offset
+    /// </summary>
+    public MclyAlpha ReadMcly(long absoluteOffset)
+    {
+        return MclyAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MTEX (texture filenames) chunk at the specified offset
+    /// </summary>
+    public MtexAlpha ReadMtex(long absoluteOffset)
+    {
+        return MtexAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MODF (WMO placement) chunk at the specified offset
+    /// </summary>
+    public ModfAlpha ReadModf(long absoluteOffset)
+    {
+        return ModfAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MDDF (doodad placement) chunk at the specified offset
+    /// </summary>
+    public MddfAlpha ReadMddf(long absoluteOffset)
+    {
+        return MddfAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MCRF (cross-references) chunk at the specified offset
+    /// </summary>
+    public McrfAlpha ReadMcrf(long absoluteOffset)
+    {
+        return McrfAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MMID (model indices) chunk at the specified offset
+    /// </summary>
+    public MmidAlpha ReadMmid(long absoluteOffset)
+    {
+        return MmidAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Scan for and parse all chunks of a specific type in the WDT file
+    /// </summary>
+    public List<T> FindAndParseChunks<T>(uint chunkTag, Func<long, T> parser)
+    {
+        var results = new List<T>();
+        var buffer = new byte[8];
+        long position = 0;
+        
+        _fs.Seek(0, SeekOrigin.Begin);
+        
+        while (position < _fs.Length - 8)
+        {
+            _fs.Seek(position, SeekOrigin.Begin);
+            int read = _fs.Read(buffer, 0, 8);
+            if (read < 8) break;
+            
+            uint tag = BitConverter.ToUInt32(buffer, 0);
+            uint size = BitConverter.ToUInt32(buffer, 4);
+            
+            if (tag == chunkTag && size > 0 && size < _fs.Length - position)
+            {
+                try
+                {
+                    var parsed = parser(position);
+                    results.Add(parsed);
+                    position += 8 + size;
+                    
+                    // Align to 4-byte boundary
+                    if (position % 4 != 0)
+                        position += 4 - (position % 4);
+                }
+                catch
+                {
+                    position++;
+                }
+            }
+            else
+            {
+                position++;
+            }
+        }
+        
+        return results;
     }
 }
