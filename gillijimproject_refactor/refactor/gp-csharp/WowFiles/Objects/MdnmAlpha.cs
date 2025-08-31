@@ -3,46 +3,46 @@ using System.Text;
 
 namespace GillijimProject.WowFiles.Objects;
 
-public sealed class MmdxAlpha : IChunkData
+public sealed class MdnmAlpha : IChunkData
 {
-    public IReadOnlyList<string> M2Filenames { get; }
-    public uint Tag => Tags.MMDX;
+    public IReadOnlyList<string> DoodadFilenames { get; }
+    public uint Tag => Tags.MDNM;
     public ReadOnlyMemory<byte> RawData { get; }
     public long SourceOffset { get; }
     
-    private MmdxAlpha(List<string> m2Filenames, ReadOnlyMemory<byte> rawData, long sourceOffset)
+    private MdnmAlpha(List<string> doodadFilenames, ReadOnlyMemory<byte> rawData, long sourceOffset)
     {
-        M2Filenames = m2Filenames;
+        DoodadFilenames = doodadFilenames;
         RawData = rawData;
         SourceOffset = sourceOffset;
     }
     
-    public static MmdxAlpha Parse(Stream s, long absoluteOffset)
+    public static MdnmAlpha Parse(Stream s, long absoluteOffset)
     {
         var ch = Chunk.ReadHeader(s, absoluteOffset);
-        Util.Assert(ch.Tag == Tags.MMDX, "Expected MMDX tag");
+        Util.Assert(ch.Tag == Tags.MDNM, "Expected MDNM tag");
         
         var buffer = new byte[ch.Size];
         s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
         int read = s.Read(buffer, 0, (int)ch.Size);
-        Util.Assert(read == ch.Size, $"Failed to read MMDX data");
+        Util.Assert(read == ch.Size, $"Failed to read MDNM data");
         
-        var filenames = ParseM2Filenames(buffer);
-        return new MmdxAlpha(filenames, buffer, absoluteOffset);
+        var filenames = ParseDoodadFilenames(buffer);
+        return new MdnmAlpha(filenames, buffer, absoluteOffset);
     }
     
-    public static MmdxAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
+    public static MdnmAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
     {
         var ch = Chunk.ReadHeader(data, absoluteOffset);
-        Util.Assert(ch.Tag == Tags.MMDX, "Expected MMDX tag");
+        Util.Assert(ch.Tag == Tags.MDNM, "Expected MDNM tag");
         
         var span = data[(int)ch.PayloadOffset..(int)(ch.PayloadOffset + ch.Size)];
         var buffer = span.ToArray();
-        var filenames = ParseM2Filenames(span);
-        return new MmdxAlpha(filenames, buffer, absoluteOffset);
+        var filenames = ParseDoodadFilenames(span);
+        return new MdnmAlpha(filenames, buffer, absoluteOffset);
     }
     
-    private static List<string> ParseM2Filenames(ReadOnlySpan<byte> data)
+    private static List<string> ParseDoodadFilenames(ReadOnlySpan<byte> data)
     {
         var filenames = new List<string>();
         int start = 0;

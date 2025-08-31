@@ -3,7 +3,7 @@ using GillijimProject.Utilities;
 namespace GillijimProject.WowFiles.Objects;
 
 public readonly record struct M2Placement(
-    uint ModelIndex,
+    uint M2Index,
     uint UniqueId,
     float X, float Y, float Z,
     float RotX, float RotY, float RotZ,
@@ -11,12 +11,20 @@ public readonly record struct M2Placement(
     ushort Flags
 );
 
-public sealed class MddfAlpha
+public sealed class MddfAlpha : IChunkData
 {
     public const int EntrySize = 36; // bytes per M2 placement entry
     public IReadOnlyList<M2Placement> Placements { get; }
+    public uint Tag => Tags.MDDF;
+    public ReadOnlyMemory<byte> RawData { get; }
+    public long SourceOffset { get; }
     
-    private MddfAlpha(List<M2Placement> placements) => Placements = placements;
+    private MddfAlpha(List<M2Placement> placements, ReadOnlyMemory<byte> rawData, long sourceOffset)
+    {
+        Placements = placements;
+        RawData = rawData;
+        SourceOffset = sourceOffset;
+    }
     
     public static MddfAlpha Parse(Stream s, long absoluteOffset)
     {
@@ -24,19 +32,21 @@ public sealed class MddfAlpha
         Util.Assert(ch.Tag == Tags.MDDF, "Expected MDDF tag");
         Util.Assert(ch.Size % EntrySize == 0, $"MDDF size {ch.Size} not multiple of {EntrySize}");
         
+        var buffer = new byte[ch.Size];
+        s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
+        int read = s.Read(buffer, 0, (int)ch.Size);
+        Util.Assert(read == ch.Size, $"Failed to read MDDF data");
+        
         int count = (int)(ch.Size / EntrySize);
         var placements = new List<M2Placement>(count);
-        Span<byte> buffer = stackalloc byte[EntrySize];
         
-        s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
         for (int i = 0; i < count; i++)
         {
-            int read = s.Read(buffer);
-            Util.Assert(read == EntrySize, $"Failed to read M2 placement {i}");
-            placements.Add(ParsePlacement(buffer));
+            var entrySpan = buffer.AsSpan(i * EntrySize, EntrySize);
+            placements.Add(ParsePlacement(entrySpan));
         }
         
-        return new MddfAlpha(placements);
+        return new MddfAlpha(placements, buffer, absoluteOffset);
     }
     
     public static MddfAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
@@ -47,6 +57,7 @@ public sealed class MddfAlpha
         
         int count = (int)(ch.Size / EntrySize);
         var span = data[(int)ch.PayloadOffset..(int)(ch.PayloadOffset + ch.Size)];
+        var buffer = span.ToArray();
         var placements = new List<M2Placement>(count);
         
         for (int i = 0; i < count; i++)
@@ -55,12 +66,12 @@ public sealed class MddfAlpha
             placements.Add(ParsePlacement(entrySpan));
         }
         
-        return new MddfAlpha(placements);
+        return new MddfAlpha(placements, buffer, absoluteOffset);
     }
     
     private static M2Placement ParsePlacement(ReadOnlySpan<byte> data)
     {
-        uint modelIndex = Util.ReadUInt32LE(data, 0);
+        uint m2Index = Util.ReadUInt32LE(data, 0);
         uint uniqueId = Util.ReadUInt32LE(data, 4);
         float x = BitConverter.ToSingle(data[8..12]);
         float y = BitConverter.ToSingle(data[12..16]);
@@ -71,6 +82,15 @@ public sealed class MddfAlpha
         ushort scale = Util.ReadUInt16LE(data, 32);
         ushort flags = Util.ReadUInt16LE(data, 34);
         
-        return new M2Placement(modelIndex, uniqueId, x, y, z, rotX, rotY, rotZ, scale, flags);
+        return new M2Placement(m2Index, uniqueId, x, y, z, rotX, rotY, rotZ, scale, flags);
+    }
+    
+    public byte[] ToBytes()
+    {
+        var result = new byte[8 + RawData.Length];
+        BitConverter.GetBytes(Tag).CopyTo(result, 0);
+        BitConverter.GetBytes((uint)RawData.Length).CopyTo(result, 4);
+        RawData.Span.CopyTo(result.AsSpan(8));
+        return result;
     }
 }

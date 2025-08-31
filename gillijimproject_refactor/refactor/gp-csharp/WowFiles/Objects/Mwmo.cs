@@ -3,11 +3,19 @@ using System.Text;
 
 namespace GillijimProject.WowFiles.Objects;
 
-public sealed class MwmoAlpha
+public sealed class MwmoAlpha : IChunkData
 {
     public IReadOnlyList<string> WmoFilenames { get; }
+    public uint Tag => Tags.MWMO;
+    public ReadOnlyMemory<byte> RawData { get; }
+    public long SourceOffset { get; }
     
-    private MwmoAlpha(List<string> wmoFilenames) => WmoFilenames = wmoFilenames;
+    private MwmoAlpha(List<string> wmoFilenames, ReadOnlyMemory<byte> rawData, long sourceOffset)
+    {
+        WmoFilenames = wmoFilenames;
+        RawData = rawData;
+        SourceOffset = sourceOffset;
+    }
     
     public static MwmoAlpha Parse(Stream s, long absoluteOffset)
     {
@@ -16,10 +24,11 @@ public sealed class MwmoAlpha
         
         var buffer = new byte[ch.Size];
         s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
-        int read = s.Read(buffer);
-        Util.Assert(read == ch.Size, $"Failed to read MWMO data, expected {ch.Size} bytes");
+        int read = s.Read(buffer, 0, (int)ch.Size);
+        Util.Assert(read == ch.Size, $"Failed to read MWMO data");
         
-        return ParseFilenames(buffer);
+        var filenames = ParseWmoFilenames(buffer);
+        return new MwmoAlpha(filenames, buffer, absoluteOffset);
     }
     
     public static MwmoAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
@@ -28,13 +37,12 @@ public sealed class MwmoAlpha
         Util.Assert(ch.Tag == Tags.MWMO, "Expected MWMO tag");
         
         var span = data[(int)ch.PayloadOffset..(int)(ch.PayloadOffset + ch.Size)];
-        var buffer = new byte[ch.Size];
-        span.CopyTo(buffer);
-        
-        return ParseFilenames(buffer);
+        var buffer = span.ToArray();
+        var filenames = ParseWmoFilenames(span);
+        return new MwmoAlpha(filenames, buffer, absoluteOffset);
     }
     
-    private static MwmoAlpha ParseFilenames(ReadOnlySpan<byte> data)
+    private static List<string> ParseWmoFilenames(ReadOnlySpan<byte> data)
     {
         var filenames = new List<string>();
         int start = 0;
@@ -52,6 +60,22 @@ public sealed class MwmoAlpha
             }
         }
         
-        return new MwmoAlpha(filenames);
+        // Handle case where last string doesn't end with null terminator
+        if (start < data.Length)
+        {
+            var filename = Encoding.UTF8.GetString(data[start..]);
+            filenames.Add(filename);
+        }
+        
+        return filenames;
+    }
+    
+    public byte[] ToBytes()
+    {
+        var result = new byte[8 + RawData.Length];
+        BitConverter.GetBytes(Tag).CopyTo(result, 0);
+        BitConverter.GetBytes((uint)RawData.Length).CopyTo(result, 4);
+        RawData.Span.CopyTo(result.AsSpan(8));
+        return result;
     }
 }

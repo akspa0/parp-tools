@@ -3,46 +3,46 @@ using System.Text;
 
 namespace GillijimProject.WowFiles.Objects;
 
-public sealed class MmdxAlpha : IChunkData
+public sealed class MonmAlpha : IChunkData
 {
-    public IReadOnlyList<string> M2Filenames { get; }
-    public uint Tag => Tags.MMDX;
+    public IReadOnlyList<string> WmoFilenames { get; }
+    public uint Tag => Tags.MONM;
     public ReadOnlyMemory<byte> RawData { get; }
     public long SourceOffset { get; }
     
-    private MmdxAlpha(List<string> m2Filenames, ReadOnlyMemory<byte> rawData, long sourceOffset)
+    private MonmAlpha(List<string> wmoFilenames, ReadOnlyMemory<byte> rawData, long sourceOffset)
     {
-        M2Filenames = m2Filenames;
+        WmoFilenames = wmoFilenames;
         RawData = rawData;
         SourceOffset = sourceOffset;
     }
     
-    public static MmdxAlpha Parse(Stream s, long absoluteOffset)
+    public static MonmAlpha Parse(Stream s, long absoluteOffset)
     {
         var ch = Chunk.ReadHeader(s, absoluteOffset);
-        Util.Assert(ch.Tag == Tags.MMDX, "Expected MMDX tag");
+        Util.Assert(ch.Tag == Tags.MONM, "Expected MONM tag");
         
         var buffer = new byte[ch.Size];
         s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
         int read = s.Read(buffer, 0, (int)ch.Size);
-        Util.Assert(read == ch.Size, $"Failed to read MMDX data");
+        Util.Assert(read == ch.Size, $"Failed to read MONM data");
         
-        var filenames = ParseM2Filenames(buffer);
-        return new MmdxAlpha(filenames, buffer, absoluteOffset);
+        var filenames = ParseWmoFilenames(buffer);
+        return new MonmAlpha(filenames, buffer, absoluteOffset);
     }
     
-    public static MmdxAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
+    public static MonmAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
     {
         var ch = Chunk.ReadHeader(data, absoluteOffset);
-        Util.Assert(ch.Tag == Tags.MMDX, "Expected MMDX tag");
+        Util.Assert(ch.Tag == Tags.MONM, "Expected MONM tag");
         
         var span = data[(int)ch.PayloadOffset..(int)(ch.PayloadOffset + ch.Size)];
         var buffer = span.ToArray();
-        var filenames = ParseM2Filenames(span);
-        return new MmdxAlpha(filenames, buffer, absoluteOffset);
+        var filenames = ParseWmoFilenames(span);
+        return new MonmAlpha(filenames, buffer, absoluteOffset);
     }
     
-    private static List<string> ParseM2Filenames(ReadOnlySpan<byte> data)
+    private static List<string> ParseWmoFilenames(ReadOnlySpan<byte> data)
     {
         var filenames = new List<string>();
         int start = 0;

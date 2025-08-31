@@ -15,12 +15,20 @@ public readonly record struct WmoPlacement(
     ushort Scale
 );
 
-public sealed class ModfAlpha
+public sealed class ModfAlpha : IChunkData
 {
     public const int EntrySize = 64; // bytes per WMO placement entry
     public IReadOnlyList<WmoPlacement> Placements { get; }
+    public uint Tag => Tags.MODF;
+    public ReadOnlyMemory<byte> RawData { get; }
+    public long SourceOffset { get; }
     
-    private ModfAlpha(List<WmoPlacement> placements) => Placements = placements;
+    private ModfAlpha(List<WmoPlacement> placements, ReadOnlyMemory<byte> rawData, long sourceOffset)
+    {
+        Placements = placements;
+        RawData = rawData;
+        SourceOffset = sourceOffset;
+    }
     
     public static ModfAlpha Parse(Stream s, long absoluteOffset)
     {
@@ -28,19 +36,21 @@ public sealed class ModfAlpha
         Util.Assert(ch.Tag == Tags.MODF, "Expected MODF tag");
         Util.Assert(ch.Size % EntrySize == 0, $"MODF size {ch.Size} not multiple of {EntrySize}");
         
+        var buffer = new byte[ch.Size];
+        s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
+        int read = s.Read(buffer, 0, (int)ch.Size);
+        Util.Assert(read == ch.Size, $"Failed to read MODF data");
+        
         int count = (int)(ch.Size / EntrySize);
         var placements = new List<WmoPlacement>(count);
-        Span<byte> buffer = stackalloc byte[EntrySize];
         
-        s.Seek(ch.PayloadOffset, SeekOrigin.Begin);
         for (int i = 0; i < count; i++)
         {
-            int read = s.Read(buffer);
-            Util.Assert(read == EntrySize, $"Failed to read WMO placement {i}");
-            placements.Add(ParsePlacement(buffer));
+            var entrySpan = buffer.AsSpan(i * EntrySize, EntrySize);
+            placements.Add(ParsePlacement(entrySpan));
         }
         
-        return new ModfAlpha(placements);
+        return new ModfAlpha(placements, buffer, absoluteOffset);
     }
     
     public static ModfAlpha Parse(ReadOnlySpan<byte> data, long absoluteOffset)
@@ -51,6 +61,7 @@ public sealed class ModfAlpha
         
         int count = (int)(ch.Size / EntrySize);
         var span = data[(int)ch.PayloadOffset..(int)(ch.PayloadOffset + ch.Size)];
+        var buffer = span.ToArray();
         var placements = new List<WmoPlacement>(count);
         
         for (int i = 0; i < count; i++)
@@ -59,7 +70,7 @@ public sealed class ModfAlpha
             placements.Add(ParsePlacement(entrySpan));
         }
         
-        return new ModfAlpha(placements);
+        return new ModfAlpha(placements, buffer, absoluteOffset);
     }
     
     private static WmoPlacement ParsePlacement(ReadOnlySpan<byte> data)
@@ -86,5 +97,14 @@ public sealed class ModfAlpha
         return new WmoPlacement(wmoIndex, uniqueId, x, y, z, rotX, rotY, rotZ,
             bbMinX, bbMinY, bbMinZ, bbMaxX, bbMaxY, bbMaxZ,
             flags, doodadSet, nameSet, scale);
+    }
+    
+    public byte[] ToBytes()
+    {
+        var result = new byte[8 + RawData.Length];
+        BitConverter.GetBytes(Tag).CopyTo(result, 0);
+        BitConverter.GetBytes((uint)RawData.Length).CopyTo(result, 4);
+        RawData.Span.CopyTo(result.AsSpan(8));
+        return result;
     }
 }

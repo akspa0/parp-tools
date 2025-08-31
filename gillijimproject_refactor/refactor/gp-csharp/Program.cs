@@ -11,6 +11,7 @@ if (commandArgs.Length == 0)
     Console.WriteLine("  dump-wdt <file.wdt> [options]     - Direct console output (legacy)");
     Console.WriteLine("  analyze-json <analysis.json>      - Analyze exported JSON data");
     Console.WriteLine("  scan-chunks <file.wdt> [options]  - Scan for all implemented chunk types");
+    Console.WriteLine("  decompile-test <file.wdt> [options] - Test decompile/recompile data preservation");
     Console.WriteLine();
     Console.WriteLine("Options:");
     Console.WriteLine("  --start <n>     Start from tile N (default: 0)");
@@ -52,6 +53,13 @@ else if (command == "analyze-json")
         return;
     }
     AnalyzeJson(commandArgs[1]);
+}
+else if (command == "decompile-test")
+{
+    var options = ParseOptions(commandArgs.Skip(1).ToArray());
+    if (options == null) return;
+    
+    DecompileTest.RunTest(options);
 }
 else
 {
@@ -234,6 +242,58 @@ static void ScanAllChunks(Options options)
         {
             var totalIndices = mmidChunks.Sum(m => m.ModelIndices.Count);
             Console.WriteLine($"  Total model indices: {totalIndices}");
+        }
+        
+        // Scan for MDNM chunks (doodad filenames)
+        var mdnmChunks = wdt.FindAndParseChunks(Tags.MDNM, offset => wdt.ReadMdnm(offset));
+        Console.WriteLine($"MDNM (Doodad filenames): {mdnmChunks.Count} chunks found");
+        if (options.Verbose && mdnmChunks.Count > 0)
+        {
+            var totalFilenames = mdnmChunks.Sum(m => m.DoodadFilenames.Count);
+            Console.WriteLine($"  Total doodad filenames: {totalFilenames}");
+            if (mdnmChunks.Count > 0)
+            {
+                Console.WriteLine($"  Sample filenames: {string.Join(", ", mdnmChunks[0].DoodadFilenames.Take(3))}");
+            }
+        }
+        
+        // Scan for MONM chunks (WMO filenames)
+        var monmChunks = wdt.FindAndParseChunks(Tags.MONM, offset => wdt.ReadMonm(offset));
+        Console.WriteLine($"MONM (WMO filenames): {monmChunks.Count} chunks found");
+        if (options.Verbose && monmChunks.Count > 0)
+        {
+            var totalFilenames = monmChunks.Sum(m => m.WmoFilenames.Count);
+            Console.WriteLine($"  Total WMO filenames: {totalFilenames}");
+            if (monmChunks.Count > 0)
+            {
+                Console.WriteLine($"  Sample filenames: {string.Join(", ", monmChunks[0].WmoFilenames.Take(3))}");
+            }
+        }
+        
+        // Scan for MMDX chunks (M2 model filenames)
+        var mmdxChunks = wdt.FindAndParseChunks(Tags.MMDX, offset => wdt.ReadMmdx(offset));
+        Console.WriteLine($"MMDX (M2 model filenames): {mmdxChunks.Count} chunks found");
+        if (options.Verbose && mmdxChunks.Count > 0)
+        {
+            var totalFilenames = mmdxChunks.Sum(m => m.M2Filenames.Count);
+            Console.WriteLine($"  Total M2 filenames: {totalFilenames}");
+            if (mmdxChunks.Count > 0)
+            {
+                Console.WriteLine($"  Sample filenames: {string.Join(", ", mmdxChunks[0].M2Filenames.Take(3))}");
+            }
+        }
+        
+        // Scan for MWMO chunks (WMO filenames)
+        var mwmoChunks = wdt.FindAndParseChunks(Tags.MWMO, offset => wdt.ReadMwmo(offset));
+        Console.WriteLine($"MWMO (WMO filenames): {mwmoChunks.Count} chunks found");
+        if (options.Verbose && mwmoChunks.Count > 0)
+        {
+            var totalFilenames = mwmoChunks.Sum(m => m.WmoFilenames.Count);
+            Console.WriteLine($"  Total WMO filenames: {totalFilenames}");
+            if (mwmoChunks.Count > 0)
+            {
+                Console.WriteLine($"  Sample filenames: {string.Join(", ", mwmoChunks[0].WmoFilenames.Take(3))}");
+            }
         }
         
         Console.WriteLine();

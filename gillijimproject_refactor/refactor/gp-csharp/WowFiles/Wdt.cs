@@ -133,6 +133,38 @@ public sealed class Wdt
     }
     
     /// <summary>
+    /// Parse MDNM (doodad filenames) chunk at the specified offset
+    /// </summary>
+    public MdnmAlpha ReadMdnm(long absoluteOffset)
+    {
+        return MdnmAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MONM (WMO filenames) chunk at the specified offset
+    /// </summary>
+    public MonmAlpha ReadMonm(long absoluteOffset)
+    {
+        return MonmAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MMDX (M2 model filenames) chunk at the specified offset
+    /// </summary>
+    public MmdxAlpha ReadMmdx(long absoluteOffset)
+    {
+        return MmdxAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
+    /// Parse MWMO (WMO filenames) chunk at the specified offset
+    /// </summary>
+    public MwmoAlpha ReadMwmo(long absoluteOffset)
+    {
+        return MwmoAlpha.Parse(_fs, absoluteOffset);
+    }
+    
+    /// <summary>
     /// Scan for and parse all chunks of a specific type in the WDT file
     /// </summary>
     public List<T> FindAndParseChunks<T>(uint chunkTag, Func<long, T> parser)
