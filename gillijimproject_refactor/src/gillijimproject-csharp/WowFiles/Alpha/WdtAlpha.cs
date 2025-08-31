@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using GillijimProject.Utilities;
+using U = GillijimProject.Utilities.Utilities;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.Alpha;
 
@@ -48,10 +48,10 @@ public class WdtAlpha : WowFiles.WowChunkedFormat
         offsetInFile = NextOffset(offsetInFile, _main);
 
         // MDNM and MONM offsets come from MPHD data
-        int mdnmOffset = Utilities.GetIntFromFile(fs, mphdStartOffset + 4);
+        int mdnmOffset = U.GetIntFromFile(fs, mphdStartOffset + 4);
         _mdnm = new Alpha.Mdnm(fs, mdnmOffset);
 
-        int monmOffset = Utilities.GetIntFromFile(fs, mphdStartOffset + 12);
+        int monmOffset = U.GetIntFromFile(fs, mphdStartOffset + 12);
         _monm = new Alpha.Monm(fs, monmOffset);
         offsetInFile = NextOffset(monmOffset, _monm);
 

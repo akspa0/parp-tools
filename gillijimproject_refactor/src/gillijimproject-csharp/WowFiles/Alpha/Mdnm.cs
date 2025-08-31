@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using GillijimProject.Utilities;
+using U = GillijimProject.Utilities.Utilities;
 using GillijimProject.WowFiles;
 
 namespace GillijimProject.WowFiles.Alpha;
@@ -22,6 +22,6 @@ public class Mdnm : Chunk
 
     public List<string> GetFilesNames()
     {
-        return Utilities.GetFileNames(Data);
+        return U.GetFileNames(Data);
     }
 }

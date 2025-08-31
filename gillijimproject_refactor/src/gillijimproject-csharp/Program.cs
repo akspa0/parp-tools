@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
-using GillijimProject.Utilities;
+using U = GillijimProject.Utilities.Utilities;
 using GillijimProject.WowFiles.Alpha;
 
 namespace GillijimProject;
@@ -28,9 +28,9 @@ public static class Program
 
         try
         {
-            var bytes = Utilities.GetWholeFile(path);
+            var bytes = U.GetWholeFile(path);
             Console.WriteLine($"[INFO] Read {bytes.Length} bytes from {path}");
-            var wdtVersion = Utilities.GetWdtVersion(path);
+            var wdtVersion = U.GetWdtVersion(path);
             Console.WriteLine($"[INFO] WDT version guess: {wdtVersion}");
 
             var wdtAlpha = new WdtAlpha(path);
