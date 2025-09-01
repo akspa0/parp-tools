@@ -10,4 +10,9 @@ public class McnrLk : Chunk
     public McnrLk(FileStream adtFile, int offsetInFile) : base(adtFile, offsetInFile) { }
     public McnrLk(byte[] wholeFile, int offsetInFile) : base(wholeFile, offsetInFile) { }
     public McnrLk(string letters, int givenSize, byte[] chunkData) : base(letters, givenSize, chunkData) { }
+    
+    /// <summary>
+    /// [PORT] Default parameterless constructor
+    /// </summary>
+    public McnrLk() : base("RNCM", 0, Array.Empty<byte>()) { }
 }

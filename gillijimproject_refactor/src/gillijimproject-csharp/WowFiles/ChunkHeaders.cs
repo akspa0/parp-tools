@@ -22,3 +22,83 @@ public static class ChunkHeaders
     public const string MMDX = "MMDX";
     public const string MMID = "MMID";
 }
+
+/// <summary>
+/// [PORT] C# port of McnkHeader from ChunkHeaders.h
+/// Header structure for Lich King MCNK chunks
+/// </summary>
+public struct McnkHeader
+{
+    public int Flags;
+    public int IndexX;
+    public int IndexY;
+    public int NLayers;
+    public int M2Number;
+    public int McvtOffset;
+    public int McnrOffset;
+    public int MclyOffset;
+    public int McrfOffset;
+    public int McalOffset;
+    public int McalSize;
+    public int McshOffset;
+    public int McshSize;
+    public int AreaId;
+    public int WmoNumber;
+    public int Holes;
+    public int GroundEffectsMap1;
+    public int GroundEffectsMap2;
+    public int GroundEffectsMap3;
+    public int GroundEffectsMap4;
+    public int PredTex;
+    public int NEffectDoodad;
+    public int McseOffset;
+    public int NSndEmitters;
+    public int MclqOffset;
+    public int MclqSize;
+    public float PosX;
+    public float PosY;
+    public float PosZ;
+    public int MccvOffset;
+    public int MclvOffset;
+    public int Unused;
+}
+
+/// <summary>
+/// [PORT] C# port of McnkAlphaHeader from ChunkHeaders.h
+/// Header structure for Alpha MCNK chunks
+/// </summary>
+public struct McnkAlphaHeader
+{
+    public int Flags;
+    public int IndexX;
+    public int IndexY;
+    public float Unknown1;
+    public int NLayers;
+    public int M2Number;
+    public int McvtOffset;
+    public int McnrOffset;
+    public int MclyOffset;
+    public int McrfOffset;
+    public int McalOffset;
+    public int McalSize;
+    public int McshOffset;
+    public int McshSize;
+    public int Unknown3;
+    public int WmoNumber;
+    public int Holes;
+    public int GroundEffectsMap1;
+    public int GroundEffectsMap2;
+    public int GroundEffectsMap3;
+    public int GroundEffectsMap4;
+    public int Unknown6;
+    public int Unknown7;
+    public int McnkChunksSize;
+    public int Unknown8;
+    public int MclqOffset;
+    public int Unused1;
+    public int Unused2;
+    public int Unused3;
+    public int Unused4;
+    public int Unused5;
+    public int Unused6;
+}

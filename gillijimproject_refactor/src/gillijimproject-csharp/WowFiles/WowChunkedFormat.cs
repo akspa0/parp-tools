@@ -14,4 +14,25 @@ public abstract class WowChunkedFormat
     /// [PORT] Alpha MCNK terrain header size.
     /// </summary>
     public const int McnkTerrainHeaderSize = 128;
+    
+    /// <summary>
+    /// [PORT] Read bytes from a file stream
+    /// </summary>
+    /// <param name="fs">File stream to read from</param>
+    /// <param name="offset">Position to start reading</param>
+    /// <param name="length">Number of bytes to read</param>
+    /// <returns>Byte array containing the data</returns>
+    public static byte[] ReadBytes(System.IO.FileStream fs, int offset, int length)
+    {
+        byte[] buffer = new byte[length];
+        fs.Seek(offset, System.IO.SeekOrigin.Begin);
+        int total = 0;
+        while (total < length)
+        {
+            int read = fs.Read(buffer, total, length - total);
+            if (read == 0) throw new System.IO.EndOfStreamException();
+            total += read;
+        }
+        return buffer;
+    }
 }

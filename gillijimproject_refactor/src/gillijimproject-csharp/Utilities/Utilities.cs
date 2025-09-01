@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace GillijimProject.Utilities;
@@ -111,5 +112,86 @@ public static class Utilities
         public readonly float Y;
         public readonly float Z;
         public Point(float x, float y, float z) { X = x; Y = y; Z = z; }
+    }
+
+    /// <summary>
+    /// [PORT] Convert a byte array to a struct
+    /// </summary>
+    /// <typeparam name="T">Struct type</typeparam>
+    /// <param name="bytes">Byte array containing struct data</param>
+    /// <returns>Populated struct</returns>
+    public static T ByteArrayToStruct<T>(byte[] bytes) where T : struct
+    {
+        GCHandle handle = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        try
+        {
+            return Marshal.PtrToStructure<T>(handle.AddrOfPinnedObject());
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    /// <summary>
+    /// [PORT] Convert a struct to a byte array
+    /// </summary>
+    /// <typeparam name="T">Struct type</typeparam>
+    /// <param name="structure">Struct to convert</param>
+    /// <returns>Byte array representation of struct</returns>
+    public static byte[] StructToByteArray<T>(T structure) where T : struct
+    {
+        int size = Marshal.SizeOf(structure);
+        byte[] arr = new byte[size];
+        IntPtr ptr = Marshal.AllocHGlobal(size);
+        
+        try
+        {
+            Marshal.StructureToPtr(structure, ptr, false);
+            Marshal.Copy(ptr, arr, 0, size);
+            return arr;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(ptr);
+        }
+    }
+
+    /// <summary>
+    /// [PORT] Get a byte array from a file at the specified position and length
+    /// </summary>
+    /// <param name="filePath">Path to the file</param>
+    /// <param name="position">Position in the file to start reading</param>
+    /// <param name="length">Number of bytes to read</param>
+    /// <returns>Byte array containing the read data</returns>
+    public static byte[] GetByteArrayFromFile(string filePath, int position, int length)
+    {
+        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+        {
+            byte[] buffer = new byte[length];
+            fs.Seek(position, SeekOrigin.Begin);
+            int bytesRead = fs.Read(buffer, 0, length);
+            
+            if (bytesRead < length)
+            {
+                // Resize buffer if we read less than requested
+                byte[] resizedBuffer = new byte[bytesRead];
+                Array.Copy(buffer, resizedBuffer, bytesRead);
+                return resizedBuffer;
+            }
+            
+            return buffer;
+        }
+    }
+
+    // [PORT] Overload for reading from an already-open FileStream
+    public static byte[] GetByteArrayFromFile(FileStream fs, int position, int length)
+    {
+        if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
+        var buffer = new byte[length];
+        fs.Seek(position, SeekOrigin.Begin);
+        int read = fs.Read(buffer, 0, length);
+        if (read != length) throw new EndOfStreamException();
+        return buffer;
     }
 }

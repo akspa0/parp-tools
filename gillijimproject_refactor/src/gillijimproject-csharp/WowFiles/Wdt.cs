@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 
 namespace GillijimProject.WowFiles;
 
@@ -43,11 +44,36 @@ public class Wdt : WowChunkedFormat
     }
 
     /// <summary>
-    /// [PORT] Write to file (not implemented yet).
+    /// [PORT] Write to file: concatenate serialized chunks. Output name: original + "_new" next to input.
     /// </summary>
     public void ToFile()
     {
-        throw new NotImplementedException("[PORT] Wdt.ToFile not implemented.");
+        var whole = new List<byte>();
+        whole.AddRange(_mver.GetWholeChunk());
+        whole.AddRange(_mphd.GetWholeChunk());
+        whole.AddRange(_main.GetWholeChunk());
+        if (!_mwmo.IsEmpty()) whole.AddRange(_mwmo.GetWholeChunk());
+        if (!_modf.IsEmpty()) whole.AddRange(_modf.GetWholeChunk());
+
+        var fileName = _wdtName + "_new";
+        File.WriteAllBytes(fileName, whole.ToArray());
+    }
+
+    /// <summary>
+    /// [PORT] Write to a specific directory. File name is basename(input) + "_new".
+    /// </summary>
+    public void ToFile(string outputDir)
+    {
+        Directory.CreateDirectory(outputDir);
+        var whole = new List<byte>();
+        whole.AddRange(_mver.GetWholeChunk());
+        whole.AddRange(_mphd.GetWholeChunk());
+        whole.AddRange(_main.GetWholeChunk());
+        if (!_mwmo.IsEmpty()) whole.AddRange(_mwmo.GetWholeChunk());
+        if (!_modf.IsEmpty()) whole.AddRange(_modf.GetWholeChunk());
+
+        var outPath = Path.Combine(outputDir, Path.GetFileName(_wdtName) + "_new");
+        File.WriteAllBytes(outPath, whole.ToArray());
     }
 
     public override string ToString() => $"Wdt({_wdtName})";
