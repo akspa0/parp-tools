@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using GillijimProject.Utilities;
@@ -7,128 +8,43 @@ using Util = GillijimProject.Utilities.Utilities;
 
 namespace GillijimProject.WowFiles.LichKing;
 
-/// <summary>
-/// [PORT] C# port of McnkLk (see lib/gillijimproject/wowfiles/lichking/McnkLk.h)
-/// Handles LichKing format MCNK chunks
-/// </summary>
 public class McnkLk : Mcnk
 {
-    private new const int ChunkLettersAndSize = 8; // 4 bytes for letters + 4 bytes for size
-    private new const int McnkTerrainHeaderSize = 0x80; // Size of MCNK header in bytes
-    
     private McnkHeader _mcnkHeader;
-    private Chunk _mcvt;
-    private Chunk? _mccv;
-    private McnrLk _mcnr;
-    private Chunk _mcly;
-    private Mcrf _mcrf;
-    private Chunk? _mcsh;
-    private Mcal _mcal;
-    private Chunk? _mclq;
-    private Chunk? _mcse;
+    private readonly Mcvt _mcvt;
+    private readonly Chunk _mccv; // Remains a generic chunk as it has no unique fields
+    private readonly McnrLk _mcnr;
+    private readonly Mcly _mcly;
+    private readonly Mcrf _mcrf;
+    private readonly Mcsh _mcsh;
+    private readonly Mcal _mcal;
+    private readonly Mclq _mclq;
+    private readonly Mcse _mcse;
 
-    /// <summary>
-    /// Constructs a McnkLk from a file array at the given offset with the given header size
-    /// </summary>
-    /// <param name="adtFile">The byte array containing the file data</param>
-    /// <param name="offsetInFile">Offset in the file where the chunk starts</param>
-    /// <param name="headerSize">Size of the header</param>
-    public McnkLk(byte[] adtFile, int offsetInFile, int headerSize) : base(adtFile, offsetInFile, McnkTerrainHeaderSize)
+    public McnkLk(byte[] adtFile, int offsetInFile) : base(adtFile, offsetInFile)
     {
         int headerStartOffset = offsetInFile;
-        
-        offsetInFile += ChunkLettersAndSize;
-        
-        byte[] headerContent = new byte[McnkTerrainHeaderSize];
-        Array.Copy(adtFile, offsetInFile, headerContent, 0, McnkTerrainHeaderSize);
+        offsetInFile += 8; // Skip MCNK FourCC and size
+
+        byte[] headerContent = new byte[128];
+        Array.Copy(adtFile, offsetInFile, headerContent, 0, 128);
         _mcnkHeader = Util.ByteArrayToStruct<McnkHeader>(headerContent);
-        
-        offsetInFile = headerStartOffset + _mcnkHeader.McvtOffset;
-        _mcvt = new Chunk(adtFile, offsetInFile);
-        
-        if (_mcnkHeader.MccvOffset != 0)
-        {
-            offsetInFile = headerStartOffset + _mcnkHeader.MccvOffset;
-            _mccv = new Chunk(adtFile, offsetInFile);
-        }
-        
-        offsetInFile = headerStartOffset + _mcnkHeader.McnrOffset;
-        _mcnr = new McnrLk(adtFile, offsetInFile);
-        
-        offsetInFile = headerStartOffset + _mcnkHeader.MclyOffset;
-        _mcly = new Chunk(adtFile, offsetInFile);
-        
-        offsetInFile = headerStartOffset + _mcnkHeader.McrfOffset;
-        _mcrf = new Mcrf(adtFile, offsetInFile);
-        
-        // Note : We don't check the 0x1 Mcnk header flag since it's not set on some maps, 
-        // even though there is a shadow map (e.g. MonasteryInstances)
-        if ((_mcnkHeader.McshOffset != 0) && (_mcnkHeader.McshOffset != _mcnkHeader.McalOffset))
-        {
-            offsetInFile = headerStartOffset + _mcnkHeader.McshOffset;
-            _mcsh = new Chunk(adtFile, offsetInFile);
-        }
-        
-        offsetInFile = headerStartOffset + _mcnkHeader.McalOffset;
-        int alphaSize = _mcnkHeader.McalSize - ChunkLettersAndSize;
-        _mcal = new Mcal(adtFile, offsetInFile, alphaSize);
-        
-        if (_mcnkHeader.MclqOffset != 0)
-        {
-            offsetInFile = headerStartOffset + _mcnkHeader.MclqOffset;
-            _mclq = new Chunk(adtFile, offsetInFile);
-        }
-        
-        if (_mcnkHeader.McseOffset != 0)
-        {
-            offsetInFile = headerStartOffset + _mcnkHeader.McseOffset;
-            _mcse = new Chunk(adtFile, offsetInFile);
-        }
+
+        _mcvt = new Mcvt(adtFile, headerStartOffset + _mcnkHeader.McvtOffset);
+        _mccv = new Chunk(adtFile, headerStartOffset + _mcnkHeader.MccvOffset);
+        _mcnr = new McnrLk(adtFile, headerStartOffset + _mcnkHeader.McnrOffset);
+        _mcly = new Mcly(adtFile, headerStartOffset + _mcnkHeader.MclyOffset);
+        _mcrf = new Mcrf(adtFile, headerStartOffset + _mcnkHeader.McrfOffset);
+        _mcsh = new Mcsh(adtFile, headerStartOffset + _mcnkHeader.McshOffset);
+        _mcal = new Mcal(adtFile, headerStartOffset + _mcnkHeader.McalOffset, _mcnkHeader.McalSize - 8);
+        _mclq = new Mclq(adtFile, headerStartOffset + _mcnkHeader.MclqOffset);
+        _mcse = new Mcse(adtFile, headerStartOffset + _mcnkHeader.McseOffset);
     }
-    
-    /// <summary>
-    /// Constructs a McnkLk from a file stream at the given offset with the given header size
-    /// </summary>
-    /// <param name="adtFile">The file stream to read from</param>
-    /// <param name="offsetInFile">Offset in the file where the chunk starts</param>
-    /// <param name="headerSize">Size of the header</param>
-    public McnkLk(FileStream adtFile, int offsetInFile, int headerSize) 
-        : this(WowChunkedFormat.ReadBytes(adtFile, offsetInFile, (int)adtFile.Length - offsetInFile), 0, headerSize) { }
-    
-    /// <summary>
-    /// Constructs a McnkLk from chunk data
-    /// </summary>
-    /// <param name="letters">The FourCC code</param>
-    /// <param name="givenSize">The size of the chunk</param>
-    /// <param name="chunkData">The chunk data</param>
-    public McnkLk(string letters, int givenSize, byte[] chunkData) : base(letters, givenSize, chunkData) 
-    { 
-        // Initialize non-nullable fields to prevent CS8618 warnings
-        _mcnkHeader = new McnkHeader();
-        _mcvt = new Chunk();
-        _mcnr = new McnrLk();
-        _mcly = new Chunk();
-        _mcrf = new Mcrf();
-        _mcsh = new Chunk();
-        _mcal = new Mcal();
-        _mclq = new Chunk();
-        _mcse = new Chunk();
-    }
-    
-    /// <summary>
-    /// Constructs a McnkLk from all its components
-    /// </summary>
-    public McnkLk(
-        McnkHeader mcnkHeader,
-        Chunk mcvt,
-        Chunk? mccv,
-        McnrLk mcnr,
-        Chunk mcly,
-        Mcrf mcrf,
-        Chunk? mcsh,
-        Mcal mcal,
-        Chunk? mclq,
-        Chunk? mcse) : base("KNCM", CalculateGivenSize(mcnkHeader, mcvt, mccv, mcnr, mcly, mcrf, mcsh, mcal, mclq, mcse), Array.Empty<byte>())
+
+    // [PORT] Compatibility overload; C++ passes header size (0x80). We compute sizes from data; value unused.
+    public McnkLk(byte[] adtFile, int offsetInFile, int headerSize) : this(adtFile, offsetInFile) { }
+
+    public McnkLk(McnkHeader mcnkHeader, Mcvt mcvt, Chunk mccv, McnrLk mcnr, Mcly mcly, Mcrf mcrf, Mcsh mcsh, Mcal mcal, Mclq mclq, Mcse mcse)
     {
         _mcnkHeader = mcnkHeader;
         _mcvt = mcvt;
@@ -141,170 +57,69 @@ public class McnkLk : Mcnk
         _mclq = mclq;
         _mcse = mcse;
     }
-    
-    /// <summary>
-    /// [PORT] Default parameterless constructor
-    /// </summary>
-    public McnkLk() : base("KNCM", 0, Array.Empty<byte>())
+
+    public override byte[] GetPayload()
     {
-        _mcnkHeader = new McnkHeader();
-        _mcvt = new Chunk();
-        _mccv = new Chunk();
-        _mcnr = new McnrLk();
-        _mcly = new Chunk();
-        _mcrf = new Mcrf();
-        _mcsh = new Chunk();
-        _mcal = new Mcal();
-        _mclq = new Chunk();
-        _mcse = new Chunk();
-    }
-    
-    /// <summary>
-    /// [PORT] Helper method to calculate the size for the constructor
-    /// </summary>
-    private static int CalculateGivenSize(
-        McnkHeader mcnkHeader,
-        Chunk mcvt,
-        Chunk? mccv,
-        McnrLk mcnr,
-        Chunk mcly,
-        Mcrf mcrf,
-        Chunk? mcsh,
-        Mcal mcal,
-        Chunk? mclq,
-        Chunk? mcse)
-    {
-        int size = McnkTerrainHeaderSize
-            + mcvt.GetRealSize()
-            + ChunkLettersAndSize
-            + mcnr.GetRealSize()
-            + ChunkLettersAndSize
-            + mcrf.GetRealSize()
-            + ChunkLettersAndSize;
-        
-        if (mccv != null && !mccv.IsEmpty())
-            size += ChunkLettersAndSize + mccv.GetRealSize();
-        
-        if (mcly != null && !mcly.IsEmpty())
-            size += ChunkLettersAndSize + mcly.GetRealSize();
-        
-        if (mcsh != null && !mcsh.IsEmpty())
-            size += ChunkLettersAndSize + mcsh.GetRealSize();
-        
-        if (mcal != null && !mcal.IsEmpty())
-            size += ChunkLettersAndSize + mcal.GetRealSize();
-        
-        if (mclq != null && !mclq.IsEmpty())
-            size += ChunkLettersAndSize + mclq.GetRealSize();
-        
-        if (mcse != null && !mcse.IsEmpty())
-            size += ChunkLettersAndSize + mcse.GetRealSize();
-            
-        return size;
-    }
-    
-    /// <summary>
-    /// Gets the serialized chunk data
-    /// </summary>
-    /// <returns>Byte array containing the whole chunk</returns>
-    public new byte[] GetWholeChunk()
-    {
-        using MemoryStream ms = new MemoryStream();
-        
-        // Write chunk letters
-        byte[] tempData = Encoding.ASCII.GetBytes(Letters);
-        ms.Write(tempData, 0, tempData.Length);
-        
-        // Write chunk size
-        tempData = BitConverter.GetBytes(GivenSize);
-        ms.Write(tempData, 0, tempData.Length);
-        
+        using var ms = new MemoryStream();
+
+        // Define fixed order for sub-chunk emission
+        var subChunks = new List<Chunk> { _mcvt, _mccv, _mcnr, _mcly, _mcrf, _mcsh, _mcal, _mclq, _mcse };
+
+        // Recompute header offsets/sizes based on fixed emission order and current subchunk sizes
+        int currentOffset = 128; // Start after the header itself
+
+        _mcnkHeader.McvtOffset = currentOffset; currentOffset += _mcvt.GetSize();
+        _mcnkHeader.MccvOffset = currentOffset; currentOffset += _mccv.GetSize();
+        _mcnkHeader.McnrOffset = currentOffset; currentOffset += _mcnr.GetSize();
+        _mcnkHeader.MclyOffset = currentOffset; currentOffset += _mcly.GetSize();
+        _mcnkHeader.McrfOffset = currentOffset; currentOffset += _mcrf.GetSize();
+
+        _mcnkHeader.McshOffset = currentOffset;
+        _mcnkHeader.McshSize = _mcsh.GetRealSize(); // Mcsh size is payload only
+        currentOffset += _mcsh.GetSize();
+
+        _mcnkHeader.McalOffset = currentOffset;
+        _mcnkHeader.McalSize = _mcal.GetSize(); // Mcal size includes its header
+        currentOffset += _mcal.GetSize();
+
+        _mcnkHeader.MclqOffset = currentOffset;
+        _mcnkHeader.MclqSize = _mclq.GetRealSize() > 0 ? _mclq.GetSize() : 0;
+        currentOffset += _mclq.GetSize();
+
+        _mcnkHeader.McseOffset = currentOffset;
+
         // Write header
-        byte[] headerContent = Util.StructToByteArray(_mcnkHeader);
-        ms.Write(headerContent, 0, McnkTerrainHeaderSize);
-        
-        // Write MCVT
-        tempData = _mcvt.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
-        
-        // Write MCCV if not empty
-        if (_mccv != null && !_mccv.IsEmpty())
+        byte[] headerBytes = Util.StructToByteArray(_mcnkHeader);
+        ms.Write(headerBytes, 0, headerBytes.Length);
+
+        // Write sub-chunks
+        foreach (var chunk in subChunks)
         {
-            tempData = _mccv.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
+            byte[] chunkBytes = chunk.GetWholeChunk();
+            ms.Write(chunkBytes, 0, chunkBytes.Length);
         }
-        
-        // Write MCNR
-        tempData = _mcnr.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
-        
-        // Write MCLY if not empty
-        if (_mcly != null && !_mcly.IsEmpty())
-        {
-            tempData = _mcly.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        // Write MCRF
-        tempData = _mcrf.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
-        
-        // Write MCSH if not empty
-        if (_mcsh != null && !_mcsh.IsEmpty())
-        {
-            tempData = _mcsh.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        // Write MCAL if not empty
-        if (!_mcal.IsEmpty())
-        {
-            tempData = _mcal.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        // Write MCLQ if not empty
-        if (_mclq != null && !_mclq.IsEmpty())
-        {
-            tempData = _mclq.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        // Write MCSE if not empty
-        if (_mcse != null && !_mcse.IsEmpty())
-        {
-            tempData = _mcse.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
+
         return ms.ToArray();
     }
-    
-    /// <summary>
-    /// Returns a string representation of the McnkLk chunk
-    /// </summary>
-    /// <returns>String representation</returns>
+
+    // [PORT] Wrapper used by AdtLk integrity decisions (MH2O vs MCLQ)
+    public int GetMclqRealSize() => _mclq.GetRealSize();
+
     public override string ToString()
     {
-        StringBuilder sb = new StringBuilder();
-        
-        sb.AppendLine($"Chunk letters: {Letters}");
-        sb.AppendLine($"Chunk givenSize: {GivenSize}");
-        
+        var sb = new StringBuilder();
+        sb.AppendLine(base.ToString()); // Includes FourCC and size
         sb.AppendLine("------------------------------");
-        
-        sb.AppendLine(_mcvt?.ToString() ?? "MCVT: null");
-        sb.AppendLine(_mccv?.ToString() ?? "MCCV: null");
-        sb.AppendLine(_mcnr?.ToString() ?? "MCNR: null");
-        sb.AppendLine(_mcly?.ToString() ?? "MCLY: null");
-        sb.AppendLine(_mcrf?.ToString() ?? "MCRF: null");
-        sb.AppendLine(_mcsh?.ToString() ?? "MCSH: null");
-        sb.AppendLine(_mcal?.ToString() ?? "MCAL: null");
-        sb.AppendLine(_mclq?.ToString() ?? "MCLQ: null");
-        sb.AppendLine(_mcse?.ToString() ?? "MCSE: null");
-        
+        sb.AppendLine(_mcvt.ToString());
+        sb.AppendLine(_mccv.ToString());
+        sb.AppendLine(_mcnr.ToString());
+        sb.AppendLine(_mcly.ToString());
+        sb.AppendLine(_mcrf.ToString());
+        sb.AppendLine(_mcsh.ToString());
+        sb.AppendLine(_mcal.ToString());
+        sb.AppendLine(_mclq.ToString());
+        sb.AppendLine(_mcse.ToString());
         sb.AppendLine("------------------------------");
-        
         return sb.ToString();
     }
 }

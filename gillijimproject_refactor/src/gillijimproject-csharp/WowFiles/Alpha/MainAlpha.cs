@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using GillijimProject.WowFiles.LichKing;
 using GillijimProject.WowFiles;
 
 namespace GillijimProject.WowFiles.Alpha;
@@ -41,20 +43,26 @@ public class MainAlpha : Chunk
     /// [PORT] Convert Alpha MAIN to LK MAIN (32768 bytes).
     /// For each 16-byte Alpha cell, set one flag byte in the LK 8-byte stride when offset != 0.
     /// </summary>
-    public Chunk ToMain()
+    public LichKing.Main ToMain()
     {
-        const int lkSize = 32768;
-        var mainLkData = new byte[lkSize];
-        int j = 0;
-        for (int i = 0; i < 65536; i += 16)
+        var mhdrOffsets = GetMhdrOffsets();
+        var lkOffsets = new LichKing.MhdrOffset[mhdrOffsets.Count];
+        for (int i = 0; i < lkOffsets.Length; i++)
         {
-            if (i + 4 <= Data.Length && BitConverter.ToInt32(Data, i) != 0)
+            lkOffsets[i] = new LichKing.MhdrOffset
             {
-                mainLkData[j] = 1;
-            }
-            j += 8;
-            if (j >= lkSize) break;
+                Flags = mhdrOffsets[i] != 0 ? 1 : 0,
+                Offset = 0,
+                Size = 0,
+                Unknown = 0
+            };
         }
-        return new Chunk("MAIN", lkSize, mainLkData);
+        return new LichKing.Main(lkOffsets);
+    }
+
+    public Dictionary<int, string> GetAdtFileNames()
+    {
+        // This functionality is not available in Alpha, return empty dictionary
+        return new Dictionary<int, string>();
     }
 }

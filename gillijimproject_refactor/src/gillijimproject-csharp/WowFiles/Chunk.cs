@@ -64,9 +64,14 @@ public class Chunk : WowChunkedFormat
     public Chunk() : this("NULL", 0, Array.Empty<byte>()) { }
 
     /// <summary>
-    /// [PORT] Total size of the serialized chunk, including header and padding.
+    /// [PORT] Size of the chunk payload (data) including padding, excluding the 8-byte header.
     /// </summary>
-    public int GetRealSize() => ChunkLettersAndSize + Data.Length + ((Data.Length & 1) == 1 ? 1 : 0);
+    public int GetRealSize() => Data.Length + ((Data.Length & 1) == 1 ? 1 : 0);
+
+    /// <summary>
+    /// [PORT] Total serialized size including 8-byte header and payload (+pad).
+    /// </summary>
+    public virtual int GetSize() => ChunkLettersAndSize + GetRealSize();
 
     /// <summary>
     /// [PORT]
@@ -77,7 +82,7 @@ public class Chunk : WowChunkedFormat
     /// [PORT] Returns serialized chunk bytes: reversed FourCC + 4-byte size + data [+ pad].
     /// [PORT] On-disk representation uses reversed FourCCs (e.g., MVER -> REVM).
     /// </summary>
-    public byte[] GetWholeChunk()
+    public virtual byte[] GetWholeChunk()
     {
         int pad = (Data.Length & 1) == 1 ? 1 : 0;
         byte[] buffer = new byte[ChunkLettersAndSize + Data.Length + pad];

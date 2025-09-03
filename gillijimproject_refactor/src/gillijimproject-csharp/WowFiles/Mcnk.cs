@@ -1,23 +1,27 @@
-using System;using System.IO;
+using System;
 
-namespace GillijimProject.WowFiles;
-
-/// <summary>
-/// [PORT] C# port skeleton of Mcnk (see lib/gillijimproject/wowfiles/Mcnk.h)
-/// </summary>
-public class Mcnk : Chunk
+namespace GillijimProject.WowFiles
 {
-    public Mcnk(FileStream file, int offsetInFile) : base(file, offsetInFile) { }
-    public Mcnk(byte[] wholeFile, int offsetInFile) : base(wholeFile, offsetInFile) { }
-    public Mcnk(string letters, int givenSize, byte[] chunkData) : base(letters, givenSize, chunkData) { }
-    
-    /// <summary>
-    /// [PORT] Default parameterless constructor
-    /// </summary>
-    public Mcnk() : base("KNCM", 0, Array.Empty<byte>()) { }
-    
-    /// <summary>
-    /// [PORT] Constructor with header size
-    /// </summary>
-    public Mcnk(byte[] wholeFile, int offsetInFile, int headerSize) : base(wholeFile, offsetInFile) { }
+    public abstract class Mcnk : Chunk
+    {
+        protected Mcnk() : base("MCNK", 0, System.Array.Empty<byte>()) { }
+
+        protected Mcnk(byte[] adtFile, int offsetInFile) : base(adtFile, offsetInFile)
+        {
+        }
+
+        // [PORT] Provide a forwarding constructor used by Alpha/LK wrappers assembling MCNK payloads in memory.
+        protected Mcnk(string letters, int givenSize, byte[] chunkData) : base(letters, givenSize, chunkData)
+        {
+        }
+
+        public abstract byte[] GetPayload();
+
+        public new byte[] GetWholeChunk()
+        {
+            var payload = GetPayload();
+            var wrapper = new Chunk("MCNK", payload.Length, payload);
+            return wrapper.GetWholeChunk();
+        }
+    }
 }

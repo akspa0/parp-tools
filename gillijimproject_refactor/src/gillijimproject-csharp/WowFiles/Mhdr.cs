@@ -25,7 +25,7 @@ public class Mhdr : Chunk
     /// <summary>
     /// Default constructor
     /// </summary>
-    public Mhdr() : base("RDHM", 0, Array.Empty<byte>()) { }
+    public Mhdr() : base("MHDR", 0, Array.Empty<byte>()) { }
 
     /// <summary>
     /// Constructs an Mhdr from a file stream at the given offset

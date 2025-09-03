@@ -194,4 +194,62 @@ public static class Utilities
         if (read != length) throw new EndOfStreamException();
         return buffer;
     }
+
+    public static int FindChunkOffset(byte[] fileBytes, string chunkLetters, int startOffset)
+    {
+        if (fileBytes == null || fileBytes.Length < 8 || startOffset < 0)
+            return -1;
+
+        // [PORT] WoW file format stores FourCCs in reversed order on disk
+        // Need to reverse the chunk letters before searching
+        string reversedChunkLetters = new string(new[] 
+        { 
+            chunkLetters[3], 
+            chunkLetters[2], 
+            chunkLetters[1], 
+            chunkLetters[0] 
+        });
+        
+        var chunkId = Encoding.ASCII.GetBytes(reversedChunkLetters);
+        int offset = startOffset;
+
+        while (offset + 8 <= fileBytes.Length)
+        {
+            if (fileBytes[offset] == chunkId[0] &&
+                fileBytes[offset + 1] == chunkId[1] &&
+                fileBytes[offset + 2] == chunkId[2] &&
+                fileBytes[offset + 3] == chunkId[3])
+            {
+                return offset;
+            }
+
+            // Safely read the chunk size
+            int chunkSize;
+            try 
+            {
+                chunkSize = BitConverter.ToInt32(fileBytes, offset + 4);
+                
+                // Validate chunk size to prevent advancing into invalid memory
+                if (chunkSize < 0 || chunkSize > fileBytes.Length)
+                    return -1;
+                    
+                // If we can't fit the header + data, we're done
+                if (offset + 8 + chunkSize > fileBytes.Length)
+                    return -1;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return -1;
+            }
+
+            // Move to next chunk with proper padding handling
+            offset += 8 + chunkSize;
+            
+            // Account for padding byte if chunk size is odd
+            if (chunkSize % 2 != 0)
+                offset += 1;
+        }
+
+        return -1; // Not found
+    }
 }

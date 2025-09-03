@@ -25,10 +25,16 @@ public class Mddf : Chunk
         return indices;
     }
 
-    public List<int> GetM2IndicesForMmdx()
+    public Dictionary<int, int> GetM2IndicesForMmdx()
     {
         var set = new SortedSet<int>(GetEntriesIndices());
-        return new List<int>(set);
+        var dict = new Dictionary<int, int>();
+        var list = new List<int>(set);
+        for (int i = 0; i < list.Count; i++)
+        {
+            dict[list[i]] = i;
+        }
+        return dict;
     }
 
     public void UpdateIndicesForLk(List<int> alphaIndices)

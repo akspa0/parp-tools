@@ -29,8 +29,7 @@ public class AdtLk
     private Mddf _mddf;
     private Modf _modf;
     private List<McnkLk> _mcnks;
-    private Chunk _mfbo;
-    private Chunk _mtxf;
+    private int _mhdrFlags;
     
     /// <summary>
     /// Constructs an AdtLk from file data and filename
@@ -42,8 +41,6 @@ public class AdtLk
         _adtName = adtFileName;
         _mcnks = new List<McnkLk>(256);
         _mh2o = new Mh2o();
-        _mfbo = new Chunk("OBFM", 0, Array.Empty<byte>());
-        _mtxf = new Chunk("FXTM", 0, Array.Empty<byte>());
         
         int offsetInFile = 0;
         int currentChunkSize;
@@ -56,6 +53,7 @@ public class AdtLk
         int mhdrStartOffset = offsetInFile + ChunkLettersAndSize;
         
         _mhdr = new Mhdr(adtFile, offsetInFile);
+        _mhdrFlags = _mhdr.GetFlags();
         
         offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.McinOffset);
         
@@ -100,18 +98,6 @@ public class AdtLk
             _mcnks.Add(new McnkLk(adtFile, offsetInFile, McnkTerrainHeaderSize));
         }
         
-        if (_mhdr.GetOffset(Mhdr.MfboOffset) != 0)
-        {
-            offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MfboOffset);
-            _mfbo = new Chunk(adtFile, offsetInFile);
-        }
-        
-        if (_mhdr.GetOffset(Mhdr.MtxfOffset) != 0)
-        {
-            offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MtxfOffset);
-            _mtxf = new Chunk(adtFile, offsetInFile);
-        }
-        
         if (!CheckIntegrity())
         {
             UpdateOrCreateMhdrAndMcin();
@@ -141,9 +127,7 @@ public class AdtLk
         Mwid mwid,
         Mddf mddf,
         Modf modf,
-        List<McnkLk> mcnks,
-        Chunk mfbo,
-        Chunk mtxf)
+        List<McnkLk> mcnks)
     {
         _adtName = name;
         _mver = mver;
@@ -156,12 +140,11 @@ public class AdtLk
         _mddf = mddf;
         _modf = modf;
         _mcnks = mcnks;
-        _mfbo = mfbo;
-        _mtxf = mtxf;
+        _mhdrFlags = mhdrFlags;
         
         // Ensure non-null defaults to satisfy definite assignment (will be replaced below)
         _mhdr = new Mhdr();
-        _mcin = new Mcin("NICM", 0, Array.Empty<byte>());
+        _mcin = new Mcin("MCIN", 0, Array.Empty<byte>());
         
         UpdateOrCreateMhdrAndMcin();
     }
@@ -219,30 +202,31 @@ public class AdtLk
         tempData = _modf.GetWholeChunk();
         ms.Write(tempData, 0, tempData.Length);
         
-        if (!_mh2o.IsEmpty())
+        // Determine if any MCNK has an MCLQ subchunk; MH2O is mutually exclusive with MCLQ
+        bool hasAnyMclq = false;
+        if (_mcnks != null)
+        {
+            foreach (var k in _mcnks)
+            {
+                if (k.GetMclqRealSize() != 0) { hasAnyMclq = true; break; }
+            }
+        }
+        
+        // Emit MH2O only if there are no MCLQ chunks in any MCNK
+        if (!hasAnyMclq)
         {
             tempData = _mh2o.GetWholeChunk();
             ms.Write(tempData, 0, tempData.Length);
         }
-        
-        foreach (var mcnk in _mcnks)
-        {
-            tempData = mcnk.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
+         
+        if (_mcnks != null) {
+            foreach (var mcnk in _mcnks)
+            {
+                tempData = mcnk.GetWholeChunk();
+                ms.Write(tempData, 0, tempData.Length);
+            }
         }
-        
-        if (!_mfbo.IsEmpty())
-        {
-            tempData = _mfbo.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        if (!_mtxf.IsEmpty())
-        {
-            tempData = _mtxf.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
+         
         File.WriteAllBytes(outPath, ms.ToArray());
     }
     
@@ -254,9 +238,11 @@ public class AdtLk
     {
         int wholeSize = 0;
         
-        foreach (var mcnk in _mcnks)
-        {
-            wholeSize += mcnk.GetWholeChunk().Length;
+        if (_mcnks != null) {
+            foreach (var mcnk in _mcnks)
+            {
+                wholeSize += mcnk.GetWholeChunk().Length;
+            }
         }
         
         return wholeSize;
@@ -290,19 +276,30 @@ public class AdtLk
             + ChunkLettersAndSize + _mddf.GetRealSize()
             + ChunkLettersAndSize + _modf.GetRealSize();
         
-        if (!_mh2o.IsEmpty())
+        // MH2O appears only if there are no MCLQ subchunks
+        bool hasAnyMclq = false;
+        if (_mcnks != null)
+        {
+            foreach (var k in _mcnks)
+            {
+                if (k.GetMclqRealSize() != 0) { hasAnyMclq = true; break; }
+            }
+        }
+        if (!hasAnyMclq)
             mcnkFoundOffset += ChunkLettersAndSize + _mh2o.GetRealSize();
         
         bool offsetsOk = true;
         
-        for (int currentMcnk = 0; currentMcnk < mcnkOffsets.Count; ++currentMcnk)
-        {
-            offsetsOk = mcnkOffsets[currentMcnk] == mcnkFoundOffset;
-            
-            if (!offsetsOk)
-                break;
-            
-            mcnkFoundOffset += _mcnks[currentMcnk].GetWholeChunk().Length;
+        if (_mcnks != null) {
+            for (int currentMcnk = 0; currentMcnk < mcnkOffsets.Count; ++currentMcnk)
+            {
+                offsetsOk = mcnkOffsets[currentMcnk] == mcnkFoundOffset;
+                
+                if (!offsetsOk)
+                    break;
+                
+                mcnkFoundOffset += _mcnks[currentMcnk].GetWholeChunk().Length;
+            }
         }
         
         return offsetsOk;
@@ -351,7 +348,16 @@ public class AdtLk
         if (!offsetsOk) return false;
         offsetInFile += ChunkLettersAndSize + _modf.GetRealSize();
         
-        if (!_mh2o.IsEmpty())
+        // MH2O appears only if there are no MCLQ subchunks
+        bool hasAnyMclq = false;
+        if (_mcnks != null)
+        {
+            foreach (var k in _mcnks)
+            {
+                if (k.GetMclqRealSize() != 0) { hasAnyMclq = true; break; }
+            }
+        }
+        if (!hasAnyMclq)
         {
             offsetsOk = _mhdr.GetOffset(Mhdr.Mh2oOffset) + mhdrStartOffset == offsetInFile;
             if (!offsetsOk) return false;
@@ -363,30 +369,7 @@ public class AdtLk
             if (!offsetsOk) return false;
             offsetInFile += GetMcnksWholeSize();
         }
-        
-        if (!_mfbo.IsEmpty())
-        {
-            offsetsOk = _mhdr.GetOffset(Mhdr.MfboOffset) + mhdrStartOffset == offsetInFile;
-            if (!offsetsOk) return false;
-            offsetInFile += ChunkLettersAndSize + _mfbo.GetRealSize();
-        }
-        else
-        {
-            offsetsOk = _mhdr.GetOffset(Mhdr.MfboOffset) == 0;
-            if (!offsetsOk) return false;
-        }
-        
-        if (!_mtxf.IsEmpty())
-        {
-            offsetsOk = _mhdr.GetOffset(Mhdr.MtxfOffset) + mhdrStartOffset == offsetInFile;
-            if (!offsetsOk) return false;
-        }
-        else
-        {
-            offsetsOk = _mhdr.GetOffset(Mhdr.MtxfOffset) == 0;
-            if (!offsetsOk) return false;
-        }
-        
+         
         return offsetsOk;
     }
     
@@ -402,16 +385,8 @@ public class AdtLk
         List<byte> mhdrData = new List<byte>();
         byte[] emptyData = new byte[4];
         
-        // Add flags
-        if (_mhdr != null && _mhdr.GetRealSize() != 0)
-        {
-            byte[] flags = BitConverter.GetBytes(_mhdr.GetFlags());
-            mhdrData.AddRange(flags);
-        }
-        else
-        {
-            mhdrData.AddRange(emptyData);
-        }
+        // Add flags (from stored _mhdrFlags)
+        mhdrData.AddRange(BitConverter.GetBytes(_mhdrFlags));
         
         // Calculate all offsets
         int offsetInFile = ChunkLettersAndSize + _mver.GetRealSize() + ChunkLettersAndSize + mhdrFixedSize;
@@ -446,15 +421,23 @@ public class AdtLk
         byte[] modfOffset = BitConverter.GetBytes(offsetInFile - relativeMhdrStart);
         mhdrData.AddRange(modfOffset);
         
-        offsetInFile = offsetInFile + ChunkLettersAndSize + _modf.GetRealSize();
-        
+        // MH2O offset written only if MH2O is present; otherwise zero
         byte[] mh2oOffset = BitConverter.GetBytes(offsetInFile - relativeMhdrStart);
         
-        if (!_mh2o.IsEmpty())
+        // MH2O only when there is no MCLQ in any MCNK
+        bool hasAnyMclq = false;
+        if (_mcnks != null)
+        {
+            foreach (var k in _mcnks)
+            {
+                if (k.GetMclqRealSize() != 0) { hasAnyMclq = true; break; }
+            }
+        }
+        if (!hasAnyMclq)
         {
             offsetInFile = offsetInFile + ChunkLettersAndSize + _mh2o.GetRealSize();
         }
-        
+ 
         // Create MCIN data with MCNK offsets
         List<byte> mcinData = new List<byte>();
         const int unusedMcinBytes = 8;
@@ -464,7 +447,7 @@ public class AdtLk
             byte[] mcnkOffset = BitConverter.GetBytes(offsetInFile);
             mcinData.AddRange(mcnkOffset);
             
-            byte[] mcnkSize = _mcnks != null && currentMcnk < _mcnks.Count
+            byte[] mcnkSize = (_mcnks != null && currentMcnk < _mcnks.Count)
                 ? BitConverter.GetBytes(_mcnks[currentMcnk].GetWholeChunk().Length)
                 : BitConverter.GetBytes(0);
                 
@@ -483,41 +466,56 @@ public class AdtLk
         }
         
         // Create updated MCIN
-        _mcin = new Mcin("NICM", mcinFixedSize, mcinData.ToArray());
-        
+        _mcin = new Mcin("MCIN", mcinFixedSize, mcinData.ToArray());
+
+        // [DEBUG] Temporary diagnostics to validate MCIN/MCNK sizes and offsets
+        try
+        {
+            if (_mcin.Data.Length != mcinFixedSize)
+            {
+                Console.WriteLine($"[DBG] MCIN data length unexpected: {_mcin.Data.Length} (expected {mcinFixedSize})");
+            }
+            else
+            {
+                Console.WriteLine($"[DBG] MCIN data length OK: {_mcin.Data.Length}");
+            }
+
+            // Dump first 4 MCIN entries: offset & size
+            for (int i = 0; i < 4; i++)
+            {
+                int baseOff = i * 16;
+                int mOff = BitConverter.ToInt32(_mcin.Data, baseOff + 0);
+                int mSize = BitConverter.ToInt32(_mcin.Data, baseOff + 4);
+                Console.WriteLine($"[DBG] MCIN[{i}] off={mOff} size={mSize}");
+            }
+
+            if (_mcnks != null && _mcnks.Count > 0)
+            {
+                int given = _mcnks[0].GivenSize;
+                int serialized = _mcnks[0].GetWholeChunk().Length;
+                Console.WriteLine($"[DBG] MCNK[0] GivenSize={given}, SerializedLen={serialized}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DBG] Exception while dumping MCIN/MCNK debug: {ex.Message}");
+        }
+
         // Add remaining offsets to MHDR
         byte[] emptyOffset = new byte[4];
         
-        byte[] mfboOffset = BitConverter.GetBytes(offsetInFile - relativeMhdrStart);
-        if (_mfbo != null && _mfbo.GetRealSize() != 0)
-        {
-            mhdrData.AddRange(mfboOffset);
-        }
-        else
-        {
-            mhdrData.AddRange(emptyOffset);
-        }
-        
-        if (_mh2o != null && _mh2o.GetRealSize() != 0)
-        {
+        // MH2O offset written only if MH2O is present; otherwise zero
+        if (!hasAnyMclq)
             mhdrData.AddRange(mh2oOffset);
-        }
         else
-        {
             mhdrData.AddRange(emptyOffset);
-        }
+
+        byte[] mfboOffset = BitConverter.GetBytes(0);
+        mhdrData.AddRange(mfboOffset);
         
-        offsetInFile = offsetInFile + (_mfbo != null ? ChunkLettersAndSize + _mfbo.GetRealSize() : 0);
-        byte[] mtxfOffset = BitConverter.GetBytes(offsetInFile - relativeMhdrStart);
-        if (_mtxf != null && _mtxf.GetRealSize() != 0)
-        {
-            mhdrData.AddRange(mtxfOffset);
-        }
-        else
-        {
-            mhdrData.AddRange(emptyOffset);
-        }
-        
+        byte[] mtxfOffset = BitConverter.GetBytes(0);
+        mhdrData.AddRange(mtxfOffset);
+         
         // Add unused bytes at the end
         const int unused = 16;
         for (int i = 0; i < unused; ++i)
@@ -526,7 +524,7 @@ public class AdtLk
         }
         
         // Create updated MHDR
-        _mhdr = new Mhdr("RDHM", mhdrFixedSize, mhdrData.ToArray());
+        _mhdr = new Mhdr("MHDR", mhdrFixedSize, mhdrData.ToArray());
     }
     
     /// <summary>
@@ -578,14 +576,13 @@ public class AdtLk
         sb.AppendLine(_modf.ToString());
         sb.AppendLine(_mh2o.ToString());
         
-        for (int i = 0; i < _mcnks.Count; ++i)
-        {
-            sb.AppendLine($"MCNK #{i} : ");
-            sb.AppendLine(_mcnks[i].ToString());
+        if (_mcnks != null) {
+            for (int i = 0; i < _mcnks.Count; ++i)
+            {
+                sb.AppendLine($"MCNK #{i} : ");
+                sb.AppendLine(_mcnks[i].ToString());
+            }
         }
-        
-        sb.AppendLine(_mfbo.ToString());
-        sb.AppendLine(_mtxf.ToString());
         
         return sb.ToString();
     }

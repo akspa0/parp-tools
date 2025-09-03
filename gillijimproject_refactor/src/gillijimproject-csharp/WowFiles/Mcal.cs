@@ -14,10 +14,11 @@ public class Mcal : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public Mcal() : base("LACM", 0, Array.Empty<byte>()) { }
+    public Mcal() : base("MCAL", 0, Array.Empty<byte>()) { }
     
-    /// <summary>
-    /// [PORT] Constructor with size parameter
-    /// </summary>
-    public Mcal(byte[] wholeFile, int offsetInFile, int alphaSize) : base(wholeFile, offsetInFile) { }
+    // [PORT] alphaSize from Alpha path is not required when reading from file; base reads actual size from header.
+    public Mcal(byte[] adtFile, int offsetInFile, int alphaSize)
+        : base(adtFile, offsetInFile)
+    {
+    }
 }

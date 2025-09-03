@@ -13,7 +13,7 @@ public class McvtAlpha : Chunk
     /// <summary>
     /// Default constructor
     /// </summary>
-    public McvtAlpha() : base("TVCM", 0, Array.Empty<byte>()) { }
+    public McvtAlpha() : base("MCVT", 0, Array.Empty<byte>()) { }
 
     /// <summary>
     /// Constructs a McvtAlpha from file at the given offset
@@ -40,8 +40,8 @@ public class McvtAlpha : Chunk
     /// <summary>
     /// Converts the Alpha format MCVT to LichKing format by reordering vertices
     /// </summary>
-    /// <returns>A Chunk containing the reordered vertex data in LK format</returns>
-    public Chunk ToMcvt()
+    /// <returns>A Mcvt containing the reordered vertex data in LK format</returns>
+    public Mcvt ToMcvt()
     {
         /* Note: Alpha vertices are NOT interleaved... Which means there are all outer vertices 
          * first (all 81), then all inner vertices (all 64) in MCVT (and not 9-8-9-8 etc. of each).
@@ -74,8 +74,8 @@ public class McvtAlpha : Chunk
         }
         
         // Create the new LK format MCVT chunk
-        Chunk mcvtLk = new Chunk("TVCM", GivenSize, cMcvtData);
-        
+        var mcvtLk = new Mcvt("MCVT", cMcvtData.Length, cMcvtData);
+
         return mcvtLk;
     }
 }

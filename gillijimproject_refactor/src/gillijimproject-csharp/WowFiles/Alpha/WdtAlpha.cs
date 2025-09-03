@@ -21,44 +21,43 @@ public class WdtAlpha : WowFiles.WowChunkedFormat
     private readonly Alpha.Monm _monm;
     private readonly Chunk _modf;
 
-    public WdtAlpha(string wdtAlphaName)
+    public WdtAlpha(byte[] fileData)
     {
-        _wdtName = wdtAlphaName;
-        using var fs = File.OpenRead(wdtAlphaName);
+        _wdtName = ""; // Not needed when parsing from memory
 
-        static int NextOffset(int start, Chunk c)
+        // Find chunks by scanning
+        int mverOffset = U.FindChunkOffset(fileData, "MVER", 0);
+        if (mverOffset < 0)
+            throw new InvalidDataException("MVER chunk not found in WDT file");
+        _mver = new Chunk(fileData, mverOffset);
+        
+        int mphdOffset = U.FindChunkOffset(fileData, "MPHD", 0);
+        if (mphdOffset < 0)
+            throw new InvalidDataException("MPHD chunk not found in WDT file");
+        _mphd = new Alpha.MphdAlpha(fileData, mphdOffset);
+        
+        int mainOffset = U.FindChunkOffset(fileData, "MAIN", 0);
+        if (mainOffset < 0)
+            throw new InvalidDataException("MAIN chunk not found in WDT file");
+        _main = new Alpha.MainAlpha(fileData, mainOffset);
+        
+        // MDNM and MONM offsets are absolute, read from MPHD data.
+        int mphdDataStart = mphdOffset + ChunkLettersAndSize;
+        int mdnmOffset = BitConverter.ToInt32(fileData, mphdDataStart + 4);
+        if (mdnmOffset < 0 || mdnmOffset + 8 > fileData.Length)
+            throw new InvalidDataException("Invalid MDNM offset in WDT file");
+        _mdnm = new Alpha.Mdnm(fileData, mdnmOffset);
+
+        int monmOffset = BitConverter.ToInt32(fileData, mphdDataStart + 12);
+        if (monmOffset < 0 || monmOffset + 8 > fileData.Length)
+            throw new InvalidDataException("Invalid MONM offset in WDT file");
+        _monm = new Alpha.Monm(fileData, monmOffset);
+
+        // Optional MODF chunk follows MAIN when WMO-based.
+        int modfOffset = U.FindChunkOffset(fileData, "MODF", 0);
+        if (_mphd.IsWmoBased() && modfOffset >= 0)
         {
-            int pad = (c.GivenSize & 1) == 1 ? 1 : 0;
-            return start + ChunkLettersAndSize + c.GivenSize + pad;
-        }
-
-        int offsetInFile = 0;
-
-        // MVER
-        _mver = new Chunk(fs, offsetInFile);
-        offsetInFile = NextOffset(offsetInFile, _mver);
-
-        // MPHD
-        int mphdStartOffset = offsetInFile + ChunkLettersAndSize; // start of MPHD data
-        _mphd = new Alpha.MphdAlpha(fs, offsetInFile);
-        offsetInFile = NextOffset(offsetInFile, _mphd);
-
-        // MAIN
-        _main = new Alpha.MainAlpha(fs, offsetInFile);
-        offsetInFile = NextOffset(offsetInFile, _main);
-
-        // MDNM and MONM offsets come from MPHD data
-        int mdnmOffset = U.GetIntFromFile(fs, mphdStartOffset + 4);
-        _mdnm = new Alpha.Mdnm(fs, mdnmOffset);
-
-        int monmOffset = U.GetIntFromFile(fs, mphdStartOffset + 12);
-        _monm = new Alpha.Monm(fs, monmOffset);
-        offsetInFile = NextOffset(monmOffset, _monm);
-
-        // Optional MODF after MONM when WMO-based
-        if (_mphd.IsWmoBased())
-        {
-            _modf = new Chunk(fs, offsetInFile);
+            _modf = new Chunk(fileData, modfOffset);
         }
         else
         {
@@ -105,6 +104,52 @@ public class WdtAlpha : WowFiles.WowChunkedFormat
     }
 
     public List<string> GetMonmFileNames()
+    {
+        return _monm.GetFilesNames();
+    }
+
+    public LichKing.WdtLk ToWdtLk(List<string> pMdnm, List<string> pMonm)
+    {
+        var cMphd = _mphd.ToMphd();
+        var cMain = _main.ToMain();
+
+        var cMwmo = new Chunk("MWMO", 0, Array.Empty<byte>());
+        var cModf = new Chunk("MODF", 0, Array.Empty<byte>());
+
+        if (_mphd.IsWmoBased())
+        {
+            cMwmo = _monm.ToMwmo();
+            cModf = _modf;
+        }
+
+        return new LichKing.WdtLk(_wdtName, _mver, cMphd, (LichKing.Main)cMain, cMwmo, cModf);
+    }
+
+    public Dictionary<int, int> GetAdtOffsets()
+    {
+        var offsets = _main.GetMhdrOffsets();
+        var adtOffsets = new Dictionary<int, int>();
+        for (int i = 0; i < offsets.Count; i++)
+        {
+            if (offsets[i] != 0)
+            {
+                adtOffsets[i] = offsets[i];
+            }
+        }
+        return adtOffsets;
+    }
+
+    public Dictionary<int, string> GetAdtFileNames()
+    {
+        return _main.GetAdtFileNames();
+    }
+
+    public List<string> GetMphdAndMdnm()
+    {
+        return _mdnm.GetFilesNames();
+    }
+
+    public List<string> GetMphdAndMonm()
     {
         return _monm.GetFilesNames();
     }

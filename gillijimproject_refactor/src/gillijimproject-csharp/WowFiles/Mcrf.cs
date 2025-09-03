@@ -15,7 +15,7 @@ public class Mcrf : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public Mcrf() : base("FRCM", 0, Array.Empty<byte>()) { }
+    public Mcrf() : base("MCRF", 0, Array.Empty<byte>()) { }
     
     /// <summary>
     /// [PORT] Gets indices for doodads from the MCRF chunk
@@ -52,58 +52,34 @@ public class Mcrf : Chunk
     /// <summary>
     /// [PORT] Updates indices for Lich King format
     /// </summary>
-    /// <param name="alphaM2Indices">Alpha M2 indices</param>
-    /// <param name="m2Number">Number of M2 indices</param>
-    /// <param name="alphaWmoIndices">Alpha WMO indices</param>
-    /// <param name="wmoNumber">Number of WMO indices</param>
-    public Mcrf UpdateIndicesForLk(List<int> alphaM2Indices, int m2Number, List<int> alphaWmoIndices, int wmoNumber)
+    /// <param name="alphaM2Indices">Mapping of Alpha M2 indices to LK M2 indices.</param>
+    /// <param name="m2Count">Number of M2s in the parent MCNK.</param>
+    /// <param name="alphaWmoIndices">Mapping of Alpha WMO indices to LK WMO indices.</param>
+    /// <param name="wmoCount">Number of WMOs in the parent MCNK.</param>
+    /// <returns>A new Mcrf object with updated indices for LK.</returns>
+    public Mcrf UpdateIndicesForLk(Dictionary<int, int> alphaM2Indices, int m2Count, Dictionary<int, int> alphaWmoIndices, int wmoCount)
     {
-        List<int> mcrfAlphaM2Indices = GetDoodadsIndices(m2Number);
-        List<int> mcrfAlphaWmoIndices = GetWmosIndices(wmoNumber);
-        
-        // TODO: Add check to be sure mcrfAlphaM2Indices.Count + mcrfAlphaWmoIndices.Count == Data.Length / 4
-        
-        // Update M2 indices
-        for (int i = 0; i < mcrfAlphaM2Indices.Count; i++)
+        // [PORT] Remap indices by parsing MCRF payload; first M2 refs, then WMO refs.
+        var oldDoodadRefs = GetDoodadsIndices(m2Count);
+        var oldWmoRefs = GetWmosIndices(wmoCount);
+
+        var newMcrfData = new List<byte>((oldDoodadRefs.Count + oldWmoRefs.Count) * 4);
+
+        // Add M2 indices (doodads)
+        foreach (var old in oldDoodadRefs)
         {
-            for (int j = 0; j < alphaM2Indices.Count; j++)
-            {
-                if (mcrfAlphaM2Indices[i] == alphaM2Indices[j])
-                {
-                    mcrfAlphaM2Indices[i] = j;
-                }
-            }
+            int mapped = alphaM2Indices.TryGetValue(old, out var v) ? v : old;
+            newMcrfData.AddRange(BitConverter.GetBytes(mapped));
         }
-        
-        // Update WMO indices
-        for (int i = 0; i < mcrfAlphaWmoIndices.Count; i++)
-        {
-            for (int j = 0; j < alphaWmoIndices.Count; j++)
-            {
-                if (mcrfAlphaWmoIndices[i] == alphaWmoIndices[j])
-                {
-                    mcrfAlphaWmoIndices[i] = j;
-                }
-            }
-        }
-        
-        // Create new data array
-        List<byte> newMcrfData = new List<byte>();
-        
-        // Add M2 indices
-        foreach (int index in mcrfAlphaM2Indices)
-        {
-            newMcrfData.AddRange(BitConverter.GetBytes(index));
-        }
-        
+
         // Add WMO indices
-        foreach (int index in mcrfAlphaWmoIndices)
+        foreach (var old in oldWmoRefs)
         {
-            newMcrfData.AddRange(BitConverter.GetBytes(index));
+            int mapped = alphaWmoIndices.TryGetValue(old, out var v) ? v : old;
+            newMcrfData.AddRange(BitConverter.GetBytes(mapped));
         }
-        
-        // [PORT] Data is immutable; return a new Mcrf instance with updated indices.
-        // Use reversed FourCC (e.g., "FRCM") for manual construction to match existing code pattern.
-        return new Mcrf("FRCM", newMcrfData.Count, newMcrfData.ToArray());
+
+        // [PORT] Data is immutable in Chunk; return a new Mcrf with remapped payload
+        return new Mcrf("MCRF", newMcrfData.Count, newMcrfData.ToArray());
     }
 }

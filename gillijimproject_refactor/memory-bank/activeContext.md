@@ -1,6 +1,13 @@
 # Active Context
 
-- Current Focus: Fixing remaining build errors (23) and warnings (25) in the C# port; addressing parameter type mismatches and non-nullable field initialization issues.
-- Recent Changes: Fixed method references (`ByteArrayToStructure` → `ByteArrayToStruct`); fixed McnkHeader field accessors (lowercase → PascalCase); fixed constructor issues in `Mh2o`, `Mmid`, `Mmdx`, and `Mwid`; implemented `ReadBytes` in `WowChunkedFormat`; fixed `Mcrf` constructor and added missing methods; added 'new' keyword to hide warnings for shadowed constants; fixed parameter type mismatch in `McnkAlpha` (changed from `Chunk` to `Mcal`); initialized non-nullable fields in constructors to fix CS8618 warnings.
-- Next Steps: Fix remaining 23 build errors; address all parameters and return types in methods; continue initializing non-nullable references; implement MCNK chunk port with proper Alpha → LK conversion; run smoke tests via CLI `-o/--out` and validate chunk ordering/FourCCs against `reference_data/wowdev.wiki/`.
-- Decisions: One C++ file → one C# file; `[PORT]` notes and XML docs; exceptions for errors; LK-only scope (no Cataclysm); initializing all non-nullable fields in constructors.
+- Current Focus: Complete the MCNK pipeline. Immediate fix: add missing base constructor `Mcnk(string letters, int givenSize, byte[] chunkData)` and rebuild.
+- Recent Changes:
+  - `Mcrf.UpdateIndicesForLk()` now parses indices from `Data` (M2s then WMOs), remaps via dictionaries, and returns a new chunk.
+  - `MainAlpha.ToMain()` now constructs and passes `LichKing.MhdrOffset[]` to `LichKing.Main`.
+  - `AdtAlpha` builds ordered MMDX/MWMO lists from Alpha (`_mddf`, `_modf`) and passes correct maps to `McnkAlpha.ToMcnkLk()`.
+  - Utilities provides `ByteArrayToStruct<T>`, `StructToByteArray<T>`, and `GetByteArrayFromFile(...)` helpers used across WowFiles.
+- Next Steps:
+  - Add `Mcnk(string,int,byte[])` constructor overload in `WowFiles/Mcnk.cs`, rebuild, and triage remaining issues.
+  - Continue MCNK payload assembly (height/normal layers, RF/LY integration) and finalize MHDR/MCIN offsets in `AdtLk`.
+- Decisions:
+  - Abstract chunk wrappers (e.g., `Mcnk`) expose a `(string letters, int givenSize, byte[] data)` constructor that forwards to `Chunk` to support derived wrappers that assemble payloads in memory.
