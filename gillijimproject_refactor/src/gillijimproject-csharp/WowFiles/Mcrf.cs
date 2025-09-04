@@ -15,7 +15,7 @@ public class Mcrf : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public Mcrf() : base("FRCM", 0, Array.Empty<byte>()) { }
+    public Mcrf() : base("MCRF", 0, Array.Empty<byte>()) { }
     
     /// <summary>
     /// [PORT] Gets indices for doodads from the MCRF chunk
@@ -103,7 +103,7 @@ public class Mcrf : Chunk
         }
         
         // [PORT] Data is immutable; return a new Mcrf instance with updated indices.
-        // Use reversed FourCC (e.g., "FRCM") for manual construction to match existing code pattern.
-        return new Mcrf("FRCM", newMcrfData.Count, newMcrfData.ToArray());
+        // Use canonical FourCC (e.g., "MCRF") in-memory; Chunk will reverse on I/O.
+        return new Mcrf("MCRF", newMcrfData.Count, newMcrfData.ToArray());
     }
 }

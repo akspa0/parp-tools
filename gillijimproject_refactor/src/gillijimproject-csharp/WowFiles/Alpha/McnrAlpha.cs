@@ -14,7 +14,7 @@ public class McnrAlpha : Chunk
     /// <summary>
     /// Default constructor
     /// </summary>
-    public McnrAlpha() : base("RNCM", 0, Array.Empty<byte>()) { }
+    public McnrAlpha() : base("MCNR", 0, Array.Empty<byte>()) { }
 
     /// <summary>
     /// Constructs a McnrAlpha from file at the given offset
@@ -83,7 +83,7 @@ public class McnrAlpha : Chunk
         Array.Copy(unknownData, 0, cMcnrData, destPos, unknownBytes);
         
         // Create the new LK format MCNR chunk
-        McnrLk mcnrLk = new McnrLk("RNCM", GivenSize - unknownBytes, cMcnrData);
+        McnrLk mcnrLk = new McnrLk("MCNR", GivenSize - unknownBytes, cMcnrData);
         
         return mcnrLk;
     }

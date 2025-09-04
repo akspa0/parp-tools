@@ -16,6 +16,9 @@ public class McnkLk : Mcnk
     private new const int ChunkLettersAndSize = 8; // 4 bytes for letters + 4 bytes for size
     private new const int McnkTerrainHeaderSize = 0x80; // Size of MCNK header in bytes
     
+    // [PORT] When true, this MCNK is a zero-byte placeholder used to pad to 256 entries without writing data
+    private readonly bool _isPlaceholder;
+
     private McnkHeader _mcnkHeader;
     private Chunk _mcvt;
     private Chunk? _mccv;
@@ -104,6 +107,7 @@ public class McnkLk : Mcnk
     public McnkLk(string letters, int givenSize, byte[] chunkData) : base(letters, givenSize, chunkData) 
     { 
         // Initialize non-nullable fields to prevent CS8618 warnings
+        _isPlaceholder = false;
         _mcnkHeader = new McnkHeader();
         _mcvt = new Chunk();
         _mcnr = new McnrLk();
@@ -128,7 +132,7 @@ public class McnkLk : Mcnk
         Chunk? mcsh,
         Mcal mcal,
         Chunk? mclq,
-        Chunk? mcse) : base("KNCM", CalculateGivenSize(mcnkHeader, mcvt, mccv, mcnr, mcly, mcrf, mcsh, mcal, mclq, mcse), Array.Empty<byte>())
+        Chunk? mcse) : base("MCNK", CalculateGivenSize(mcnkHeader, mcvt, mccv, mcnr, mcly, mcrf, mcsh, mcal, mclq, mcse), Array.Empty<byte>())
     {
         _mcnkHeader = mcnkHeader;
         _mcvt = mcvt;
@@ -145,8 +149,9 @@ public class McnkLk : Mcnk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public McnkLk() : base("KNCM", 0, Array.Empty<byte>())
+    public McnkLk() : base("MCNK", 0, Array.Empty<byte>())
     {
+        _isPlaceholder = false;
         _mcnkHeader = new McnkHeader();
         _mcvt = new Chunk();
         _mccv = new Chunk();
@@ -160,7 +165,59 @@ public class McnkLk : Mcnk
     }
     
     /// <summary>
-    /// [PORT] Helper method to calculate the size for the constructor
+    /// [PORT] Factory for zero-byte placeholder MCNK entries.
+    /// </summary>
+    public static McnkLk CreatePlaceholder()
+    {
+        var m = new McnkLk();
+        // flip private readonly via constructor pattern
+        // Since fields are readonly, use dedicated private ctor
+        return new McnkLk(true);
+    }
+
+    // Private ctor for placeholders
+    private McnkLk(bool placeholder) : base("MCNK", 0, Array.Empty<byte>())
+    {
+        _isPlaceholder = placeholder;
+        _mcnkHeader = new McnkHeader();
+        _mcvt = new Chunk();
+        _mccv = new Chunk();
+        _mcnr = new McnrLk();
+        _mcly = new Chunk();
+        _mcrf = new Mcrf();
+        _mcsh = new Chunk();
+        _mcal = new Mcal();
+        _mclq = new Chunk();
+        _mcse = new Chunk();
+    }
+    
+    /// <summary>
+    /// Exposes whether this MCNK is a placeholder (zero-byte) entry.
+    /// </summary>
+    public bool IsPlaceholder => _isPlaceholder;
+
+    /// <summary>
+    /// [PORT] Compute LK world-space position from ADT number and MCNK local indices.
+    /// Mirrors the existing Alpha -> LK conversion formula for PosX/PosY/PosZ.
+    /// </summary>
+    /// <param name="adtNumber">Absolute ADT tile index (0..4095, row-major 64x64)</param>
+    /// <param name="indexX">MCNK X index within ADT (0..15)</param>
+    /// <param name="indexY">MCNK Y index within ADT (0..15)</param>
+    /// <returns>Tuple (posX, posY, posZ)</returns>
+    public static (float posX, float posY, float posZ) ComputePositionFromAdt(int adtNumber, int indexX, int indexY)
+    {
+        int adtX = adtNumber % 64;
+        int adtY = adtNumber / 64;
+
+        // Note: Keep exact constants and sign to preserve parity with original logic
+        float posY = (((533.33333f / 16f) * indexX) + (533.33333f * adtX) - (533.33333f * 32f)) * -1f;
+        float posX = (((533.33333f / 16f) * indexY) + (533.33333f * adtY) - (533.33333f * 32f)) * -1f;
+        float posZ = 0f;
+        return (posX, posY, posZ);
+    }
+    
+    /// <summary>
+    /// Helper method to calculate the size for the constructor
     /// </summary>
     private static int CalculateGivenSize(
         McnkHeader mcnkHeader,
@@ -209,18 +266,52 @@ public class McnkLk : Mcnk
     /// <returns>Byte array containing the whole chunk</returns>
     public new byte[] GetWholeChunk()
     {
+        if (_isPlaceholder) return Array.Empty<byte>();
         using MemoryStream ms = new MemoryStream();
         
         // Write chunk letters
-        byte[] tempData = Encoding.ASCII.GetBytes(Letters);
+        var reversedLetters = new string(new[] { Letters[3], Letters[2], Letters[1], Letters[0] });
+        byte[] tempData = Encoding.ASCII.GetBytes(reversedLetters);
         ms.Write(tempData, 0, tempData.Length);
         
         // Write chunk size
         tempData = BitConverter.GetBytes(GivenSize);
         ms.Write(tempData, 0, tempData.Length);
         
-        // Write header
-        byte[] headerContent = Util.StructToByteArray(_mcnkHeader);
+        // [PORT] Recompute header subchunk offsets/sizes before writing header.
+        // Offsets are relative to the start of the MCNK chunk (including letters).
+        var hdr = _mcnkHeader;
+        int offset = ChunkLettersAndSize + McnkTerrainHeaderSize; // first subchunk starts after letters+size+header
+
+        // Reset optional fields
+        hdr.MccvOffset = 0;
+        hdr.MclyOffset = 0;
+        hdr.McshOffset = 0; hdr.McshSize = 0;
+        hdr.McalOffset = 0; hdr.McalSize = 0;
+        hdr.MclqOffset = 0; hdr.MclqSize = 0;
+        hdr.McseOffset = 0;
+
+        // Required/present chunks in write order
+        hdr.McvtOffset = offset; offset += _mcvt.GetWholeChunk().Length;
+
+        if (_mccv != null && !_mccv.IsEmpty()) { hdr.MccvOffset = offset; offset += _mccv.GetWholeChunk().Length; }
+
+        hdr.McnrOffset = offset; offset += _mcnr.GetWholeChunk().Length;
+
+        if (_mcly != null && !_mcly.IsEmpty()) { hdr.MclyOffset = offset; offset += _mcly.GetWholeChunk().Length; }
+
+        hdr.McrfOffset = offset; offset += _mcrf.GetWholeChunk().Length;
+
+        if (_mcsh != null && !_mcsh.IsEmpty()) { hdr.McshOffset = offset; hdr.McshSize = _mcsh.GetWholeChunk().Length; offset += _mcsh.GetWholeChunk().Length; }
+
+        if (_mcal != null && !_mcal.IsEmpty()) { hdr.McalOffset = offset; hdr.McalSize = _mcal.GetWholeChunk().Length; offset += _mcal.GetWholeChunk().Length; }
+
+        if (_mclq != null && !_mclq.IsEmpty()) { hdr.MclqOffset = offset; hdr.MclqSize = _mclq.GetWholeChunk().Length; offset += _mclq.GetWholeChunk().Length; }
+
+        if (_mcse != null && !_mcse.IsEmpty()) { hdr.McseOffset = offset; offset += _mcse.GetWholeChunk().Length; }
+
+        // Serialize updated header
+        byte[] headerContent = Util.StructToByteArray(hdr);
         ms.Write(headerContent, 0, McnkTerrainHeaderSize);
         
         // Write MCVT
@@ -257,7 +348,7 @@ public class McnkLk : Mcnk
         }
         
         // Write MCAL if not empty
-        if (!_mcal.IsEmpty())
+        if (_mcal != null && !_mcal.IsEmpty())
         {
             tempData = _mcal.GetWholeChunk();
             ms.Write(tempData, 0, tempData.Length);
@@ -306,5 +397,14 @@ public class McnkLk : Mcnk
         sb.AppendLine("------------------------------");
         
         return sb.ToString();
+    }
+    
+    /// <summary>
+    /// [PORT] Indicates whether this MCNK contains an MCLQ subchunk
+    /// </summary>
+    public bool HasMclq()
+    {
+        if (_isPlaceholder) return false;
+        return _mclq != null && !_mclq.IsEmpty();
     }
 }

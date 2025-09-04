@@ -14,7 +14,7 @@ public class Mcal : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public Mcal() : base("LACM", 0, Array.Empty<byte>()) { }
+    public Mcal() : base("MCAL", 0, Array.Empty<byte>()) { }
     
     /// <summary>
     /// [PORT] Constructor with size parameter

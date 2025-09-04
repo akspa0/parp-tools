@@ -15,6 +15,7 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
 {
     private readonly int _adtNumber;
     private readonly string _adtFileName;
+    private readonly string _wdtAlphaPath;
     private readonly int _x;
     private readonly int _y;
     private readonly Chunk _mhdr;
@@ -33,6 +34,7 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         _x = adtNum % 64;
         _y = adtNum / 64;
         _adtFileName = GetAdtFileName(wdtAlphaName, _x, _y);
+        _wdtAlphaPath = wdtAlphaName;
 
         using var wdtAlphaFile = File.OpenRead(wdtAlphaName);
 
@@ -73,6 +75,7 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
     /// </summary>
     public AdtLk ToAdtLk(List<string> mdnmFileNames, List<string> monmFileNames)
     {
+        // MVER for LK (0x12)
         var mverData = new byte[] { 0x12, 0x00, 0x00, 0x00 };
         var cMver = new Chunk("MVER", mverData.Length, mverData);
 
@@ -95,6 +98,28 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         var cModf = new Modf("MODF", _modf.Data.Length, (byte[])_modf.Data.Clone());
         cModf.UpdateIndicesForLk(alphaWmoIndices);
 
+        // Convert all present Alpha MCNKs into LK MCNKs using MCIN offsets
+        var mcnkLkList = new List<McnkLk>(capacity: 256);
+        var offsets = _mcin.GetMcnkOffsets();
+        using (var fs = File.OpenRead(_wdtAlphaPath))
+        {
+            for (int i = 0; i < 256; i++)
+            {
+                int off = (i < offsets.Count) ? offsets[i] : 0;
+                if (off > 0)
+                {
+                    var a = new McnkAlpha(fs, off, headerSize: 0, adtNum: _adtNumber);
+                    var lk = a.ToMcnkLk(alphaM2Indices, alphaWmoIndices);
+                    mcnkLkList.Add(lk);
+                }
+                else
+                {
+                    // Emit empty MCNK placeholder to preserve 256 entries
+                    mcnkLkList.Add(new McnkLk());
+                }
+            }
+        }
+
         return new AdtLk(
             _adtFileName,
             cMver,
@@ -107,7 +132,7 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
             cMwid,
             cMddf,
             cModf,
-            new List<McnkLk>(),
+            mcnkLkList,
             new Chunk(),
             new Chunk());
     }

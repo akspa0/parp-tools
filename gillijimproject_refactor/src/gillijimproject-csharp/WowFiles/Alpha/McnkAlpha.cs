@@ -43,12 +43,12 @@ public class McnkAlpha : Mcnk
         // Read MCVT
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McvtOffset;
         byte[] mcvtData = Util.GetByteArrayFromFile(adtFile, offsetInFile, McvtSize);
-        _mcvt = new McvtAlpha("TVCM", McvtSize, mcvtData);
+        _mcvt = new McvtAlpha("MCVT", McvtSize, mcvtData);
 
         // Read MCNR
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McnrOffset;
         byte[] mcnrData = Util.GetByteArrayFromFile(adtFile, offsetInFile, McnrSize);
-        _mcnrAlpha = new McnrAlpha("RNCM", McnrSize, mcnrData);
+        _mcnrAlpha = new McnrAlpha("MCNR", McnrSize, mcnrData);
 
         // Read MCLY
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.MclyOffset;
@@ -61,18 +61,18 @@ public class McnkAlpha : Mcnk
         // Read MCSH
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McshOffset;
         byte[] mcshData = Util.GetByteArrayFromFile(adtFile, offsetInFile, _mcnkAlphaHeader.McshSize);
-        _mcsh = new Chunk("HSCM", _mcnkAlphaHeader.McshSize, mcshData);
+        _mcsh = new Chunk("MCSH", _mcnkAlphaHeader.McshSize, mcshData);
 
         // Read MCAL
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McalOffset;
         byte[] mcalData = Util.GetByteArrayFromFile(adtFile, offsetInFile, _mcnkAlphaHeader.McalSize);
-        _mcal = new Mcal("LACM", _mcnkAlphaHeader.McalSize, mcalData);
+        _mcal = new Mcal("MCAL", _mcnkAlphaHeader.McalSize, mcalData);
 
         // Read MCLQ
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.MclqOffset;
         int mclqSize = _mcnkAlphaHeader.McnkChunksSize - _mcnkAlphaHeader.MclqOffset;
         byte[] mclqData = Util.GetByteArrayFromFile(adtFile, offsetInFile, mclqSize);
-        _mclq = new Chunk("QLCM", mclqSize, mclqData);
+        _mclq = new Chunk("MCLQ", mclqSize, mclqData);
     }
 
     public McnkAlpha(byte[] wholeFile, int offsetInFile) : base(wholeFile, offsetInFile) 
@@ -106,7 +106,7 @@ public class McnkAlpha : Mcnk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public McnkAlpha() : base("KNCM", 0, Array.Empty<byte>())
+    public McnkAlpha() : base("MCNK", 0, Array.Empty<byte>())
     {
         // Initialize non-nullable fields to prevent CS8618 warnings
         _adtNumber = 0;
@@ -173,15 +173,11 @@ public class McnkAlpha : Mcnk
         else
             cMcnkHeader.MclqSize = 0;
 
-        // Calculate positions from ADT coordinates
-        int adtX = _adtNumber % 64;
-        int adtY = _adtNumber / 64;
-
-        // TODO: make this prettier and more consistent (X - Y inversions look bad)
-        cMcnkHeader.PosY = (((533.33333f / 16) * cMcnkHeader.IndexX) + (533.33333f * adtX) - (533.33333f * 32)) * -1;
-        cMcnkHeader.PosX = (((533.33333f / 16) * cMcnkHeader.IndexY) + (533.33333f * adtY) - (533.33333f * 32)) * -1;
-
-        cMcnkHeader.PosZ = 0;
+        // Calculate positions from ADT coordinates using centralized helper for parity
+        var (posX, posY, posZ) = McnkLk.ComputePositionFromAdt(_adtNumber, cMcnkHeader.IndexX, cMcnkHeader.IndexY);
+        cMcnkHeader.PosX = posX;
+        cMcnkHeader.PosY = posY;
+        cMcnkHeader.PosZ = posZ;
         cMcnkHeader.MccvOffset = 0;
         cMcnkHeader.MclvOffset = 0;
         cMcnkHeader.Unused = 0;
@@ -191,7 +187,7 @@ public class McnkAlpha : Mcnk
 
         McnrLk cMcnr = _mcnrAlpha.ToMcnrLk();
 
-        Chunk cMcvt = new Chunk("TVCM", 0, emptyData);
+        Chunk cMcvt = new Chunk("MCVT", 0, emptyData);
         cMcvt = _mcvt.ToMcvt();
 
         Mcrf cMcrf = _mcrf.UpdateIndicesForLk(alphaM2Indices, _mcnkAlphaHeader.M2Number, alphaWmoIndices, _mcnkAlphaHeader.WmoNumber);

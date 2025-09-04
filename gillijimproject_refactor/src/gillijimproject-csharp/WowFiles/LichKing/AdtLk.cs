@@ -231,7 +231,18 @@ public class AdtLk
             ms.Write(tempData, 0, tempData.Length);
         }
         
-        // LK write path excludes MFBO/MTXF: do not write these chunks
+        // [PORT] Write MFBO and MTXF if present (match C++ order: MFBO then MTXF)
+        if (!_mfbo.IsEmpty())
+        {
+            tempData = _mfbo.GetWholeChunk();
+            ms.Write(tempData, 0, tempData.Length);
+        }
+
+        if (!_mtxf.IsEmpty())
+        {
+            tempData = _mtxf.GetWholeChunk();
+            ms.Write(tempData, 0, tempData.Length);
+        }
         
         File.WriteAllBytes(outPath, ms.ToArray());
     }
@@ -475,9 +486,20 @@ public class AdtLk
         // Add remaining offsets to MHDR
         byte[] emptyOffset = new byte[4];
         
-        // LK path excludes MFBO/MTXF: force offsets to 0
-        mhdrData.AddRange(emptyOffset); // MFBO offset = 0
-         
+        // [PORT] Compute MFBO/MH2O/MTXF offsets per C++ logic
+        // After all MCNKs, MFBO starts (if present)
+        int afterMcnks = mcnkStart;
+        byte[] mfboOffset = BitConverter.GetBytes(afterMcnks - relativeMhdrStart);
+        if (_mfbo != null && !_mfbo.IsEmpty())
+        {
+            mhdrData.AddRange(mfboOffset);
+        }
+        else
+        {
+            mhdrData.AddRange(emptyOffset);
+        }
+        
+        // MH2O offset was captured before MCNKs; write if present
         if (_mh2o != null && _mh2o.GetRealSize() != 0)
         {
             mhdrData.AddRange(mh2oOffset);
@@ -487,8 +509,18 @@ public class AdtLk
             mhdrData.AddRange(emptyOffset);
         }
         
-        mhdrData.AddRange(emptyOffset); // MTXF offset = 0
-         
+        // MTXF starts after MFBO (or after MCNKs if MFBO absent)
+        int afterMfbo = afterMcnks + (_mfbo != null ? _mfbo.GetRealSize() : 0);
+        byte[] mtxfOffset = BitConverter.GetBytes(afterMfbo - relativeMhdrStart);
+        if (_mtxf != null && !_mtxf.IsEmpty())
+        {
+            mhdrData.AddRange(mtxfOffset);
+        }
+        else
+        {
+            mhdrData.AddRange(emptyOffset);
+        }
+        
         // Add unused bytes at the end
         const int unused = 16;
         for (int i = 0; i < unused; ++i)
@@ -559,5 +591,35 @@ public class AdtLk
         sb.AppendLine(_mtxf.ToString());
         
         return sb.ToString();
+    }
+    
+    /// <summary>
+    /// [PORT] Public integrity wrapper for CLI: verifies MHDR and MCIN offsets
+    /// </summary>
+    public bool ValidateIntegrity()
+    {
+        return CheckMhdrOffsets() && CheckMcinOffsets();
+    }
+    
+    /// <summary>
+    /// [PORT] Returns the number of MCNK chunks
+    /// </summary>
+    public int GetMcnkCount()
+    {
+        return _mcnks?.Count ?? 0;
+    }
+    
+    /// <summary>
+    /// [PORT] Counts MCNK chunks that contain an MCLQ subchunk
+    /// </summary>
+    public int CountMclqChunks()
+    {
+        if (_mcnks == null || _mcnks.Count == 0) return 0;
+        int count = 0;
+        foreach (var m in _mcnks)
+        {
+            if (m != null && m.HasMclq()) count++;
+        }
+        return count;
     }
 }

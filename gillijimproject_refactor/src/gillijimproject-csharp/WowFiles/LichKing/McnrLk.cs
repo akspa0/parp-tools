@@ -14,5 +14,5 @@ public class McnrLk : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public McnrLk() : base("RNCM", 0, Array.Empty<byte>()) { }
+    public McnrLk() : base("MCNR", 0, Array.Empty<byte>()) { }
 }
