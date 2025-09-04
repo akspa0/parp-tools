@@ -1,13 +1,17 @@
 # Tech Context
 
-- Target: .NET 9 (SDK-style console app)
-- Namespace root: `GillijimProject`
-- Build: `dotnet build` under `src/gillijimproject-csharp`
+- Target: .NET 9 across projects
+- Namespaces: `GillijimProject` root; `GillijimProject.Core` (library), `GillijimProject.Cli` (console)
+- Build:
+  - Solution-level `dotnet build` for all projects
+  - `dotnet test` for test project(s)
+  - `dotnet pack` for `GillijimProject.Core` (NuGet)
 - IO: `FileStream`, `ReadOnlySpan<byte>`, `BitConverter`, `Encoding.ASCII`
-- Testing: planned smoke tests on known WDT/ADT assets
-- Scope: LK-only; Cataclysm excluded for this port phase
-- FourCC: forward in memory; reversed on disk via `WowFiles/Chunk.cs` during serialization
-- Writers respect `-o/--out` and write all outputs into the specified directory
-- Nullable reference types enabled; requiring proper initialization of all non-nullable fields in constructors
-- Method naming conventions follow C# standards (PascalCase)
-- Current build status: 23 errors and 25 warnings remaining
+- Testing: xUnit/NUnit for smoke/integration tests with known WDT/ADT fixtures
+- Scope: LK-only; Cataclysm excluded for now
+- FourCC: forward in memory; reversed on disk by serializer
+- Writers: Prefer Warcraft.NET writer APIs via adapters/facades where applicable
+- CLI: thin wrapper over the library; `-o/--out` respected
+- Nullable: enabled; initialize non-nullable fields in constructors
+- Method naming: PascalCase
+- Current status: Parity achieved; refactor and integration phase underway

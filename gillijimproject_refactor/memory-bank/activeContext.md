@@ -1,6 +1,17 @@
 # Active Context
 
-- Current Focus: Fixing remaining build errors (23) and warnings (25) in the C# port; addressing parameter type mismatches and non-nullable field initialization issues.
-- Recent Changes: Fixed method references (`ByteArrayToStructure` → `ByteArrayToStruct`); fixed McnkHeader field accessors (lowercase → PascalCase); fixed constructor issues in `Mh2o`, `Mmid`, `Mmdx`, and `Mwid`; implemented `ReadBytes` in `WowChunkedFormat`; fixed `Mcrf` constructor and added missing methods; added 'new' keyword to hide warnings for shadowed constants; fixed parameter type mismatch in `McnkAlpha` (changed from `Chunk` to `Mcal`); initialized non-nullable fields in constructors to fix CS8618 warnings.
-- Next Steps: Fix remaining 23 build errors; address all parameters and return types in methods; continue initializing non-nullable references; implement MCNK chunk port with proper Alpha → LK conversion; run smoke tests via CLI `-o/--out` and validate chunk ordering/FourCCs against `reference_data/wowdev.wiki/`.
-- Decisions: One C++ file → one C# file; `[PORT]` notes and XML docs; exceptions for errors; LK-only scope (no Cataclysm); initializing all non-nullable fields in constructors.
+- Current Focus: Refactor the working parity implementation into a reusable library (`GillijimProject.Core`) and integrate Warcraft.NET for safer, more efficient ADT writing. Maintain LK output compatibility.
+- Recent Changes:
+  - Achieved 1:1 C++ → C# parity for Alpha WDT → Wrath ADT conversion.
+  - Fixed MMID/MWID off-by-one (no spurious final offset); corrected MCVT forward FourCC usage; ensured MH2O is omitted when empty; enforced MCLQ written last in MCNK.
+  - Stabilized ADT outputs validated with 010 Editor templates.
+- Next Steps:
+  - Create `GillijimProject.Core` (Class Library, net9.0) and move core parsing/conversion/writing logic behind a public API.
+  - Keep `GillijimProject.Cli` as a thin wrapper over the library.
+  - Add test project for smoke/integration tests over representative Alpha WDT/ADT samples.
+  - Introduce Warcraft.NET as writer backend where applicable; add adapters/facades as needed.
+  - Document the public API (XML docs) and prepare for NuGet packaging.
+- Decisions:
+  - Library-first architecture; CLI delegates to library.
+  - Forward FourCC in memory; reversed on disk by serializer.
+  - Exceptions for error handling; immutable domain where practical; builders/writers handle mutation.
