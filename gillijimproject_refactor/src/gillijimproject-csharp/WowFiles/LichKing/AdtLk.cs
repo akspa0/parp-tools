@@ -499,8 +499,8 @@ public class AdtLk
             mhdrData.AddRange(emptyOffset);
         }
         
-        // MH2O offset was captured before MCNKs; write if present
-        if (_mh2o != null && _mh2o.GetRealSize() != 0)
+        // MH2O offset was captured before MCNKs; write if present (non-empty)
+        if (_mh2o != null && !_mh2o.IsEmpty())
         {
             mhdrData.AddRange(mh2oOffset);
         }

@@ -251,11 +251,12 @@ public class McnkLk : Mcnk
         if (mcal != null && !mcal.IsEmpty())
             size += mcal.GetRealSize();
 
-        if (mclq != null && !mclq.IsEmpty())
-            size += mclq.GetRealSize();
-
+        // [PORT] Ensure MCSE accounted before MCLQ so MCLQ remains last in write order
         if (mcse != null && !mcse.IsEmpty())
             size += mcse.GetRealSize();
+
+        if (mclq != null && !mclq.IsEmpty())
+            size += mclq.GetRealSize();
 
         return size;
     }
@@ -306,9 +307,10 @@ public class McnkLk : Mcnk
 
         if (_mcal != null && !_mcal.IsEmpty()) { hdr.McalOffset = offset; hdr.McalSize = _mcal.GetWholeChunk().Length; offset += _mcal.GetWholeChunk().Length; }
 
-        if (_mclq != null && !_mclq.IsEmpty()) { hdr.MclqOffset = offset; hdr.MclqSize = _mclq.GetWholeChunk().Length; offset += _mclq.GetWholeChunk().Length; }
-
+        // [PORT] Place MCSE before MCLQ; MCLQ must be last
         if (_mcse != null && !_mcse.IsEmpty()) { hdr.McseOffset = offset; offset += _mcse.GetWholeChunk().Length; }
+
+        if (_mclq != null && !_mclq.IsEmpty()) { hdr.MclqOffset = offset; hdr.MclqSize = _mclq.GetWholeChunk().Length; offset += _mclq.GetWholeChunk().Length; }
 
         // Serialize updated header
         byte[] headerContent = Util.StructToByteArray(hdr);
@@ -354,17 +356,17 @@ public class McnkLk : Mcnk
             ms.Write(tempData, 0, tempData.Length);
         }
         
-        // Write MCLQ if not empty
-        if (_mclq != null && !_mclq.IsEmpty())
-        {
-            tempData = _mclq.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
-        
-        // Write MCSE if not empty
+        // Write MCSE if not empty (before MCLQ)
         if (_mcse != null && !_mcse.IsEmpty())
         {
             tempData = _mcse.GetWholeChunk();
+            ms.Write(tempData, 0, tempData.Length);
+        }
+
+        // Write MCLQ if not empty (last)
+        if (_mclq != null && !_mclq.IsEmpty())
+        {
+            tempData = _mclq.GetWholeChunk();
             ms.Write(tempData, 0, tempData.Length);
         }
         

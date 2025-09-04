@@ -42,7 +42,8 @@ public class Mh2o : Chunk
     /// <returns>True if the chunk is empty, false otherwise</returns>
     public new bool IsEmpty()
     {
-        return GetRealSize() == 0;
+        // [PORT] Use base semantics: empty if GivenSize == 0 or Data.Length == 0
+        return base.IsEmpty();
     }
     
     /// <summary>
