@@ -14,7 +14,7 @@ public class Mcnk : Chunk
     /// <summary>
     /// [PORT] Default parameterless constructor
     /// </summary>
-    public Mcnk() : base("KNCM", 0, Array.Empty<byte>()) { }
+    public Mcnk() : base("MCNK", 0, Array.Empty<byte>()) { }
     
     /// <summary>
     /// [PORT] Constructor with header size

@@ -174,32 +174,32 @@ public class McnkLk : Mcnk
         Chunk? mclq,
         Chunk? mcse)
     {
-        int size = McnkTerrainHeaderSize
-            + mcvt.GetRealSize()
-            + ChunkLettersAndSize
-            + mcnr.GetRealSize()
-            + ChunkLettersAndSize
-            + mcrf.GetRealSize()
-            + ChunkLettersAndSize;
-        
+        int size = McnkTerrainHeaderSize;
+
+        // Always-present chunks
+        size += mcvt.GetRealSize();
+        size += mcnr.GetRealSize();
+        size += mcrf.GetRealSize();
+
+        // Optional chunks
         if (mccv != null && !mccv.IsEmpty())
-            size += ChunkLettersAndSize + mccv.GetRealSize();
-        
+            size += mccv.GetRealSize();
+
         if (mcly != null && !mcly.IsEmpty())
-            size += ChunkLettersAndSize + mcly.GetRealSize();
-        
+            size += mcly.GetRealSize();
+
         if (mcsh != null && !mcsh.IsEmpty())
-            size += ChunkLettersAndSize + mcsh.GetRealSize();
-        
+            size += mcsh.GetRealSize();
+
         if (mcal != null && !mcal.IsEmpty())
-            size += ChunkLettersAndSize + mcal.GetRealSize();
-        
+            size += mcal.GetRealSize();
+
         if (mclq != null && !mclq.IsEmpty())
-            size += ChunkLettersAndSize + mclq.GetRealSize();
-        
+            size += mclq.GetRealSize();
+
         if (mcse != null && !mcse.IsEmpty())
-            size += ChunkLettersAndSize + mcse.GetRealSize();
-            
+            size += mcse.GetRealSize();
+
         return size;
     }
     

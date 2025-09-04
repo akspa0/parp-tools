@@ -21,6 +21,21 @@ public static class ChunkHeaders
     public const string MH2O = "MH2O";
     public const string MMDX = "MMDX";
     public const string MMID = "MMID";
+
+    // ADT top-level (LK)
+    public const string MTEX = "MTEX";
+    public const string MFBO = "MFBO";
+    public const string MTXF = "MTXF";
+
+    // MCNK subchunks
+    public const string MCVT = "MCVT";
+    public const string MCNR = "MCNR";
+    public const string MCLY = "MCLY";
+    public const string MCSH = "MCSH";
+    public const string MCSE = "MCSE";
+    public const string MCCV = "MCCV";
+    public const string MCLV = "MCLV";
+    public const string MCLQ = "MCLQ";
 }
 
 /// <summary>
