@@ -41,7 +41,11 @@ public class Mwmo : Chunk
         {
             if (Data[i] == 0x0)
             {
-                mwidData.Add(i + 1);
+                // [PORT] Avoid adding an index beyond end-of-buffer; skip final terminator
+                if (i + 1 < Data.Length)
+                {
+                    mwidData.Add(i + 1);
+                }
             }
         }
         return mwidData;
