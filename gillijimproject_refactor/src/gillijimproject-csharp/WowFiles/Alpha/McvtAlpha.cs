@@ -13,7 +13,7 @@ public class McvtAlpha : Chunk
     /// <summary>
     /// Default constructor
     /// </summary>
-    public McvtAlpha() : base("TVCM", 0, Array.Empty<byte>()) { }
+    public McvtAlpha() : base("MCVT", 0, Array.Empty<byte>()) { }
 
     /// <summary>
     /// Constructs a McvtAlpha from file at the given offset
@@ -74,7 +74,7 @@ public class McvtAlpha : Chunk
         }
         
         // Create the new LK format MCVT chunk
-        Chunk mcvtLk = new Chunk("TVCM", GivenSize, cMcvtData);
+        Chunk mcvtLk = new Chunk("MCVT", GivenSize, cMcvtData);
         
         return mcvtLk;
     }
