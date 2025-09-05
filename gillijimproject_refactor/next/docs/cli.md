@@ -35,11 +35,28 @@ Commands (scaffold):
   - `--include-empty-monm` (optional; include an empty MONM chunk)
   - `--wmo-based` (optional; include empty MODF and set MPHD flag)
 
-Note: Map.dbc is loaded automatically from the same DBC directory as AreaTable.dbc for each build.
+## Liquids Flags
 
-Note: both `convert` and `fix-areaids` will compute an Alpha→LK AreaID mapping using DBCD and a Map.dbc crosswalk. If `--out` is provided, a report is written:
-- `areaid_mapping.json` (full mapping, ambiguous and unmatched lists, and `maps` crosswalk section)
-- `areaid_mapping_summary.txt` (counts only: maps and areas)
+- `--liquids on|off` — Master switch for liquid conversion (default: on)
+- `--liquid-precedence <order>` — Override precedence, e.g. `magma>slime>river>ocean`
+- `--liquid-id-map <path>` — JSON mapping of liquid type names to LK LiquidType IDs
+- `--green-lava` — Enable green lava variant (mapping behavior TBD)
+
+Notes:
+- Precedence determines which liquid wins when multiple instances overlap.
+- Mapping values should match entries in LiquidType.dbc for LK; defaults are placeholders.
+- The `convert` command uses a real Alpha-era MCLQ extractor (not a stub) to read liquid data from Alpha ADTs.
+
+### Liquids Extraction (Alpha ADT)
+- Extractor: `AlphaMclqExtractor` at `next/src/GillijimProject.Next.Core/IO/AlphaMclqExtractor.cs`.
+- Heuristics: tries multiple offset origins for `ofsLiquid` (header end, data start, chunk begin).
+- Layouts by MCNK flags:
+  - Water: depth+height per vertex
+  - Ocean: depth-only per vertex; heights inferred from `heightMin`
+  - Magma: UV+height per vertex (UV ignored downstream)
+- Tiles: 8×8 bytes where low nibble is `MclqLiquidType`, high nibble is `MclqTileFlags` (e.g., `ForcedSwim`, `Fatigue`).
+- Robustness: bounds-checked reads; per-chunk errors produce no liquids for that chunk rather than failing the conversion.
+- CLI prints a liquids summary including a count of liquid-bearing chunks.
 
 ## Examples
 

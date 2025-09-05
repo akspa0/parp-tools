@@ -55,7 +55,7 @@ public class CrosswalkAndMappingTests
         var translator = new AreaIdTranslator(provider);
         translator.BuildMapping(areaOverridesJsonPath: null, mapOverridesJsonPath: null);
 
-        var alphaMapIds = provider.GetAlphaMapTable().Select(kv => kv.Key).ToHashSet();
+        var alphaMapIds = provider.GetAlphaMapTable().Keys.ToHashSet();
         var matched = translator.GetMapCrosswalk().Keys.ToHashSet();
         var amb = translator.GetMapAmbiguousAlpha().ToHashSet();
         var un = translator.GetMapUnmatchedAlpha().ToHashSet();
@@ -88,7 +88,7 @@ public class CrosswalkAndMappingTests
         var translator = new AreaIdTranslator(provider);
         translator.BuildMapping(areaOverridesJsonPath: null, mapOverridesJsonPath: null);
 
-        var alphaAreaIds = provider.GetAlphaAreaTable().Select(kv => kv.Key).ToHashSet();
+        var alphaAreaIds = new HashSet<int>(provider.GetAlphaAreaTable().Keys);
         var matched = translator.GetMapping().Keys.ToHashSet();
         var amb = translator.GetAmbiguousAlpha().ToHashSet();
         var un = translator.GetUnmatchedAlpha().ToHashSet();

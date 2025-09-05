@@ -135,7 +135,7 @@ public static class AlphaWdtWriter
             mapName,
             lkAdtDir,
             outWdtPath,
-            tilesTotal: tilesTotal,
+            TilesTotal: tilesTotal,
             TilesEmbedded: tilesEmbedded,
             TilesMissing: tilesTotal - tilesEmbedded,
             Warnings: warnings

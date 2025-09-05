@@ -4,17 +4,32 @@
 - Recent Changes:
   - Established Next project memory bank and seeded plan.
   - Prepared domain design for MH2O and MCLQ representations with explicit dimensions and LVF support.
+  - Implemented domain models under `next/src/GillijimProject.Next.Core/Domain/Liquids/`.
+  - Implemented `LiquidsConverter` with MH2O→MCLQ and MCLQ→MH2O algorithms.
+  - Added CLI flags: `--liquids`, `--liquid-precedence`, `--liquid-id-map`, `--green-lava`.
+  - Implemented `AlphaMclqExtractor` and wired it into the Alpha→LK pipeline via CLI `convert`; conversion now uses real MCLQ data.
+  - Updated docs (`architecture.md`, `cli.md`) to describe extractor behavior and limitations.
+  - Fixed Next.Core CS0246 errors by adding `using System.Collections.Generic;` to `Services/UniqueIdAnalyzer.cs` and `Transform/AlphaToLkConverter.cs`.
+  - Fixed `AlphaMclqExtractorTests` builder compile issue by removing out-parameter shadowing: simplified `BuildMcnkHeader(...)` and preserved `OfsLiquid` (100) / `SizeLiquid` (104) header offsets for patching.
 - Next Steps:
-  1) Implement domain models under `next/src/GillijimProject.Next.Core/Domain/Liquids/`.
-  2) Implement `LiquidsConverter` with MH2O→MCLQ and MCLQ→MH2O algorithms.
-  3) Integrate into Alpha→LK (MCLQ→MH2O) and LK→Alpha (MH2O→MCLQ) paths.
-  4) Add CLI flags: `--liquids`, `--liquid-precedence`, `--liquid-id-map`, `--green-lava`.
-  5) Add unit and round-trip tests; update docs (`architecture.md`, `cli.md`).
-  6) Add validations and logging (exists bitmasks, bounds, clamps, empty cleanup).
+  1) Implement domain models under `next/src/GillijimProject.Next.Core/Domain/Liquids/`. 
+  2) Implement `LiquidsConverter` with MH2O→MCLQ and MCLQ→MH2O algorithms. 
+  3) Integrate into Alpha→LK (MCLQ→MH2O) and LK→Alpha (MH2O→MCLQ) paths. In progress — Alpha→LK wired using extractor stub.
+  4) Add CLI flags: `--liquids`, `--liquid-precedence`, `--liquid-id-map`, `--green-lava`. 
+  5) Add unit and round-trip tests; update docs (`architecture.md`, `cli.md`). In progress — unit tests started.
+  6) Add validations and logging (exists bitmasks, bounds, clamps, empty cleanup). Pending.
+  7) Unit tests for MCLQ parsing (synthetic water/ocean/magma, offset-origin variants) and optional fixture-based integration tests.
+  8) Validation & logging enhancements (sizeLiquid vs actual, offset origin diagnostics, tile normalization metrics).
+  9) Continue LK→Alpha reverse writer path and round-trip tests.
 - Decisions:
   - Support LVF Case 0 and 2 initially; defer 1 and 3 with TODOs.
   - Precedence default: magma > slime > river > ocean (configurable).
   - LiquidType mapping provided via JSON overrides; provide sane defaults with TODO to validate against LiquidType.dbc.
+  - AdtLk holds a fixed-size `Mh2oByChunk` array (256) for per-MCNK liquids.
+  - Offset-origin heuristics for `ofsLiquid`: header end (dataStart+128), data start, chunk begin.
+  - Ocean heights inferred from `heightMin` when depth-only layout is present.
+  - Unknown low-nibble tile types normalized to `None`.
+  - Per-chunk parsing errors are non-fatal and result in a null MCLQ entry for that chunk.
 
 ## Liquids Plan (Approved)
 

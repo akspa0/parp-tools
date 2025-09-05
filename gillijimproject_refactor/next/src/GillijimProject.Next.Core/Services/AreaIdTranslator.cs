@@ -165,7 +165,7 @@ public sealed class AreaIdTranslator
     private static AreaIndex BuildAreaIndex(IDBCDStorage storage)
     {
         var idx = new AreaIndex();
-        foreach (var pair in storage)
+        foreach (var pair in (IEnumerable<KeyValuePair<int, DBCDRow>>)storage)
         {
             var id = pair.Key;
             var row = (DBCDRow)pair.Value;
@@ -222,7 +222,7 @@ public sealed class AreaIdTranslator
     private static MapIndex BuildMapIndex(IDBCDStorage storage)
     {
         var idx = new MapIndex();
-        foreach (var pair in storage)
+        foreach (var pair in (IEnumerable<KeyValuePair<int, DBCDRow>>)storage)
         {
             var id = pair.Key;
             var row = (DBCDRow)pair.Value;

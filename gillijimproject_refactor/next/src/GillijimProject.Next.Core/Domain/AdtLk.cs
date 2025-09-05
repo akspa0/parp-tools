@@ -6,4 +6,7 @@ namespace GillijimProject.Next.Core.Domain;
 /// <remarks>
 /// Invariants: FourCC forward in-memory; MFBO/MTXF included when present; MCLQ written last within MCNK; omit MH2O when empty.
 /// </remarks>
-public sealed record AdtLk(string Name);
+public sealed record AdtLk(string Name)
+{
+    public GillijimProject.Next.Core.Domain.Liquids.Mh2oChunk?[] Mh2oByChunk { get; init; } = new GillijimProject.Next.Core.Domain.Liquids.Mh2oChunk?[256];
+}

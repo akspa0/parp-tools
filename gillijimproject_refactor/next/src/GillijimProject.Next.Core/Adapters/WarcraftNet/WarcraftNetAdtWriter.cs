@@ -1,3 +1,4 @@
+using System.IO;
 using GillijimProject.Next.Core.Domain;
 
 namespace GillijimProject.Next.Core.Adapters.WarcraftNet;
