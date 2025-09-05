@@ -28,6 +28,8 @@ public static class Program
             "analyze" => AnalyzeCommand.Run(rest),
             "fix-areaids" => FixAreaIdsCommand.Run(rest),
             "gen-alpha-wdt" => GenAlphaWdtCommand.Run(rest),
+            "wdl-dump" => WdlDumpCommand.Run(rest),
+            "wdl-build" => WdlBuildCommand.Run(rest),
             _ => Unknown(command)
         };
     }
@@ -40,6 +42,8 @@ public static class Program
         Console.WriteLine("  analyze      Analyze UniqueIDs and assets");
         Console.WriteLine("  fix-areaids  Re-emit ADTs with corrected AreaIDs");
         Console.WriteLine("  gen-alpha-wdt Generate Alpha WDT from LK ADTs (reverse)");
+        Console.WriteLine("  wdl-dump     Parse a WDL and print a summary (present tiles, holes)");
+        Console.WriteLine("  wdl-build    Read a WDL and re-emit it using the new writer");
         Console.WriteLine("\nUse: dotnet run --project next/src/GillijimProject.Next.Cli -- <command> [options]\n");
     }
 

@@ -15,3 +15,6 @@
   - Round-trip and integration tests once IO paths are complete.
 - Known Issues / Follow-ups:
   - LVF Case 1/3 (UVs) deferred; green-lava mapping behavior TBD.
+- WDL Parsing:
+  - Completed: Domain split to `Domain/Wdl.cs`, parser hardening (MVER tolerance, overflow-safe bounds, padding), MAHO holes parsing (incl. reversed `OHAM`), tests (synthetic normal + reversed + missing MAHO + odd-size padding) and fixture skip-if-missing.
+  - Pending: Implement `WdlWriter` and minimal CLI verbs (`wdl-dump`, `wdl-build`) with roundtrip tests.

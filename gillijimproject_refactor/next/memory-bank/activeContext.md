@@ -57,3 +57,15 @@
   - CLI: flags, examples, mapping schema.
 - Logging & Validation
   - Exists bitmap coverage, rectangle bounds, height clamps, attribute consistency; remove empty instances.
+
+## WDL Parsing Progress
+
+- Completed M1–M4:
+  - Split `Wdl`/`WdlTile` into `next/src/GillijimProject.Next.Core/Domain/Wdl.cs`.
+  - Hardened `AlphaReader.ParseWdl()` (MVER tolerance, overflow-safe bounds, padding after `MARE`/`MAHO`, reversed FourCC helpers).
+  - Implemented `MAHO` holes parsing (incl. reversed `OHAM`), with default zero masks when missing.
+  - Added tests: normal + reversed `MAHO`, missing-`MAHO` default, odd-size chunk padding tolerance, and fixture-based skip-if-missing.
+- Docs updated: `next/docs/wdl-parsing-plan.md` statuses reflect M1–M4 completed.
+- Next:
+  - Implement `WdlWriter` and minimal CLI verbs (`wdl-dump`, `wdl-build`) with roundtrip tests.
+  - Keep Noggit behavior for write ordering (MARE→MAHO per tile) and include `MAHO` even when zeroed.
