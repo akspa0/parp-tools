@@ -29,7 +29,10 @@ public static class Program
             "fix-areaids" => FixAreaIdsCommand.Run(rest),
             "gen-alpha-wdt" => GenAlphaWdtCommand.Run(rest),
             "wdl-dump" => WdlDumpCommand.Run(rest),
-            "wdl-build" => WdlBuildCommand.Run(rest),
+            "wdt-dump" => WdtDumpCommand.Run(rest),
+            "adt-dump" => AdtDumpCommand.Run(rest),
+            "wdl-obj" => WdlObjCommand.Run(rest),
+            "wdl-glb" => WdlGlbCommand.Run(rest),
             _ => Unknown(command)
         };
     }
@@ -43,7 +46,10 @@ public static class Program
         Console.WriteLine("  fix-areaids  Re-emit ADTs with corrected AreaIDs");
         Console.WriteLine("  gen-alpha-wdt Generate Alpha WDT from LK ADTs (reverse)");
         Console.WriteLine("  wdl-dump     Parse a WDL and print a summary (present tiles, holes)");
-        Console.WriteLine("  wdl-build    Read a WDL and re-emit it using the new writer");
+        Console.WriteLine("  wdt-dump     Parse an Alpha WDT and print MAIN/MDNM/MONM summary");
+        Console.WriteLine("  adt-dump     Parse an Alpha ADT and print MCNK/MCVT/MCLQ summary");
+        Console.WriteLine("  wdl-obj      Export WDL as OBJ (per tile and merged)");
+        Console.WriteLine("  wdl-glb      Export WDL as GLB (per tile and merged) using local SharpGLTF");
         Console.WriteLine("\nUse: dotnet run --project next/src/GillijimProject.Next.Cli -- <command> [options]\n");
     }
 

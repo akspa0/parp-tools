@@ -9,6 +9,7 @@ using GillijimProject.Next.Core.Domain.Liquids;
 using GillijimProject.Next.Core.Domain;
 using GillijimProject.Next.Core.Transform;
 using GillijimProject.Next.Core.IO;
+using GillijimProject.Next.Core.WowFiles.Alpha;
 
 namespace GillijimProject.Next.Cli.Commands;
 
@@ -104,6 +105,14 @@ public static class ConvertCommand
             return 2;
         }
 
+        // Use modern AlphaWdtReader for WDT introspection
+        var wdtInfo = AlphaWdtReader.Read(wdtPath);
+        Console.WriteLine($"[convert] WDT: wmoBased={wdtInfo.WmoBased} mdnm={wdtInfo.MdnmFiles.Count} monm={wdtInfo.MonmFiles.Count}");
+        int presentTiles = 0;
+        for (int i = 0; i < wdtInfo.AdtOffsets.Count; i++) if (wdtInfo.AdtOffsets[i] != 0) presentTiles++;
+        Console.WriteLine($"[convert] MAIN present tiles={presentTiles}");
+
+        // Domain record for existing converter pipeline
         var wdt = new WdtAlpha(wdtPath);
         var mapName = Path.GetFileNameWithoutExtension(wdtPath);
         var adtDir = Path.GetDirectoryName(wdtPath) ?? ".";
