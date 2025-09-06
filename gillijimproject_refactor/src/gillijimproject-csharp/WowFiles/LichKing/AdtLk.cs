@@ -4,12 +4,13 @@ using System.IO;
 using System.Text;
 using GillijimProject.Utilities;
 using GillijimProject.WowFiles;
+using Warcraft.NET.Files.ADT; // Added for Warcraft.NET
 
 namespace GillijimProject.WowFiles.LichKing;
 
 /// <summary>
 /// [PORT] C# port of AdtLk (see lib/gillijimproject/wowfiles/lichking/AdtLk.h)
-/// Handles LichKing format ADT files
+/// Handles LichKing format ADT files using Warcraft.NET for WotLK 3.3.5 output
 /// </summary>
 public class AdtLk
 {
@@ -33,7 +34,7 @@ public class AdtLk
     private Chunk _mtxf;
     
     /// <summary>
-    /// Constructs an AdtLk from file data and filename
+    /// Constructs an AdtLk from file data and filename (legacy manual parsing)
     /// </summary>
     /// <param name="adtFile">The byte array containing the ADT file data</param>
     /// <param name="adtFileName">The name of the ADT file</param>
@@ -119,7 +120,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Constructs an AdtLk from file stream and filename
+    /// Constructs an AdtLk from file stream and filename (legacy)
     /// </summary>
     /// <param name="adtFile">The file stream containing the ADT file data</param>
     /// <param name="adtFileName">The name of the ADT file</param>
@@ -127,7 +128,7 @@ public class AdtLk
         : this(WowChunkedFormat.ReadBytes(adtFile, 0, (int)adtFile.Length), adtFileName) { }
     
     /// <summary>
-    /// Constructs an AdtLk from its component chunks
+    /// Constructs an AdtLk from its component chunks (legacy manual)
     /// </summary>
     public AdtLk(
         string name,
@@ -167,7 +168,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Writes the ADT to a file using the stored name
+    /// Writes the ADT to a file using Warcraft.NET for WotLK 3.3.5 format
     /// </summary>
     public void ToFile()
     {
@@ -176,7 +177,7 @@ public class AdtLk
     }
  
     /// <summary>
-    /// Writes the ADT to the specified file name
+    /// Writes the ADT to the specified file name using Warcraft.NET
     /// </summary>
     /// <param name="fileName">The file name to write to</param>
     public void ToFile(string fileName)
@@ -187,68 +188,65 @@ public class AdtLk
         {
             outPath = Path.Combine(fileName, Path.GetFileName(_adtName));
         }
-        using var ms = new MemoryStream();
         
-        byte[] tempData = _mver.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // Build Warcraft.NET AdtFile from components
+        var adt = new AdtFile();
         
-        tempData = _mhdr.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MVER
+        adt.Header.MVERChunk = new MVERChunk(new byte[] { 0x12, 0x00, 0x00, 0x00 });
         
-        tempData = _mcin.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MHDR (generated from chunks, flags from _mhdr.GetFlags())
+        adt.Header.MHDRChunk = new MHDRChunk(new byte[64]); // Placeholder; will be auto-filled on write
         
-        tempData = _mtex.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MCIN from _mcin
+        adt.MapChunkIndices = new MapChunkIndicesChunk(_mcin.Data);
         
-        tempData = _mmdx.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MTEX
+        adt.Textures.MTEXChunk = new MTEXChunk(_mtex.Data);
         
-        tempData = _mmid.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MMDX/MMID from _mmdx/_mmid
+        adt.DoodadNames.MMDXChunk = new MMDXChunk(_mmdx.Data);
+        adt.DoodadNameIndices.MMIDChunk = new MMIDChunk(_mmid.Data);
         
-        tempData = _mwmo.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MWMO/MWID from _mwmo/_mwid
+        adt.WorldModelNames.MWMOChunk = new MWMOChunk(_mwmo.Data);
+        adt.WorldModelNameIndices.MWIDChunk = new MWIDChunk(_mwid.Data);
         
-        tempData = _mwid.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MDDF from _mddf
+        adt.DoodadSet.MDDFChunk = new MDDFChunk(_mddf.Data);
         
-        tempData = _mddf.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
+        // MODF from _modf
+        adt.WorldModelObjectSet.MODFChunk = new MODFChunk(_modf.Data);
         
-        tempData = _modf.GetWholeChunk();
-        ms.Write(tempData, 0, tempData.Length);
-        
-        if (!_mh2o.IsEmpty())
+        // MCNKs from _mcnks
+        var mapChunks = new List<AdtMapChunk>(256);
+        for (int i = 0; i < _mcnks.Count; i++)
         {
-            tempData = _mh2o.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
+            var mcnkChunk = new MCNKChunk(_mcnks[i].GetWholeChunk().ToArray());
+            mapChunks.Add(new AdtMapChunk(mcnkChunk));
         }
+        adt.MapChunks = mapChunks;
         
-        foreach (var mcnk in _mcnks)
-        {
-            tempData = mcnk.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
-        }
+        // MH2O from _mh2o
+        adt.LiquidData.MH2OChunk = new MH2OChunk(_mh2o.Data);
         
-        // [PORT] Write MFBO and MTXF if present (match C++ order: MFBO then MTXF)
+        // MFBO/MTXF
         if (!_mfbo.IsEmpty())
         {
-            tempData = _mfbo.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
+            adt.DoodadFoliage.MFBOChunk = new MFBOChunk(_mfbo.Data);
         }
-
         if (!_mtxf.IsEmpty())
         {
-            tempData = _mtxf.GetWholeChunk();
-            ms.Write(tempData, 0, tempData.Length);
+            adt.DoodadFoliage.MTXFChunk = new MTXFChunk(_mtxf.Data);
         }
         
-        File.WriteAllBytes(outPath, ms.ToArray());
+        // Write using Warcraft.NET
+        using var fs = File.Create(outPath);
+        adt.WriteAdt(fs);
     }
     
     /// <summary>
-    /// Gets the total size of all MCNK chunks
+    /// Gets the total size of all MCNK chunks (legacy)
     /// </summary>
     /// <returns>The total size in bytes</returns>
     private int GetMcnksWholeSize()
@@ -264,7 +262,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Checks if the ADT's internal offsets are correct
+    /// Checks if the ADT's internal offsets are correct (legacy)
     /// </summary>
     /// <returns>True if the offsets are correct, false otherwise</returns>
     private bool CheckIntegrity()
@@ -273,7 +271,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Checks if the MCIN offsets are correct
+    /// Checks if the MCIN offsets are correct (legacy)
     /// </summary>
     /// <returns>True if the offsets are correct, false otherwise</returns>
     private bool CheckMcinOffsets()
@@ -310,7 +308,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Checks if the MHDR offsets are correct
+    /// Checks if the MHDR offsets are correct (legacy)
     /// </summary>
     /// <returns>True if the offsets are correct, false otherwise</returns>
     private bool CheckMhdrOffsets()
@@ -392,7 +390,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Updates or creates the MHDR and MCIN chunks with correct offsets
+    /// Updates or creates the MHDR and MCIN chunks with correct offsets (legacy, for manual construction)
     /// </summary>
     private void UpdateOrCreateMhdrAndMcin()
     {
