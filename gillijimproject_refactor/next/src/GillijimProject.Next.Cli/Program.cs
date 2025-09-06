@@ -33,6 +33,9 @@ public static class Program
             "adt-dump" => AdtDumpCommand.Run(rest),
             "wdl-obj" => WdlObjCommand.Run(rest),
             "wdl-glb" => WdlGlbCommand.Run(rest),
+            "obj-xform" => ObjXformCommand.Run(rest),
+            "align-adt-wdl" => AlignAdtWdlCommand.Run(rest),
+            "pm4-export" => Pm4ExportCommand.Run(rest),
             _ => Unknown(command)
         };
     }
@@ -50,6 +53,9 @@ public static class Program
         Console.WriteLine("  adt-dump     Parse an Alpha ADT and print MCNK/MCVT/MCLQ summary");
         Console.WriteLine("  wdl-obj      Export WDL as OBJ (per tile and merged)");
         Console.WriteLine("  wdl-glb      Export WDL as GLB (per tile and merged) using local SharpGLTF");
+        Console.WriteLine("  obj-xform    Transform OBJ(s) with flips/rotate/translate and parity-aware winding");
+        Console.WriteLine("  align-adt-wdl Discover ADT→WDL orientation/translation and optionally write aligned OBJ");
+        Console.WriteLine("  pm4-export   Export PM4 files (tiles or merged) with optional MSCN sidecar");
         Console.WriteLine("\nUse: dotnet run --project next/src/GillijimProject.Next.Cli -- <command> [options]\n");
     }
 

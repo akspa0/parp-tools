@@ -10,6 +10,8 @@
   - Next.Core builds cleanly after fixing CS0246 by adding `using System.Collections.Generic;` to `Services/UniqueIdAnalyzer.cs` and `Transform/AlphaToLkConverter.cs`.
   - Fixed `AlphaMclqExtractorTests` builder compile issue by simplifying `BuildMcnkHeader` (no out-params) and preserving `OfsLiquid` (100) / `SizeLiquid` (104) patch positions.
 - Pending:
+  - Implement CLI `wdt-convert` (Alpha WDT→LK; ADT Alpha→LK for present tiles) with Liquids options and run-dir logging.
+  - Implement CLI `adt-roundtrip` (read→write→re-read; integrity; optional SHA and MCLQ report) with run-dir logging.
   - Unit tests for MCLQ parsing (synthetic water/ocean/magma) and optional fixture-based integration tests.
   - Validation & logging (size vs actual, offset heuristics, tile normalization, all-none short-circuit).
   - Round-trip and integration tests once IO paths are complete.

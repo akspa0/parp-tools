@@ -85,14 +85,14 @@ public static class WdlObjExporter
         int vertsBefore = 0, faces = 0;
         sw.WriteLine($"o {name}");
 
-        // Vertices: 17x17 grid, OBJ with X/Z swapped: X=j, Z=i, Y=height
+        // Vertices: 17x17 grid, ADT-aligned basis: X=worldX=baseZ+j*xy, Y=worldY=baseX+i*xy, Z=+height
         for (int j = 0; j <= 16; j++)
         {
             for (int i = 0; i <= 16; i++)
             {
-                double x = baseZ + j * xyScale;
-                double y = tile.Height17[j, i] * heightScale;
-                double z = baseX + i * xyScale;
+                double x = baseZ + j * xyScale;   // world X (north/south)
+                double y = baseX + i * xyScale;   // world Y (west/east)
+                double z =  tile.Height17[j, i] * heightScale; // height up
                 sw.WriteLine(FormattableString.Invariant($"v {x:R} {y:R} {z:R}"));
                 vertsBefore++;
             }
@@ -110,9 +110,8 @@ public static class WdlObjExporter
                 int v10 = vertexOffset + Idx(i + 1, j);
                 int v01 = vertexOffset + Idx(i, j + 1);
                 int v11 = vertexOffset + Idx(i + 1, j + 1);
-                // Triangle 1: v00, v10, v11
+                // Triangles (standard winding for Z=+height)
                 sw.WriteLine($"f {v00} {v10} {v11}");
-                // Triangle 2: v00, v11, v01
                 sw.WriteLine($"f {v00} {v11} {v01}");
                 faces += 2;
             }

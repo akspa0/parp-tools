@@ -72,9 +72,10 @@ public static class WdlGltfExporter
                 if (t is null) continue;
 
                 var mesh = BuildTileMesh(t, xyScale, options.HeightScale, options.SkipHoles, out int vCount, out int fCount);
+                // With Z as up, lay tiles on the X/Y plane
                 float baseX = (float)(tx * 16 * xyScale);
-                float baseZ = (float)(ty * 16 * xyScale);
-                var xform = Matrix4x4.CreateTranslation(baseX, 0f, baseZ);
+                float baseY = (float)(ty * 16 * xyScale);
+                var xform = Matrix4x4.CreateTranslation(baseX, baseY, 0f);
                 scene.AddRigidMesh(mesh, xform);
 
                 tiles++;
@@ -95,7 +96,7 @@ public static class WdlGltfExporter
         var prim = mesh.UsePrimitive(mat);
         faces = 0;
 
-        // Precompute normals per 17x17 vertex
+        // Precompute normals per 17x17 vertex (Z is up = height)
         var normals = new Vector3[17, 17];
         for (int j = 0; j <= 16; j++)
         {
@@ -105,10 +106,11 @@ public static class WdlGltfExporter
                 float hR = tile.Height17[j, Math.Min(16, i + 1)];
                 float hU = tile.Height17[Math.Max(0, j - 1), i];
                 float hD = tile.Height17[Math.Min(16, j + 1), i];
-                var dx = new Vector3((float)(2 * xyScale), (hR - hL) * (float)heightScale, 0);
-                var dz = new Vector3(0, (hD - hU) * (float)heightScale, (float)(2 * xyScale));
-                var n = Vector3.Cross(dz, dx);
-                if (n.LengthSquared() < 1e-6f) n = new Vector3(0, 1, 0);
+                // With Z = -height, the delta along height is negated
+                var dx = new Vector3((float)(2 * xyScale), 0f, -(hR - hL) * (float)heightScale);
+                var dy = new Vector3(0f, (float)(2 * xyScale), -(hD - hU) * (float)heightScale);
+                var n = Vector3.Cross(dy, dx); // right-hand rule
+                if (n.LengthSquared() < 1e-6f) n = new Vector3(0, 0, 1);
                 else n = Vector3.Normalize(n);
                 normals[j, i] = n;
             }
@@ -116,7 +118,8 @@ public static class WdlGltfExporter
 
         static VertexPositionNormal V(int i, int j, double xy, double hScale, WdlTile t, Vector3[,] ns)
         {
-            var pos = new Vector3((float)(i * xy), t.Height17[j, i] * (float)hScale, (float)(j * xy));
+            // Position with Z as up (height), using negative height to match OBJ orientation
+            var pos = new Vector3((float)(i * xy), (float)(j * xy), -t.Height17[j, i] * (float)hScale);
             var nrm = ns[j, i];
             return new VertexPositionNormal(pos, nrm);
         }
@@ -130,8 +133,9 @@ public static class WdlGltfExporter
                 var v10 = V(i + 1, j, xyScale, heightScale, tile, normals);
                 var v01 = V(i, j + 1, xyScale, heightScale, tile, normals);
                 var v11 = V(i + 1, j + 1, xyScale, heightScale, tile, normals);
-                prim.AddTriangle(v00, v10, v11);
-                prim.AddTriangle(v00, v11, v01);
+                // Flip winding to ensure front faces with Z-up mapping
+                prim.AddTriangle(v00, v11, v10);
+                prim.AddTriangle(v00, v01, v11);
                 faces += 2;
             }
         }
