@@ -4,13 +4,12 @@ using System.IO;
 using System.Text;
 using GillijimProject.Utilities;
 using GillijimProject.WowFiles;
-using Warcraft.NET.Files.ADT; // Added for Warcraft.NET
 
 namespace GillijimProject.WowFiles.LichKing;
 
 /// <summary>
 /// [PORT] C# port of AdtLk (see lib/gillijimproject/wowfiles/lichking/AdtLk.h)
-/// Handles LichKing format ADT files using Warcraft.NET for WotLK 3.3.5 output
+/// Handles LichKing format ADT files. Writes via legacy chunk composition (manual) in this repository.
 /// </summary>
 public class AdtLk
 {
@@ -168,7 +167,7 @@ public class AdtLk
     }
     
     /// <summary>
-    /// Writes the ADT to a file using Warcraft.NET for WotLK 3.3.5 format
+    /// Writes the ADT to a file (legacy manual writer)
     /// </summary>
     public void ToFile()
     {
@@ -177,7 +176,7 @@ public class AdtLk
     }
  
     /// <summary>
-    /// Writes the ADT to the specified file name using Warcraft.NET
+    /// Writes the ADT to the specified file name (manual composition using Chunk.GetWholeChunk order)
     /// </summary>
     /// <param name="fileName">The file name to write to</param>
     public void ToFile(string fileName)
@@ -189,60 +188,47 @@ public class AdtLk
             outPath = Path.Combine(fileName, Path.GetFileName(_adtName));
         }
         
-        // Build Warcraft.NET AdtFile from components
-        var adt = new AdtFile();
-        
-        // MVER
-        adt.Header.MVERChunk = new MVERChunk(new byte[] { 0x12, 0x00, 0x00, 0x00 });
-        
-        // MHDR (generated from chunks, flags from _mhdr.GetFlags())
-        adt.Header.MHDRChunk = new MHDRChunk(new byte[64]); // Placeholder; will be auto-filled on write
-        
-        // MCIN from _mcin
-        adt.MapChunkIndices = new MapChunkIndicesChunk(_mcin.Data);
-        
-        // MTEX
-        adt.Textures.MTEXChunk = new MTEXChunk(_mtex.Data);
-        
-        // MMDX/MMID from _mmdx/_mmid
-        adt.DoodadNames.MMDXChunk = new MMDXChunk(_mmdx.Data);
-        adt.DoodadNameIndices.MMIDChunk = new MMIDChunk(_mmid.Data);
-        
-        // MWMO/MWID from _mwmo/_mwid
-        adt.WorldModelNames.MWMOChunk = new MWMOChunk(_mwmo.Data);
-        adt.WorldModelNameIndices.MWIDChunk = new MWIDChunk(_mwid.Data);
-        
-        // MDDF from _mddf
-        adt.DoodadSet.MDDFChunk = new MDDFChunk(_mddf.Data);
-        
-        // MODF from _modf
-        adt.WorldModelObjectSet.MODFChunk = new MODFChunk(_modf.Data);
-        
-        // MCNKs from _mcnks
-        var mapChunks = new List<AdtMapChunk>(256);
-        for (int i = 0; i < _mcnks.Count; i++)
+        // Ensure internal offsets are correct before writing
+        if (!CheckIntegrity())
         {
-            var mcnkChunk = new MCNKChunk(_mcnks[i].GetWholeChunk().ToArray());
-            mapChunks.Add(new AdtMapChunk(mcnkChunk));
+            UpdateOrCreateMhdrAndMcin();
         }
-        adt.MapChunks = mapChunks;
         
-        // MH2O from _mh2o
-        adt.LiquidData.MH2OChunk = new MH2OChunk(_mh2o.Data);
+        using var fs = File.Create(outPath);
         
-        // MFBO/MTXF
+        // Write chunks in canonical LK order
+        fs.Write(_mver.GetWholeChunk());
+        fs.Write(_mhdr.GetWholeChunk());
+        fs.Write(_mcin.GetWholeChunk());
+        fs.Write(_mtex.GetWholeChunk());
+        fs.Write(_mmdx.GetWholeChunk());
+        fs.Write(_mmid.GetWholeChunk());
+        fs.Write(_mwmo.GetWholeChunk());
+        fs.Write(_mwid.GetWholeChunk());
+        fs.Write(_mddf.GetWholeChunk());
+        fs.Write(_modf.GetWholeChunk());
+        
+        if (!_mh2o.IsEmpty())
+        {
+            fs.Write(_mh2o.GetWholeChunk());
+        }
+        
+        // MCNKs
+        foreach (var mcnk in _mcnks)
+        {
+            var bytes = mcnk.GetWholeChunk();
+            fs.Write(bytes, 0, bytes.Length);
+        }
+        
         if (!_mfbo.IsEmpty())
         {
-            adt.DoodadFoliage.MFBOChunk = new MFBOChunk(_mfbo.Data);
-        }
-        if (!_mtxf.IsEmpty())
-        {
-            adt.DoodadFoliage.MTXFChunk = new MTXFChunk(_mtxf.Data);
+            fs.Write(_mfbo.GetWholeChunk());
         }
         
-        // Write using Warcraft.NET
-        using var fs = File.Create(outPath);
-        adt.WriteAdt(fs);
+        if (!_mtxf.IsEmpty())
+        {
+            fs.Write(_mtxf.GetWholeChunk());
+        }
     }
     
     /// <summary>

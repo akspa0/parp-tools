@@ -7,4 +7,7 @@
     <RootNamespace>GillijimProject</RootNamespace>
     <AssemblyName>gillijimproject-csharp</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\next\libs\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+  </ItemGroup>
 </Project>
