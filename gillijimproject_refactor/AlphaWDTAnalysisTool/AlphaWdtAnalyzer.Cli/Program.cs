@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using AlphaWdtAnalyzer.Core;
+using AlphaWdtAnalyzer.Core.Export;
 
 namespace AlphaWdtAnalyzer.Cli;
 
@@ -10,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <path/to/listfile.csv> --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <path/to/listfile.csv> --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
         return 2;
     }
 
@@ -20,6 +21,7 @@ public static class Program
         string? wdt = null;
         string? inputDir = null;
         string? listfile = null;
+        string? lkListfile = null;
         string? outDir = null;
         bool web = false; // default off
         int? clusterThreshold = null;
@@ -27,6 +29,15 @@ public static class Program
         string? dbcDir = null;
         string? areaAlpha = null;
         string? areaLk = null;
+        // export flags
+        bool exportAdt = false;
+        string? exportDir = null;
+        string fallbackTileset = @"Tileset\Generic\Checkers.blp";
+        string fallbackWmo = @"wmo\Dungeon\test\missingwmo.wmo";
+        string fallbackM2 = @"World\Scale\HumanMaleScale.mdx";
+        string fallbackNonTilesetBlp = @"Dungeons\Textures\temp\64.blp";
+        bool mh2o = true;
+        bool assetFuzzy = true;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -44,6 +55,10 @@ public static class Program
                 case "--listfile":
                     if (i + 1 >= args.Length) return Usage();
                     listfile = args[++i];
+                    break;
+                case "--lk-listfile":
+                    if (i + 1 >= args.Length) return Usage();
+                    lkListfile = args[++i];
                     break;
                 case "--out":
                     if (i + 1 >= args.Length) return Usage();
@@ -77,6 +92,37 @@ public static class Program
                 case "--no-web":
                     web = false;
                     break;
+                case "--export-adt":
+                    exportAdt = true;
+                    break;
+                case "--export-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    exportDir = args[++i];
+                    break;
+                case "--fallback-tileset":
+                    if (i + 1 >= args.Length) return Usage();
+                    fallbackTileset = args[++i];
+                    break;
+                case "--fallback-wmo":
+                    if (i + 1 >= args.Length) return Usage();
+                    fallbackWmo = args[++i];
+                    break;
+                case "--fallback-m2":
+                    if (i + 1 >= args.Length) return Usage();
+                    fallbackM2 = args[++i];
+                    break;
+                case "--fallback-blp":
+                    if (i + 1 >= args.Length) return Usage();
+                    fallbackNonTilesetBlp = args[++i];
+                    break;
+                case "--no-mh2o":
+                    mh2o = false;
+                    break;
+                case "--asset-fuzzy":
+                    if (i + 1 >= args.Length) return Usage();
+                    var v = args[++i];
+                    assetFuzzy = !string.Equals(v, "off", StringComparison.OrdinalIgnoreCase);
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
@@ -103,10 +149,23 @@ public static class Program
             Console.Error.WriteLine($"Listfile not found: {listfile}");
             return 1;
         }
+        if (!string.IsNullOrWhiteSpace(lkListfile) && !File.Exists(lkListfile))
+        {
+            Console.Error.WriteLine($"LK listfile not found: {lkListfile}");
+            return 1;
+        }
         if (!string.IsNullOrWhiteSpace(dbcDir) && !Directory.Exists(dbcDir))
         {
             Console.Error.WriteLine($"DBC dir not found: {dbcDir}");
             return 1;
+        }
+        if (exportAdt)
+        {
+            if (string.IsNullOrWhiteSpace(exportDir))
+            {
+                Console.Error.WriteLine("--export-adt requires --export-dir <dir>");
+                return 1;
+            }
         }
 
         try
@@ -129,6 +188,23 @@ public static class Program
                     DbcDir = dbcDir,
                     Web = web
                 });
+
+                if (exportAdt)
+                {
+                    AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
+                    {
+                        InputRoot = inputDir!,
+                        CommunityListfilePath = listfile!,
+                        LkListfilePath = lkListfile,
+                        ExportDir = exportDir!,
+                        FallbackTileset = fallbackTileset,
+                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                        FallbackWmo = fallbackWmo,
+                        FallbackM2 = fallbackM2,
+                        ConvertToMh2o = mh2o,
+                        AssetFuzzy = assetFuzzy
+                    });
+                }
             }
             else
             {
@@ -154,6 +230,23 @@ public static class Program
                 {
                     WebAssetsWriter.Write(outDir!);
                     Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
+                }
+
+                if (exportAdt)
+                {
+                    AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
+                    {
+                        SingleWdtPath = wdt!,
+                        CommunityListfilePath = listfile!,
+                        LkListfilePath = lkListfile,
+                        ExportDir = exportDir!,
+                        FallbackTileset = fallbackTileset,
+                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                        FallbackWmo = fallbackWmo,
+                        FallbackM2 = fallbackM2,
+                        ConvertToMh2o = mh2o,
+                        AssetFuzzy = assetFuzzy
+                    });
                 }
             }
 
