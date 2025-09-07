@@ -137,6 +137,57 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
             new Chunk());
     }
 
+    /// <summary>
+    /// Exposes the set of Alpha MDDF indices referencing WDT MDNM names.
+    /// Use WDT MDNM file list to resolve indices to model paths.
+    /// </summary>
+    public List<int> GetAlphaM2Indices() => _mddf.GetM2IndicesForMmdx();
+
+    /// <summary>
+    /// Exposes the set of Alpha MODF indices referencing WDT MONM names.
+    /// Use WDT MONM file list to resolve indices to WMO paths.
+    /// </summary>
+    public List<int> GetAlphaWmoIndices() => _modf.GetWmoIndicesForMwmo();
+
+    /// <summary>
+    /// Parses the MTEX chunk as a C-style string table and returns texture names.
+    /// </summary>
+    public List<string> GetMtexTextureNames()
+    {
+        var result = new List<string>();
+        if (_mtex is null || _mtex.Data.Length == 0) return result;
+        int start = 0;
+        while (start < _mtex.Data.Length)
+        {
+            int end = Array.IndexOf<byte>(_mtex.Data, 0, start);
+            if (end < 0) end = _mtex.Data.Length;
+            int len = end - start;
+            if (len > 0)
+            {
+                var s = System.Text.Encoding.ASCII.GetString(_mtex.Data, start, len);
+                if (!string.IsNullOrWhiteSpace(s)) result.Add(s);
+            }
+            start = end + 1;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns a copy of the raw MDDF bytes for external analysis (entry size 36 bytes in Alpha).
+    /// </summary>
+    public byte[] GetMddfRaw()
+    {
+        return _mddf?.Data is null ? Array.Empty<byte>() : (byte[])_mddf.Data.Clone();
+    }
+
+    /// <summary>
+    /// Returns a copy of the raw MODF bytes for external analysis (entry size 64 bytes in Alpha).
+    /// </summary>
+    public byte[] GetModfRaw()
+    {
+        return _modf?.Data is null ? Array.Empty<byte>() : (byte[])_modf.Data.Clone();
+    }
+
     private static string GetAdtFileName(string wdtName, int x, int y)
     {
         // [PORT] Basename only; writers choose output directory.
