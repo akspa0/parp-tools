@@ -159,6 +159,16 @@ public static class Program
             Console.Error.WriteLine($"DBC dir not found: {dbcDir}");
             return 1;
         }
+        if (!string.IsNullOrWhiteSpace(areaAlpha) && !File.Exists(areaAlpha))
+        {
+            Console.Error.WriteLine($"AreaTable alpha not found: {areaAlpha}");
+            return 1;
+        }
+        if (!string.IsNullOrWhiteSpace(areaLk) && !File.Exists(areaLk))
+        {
+            Console.Error.WriteLine($"AreaTable LK not found: {areaLk}");
+            return 1;
+        }
         if (exportAdt)
         {
             if (string.IsNullOrWhiteSpace(exportDir))
@@ -202,7 +212,9 @@ public static class Program
                         FallbackWmo = fallbackWmo,
                         FallbackM2 = fallbackM2,
                         ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy
+                        AssetFuzzy = assetFuzzy,
+                        AreaAlphaPath = areaAlpha,
+                        AreaLkPath = areaLk
                     });
                 }
             }
@@ -245,7 +257,9 @@ public static class Program
                         FallbackWmo = fallbackWmo,
                         FallbackM2 = fallbackM2,
                         ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy
+                        AssetFuzzy = assetFuzzy,
+                        AreaAlphaPath = areaAlpha,
+                        AreaLkPath = areaLk
                     });
                 }
             }

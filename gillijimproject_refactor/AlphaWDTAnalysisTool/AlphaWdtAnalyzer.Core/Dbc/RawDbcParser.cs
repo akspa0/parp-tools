@@ -69,11 +69,11 @@ public static class RawDbcParser
             for (int f = 0; f < fieldCount; f++)
             {
                 var val = fields[f];
-                // Heuristic: if value is within string block, try to read a C-string
+                // If value is within string block, read a C-string
                 if (val < stringBlock.Length)
                 {
                     var s = ReadCString(stringBlock, (int)val);
-                    if (!string.IsNullOrWhiteSpace(s) && LooksLikeText(s))
+                    if (!string.IsNullOrEmpty(s))
                     {
                         guessed[f] = s;
                     }
@@ -92,16 +92,5 @@ public static class RawDbcParser
         int len = end - offset;
         if (len <= 0) return string.Empty;
         return Encoding.ASCII.GetString(data, offset, len);
-    }
-
-    private static bool LooksLikeText(string s)
-    {
-        // Accept printable ASCII and common path chars, and also filter out very short junk
-        if (s.Length < 2) return false;
-        foreach (var ch in s)
-        {
-            if (ch < 0x20 || ch > 0x7E) return false;
-        }
-        return true;
     }
 }

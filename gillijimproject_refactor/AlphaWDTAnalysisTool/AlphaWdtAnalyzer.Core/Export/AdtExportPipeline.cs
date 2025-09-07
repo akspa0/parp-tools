@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using GillijimProject.WowFiles.Alpha;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -20,6 +21,8 @@ public static class AdtExportPipeline
         public required string FallbackM2 { get; init; }
         public bool ConvertToMh2o { get; init; } = true;
         public bool AssetFuzzy { get; init; } = true;
+        public string? AreaAlphaPath { get; init; }
+        public string? AreaLkPath { get; init; }
     }
 
     public static void ExportSingle(Options opts)
@@ -36,6 +39,8 @@ public static class AdtExportPipeline
             opts.FallbackM2,
             opts.AssetFuzzy);
 
+        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath);
+
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
         var adtScanner = new AdtScanner();
         var result = adtScanner.Scan(wdt);
@@ -45,6 +50,17 @@ public static class AdtExportPipeline
         foreach (var g in byTile)
         {
             var (x, y) = g.Key;
+
+            IReadOnlyList<int>? alphaAreaIds = null;
+            // Always try to compute alpha area ids so we can emit CSV even without LK mapper
+            int adtNum = (y * 64) + x;
+            int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
+            if (offset > 0)
+            {
+                var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+                alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+            }
+
             var ctx = new AdtWotlkWriter.WriteContext
             {
                 ExportDir = opts.ExportDir,
@@ -53,7 +69,9 @@ public static class AdtExportPipeline
                 TileY = y,
                 Placements = g,
                 Fixup = fixup,
-                ConvertToMh2o = opts.ConvertToMh2o
+                ConvertToMh2o = opts.ConvertToMh2o,
+                AreaMapper = areaMapper,
+                AlphaAreaIds = alphaAreaIds
             };
             AdtWotlkWriter.WritePlaceholder(ctx);
         }
@@ -73,6 +91,8 @@ public static class AdtExportPipeline
             opts.FallbackM2,
             opts.AssetFuzzy);
 
+        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath);
+
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
 
@@ -88,6 +108,16 @@ public static class AdtExportPipeline
                 foreach (var g in byTile)
                 {
                     var (x, y) = g.Key;
+
+                    IReadOnlyList<int>? alphaAreaIds = null;
+                    int adtNum = (y * 64) + x;
+                    int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
+                    if (offset > 0)
+                    {
+                        var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+                        alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+                    }
+
                     var ctx = new AdtWotlkWriter.WriteContext
                     {
                         ExportDir = opts.ExportDir,
@@ -96,7 +126,9 @@ public static class AdtExportPipeline
                         TileY = y,
                         Placements = g,
                         Fixup = fixup,
-                        ConvertToMh2o = opts.ConvertToMh2o
+                        ConvertToMh2o = opts.ConvertToMh2o,
+                        AreaMapper = areaMapper,
+                        AlphaAreaIds = alphaAreaIds
                     };
                     AdtWotlkWriter.WritePlaceholder(ctx);
                 }

@@ -138,6 +138,29 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
     }
 
     /// <summary>
+    /// Returns a list of 256 Alpha area IDs (or -1 when the MCNK is not present),
+    /// inferred from McnkAlpha headers (Unknown3 field used by the original port as area candidate).
+    /// </summary>
+    public List<int> GetAlphaMcnkAreaIds()
+    {
+        var result = new List<int>(capacity: 256);
+        for (int i = 0; i < 256; i++) result.Add(-1);
+
+        var offsets = _mcin.GetMcnkOffsets();
+        using var fs = File.OpenRead(_wdtAlphaPath);
+        for (int i = 0; i < 256; i++)
+        {
+            int off = (i < offsets.Count) ? offsets[i] : 0;
+            if (off > 0)
+            {
+                var a = new McnkAlpha(fs, off, headerSize: 0, adtNum: _adtNumber);
+                result[i] = a.GetAlphaAreaId();
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Exposes the set of Alpha MDDF indices referencing WDT MDNM names.
     /// Use WDT MDNM file list to resolve indices to model paths.
     /// </summary>
