@@ -10,16 +10,18 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <path/to/listfile.csv> --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--no-web]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <path/to/listfile.csv> --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <path/to/listfile.csv> --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web]");
         return 2;
     }
 
     public static int Main(string[] args)
     {
         string? wdt = null;
+        string? inputDir = null;
         string? listfile = null;
         string? outDir = null;
-        bool noWeb = false;
+        bool web = false; // default off
         int? clusterThreshold = null;
         int? clusterGap = null;
         string? dbcDir = null;
@@ -34,6 +36,10 @@ public static class Program
                 case "--input":
                     if (i + 1 >= args.Length) return Usage();
                     wdt = args[++i];
+                    break;
+                case "--input-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    inputDir = args[++i];
                     break;
                 case "--listfile":
                     if (i + 1 >= args.Length) return Usage();
@@ -65,8 +71,11 @@ public static class Program
                     if (i + 1 >= args.Length) return Usage();
                     areaLk = args[++i];
                     break;
+                case "--web":
+                    web = true;
+                    break;
                 case "--no-web":
-                    noWeb = true;
+                    web = false;
                     break;
                 case "-h":
                 case "--help":
@@ -74,50 +83,78 @@ public static class Program
             }
         }
 
-        if (string.IsNullOrWhiteSpace(wdt) || string.IsNullOrWhiteSpace(listfile) || string.IsNullOrWhiteSpace(outDir))
+        // Allow directory passed via --input
+        if (!string.IsNullOrWhiteSpace(wdt) && Directory.Exists(wdt))
+        {
+            inputDir = wdt;
+            wdt = null;
+        }
+
+        var isBatch = !string.IsNullOrWhiteSpace(inputDir);
+
+        if ((isBatch && (string.IsNullOrWhiteSpace(listfile) || string.IsNullOrWhiteSpace(outDir))) ||
+            (!isBatch && (string.IsNullOrWhiteSpace(wdt) || string.IsNullOrWhiteSpace(listfile) || string.IsNullOrWhiteSpace(outDir))))
         {
             return Usage();
         }
 
-        if (!File.Exists(wdt))
-        {
-            Console.Error.WriteLine($"WDT not found: {wdt}");
-            return 1;
-        }
-        if (!File.Exists(listfile))
+        if (!string.IsNullOrWhiteSpace(listfile) && !File.Exists(listfile))
         {
             Console.Error.WriteLine($"Listfile not found: {listfile}");
             return 1;
         }
-        if (!string.IsNullOrWhiteSpace(areaAlpha) && !File.Exists(areaAlpha))
+        if (!string.IsNullOrWhiteSpace(dbcDir) && !Directory.Exists(dbcDir))
         {
-            Console.Error.WriteLine($"AreaTable alpha not found: {areaAlpha}");
-            return 1;
-        }
-        if (!string.IsNullOrWhiteSpace(areaLk) && !File.Exists(areaLk))
-        {
-            Console.Error.WriteLine($"AreaTable LK not found: {areaLk}");
+            Console.Error.WriteLine($"DBC dir not found: {dbcDir}");
             return 1;
         }
 
         try
         {
-            AnalysisPipeline.Run(new AnalysisPipeline.Options
+            if (isBatch)
             {
-                WdtPath = wdt,
-                ListfilePath = listfile,
-                OutDir = outDir!,
-                ClusterThreshold = clusterThreshold ?? 10,
-                ClusterGap = clusterGap ?? 1000,
-                DbcDir = dbcDir,
-                AreaAlphaPath = areaAlpha,
-                AreaLkPath = areaLk,
-            });
+                if (!Directory.Exists(inputDir!))
+                {
+                    Console.Error.WriteLine($"Input directory not found: {inputDir}");
+                    return 1;
+                }
 
-            if (!noWeb)
+                BatchAnalysis.Run(new BatchAnalysis.Options
+                {
+                    InputRoot = inputDir!,
+                    ListfilePath = listfile!,
+                    OutDir = outDir!,
+                    ClusterThreshold = clusterThreshold ?? 10,
+                    ClusterGap = clusterGap ?? 1000,
+                    DbcDir = dbcDir,
+                    Web = web
+                });
+            }
+            else
             {
-                WebAssetsWriter.Write(outDir!);
-                Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
+                if (!File.Exists(wdt!))
+                {
+                    Console.Error.WriteLine($"WDT not found: {wdt}");
+                    return 1;
+                }
+
+                AnalysisPipeline.Run(new AnalysisPipeline.Options
+                {
+                    WdtPath = wdt!,
+                    ListfilePath = listfile!,
+                    OutDir = outDir!,
+                    ClusterThreshold = clusterThreshold ?? 10,
+                    ClusterGap = clusterGap ?? 1000,
+                    DbcDir = dbcDir,
+                    AreaAlphaPath = areaAlpha,
+                    AreaLkPath = areaLk,
+                });
+
+                if (web)
+                {
+                    WebAssetsWriter.Write(outDir!);
+                    Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
+                }
             }
 
             Console.WriteLine("Analysis complete.");

@@ -61,6 +61,45 @@ public static class CsvReportWriter
         }
     }
 
+    public static void WriteTimeline(string outDir, IEnumerable<PlacementRecord> placements)
+    {
+        Directory.CreateDirectory(outDir);
+        var path = Path.Combine(outDir, "unique_id_timeline.csv");
+        var sorted = placements.Where(p => p.UniqueId.HasValue).OrderBy(p => p.UniqueId!.Value).ToList();
+        using var sw = new StreamWriter(path);
+        sw.WriteLine("type,asset_path,map,tile_x,tile_y,unique_id");
+        foreach (var p in sorted)
+        {
+            sw.WriteLine($"{p.Type},{Escape(p.AssetPath)},{Escape(p.MapName)},{p.TileX},{p.TileY},{p.UniqueId!.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
+    public static void WriteMapUniqueIds(string mapDir, string mapName, IEnumerable<PlacementRecord> placements)
+    {
+        Directory.CreateDirectory(mapDir);
+        var path = Path.Combine(mapDir, "unique_ids.csv");
+        using var sw = new StreamWriter(path);
+        sw.WriteLine("type,asset_path,tile_x,tile_y,unique_id");
+        foreach (var p in placements)
+        {
+            if (!p.UniqueId.HasValue) continue;
+            sw.WriteLine($"{p.Type},{Escape(p.AssetPath)},{p.TileX},{p.TileY},{p.UniqueId.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
+    public static void WriteMapTimeline(string mapDir, string mapName, IEnumerable<PlacementRecord> placements)
+    {
+        Directory.CreateDirectory(mapDir);
+        var path = Path.Combine(mapDir, "unique_id_timeline.csv");
+        var sorted = placements.Where(p => p.UniqueId.HasValue).OrderBy(p => p.UniqueId!.Value).ToList();
+        using var sw = new StreamWriter(path);
+        sw.WriteLine("type,asset_path,tile_x,tile_y,unique_id");
+        foreach (var p in sorted)
+        {
+            sw.WriteLine($"{p.Type},{Escape(p.AssetPath)},{p.TileX},{p.TileY},{p.UniqueId!.Value.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
     public static void WriteIdRangesByMap(string outDir, IEnumerable<(string MapName, UniqueIdClusterer.Cluster Cluster)> entries)
     {
         Directory.CreateDirectory(outDir);
