@@ -25,9 +25,7 @@ public static class AdtWotlkWriter
     public static void WritePlaceholder(WriteContext ctx)
     {
         Directory.CreateDirectory(ctx.ExportDir);
-        var placeholderDir = Path.Combine(ctx.ExportDir, "placeholders", ctx.MapName);
-        Directory.CreateDirectory(placeholderDir);
-        var file = Path.Combine(placeholderDir, $"{ctx.MapName}_{ctx.TileX}_{ctx.TileY}.adt.placeholder.txt");
+        var file = Path.Combine(ctx.ExportDir, $"{ctx.MapName}_{ctx.TileX}_{ctx.TileY}.adt.placeholder.txt");
         using var sw = new StreamWriter(file);
         sw.WriteLine($"Map={ctx.MapName} Tile=({ctx.TileX},{ctx.TileY})");
         sw.WriteLine($"ConvertToMh2o={ctx.ConvertToMh2o}");
@@ -53,8 +51,8 @@ public static class AdtWotlkWriter
             }
             sw.WriteLine($"AreaIds: present={present} mapped={mapped} unmapped={unmapped}");
 
-            // Emit CSV rows per MCNK under <ExportDir>/csv/<MapName>/
-            var csvDir = Path.Combine(ctx.ExportDir, "csv", ctx.MapName);
+            // Emit CSV rows per MCNK
+            var csvDir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
             Directory.CreateDirectory(csvDir);
             var csvPath = Path.Combine(csvDir, "areaid_mapping.csv");
 
