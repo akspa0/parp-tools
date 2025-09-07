@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using GillijimProject.WowFiles.Alpha;
+using GillijimProject.WowFiles.LichKing;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -59,6 +60,32 @@ public static class AdtExportPipeline
             {
                 var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                 alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+
+                // Build fixed model name tables (preserve indices) for MMDX/MWMO
+                var fixedM2 = wdt.MdnmFiles.Select(n => fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
+                var fixedWmo = wdt.MonmFiles.Select(n => fixup.Resolve(AssetType.Wmo, n)).ToList();
+
+                // Convert to LK ADT via existing writer, then patch
+                var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
+
+                // Prepare patched area IDs (decoded-only). Keep alpha decoded id; do not remap.
+                var patched = new int[alphaAreaIds.Count];
+                for (int i = 0; i < alphaAreaIds.Count; i++)
+                {
+                    patched[i] = alphaAreaIds[i]; // may be -1 for empty MCNK; PatchMcnkAreaIds will skip negatives
+                }
+                adtLk.PatchMcnkAreaIds(patched);
+
+                // Replace MTEX with normalized + fixed textures
+                var alphaTextures = alpha.GetMtexTextureNames();
+                var fixedTextures = alphaTextures
+                    .Select(t => fixup.ResolveTexture(t))
+                    .ToList();
+                adtLk.ReplaceMtexFromNames(fixedTextures);
+
+                // Write binary ADT next to placeholder artifacts
+                var outFile = Path.Combine(opts.ExportDir, $"{wdt.MapName}_{x}_{y}.adt");
+                adtLk.ToFile(outFile);
             }
 
             var ctx = new AdtWotlkWriter.WriteContext
@@ -116,6 +143,29 @@ public static class AdtExportPipeline
                     {
                         var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                         alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+
+                        // Fixed names for model tables (preserve size/order)
+                        var fixedM2 = wdt.MdnmFiles.Select(n => fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
+                        var fixedWmo = wdt.MonmFiles.Select(n => fixup.Resolve(AssetType.Wmo, n)).ToList();
+
+                        var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
+
+                        // Decoded-only area IDs (no remap). Keep alpha decoded id for all present chunks.
+                        var patched = new int[alphaAreaIds.Count];
+                        for (int i = 0; i < alphaAreaIds.Count; i++)
+                        {
+                            patched[i] = alphaAreaIds[i];
+                        }
+                        adtLk.PatchMcnkAreaIds(patched);
+
+                        var alphaTextures = alpha.GetMtexTextureNames();
+                        var fixedTextures = alphaTextures
+                            .Select(t => fixup.ResolveTexture(t))
+                            .ToList();
+                        adtLk.ReplaceMtexFromNames(fixedTextures);
+
+                        var outFile = Path.Combine(opts.ExportDir, $"{wdt.MapName}_{x}_{y}.adt");
+                        adtLk.ToFile(outFile);
                     }
 
                     var ctx = new AdtWotlkWriter.WriteContext
