@@ -81,23 +81,8 @@ public static class AnalysisPipeline
             CsvReportWriter.WriteIdRangeSummaryGlobal(csvDir, ids.Min(), ids.Max(), ids.Count());
         }
 
-        // Optional: DBC scanning for liquids/lights
-        if (!string.IsNullOrWhiteSpace(opts.DbcDir) && Directory.Exists(opts.DbcDir))
-        {
-            var dbcOut = Path.Combine(csvDir, "dbc");
-            Directory.CreateDirectory(dbcOut);
-            var scan = Dbc.DbcScanner.Scan(opts.DbcDir);
-            Dbc.DbcReportWriter.Write(dbcOut, scan);
-        }
-
-        // Optional: AreaTable crosswalk (Alpha vs LK)
-        if (!string.IsNullOrWhiteSpace(opts.AreaAlphaPath) && !string.IsNullOrWhiteSpace(opts.AreaLkPath))
-        {
-            var areaOut = Path.Combine(csvDir, "area");
-            Directory.CreateDirectory(areaOut);
-            var cross = Dbc.AreaTableAnalyzer.Compare(opts.AreaAlphaPath!, opts.AreaLkPath!);
-            Dbc.AreaTableReportWriter.Write(areaOut, cross);
-        }
+        // Optional DBC scanning and crosswalk have been removed from this pipeline.
+        // They are performed (when needed) via the DBCD-backed export flow.
 
         // Write index.json for web UI
         var idx = new AnalysisIndex

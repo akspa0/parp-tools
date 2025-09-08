@@ -11,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
         return 2;
     }
 
@@ -38,6 +38,10 @@ public static class Program
         string fallbackNonTilesetBlp = @"Dungeons\Textures\temp\64.blp";
         bool mh2o = true;
         bool assetFuzzy = true;
+        // profiles/toggles
+        string profile = "modified"; // modified|preserve
+        bool useFallbacks = true;
+        bool enableFixups = true;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -123,10 +127,28 @@ public static class Program
                     var v = args[++i];
                     assetFuzzy = !string.Equals(v, "off", StringComparison.OrdinalIgnoreCase);
                     break;
+                case "--profile":
+                    if (i + 1 >= args.Length) return Usage();
+                    profile = args[++i];
+                    break;
+                case "--no-fallbacks":
+                    useFallbacks = false;
+                    break;
+                case "--no-fixups":
+                    enableFixups = false;
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
             }
+        }
+
+        // Apply profile
+        if (string.Equals(profile, "preserve", StringComparison.OrdinalIgnoreCase))
+        {
+            assetFuzzy = false;
+            useFallbacks = false;
+            enableFixups = false;
         }
 
         // Allow directory passed via --input
@@ -213,8 +235,11 @@ public static class Program
                         FallbackM2 = fallbackM2,
                         ConvertToMh2o = mh2o,
                         AssetFuzzy = assetFuzzy,
+                        UseFallbacks = useFallbacks,
+                        EnableFixups = enableFixups,
                         AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk
+                        AreaLkPath = areaLk,
+                        DbcDir = dbcDir
                     });
                 }
             }
@@ -258,8 +283,11 @@ public static class Program
                         FallbackM2 = fallbackM2,
                         ConvertToMh2o = mh2o,
                         AssetFuzzy = assetFuzzy,
+                        UseFallbacks = useFallbacks,
+                        EnableFixups = enableFixups,
                         AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk
+                        AreaLkPath = areaLk,
+                        DbcDir = dbcDir
                     });
                 }
             }

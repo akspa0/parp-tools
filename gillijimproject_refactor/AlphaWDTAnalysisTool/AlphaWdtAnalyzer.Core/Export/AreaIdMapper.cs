@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using AlphaWdtAnalyzer.Core.Dbc;
+
+#if USE_DBCD
+using DBCD;
+using DBCD.Providers;
+#endif
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -34,28 +38,47 @@ public sealed class AreaIdMapper
         _lkFallbackOnMapDungeonId = ResolveOnMapDungeonId(lkNameToId);
     }
 
+    // Deprecated signature retained for compatibility; returns null to force DBCD path
     public static AreaIdMapper? TryCreate(string? alphaDbcPath, string? lkDbcPath)
+    {
+        return null; // RawDBC is removed; use the DBCD overload below
+    }
+
+    public static AreaIdMapper? TryCreate(string? alphaDbcPath, string? lkDbcPath, string? dbdDefinitionsDir)
     {
         if (string.IsNullOrWhiteSpace(alphaDbcPath) || string.IsNullOrWhiteSpace(lkDbcPath)) return null;
         if (!File.Exists(alphaDbcPath) || !File.Exists(lkDbcPath)) return null;
+        if (string.IsNullOrWhiteSpace(dbdDefinitionsDir) || !Directory.Exists(dbdDefinitionsDir)) return null;
 
-        var alpha = LoadTable(alphaDbcPath);
-        var lk = LoadTable(lkDbcPath);
-        if (alpha is null || lk is null) return null;
+#if USE_DBCD
+        try
+        {
+            var alphaIdToName = LoadIdToNameDbcd(alphaDbcPath!, dbdDefinitionsDir!, TryGetAlphaBuilds());
+            var lkIdToName = LoadIdToNameDbcd(lkDbcPath!, dbdDefinitionsDir!, new[] { "3.3.5.12340" });
 
-        // Pick a single, robust name column per table
-        var alphaNameCol = GuessNameColumn(alpha);
-        var lkNameCol = GuessNameColumn(lk);
+            // Build LK name->id map using normalized names
+            var lkNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in lkIdToName)
+            {
+                var norm = NormalizeName(kv.Value);
+                if (!lkNameToId.ContainsKey(norm)) lkNameToId[norm] = kv.Key;
+            }
 
-        var alphaIdToName = BuildIdToName(alpha, alphaNameCol);
-        var (lkNameToId, lkIdToName) = BuildNameToId(lk, lkNameCol);
-
-        return new AreaIdMapper(alphaIdToName, lkNameToId, lkIdToName, alphaNameCol, lkNameCol);
+            // AlphaNameColumnIndex/LkNameColumnIndex are not meaningful with DBCD; set to 0
+            return new AreaIdMapper(alphaIdToName, lkNameToId, lkIdToName, 0, 0);
+        }
+        catch
+        {
+            return null;
+        }
+#else
+        // DBCD not available in this build
+        return null;
+#endif
     }
 
     public bool TryResolveById(int alphaAreaId, out int lkAreaId, out string reason)
     {
-        // Keep for diagnostics but not used in strict name-only flows
         if (_lkIds.Contains(alphaAreaId))
         {
             lkAreaId = alphaAreaId;
@@ -79,7 +102,6 @@ public sealed class AreaIdMapper
         alphaName = null;
         lkName = null;
 
-        // Strict name-only mapping (exact normalized match)
         if (_alphaIdToName.TryGetValue(alphaAreaId, out var aName) && !string.IsNullOrWhiteSpace(aName))
         {
             alphaName = aName;
@@ -94,107 +116,73 @@ public sealed class AreaIdMapper
         return false;
     }
 
-    private static RawDbcTable? LoadTable(string path)
-    {
-        try
-        {
-            return RawDbcParser.Parse(path);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static Dictionary<int, string> BuildIdToName(RawDbcTable table, int nameCol)
+#if USE_DBCD
+    private static Dictionary<int, string> LoadIdToNameDbcd(string dbcPath, string dbdDefinitionsDir, IEnumerable<string> buildCandidates)
     {
         var result = new Dictionary<int, string>();
-        foreach (var row in table.Rows)
+
+        var dbcDir = Path.GetDirectoryName(dbcPath)!;
+        var tableName = Path.GetFileNameWithoutExtension(dbcPath)!;
+
+        var dbcProvider = new FilesystemDBCProvider(dbcDir);
+        // DBCD expects the "definitions" subfolder
+        var defDir = Directory.Exists(Path.Combine(dbdDefinitionsDir, "definitions"))
+            ? Path.Combine(dbdDefinitionsDir, "definitions")
+            : dbdDefinitionsDir;
+        var dbdProvider = new FilesystemDBDProvider(defDir);
+
+        var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+
+        Exception? last = null;
+        foreach (var build in buildCandidates)
         {
-            int id = unchecked((int)row.Fields[0]);
-            string? s = (nameCol >= 0 && nameCol < row.GuessedStrings.Length) ? row.GuessedStrings[nameCol] : null;
-            if (!string.IsNullOrWhiteSpace(s))
+            try
             {
-                result[id] = s!;
+                var storage = dbcd.Load(tableName, build);
+                foreach (KeyValuePair<int, DBCDRow> entry in (IEnumerable<KeyValuePair<int, DBCDRow>>)storage)
+                {
+                    int id = entry.Key;
+                    DBCDRow row = entry.Value;
+                    string? name = TryGetName(row);
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        result[id] = name!;
+                    }
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                continue;
             }
         }
-        return result;
+        throw last ?? new InvalidOperationException("Failed to load DBC via DBCD");
     }
 
-    private static (Dictionary<string, int> nameToId, Dictionary<int, string> idToName) BuildNameToId(RawDbcTable table, int nameCol)
+    private static string? TryGetName(DBCDRow row)
     {
-        var nameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var idToName = new Dictionary<int, string>();
-        foreach (var row in table.Rows)
+        // Try common field names across eras
+        string[] fields = new[] { "AreaName_lang", "Name_lang", "AreaName_Lang", "Name_Lang", "AreaName", "Name" };
+        foreach (var f in fields)
         {
-            int id = unchecked((int)row.Fields[0]);
-            string? s = (nameCol >= 0 && nameCol < row.GuessedStrings.Length) ? row.GuessedStrings[nameCol] : null;
-            if (string.IsNullOrWhiteSpace(s)) continue;
-            var norm = NormalizeName(s);
-            if (!nameToId.ContainsKey(norm)) nameToId[norm] = id;
-            if (!idToName.ContainsKey(id)) idToName[id] = s;
-        }
-        return (nameToId, idToName);
-    }
-
-    private static int GuessNameColumn(RawDbcTable table)
-    {
-        // Heuristic: choose the column index with the highest count of plausible name strings
-        // Plausible name: non-empty, ASCII printable, contains letters, no path separators
-        int bestCol = -1;
-        int bestScore = -1;
-        for (int f = 0; f < table.FieldCount; f++)
-        {
-            int score = 0;
-            foreach (var row in table.Rows)
+            try
             {
-                var s = row.GuessedStrings.Length > f ? row.GuessedStrings[f] : null;
-                if (IsPlausibleName(s)) score++;
+                object val = row[f];
+                if (val is string s && !string.IsNullOrWhiteSpace(s)) return s;
             }
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestCol = f;
-            }
+            catch { /* field may not exist; continue */ }
         }
-        return bestCol;
+        return null;
     }
 
-    private static bool IsPlausibleName(string? s)
+    private static IEnumerable<string> TryGetAlphaBuilds()
     {
-        if (string.IsNullOrWhiteSpace(s)) return false;
-        if (s.Length < 2) return false;
-        if (s.IndexOf('/') >= 0 || s.IndexOf('\\') >= 0) return false;
-        foreach (var ch in s)
-        {
-            if (ch < 0x20 || ch > 0x7E) return false; // ASCII printable only
-        }
-        return Regex.IsMatch(s, "[A-Za-z]");
+        // Reasonable 0.5.x candidates; will try in order until one matches available DBD
+        yield return "0.5.5.3494";
+        yield return "0.5.3.3368";
     }
-
-    private static string NormalizeName(string s)
-    {
-        var norm = s.Trim();
-        norm = Regex.Replace(norm, "[\'\"]", ""); // remove quotes/possessives
-        norm = Regex.Replace(norm, "\\s+", " ");
-        return norm;
-    }
-
-    private static double FuzzyScore(string a, string b)
-    {
-        a = a.ToLowerInvariant();
-        b = b.ToLowerInvariant();
-        if (a == b) return 1.0;
-        if (a.Length == 0 || b.Length == 0) return 0.0;
-        if (a.StartsWith(b) || b.StartsWith(a)) return 0.9;
-        if (a.Contains(b) || b.Contains(a)) return 0.8;
-        // fallback Jaccard on words
-        var wa = a.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var wb = b.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var inter = wa.Intersect(wb).Count();
-        var union = wa.Union(wb).Count();
-        return union == 0 ? 0.0 : (double)inter / union;
-    }
+#endif
 
     private static int? ResolveOnMapDungeonId(Dictionary<string, int> lkNameToId)
     {
@@ -207,4 +195,12 @@ public sealed class AreaIdMapper
 
     public string? GetAlphaName(int id) => _alphaIdToName.TryGetValue(id, out var n) ? n : null;
     public string? GetLkNameById(int id) => _lkIdToName.TryGetValue(id, out var n) ? n : null;
+
+    private static string NormalizeName(string s)
+    {
+        var norm = s.Trim();
+        norm = Regex.Replace(norm, "[\'\"]", "");
+        norm = Regex.Replace(norm, "\\s+", " ");
+        return norm.ToLowerInvariant();
+    }
 }

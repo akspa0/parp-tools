@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using GillijimProject.WowFiles.Alpha;
+using AlphaWdtAnalyzer.Core.Dbc;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -21,8 +22,11 @@ public static class AdtExportPipeline
         public required string FallbackM2 { get; init; }
         public bool ConvertToMh2o { get; init; } = true;
         public bool AssetFuzzy { get; init; } = true;
+        public bool UseFallbacks { get; init; } = true;
+        public bool EnableFixups { get; init; } = true;
         public string? AreaAlphaPath { get; init; }
         public string? AreaLkPath { get; init; }
+        public string? DbcDir { get; init; }
     }
 
     public static void ExportSingle(Options opts)
@@ -31,15 +35,31 @@ public static class AdtExportPipeline
         Directory.CreateDirectory(opts.ExportDir);
 
         var resolver = MultiListfileResolver.FromFiles(opts.LkListfilePath, opts.CommunityListfilePath);
+        var mapName = Path.GetFileNameWithoutExtension(opts.SingleWdtPath!);
+        var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
+        Directory.CreateDirectory(logDir);
+        using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
         var fixup = new AssetFixupPolicy(
             resolver,
             opts.FallbackTileset,
             opts.FallbackNonTilesetBlp,
             opts.FallbackWmo,
             opts.FallbackM2,
-            opts.AssetFuzzy);
+            opts.AssetFuzzy,
+            opts.UseFallbacks,
+            opts.EnableFixups,
+            fixupLogger);
 
-        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath);
+        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
+
+        // Auto-export DBCs to CSV when provided
+        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
+            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
+            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
+        {
+            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
+            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
+        }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
         var adtScanner = new AdtScanner();
@@ -102,15 +122,15 @@ public static class AdtExportPipeline
         Directory.CreateDirectory(opts.ExportDir);
 
         var resolver = MultiListfileResolver.FromFiles(opts.LkListfilePath, opts.CommunityListfilePath);
-        var fixup = new AssetFixupPolicy(
-            resolver,
-            opts.FallbackTileset,
-            opts.FallbackNonTilesetBlp,
-            opts.FallbackWmo,
-            opts.FallbackM2,
-            opts.AssetFuzzy);
 
-        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath);
+        // Auto-export DBCs to CSV when provided (once per batch)
+        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
+            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
+            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
+        {
+            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
+            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
+        }
 
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
@@ -120,6 +140,25 @@ public static class AdtExportPipeline
             try
             {
                 var wdt = new WdtAlphaScanner(wdtPath);
+
+                var mapName = Path.GetFileNameWithoutExtension(wdtPath);
+                var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
+                Directory.CreateDirectory(logDir);
+                using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
+
+                var fixup = new AssetFixupPolicy(
+                    resolver,
+                    opts.FallbackTileset,
+                    opts.FallbackNonTilesetBlp,
+                    opts.FallbackWmo,
+                    opts.FallbackM2,
+                    opts.AssetFuzzy,
+                    opts.UseFallbacks,
+                    opts.EnableFixups,
+                    fixupLogger);
+
+                var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
+
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
 

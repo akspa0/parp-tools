@@ -129,7 +129,27 @@ public sealed class MultiListfileResolver
             .FirstOrDefault();
         if (primaryMatch is not null) return primaryMatch;
 
-        // Fallback to secondary
+        // Heuristic: common prefix variants (e.g., AZ_ + name)
+        var variants = new[] { $"AZ_{targetNameNoExt}", $"A_{targetNameNoExt}", $"{targetNameNoExt}_A" };
+        primaryMatch = _primary.Keys
+            .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => variants.Any(v => string.Equals(Path.GetFileNameWithoutExtension(p), v, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(p => PathSimilarity(norm, p))
+            .FirstOrDefault();
+        if (primaryMatch is not null) return primaryMatch;
+
+        // Fuzzy basename similarity over primary
+        var primaryFuzzy = _primary.Keys
+            .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Select(p => new { Path = p, Score = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)) })
+            .Where(x => x.Score >= 0.70)
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => PathSimilarity(norm, x.Path))
+            .Select(x => x.Path)
+            .FirstOrDefault();
+        if (primaryFuzzy is not null) return primaryFuzzy;
+
+        // Secondary: exact filename
         var secondaryMatch = _secondary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
             .Where(p => string.Equals(Path.GetFileName(p), targetName, StringComparison.OrdinalIgnoreCase))
@@ -137,12 +157,32 @@ public sealed class MultiListfileResolver
             .FirstOrDefault();
         if (secondaryMatch is not null) return secondaryMatch;
 
+        // Secondary: exact filename without ext
         secondaryMatch = _secondary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
             .Where(p => string.Equals(Path.GetFileNameWithoutExtension(p), targetNameNoExt, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(p => PathSimilarity(norm, p))
             .FirstOrDefault();
         if (secondaryMatch is not null) return secondaryMatch;
+
+        // Secondary: prefix variants
+        secondaryMatch = _secondary.Keys
+            .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => variants.Any(v => string.Equals(Path.GetFileNameWithoutExtension(p), v, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(p => PathSimilarity(norm, p))
+            .FirstOrDefault();
+        if (secondaryMatch is not null) return secondaryMatch;
+
+        // Secondary: fuzzy basename similarity
+        var secondaryFuzzy = _secondary.Keys
+            .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Select(p => new { Path = p, Score = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)) })
+            .Where(x => x.Score >= 0.70)
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => PathSimilarity(norm, x.Path))
+            .Select(x => x.Path)
+            .FirstOrDefault();
+        if (secondaryFuzzy is not null) return secondaryFuzzy;
 
         return null;
     }
@@ -155,5 +195,60 @@ public sealed class MultiListfileResolver
         var inter = segA.Intersect(segB, StringComparer.OrdinalIgnoreCase).Count();
         var union = segA.Union(segB, StringComparer.OrdinalIgnoreCase).Count();
         return union == 0 ? 0 : (double)inter / union;
+    }
+
+    private static double BasenameSimilarity(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return 0.0;
+        var sa = Sanitize(a);
+        var sb = Sanitize(b);
+        if (sa.Equals(sb, StringComparison.OrdinalIgnoreCase)) return 1.0;
+        if (sa.Contains(sb, StringComparison.OrdinalIgnoreCase) || sb.Contains(sa, StringComparison.OrdinalIgnoreCase)) return 0.9;
+        // Levenshtein-based normalized similarity
+        int dist = Levenshtein(sa.ToLowerInvariant(), sb.ToLowerInvariant());
+        int maxLen = Math.Max(sa.Length, sb.Length);
+        if (maxLen == 0) return 0.0;
+        return 1.0 - ((double)dist / maxLen);
+    }
+
+    private static string Sanitize(string s)
+    {
+        // remove non-alphanumeric and collapse
+        var chars = s.Where(ch => char.IsLetterOrDigit(ch)).ToArray();
+        return new string(chars);
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        int n = a.Length;
+        int m = b.Length;
+        if (n == 0) return m;
+        if (m == 0) return n;
+        var d = new int[n + 1, m + 1];
+        for (int i = 0; i <= n; i++) d[i, 0] = i;
+        for (int j = 0; j <= m; j++) d[0, j] = j;
+        for (int i = 1; i <= n; i++)
+        {
+            for (int j = 1; j <= m; j++)
+            {
+                int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+        return d[n, m];
+    }
+
+    public bool ContainsPrimary(string path)
+    {
+        var norm = WowPath.Normalize(path);
+        return _primary.ContainsKey(norm);
+    }
+
+    public bool ContainsSecondary(string path)
+    {
+        var norm = WowPath.Normalize(path);
+        return _secondary.ContainsKey(norm);
     }
 }

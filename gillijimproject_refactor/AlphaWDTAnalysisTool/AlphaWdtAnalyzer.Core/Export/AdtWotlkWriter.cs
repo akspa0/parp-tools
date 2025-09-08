@@ -280,7 +280,7 @@ public static class AdtWotlkWriter
 
     private static string ReverseFourCC(string s)
     {
-        if (s is null || s.Length != 4) return s;
+        if (string.IsNullOrEmpty(s) || s.Length != 4) return s ?? string.Empty;
         return new string(new[] { s[3], s[2], s[1], s[0] });
     }
 
