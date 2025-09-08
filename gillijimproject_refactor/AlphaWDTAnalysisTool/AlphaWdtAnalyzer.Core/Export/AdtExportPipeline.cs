@@ -45,35 +45,54 @@ public static class AdtExportPipeline
         var adtScanner = new AdtScanner();
         var result = adtScanner.Scan(wdt);
 
-        // group placements per tile
-        var byTile = result.Placements.GroupBy(p => (p.TileX, p.TileY));
-        foreach (var g in byTile)
+        // Build union of tiles from placements and from WDT offsets (non-zero)
+        var placementsByTile = result.Placements
+            .GroupBy(p => (p.TileX, p.TileY))
+            .ToDictionary(g => g.Key, g => (IEnumerable<PlacementRecord>)g);
+
+        var candidateTiles = new HashSet<(int tx, int ty)>(placementsByTile.Keys);
+        for (int adtNum = 0; adtNum < wdt.AdtMhdrOffsets.Count; adtNum++)
         {
-            var (x, y) = g.Key;
+            if (wdt.AdtMhdrOffsets[adtNum] > 0)
+            {
+                int x = adtNum % 64;
+                int y = adtNum / 64;
+                candidateTiles.Add((x, y));
+            }
+        }
+
+        foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
+        {
+            var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
+            var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
 
             IReadOnlyList<int>? alphaAreaIds = null;
-            // Always try to compute alpha area ids so we can emit CSV even without LK mapper
             int adtNum = (y * 64) + x;
             int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
             if (offset > 0)
             {
                 var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                 alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
-            }
 
-            var ctx = new AdtWotlkWriter.WriteContext
-            {
-                ExportDir = opts.ExportDir,
-                MapName = wdt.MapName,
-                TileX = x,
-                TileY = y,
-                Placements = g,
-                Fixup = fixup,
-                ConvertToMh2o = opts.ConvertToMh2o,
-                AreaMapper = areaMapper,
-                AlphaAreaIds = alphaAreaIds
-            };
-            AdtWotlkWriter.WritePlaceholder(ctx);
+                var ctx = new AdtWotlkWriter.WriteContext
+                {
+                    ExportDir = opts.ExportDir,
+                    MapName = wdt.MapName,
+                    TileX = x,
+                    TileY = y,
+                    Placements = g,
+                    Fixup = fixup,
+                    ConvertToMh2o = opts.ConvertToMh2o,
+                    AreaMapper = areaMapper,
+                    AlphaAreaIds = alphaAreaIds,
+                    WdtPath = wdt.WdtPath,
+                    AdtNumber = adtNum,
+                    AdtOffset = offset,
+                    MdnmFiles = wdt.MdnmFiles,
+                    MonmFiles = wdt.MonmFiles
+                };
+                AdtWotlkWriter.WriteBinary(ctx);
+            }
         }
     }
 
@@ -104,10 +123,26 @@ public static class AdtExportPipeline
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
 
-                var byTile = result.Placements.GroupBy(p => (p.TileX, p.TileY));
-                foreach (var g in byTile)
+                // Union of placements and WDT-present tiles
+                var placementsByTile = result.Placements
+                    .GroupBy(p => (p.TileX, p.TileY))
+                    .ToDictionary(g => g.Key, g => (IEnumerable<PlacementRecord>)g);
+
+                var candidateTiles = new HashSet<(int tx, int ty)>(placementsByTile.Keys);
+                for (int adtNum = 0; adtNum < wdt.AdtMhdrOffsets.Count; adtNum++)
                 {
-                    var (x, y) = g.Key;
+                    if (wdt.AdtMhdrOffsets[adtNum] > 0)
+                    {
+                        int x = adtNum % 64;
+                        int y = adtNum / 64;
+                        candidateTiles.Add((x, y));
+                    }
+                }
+
+                foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
+                {
+                    var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
+                    var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
 
                     IReadOnlyList<int>? alphaAreaIds = null;
                     int adtNum = (y * 64) + x;
@@ -116,21 +151,26 @@ public static class AdtExportPipeline
                     {
                         var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                         alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
-                    }
 
-                    var ctx = new AdtWotlkWriter.WriteContext
-                    {
-                        ExportDir = opts.ExportDir,
-                        MapName = wdt.MapName,
-                        TileX = x,
-                        TileY = y,
-                        Placements = g,
-                        Fixup = fixup,
-                        ConvertToMh2o = opts.ConvertToMh2o,
-                        AreaMapper = areaMapper,
-                        AlphaAreaIds = alphaAreaIds
-                    };
-                    AdtWotlkWriter.WritePlaceholder(ctx);
+                        var ctx = new AdtWotlkWriter.WriteContext
+                        {
+                            ExportDir = opts.ExportDir,
+                            MapName = wdt.MapName,
+                            TileX = x,
+                            TileY = y,
+                            Placements = g,
+                            Fixup = fixup,
+                            ConvertToMh2o = opts.ConvertToMh2o,
+                            AreaMapper = areaMapper,
+                            AlphaAreaIds = alphaAreaIds,
+                            WdtPath = wdt.WdtPath,
+                            AdtNumber = adtNum,
+                            AdtOffset = offset,
+                            MdnmFiles = wdt.MdnmFiles,
+                            MonmFiles = wdt.MonmFiles
+                        };
+                        AdtWotlkWriter.WriteBinary(ctx);
+                    }
                 }
             }
             catch (Exception ex)
