@@ -6,6 +6,11 @@ using System.Text;
 using GillijimProject.WowFiles.Alpha;
 using GillijimProject.WowFiles.LichKing;
 
+#if USE_DBCD
+using DBCD;
+using DBCD.Providers;
+#endif
+
 namespace AlphaWdtAnalyzer.Core.Export;
 
 public static class AdtExportPipeline
@@ -25,6 +30,8 @@ public static class AdtExportPipeline
         public bool AssetFuzzy { get; init; } = true;
         public string? AreaAlphaPath { get; init; }
         public string? AreaLkPath { get; init; }
+        public string? DbdDefinitionsDir { get; init; }
+        public string? DbdBuild { get; init; }
     }
 
     public static void ExportSingle(Options opts)
@@ -81,6 +88,9 @@ public static class AdtExportPipeline
 
                 var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
 
+                // Analysis-only: fetch raw alpha ADT MCNK area IDs (no decoding)
+                var rawAlphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+
                 var fixedM2 = wdt.MdnmFiles.Select(n => fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
                 var fixedWmo = wdt.MonmFiles.Select(n => fixup.Resolve(AssetType.Wmo, n)).ToList();
 
@@ -95,24 +105,50 @@ public static class AdtExportPipeline
                 adtLk.ToFile(outFile);
 
                 ReplaceMtexOnDisk(outFile, fixedTextures);
-            }
 
-            var ctx = new AdtWotlkWriter.WriteContext
+                // Write placeholder summary with raw area IDs for per-MCNK CSV (mapping disabled)
+                var ctx = new AdtWotlkWriter.WriteContext
+                {
+                    ExportDir = mapDir,
+                    MapName = wdt.MapName,
+                    TileX = x,
+                    TileY = y,
+                    Placements = g,
+                    Fixup = fixup,
+                    ConvertToMh2o = opts.ConvertToMh2o,
+                    AreaMapper = null,
+                    AlphaAreaIds = rawAlphaAreaIds
+                };
+                AdtWotlkWriter.WritePlaceholder(ctx);
+            }
+            else
             {
-                ExportDir = mapDir,
-                MapName = wdt.MapName,
-                TileX = x,
-                TileY = y,
-                Placements = g,
-                Fixup = fixup,
-                ConvertToMh2o = opts.ConvertToMh2o,
-                AreaMapper = null,
-                AlphaAreaIds = null
-            };
-            AdtWotlkWriter.WritePlaceholder(ctx);
+                // Still emit placeholder row for tiles without embedded ADT for completeness (no area IDs available)
+                var ctx = new AdtWotlkWriter.WriteContext
+                {
+                    ExportDir = mapDir,
+                    MapName = wdt.MapName,
+                    TileX = x,
+                    TileY = y,
+                    Placements = g,
+                    Fixup = fixup,
+                    ConvertToMh2o = opts.ConvertToMh2o,
+                    AreaMapper = null,
+                    AlphaAreaIds = null
+                };
+                AdtWotlkWriter.WritePlaceholder(ctx);
+            }
         }
 
         WriteMinimalWdtLk(Path.Combine(mapDir, $"{wdt.MapName}.wdt"), presentTiles);
+
+        // Alpha DBC CSVs via DBCD (with official definitions)
+        if (!string.IsNullOrWhiteSpace(opts.AreaAlphaPath))
+        {
+            WriteAlphaDbcDump(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.dump.csv"), opts.DbdBuild);
+            WriteAlphaNormalizedCsv(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.normalized.csv"), opts.DbdBuild);
+            WriteAlphaAreaHierarchyCsv(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.hierarchy.csv"), opts.DbdBuild);
+        }
     }
 
     public static void ExportBatch(Options opts)
@@ -176,6 +212,9 @@ public static class AdtExportPipeline
 
                         var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
 
+                        // Analysis-only: fetch raw alpha ADT MCNK area IDs (no decoding)
+                        var rawAlphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+
                         var fixedM2 = wdt.MdnmFiles.Select(n => fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
                         var fixedWmo = wdt.MonmFiles.Select(n => fixup.Resolve(AssetType.Wmo, n)).ToList();
 
@@ -190,24 +229,48 @@ public static class AdtExportPipeline
                         adtLk.ToFile(outFile);
 
                         ReplaceMtexOnDisk(outFile, fixedTextures);
-                    }
 
-                    var ctx = new AdtWotlkWriter.WriteContext
+                        var ctx = new AdtWotlkWriter.WriteContext
+                        {
+                            ExportDir = mapDir,
+                            MapName = wdt.MapName,
+                            TileX = x,
+                            TileY = y,
+                            Placements = g,
+                            Fixup = fixup,
+                            ConvertToMh2o = opts.ConvertToMh2o,
+                            AreaMapper = null,
+                            AlphaAreaIds = rawAlphaAreaIds
+                        };
+                        AdtWotlkWriter.WritePlaceholder(ctx);
+                    }
+                    else
                     {
-                        ExportDir = mapDir,
-                        MapName = wdt.MapName,
-                        TileX = x,
-                        TileY = y,
-                        Placements = g,
-                        Fixup = fixup,
-                        ConvertToMh2o = opts.ConvertToMh2o,
-                        AreaMapper = null,
-                        AlphaAreaIds = null
-                    };
-                    AdtWotlkWriter.WritePlaceholder(ctx);
+                        var ctx = new AdtWotlkWriter.WriteContext
+                        {
+                            ExportDir = mapDir,
+                            MapName = wdt.MapName,
+                            TileX = x,
+                            TileY = y,
+                            Placements = g,
+                            Fixup = fixup,
+                            ConvertToMh2o = opts.ConvertToMh2o,
+                            AreaMapper = null,
+                            AlphaAreaIds = null
+                        };
+                        AdtWotlkWriter.WritePlaceholder(ctx);
+                    }
                 }
 
                 WriteMinimalWdtLk(Path.Combine(mapDir, $"{wdt.MapName}.wdt"), presentTiles);
+
+                // Alpha DBC CSVs via DBCD (with official definitions)
+                if (!string.IsNullOrWhiteSpace(opts.AreaAlphaPath))
+                {
+                    WriteAlphaDbcDump(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.dump.csv"), opts.DbdBuild);
+                    WriteAlphaNormalizedCsv(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.normalized.csv"), opts.DbdBuild);
+                    WriteAlphaAreaHierarchyCsv(opts.AreaAlphaPath!, opts.DbdDefinitionsDir, Path.Combine(mapDir, "alpha_AreaTable.hierarchy.csv"), opts.DbdBuild);
+                }
             }
             catch (Exception ex)
             {
@@ -314,6 +377,254 @@ public static class AdtExportPipeline
         }
     }
 
+    // Alpha AreaTable DBC CSV via DBCD (with fallback to raw parser)
+    private static void WriteAlphaDbcDump(string dbcPath, string? dbdDir, string outCsvPath, string? dbdBuild = null)
+    {
+        try
+        {
+#if USE_DBCD
+            var dbcDir = Path.GetDirectoryName(dbcPath)!;
+            var dbc = new DBCD.DBCD(new FilesystemDBCProvider(dbcDir), new FilesystemDBDProvider(dbdDir ?? Path.Combine(dbcDir, "..")));
+            var build = ResolveDbdBuild(dbdBuild, dbcPath, dbcDir);
+            var storage = dbc.Load("AreaTable", build: build, locale: DBCD.Locale.EnUS);
+            var columns = storage.AvailableColumns;
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            sw.WriteLine("id," + string.Join(',', columns));
+            var dict = storage.ToDictionary();
+            foreach (var kvp in dict.OrderBy(k => k.Key))
+            {
+                var row = kvp.Value;
+                var cells = new List<string> { kvp.Key.ToString() };
+                foreach (var col in columns)
+                {
+                    var val = row[col];
+                    string s = FormatDbcdValue(val);
+                    cells.Add(s);
+                }
+                sw.WriteLine(string.Join(',', cells));
+            }
+            return;
+#endif
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaDbcDump DBCD failed for '{dbcPath}': {ex.Message}, falling back to raw parser.");
+        }
+        // Fallback: raw
+        try
+        {
+            var t = AlphaWdtAnalyzer.Core.Dbc.RawDbcParser.Parse(dbcPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            // Determine which columns have any guessed string
+            var stringCols = new HashSet<int>();
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                var row = t.Rows[i];
+                for (int f = 0; f < t.FieldCount; f++)
+                {
+                    if (!string.IsNullOrWhiteSpace(row.GuessedStrings[f])) stringCols.Add(f);
+                }
+            }
+            var headers = new List<string> { "row" };
+            headers.AddRange(Enumerable.Range(0, t.FieldCount).Select(i => $"col{i}"));
+            headers.AddRange(stringCols.OrderBy(i => i).Select(i => $"col{i}_str"));
+            sw.WriteLine(string.Join(',', headers));
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                var row = t.Rows[i];
+                var cells = new List<string> { i.ToString() };
+                for (int f = 0; f < t.FieldCount; f++) cells.Add(unchecked((int)row.Fields[f]).ToString());
+                foreach (var sc in stringCols.OrderBy(i2 => i2))
+                {
+                    var s = row.GuessedStrings[sc] ?? string.Empty;
+                    cells.Add($"\"{EscapeCsv(s)}\"");
+                }
+                sw.WriteLine(string.Join(',', cells));
+            }
+        }
+        catch (Exception ex2)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaDbcDump raw failed for '{dbcPath}': {ex2.Message}");
+        }
+    }
+
+    private static void WriteAlphaNormalizedCsv(string alphaDbcPath, string? dbdDir, string outCsvPath, string? dbdBuild = null)
+    {
+        try
+        {
+#if USE_DBCD
+            var dbcDir = Path.GetDirectoryName(alphaDbcPath)!;
+            var dbc = new DBCD.DBCD(new FilesystemDBCProvider(dbcDir), new FilesystemDBDProvider(dbdDir ?? Path.Combine(dbcDir, "..")));
+            var build = ResolveDbdBuild(dbdBuild, alphaDbcPath, dbcDir);
+            var storage = dbc.Load("AreaTable", build: build, locale: DBCD.Locale.EnUS);
+            var columns = storage.AvailableColumns;
+            string? parentCol = columns.FirstOrDefault(c => string.Equals(c, "ParentAreaID", StringComparison.OrdinalIgnoreCase))
+                                ?? columns.FirstOrDefault(c => c.Contains("Parent", StringComparison.OrdinalIgnoreCase));
+            string? nameCol = columns.FirstOrDefault(c => c.EndsWith("_lang", StringComparison.OrdinalIgnoreCase))
+                              ?? columns.FirstOrDefault(c => c.IndexOf("Name", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            sw.WriteLine("row_id,area_id,parent_area_id,name,parent_col,name_col");
+            var dict = storage.ToDictionary();
+            foreach (var kvp in dict.OrderBy(k => k.Key))
+            {
+                int id = kvp.Key;
+                var row = kvp.Value;
+                int parent = 0;
+                if (!string.IsNullOrEmpty(parentCol))
+                {
+                    var pv = row[parentCol!];
+                    parent = TryToInt(pv);
+                }
+                string name = string.Empty;
+                if (!string.IsNullOrEmpty(nameCol))
+                {
+                    var nv = row[nameCol!];
+                    name = FormatDbcdString(nv);
+                }
+                sw.WriteLine($"{id},{id},{parent},\"{EscapeCsv(name)}\",{(parentCol ?? string.Empty)},{(nameCol ?? string.Empty)}");
+            }
+            return;
+#endif
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaNormalizedCsv DBCD failed for '{alphaDbcPath}': {ex.Message}, falling back to raw parser.");
+        }
+        // Fallback to raw
+        try
+        {
+            var t = AlphaWdtAnalyzer.Core.Dbc.RawDbcParser.Parse(alphaDbcPath);
+            int areaIdIndex = 1, parentIdIndex = 3, nameIndex = 14;
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            sw.WriteLine("row_id,area_id,parent_area_id,name,area_id_col,parent_id_col,name_col");
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                var row = t.Rows[i];
+                int rowId = unchecked((int)row.Fields[0]);
+                int areaId = (areaIdIndex < t.FieldCount) ? unchecked((int)row.Fields[areaIdIndex]) : 0;
+                int parentId = (parentIdIndex < t.FieldCount) ? unchecked((int)row.Fields[parentIdIndex]) : 0;
+                string name = (nameIndex < t.FieldCount) ? (row.GuessedStrings[nameIndex] ?? string.Empty) : string.Empty;
+                sw.WriteLine($"{rowId},{areaId},{parentId},\"{EscapeCsv(name)}\",{areaIdIndex},{parentIdIndex},{nameIndex}");
+            }
+        }
+        catch (Exception ex2)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaNormalizedCsv raw failed for '{alphaDbcPath}': {ex2.Message}");
+        }
+    }
+
+    private static void WriteAlphaAreaHierarchyCsv(string alphaDbcPath, string? dbdDir, string outCsvPath, string? dbdBuild = null)
+    {
+        try
+        {
+#if USE_DBCD
+            var dbcDir = Path.GetDirectoryName(alphaDbcPath)!;
+            var dbc = new DBCD.DBCD(new FilesystemDBCProvider(dbcDir), new FilesystemDBDProvider(dbdDir ?? Path.Combine(dbcDir, "..")));
+            var build = ResolveDbdBuild(dbdBuild, alphaDbcPath, dbcDir);
+            var storage = dbc.Load("AreaTable", build: build, locale: DBCD.Locale.EnUS);
+            var columns = storage.AvailableColumns;
+            string? parentCol = columns.FirstOrDefault(c => string.Equals(c, "ParentAreaID", StringComparison.OrdinalIgnoreCase))
+                                ?? columns.FirstOrDefault(c => c.Contains("Parent", StringComparison.OrdinalIgnoreCase));
+            string? nameCol = columns.FirstOrDefault(c => c.EndsWith("_lang", StringComparison.OrdinalIgnoreCase))
+                              ?? columns.FirstOrDefault(c => c.IndexOf("Name", StringComparison.OrdinalIgnoreCase) >= 0);
+
+            // Build name map by raw area id (ID)
+            var dict = storage.ToDictionary();
+            var namesById = dict.OrderBy(k => k.Key).ToDictionary(k => k.Key, k =>
+            {
+                if (string.IsNullOrEmpty(nameCol)) return string.Empty;
+                return FormatDbcdString(k.Value[nameCol!]);
+            });
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            sw.WriteLine("area_id,parent_area_id,area_name,parent_name");
+            foreach (var kvp in dict.OrderBy(k => k.Key))
+            {
+                int id = kvp.Key;
+                int parent = 0;
+                if (!string.IsNullOrEmpty(parentCol)) parent = TryToInt(kvp.Value[parentCol!]);
+                var areaName = namesById.TryGetValue(id, out var an) ? an : string.Empty;
+                var parentName = namesById.TryGetValue(parent, out var pn) ? pn : string.Empty;
+                sw.WriteLine($"{id},{parent},\"{EscapeCsv(areaName)}\",\"{EscapeCsv(parentName)}\"");
+            }
+            return;
+#endif
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaAreaHierarchyCsv DBCD failed for '{alphaDbcPath}': {ex.Message}, falling back to raw parser.");
+        }
+        // Fallback
+        try
+        {
+            var t = AlphaWdtAnalyzer.Core.Dbc.RawDbcParser.Parse(alphaDbcPath);
+            int areaIdIndex = 1, parentIdIndex = 3, nameIndex = 14;
+            var namesByAreaId = new Dictionary<int, string>();
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                var row = t.Rows[i];
+                int areaId = (areaIdIndex < t.FieldCount) ? unchecked((int)row.Fields[areaIdIndex]) : 0;
+                string name = (nameIndex < t.FieldCount) ? (row.GuessedStrings[nameIndex] ?? string.Empty) : string.Empty;
+                if (!namesByAreaId.ContainsKey(areaId)) namesByAreaId[areaId] = name;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outCsvPath)!);
+            using var sw = new StreamWriter(outCsvPath, false, Encoding.UTF8);
+            sw.WriteLine("area_id,parent_area_id,area_name,parent_name");
+            for (int i = 0; i < t.Rows.Count; i++)
+            {
+                var row = t.Rows[i];
+                int areaId = (areaIdIndex < t.FieldCount) ? unchecked((int)row.Fields[areaIdIndex]) : 0;
+                int parentId = (parentIdIndex < t.FieldCount) ? unchecked((int)row.Fields[parentIdIndex]) : 0;
+                string areaName = (nameIndex < t.FieldCount) ? (row.GuessedStrings[nameIndex] ?? string.Empty) : string.Empty;
+                namesByAreaId.TryGetValue(parentId, out var parentName);
+                sw.WriteLine($"{areaId},{parentId},\"{EscapeCsv(areaName)}\",\"{EscapeCsv(parentName ?? string.Empty)}\"");
+            }
+        }
+        catch (Exception ex2)
+        {
+            Console.Error.WriteLine($"Warn: WriteAlphaAreaHierarchyCsv raw failed for '{alphaDbcPath}': {ex2.Message}");
+        }
+    }
+
+    private static string FormatDbcdValue(object? val)
+    {
+        if (val is null) return string.Empty;
+        if (val is string s) return $"\"{EscapeCsv(s)}\"";
+        if (val is Array arr)
+        {
+            var parts = new List<string>();
+            foreach (var o in arr) parts.Add(o?.ToString() ?? string.Empty);
+            return string.Join('|', parts);
+        }
+        return val.ToString() ?? string.Empty;
+    }
+
+    private static string FormatDbcdString(object? val)
+    {
+        if (val is string s) return s;
+        if (val is Array arr && arr.Length > 0 && arr.GetValue(0) is string s2) return s2;
+        return val?.ToString() ?? string.Empty;
+    }
+
+    private static int TryToInt(object? val)
+    {
+        try
+        {
+            return Convert.ToInt32(val);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     // Write a 64x64 tile matrix CSV for diagnostics and emit warnings on suspicious conditions.
     private static void WriteTileDiagnostics(
         string exportDir,
@@ -377,4 +688,52 @@ public static class AdtExportPipeline
         }
         return s;
     }
+
+#if USE_DBCD
+    private static string? ResolveDbdBuild(string? explicitBuild, string dbFilePath, string dbcDir)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitBuild))
+        {
+            Console.WriteLine($"DBCD build resolved (explicit): {explicitBuild}");
+            return explicitBuild;
+        }
+        // Try to infer from parent folders like ...\0.5.5\tree\...
+        static bool LooksLikeXyz(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            var dotCount = s.Count(c => c == '.');
+            if (dotCount != 2) return false;
+            var parts = s.Split('.');
+            if (parts.Length != 3) return false;
+            return parts.All(p => int.TryParse(p, out _));
+        }
+
+        var set = new LinkedList<string>();
+        foreach (var p in new[] { dbFilePath, dbcDir })
+        {
+            try
+            {
+                var parts = Path.GetFullPath(p).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                foreach (var part in parts)
+                {
+                    if (LooksLikeXyz(part))
+                    {
+                        var v = part;
+                        set.AddLast(v + ".0");
+                        set.AddLast(v + ".99999");
+                    }
+                }
+            }
+            catch { }
+        }
+        if (set.Count > 0)
+        {
+            var unique = set.Distinct().ToList();
+            Console.WriteLine($"DBCD build candidates inferred: {string.Join(",", unique)}");
+            return unique.First();
+        }
+        Console.Error.WriteLine("Warn: Could not infer DBCD build from paths; DBCD may fail and fall back to raw parser.");
+        return null;
+    }
+#endif
 }

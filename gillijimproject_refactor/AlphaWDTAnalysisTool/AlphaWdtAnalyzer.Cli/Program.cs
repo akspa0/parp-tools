@@ -11,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--dbd-dir <dir>] [--dbd-build <x.x.x.xxxxx>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--dbd-dir <dir>] [--dbd-build <x.x.x.xxxxx>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]");
         return 2;
     }
 
@@ -27,6 +27,8 @@ public static class Program
         int? clusterThreshold = null;
         int? clusterGap = null;
         string? dbcDir = null;
+        string? dbdDir = null;
+        string? dbdBuild = null;
         string? areaAlpha = null;
         string? areaLk = null;
         // export flags
@@ -77,6 +79,15 @@ public static class Program
                 case "--dbc-dir":
                     if (i + 1 >= args.Length) return Usage();
                     dbcDir = args[++i];
+                    break;
+                case "--dbd-build":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbdBuild = args[++i];
+                    break;
+                case "--dbd-dir":
+                case "-dbd-dir": // alias convenience
+                    if (i + 1 >= args.Length) return Usage();
+                    dbdDir = args[++i];
                     break;
                 case "--area-alpha":
                     if (i + 1 >= args.Length) return Usage();
@@ -169,6 +180,18 @@ public static class Program
             Console.Error.WriteLine($"AreaTable LK not found: {areaLk}");
             return 1;
         }
+        // Default DBD definitions dir to lib/WoWDBDefs/definitions if it exists
+        if (string.IsNullOrWhiteSpace(dbdDir))
+        {
+            var defaultDbd = Path.Combine(AppContext.BaseDirectory, "..", "..", "lib", "WoWDBDefs", "definitions");
+            defaultDbd = Path.GetFullPath(defaultDbd);
+            if (Directory.Exists(defaultDbd)) dbdDir = defaultDbd;
+        }
+        if (!string.IsNullOrWhiteSpace(dbdDir) && !Directory.Exists(dbdDir))
+        {
+            Console.Error.WriteLine($"DBD definitions dir not found: {dbdDir}");
+            return 1;
+        }
         if (exportAdt)
         {
             if (string.IsNullOrWhiteSpace(exportDir))
@@ -214,7 +237,9 @@ public static class Program
                         ConvertToMh2o = mh2o,
                         AssetFuzzy = assetFuzzy,
                         AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk
+                        AreaLkPath = areaLk,
+                        DbdDefinitionsDir = dbdDir,
+                        DbdBuild = dbdBuild
                     });
                 }
             }
@@ -259,7 +284,9 @@ public static class Program
                         ConvertToMh2o = mh2o,
                         AssetFuzzy = assetFuzzy,
                         AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk
+                        AreaLkPath = areaLk,
+                        DbdDefinitionsDir = dbdDir,
+                        DbdBuild = dbdBuild
                     });
                 }
             }

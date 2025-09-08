@@ -3,14 +3,10 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);USE_DBCD</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="Exists('..\\..\\lib\\wow.tools.local\\DBCD\\DBCD\\DBCD.csproj')">
     <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
   </ItemGroup>
-  <PropertyGroup Condition="Exists('..\\..\\lib\\wow.tools.local\\DBCD\\DBCD\\DBCD.csproj')">
-    <DefineConstants>$(DefineConstants);USE_DBCD</DefineConstants>
-  </PropertyGroup>
 </Project>
