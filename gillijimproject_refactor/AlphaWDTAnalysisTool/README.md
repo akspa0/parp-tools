@@ -27,6 +27,44 @@ This folder contains the tool and its CLI.
 
 ---
 
+## Dependencies & Setup
+
+This tool expects a couple of external resources to be available locally.
+
+- Community listfile (CSV) — required
+  - Download the latest “with capitals” CSV:
+    - https://github.com/wowdev/wow-listfile/releases/download/202509072101/community-listfile-withcapitals.csv
+  - Save it somewhere accessible (examples below use `test_data/community-listfile-withcapitals.csv`).
+
+- LK 3.x listfile (smaller, optional but recommended)
+  - Download the ZIP from: http://www.zezula.net/download/listfiles.zip
+  - Extract the archive and locate the 3.x-specific listfile (commonly named like `listfile - 3.x.txt`).
+  - Optionally rename it to `World of Warcraft 3x.txt` to match example commands.
+
+- Libraries to clone into the repository (as source dependencies)
+  - Clone these into the repository `lib/` folder:
+    - wow.tools.local: https://github.com/Marlamin/wow.tools.local/
+    - WoWDBDefs: https://github.com/wowdev/WoWDBDefs
+
+  Example (PowerShell from repo root):
+
+  ```powershell
+  # Ensure lib folder exists
+  mkdir lib -Force | Out-Null
+
+  # Clone wow.tools.local with submodules
+  git clone --recurse-submodules https://github.com/Marlamin/wow.tools.local.git lib/wow.tools.local
+
+  # Clone WoWDBDefs
+  git clone https://github.com/wowdev/WoWDBDefs.git lib/WoWDBDefs
+  ```
+
+  Notes:
+  - If you already have these folders, ensure they are up to date and run `git submodule update --init --recursive` in `lib/wow.tools.local` if needed.
+  - The solution is wired to consume these as source dependencies under `lib/`.
+
+---
+
 ## Build
 
 ```powershell
@@ -147,6 +185,42 @@ Notes:
 - Fallbacks:
   - `--fallback-tileset`, `--fallback-wmo`, `--fallback-m2`, `--fallback-blp` can be used when assets are missing or unmapped.
   - `--asset-fuzzy on|off` toggles fuzzy matching during fixups.
+
+---
+
+## Quick Start
+
+1) Clone required libraries under `lib/`:
+
+```powershell
+mkdir lib -Force | Out-Null
+git clone --recurse-submodules https://github.com/Marlamin/wow.tools.local.git lib/wow.tools.local
+git clone https://github.com/wowdev/WoWDBDefs.git lib/WoWDBDefs
+```
+
+2) Download listfiles:
+
+- Community CSV: https://github.com/wowdev/wow-listfile/releases/download/202509072101/community-listfile-withcapitals.csv
+- LK 3.x listfile: http://www.zezula.net/download/listfiles.zip (extract and locate the 3.x file; optionally rename to `World of Warcraft 3x.txt`)
+
+3) Build:
+
+```powershell
+dotnet build
+```
+
+4) Run (single map example):
+
+```powershell
+dotnet run --project .\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli -- \
+  --input "<path-to>\World\Maps\<MapName>\<MapName>.wdt" \
+  --listfile "<path-to>\community-listfile-withcapitals.csv" \
+  --lk-listfile "<path-to>\World of Warcraft 3x.txt" \
+  --out "<output-root>" \
+  --export-adt --export-dir "<export-root>" \
+  --area-alpha "<path-to>\AreaTable.dbc" \
+  --dbc-dir ".\lib\WoWDBDefs\definitions"
+```
 
 ---
 
