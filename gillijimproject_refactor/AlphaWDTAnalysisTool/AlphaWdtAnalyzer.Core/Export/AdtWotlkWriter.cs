@@ -189,7 +189,7 @@ public static class AdtWotlkWriter
         // Patch MMDX (M2/MDX) and MWMO (WMO) name tables in-place
         try
         {
-            PatchStringTableInPlace(outFile, "MMDX", (orig) => ctx.Fixup.ResolveWithMethod(AssetType.MdxOrM2, orig, out _));
+            PatchStringTableInPlace(outFile, "MMDX", AssetType.MdxOrM2, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.MdxOrM2, orig, out _));
         }
         catch (Exception ex)
         {
@@ -197,7 +197,7 @@ public static class AdtWotlkWriter
         }
         try
         {
-            PatchStringTableInPlace(outFile, "MWMO", (orig) => ctx.Fixup.ResolveWithMethod(AssetType.Wmo, orig, out _));
+            PatchStringTableInPlace(outFile, "MWMO", AssetType.Wmo, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.Wmo, orig, out _));
         }
         catch (Exception ex)
         {
@@ -340,6 +340,7 @@ public static class AdtWotlkWriter
 
                 // Enforce capacity: try resolved; if too long, try fallbacks; else skip
                 ReadOnlySpan<byte> toWrite = Encoding.ASCII.GetBytes(resolved);
+                string decision = "resolved";
                 if (toWrite.Length > capacity)
                 {
                     // tileset fallback
@@ -347,7 +348,7 @@ public static class AdtWotlkWriter
                     if (!string.IsNullOrWhiteSpace(tf) && fixup.ExistsPath(tf))
                     {
                         var tfBytes = Encoding.ASCII.GetBytes(tf);
-                        if (tfBytes.Length <= capacity) toWrite = tfBytes;
+                        if (tfBytes.Length <= capacity) { toWrite = tfBytes; decision = "capacity_fallback:tileset"; }
                     }
                 }
                 if (toWrite.Length > capacity)
@@ -357,7 +358,7 @@ public static class AdtWotlkWriter
                     if (!string.IsNullOrWhiteSpace(nf) && fixup.ExistsPath(nf))
                     {
                         var nfBytes = Encoding.ASCII.GetBytes(nf);
-                        if (nfBytes.Length <= capacity) toWrite = nfBytes;
+                        if (nfBytes.Length <= capacity) { toWrite = nfBytes; decision = "capacity_fallback:non_tileset"; }
                     }
                 }
 
@@ -366,10 +367,18 @@ public static class AdtWotlkWriter
                     Array.Copy(toWrite.ToArray(), 0, data, start, toWrite.Length);
                     // pad remaining to zero
                     for (int k = start + toWrite.Length; k < end; k++) data[k] = 0;
+                    if (decision.StartsWith("capacity_fallback", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fixup.LogDiagnostic(AssetType.Blp, norm, Encoding.ASCII.GetString(toWrite), decision);
+                    }
                 }
                 else
                 {
                     // overflow or unchanged; leave as-is
+                    if (toWrite.Length > capacity)
+                    {
+                        fixup.LogDiagnostic(AssetType.Blp, norm, resolved, "overflow_skip:mtex");
+                    }
                 }
             }
 
@@ -475,7 +484,7 @@ public static class AdtWotlkWriter
         return s;
     }
 
-    private static void PatchStringTableInPlace(string filePath, string chunkFourCC, Func<string, string> resolve)
+    private static void PatchStringTableInPlace(string filePath, string chunkFourCC, AssetType type, AssetFixupPolicy fixup, Func<string, string> resolve)
     {
         using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
         using var br = new BinaryReader(fs);
@@ -525,6 +534,10 @@ public static class AdtWotlkWriter
                 {
                     Array.Copy(bytes, 0, data, start, bytes.Length);
                     for (int k = start + bytes.Length; k < end; k++) data[k] = 0;
+                }
+                else if (bytes.Length > capacity)
+                {
+                    fixup.LogDiagnostic(type, norm, resolved, "overflow_skip:" + chunkFourCC.ToLowerInvariant());
                 }
             }
             i = end + 1;

@@ -237,6 +237,17 @@ public sealed class AssetFixupPolicy
         });
     }
 
+    public void LogDiagnostic(AssetType type, string original, string resolved, string method)
+    {
+        _logger?.Write(new FixupRecord
+        {
+            Type = type.ToString(),
+            Original = original,
+            Resolved = resolved,
+            Method = method
+        });
+    }
+
     // Exposed helpers for in-place MTEX patching
     public string TilesetFallbackPath => _fallbackTileset;
     public string NonTilesetFallbackPath => _fallbackNonTilesetBlp;

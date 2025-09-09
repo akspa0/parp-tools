@@ -11,15 +11,21 @@
   - `csv/dbc/AreaTable_Alpha.csv`
   - `csv/dbc/AreaTable_335.csv`
 - Mapping/patching is performed in the tool layer (no changes under `src/gillijimproject-csharp/WowFiles`).
+- [Planned] Replace minimal CSVs with DBCD-driven rich CSVs (decoded fields, parent/continent/flags), and improve per-tile mapping CSV accordingly.
 
-## Asset Fixups (Defaults)
-- Fuzzy matching: enabled by default (`--asset-fuzzy` defaults to on).
-- Fallbacks: enabled by default.
-- Tileset fixups: `_s` variant swap enabled by default.
-- Fuzzy resolver behavior (`MultiListfileResolver.FindSimilar()`):
-  - Exact basename checks (with and without extension), primary then secondary.
-  - Heuristics for prefix variants: e.g., `AZ_<name>` (helps `SunkenTemple` → `AZ_SunkenTemple`).
-  - Basename similarity with Levenshtein threshold ≥ 0.70, path segment Jaccard tie-break.
+## Asset Fixups (Strategy)
+- In-place patchers for ADT string tables (no chunk growth, no offset changes):
+  - `MTEX` (BLP textures): capacity-aware replacement, with tileset/non-tileset fallbacks if the resolved path is too long; else skip.
+  - `MMDX` (MDX/M2 model names): capacity-aware replacement only (no growth); extension parity enforced.
+  - `MWMO` (WMO names): capacity-aware replacement only (no growth).
+- Fuzzy matching:
+  - Directory-aware for textures (prioritize same-folder candidates).
+  - Basename similarity threshold ≥ 0.70, with path segment Jaccard tiebreak.
+- Specular rule:
+  - Never map non-`_s` → `_s` textures.
+  - Allow `_s` → non-`_s` downgrade only when the `_s` original is missing.
+- Extension parity:
+  - Do not flip MDX↔M2. Fuzzy and fallbacks restricted to original extension when known.
 
 ## Profiles and Toggles
 - `--profile preserve|modified` (default: `modified`)
@@ -30,9 +36,10 @@
   - `--no-fixups` → disables tileset `_s` variant handling.
 
 ## Asset Fixup Logging
-- For each map when exporting, we write `csv/maps/<MapName>/asset_fixups.csv` with columns:
-  - `type, original, resolved, method`
-  - Methods include: `exact`, `tileset_variant`, `fuzzy:primary`, `fuzzy:secondary`, `fallback`, `preserve`.
+- `csv/maps/<MapName>/asset_fixups.csv` records actionable events:
+  - `fuzzy:*` (suggested replacements)
+  - `capacity_fallback:*` (fallback chosen because resolved path didn’t fit slot)
+  - `overflow_skip:*` (replacement too long for slot, left original in file)
 
 ## Notes
 - All changes implemented within the tool; core library (`src/gillijimproject-csharp/WowFiles`) remains untouched.

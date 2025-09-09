@@ -19,8 +19,17 @@ public sealed class FixupLogger : IDisposable
 
     public void Write(FixupRecord rec)
     {
-        // Only record fuzzy matches to keep CSV small and actionable
-        if (!rec.Method.StartsWith("fuzzy", StringComparison.OrdinalIgnoreCase)) return;
+        // Record actionable events:
+        // - fuzzy:* (suggested replacements)
+        // - overflow_* (too long to fit slot)
+        // - capacity_* (fallback chosen due to capacity)
+        var m = rec.Method ?? string.Empty;
+        if (!(m.StartsWith("fuzzy", StringComparison.OrdinalIgnoreCase)
+            || m.StartsWith("overflow", StringComparison.OrdinalIgnoreCase)
+            || m.StartsWith("capacity", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
 
         var key = $"{rec.Type}|{rec.Original}|{rec.Resolved}|{rec.Method}";
         if (_seen.Contains(key)) return;
