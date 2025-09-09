@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using GillijimProject.WowFiles.Alpha;
 using AlphaWdtAnalyzer.Core.Dbc;
+using AlphaWdtAnalyzer.Core.Assets;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -24,6 +25,8 @@ public static class AdtExportPipeline
         public bool AssetFuzzy { get; init; } = true;
         public bool UseFallbacks { get; init; } = true;
         public bool EnableFixups { get; init; } = true;
+        public string?[]? AssetRoots { get; init; }
+        public bool LogExact { get; init; } = false;
         public string? AreaAlphaPath { get; init; }
         public string? AreaLkPath { get; init; }
         public string? DbcDir { get; init; }
@@ -39,6 +42,7 @@ public static class AdtExportPipeline
         var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
         Directory.CreateDirectory(logDir);
         using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
+        var inventory = new AssetInventory(opts.AssetRoots);
         var fixup = new AssetFixupPolicy(
             resolver,
             opts.FallbackTileset,
@@ -48,7 +52,9 @@ public static class AdtExportPipeline
             opts.AssetFuzzy,
             opts.UseFallbacks,
             opts.EnableFixups,
-            fixupLogger);
+            fixupLogger,
+            inventory,
+            opts.LogExact);
 
         var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
 
@@ -135,6 +141,8 @@ public static class AdtExportPipeline
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
 
+        var inventory = new AssetInventory(opts.AssetRoots);
+
         foreach (var wdtPath in wdts)
         {
             try
@@ -155,7 +163,9 @@ public static class AdtExportPipeline
                     opts.AssetFuzzy,
                     opts.UseFallbacks,
                     opts.EnableFixups,
-                    fixupLogger);
+                    fixupLogger,
+                    inventory,
+                    opts.LogExact);
 
                 var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
 

@@ -112,6 +112,39 @@ public sealed class MultiListfileResolver
         var targetName = Path.GetFileName(norm);
         var targetNameNoExt = Path.GetFileNameWithoutExtension(norm);
         var allowed = new HashSet<string>(allowedExtensions.Select(e => e.ToLowerInvariant()));
+        var isBlpOnly = allowed.SetEquals(new[] { ".blp" });
+        var lastSlash = norm.LastIndexOf('/');
+        var targetDir = lastSlash > 0 ? norm.Substring(0, lastSlash) : string.Empty;
+        var lastSeg = targetDir.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? string.Empty;
+        var originalIsSpecular = targetNameNoExt.EndsWith("_s", StringComparison.OrdinalIgnoreCase);
+
+        // Prefer same-folder search for textures: tileset/<zone>/...
+        if (isBlpOnly && targetDir.Length > 0)
+        {
+            string? sameDirPrimary = _primary.Keys
+                .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+                .Where(p => p.StartsWith(targetDir + "/", StringComparison.OrdinalIgnoreCase))
+                .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
+                .Select(p => new { Path = p, B = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)), P = PathSimilarity(norm, p) })
+                .Where(x => x.B >= 0.50) // allow looser threshold for sand/sand2, etc.
+                .OrderByDescending(x => x.B)
+                .ThenByDescending(x => x.P)
+                .Select(x => x.Path)
+                .FirstOrDefault();
+            if (sameDirPrimary is not null) return sameDirPrimary;
+
+            string? sameDirSecondary = _secondary.Keys
+                .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+                .Where(p => p.StartsWith(targetDir + "/", StringComparison.OrdinalIgnoreCase))
+                .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
+                .Select(p => new { Path = p, B = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)), P = PathSimilarity(norm, p) })
+                .Where(x => x.B >= 0.50)
+                .OrderByDescending(x => x.B)
+                .ThenByDescending(x => x.P)
+                .Select(x => x.Path)
+                .FirstOrDefault();
+            if (sameDirSecondary is not null) return sameDirSecondary;
+        }
 
         // Search primary by exact basename, filtered by allowed ext
         var primaryMatch = _primary.Keys
@@ -125,6 +158,7 @@ public sealed class MultiListfileResolver
         primaryMatch = _primary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
             .Where(p => string.Equals(Path.GetFileNameWithoutExtension(p), targetNameNoExt, StringComparison.OrdinalIgnoreCase))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(p => PathSimilarity(norm, p))
             .FirstOrDefault();
         if (primaryMatch is not null) return primaryMatch;
@@ -133,6 +167,7 @@ public sealed class MultiListfileResolver
         var variants = new[] { $"AZ_{targetNameNoExt}", $"A_{targetNameNoExt}", $"{targetNameNoExt}_A" };
         primaryMatch = _primary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .Where(p => variants.Any(v => string.Equals(Path.GetFileNameWithoutExtension(p), v, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(p => PathSimilarity(norm, p))
             .FirstOrDefault();
@@ -141,6 +176,7 @@ public sealed class MultiListfileResolver
         // Fuzzy basename similarity over primary
         var primaryFuzzy = _primary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .Select(p => new { Path = p, Score = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)) })
             .Where(x => x.Score >= 0.70)
             .OrderByDescending(x => x.Score)
@@ -161,6 +197,7 @@ public sealed class MultiListfileResolver
         secondaryMatch = _secondary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
             .Where(p => string.Equals(Path.GetFileNameWithoutExtension(p), targetNameNoExt, StringComparison.OrdinalIgnoreCase))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(p => PathSimilarity(norm, p))
             .FirstOrDefault();
         if (secondaryMatch is not null) return secondaryMatch;
@@ -168,6 +205,7 @@ public sealed class MultiListfileResolver
         // Secondary: prefix variants
         secondaryMatch = _secondary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .Where(p => variants.Any(v => string.Equals(Path.GetFileNameWithoutExtension(p), v, StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(p => PathSimilarity(norm, p))
             .FirstOrDefault();
@@ -176,6 +214,7 @@ public sealed class MultiListfileResolver
         // Secondary: fuzzy basename similarity
         var secondaryFuzzy = _secondary.Keys
             .Where(p => allowed.Contains(Path.GetExtension(p).ToLowerInvariant()))
+            .Where(p => originalIsSpecular || !Path.GetFileNameWithoutExtension(p).EndsWith("_s", StringComparison.OrdinalIgnoreCase))
             .Select(p => new { Path = p, Score = BasenameSimilarity(targetNameNoExt, Path.GetFileNameWithoutExtension(p)) })
             .Where(x => x.Score >= 0.70)
             .OrderByDescending(x => x.Score)

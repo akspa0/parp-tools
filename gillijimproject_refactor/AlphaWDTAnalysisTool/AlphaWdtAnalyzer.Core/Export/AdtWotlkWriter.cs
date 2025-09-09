@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using GillijimProject.WowFiles.Alpha;
 
 namespace AlphaWdtAnalyzer.Core.Export;
@@ -122,12 +123,68 @@ public static class AdtWotlkWriter
         Directory.CreateDirectory(mapsDir);
         var outFile = Path.Combine(mapsDir, $"{ctx.MapName}_{ctx.TileX}_{ctx.TileY}.adt");
 
-        // Build LK ADT from Alpha using WDT MDNM/MONM tables
+        // Build Alpha ADT handle once (also used to enumerate MTEX textures)
         var alpha = new AdtAlpha(ctx.WdtPath, ctx.AdtOffset, ctx.AdtNumber);
+
+        // Before conversion, record any placements or textures we could not resolve at all
+        var missingPath = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName, "missing_assets.csv");
+        Directory.CreateDirectory(Path.GetDirectoryName(missingPath)!);
+        using (var missing = new MissingAssetsLogger(missingPath))
+        {
+            // placements (WMO/M2)
+            foreach (var p in ctx.Placements)
+            {
+                var _ = ctx.Fixup.ResolveWithMethod(p.Type, p.AssetPath, out var method);
+                if (string.Equals(method, "preserve_missing", StringComparison.OrdinalIgnoreCase))
+                {
+                    missing.Write(new MissingAssetRecord
+                    {
+                        Type = p.Type.ToString(),
+                        Original = p.AssetPath,
+                        MapName = p.MapName,
+                        TileX = p.TileX,
+                        TileY = p.TileY,
+                        UniqueId = p.UniqueId
+                    });
+                }
+            }
+
+            // textures (BLP via MTEX)
+            foreach (var tex in alpha.GetMtexTextureNames())
+            {
+                var norm = ListfileLoader.NormalizePath(tex);
+                if (string.IsNullOrWhiteSpace(norm)) continue;
+                var _ = ctx.Fixup.ResolveTextureWithMethod(norm, out var method);
+                if (string.Equals(method, "preserve_missing", StringComparison.OrdinalIgnoreCase))
+                {
+                    missing.Write(new MissingAssetRecord
+                    {
+                        Type = AssetType.Blp.ToString(),
+                        Original = norm,
+                        MapName = ctx.MapName,
+                        TileX = ctx.TileX,
+                        TileY = ctx.TileY,
+                        UniqueId = null
+                    });
+                }
+            }
+        }
+
+        // Build LK ADT from Alpha using WDT MDNM/MONM tables
         var fixedM2 = ctx.MdnmFiles.Select(n => ctx.Fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
         var fixedWmo = ctx.MonmFiles.Select(n => ctx.Fixup.Resolve(AssetType.Wmo, n)).ToList();
         var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
         adtLk.ToFile(outFile);
+
+        // Rebuild MTEX with potentially longer replacement paths
+        try
+        {
+            RebuildMtexOnDisk(outFile, ctx.Fixup);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[MTEX] Failed to rebuild MTEX for {outFile}: {ex.Message}");
+        }
 
         // Emit/refresh WDT once per map in the same folder, rename *_new to <map>.wdt
         if (!EmittedWdtForMap.Contains(ctx.MapName))
@@ -212,6 +269,91 @@ public static class AdtWotlkWriter
         }
     }
 
+    private static void RebuildMtexOnDisk(string filePath, AssetFixupPolicy fixup)
+    {
+        var file = File.ReadAllBytes(filePath);
+
+        // scan chunks to locate MTEX
+        int pos = 0;
+        int headerPos = -1;
+        int dataPos = -1;
+        int size = -1;
+        while (pos + 8 <= file.Length)
+        {
+            var fourccRev = Encoding.ASCII.GetString(file, pos, 4);
+            var fourcc = ReverseFourCC(fourccRev);
+            int chunkSize = BitConverter.ToInt32(file, pos + 4);
+            int chunkDataPos = pos + 8;
+            if (fourcc == "MTEX")
+            {
+                headerPos = pos;
+                dataPos = chunkDataPos;
+                size = chunkSize;
+                break;
+            }
+            // advance to next chunk (including pad)
+            pos = chunkDataPos + chunkSize + ((chunkSize & 1) == 1 ? 1 : 0);
+        }
+        if (dataPos < 0 || size < 0) return; // no MTEX
+
+        // parse original strings
+        var strings = new List<string>();
+        int i = 0;
+        while (i < size)
+        {
+            int start = i;
+            while (i < size && file[dataPos + i] != 0) i++;
+            int end = i; // at 0 or end
+            int cap = end - start;
+            if (cap > 0)
+            {
+                var s = Encoding.ASCII.GetString(file, dataPos + start, cap);
+                strings.Add(ListfileLoader.NormalizePath(s));
+            }
+            i = end + 1;
+        }
+
+        // compute replacements (preserve index order)
+        var replaced = new List<string>(strings.Count);
+        foreach (var s in strings)
+        {
+            var r = fixup.ResolveTextureWithMethod(s, out var _);
+            replaced.Add(r);
+        }
+
+        // build new MTEX payload
+        using var payloadMs = new MemoryStream();
+        using (var bw = new BinaryWriter(payloadMs, Encoding.ASCII, leaveOpen: true))
+        {
+            foreach (var s in replaced)
+            {
+                var bytes = Encoding.ASCII.GetBytes(s);
+                bw.Write(bytes);
+                bw.Write((byte)0);
+            }
+        }
+        var newPayload = payloadMs.ToArray();
+
+        // assemble new file: [0..headerPos) + MTEXhdr(4 + size) + newPayload + pad + [oldNextPos..end)
+        int oldNextPos = dataPos + size + ((size & 1) == 1 ? 1 : 0);
+        using var outMs = new MemoryStream(file.Length - size + newPayload.Length + 8 + 1 + (file.Length - oldNextPos));
+        using (var outBw = new BinaryWriter(outMs, Encoding.ASCII, leaveOpen: true))
+        {
+            // pre
+            outBw.Write(file, 0, headerPos);
+            // header (keep fourcc bytes as-is reversed, update size)
+            outBw.Write(file, headerPos, 4);
+            outBw.Write(newPayload.Length);
+            // data
+            outBw.Write(newPayload);
+            if ((newPayload.Length & 1) == 1) outBw.Write((byte)0);
+            // rest
+            outBw.Write(file, oldNextPos, file.Length - oldNextPos);
+        }
+
+        File.WriteAllBytes(filePath, outMs.ToArray());
+    }
+
     private static void PatchMcnkAreaIdsOnDisk(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper)
     {
         using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
@@ -229,26 +371,26 @@ public static class AdtWotlkWriter
             var fourccRevBytes = br.ReadBytes(4);
             if (fourccRevBytes.Length < 4) break;
             var fourcc = ReverseFourCC(System.Text.Encoding.ASCII.GetString(fourccRevBytes));
-            int size = br.ReadInt32();
-            long dataPos = fs.Position;
+            int size2 = br.ReadInt32();
+            long dataPos2 = fs.Position;
             if (fourcc == "MCIN")
             {
-                mcinDataPos = dataPos;
-                mcinSize = size;
+                mcinDataPos = dataPos2;
+                mcinSize = size2;
                 break;
             }
             // skip data + pad
-            fs.Position = dataPos + size + ((size & 1) == 1 ? 1 : 0);
+            fs.Position = dataPos2 + size2 + ((size2 & 1) == 1 ? 1 : 0);
         }
 
         if (mcinDataPos < 0 || mcinSize < (256 * 16)) return;
 
-        for (int i = 0; i < 256; i++)
+        for (int i2 = 0; i2 < 256; i2++)
         {
-            int aId = alphaAreaIds[i];
+            int aId = alphaAreaIds[i2];
             if (aId < 0) continue; // no MCNK present
 
-            fs.Position = mcinDataPos + (i * 16);
+            fs.Position = mcinDataPos + (i2 * 16);
             int mcnkOffset = br.ReadInt32();
             // skip size and unused
             if (mcnkOffset <= 0) continue;

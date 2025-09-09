@@ -1,37 +1,29 @@
 using System;
-using System.Globalization;
 using System.IO;
-using System.Collections.Generic;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
-public sealed class FixupLogger : IDisposable
+public sealed class MissingAssetsLogger : IDisposable
 {
     private readonly string _path;
     private bool _initialized;
     private StreamWriter? _writer;
-    private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
 
-    public FixupLogger(string path)
+    public MissingAssetsLogger(string path)
     {
         _path = path;
     }
 
-    public void Write(FixupRecord rec)
+    public void Write(MissingAssetRecord rec)
     {
-        // Only record fuzzy matches to keep CSV small and actionable
-        if (!rec.Method.StartsWith("fuzzy", StringComparison.OrdinalIgnoreCase)) return;
-
-        var key = $"{rec.Type}|{rec.Original}|{rec.Resolved}|{rec.Method}";
-        if (_seen.Contains(key)) return;
-        _seen.Add(key);
-
         Ensure();
         _writer!.WriteLine(string.Join(',',
             rec.Type,
             Csv(rec.Original),
-            Csv(rec.Resolved),
-            Csv(rec.Method)));
+            Csv(rec.MapName),
+            rec.TileX,
+            rec.TileY,
+            rec.UniqueId?.ToString() ?? string.Empty));
     }
 
     private void Ensure()
@@ -39,7 +31,7 @@ public sealed class FixupLogger : IDisposable
         if (_initialized) return;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         _writer = new StreamWriter(_path, append: false);
-        _writer.WriteLine("type,original,resolved,method");
+        _writer.WriteLine("type,original,map,tile_x,tile_y,unique_id");
         _writer.Flush();
         _initialized = true;
     }
@@ -59,10 +51,12 @@ public sealed class FixupLogger : IDisposable
     }
 }
 
-public sealed class FixupRecord
+public sealed class MissingAssetRecord
 {
     public required string Type { get; init; }
     public required string Original { get; init; }
-    public required string Resolved { get; init; }
-    public required string Method { get; init; }
+    public required string MapName { get; init; }
+    public required int TileX { get; init; }
+    public required int TileY { get; init; }
+    public int? UniqueId { get; init; }
 }
