@@ -176,14 +176,32 @@ public static class AdtWotlkWriter
         var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
         adtLk.ToFile(outFile);
 
-        // Rebuild MTEX with potentially longer replacement paths
+        // Patch MTEX in-place with capacity-aware replacements (do not change file size)
         try
         {
-            RebuildMtexOnDisk(outFile, ctx.Fixup);
+            PatchMtexOnDisk(outFile, ctx.Fixup);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[MTEX] Failed to rebuild MTEX for {outFile}: {ex.Message}");
+            Console.Error.WriteLine($"[MTEX] Failed to patch MTEX for {outFile}: {ex.Message}");
+        }
+
+        // Patch MMDX (M2/MDX) and MWMO (WMO) name tables in-place
+        try
+        {
+            PatchStringTableInPlace(outFile, "MMDX", (orig) => ctx.Fixup.ResolveWithMethod(AssetType.MdxOrM2, orig, out _));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[MMDX] Failed to patch M2/MDX names for {outFile}: {ex.Message}");
+        }
+        try
+        {
+            PatchStringTableInPlace(outFile, "MWMO", (orig) => ctx.Fixup.ResolveWithMethod(AssetType.Wmo, orig, out _));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[MWMO] Failed to patch WMO names for {outFile}: {ex.Message}");
         }
 
         // Emit/refresh WDT once per map in the same folder, rename *_new to <map>.wdt
@@ -269,89 +287,99 @@ public static class AdtWotlkWriter
         }
     }
 
-    private static void RebuildMtexOnDisk(string filePath, AssetFixupPolicy fixup)
+    private static void PatchMtexOnDisk(string filePath, AssetFixupPolicy fixup)
     {
-        var file = File.ReadAllBytes(filePath);
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        using var br = new BinaryReader(fs);
+        using var bw = new BinaryWriter(fs);
 
-        // scan chunks to locate MTEX
-        int pos = 0;
-        int headerPos = -1;
-        int dataPos = -1;
-        int size = -1;
-        while (pos + 8 <= file.Length)
+        // Locate MTEX chunk by scanning top-level chunks
+        fs.Seek(0, SeekOrigin.Begin);
+        long fileLen = fs.Length;
+        long mtexDataPos = -1;
+        int mtexSize = 0;
+
+        while (fs.Position + 8 <= fileLen)
         {
-            var fourccRev = Encoding.ASCII.GetString(file, pos, 4);
-            var fourcc = ReverseFourCC(fourccRev);
-            int chunkSize = BitConverter.ToInt32(file, pos + 4);
-            int chunkDataPos = pos + 8;
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
+            int size = br.ReadInt32();
+            long dataPos = fs.Position;
             if (fourcc == "MTEX")
             {
-                headerPos = pos;
-                dataPos = chunkDataPos;
-                size = chunkSize;
+                mtexDataPos = dataPos;
+                mtexSize = size;
                 break;
             }
-            // advance to next chunk (including pad)
-            pos = chunkDataPos + chunkSize + ((chunkSize & 1) == 1 ? 1 : 0);
+            // skip data + pad
+            fs.Position = dataPos + size + ((size & 1) == 1 ? 1 : 0);
         }
-        if (dataPos < 0 || size < 0) return; // no MTEX
 
-        // parse original strings
-        var strings = new List<string>();
+        if (mtexDataPos < 0 || mtexSize <= 0) return; // no textures
+
+        // Read MTEX data
+        fs.Position = mtexDataPos;
+        var data = br.ReadBytes(mtexSize);
+
+        // Parse null-terminated strings and patch in-place if replacement fits
         int i = 0;
-        while (i < size)
+        while (i < data.Length)
         {
             int start = i;
-            while (i < size && file[dataPos + i] != 0) i++;
-            int end = i; // at 0 or end
-            int cap = end - start;
-            if (cap > 0)
+            // find terminator
+            while (i < data.Length && data[i] != 0) i++;
+            int end = i; // points at 0 or data.Length
+            int capacity = end - start; // bytes available before 0
+
+            if (capacity > 0)
             {
-                var s = Encoding.ASCII.GetString(file, dataPos + start, cap);
-                strings.Add(ListfileLoader.NormalizePath(s));
+                var original = Encoding.ASCII.GetString(data, start, capacity);
+                var norm = ListfileLoader.NormalizePath(original);
+                var resolved = fixup.ResolveTextureWithMethod(norm, out var method);
+
+                // Enforce capacity: try resolved; if too long, try fallbacks; else skip
+                ReadOnlySpan<byte> toWrite = Encoding.ASCII.GetBytes(resolved);
+                if (toWrite.Length > capacity)
+                {
+                    // tileset fallback
+                    var tf = fixup.TilesetFallbackPath;
+                    if (!string.IsNullOrWhiteSpace(tf) && fixup.ExistsPath(tf))
+                    {
+                        var tfBytes = Encoding.ASCII.GetBytes(tf);
+                        if (tfBytes.Length <= capacity) toWrite = tfBytes;
+                    }
+                }
+                if (toWrite.Length > capacity)
+                {
+                    // non-tileset fallback
+                    var nf = fixup.NonTilesetFallbackPath;
+                    if (!string.IsNullOrWhiteSpace(nf) && fixup.ExistsPath(nf))
+                    {
+                        var nfBytes = Encoding.ASCII.GetBytes(nf);
+                        if (nfBytes.Length <= capacity) toWrite = nfBytes;
+                    }
+                }
+
+                if (toWrite.Length <= capacity && !original.Equals(Encoding.ASCII.GetString(toWrite), StringComparison.OrdinalIgnoreCase))
+                {
+                    Array.Copy(toWrite.ToArray(), 0, data, start, toWrite.Length);
+                    // pad remaining to zero
+                    for (int k = start + toWrite.Length; k < end; k++) data[k] = 0;
+                }
+                else
+                {
+                    // overflow or unchanged; leave as-is
+                }
             }
+
+            // move past terminator
             i = end + 1;
         }
 
-        // compute replacements (preserve index order)
-        var replaced = new List<string>(strings.Count);
-        foreach (var s in strings)
-        {
-            var r = fixup.ResolveTextureWithMethod(s, out var _);
-            replaced.Add(r);
-        }
-
-        // build new MTEX payload
-        using var payloadMs = new MemoryStream();
-        using (var bw = new BinaryWriter(payloadMs, Encoding.ASCII, leaveOpen: true))
-        {
-            foreach (var s in replaced)
-            {
-                var bytes = Encoding.ASCII.GetBytes(s);
-                bw.Write(bytes);
-                bw.Write((byte)0);
-            }
-        }
-        var newPayload = payloadMs.ToArray();
-
-        // assemble new file: [0..headerPos) + MTEXhdr(4 + size) + newPayload + pad + [oldNextPos..end)
-        int oldNextPos = dataPos + size + ((size & 1) == 1 ? 1 : 0);
-        using var outMs = new MemoryStream(file.Length - size + newPayload.Length + 8 + 1 + (file.Length - oldNextPos));
-        using (var outBw = new BinaryWriter(outMs, Encoding.ASCII, leaveOpen: true))
-        {
-            // pre
-            outBw.Write(file, 0, headerPos);
-            // header (keep fourcc bytes as-is reversed, update size)
-            outBw.Write(file, headerPos, 4);
-            outBw.Write(newPayload.Length);
-            // data
-            outBw.Write(newPayload);
-            if ((newPayload.Length & 1) == 1) outBw.Write((byte)0);
-            // rest
-            outBw.Write(file, oldNextPos, file.Length - oldNextPos);
-        }
-
-        File.WriteAllBytes(filePath, outMs.ToArray());
+        // Write back patched MTEX payload
+        fs.Position = mtexDataPos;
+        bw.Write(data);
     }
 
     private static void PatchMcnkAreaIdsOnDisk(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper)
@@ -370,20 +398,31 @@ public static class AdtWotlkWriter
         {
             var fourccRevBytes = br.ReadBytes(4);
             if (fourccRevBytes.Length < 4) break;
-            var fourcc = ReverseFourCC(System.Text.Encoding.ASCII.GetString(fourccRevBytes));
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
             int size2 = br.ReadInt32();
-            long dataPos2 = fs.Position;
+            long dpos2 = fs.Position;
             if (fourcc == "MCIN")
             {
-                mcinDataPos = dataPos2;
+                mcinDataPos = dpos2;
                 mcinSize = size2;
                 break;
             }
-            // skip data + pad
-            fs.Position = dataPos2 + size2 + ((size2 & 1) == 1 ? 1 : 0);
+            fs.Position = dpos2 + size2 + ((size2 & 1) == 1 ? 1 : 0);
         }
-
-        if (mcinDataPos < 0 || mcinSize < (256 * 16)) return;
+        if (mcinDataPos >= 0 && mcinSize >= 16)
+        {
+            fs.Position = mcinDataPos;
+            long end2 = mcinDataPos + mcinSize;
+            while (fs.Position + 16 <= end2)
+            {
+                long entryPos = fs.Position;
+                int textureIdOld = br.ReadInt32();
+                // skip other fields (flags, ofsMcal, effectId)
+                fs.Position = entryPos; // rewind to start
+                // MTEX not moved; textureId offsets remain valid
+                fs.Position = entryPos + 16; // next entry
+            }
+        }
 
         for (int i2 = 0; i2 < 256; i2++)
         {
@@ -434,5 +473,64 @@ public static class AdtWotlkWriter
             return '"' + s.Replace("\"", "\"\"") + '"';
         }
         return s;
+    }
+
+    private static void PatchStringTableInPlace(string filePath, string chunkFourCC, Func<string, string> resolve)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        using var br = new BinaryReader(fs);
+        using var bw = new BinaryWriter(fs);
+
+        // Locate the string table chunk by scanning top-level chunks
+        fs.Seek(0, SeekOrigin.Begin);
+        long fileLen = fs.Length;
+        long dataPos = -1;
+        int size = 0;
+        while (fs.Position + 8 <= fileLen)
+        {
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
+            int sz = br.ReadInt32();
+            long dpos = fs.Position;
+            if (fourcc == chunkFourCC)
+            {
+                dataPos = dpos;
+                size = sz;
+                break;
+            }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+        }
+        if (dataPos < 0 || size <= 0) return;
+
+        // Read chunk payload
+        fs.Position = dataPos;
+        var data = br.ReadBytes(size);
+
+        // Iterate null-terminated strings and patch when replacement fits
+        int i = 0;
+        while (i < data.Length)
+        {
+            int start = i;
+            while (i < data.Length && data[i] != 0) i++;
+            int end = i;
+            int capacity = end - start;
+            if (capacity > 0)
+            {
+                var original = Encoding.ASCII.GetString(data, start, capacity);
+                var norm = ListfileLoader.NormalizePath(original);
+                var resolved = resolve(norm);
+                var bytes = Encoding.ASCII.GetBytes(resolved);
+                if (bytes.Length <= capacity && !norm.Equals(resolved, StringComparison.OrdinalIgnoreCase))
+                {
+                    Array.Copy(bytes, 0, data, start, bytes.Length);
+                    for (int k = start + bytes.Length; k < end; k++) data[k] = 0;
+                }
+            }
+            i = end + 1;
+        }
+
+        fs.Position = dataPos;
+        bw.Write(data);
     }
 }

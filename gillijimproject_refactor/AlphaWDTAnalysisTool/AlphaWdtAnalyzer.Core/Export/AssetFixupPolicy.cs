@@ -93,16 +93,29 @@ public sealed class AssetFixupPolicy
             }
             case AssetType.MdxOrM2:
             {
+                var originalExt = Path.GetExtension(norm).ToLowerInvariant();
+                var allowed = (originalExt == ".mdx" || originalExt == ".m2") ? new[] { originalExt } : new[] { ".m2", ".mdx" };
                 if (_enableFuzzy)
                 {
-                    var fuzzy = _resolver.FindSimilar(norm, new[] { ".m2", ".mdx" });
+                    var fuzzy = _resolver.FindSimilar(norm, allowed);
                     if (fuzzy is not null) { var m = SourceOf(fuzzy, "fuzzy"); Log(AssetType.MdxOrM2, norm, fuzzy, method: m); method = m; return fuzzy; }
                 }
                 if (_useFallbacks)
                 {
-                    Log(AssetType.MdxOrM2, norm, _fallbackM2, method: "fallback");
+                    // Prefer a fallback with the same extension as the original if possible
+                    var fb = _fallbackM2;
+                    if (!string.IsNullOrWhiteSpace(originalExt))
+                    {
+                        var fbExt = Path.GetExtension(fb).ToLowerInvariant();
+                        if (!fbExt.Equals(originalExt, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var alt = Path.ChangeExtension(fb, originalExt);
+                            if (ExistsPath(alt)) fb = alt;
+                        }
+                    }
+                    Log(AssetType.MdxOrM2, norm, fb, method: "fallback");
                     method = "fallback";
-                    return _fallbackM2;
+                    return fb;
                 }
                 method = "preserve_missing";
                 return norm;
@@ -222,5 +235,15 @@ public sealed class AssetFixupPolicy
             Resolved = resolved,
             Method = method
         });
+    }
+
+    // Exposed helpers for in-place MTEX patching
+    public string TilesetFallbackPath => _fallbackTileset;
+    public string NonTilesetFallbackPath => _fallbackNonTilesetBlp;
+
+    public bool ExistsPath(string path)
+    {
+        var norm = WowPath.Normalize(path);
+        return _resolver.Exists(norm) || _inventory.Exists(norm);
     }
 }
