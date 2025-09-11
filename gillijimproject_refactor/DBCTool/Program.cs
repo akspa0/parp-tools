@@ -25,8 +25,8 @@ namespace DBCTool
 
             try
             {
-                var (dbdDir, outBase, localeStr, tables, inputs, mpqRoot, mpqArchives) = ParseArgs(args);
-                if (tables.Count == 0)
+                var (dbdDir, outBase, localeStr, tables, inputs, mpqRoot, mpqArchives, debugMpqTable) = ParseArgs(args);
+                if (tables.Count == 0 && string.IsNullOrEmpty(debugMpqTable))
                 {
                     Console.Error.WriteLine("ERROR: At least one --table must be specified (e.g., --table AreaTable)");
                     return 2;
@@ -52,13 +52,15 @@ namespace DBCTool
                     IDBCProvider dbcProvider;
                     string? effectiveMpqRoot = null;
                     bool useMpq = IsMpqSpec(dbcSpec);
+                    MpqDBCProvider? mpqProv = null;
                     if (useMpq)
                     {
                         effectiveMpqRoot = TryExtractMpqRoot(dbcSpec) ?? mpqRoot;
                         if (mpqArchives.Count > 0)
                         {
                             Console.WriteLine($"  • Using explicit MPQ archives ({mpqArchives.Count})");
-                            dbcProvider = new MpqDBCProvider(mpqArchives);
+                            mpqProv = new MpqDBCProvider(mpqArchives);
+                            dbcProvider = mpqProv;
                         }
                         else
                         {
@@ -68,7 +70,27 @@ namespace DBCTool
                                 return 3;
                             }
                             Console.WriteLine($"  • Using MPQ root: {effectiveMpqRoot}");
-                            dbcProvider = MpqDBCProvider.FromRoot(effectiveMpqRoot);
+                            mpqProv = MpqDBCProvider.FromRoot(effectiveMpqRoot);
+                            dbcProvider = mpqProv;
+                        }
+
+                        if (mpqProv != null)
+                        {
+                            var count = mpqProv.Archives.Count;
+                            var sample = string.Join(", ", mpqProv.Archives.Take(8).Select(Path.GetFileName));
+                            Console.WriteLine($"  • Discovered {count} MPQ archives{(count > 0 ? ": " + sample + (count > 8 ? ", ..." : string.Empty) : string.Empty)}");
+                        }
+
+                        // MPQ Debug probe: show which archives expose the target file, then exit
+                        if (!string.IsNullOrEmpty(debugMpqTable))
+                        {
+                            if (mpqProv == null)
+                            {
+                                Console.Error.WriteLine("No MPQ provider available for debug probe");
+                                return 5;
+                            }
+                            MpqDebugProbe(mpqProv, debugMpqTable);
+                            return 0;
                         }
                     }
                     else
@@ -109,7 +131,7 @@ namespace DBCTool
                             }
                             catch (Exception ex) when (locale != DBCD.Locale.None)
                             {
-                                Console.WriteLine($"    Load failed with locale {locale} ({ex.GetType().Name}). Retrying with Locale.None to work around locstring mask alignment...");
+                                Console.WriteLine($"    Load failed with locale {localeStr} ({ex.GetType().Name}). Retrying with Locale.None to work around locstring mask alignment...");
                                 usedFallback = true;
                                 storage = dbcd.Load(table, build, DBCD.Locale.None);
                             }
@@ -141,12 +163,48 @@ namespace DBCTool
             }
         }
 
-        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string? mpqRoot, List<string> mpqArchives) ParseArgs(string[] args)
+        private static void MpqDebugProbe(MpqDBCProvider mpqProv, string table)
+        {
+            var candidates = new[]
+            {
+                $"DBFilesClient\\{table}.dbc",
+                $"DBFilesClient/{table}.dbc"
+            };
+
+            Console.WriteLine($"[MPQ-DEBUG] Probing {table} in {mpqProv.Archives.Count} archives...");
+            foreach (var ap in mpqProv.Archives)
+            {
+                if (!StormLib.SFileOpenArchive(ap, 0, 0, out var h))
+                {
+                    Console.WriteLine($"  [open-failed] {ap}");
+                    continue;
+                }
+                try
+                {
+                    foreach (var p in candidates)
+                    {
+                        bool visible = StormLib.SFileHasFile(h, p);
+                        if (visible)
+                        {
+                            Console.WriteLine($"  [direct-visible] {Path.GetFileName(ap)} → {p}");
+                        }
+                    }
+                }
+                finally
+                {
+                    StormLib.SFileCloseArchive(h);
+                }
+            }
+            Console.WriteLine("[MPQ-DEBUG] Probe complete.");
+        }
+
+        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string? mpqRoot, List<string> mpqArchives, string debugMpqTable) ParseArgs(string[] args)
         {
             string dbdDir = DefaultDbdDir;
             string outBase = DefaultOutBase;
             string locale = DefaultLocale;
             string? mpqRoot = null;
+            string debugMpqTable = string.Empty;
             var tables = new List<string>();
             var inputs = new List<(string build, string dir)>();
             var mpqArchives = new List<string>();
@@ -189,13 +247,16 @@ namespace DBCTool
                     case "--mpq-archive":
                         mpqArchives.Add(RequireValue(args, ref i, a));
                         break;
+                    case "--debug-mpq-file":
+                        debugMpqTable = RequireValue(args, ref i, a);
+                        break;
                     default:
                         // ignore unknowns to keep CLI simple
                         break;
                 }
             }
 
-            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs, mpqRoot != null ? NormalizePath(mpqRoot) : null, mpqArchives.Select(NormalizePath).ToList());
+            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs, mpqRoot != null ? NormalizePath(mpqRoot) : null, mpqArchives.Select(NormalizePath).ToList(), debugMpqTable);
         }
 
         private static string RequireValue(string[] args, ref int i, string flag)
@@ -261,6 +322,9 @@ namespace DBCTool
             Console.WriteLine("    --mpq-archive C:/WoW/Data/patch.MPQ --mpq-archive C:/WoW/Data/patch-2.MPQ ");
             Console.WriteLine("    --mpq-archive C:/WoW/Data/enUS/patch-enUS.MPQ ");
             Console.WriteLine("    --input 3.3.5.12340=mpq");
+            Console.WriteLine();
+            Console.WriteLine("Debug MPQ (probe which archive exposes a table):");
+            Console.WriteLine("  dotnet run -- --mpq-root C:/WoW-3.3.5 --input 3.3.5.12340=mpq --debug-mpq-file AreaTable");
             Console.WriteLine();
         }
     }
