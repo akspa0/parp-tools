@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using DBCD;
 using DBCD.Providers;
-using DBCTool.Mpq;
 
 namespace DBCTool
 {
@@ -25,84 +25,37 @@ namespace DBCTool
 
             try
             {
-                var (dbdDir, outBase, localeStr, tables, inputs, mpqRoot, mpqArchives, debugMpqTable) = ParseArgs(args);
-                if (tables.Count == 0 && string.IsNullOrEmpty(debugMpqTable))
-                {
-                    Console.Error.WriteLine("ERROR: At least one --table must be specified (e.g., --table AreaTable)");
-                    return 2;
-                }
+                var (dbdDir, outBase, localeStr, inputs, buildOverride, compareArea) = ParseArgs(args);
+
                 if (inputs.Count == 0)
                 {
-                    Console.Error.WriteLine("ERROR: At least one --input <build>=<dbcDir|mpq|mpq:<root>> must be specified");
+                    Console.Error.WriteLine("ERROR: At least one --input must be specified");
                     return 2;
                 }
 
                 var locale = ParseLocale(localeStr);
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
 
                 foreach (var (build, dbcSpec) in inputs)
                 {
-                    var subFolderName = $"dbcTool_{build}_{timestamp}";
+                    // Determine alias/canonical build and stable out folder (no timestamp)
+                    var alias = ResolveAliasOrInfer(build, dbcSpec, buildOverride: string.Empty);
+                    var canonicalBuild = !string.IsNullOrWhiteSpace(alias) ? CanonicalizeBuild(alias) : build;
+                    var subFolderName = !string.IsNullOrWhiteSpace(alias)
+                        ? alias
+                        : (!string.IsNullOrWhiteSpace(ResolveAlias(build)) ? ResolveAlias(build) : (string.IsNullOrWhiteSpace(build) ? "unknown" : build));
                     var outDir = Path.Combine(outBase, subFolderName);
                     Directory.CreateDirectory(outDir);
 
-                    Console.WriteLine($"[DBCTool] Exporting tables for build {build} → {outDir}");
+                    Console.WriteLine($"[DBCTool] Exporting tables for build {subFolderName} → {outDir}");
 
-                    // Select DBC provider (filesystem or MPQ)
-                    IDBCProvider dbcProvider;
-                    string? effectiveMpqRoot = null;
-                    bool useMpq = IsMpqSpec(dbcSpec);
-                    MpqDBCProvider? mpqProv = null;
-                    if (useMpq)
+                    var dbcDir = NormalizePath(dbcSpec);
+                    if (!Directory.Exists(dbcDir))
                     {
-                        effectiveMpqRoot = TryExtractMpqRoot(dbcSpec) ?? mpqRoot;
-                        if (mpqArchives.Count > 0)
-                        {
-                            Console.WriteLine($"  • Using explicit MPQ archives ({mpqArchives.Count})");
-                            mpqProv = new MpqDBCProvider(mpqArchives);
-                            dbcProvider = mpqProv;
-                        }
-                        else
-                        {
-                            if (string.IsNullOrWhiteSpace(effectiveMpqRoot))
-                            {
-                                Console.Error.WriteLine("ERROR: MPQ mode selected but no --mpq-root provided and no root in input spec (mpq:<root>)");
-                                return 3;
-                            }
-                            Console.WriteLine($"  • Using MPQ root: {effectiveMpqRoot}");
-                            mpqProv = MpqDBCProvider.FromRoot(effectiveMpqRoot);
-                            dbcProvider = mpqProv;
-                        }
-
-                        if (mpqProv != null)
-                        {
-                            var count = mpqProv.Archives.Count;
-                            var sample = string.Join(", ", mpqProv.Archives.Take(8).Select(Path.GetFileName));
-                            Console.WriteLine($"  • Discovered {count} MPQ archives{(count > 0 ? ": " + sample + (count > 8 ? ", ..." : string.Empty) : string.Empty)}");
-                        }
-
-                        // MPQ Debug probe: show which archives expose the target file, then exit
-                        if (!string.IsNullOrEmpty(debugMpqTable))
-                        {
-                            if (mpqProv == null)
-                            {
-                                Console.Error.WriteLine("No MPQ provider available for debug probe");
-                                return 5;
-                            }
-                            MpqDebugProbe(mpqProv, debugMpqTable);
-                            return 0;
-                        }
+                        Console.Error.WriteLine($"ERROR: DBC directory not found: {dbcDir}");
+                        return 3;
                     }
-                    else
-                    {
-                        var dbcDir = NormalizePath(dbcSpec);
-                        if (!Directory.Exists(dbcDir))
-                        {
-                            Console.Error.WriteLine($"ERROR: DBC directory not found: {dbcDir}");
-                            return 3;
-                        }
-                        dbcProvider = new FilesystemDBCProvider(dbcDir, useCache: true);
-                    }
+
+                    var dbcProvider = new FilesystemDBCProvider(dbcDir, useCache: true);
 
                     if (!Directory.Exists(dbdDir))
                     {
@@ -113,13 +66,19 @@ namespace DBCTool
                     var dbdFsProvider = new FilesystemDBDProvider(dbdDir);
                     var dbcd = new DBCD.DBCD(dbcProvider, dbdFsProvider);
 
+                    var tables = new List<string>();
+                    if (compareArea)
+                    {
+                        tables.Add("AreaTable");
+                    }
+
                     foreach (var table in tables)
                     {
                         try
                         {
-                            if (!dbdFsProvider.ContainsBuild(table, build))
+                            if (!dbdFsProvider.ContainsBuild(table, canonicalBuild))
                             {
-                                Console.WriteLine($"  ! Warning: {table}.dbd does not list build {build}. Proceeding; loader may still match by layout hash.");
+                                Console.WriteLine($"  ! Warning: {table}.dbd does not list build {canonicalBuild}. Proceeding; loader may still match by layout hash.");
                             }
                             Console.WriteLine($"  - Loading {table} ...");
 
@@ -127,13 +86,13 @@ namespace DBCTool
                             bool usedFallback = false;
                             try
                             {
-                                storage = dbcd.Load(table, build, locale);
+                                storage = dbcd.Load(table, canonicalBuild, locale);
                             }
                             catch (Exception ex) when (locale != DBCD.Locale.None)
                             {
                                 Console.WriteLine($"    Load failed with locale {localeStr} ({ex.GetType().Name}). Retrying with Locale.None to work around locstring mask alignment...");
                                 usedFallback = true;
-                                storage = dbcd.Load(table, build, DBCD.Locale.None);
+                                storage = dbcd.Load(table, canonicalBuild, DBCD.Locale.None);
                             }
 
                             Console.WriteLine($"    Loaded {table}: layout=0x{storage.LayoutHash:X8}, rows={storage.Count}{(usedFallback ? " (Locale=None)" : string.Empty)}");
@@ -143,7 +102,7 @@ namespace DBCTool
                         }
                         catch (Exception ex)
                         {
-                            Console.Error.WriteLine($"  ! Failed to export {table} for build {build}: {ex}");
+                            Console.Error.WriteLine($"  ! Failed to export {table} for build {canonicalBuild}: {ex}");
                             if (ex.InnerException != null)
                             {
                                 Console.Error.WriteLine($"    Inner: {ex.InnerException}");
@@ -163,51 +122,31 @@ namespace DBCTool
             }
         }
 
-        private static void MpqDebugProbe(MpqDBCProvider mpqProv, string table)
+        private static int MpqList(string archivePath, string mask)
         {
-            var candidates = new[]
-            {
-                $"DBFilesClient\\{table}.dbc",
-                $"DBFilesClient/{table}.dbc"
-            };
-
-            Console.WriteLine($"[MPQ-DEBUG] Probing {table} in {mpqProv.Archives.Count} archives...");
-            foreach (var ap in mpqProv.Archives)
-            {
-                if (!StormLib.SFileOpenArchive(ap, 0, 0, out var h))
-                {
-                    Console.WriteLine($"  [open-failed] {ap}");
-                    continue;
-                }
-                try
-                {
-                    foreach (var p in candidates)
-                    {
-                        bool visible = StormLib.SFileHasFile(h, p);
-                        if (visible)
-                        {
-                            Console.WriteLine($"  [direct-visible] {Path.GetFileName(ap)} → {p}");
-                        }
-                    }
-                }
-                finally
-                {
-                    StormLib.SFileCloseArchive(h);
-                }
-            }
-            Console.WriteLine("[MPQ-DEBUG] Probe complete.");
+            Console.WriteLine("[MPQ-LIST] MPQ support has been removed; filesystem mode only.");
+            return 0;
         }
 
-        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string? mpqRoot, List<string> mpqArchives, string debugMpqTable) ParseArgs(string[] args)
+        private static int MpqTestOpen(string archivePath, string mpqPath)
+        {
+            Console.WriteLine("[MPQ-TEST] MPQ support has been removed; filesystem mode only.");
+            return 0;
+        }
+
+        private static void MpqDebugProbe(object _mpqProvIgnored, string _tableIgnored)
+        {
+            Console.WriteLine("[MPQ-DEBUG] MPQ support has been removed; filesystem mode only.");
+        }
+
+        private static (string dbdDir, string outBase, string locale, List<(string build, string dir)> inputs, string buildOverride, bool compareArea) ParseArgs(string[] args)
         {
             string dbdDir = DefaultDbdDir;
             string outBase = DefaultOutBase;
             string locale = DefaultLocale;
-            string? mpqRoot = null;
-            string debugMpqTable = string.Empty;
-            var tables = new List<string>();
+            string buildOverride = string.Empty;
+            bool compareArea = false;
             var inputs = new List<(string build, string dir)>();
-            var mpqArchives = new List<string>();
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -223,40 +162,33 @@ namespace DBCTool
                     case "--locale":
                         locale = RequireValue(args, ref i, a);
                         break;
-                    case "--table":
-                        var t = RequireValue(args, ref i, a);
-                        foreach (var part in t.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                        {
-                            if (!string.IsNullOrWhiteSpace(part))
-                                tables.Add(part);
-                        }
-                        break;
                     case "--input":
                         var spec = RequireValue(args, ref i, a);
-                        // format: <build>=<dir|mpq|mpq:<root>>
                         var eq = spec.IndexOf('=');
-                        if (eq <= 0 || eq >= spec.Length - 1)
-                            throw new ArgumentException($"Invalid --input format: {spec}. Expected <build>=<dbcDir|mpq|mpq:<root>>");
-                        var build = spec.Substring(0, eq).Trim();
-                        var dir = spec.Substring(eq + 1).Trim();
-                        inputs.Add((build, dir));
+                        if (eq > 0 && eq < spec.Length - 1)
+                        {
+                            var b = spec.Substring(0, eq).Trim();
+                            var d = spec.Substring(eq + 1).Trim();
+                            inputs.Add((b, d));
+                        }
+                        else
+                        {
+                            // Bare directory: infer alias from path later
+                            inputs.Add((string.Empty, spec));
+                        }
                         break;
-                    case "--mpq-root":
-                        mpqRoot = RequireValue(args, ref i, a);
+                    case "--build":
+                        buildOverride = RequireValue(args, ref i, a);
                         break;
-                    case "--mpq-archive":
-                        mpqArchives.Add(RequireValue(args, ref i, a));
-                        break;
-                    case "--debug-mpq-file":
-                        debugMpqTable = RequireValue(args, ref i, a);
+                    case "--compare-area":
+                        compareArea = true;
                         break;
                     default:
-                        // ignore unknowns to keep CLI simple
                         break;
                 }
             }
 
-            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs, mpqRoot != null ? NormalizePath(mpqRoot) : null, mpqArchives.Select(NormalizePath).ToList(), debugMpqTable);
+            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, inputs.Select(t => (t.build, NormalizePath(t.dir))).ToList(), buildOverride, compareArea);
         }
 
         private static string RequireValue(string[] args, ref int i, string flag)
@@ -279,52 +211,62 @@ namespace DBCTool
             return DBCD.Locale.EnUS;
         }
 
-        private static bool IsMpqSpec(string spec)
+        private static byte[] ReadAllUnknown(IntPtr _hFile, int _maxLimit) => Array.Empty<byte>();
+
+        private static string ResolveAliasOrInfer(string buildOrAlias, string dbcSpec, string buildOverride)
         {
-            return string.Equals(spec, "mpq", StringComparison.OrdinalIgnoreCase) || spec.StartsWith("mpq:", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(buildOverride))
+                return ResolveAlias(buildOverride);
+            if (!string.IsNullOrWhiteSpace(buildOrAlias))
+                return ResolveAlias(buildOrAlias);
+            return InferAliasFromPath(dbcSpec);
         }
 
-        private static string? TryExtractMpqRoot(string spec)
+        private static string CanonicalizeBuild(string alias)
         {
-            const string prefix = "mpq:";
-            if (spec.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return alias switch
             {
-                var root = spec.Substring(prefix.Length).Trim();
-                return string.IsNullOrWhiteSpace(root) ? null : NormalizePath(root);
-            }
-            return null;
+                "0.5.3" => "0.5.3.3368",
+                "0.5.5" => "0.5.5.3494",
+                "3.3.5" => "3.3.5.12340",
+                _ => alias
+            };
+        }
+
+        private static string ResolveAlias(string buildOrAlias)
+        {
+            if (string.IsNullOrWhiteSpace(buildOrAlias)) return string.Empty;
+            var s = buildOrAlias.Trim();
+            if (s.StartsWith("0.5.3")) return "0.5.3";
+            if (s.StartsWith("0.5.5")) return "0.5.5";
+            if (s.StartsWith("3.3.5")) return "3.3.5";
+            return string.Empty;
+        }
+
+        private static string InferAliasFromPath(string path)
+        {
+            var p = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).ToLowerInvariant();
+            if (p.Contains("0.5.3")) return "0.5.3";
+            if (p.Contains("0.5.5")) return "0.5.5";
+            if (p.Contains("3.3.5")) return "3.3.5";
+            return string.Empty;
         }
 
         private static void PrintHelp()
         {
-            Console.WriteLine("DBCTool - Export WoW DBC tables to CSV using DBCD + WoWDBDefs");
+            Console.WriteLine("DBCTool - Export WoW DBC tables to CSV using DBCD + WoWDBDefs (filesystem only)");
             Console.WriteLine();
-            Console.WriteLine("Usage (filesystem mode):");
-            Console.WriteLine("  dotnet run --project DBCTool -- ");
-            Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions ");
-            Console.WriteLine("    --out out ");
-            Console.WriteLine("    --locale enUS ");
+            Console.WriteLine("Usage (with build alias):");
+            Console.WriteLine("  dotnet run -- ");
+            Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
             Console.WriteLine("    --table AreaTable [--table Map] ");
-            Console.WriteLine("    --input 3.3.5.12340=test_data/3.3.5/tree/DBFilesClient ");
+            Console.WriteLine("    --input 3.3.5=path/to/3.3.5/DBFilesClient");
             Console.WriteLine();
-            Console.WriteLine("Usage (MPQ mode, auto):");
-            Console.WriteLine("  dotnet run --project DBCTool -- ");
+            Console.WriteLine("Usage (bare directory; build inferred from path tokens 0.5.3|0.5.5|3.3.5):");
+            Console.WriteLine("  dotnet run -- ");
             Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
-            Console.WriteLine("    --table Map ");
-            Console.WriteLine("    --mpq-root C:/WoW-3.3.5 ");
-            Console.WriteLine("    --input 3.3.5.12340=mpq");
-            Console.WriteLine();
-            Console.WriteLine("Usage (MPQ mode, explicit archives):");
-            Console.WriteLine("  dotnet run --project DBCTool -- ");
-            Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
-            Console.WriteLine("    --table Map ");
-            Console.WriteLine("    --mpq-archive C:/WoW/Data/common.MPQ --mpq-archive C:/WoW/Data/lichking.MPQ ");
-            Console.WriteLine("    --mpq-archive C:/WoW/Data/patch.MPQ --mpq-archive C:/WoW/Data/patch-2.MPQ ");
-            Console.WriteLine("    --mpq-archive C:/WoW/Data/enUS/patch-enUS.MPQ ");
-            Console.WriteLine("    --input 3.3.5.12340=mpq");
-            Console.WriteLine();
-            Console.WriteLine("Debug MPQ (probe which archive exposes a table):");
-            Console.WriteLine("  dotnet run -- --mpq-root C:/WoW-3.3.5 --input 3.3.5.12340=mpq --debug-mpq-file AreaTable");
+            Console.WriteLine("    --table AreaTable ");
+            Console.WriteLine("    --input path/to/0.5.3/DBFilesClient");
             Console.WriteLine();
         }
     }

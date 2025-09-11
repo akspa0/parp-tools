@@ -10,10 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
   </ItemGroup>
+  <!-- Exclude legacy MPQ code from compilation -->
   <ItemGroup>
-    <!-- Copy the locally built StormLib.dll (x64 Release) to the output folder -->
-    <None Include="..\lib\StormLib\bin\StormLib_dll\x64\Release\StormLib.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <Compile Remove="Mpq\**\*.cs" />
   </ItemGroup>
+  <!-- StormLib/MPQ support removed: no native DLL copy -->
 </Project>
