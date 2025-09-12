@@ -34,7 +34,11 @@ namespace DBCTool
                 }
 
                 var locale = ParseLocale(localeStr);
-                if (!compareArea && !exportAll && (tables == null || tables.Count == 0))
+                if (compareArea)
+                {
+                    return CompareAreas(dbdDir, outBase, locale, inputs, buildOverride);
+                }
+                if (!exportAll && (tables == null || tables.Count == 0))
                 {
                     Console.Error.WriteLine("ERROR: At least one --table must be specified (or use --all)");
                     return 2;
@@ -344,6 +348,519 @@ namespace DBCTool
             Console.WriteLine("Export all tables found in the input folder:");
             Console.WriteLine("  dotnet run -- --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS --all --input path/to/DBFilesClient");
             Console.WriteLine();
+            Console.WriteLine("Compare AreaTable 0.5.3 → 3.3.5 mapping and MapId→Name reports:");
+            Console.WriteLine("  dotnet run -- ");
+            Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
+            Console.WriteLine("    --compare-area ");
+            Console.WriteLine("    --input 0.5.3=path/to/0.5.3/DBFilesClient ");
+            Console.WriteLine("    --input 3.3.5=path/to/3.3.5/DBFilesClient");
+            Console.WriteLine();
+        }
+
+        // Compare 0.5.3 → 3.3.5 AreaTable entries using per-build truth (names, parents, map names)
+        private static int CompareAreas(string dbdDir, string outBase, DBCD.Locale locale, List<(string build, string dir)> inputs, string buildOverride)
+        {
+            // Normalize inputs and pick 0.5.3 and 3.3.5
+            string? dir053 = null, dir335 = null;
+            foreach (var (build, dir) in inputs)
+            {
+                var alias = ResolveAliasOrInfer(build, dir, buildOverride);
+                if (alias == "0.5.3") dir053 = NormalizePath(dir);
+                else if (alias == "3.3.5") dir335 = NormalizePath(dir);
+            }
+            if (string.IsNullOrEmpty(dir053) || string.IsNullOrEmpty(dir335))
+            {
+                Console.Error.WriteLine("ERROR: --compare-area requires both 0.5.3 and 3.3.5 inputs.");
+                return 2;
+            }
+
+            var outDir = Path.Combine(outBase, "compare");
+            Directory.CreateDirectory(outDir);
+
+            var dbdProvider = new FilesystemDBDProvider(dbdDir);
+
+            // Load storages with fallback to Locale.None
+            var stor053_Area = LoadTable("AreaTable", "0.5.3.3368", dir053, dbdProvider, locale);
+            var stor053_Map  = LoadTable("Map",       "0.5.3.3368", dir053, dbdProvider, locale);
+            var stor335_Area = LoadTable("AreaTable", "3.3.5.12340", dir335, dbdProvider, locale);
+            var stor335_Map  = LoadTable("Map",       "3.3.5.12340", dir335, dbdProvider, locale);
+
+            // Helper: pick best column name for strings
+            string DetectColumn(IDBCDStorage storage, params string[] preferred)
+            {
+                var cols = storage.AvailableColumns ?? Array.Empty<string>();
+                foreach (var c in preferred)
+                    if (cols.Any(x => string.Equals(x, c, StringComparison.OrdinalIgnoreCase))) return cols.First(x => string.Equals(x, c, StringComparison.OrdinalIgnoreCase));
+                // fallback: first column containing "name"
+                var any = cols.FirstOrDefault(x => x.IndexOf("name", StringComparison.OrdinalIgnoreCase) >= 0);
+                return any ?? (preferred.Length > 0 ? preferred[0] : string.Empty);
+            }
+
+            // Build MapId → Name for each build using their own columns
+            // Prefer Directory (Azeroth/Kalimdor/etc.) to stabilize continent naming across versions
+            string mapNameCol053 = DetectColumn(stor053_Map, "Directory", "InternalName", "MapName_lang", "MapName");
+            string mapNameCol335 = DetectColumn(stor335_Map, "Directory", "InternalName", "MapName_lang", "MapName");
+            string areaNameCol053 = DetectColumn(stor053_Area, "AreaName_lang", "AreaName", "Name");
+            string areaNameCol335 = DetectColumn(stor335_Area, "AreaName_lang", "AreaName", "Name");
+
+            string NormName(string s) => (s ?? string.Empty).Trim().ToLowerInvariant();
+            string Slug(string s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var sb = new StringBuilder(s.Length);
+                foreach (var ch in s)
+                {
+                    if (char.IsLetterOrDigit(ch)) sb.Append(char.ToLowerInvariant(ch));
+                }
+                return sb.ToString();
+            }
+
+            string ExtractDirToken(string s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var parts = s.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                return parts.Length > 0 ? parts[^1] : s.Trim();
+            }
+
+            // Build 3.3.5 map indexes for crosswalk (by Directory token and by normalized name)
+            var dir335Index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var name335Index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mid in stor335_Map.Keys)
+            {
+                var mrow = stor335_Map[mid];
+                var dirTok = ExtractDirToken(SafeField<string>(mrow, "Directory"));
+                if (!string.IsNullOrWhiteSpace(dirTok) && !dir335Index.ContainsKey(dirTok)) dir335Index[dirTok] = mid;
+                var nm = NormName(FirstNonEmpty(
+                    SafeField<string>(mrow, "MapName_lang"),
+                    SafeField<string>(mrow, "MapName"),
+                    SafeField<string>(mrow, "InternalName"),
+                    dirTok
+                ));
+                if (!string.IsNullOrWhiteSpace(nm) && !name335Index.ContainsKey(nm)) name335Index[nm] = mid;
+            }
+
+            // 0.5.3 → 3.3.5 mapping
+            var cw053To335 = new Dictionary<int, int>();
+            var cwReport = new StringBuilder();
+            cwReport.AppendLine("srcMapId,srcDirToken,srcName,tgtMapId,tgtDirToken,tgtName,method");
+            foreach (var srcId in stor053_Map.Keys)
+            {
+                var srcRow = stor053_Map[srcId];
+                var srcDirTok = ExtractDirToken(SafeField<string>(srcRow, "Directory"));
+                var srcName = FirstNonEmpty(
+                    SafeField<string>(srcRow, "MapName_lang"),
+                    SafeField<string>(srcRow, "MapName"),
+                    SafeField<string>(srcRow, "InternalName"),
+                    srcDirTok
+                ) ?? string.Empty;
+
+                int tgtId = -1; string method = string.Empty;
+                var srcDirTokSlug = Slug(srcDirTok);
+                var srcNameSlug = Slug(srcName);
+                if (srcDirTokSlug == "kalidar" || srcNameSlug == "kalidar")
+                { tgtId = 17; method = "override(kalidar→17)"; }
+                else if (!string.IsNullOrWhiteSpace(srcDirTok) && dir335Index.TryGetValue(srcDirTok, out var byDir))
+                { tgtId = byDir; method = "directory"; }
+                else
+                {
+                    var key = NormName(srcName);
+                    if (!string.IsNullOrWhiteSpace(key) && name335Index.TryGetValue(key, out var byNameId))
+                    { tgtId = byNameId; method = "name"; }
+                }
+
+                if (tgtId >= 0)
+                {
+                    cw053To335[srcId] = tgtId;
+                    var tgtRow = stor335_Map[tgtId];
+                    var tgtDirTok = ExtractDirToken(SafeField<string>(tgtRow, "Directory"));
+                    var tgtName = FirstNonEmpty(
+                        SafeField<string>(tgtRow, "MapName_lang"),
+                        SafeField<string>(tgtRow, "MapName"),
+                        SafeField<string>(tgtRow, "InternalName"),
+                        tgtDirTok
+                    ) ?? string.Empty;
+                    cwReport.AppendLine(string.Join(',', new[]
+                    {
+                        srcId.ToString(CultureInfo.InvariantCulture),
+                        Csv(srcDirTok),
+                        Csv(srcName),
+                        tgtId.ToString(CultureInfo.InvariantCulture),
+                        Csv(tgtDirTok),
+                        Csv(tgtName),
+                        method
+                    }));
+                }
+                else
+                {
+                    cwReport.AppendLine(string.Join(',', new[]
+                    {
+                        srcId.ToString(CultureInfo.InvariantCulture),
+                        Csv(srcDirTok),
+                        Csv(srcName),
+                        "-1","","","unmatched"
+                    }));
+                }
+            }
+            var cwOut = Path.Combine(outDir, "Map_crosswalk_053_to_335.csv");
+            File.WriteAllText(cwOut, cwReport.ToString(), new UTF8Encoding(true));
+
+            // Build MapId → Name reports and keep dictionaries for later lookups
+            var map053 = BuildMapNames(stor053_Map, mapNameCol053);
+            var map335 = BuildMapNames(stor335_Map, mapNameCol335);
+            WriteSimpleMapReport(Path.Combine(outDir, "MapId_to_Name_0.5.3.csv"), map053);
+            WriteSimpleMapReport(Path.Combine(outDir, "MapId_to_Name_3.3.5.csv"), map335);
+
+            // Build a token index of 0.5.3 maps to help infer expected map for areas when ContinentID is unreliable
+            var token053Index = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+            void IndexToken053(string token, int id)
+            {
+                if (string.IsNullOrWhiteSpace(token)) return;
+                if (!token053Index.TryGetValue(token, out var list)) { list = new List<int>(); token053Index[token] = list; }
+                if (!list.Contains(id)) list.Add(id);
+            }
+            foreach (var mid in stor053_Map.Keys)
+            {
+                var mrow = stor053_Map[mid];
+                var dirTok = ExtractDirToken(SafeField<string>(mrow, "Directory"));
+                var tok1 = Slug(dirTok);
+                var tok2 = Slug(SafeField<string>(mrow, "InternalName") ?? string.Empty);
+                var tok3 = Slug(FirstNonEmpty(SafeField<string>(mrow, "MapName_lang"), SafeField<string>(mrow, "MapName")) ?? string.Empty);
+                IndexToken053(tok1, mid);
+                IndexToken053(tok2, mid);
+                IndexToken053(tok3, mid);
+            }
+
+            int Infer053MapIdForArea(string name, string parentName)
+            {
+                var tokens = new List<string>();
+                var tParent = Slug(parentName);
+                var tName = Slug(name);
+                if (!string.IsNullOrWhiteSpace(tParent)) tokens.Add(tParent);
+                if (!string.IsNullOrWhiteSpace(tName) && tName != tParent) tokens.Add(tName);
+                foreach (var t in tokens)
+                {
+                    if (token053Index.TryGetValue(t, out var list) && list.Count > 0)
+                    {
+                        if (list.Count == 1) return list[0];
+                        // Prefer exact Directory token match
+                        foreach (var cand in list)
+                        {
+                            var d = ExtractDirToken(SafeField<string>(stor053_Map[cand], "Directory"));
+                            if (Slug(d) == t) return cand;
+                        }
+                        return list[0];
+                    }
+                }
+                return -1;
+            }
+
+            // 0.5.3 indices and parent resolution via AreaNumber
+            var idx053_NumToRow = new Dictionary<int, DBCDRow>();
+            foreach (var id in stor053_Area.Keys)
+            {
+                var row = stor053_Area[id];
+                int num = SafeField<int>(row, "AreaNumber");
+                if (num > 0 && !idx053_NumToRow.ContainsKey(num)) idx053_NumToRow[num] = row;
+            }
+
+            // 3.3.5 indices and parent resolution via ParentAreaID
+            var idx335_IdToRow = new Dictionary<int, DBCDRow>();
+            foreach (var id in stor335_Area.Keys) idx335_IdToRow[id] = stor335_Area[id];
+
+            (string name, string parentName, int areaNum, int parentId, int mapId, string mapName, string path) Extract335(int id)
+            {
+                var row = idx335_IdToRow[id];
+                string name = SafeField<string>(row, areaNameCol335);
+                int areaNum = SafeField<int>(row, "AreaNumber");
+                int parentId = SafeField<int>(row, "ParentAreaID");
+                if (parentId <= 0) parentId = id; // parent=self
+                int cont = SafeField<int>(row, "ContinentID");
+                string mapName = string.Empty;
+                if (map335.TryGetValue(cont, out var tmp)) mapName = tmp;
+                string parentName = name;
+                if (parentId != id && idx335_IdToRow.TryGetValue(parentId, out var prow))
+                    parentName = SafeField<string>(prow, areaNameCol335);
+                var path = $"{NormName(mapName)}/{NormName(parentName)}/{NormName(name)}";
+                return (name, parentName, areaNum, parentId, cont, mapName ?? string.Empty, path);
+            }
+
+            // 0.5.3 → 3.3.5 mapping
+            (string name, string parentName, int areaNum, int parentNum, int mapId, string mapName, int mapIdX, string mapNameX, string path) Extract053(DBCDRow row)
+            {
+                string name = SafeField<string>(row, areaNameCol053);
+                int areaNum = SafeField<int>(row, "AreaNumber");
+                int parentNum = SafeField<int>(row, "ParentAreaNum");
+                if (parentNum <= 0) parentNum = areaNum; // parent=self
+                // Resolve parent name via AreaNumber index (never index storage by ParentAreaNum)
+                string parentNameForInfer = name;
+                if (parentNum != areaNum && idx053_NumToRow.TryGetValue(parentNum, out var prowName))
+                    parentNameForInfer = SafeField<string>(prowName, areaNameCol053) ?? name;
+                int cont = SafeField<int>(row, "ContinentID");
+                string mapName = MapName053FromCont(cont);
+                if (string.IsNullOrWhiteSpace(mapName) && map053.TryGetValue(cont, out var tmpM)) mapName = tmpM;
+                int contX = -1;
+                if (!cw053To335.TryGetValue(cont, out contX))
+                {
+                    // Infer expected 0.5.3 MapID from names, then crosswalk
+                    var inferred053 = Infer053MapIdForArea(name, parentNameForInfer);
+                    if (inferred053 >= 0 && cw053To335.TryGetValue(inferred053, out var tmpX2)) contX = tmpX2;
+                }
+                string mapNameX = string.Empty;
+                if (contX >= 0) map335.TryGetValue(contX, out mapNameX);
+                string path;
+                if (!string.IsNullOrWhiteSpace(mapNameX))
+                    path = $"{NormName(mapNameX)}/{NormName(parentNameForInfer)}/{NormName(name)}";
+                else
+                    path = $"{NormName(parentNameForInfer)}/{NormName(name)}";
+                return (name, parentNameForInfer, areaNum, parentNum, cont, mapName ?? string.Empty, contX, mapNameX ?? string.Empty, path);
+            }
+
+            // Build 3.3.5 indices for matching (by name globally, and by name within map)
+            var idx335_ByName = new Dictionary<string, List<int>>();
+            var idx335_ByMap = new Dictionary<int, List<int>>();
+            var idx335_ByMapName = new Dictionary<int, Dictionary<string, List<int>>>();
+            foreach (var id in stor335_Area.Keys)
+            {
+                var rec = Extract335(id);
+                var nameN = NormName(rec.name);
+                if (!idx335_ByName.TryGetValue(nameN, out var ln)) { ln = new List<int>(); idx335_ByName[nameN] = ln; }
+                ln.Add(id);
+                if (!idx335_ByMap.TryGetValue(rec.mapId, out var lm)) { lm = new List<int>(); idx335_ByMap[rec.mapId] = lm; }
+                lm.Add(id);
+                if (!idx335_ByMapName.TryGetValue(rec.mapId, out var dict)) { dict = new Dictionary<string, List<int>>(); idx335_ByMapName[rec.mapId] = dict; }
+                if (!dict.TryGetValue(nameN, out var lnm)) { lnm = new List<int>(); dict[nameN] = lnm; }
+                lnm.Add(id);
+            }
+
+            // Simple Levenshtein distance for fuzzy fallback
+            int EditDistance(string a, string b)
+            {
+                a = a ?? string.Empty; b = b ?? string.Empty;
+                int n = a.Length, m = b.Length;
+                var d = new int[n + 1, m + 1];
+                for (int i = 0; i <= n; i++) d[i, 0] = i;
+                for (int j = 0; j <= m; j++) d[0, j] = j;
+                for (int i = 1; i <= n; i++)
+                {
+                    for (int j = 1; j <= m; j++)
+                    {
+                        int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                        d[i, j] = Math.Min(
+                            Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                            d[i - 1, j - 1] + cost);
+                    }
+                }
+                return d[n, m];
+            }
+
+            // Cache for resolved 0.5.3 AreaNumber → chosen 3.3.5 AreaID
+            var resolved053 = new Dictionary<int, int>();
+            var resolving053 = new HashSet<int>();
+
+            (int id, string method) ChooseTargetByName(string srcName, int mapIdX)
+            {
+                var nameN = NormName(srcName);
+                // Exact within expected map
+                if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap) && byNameMap.TryGetValue(nameN, out var listM) && listM.Count > 0)
+                {
+                    return (listM.Min(), "name+map");
+                }
+                // Exact globally
+                if (idx335_ByName.TryGetValue(nameN, out var listG) && listG.Count > 0)
+                {
+                    return (listG.Min(), "name");
+                }
+                // Fuzzy within map then globally
+                IEnumerable<int> domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm)) ? lm : idx335_IdToRow.Keys;
+                int bestId = -1; int bestDist = int.MaxValue;
+                foreach (var tid in domain)
+                {
+                    var rec = Extract335(tid);
+                    var dn = EditDistance(nameN, NormName(rec.name));
+                    if (dn <= 2)
+                    {
+                        if (dn < bestDist || (dn == bestDist && tid < bestId))
+                        {
+                            bestDist = dn; bestId = tid;
+                        }
+                    }
+                }
+                if (bestId >= 0) return (bestId, (mapIdX >= 0 ? "fuzzy+map(name)" : "fuzzy(name)"));
+                return (-1, "unmatched");
+            }
+
+            int ResolveTargetForAreaNum(int areaNum)
+            {
+                if (resolved053.TryGetValue(areaNum, out var got)) return got;
+                if (resolving053.Contains(areaNum)) return -1; // break cycles
+                if (!idx053_NumToRow.TryGetValue(areaNum, out var row)) return -1;
+                resolving053.Add(areaNum);
+                var srcRec = Extract053(row);
+                var (cid, _) = ChooseTargetByName(srcRec.name, srcRec.mapIdX);
+                resolved053[areaNum] = cid;
+                resolving053.Remove(areaNum);
+                return cid;
+            }
+
+            // Map rows 0.5.3 → 3.3.5
+            var mapping = new StringBuilder();
+            var unmatchedCsv = new StringBuilder();
+            var ambiguousCsv = new StringBuilder();
+            var patchCsv = new StringBuilder();
+            patchCsv.AppendLine("src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name");
+            var header = string.Join(',', new[]
+            {
+                "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_mapId_xwalk","src_mapName_xwalk","src_path",
+                "tgt_id_335","tgt_name","tgt_parent_id","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_path","match_method"
+            });
+            mapping.AppendLine(header);
+            unmatchedCsv.AppendLine(header);
+            ambiguousCsv.AppendLine(header + ",candidates");
+
+            int byName = 0, unmatched = 0, ambiguous = 0;
+            foreach (var id in stor053_Area.Keys)
+            {
+                var src = Extract053(stor053_Area[id]);
+
+                // Name-only selection (ignore parent mismatches)
+                int chosen = -1; string method = string.Empty;
+                (chosen, method) = ChooseTargetByName(src.name, src.mapIdX);
+                if (chosen >= 0) byName++;
+
+                string lineFor(int tgtId, string mth)
+                {
+                    string tgtName = string.Empty, tgtParentName = string.Empty, tgtMapName = string.Empty; int tgtParentId = -1, tgtMapId = -1; string tgtPath = string.Empty;
+                    if (tgtId >= 0)
+                    {
+                        var rec = Extract335(tgtId);
+                        tgtName = rec.name; tgtParentName = rec.parentName; tgtParentId = rec.parentId; tgtMapId = rec.mapId; tgtMapName = rec.mapName; tgtPath = rec.path;
+                    }
+                    return string.Join(',', new[]
+                    {
+                        id.ToString(CultureInfo.InvariantCulture),
+                        src.areaNum.ToString(CultureInfo.InvariantCulture),
+                        src.parentNum.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.name),
+                        src.mapId.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.mapName),
+                        src.mapIdX.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.mapNameX),
+                        Csv(src.path),
+                        (tgtId >= 0 ? tgtId.ToString(CultureInfo.InvariantCulture) : "-1"),
+                        Csv(tgtName),
+                        tgtParentId.ToString(CultureInfo.InvariantCulture),
+                        Csv(tgtParentName),
+                        tgtMapId.ToString(CultureInfo.InvariantCulture),
+                        Csv(tgtMapName),
+                        Csv(tgtPath),
+                        mth
+                    });
+                }
+
+                if (chosen >= 0)
+                {
+                    mapping.AppendLine(lineFor(chosen, method));
+                    var trecPatch = Extract335(chosen);
+                    // Determine target parent for patch from mapping of source parent
+                    int tgtParentForPatch = chosen;
+                    if (src.parentNum != src.areaNum)
+                    {
+                        var mappedParent = ResolveTargetForAreaNum(src.parentNum);
+                        if (mappedParent >= 0) tgtParentForPatch = mappedParent;
+                    }
+                    patchCsv.AppendLine(string.Join(',', new[]
+                    {
+                        src.mapId.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.mapName),
+                        src.areaNum.ToString(CultureInfo.InvariantCulture),
+                        src.parentNum.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.name),
+                        src.mapIdX.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.mapNameX),
+                        chosen.ToString(CultureInfo.InvariantCulture),
+                        tgtParentForPatch.ToString(CultureInfo.InvariantCulture),
+                        Csv(trecPatch.name)
+                    }));
+                }
+                else
+                {
+                    unmatched++;
+                    unmatchedCsv.AppendLine(lineFor(-1, "unmatched"));
+                }
+            }
+
+            var mapOut = Path.Combine(outDir, "AreaTable_mapping_053_to_335.csv");
+            File.WriteAllText(mapOut, mapping.ToString(), new UTF8Encoding(true));
+            var unOut = Path.Combine(outDir, "AreaTable_unmatched_053_to_335.csv");
+            File.WriteAllText(unOut, unmatchedCsv.ToString(), new UTF8Encoding(true));
+            var ambOut = Path.Combine(outDir, "AreaTable_ambiguous_053_to_335.csv");
+            File.WriteAllText(ambOut, ambiguousCsv.ToString(), new UTF8Encoding(true));
+            var patchOut = Path.Combine(outDir, "Area_patch_crosswalk_053_to_335.csv");
+            File.WriteAllText(patchOut, patchCsv.ToString(), new UTF8Encoding(true));
+
+            Console.WriteLine($"[Compare] Wrote {mapOut}");
+            Console.WriteLine($"[Compare] Wrote {unOut}");
+            Console.WriteLine($"[Compare] Wrote {ambOut}");
+            Console.WriteLine($"[Compare] Wrote {patchOut}");
+            Console.WriteLine($"[Compare] Summary: name={byName}, unmatched={unmatched}, ambiguous={ambiguous}");
+            Console.WriteLine("[Compare] Done.");
+            return 0;
+        }
+
+        private static IDBCDStorage LoadTable(string table, string canonicalBuild, string dbcDir, FilesystemDBDProvider dbdProvider, DBCD.Locale locale)
+        {
+            var provider = new FilesystemDBCProvider(dbcDir, useCache: true);
+            var dbcd = new DBCD.DBCD(provider, dbdProvider);
+            try { return dbcd.Load(table, canonicalBuild, locale); }
+            catch { return dbcd.Load(table, canonicalBuild, DBCD.Locale.None); }
+        }
+
+        private static Dictionary<int, string> BuildMapNames(IDBCDStorage mapStorage, string mapNameCol)
+        {
+            var dict = new Dictionary<int, string>();
+            foreach (var id in mapStorage.Keys)
+            {
+                var row = mapStorage[id];
+                string name = SafeField<string>(row, mapNameCol) ?? string.Empty;
+                dict[id] = name;
+            }
+            return dict;
+        }
+
+        private static void WriteSimpleMapReport(string path, Dictionary<int, string> map)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("MapID,Name");
+            foreach (var kv in map.OrderBy(k => k.Key))
+            {
+                sb.Append(kv.Key.ToString(CultureInfo.InvariantCulture));
+                sb.Append(',');
+                sb.AppendLine(Csv(kv.Value ?? string.Empty));
+            }
+            File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));
+        }
+
+        private static string Csv(string s)
+        {
+            if (s.IndexOfAny(new[] { '"', ',', '\n', '\r' }) >= 0) return '"' + s.Replace("\"", "\"\"") + '"';
+            return s;
+        }
+
+        private static string FirstNonEmpty(params string[] vals)
+        {
+            foreach (var v in vals) if (!string.IsNullOrWhiteSpace(v)) return v; return string.Empty;
+        }
+
+        private static T SafeField<T>(DBCDRow row, string col)
+        {
+            try { return row.Field<T>(col); } catch { return default!; }
+        }
+
+        private static string MapName053FromCont(int cont)
+        {
+            if (cont == 0) return "Azeroth";
+            if (cont == 1) return "Kalimdor";
+            return string.Empty;
         }
     }
 }
