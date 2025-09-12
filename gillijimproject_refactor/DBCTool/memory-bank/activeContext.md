@@ -1,31 +1,14 @@
 # Active Context
 
 - Current Focus:
-  - Area remapping pipeline: map early builds (0.5.3, 0.5.5) to 3.3.5 AreaIDs using a crosswalked map domain + robust name matching.
-  - Deterministic remap flow: discover → export remap JSON → apply remap.
-  - Fix MapId → Name reports to ensure parent map names are stable (Directory-first, then fallbacks).
+  - **Documentation and Usability**: The core area remapping functionality is complete and stable. The current focus is on creating clear, comprehensive documentation so that the tool's output (specifically the `remap.json` files) can be reliably consumed by other downstream tools and developers.
 
-- Recent Results (0.5.3 → 3.3.5):
-  - Matching summary: `name=477, unmatched=1, ambiguous=0, skipped_dev=10`.
-  - Exported `defs/053_to_335.remap.json` with aliases, explicit maps, ignore list, and options.
-  - Alias/variant layer (examples):
-    - Demonic Stronghold → Dreadmaul Hold
-    - Dark Portal → The Dark Portal
-    - Shadowfang → Shadowfang Keep
-    - Lik’ash Tar Pits → Lakkari Tar Pits
-    - Kargathia Outpost → Kargathia Keep
-    - Toggle leading “The ” variants (e.g., The Wellspring River)
-  - DO NOT USE targets excluded by default; can be overridden with `--allow-do-not-use`.
-
-- Matching Strategy (summary):
-  - Build map crosswalk by Directory (fallback to name) to get a 3.3.5 map bias.
-  - Match Areas by name only (parent-agnostic), using:
-    - Exact across variants (map-biased, then global)
-    - Fuzzy within map (Levenshtein), then global fallback
-  - Dev placeholders are filtered from unmatched stats: `***On Map Dungeon***`, Programmer Isle, Plains of Snow, Jeff Quadrant.
+- Core Logic Summary:
+  - The tool provides a deterministic workflow for mapping AreaIDs between different client builds.
+  - It uses a combination of map cross-walking, exact name matching (with aliases), and fuzzy matching to find the best candidates.
+  - The entire process can be saved to a `.remap.json` file and re-applied later for consistent results.
 
 - Next Steps:
-  1. Fix `MapId_to_Name_{0.5.3|0.5.5}.csv` generation so Directory/InternalName/Name fallbacks produce correct labels for all MapIDs.
-  2. Run 0.5.5 → 3.3.5 mapping; export `defs/055_to_335.remap.json`.
-  3. Re-check unmatched for 0.5.5 and 0.5.3 with corrected map-name reports; add aliases/explicit maps if still needed.
-  4. Integrate patch CSV into ADT conversion (join `src_areaNumber` → write `tgt_areaID`).
+  1.  **Create API Documentation**: Write a clear `api.md` file explaining the structure of the `remap.json` output.
+  2.  **Update README**: Add a link in the main `README.md` pointing to the new API documentation.
+  3.  **Align Memory Bank**: Ensure all memory bank files reflect the tool's current, functional state and its new focus on developer experience.

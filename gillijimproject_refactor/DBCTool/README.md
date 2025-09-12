@@ -121,6 +121,12 @@ Remap definition:
   - `ignore_area_numbers`: excluded source area numbers (e.g., dev placeholders)
   - `options`: `{ disallow_do_not_use_targets: true|false }`
 
+## API Documentation
+
+For developers who wish to consume the `.remap.json` files in other tools, detailed documentation of the file format is available.
+
+- **[DBCTool Remap File API](./docs/api.md)**
+
 ### Column reference (patch CSV)
 `Area_patch_crosswalk_{053|055}_to_335.csv`:
 - `src_mapId`, `src_mapName`
