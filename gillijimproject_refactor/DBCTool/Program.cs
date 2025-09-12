@@ -25,7 +25,7 @@ namespace DBCTool
 
             try
             {
-                var (dbdDir, outBase, localeStr, inputs, buildOverride, compareArea) = ParseArgs(args);
+                var (dbdDir, outBase, localeStr, tables, inputs, buildOverride, compareArea, exportAll) = ParseArgs(args);
 
                 if (inputs.Count == 0)
                 {
@@ -34,6 +34,11 @@ namespace DBCTool
                 }
 
                 var locale = ParseLocale(localeStr);
+                if (!compareArea && !exportAll && (tables == null || tables.Count == 0))
+                {
+                    Console.Error.WriteLine("ERROR: At least one --table must be specified (or use --all)");
+                    return 2;
+                }
 
                 foreach (var (build, dbcSpec) in inputs)
                 {
@@ -66,13 +71,14 @@ namespace DBCTool
                     var dbdFsProvider = new FilesystemDBDProvider(dbdDir);
                     var dbcd = new DBCD.DBCD(dbcProvider, dbdFsProvider);
 
-                    var tables = new List<string>();
-                    if (compareArea)
-                    {
-                        tables.Add("AreaTable");
-                    }
+                    var tablesLocal = exportAll ? DiscoverTables(dbcDir, dbdDir, dbdFsProvider, alias, canonicalBuild) : new List<string>(tables);
+                    if (compareArea && !tablesLocal.Contains("AreaTable", StringComparer.OrdinalIgnoreCase))
+                        tablesLocal.Add("AreaTable");
 
-                    foreach (var table in tables)
+                    Console.WriteLine($"  - Tables to export: {tablesLocal.Count}");
+
+                    int okCount = 0, failCount = 0;
+                    foreach (var table in tablesLocal)
                     {
                         try
                         {
@@ -99,17 +105,22 @@ namespace DBCTool
                             var outPath = Path.Combine(outDir, $"{table}.csv");
                             CsvExporter.WriteCsv(storage, outPath);
                             Console.WriteLine($"    Wrote {outPath}");
+                            okCount++;
                         }
                         catch (Exception ex)
                         {
-                            Console.Error.WriteLine($"  ! Failed to export {table} for build {canonicalBuild}: {ex}");
-                            if (ex.InnerException != null)
+                            failCount++;
+                            Console.Error.WriteLine($"  ! Failed to export {table} for build {canonicalBuild}: {ex.Message}");
+                            if (!exportAll)
                             {
-                                Console.Error.WriteLine($"    Inner: {ex.InnerException}");
+                                if (ex.InnerException != null) Console.Error.WriteLine($"    Inner: {ex.InnerException.Message}");
+                                return 4;
                             }
-                            return 4;
+                            // In --all mode, continue best-effort
                         }
                     }
+
+                    Console.WriteLine($"[DBCTool] Summary for {alias}: {okCount} ok, {failCount} failed");
                 }
 
                 Console.WriteLine("[DBCTool] Done.");
@@ -139,13 +150,15 @@ namespace DBCTool
             Console.WriteLine("[MPQ-DEBUG] MPQ support has been removed; filesystem mode only.");
         }
 
-        private static (string dbdDir, string outBase, string locale, List<(string build, string dir)> inputs, string buildOverride, bool compareArea) ParseArgs(string[] args)
+        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string buildOverride, bool compareArea, bool exportAll) ParseArgs(string[] args)
         {
             string dbdDir = DefaultDbdDir;
             string outBase = DefaultOutBase;
             string locale = DefaultLocale;
             string buildOverride = string.Empty;
             bool compareArea = false;
+            bool exportAll = false;
+            var tables = new List<string>();
             var inputs = new List<(string build, string dir)>();
 
             for (int i = 0; i < args.Length; i++)
@@ -161,6 +174,14 @@ namespace DBCTool
                         break;
                     case "--locale":
                         locale = RequireValue(args, ref i, a);
+                        break;
+                    case "--table":
+                        var t = RequireValue(args, ref i, a);
+                        foreach (var part in t.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            if (!string.IsNullOrWhiteSpace(part))
+                                tables.Add(part);
+                        }
                         break;
                     case "--input":
                         var spec = RequireValue(args, ref i, a);
@@ -183,12 +204,16 @@ namespace DBCTool
                     case "--compare-area":
                         compareArea = true;
                         break;
+                    case "--all":
+                    case "--export-all":
+                        exportAll = true;
+                        break;
                     default:
                         break;
                 }
             }
 
-            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, inputs.Select(t => (t.build, NormalizePath(t.dir))).ToList(), buildOverride, compareArea);
+            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs.Select(t => (t.build, NormalizePath(t.dir))).ToList(), buildOverride, compareArea, exportAll);
         }
 
         private static string RequireValue(string[] args, ref int i, string flag)
@@ -252,6 +277,54 @@ namespace DBCTool
             return string.Empty;
         }
 
+        private static List<string> DiscoverTables(string dbcDir, string dbdDir, FilesystemDBDProvider dbdProvider, string alias, string canonicalBuild)
+        {
+            var dirNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                // For classic/early builds (0.5.x, 3.3.5), only *.dbc are valid
+                foreach (var p in Directory.EnumerateFiles(dbcDir, "*.dbc", SearchOption.TopDirectoryOnly))
+                    dirNames.Add(Path.GetFileNameWithoutExtension(p));
+                // Include *.db2 only for non-classic aliases
+                if (!(alias == "0.5.3" || alias == "0.5.5" || alias == "3.3.5"))
+                {
+                    foreach (var p in Directory.EnumerateFiles(dbcDir, "*.db2", SearchOption.TopDirectoryOnly))
+                        dirNames.Add(Path.GetFileNameWithoutExtension(p));
+                }
+            }
+            catch { }
+
+            // Intersect with known .dbd definitions
+            var dbdNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var p in Directory.EnumerateFiles(dbdDir, "*.dbd", SearchOption.TopDirectoryOnly))
+                    dbdNames.Add(Path.GetFileNameWithoutExtension(p));
+            }
+            catch { }
+
+            var candidates = dirNames.Where(name => dbdNames.Contains(name)).ToList();
+
+            // Filter to those listing the build (best-effort)
+            var result = new List<string>();
+            foreach (var name in candidates)
+            {
+                try
+                {
+                    if (dbdProvider.ContainsBuild(name, canonicalBuild))
+                        result.Add(name);
+                }
+                catch
+                {
+                    // If ContainsBuild throws, include anyway and let loader decide
+                    result.Add(name);
+                }
+            }
+
+            result.Sort(StringComparer.OrdinalIgnoreCase);
+            return result;
+        }
+
         private static void PrintHelp()
         {
             Console.WriteLine("DBCTool - Export WoW DBC tables to CSV using DBCD + WoWDBDefs (filesystem only)");
@@ -259,14 +332,17 @@ namespace DBCTool
             Console.WriteLine("Usage (with build alias):");
             Console.WriteLine("  dotnet run -- ");
             Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
-            Console.WriteLine("    --table AreaTable [--table Map] ");
+            Console.WriteLine("    --table AreaTable [--table Map]  (or use --all) ");
             Console.WriteLine("    --input 3.3.5=path/to/3.3.5/DBFilesClient");
             Console.WriteLine();
             Console.WriteLine("Usage (bare directory; build inferred from path tokens 0.5.3|0.5.5|3.3.5):");
             Console.WriteLine("  dotnet run -- ");
             Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS ");
-            Console.WriteLine("    --table AreaTable ");
+            Console.WriteLine("    --table AreaTable  (or use --all) ");
             Console.WriteLine("    --input path/to/0.5.3/DBFilesClient");
+            Console.WriteLine();
+            Console.WriteLine("Export all tables found in the input folder:");
+            Console.WriteLine("  dotnet run -- --dbd-dir lib/WoWDBDefs/definitions --out out --locale enUS --all --input path/to/DBFilesClient");
             Console.WriteLine();
         }
     }
