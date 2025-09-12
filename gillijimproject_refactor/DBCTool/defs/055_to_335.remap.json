@@ -1,0 +1,2548 @@
+﻿{
+  "meta": {
+    "src_alias": "0.5.5",
+    "src_build": "0.5.5.3494",
+    "tgt_build": "3.3.5.12340",
+    "generated_at": "2025-09-12T20:13:10.6255427Z"
+  },
+  "aliases": {
+    "dark portal": [
+      "the dark portal"
+    ],
+    "demonic stronghold": [
+      "dreadmaul hold"
+    ],
+    "shadowfang": [
+      "shadowfang keep"
+    ],
+    "lik\u0027ash tar pits": [
+      "lakkari tar pits"
+    ],
+    "kargathia outpost": [
+      "kargathia keep"
+    ],
+    "the wellspring river": [
+      "wellspring river"
+    ],
+    "wellspring river": [
+      "the wellspring river"
+    ]
+  },
+  "explicit_map": [
+    {
+      "src_areaNumber": 589825,
+      "tgt_areaID": 210,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589827,
+      "tgt_areaID": 212,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589828,
+      "tgt_areaID": 213,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589829,
+      "tgt_areaID": 214,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589831,
+      "tgt_areaID": 216,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327684,
+      "tgt_areaID": 217,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327685,
+      "tgt_areaID": 218,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327686,
+      "tgt_areaID": 219,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327687,
+      "tgt_areaID": 220,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327688,
+      "tgt_areaID": 221,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327689,
+      "tgt_areaID": 222,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327690,
+      "tgt_areaID": 223,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327691,
+      "tgt_areaID": 224,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327692,
+      "tgt_areaID": 225,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327693,
+      "tgt_areaID": 226,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327694,
+      "tgt_areaID": 227,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966080,
+      "tgt_areaID": 228,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2031616,
+      "tgt_areaID": 230,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966083,
+      "tgt_areaID": 232,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966086,
+      "tgt_areaID": 233,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310721,
+      "tgt_areaID": 235,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310722,
+      "tgt_areaID": 236,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310723,
+      "tgt_areaID": 2006,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 1310724,
+      "tgt_areaID": 238,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310725,
+      "tgt_areaID": 239,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310726,
+      "tgt_areaID": 240,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310727,
+      "tgt_areaID": 241,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310728,
+      "tgt_areaID": 242,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966087,
+      "tgt_areaID": 243,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966088,
+      "tgt_areaID": 244,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966089,
+      "tgt_areaID": 245,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966090,
+      "tgt_areaID": 246,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966091,
+      "tgt_areaID": 247,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966092,
+      "tgt_areaID": 248,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2162688,
+      "tgt_areaID": 249,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966095,
+      "tgt_areaID": 250,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2228224,
+      "tgt_areaID": 885,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720919,
+      "tgt_areaID": 253,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917509,
+      "tgt_areaID": 254,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917510,
+      "tgt_areaID": 255,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458757,
+      "tgt_areaID": 256,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720920,
+      "tgt_areaID": 257,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720922,
+      "tgt_areaID": 259,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638419,
+      "tgt_areaID": 260,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638420,
+      "tgt_areaID": 261,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786433,
+      "tgt_areaID": 262,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917511,
+      "tgt_areaID": 264,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720923,
+      "tgt_areaID": 265,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720925,
+      "tgt_areaID": 267,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851970,
+      "tgt_areaID": 269,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851972,
+      "tgt_areaID": 271,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851974,
+      "tgt_areaID": 273,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851976,
+      "tgt_areaID": 274,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851977,
+      "tgt_areaID": 275,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851979,
+      "tgt_areaID": 277,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851980,
+      "tgt_areaID": 278,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851981,
+      "tgt_areaID": 279,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851982,
+      "tgt_areaID": 280,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851983,
+      "tgt_areaID": 281,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2359296,
+      "tgt_areaID": 283,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524288,
+      "tgt_areaID": 284,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589824,
+      "tgt_areaID": 285,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851985,
+      "tgt_areaID": 286,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851986,
+      "tgt_areaID": 287,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851987,
+      "tgt_areaID": 288,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851988,
+      "tgt_areaID": 289,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114113,
+      "tgt_areaID": 290,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114116,
+      "tgt_areaID": 293,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114117,
+      "tgt_areaID": 294,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114118,
+      "tgt_areaID": 295,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114119,
+      "tgt_areaID": 296,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114120,
+      "tgt_areaID": 297,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114121,
+      "tgt_areaID": 298,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114122,
+      "tgt_areaID": 299,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114123,
+      "tgt_areaID": 300,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786434,
+      "tgt_areaID": 301,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786435,
+      "tgt_areaID": 302,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786436,
+      "tgt_areaID": 303,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786437,
+      "tgt_areaID": 304,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786438,
+      "tgt_areaID": 305,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786439,
+      "tgt_areaID": 306,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786442,
+      "tgt_areaID": 309,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 655360,
+      "tgt_areaID": 310,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458759,
+      "tgt_areaID": 311,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65537,
+      "tgt_areaID": 312,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458760,
+      "tgt_areaID": 313,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720896,
+      "tgt_areaID": 314,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131073,
+      "tgt_areaID": 315,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131074,
+      "tgt_areaID": 316,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131075,
+      "tgt_areaID": 317,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131076,
+      "tgt_areaID": 318,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131077,
+      "tgt_areaID": 319,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131078,
+      "tgt_areaID": 320,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131079,
+      "tgt_areaID": 321,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131080,
+      "tgt_areaID": 322,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131081,
+      "tgt_areaID": 323,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131083,
+      "tgt_areaID": 325,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131084,
+      "tgt_areaID": 326,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131085,
+      "tgt_areaID": 327,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131086,
+      "tgt_areaID": 328,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786432,
+      "tgt_areaID": 329,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65538,
+      "tgt_areaID": 330,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65539,
+      "tgt_areaID": 331,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65540,
+      "tgt_areaID": 332,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65541,
+      "tgt_areaID": 333,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65543,
+      "tgt_areaID": 335,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65544,
+      "tgt_areaID": 336,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65545,
+      "tgt_areaID": 337,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65546,
+      "tgt_areaID": 338,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65548,
+      "tgt_areaID": 340,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65550,
+      "tgt_areaID": 341,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65551,
+      "tgt_areaID": 342,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65552,
+      "tgt_areaID": 343,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131087,
+      "tgt_areaID": 344,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2424832,
+      "tgt_areaID": 867,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2424833,
+      "tgt_areaID": 868,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458761,
+      "tgt_areaID": 347,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458762,
+      "tgt_areaID": 348,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048576,
+      "tgt_areaID": 1,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196611,
+      "tgt_areaID": 2,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114112,
+      "tgt_areaID": 3,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131072,
+      "tgt_areaID": 4,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720897,
+      "tgt_areaID": 5,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458752,
+      "tgt_areaID": 6,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393218,
+      "tgt_areaID": 7,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393216,
+      "tgt_areaID": 10,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131072,
+      "tgt_areaID": 12,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196608,
+      "tgt_areaID": 13,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262144,
+      "tgt_areaID": 14,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 15,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393220,
+      "tgt_areaID": 16,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196610,
+      "tgt_areaID": 18,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1376256,
+      "tgt_areaID": 19,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393223,
+      "tgt_areaID": 21,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393224,
+      "tgt_areaID": 22,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179648,
+      "tgt_areaID": 23,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245184,
+      "tgt_areaID": 25,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 655360,
+      "tgt_areaID": 26,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262147,
+      "tgt_areaID": 27,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720896,
+      "tgt_areaID": 28,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393222,
+      "tgt_areaID": 29,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720901,
+      "tgt_areaID": 30,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310720,
+      "tgt_areaID": 31,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720899,
+      "tgt_areaID": 32,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983040,
+      "tgt_areaID": 33,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196608,
+      "tgt_areaID": 34,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262145,
+      "tgt_areaID": 36,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720898,
+      "tgt_areaID": 37,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524288,
+      "tgt_areaID": 38,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851968,
+      "tgt_areaID": 39,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589824,
+      "tgt_areaID": 40,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786432,
+      "tgt_areaID": 41,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1441793,
+      "tgt_areaID": 42,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 1507328,
+      "tgt_areaID": 43,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393228,
+      "tgt_areaID": 44,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393230,
+      "tgt_areaID": 706,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393231,
+      "tgt_areaID": 47,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393232,
+      "tgt_areaID": 48,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393233,
+      "tgt_areaID": 49,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393235,
+      "tgt_areaID": 51,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393236,
+      "tgt_areaID": 52,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393237,
+      "tgt_areaID": 53,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393238,
+      "tgt_areaID": 54,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524290,
+      "tgt_areaID": 59,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524291,
+      "tgt_areaID": 60,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131073,
+      "tgt_areaID": 62,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131074,
+      "tgt_areaID": 673,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458753,
+      "tgt_areaID": 64,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458754,
+      "tgt_areaID": 65,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458755,
+      "tgt_areaID": 66,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048577,
+      "tgt_areaID": 67,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393239,
+      "tgt_areaID": 688,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572864,
+      "tgt_areaID": 73,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393240,
+      "tgt_areaID": 74,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393242,
+      "tgt_areaID": 76,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393243,
+      "tgt_areaID": 77,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393244,
+      "tgt_areaID": 78,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262149,
+      "tgt_areaID": 81,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524293,
+      "tgt_areaID": 82,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524294,
+      "tgt_areaID": 83,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524295,
+      "tgt_areaID": 84,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524296,
+      "tgt_areaID": 85,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720902,
+      "tgt_areaID": 86,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720904,
+      "tgt_areaID": 88,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720906,
+      "tgt_areaID": 90,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720907,
+      "tgt_areaID": 91,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720908,
+      "tgt_areaID": 92,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720909,
+      "tgt_areaID": 93,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196612,
+      "tgt_areaID": 94,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196613,
+      "tgt_areaID": 95,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196614,
+      "tgt_areaID": 96,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196616,
+      "tgt_areaID": 97,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196620,
+      "tgt_areaID": 99,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458756,
+      "tgt_areaID": 100,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917505,
+      "tgt_areaID": 102,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262150,
+      "tgt_areaID": 104,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720911,
+      "tgt_areaID": 105,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720912,
+      "tgt_areaID": 106,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720914,
+      "tgt_areaID": 107,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720915,
+      "tgt_areaID": 108,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720916,
+      "tgt_areaID": 109,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720917,
+      "tgt_areaID": 110,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720918,
+      "tgt_areaID": 111,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638400,
+      "tgt_areaID": 112,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048578,
+      "tgt_areaID": 113,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048579,
+      "tgt_areaID": 114,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048580,
+      "tgt_areaID": 115,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048581,
+      "tgt_areaID": 116,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048582,
+      "tgt_areaID": 117,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048583,
+      "tgt_areaID": 118,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048584,
+      "tgt_areaID": 119,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048585,
+      "tgt_areaID": 120,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1703936,
+      "tgt_areaID": 121,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327680,
+      "tgt_areaID": 122,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983041,
+      "tgt_areaID": 123,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983042,
+      "tgt_areaID": 124,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983043,
+      "tgt_areaID": 125,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983044,
+      "tgt_areaID": 126,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983045,
+      "tgt_areaID": 127,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983046,
+      "tgt_areaID": 128,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393216,
+      "tgt_areaID": 129,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983047,
+      "tgt_areaID": 130,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917507,
+      "tgt_areaID": 131,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572865,
+      "tgt_areaID": 133,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572867,
+      "tgt_areaID": 135,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572868,
+      "tgt_areaID": 136,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572869,
+      "tgt_areaID": 137,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572870,
+      "tgt_areaID": 138,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572871,
+      "tgt_areaID": 139,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572872,
+      "tgt_areaID": 140,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572873,
+      "tgt_areaID": 141,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572874,
+      "tgt_areaID": 142,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572875,
+      "tgt_areaID": 143,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572876,
+      "tgt_areaID": 144,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572877,
+      "tgt_areaID": 145,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572878,
+      "tgt_areaID": 146,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572879,
+      "tgt_areaID": 147,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572880,
+      "tgt_areaID": 148,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572881,
+      "tgt_areaID": 149,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1835008,
+      "tgt_areaID": 151,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638401,
+      "tgt_areaID": 152,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327682,
+      "tgt_areaID": 712,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048586,
+      "tgt_areaID": 157,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245185,
+      "tgt_areaID": 158,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245187,
+      "tgt_areaID": 159,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245188,
+      "tgt_areaID": 160,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245190,
+      "tgt_areaID": 161,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245192,
+      "tgt_areaID": 163,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245193,
+      "tgt_areaID": 164,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245194,
+      "tgt_areaID": 165,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245195,
+      "tgt_areaID": 166,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245196,
+      "tgt_areaID": 167,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245197,
+      "tgt_areaID": 168,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245198,
+      "tgt_areaID": 169,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638402,
+      "tgt_areaID": 170,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917508,
+      "tgt_areaID": 171,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 34,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 131072,
+      "tgt_areaID": 173,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196608,
+      "tgt_areaID": 696,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 175,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048587,
+      "tgt_areaID": 177,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048588,
+      "tgt_areaID": 178,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638403,
+      "tgt_areaID": 179,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1900544,
+      "tgt_areaID": 180,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458752,
+      "tgt_areaID": 181,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196621,
+      "tgt_areaID": 182,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458754,
+      "tgt_areaID": 184,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458755,
+      "tgt_areaID": 185,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458756,
+      "tgt_areaID": 186,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458757,
+      "tgt_areaID": 187,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458758,
+      "tgt_areaID": 188,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638405,
+      "tgt_areaID": 190,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638406,
+      "tgt_areaID": 191,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638407,
+      "tgt_areaID": 192,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638408,
+      "tgt_areaID": 193,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638409,
+      "tgt_areaID": 194,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638410,
+      "tgt_areaID": 195,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638411,
+      "tgt_areaID": 196,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638414,
+      "tgt_areaID": 198,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638415,
+      "tgt_areaID": 199,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638418,
+      "tgt_areaID": 202,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262151,
+      "tgt_areaID": 203,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262152,
+      "tgt_areaID": 204,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262153,
+      "tgt_areaID": 205,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262154,
+      "tgt_areaID": 206,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1507329,
+      "tgt_areaID": 208,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1507330,
+      "tgt_areaID": 209,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245185,
+      "tgt_areaID": 494,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458758,
+      "tgt_areaID": 495,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 496,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 327696,
+      "tgt_areaID": 714,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327697,
+      "tgt_areaID": 717,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327698,
+      "tgt_areaID": 716,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327699,
+      "tgt_areaID": 2070,
+      "note": "fuzzy-global"
+    },
+    {
+      "src_areaNumber": 327700,
+      "tgt_areaID": 713,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327701,
+      "tgt_areaID": 715,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327702,
+      "tgt_areaID": 503,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 509,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458763,
+      "tgt_areaID": 349,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851968,
+      "tgt_areaID": 351,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65553,
+      "tgt_areaID": 352,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458765,
+      "tgt_areaID": 354,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917504,
+      "tgt_areaID": 355,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983040,
+      "tgt_areaID": 356,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131088,
+      "tgt_areaID": 707,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2490368,
+      "tgt_areaID": 358,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2555904,
+      "tgt_areaID": 359,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131089,
+      "tgt_areaID": 360,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524289,
+      "tgt_areaID": 361,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524291,
+      "tgt_areaID": 363,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524292,
+      "tgt_areaID": 364,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524293,
+      "tgt_areaID": 365,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524294,
+      "tgt_areaID": 366,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524295,
+      "tgt_areaID": 367,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524296,
+      "tgt_areaID": 368,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524297,
+      "tgt_areaID": 369,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524298,
+      "tgt_areaID": 370,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524299,
+      "tgt_areaID": 371,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524300,
+      "tgt_areaID": 372,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524302,
+      "tgt_areaID": 373,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524304,
+      "tgt_areaID": 375,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524305,
+      "tgt_areaID": 376,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524308,
+      "tgt_areaID": 379,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524310,
+      "tgt_areaID": 381,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524311,
+      "tgt_areaID": 382,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524313,
+      "tgt_areaID": 384,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524314,
+      "tgt_areaID": 385,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524316,
+      "tgt_areaID": 387,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851969,
+      "tgt_areaID": 388,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048576,
+      "tgt_areaID": 389,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524317,
+      "tgt_areaID": 390,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393217,
+      "tgt_areaID": 391,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393218,
+      "tgt_areaID": 392,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393219,
+      "tgt_areaID": 393,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393220,
+      "tgt_areaID": 394,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393221,
+      "tgt_areaID": 395,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393222,
+      "tgt_areaID": 396,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393223,
+      "tgt_areaID": 397,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393224,
+      "tgt_areaID": 398,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393225,
+      "tgt_areaID": 399,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393227,
+      "tgt_areaID": 400,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393229,
+      "tgt_areaID": 402,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393230,
+      "tgt_areaID": 403,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393231,
+      "tgt_areaID": 404,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65554,
+      "tgt_areaID": 406,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572884,
+      "tgt_areaID": 407,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983041,
+      "tgt_areaID": 408,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983042,
+      "tgt_areaID": 409,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983044,
+      "tgt_areaID": 410,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983045,
+      "tgt_areaID": 411,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983046,
+      "tgt_areaID": 412,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983047,
+      "tgt_areaID": 413,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983049,
+      "tgt_areaID": 415,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983050,
+      "tgt_areaID": 416,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458766,
+      "tgt_areaID": 708,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458767,
+      "tgt_areaID": 418,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458768,
+      "tgt_areaID": 419,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458770,
+      "tgt_areaID": 711,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458771,
+      "tgt_areaID": 710,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458772,
+      "tgt_areaID": 709,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720926,
+      "tgt_areaID": 424,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327695,
+      "tgt_areaID": 425,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851970,
+      "tgt_areaID": 426,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851971,
+      "tgt_areaID": 427,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851973,
+      "tgt_areaID": 429,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851974,
+      "tgt_areaID": 430,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851975,
+      "tgt_areaID": 431,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851976,
+      "tgt_areaID": 432,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851977,
+      "tgt_areaID": 433,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851978,
+      "tgt_areaID": 434,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851979,
+      "tgt_areaID": 435,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 655361,
+      "tgt_areaID": 436,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179648,
+      "tgt_areaID": 437,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 438,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262156,
+      "tgt_areaID": 439,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245184,
+      "tgt_areaID": 440,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196610,
+      "tgt_areaID": 442,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2621440,
+      "tgt_areaID": 542,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196611,
+      "tgt_areaID": 443,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196612,
+      "tgt_areaID": 444,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196613,
+      "tgt_areaID": 445,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196618,
+      "tgt_areaID": 450,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196619,
+      "tgt_areaID": 451,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196620,
+      "tgt_areaID": 452,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196621,
+      "tgt_areaID": 453,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196622,
+      "tgt_areaID": 454,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196623,
+      "tgt_areaID": 455,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196625,
+      "tgt_areaID": 457,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196626,
+      "tgt_areaID": 816,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196627,
+      "tgt_areaID": 459,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196628,
+      "tgt_areaID": 460,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196629,
+      "tgt_areaID": 461,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196630,
+      "tgt_areaID": 462,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196631,
+      "tgt_areaID": 463,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196632,
+      "tgt_areaID": 464,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262157,
+      "tgt_areaID": 465,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179649,
+      "tgt_areaID": 466,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179650,
+      "tgt_areaID": 467,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179651,
+      "tgt_areaID": 468,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179652,
+      "tgt_areaID": 469,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179653,
+      "tgt_areaID": 470,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179654,
+      "tgt_areaID": 471,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1179655,
+      "tgt_areaID": 472,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983048,
+      "tgt_areaID": 473,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262158,
+      "tgt_areaID": 474,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393241,
+      "tgt_areaID": 75,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524303,
+      "tgt_areaID": 374,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393229,
+      "tgt_areaID": 45,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638404,
+      "tgt_areaID": 189,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65542,
+      "tgt_areaID": 334,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524309,
+      "tgt_areaID": 225,
+      "note": "fuzzy-global"
+    },
+    {
+      "src_areaNumber": 458769,
+      "tgt_areaID": 420,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262146,
+      "tgt_areaID": 11,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327680,
+      "tgt_areaID": 35,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524289,
+      "tgt_areaID": 58,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393245,
+      "tgt_areaID": 79,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393246,
+      "tgt_areaID": 103,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1769472,
+      "tgt_areaID": 132,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 327683,
+      "tgt_areaID": 156,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458753,
+      "tgt_areaID": 183,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262155,
+      "tgt_areaID": 207,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2097152,
+      "tgt_areaID": 984,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720921,
+      "tgt_areaID": 258,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851984,
+      "tgt_areaID": 282,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131082,
+      "tgt_areaID": 324,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196609,
+      "tgt_areaID": 353,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524306,
+      "tgt_areaID": 377,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524312,
+      "tgt_areaID": 383,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114112,
+      "tgt_areaID": 405,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851972,
+      "tgt_areaID": 428,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196617,
+      "tgt_areaID": 449,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720900,
+      "tgt_areaID": 17,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196618,
+      "tgt_areaID": 98,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572882,
+      "tgt_areaID": 150,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1245191,
+      "tgt_areaID": 162,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589826,
+      "tgt_areaID": 211,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851978,
+      "tgt_areaID": 276,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65547,
+      "tgt_areaID": 339,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393228,
+      "tgt_areaID": 401,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196624,
+      "tgt_areaID": 456,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720903,
+      "tgt_areaID": 87,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720905,
+      "tgt_areaID": 89,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638416,
+      "tgt_areaID": 200,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638417,
+      "tgt_areaID": 201,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720924,
+      "tgt_areaID": 266,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851971,
+      "tgt_areaID": 270,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786440,
+      "tgt_areaID": 307,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 786441,
+      "tgt_areaID": 308,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917505,
+      "tgt_areaID": 475,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917506,
+      "tgt_areaID": 476,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917507,
+      "tgt_areaID": 477,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917508,
+      "tgt_areaID": 478,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917509,
+      "tgt_areaID": 479,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917518,
+      "tgt_areaID": 486,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917511,
+      "tgt_areaID": 480,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917512,
+      "tgt_areaID": 481,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917513,
+      "tgt_areaID": 482,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196609,
+      "tgt_areaID": 24,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917515,
+      "tgt_areaID": 483,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917516,
+      "tgt_areaID": 484,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917517,
+      "tgt_areaID": 485,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393234,
+      "tgt_areaID": 50,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572866,
+      "tgt_areaID": 134,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1638413,
+      "tgt_areaID": 197,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851973,
+      "tgt_areaID": 272,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458764,
+      "tgt_areaID": 350,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524307,
+      "tgt_areaID": 378,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524315,
+      "tgt_areaID": 966,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983048,
+      "tgt_areaID": 414,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196615,
+      "tgt_areaID": 447,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966082,
+      "tgt_areaID": 231,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1966096,
+      "tgt_areaID": 251,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262144,
+      "tgt_areaID": 8,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 917504,
+      "tgt_areaID": 9,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1310720,
+      "tgt_areaID": 487,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1572883,
+      "tgt_areaID": 153,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1376256,
+      "tgt_areaID": 488,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327681,
+      "tgt_areaID": 154,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196614,
+      "tgt_areaID": 446,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196616,
+      "tgt_areaID": 448,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524290,
+      "tgt_areaID": 362,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 983051,
+      "tgt_areaID": 489,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 524292,
+      "tgt_areaID": 61,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262148,
+      "tgt_areaID": 80,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720910,
+      "tgt_areaID": 101,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 589830,
+      "tgt_areaID": 697,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 2293760,
+      "tgt_areaID": 263,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 851969,
+      "tgt_areaID": 268,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114114,
+      "tgt_areaID": 291,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1114115,
+      "tgt_areaID": 292,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458773,
+      "tgt_areaID": 490,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131090,
+      "tgt_areaID": 491,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131091,
+      "tgt_areaID": 492,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131092,
+      "tgt_areaID": 493,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1048589,
+      "tgt_areaID": 504,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 505,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 506,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 507,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65555,
+      "tgt_areaID": 508,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 65536,
+      "tgt_areaID": 510,
+      "note": "name\u002Bmap"
+    }
+  ],
+  "ignore_area_numbers": [
+    0,
+    0,
+    0,
+    1441797,
+    1441798,
+    1441799,
+    0,
+    1441792,
+    1441796,
+    65536
+  ],
+  "options": {
+    "disallow_do_not_use_targets": true
+  }
+}
