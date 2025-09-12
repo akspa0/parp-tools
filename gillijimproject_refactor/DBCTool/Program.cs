@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DBCD;
 using DBCD.Providers;
 
@@ -25,7 +27,7 @@ namespace DBCTool
 
             try
             {
-                var (dbdDir, outBase, localeStr, tables, inputs, buildOverride, compareArea, exportAll) = ParseArgs(args);
+                var (dbdDir, outBase, localeStr, tables, inputs, buildOverride, compareArea, exportAll, srcAliasFlag, srcBuildFlag, tgtBuildFlag, exportRemap, applyRemap, disallowDoNotUse) = ParseArgs(args);
 
                 if (inputs.Count == 0)
                 {
@@ -36,7 +38,7 @@ namespace DBCTool
                 var locale = ParseLocale(localeStr);
                 if (compareArea)
                 {
-                    return CompareAreas(dbdDir, outBase, locale, inputs, buildOverride);
+                    return CompareAreas(dbdDir, outBase, locale, inputs, buildOverride, srcAliasFlag, srcBuildFlag, tgtBuildFlag, exportRemap, applyRemap, disallowDoNotUse);
                 }
                 if (!exportAll && (tables == null || tables.Count == 0))
                 {
@@ -154,7 +156,7 @@ namespace DBCTool
             Console.WriteLine("[MPQ-DEBUG] MPQ support has been removed; filesystem mode only.");
         }
 
-        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string buildOverride, bool compareArea, bool exportAll) ParseArgs(string[] args)
+        private static (string dbdDir, string outBase, string locale, List<string> tables, List<(string build, string dir)> inputs, string buildOverride, bool compareArea, bool exportAll, string srcAlias, string srcBuild, string tgtBuild, string exportRemap, string applyRemap, bool disallowDoNotUse) ParseArgs(string[] args)
         {
             string dbdDir = DefaultDbdDir;
             string outBase = DefaultOutBase;
@@ -162,6 +164,12 @@ namespace DBCTool
             string buildOverride = string.Empty;
             bool compareArea = false;
             bool exportAll = false;
+            string srcAlias = string.Empty;
+            string srcBuild = string.Empty;
+            string tgtBuild = string.Empty;
+            string exportRemap = string.Empty;
+            string applyRemap = string.Empty;
+            bool disallowDoNotUse = true; // default: do not map to DO NOT USE areas
             var tables = new List<string>();
             var inputs = new List<(string build, string dir)>();
 
@@ -178,6 +186,15 @@ namespace DBCTool
                         break;
                     case "--locale":
                         locale = RequireValue(args, ref i, a);
+                        break;
+                    case "--src-alias":
+                        srcAlias = RequireValue(args, ref i, a);
+                        break;
+                    case "--src-build":
+                        srcBuild = RequireValue(args, ref i, a);
+                        break;
+                    case "--tgt-build":
+                        tgtBuild = RequireValue(args, ref i, a);
                         break;
                     case "--table":
                         var t = RequireValue(args, ref i, a);
@@ -212,12 +229,22 @@ namespace DBCTool
                     case "--export-all":
                         exportAll = true;
                         break;
+                    case "--export-remap":
+                        exportRemap = RequireValue(args, ref i, a);
+                        break;
+                    case "--apply-remap":
+                        applyRemap = RequireValue(args, ref i, a);
+                        break;
+                    case "--allow-do-not-use":
+                        // If set, allow mapping to target areas named DO NOT USE
+                        disallowDoNotUse = false;
+                        break;
                     default:
                         break;
                 }
             }
 
-            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs.Select(t => (t.build, NormalizePath(t.dir))).ToList(), buildOverride, compareArea, exportAll);
+            return (NormalizePath(dbdDir), NormalizePath(outBase), locale, tables, inputs.Select(t => (t.build, NormalizePath(t.dir))).ToList(), buildOverride, compareArea, exportAll, srcAlias, srcBuild, tgtBuild, NormalizePath(exportRemap), NormalizePath(applyRemap), disallowDoNotUse);
         }
 
         private static string RequireValue(string[] args, ref int i, string flag)
@@ -358,19 +385,24 @@ namespace DBCTool
         }
 
         // Compare 0.5.3 → 3.3.5 AreaTable entries using per-build truth (names, parents, map names)
-        private static int CompareAreas(string dbdDir, string outBase, DBCD.Locale locale, List<(string build, string dir)> inputs, string buildOverride)
+        private static int CompareAreas(string dbdDir, string outBase, DBCD.Locale locale, List<(string build, string dir)> inputs, string buildOverride, string srcAliasFlag, string srcBuildFlag, string tgtBuildFlag, string exportRemap, string applyRemap, bool disallowDoNotUse)
         {
-            // Normalize inputs and pick 0.5.3 and 3.3.5
-            string? dir053 = null, dir335 = null;
+            // Normalize inputs and pick source (0.5.3 or 0.5.5) and 3.3.5
+            string? dir053 = null, dir055 = null, dir335 = null;
             foreach (var (build, dir) in inputs)
             {
                 var alias = ResolveAliasOrInfer(build, dir, buildOverride);
                 if (alias == "0.5.3") dir053 = NormalizePath(dir);
+                else if (alias == "0.5.5") dir055 = NormalizePath(dir);
                 else if (alias == "3.3.5") dir335 = NormalizePath(dir);
             }
-            if (string.IsNullOrEmpty(dir053) || string.IsNullOrEmpty(dir335))
+            // Determine source alias if not explicitly provided
+            string srcAlias = ResolveAlias(srcAliasFlag);
+            if (string.IsNullOrWhiteSpace(srcAlias)) srcAlias = !string.IsNullOrEmpty(dir053) ? "0.5.3" : (!string.IsNullOrEmpty(dir055) ? "0.5.5" : "0.5.3");
+            string? dirSrc = srcAlias == "0.5.3" ? dir053 : dir055;
+            if (string.IsNullOrEmpty(dirSrc) || string.IsNullOrEmpty(dir335))
             {
-                Console.Error.WriteLine("ERROR: --compare-area requires both 0.5.3 and 3.3.5 inputs.");
+                Console.Error.WriteLine("ERROR: --compare-area requires both a source (0.5.3 or 0.5.5) and 3.3.5 inputs.");
                 return 2;
             }
 
@@ -380,10 +412,12 @@ namespace DBCTool
             var dbdProvider = new FilesystemDBDProvider(dbdDir);
 
             // Load storages with fallback to Locale.None
-            var stor053_Area = LoadTable("AreaTable", "0.5.3.3368", dir053, dbdProvider, locale);
-            var stor053_Map  = LoadTable("Map",       "0.5.3.3368", dir053, dbdProvider, locale);
-            var stor335_Area = LoadTable("AreaTable", "3.3.5.12340", dir335, dbdProvider, locale);
-            var stor335_Map  = LoadTable("Map",       "3.3.5.12340", dir335, dbdProvider, locale);
+            string canonicalSrcBuild = !string.IsNullOrWhiteSpace(srcBuildFlag) ? srcBuildFlag : CanonicalizeBuild(srcAlias);
+            string canonicalTgtBuild = !string.IsNullOrWhiteSpace(tgtBuildFlag) ? tgtBuildFlag : CanonicalizeBuild("3.3.5");
+            var stor053_Area = LoadTable("AreaTable", canonicalSrcBuild, dirSrc!, dbdProvider, locale);
+            var stor053_Map  = LoadTable("Map",       canonicalSrcBuild, dirSrc!, dbdProvider, locale);
+            var stor335_Area = LoadTable("AreaTable", canonicalTgtBuild, dir335!, dbdProvider, locale);
+            var stor335_Map  = LoadTable("Map",       canonicalTgtBuild, dir335!, dbdProvider, locale);
 
             // Helper: pick best column name for strings
             string DetectColumn(IDBCDStorage storage, params string[] preferred)
@@ -430,12 +464,7 @@ namespace DBCTool
                 var mrow = stor335_Map[mid];
                 var dirTok = ExtractDirToken(SafeField<string>(mrow, "Directory"));
                 if (!string.IsNullOrWhiteSpace(dirTok) && !dir335Index.ContainsKey(dirTok)) dir335Index[dirTok] = mid;
-                var nm = NormName(FirstNonEmpty(
-                    SafeField<string>(mrow, "MapName_lang"),
-                    SafeField<string>(mrow, "MapName"),
-                    SafeField<string>(mrow, "InternalName"),
-                    dirTok
-                ));
+                var nm = NormName(SafeField<string>(mrow, "MapName_lang") ?? SafeField<string>(mrow, "MapName") ?? SafeField<string>(mrow, "InternalName") ?? dirTok);
                 if (!string.IsNullOrWhiteSpace(nm) && !name335Index.ContainsKey(nm)) name335Index[nm] = mid;
             }
 
@@ -501,13 +530,14 @@ namespace DBCTool
                     }));
                 }
             }
-            var cwOut = Path.Combine(outDir, "Map_crosswalk_053_to_335.csv");
+            var srcTagShort = srcAlias == "0.5.5" ? "055" : "053";
+            var cwOut = Path.Combine(outDir, $"Map_crosswalk_{srcTagShort}_to_335.csv");
             File.WriteAllText(cwOut, cwReport.ToString(), new UTF8Encoding(true));
 
             // Build MapId → Name reports and keep dictionaries for later lookups
             var map053 = BuildMapNames(stor053_Map, mapNameCol053);
             var map335 = BuildMapNames(stor335_Map, mapNameCol335);
-            WriteSimpleMapReport(Path.Combine(outDir, "MapId_to_Name_0.5.3.csv"), map053);
+            WriteSimpleMapReport(Path.Combine(outDir, $"MapId_to_Name_{srcAlias}.csv"), map053);
             WriteSimpleMapReport(Path.Combine(outDir, "MapId_to_Name_3.3.5.csv"), map335);
 
             // Build a token index of 0.5.3 maps to help infer expected map for areas when ContinentID is unreliable
@@ -650,6 +680,45 @@ namespace DBCTool
                 lnm.Add(id);
             }
 
+            // Alias table (data-guided) and name variants to catch common renames and articles
+            var aliasMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                { "dark portal", new[] { "the dark portal" } },
+                { "demonic stronghold", new[] { "dreadmaul hold" } },
+                { "shadowfang", new[] { "shadowfang keep" } },
+                { "lik'ash tar pits", new[] { "lakkari tar pits" } },
+                { "kargathia outpost", new[] { "kargathia keep" } },
+                { "the wellspring river", new[] { "wellspring river" } },
+                { "wellspring river", new[] { "the wellspring river" } },
+            };
+
+            // Apply remap file if provided: override aliases and load explicit maps/options
+            RemapDefinition? appliedRemap = null;
+            var explicitMap = new Dictionary<int, int>();
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(applyRemap) && File.Exists(applyRemap))
+                {
+                    appliedRemap = JsonSerializer.Deserialize<RemapDefinition>(File.ReadAllText(applyRemap));
+                    if (appliedRemap != null)
+                    {
+                        if (appliedRemap.aliases != null && appliedRemap.aliases.Count > 0)
+                            aliasMap = new Dictionary<string, string[]>(appliedRemap.aliases, StringComparer.OrdinalIgnoreCase);
+                        if (appliedRemap.options != null)
+                            disallowDoNotUse = appliedRemap.options.disallow_do_not_use_targets;
+                        if (appliedRemap.explicit_map != null)
+                        {
+                            foreach (var e in appliedRemap.explicit_map)
+                                explicitMap[e.src_areaNumber] = e.tgt_areaID;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Remap] Failed to load {applyRemap}: {ex.Message}");
+            }
+
             // Simple Levenshtein distance for fuzzy fallback
             int EditDistance(string a, string b)
             {
@@ -671,53 +740,104 @@ namespace DBCTool
                 return d[n, m];
             }
 
-            // Cache for resolved 0.5.3 AreaNumber → chosen 3.3.5 AreaID
-            var resolved053 = new Dictionary<int, int>();
-            var resolving053 = new HashSet<int>();
+            bool DisallowCandidate(string nm)
+            {
+                if (!disallowDoNotUse) return false;
+                if (string.IsNullOrWhiteSpace(nm)) return false;
+                return nm.IndexOf("DO NOT USE", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
 
             (int id, string method) ChooseTargetByName(string srcName, int mapIdX)
             {
-                var nameN = NormName(srcName);
-                // Exact within expected map
-                if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap) && byNameMap.TryGetValue(nameN, out var listM) && listM.Count > 0)
+                var variants = NameVariants(srcName).Select(NormName).Distinct().ToList();
+                if (variants.Count == 0) variants = new List<string> { NormName(srcName) };
+
+                // 1) Exact matches (map-biased then global) across variants
+                if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap))
                 {
-                    return (listM.Min(), "name+map");
+                    foreach (var v in variants)
+                        if (byNameMap.TryGetValue(v, out var lm) && lm.Count > 0)
+                        {
+                            var lmOk = lm.Where(tid => !DisallowCandidate(Extract335(tid).name)).ToList();
+                            if (lmOk.Count > 0) return (lmOk.Min(), "name+map");
+                        }
                 }
-                // Exact globally
-                if (idx335_ByName.TryGetValue(nameN, out var listG) && listG.Count > 0)
-                {
-                    return (listG.Min(), "name");
-                }
-                // Fuzzy within map
-                IEnumerable<int> domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm)) ? lm : idx335_IdToRow.Keys;
+                foreach (var v in variants)
+                    if (idx335_ByName.TryGetValue(v, out var lg) && lg.Count > 0)
+                    {
+                        var lgOk = lg.Where(tid => !DisallowCandidate(Extract335(tid).name)).ToList();
+                        if (lgOk.Count > 0) return (lgOk.Min(), "name");
+                    }
+
+                // 2) Fuzzy within map across variants
+                IEnumerable<int> domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm2)) ? lm2 : idx335_IdToRow.Keys;
                 int bestId = -1; int bestDist = int.MaxValue;
                 foreach (var tid in domain)
                 {
                     var rec = Extract335(tid);
-                    var dn = EditDistance(nameN, NormName(rec.name));
-                    if (dn <= 2)
+                    if (DisallowCandidate(rec.name)) continue;
+                    var rn = NormName(rec.name);
+                    foreach (var v in variants)
                     {
-                        if (dn < bestDist || (dn == bestDist && tid < bestId))
+                        var dn = EditDistance(v, rn);
+                        if (dn <= 2 && (dn < bestDist || (dn == bestDist && tid < bestId)))
                         {
                             bestDist = dn; bestId = tid;
                         }
                     }
                 }
                 if (bestId >= 0) return (bestId, (mapIdX >= 0 ? "fuzzy+map" : "fuzzy"));
-                // Global fuzzy fallback to avoid false unmatched due to wrong map domain
+
+                // 3) Global fuzzy fallback across variants
                 int gBestId = -1; int gBestDist = int.MaxValue;
                 foreach (var tid in idx335_IdToRow.Keys)
                 {
                     var rec = Extract335(tid);
-                    var dn = EditDistance(nameN, NormName(rec.name));
-                    if (dn <= 3 && (dn < gBestDist || (dn == gBestDist && tid < gBestId)))
+                    if (DisallowCandidate(rec.name)) continue;
+                    var rn = NormName(rec.name);
+                    foreach (var v in variants)
                     {
-                        gBestDist = dn; gBestId = tid;
+                        var dn = EditDistance(v, rn);
+                        if (dn <= 3 && (dn < gBestDist || (dn == gBestDist && tid < gBestId)))
+                        {
+                            gBestDist = dn; gBestId = tid;
+                        }
                     }
                 }
                 if (gBestId >= 0) return (gBestId, "fuzzy-global");
                 return (-1, "unmatched");
             }
+
+            IEnumerable<string> NameVariants(string srcName)
+            {
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var baseName = (srcName ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(baseName)) yield break;
+                // base
+                if (set.Add(baseName)) yield return baseName;
+                // add/remove leading "The "
+                if (baseName.StartsWith("The ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var noThe = baseName.Substring(4).Trim();
+                    if (noThe.Length > 0 && set.Add(noThe)) yield return noThe;
+                }
+                else
+                {
+                    var withThe = "The " + baseName;
+                    if (set.Add(withThe)) yield return withThe;
+                }
+                // aliases
+                var key = NormName(baseName);
+                if (aliasMap.TryGetValue(key, out var al))
+                {
+                    foreach (var a in al)
+                        if (!string.IsNullOrWhiteSpace(a) && set.Add(a)) yield return a;
+                }
+            }
+
+            // Cache for resolved 0.5.3 AreaNumber → chosen 3.3.5 AreaID
+            var resolved053 = new Dictionary<int, int>();
+            var resolving053 = new HashSet<int>();
 
             int ResolveTargetForAreaNum(int areaNum)
             {
@@ -751,14 +871,29 @@ namespace DBCTool
             unmatchedCsv.AppendLine(header);
             ambiguousCsv.AppendLine(header + ",candidates");
 
-            int byName = 0, unmatched = 0, ambiguous = 0;
+            int byName = 0, unmatched = 0, ambiguous = 0, skippedDev = 0;
+            var exportExplicit = new List<RemapDefinition.ExplicitMap>();
+            var ignoredAreas = new List<int>();
             foreach (var id in stor053_Area.Keys)
             {
                 var src = Extract053(stor053_Area[id]);
 
+                bool ShouldSkipDev(string n)
+                {
+                    var nn = NormName(n);
+                    if (nn.Contains("***on map dungeon***")) return true;
+                    if (nn.Contains("programmer isle")) return true;
+                    if (nn.Contains("plains of snow")) return true;
+                    if (nn.Contains("jeff") && nn.Contains("quadrant")) return true;
+                    return false;
+                }
+                if (ShouldSkipDev(src.name)) { skippedDev++; ignoredAreas.Add(src.areaNum); continue; }
+
                 // Name-only selection (ignore parent mismatches)
                 int chosen = -1; string method = string.Empty;
-                (chosen, method) = ChooseTargetByName(src.name, src.mapIdX);
+                // Apply explicit mapping if provided
+                if (explicitMap.TryGetValue(src.areaNum, out var expId)) { chosen = expId; method = "explicit"; }
+                else { (chosen, method) = ChooseTargetByName(src.name, src.mapIdX); }
                 if (chosen >= 0) byName++;
 
                 string lineFor(int tgtId, string mth)
@@ -794,6 +929,7 @@ namespace DBCTool
                 if (chosen >= 0)
                 {
                     mapping.AppendLine(lineFor(chosen, method));
+                    exportExplicit.Add(new RemapDefinition.ExplicitMap { src_areaNumber = src.areaNum, tgt_areaID = chosen, note = method });
                     var trecPatch = Extract335(chosen);
                     // Determine target parent for patch from mapping of source parent
                     int tgtParentForPatch = chosen;
@@ -845,23 +981,54 @@ namespace DBCTool
                 }
             }
 
-            var mapOut = Path.Combine(outDir, "AreaTable_mapping_053_to_335.csv");
+            var mapOut = Path.Combine(outDir, $"AreaTable_mapping_{srcTagShort}_to_335.csv");
             File.WriteAllText(mapOut, mapping.ToString(), new UTF8Encoding(true));
-            var unOut = Path.Combine(outDir, "AreaTable_unmatched_053_to_335.csv");
+            var unOut = Path.Combine(outDir, $"AreaTable_unmatched_{srcTagShort}_to_335.csv");
             File.WriteAllText(unOut, unmatchedCsv.ToString(), new UTF8Encoding(true));
-            var ambOut = Path.Combine(outDir, "AreaTable_ambiguous_053_to_335.csv");
+            var ambOut = Path.Combine(outDir, $"AreaTable_ambiguous_{srcTagShort}_to_335.csv");
             File.WriteAllText(ambOut, ambiguousCsv.ToString(), new UTF8Encoding(true));
-            var patchOut = Path.Combine(outDir, "Area_patch_crosswalk_053_to_335.csv");
+            var patchOut = Path.Combine(outDir, $"Area_patch_crosswalk_{srcTagShort}_to_335.csv");
             File.WriteAllText(patchOut, patchCsv.ToString(), new UTF8Encoding(true));
-            var suggestOut = Path.Combine(outDir, "AreaTable_rename_suggestions_053_to_335.csv");
+            var suggestOut = Path.Combine(outDir, $"AreaTable_rename_suggestions_{srcTagShort}_to_335.csv");
             File.WriteAllText(suggestOut, suggestCsv.ToString(), new UTF8Encoding(true));
+
+            // Export remap definition if requested
+            if (!string.IsNullOrWhiteSpace(exportRemap))
+            {
+                try
+                {
+                    var remapDir = Path.GetDirectoryName(exportRemap);
+                    if (!string.IsNullOrWhiteSpace(remapDir) && !Directory.Exists(remapDir)) Directory.CreateDirectory(remapDir);
+                    var def = new RemapDefinition
+                    {
+                        meta = new RemapDefinition.Meta
+                        {
+                            src_alias = srcAlias,
+                            src_build = canonicalSrcBuild,
+                            tgt_build = canonicalTgtBuild,
+                            generated_at = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
+                        },
+                        aliases = aliasMap,
+                        explicit_map = exportExplicit,
+                        ignore_area_numbers = ignoredAreas,
+                        options = new RemapDefinition.Options { disallow_do_not_use_targets = disallowDoNotUse }
+                    };
+                    var jsonOpts = new JsonSerializerOptions { WriteIndented = true };
+                    File.WriteAllText(exportRemap, JsonSerializer.Serialize(def, jsonOpts), new UTF8Encoding(true));
+                    Console.WriteLine($"[Compare] Wrote {exportRemap}");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[Remap] Failed to write {exportRemap}: {ex.Message}");
+                }
+            }
 
             Console.WriteLine($"[Compare] Wrote {mapOut}");
             Console.WriteLine($"[Compare] Wrote {unOut}");
             Console.WriteLine($"[Compare] Wrote {ambOut}");
             Console.WriteLine($"[Compare] Wrote {patchOut}");
             Console.WriteLine($"[Compare] Wrote {suggestOut}");
-            Console.WriteLine($"[Compare] Summary: name={byName}, unmatched={unmatched}, ambiguous={ambiguous}");
+            Console.WriteLine($"[Compare] Summary: name={byName}, unmatched={unmatched}, ambiguous={ambiguous}, skipped_dev={skippedDev}");
             Console.WriteLine("[Compare] Done.");
             return 0;
         }
@@ -920,6 +1087,36 @@ namespace DBCTool
             if (cont == 0) return "Azeroth";
             if (cont == 1) return "Kalimdor";
             return string.Empty;
+        }
+
+        // RemapDefinition JSON model for export/apply deterministic mappings
+        private sealed class RemapDefinition
+        {
+            public Meta meta { get; set; } = new Meta();
+            public Dictionary<string, string[]> aliases { get; set; } = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+            public List<ExplicitMap> explicit_map { get; set; } = new List<ExplicitMap>();
+            public List<int> ignore_area_numbers { get; set; } = new List<int>();
+            public Options options { get; set; } = new Options();
+
+            public sealed class Meta
+            {
+                public string src_alias { get; set; } = string.Empty;
+                public string src_build { get; set; } = string.Empty;
+                public string tgt_build { get; set; } = string.Empty;
+                public string generated_at { get; set; } = string.Empty;
+            }
+
+            public sealed class ExplicitMap
+            {
+                public int src_areaNumber { get; set; }
+                public int tgt_areaID { get; set; }
+                public string? note { get; set; }
+            }
+
+            public sealed class Options
+            {
+                public bool disallow_do_not_use_targets { get; set; } = true;
+            }
         }
     }
 }

@@ -1,30 +1,31 @@
 # Active Context
 
 - Current Focus:
-  - Make MPQ reading reliable for DBCs (`Map`, `AreaTable`) using composite patch chains and robust StormLib IO.
+  - Area remapping pipeline: map early builds (0.5.3, 0.5.5) to 3.3.5 AreaIDs using a crosswalked map domain + robust name matching.
+  - Deterministic remap flow: discover → export remap JSON → apply remap.
+  - Fix MapId → Name reports to ensure parent map names are stable (Directory-first, then fallbacks).
 
-- Recent Findings:
-  - `SFileOpenFileEx` can return a handle ("open OK") but `SFileGetFileSize` returns `err=6`.
-  - Unknown-size read fallback currently returns 0 bytes for `locale-enUS.MPQ: DBFilesClient/Map.dbc`.
-  - Listing without a listfile fails (expected on many MPQs; `find-first err=0`).
-  - Composite attach order improved; locale prefix passed to `SFileOpenPatchArchive`.
+- Recent Results (0.5.3 → 3.3.5):
+  - Matching summary: `name=477, unmatched=1, ambiguous=0, skipped_dev=10`.
+  - Exported `defs/053_to_335.remap.json` with aliases, explicit maps, ignore list, and options.
+  - Alias/variant layer (examples):
+    - Demonic Stronghold → Dreadmaul Hold
+    - Dark Portal → The Dark Portal
+    - Shadowfang → Shadowfang Keep
+    - Lik’ash Tar Pits → Lakkari Tar Pits
+    - Kargathia Outpost → Kargathia Keep
+    - Toggle leading “The ” variants (e.g., The Wellspring River)
+  - DO NOT USE targets excluded by default; can be overridden with `--allow-do-not-use`.
 
-- Hypotheses:
-  - Some paths in locale MPQs are patch fragments that require a composite (base + core patches + locale overlays) to materialize.
-  - Verify StormLib.dll bitness (x64) and load path to exclude shadowing by a 32-bit DLL.
-  - Path normalization/prefix nuances may matter for patched views.
+- Matching Strategy (summary):
+  - Build map crosswalk by Directory (fallback to name) to get a 3.3.5 map bias.
+  - Match Areas by name only (parent-agnostic), using:
+    - Exact across variants (map-biased, then global)
+    - Fuzzy within map (Levenshtein), then global fallback
+  - Dev placeholders are filtered from unmatched stats: `***On Map Dungeon***`, Programmer Isle, Plains of Snow, Jeff Quadrant.
 
-- Next Steps (Morning Checklist):
-  1. Confirm StormLib.dll x64 is used by the x64 process (ensure it sits next to `DBCTool.dll` or on PATH; no 32-bit shadow).
-  2. `--mpq-test-open` probes:
-     - `base-enUS.MPQ` → `DBFilesClient/Map.dbc`
-     - `patch.MPQ` → `DBFilesClient/Map.dbc`
-     - `locale-enUS.MPQ` → `DBFilesClient/Map.dbc`
-     Try both `\` and `/` path separators.
-  3. If single-file reads 0 bytes, try a smaller DBC (e.g., `LightParams.dbc`) to compare behavior.
-  4. Re-run export with composite patching:
-     - `dotnet run -- --dbd-dir ..\lib\WoWDBDefs\definitions\ --out out --locale enUS --table Map --mpq-root H:\WoWDev\modernwow --input 3.3.5.12340=mpq --mpq-locale-only enUS --mpq-verbose`
-  5. If still failing, extract one DBC with Ladik’s to filesystem and confirm DBCD load via filesystem provider.
-
-- Decisions:
-  - Keep DBCD as upstream ProjectReference; diagnostics live in the tool; no changes to shared libraries.
+- Next Steps:
+  1. Fix `MapId_to_Name_{0.5.3|0.5.5}.csv` generation so Directory/InternalName/Name fallbacks produce correct labels for all MapIDs.
+  2. Run 0.5.5 → 3.3.5 mapping; export `defs/055_to_335.remap.json`.
+  3. Re-check unmatched for 0.5.5 and 0.5.3 with corrected map-name reports; add aliases/explicit maps if still needed.
+  4. Integrate patch CSV into ADT conversion (join `src_areaNumber` → write `tgt_areaID`).
