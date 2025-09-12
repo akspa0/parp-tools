@@ -530,6 +530,15 @@ namespace DBCTool
                 IndexToken053(tok3, mid);
             }
 
+            // 0.5.3 map index by Directory token → MapID (to translate ContinentID enum to actual map row)
+            var dir053Index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mid in stor053_Map.Keys)
+            {
+                var mrow = stor053_Map[mid];
+                var dirTok = ExtractDirToken(SafeField<string>(mrow, "Directory"));
+                if (!string.IsNullOrWhiteSpace(dirTok) && !dir053Index.ContainsKey(dirTok)) dir053Index[dirTok] = mid;
+            }
+
             int Infer053MapIdForArea(string name, string parentName)
             {
                 var tokens = new List<string>();
@@ -599,14 +608,23 @@ namespace DBCTool
                 string mapName = MapName053FromCont(cont);
                 if (string.IsNullOrWhiteSpace(mapName) && map053.TryGetValue(cont, out var tmpM)) mapName = tmpM;
                 int contX = -1;
-                if (!cw053To335.TryGetValue(cont, out contX))
+                // Step A: ContinentID in 0.5.3 is enum (0=Azeroth,1=Kalimdor). Map enum→dir token→053 MapID→crosswalk.
+                var contDir = MapName053FromCont(cont);
+                if (!string.IsNullOrWhiteSpace(contDir))
                 {
-                    // Infer expected 0.5.3 MapID from names, then crosswalk
+                    if (dir053Index.TryGetValue(contDir, out var cont053Id) && cw053To335.TryGetValue(cont053Id, out var x1)) contX = x1;
+                    else if (dir335Index.TryGetValue(contDir, out var x2)) contX = x2; // fallback: direct to 335 by dir
+                }
+                // Step B: Some rows may already carry a 053 MapID in ContinentID; try crosswalk by numeric id.
+                if (contX < 0 && cw053To335.TryGetValue(cont, out var x3)) contX = x3;
+                // Step C: Infer from names to 0.5.3 MapID and crosswalk
+                if (contX < 0)
+                {
                     var inferred053 = Infer053MapIdForArea(name, parentNameForInfer);
                     if (inferred053 >= 0 && cw053To335.TryGetValue(inferred053, out var tmpX2)) contX = tmpX2;
                 }
                 string mapNameX = string.Empty;
-                if (contX >= 0) map335.TryGetValue(contX, out mapNameX);
+                if (contX >= 0 && map335.TryGetValue(contX, out var tmpMapNameX) && !string.IsNullOrEmpty(tmpMapNameX)) mapNameX = tmpMapNameX;
                 string path;
                 if (!string.IsNullOrWhiteSpace(mapNameX))
                     path = $"{NormName(mapNameX)}/{NormName(parentNameForInfer)}/{NormName(name)}";
@@ -615,7 +633,7 @@ namespace DBCTool
                 return (name, parentNameForInfer, areaNum, parentNum, cont, mapName ?? string.Empty, contX, mapNameX ?? string.Empty, path);
             }
 
-            // Build 3.3.5 indices for matching (by name globally, and by name within map)
+            // 3.3.5 indices for matching (by name globally, and by name within map)
             var idx335_ByName = new Dictionary<string, List<int>>();
             var idx335_ByMap = new Dictionary<int, List<int>>();
             var idx335_ByMapName = new Dictionary<int, Dictionary<string, List<int>>>();
@@ -670,7 +688,7 @@ namespace DBCTool
                 {
                     return (listG.Min(), "name");
                 }
-                // Fuzzy within map then globally
+                // Fuzzy within map
                 IEnumerable<int> domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm)) ? lm : idx335_IdToRow.Keys;
                 int bestId = -1; int bestDist = int.MaxValue;
                 foreach (var tid in domain)
@@ -685,14 +703,26 @@ namespace DBCTool
                         }
                     }
                 }
-                if (bestId >= 0) return (bestId, (mapIdX >= 0 ? "fuzzy+map(name)" : "fuzzy(name)"));
+                if (bestId >= 0) return (bestId, (mapIdX >= 0 ? "fuzzy+map" : "fuzzy"));
+                // Global fuzzy fallback to avoid false unmatched due to wrong map domain
+                int gBestId = -1; int gBestDist = int.MaxValue;
+                foreach (var tid in idx335_IdToRow.Keys)
+                {
+                    var rec = Extract335(tid);
+                    var dn = EditDistance(nameN, NormName(rec.name));
+                    if (dn <= 3 && (dn < gBestDist || (dn == gBestDist && tid < gBestId)))
+                    {
+                        gBestDist = dn; gBestId = tid;
+                    }
+                }
+                if (gBestId >= 0) return (gBestId, "fuzzy-global");
                 return (-1, "unmatched");
             }
 
             int ResolveTargetForAreaNum(int areaNum)
             {
                 if (resolved053.TryGetValue(areaNum, out var got)) return got;
-                if (resolving053.Contains(areaNum)) return -1; // break cycles
+                if (resolving053.Contains(areaNum)) return -1; // prevent cycles
                 if (!idx053_NumToRow.TryGetValue(areaNum, out var row)) return -1;
                 resolving053.Add(areaNum);
                 var srcRec = Extract053(row);
@@ -701,6 +731,10 @@ namespace DBCTool
                 resolving053.Remove(areaNum);
                 return cid;
             }
+
+            // Rename suggestions report for unmatched rows (top-3 by edit distance, data-driven from storages)
+            var suggestCsv = new StringBuilder();
+            suggestCsv.AppendLine("src_areaNumber,src_name,src_mapId_xwalk,src_mapName_xwalk,cand1_id,cand1_name,cand1_dist,cand2_id,cand2_name,cand2_dist,cand3_id,cand3_name,cand3_dist");
 
             // Map rows 0.5.3 → 3.3.5
             var mapping = new StringBuilder();
@@ -785,6 +819,28 @@ namespace DBCTool
                 else
                 {
                     unmatched++;
+                    // Record top-3 rename suggestions for unmatched (global domain, by edit distance)
+                    var srcNameN = NormName(src.name);
+                    var cands = idx335_IdToRow.Keys
+                        .Select(tid => { var r = Extract335(tid); return new { tid, nm = r.name, dist = EditDistance(srcNameN, NormName(r.name)) }; })
+                        .OrderBy(x => x.dist).ThenBy(x => x.tid).Take(3).ToList();
+                    string c1 = (cands.Count > 0 ? cands[0].tid.ToString(CultureInfo.InvariantCulture) : "");
+                    string n1 = (cands.Count > 0 ? Csv(cands[0].nm ?? string.Empty) : "");
+                    string d1 = (cands.Count > 0 ? cands[0].dist.ToString(CultureInfo.InvariantCulture) : "");
+                    string c2 = (cands.Count > 1 ? cands[1].tid.ToString(CultureInfo.InvariantCulture) : "");
+                    string n2 = (cands.Count > 1 ? Csv(cands[1].nm ?? string.Empty) : "");
+                    string d2 = (cands.Count > 1 ? cands[1].dist.ToString(CultureInfo.InvariantCulture) : "");
+                    string c3 = (cands.Count > 2 ? cands[2].tid.ToString(CultureInfo.InvariantCulture) : "");
+                    string n3 = (cands.Count > 2 ? Csv(cands[2].nm ?? string.Empty) : "");
+                    string d3 = (cands.Count > 2 ? cands[2].dist.ToString(CultureInfo.InvariantCulture) : "");
+                    suggestCsv.AppendLine(string.Join(',', new[]
+                    {
+                        src.areaNum.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.name),
+                        src.mapIdX.ToString(CultureInfo.InvariantCulture),
+                        Csv(src.mapNameX),
+                        c1,n1,d1,c2,n2,d2,c3,n3,d3
+                    }));
                     unmatchedCsv.AppendLine(lineFor(-1, "unmatched"));
                 }
             }
@@ -797,11 +853,14 @@ namespace DBCTool
             File.WriteAllText(ambOut, ambiguousCsv.ToString(), new UTF8Encoding(true));
             var patchOut = Path.Combine(outDir, "Area_patch_crosswalk_053_to_335.csv");
             File.WriteAllText(patchOut, patchCsv.ToString(), new UTF8Encoding(true));
+            var suggestOut = Path.Combine(outDir, "AreaTable_rename_suggestions_053_to_335.csv");
+            File.WriteAllText(suggestOut, suggestCsv.ToString(), new UTF8Encoding(true));
 
             Console.WriteLine($"[Compare] Wrote {mapOut}");
             Console.WriteLine($"[Compare] Wrote {unOut}");
             Console.WriteLine($"[Compare] Wrote {ambOut}");
             Console.WriteLine($"[Compare] Wrote {patchOut}");
+            Console.WriteLine($"[Compare] Wrote {suggestOut}");
             Console.WriteLine($"[Compare] Summary: name={byName}, unmatched={unmatched}, ambiguous={ambiguous}");
             Console.WriteLine("[Compare] Done.");
             return 0;
