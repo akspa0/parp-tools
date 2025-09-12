@@ -441,3 +441,10 @@ parpToolbox/PM4Tool/lib/
 parpToolbox/test_data
 parpToolbox/PM4Tool/src
 PM4Tools/
+
+# libraries we don't want to track
+ADTPrefabTool/lib/wow.tools.local/
+ADTPrefabTool/lib/wow.export/
+
+# gillijimproject-refactor
+gillijimproject_refactor/test_data

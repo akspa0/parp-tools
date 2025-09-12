@@ -1,0 +1,68 @@
+using GillijimProject.Next.Core.Adapters.Dbcd;
+using GillijimProject.Next.Core.Services;
+using GillijimProject.Next.Core.IO;
+using GillijimProject.Next.Core.Transform;
+using GillijimProject.Next.Core.Adapters.WarcraftNet;
+using GillijimProject.Next.Cli.Commands;
+using System;
+using System.Linq;
+
+namespace GillijimProject.Next.Cli;
+
+public static class Program
+{
+    public static int Main(string[] args)
+    {
+        if (args.Length == 0 || args[0] is "-h" or "--help")
+        {
+            PrintHelp();
+            return 0;
+        }
+
+        var command = args[0].ToLowerInvariant();
+        var rest = args.Skip(1).ToArray();
+
+        return command switch
+        {
+            "convert" => ConvertCommand.Run(rest),
+            "analyze" => AnalyzeCommand.Run(rest),
+            "fix-areaids" => FixAreaIdsCommand.Run(rest),
+            "gen-alpha-wdt" => GenAlphaWdtCommand.Run(rest),
+            "wdl-dump" => WdlDumpCommand.Run(rest),
+            "wdt-dump" => WdtDumpCommand.Run(rest),
+            "adt-dump" => AdtDumpCommand.Run(rest),
+            "wdl-obj" => WdlObjCommand.Run(rest),
+            "wdl-glb" => WdlGlbCommand.Run(rest),
+            "obj-xform" => ObjXformCommand.Run(rest),
+            "align-adt-wdl" => AlignAdtWdlCommand.Run(rest),
+            "pm4-export" => Pm4ExportCommand.Run(rest),
+            _ => Unknown(command)
+        };
+    }
+
+    private static void PrintHelp()
+    {
+        Console.WriteLine("GillijimProject.Next CLI\n");
+        Console.WriteLine("Commands:");
+        Console.WriteLine("  convert      Convert Alpha → LK ADTs");
+        Console.WriteLine("  analyze      Analyze UniqueIDs and assets");
+        Console.WriteLine("  fix-areaids  Re-emit ADTs with corrected AreaIDs");
+        Console.WriteLine("  gen-alpha-wdt Generate Alpha WDT from LK ADTs (reverse)");
+        Console.WriteLine("  wdl-dump     Parse a WDL and print a summary (present tiles, holes)");
+        Console.WriteLine("  wdt-dump     Parse an Alpha WDT and print MAIN/MDNM/MONM summary");
+        Console.WriteLine("  adt-dump     Parse an Alpha ADT and print MCNK/MCVT/MCLQ summary");
+        Console.WriteLine("  wdl-obj      Export WDL as OBJ (per tile and merged)");
+        Console.WriteLine("  wdl-glb      Export WDL as GLB (per tile and merged) using local SharpGLTF");
+        Console.WriteLine("  obj-xform    Transform OBJ(s) with flips/rotate/translate and parity-aware winding");
+        Console.WriteLine("  align-adt-wdl Discover ADT→WDL orientation/translation and optionally write aligned OBJ");
+        Console.WriteLine("  pm4-export   Export PM4 files (tiles or merged) with optional MSCN sidecar");
+        Console.WriteLine("\nUse: dotnet run --project next/src/GillijimProject.Next.Cli -- <command> [options]\n");
+    }
+
+    private static int Unknown(string cmd)
+    {
+        Console.Error.WriteLine($"Unknown command: {cmd}");
+        PrintHelp();
+        return 1;
+    }
+}

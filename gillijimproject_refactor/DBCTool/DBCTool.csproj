@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+  </ItemGroup>
+  <!-- Exclude legacy MPQ code from compilation -->
+  <ItemGroup>
+    <Compile Remove="Mpq\**\*.cs" />
+  </ItemGroup>
+  <!-- StormLib/MPQ support removed: no native DLL copy -->
+</Project>
