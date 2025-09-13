@@ -11,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
         return 2;
     }
 
@@ -26,9 +26,6 @@ public static class Program
         bool web = false; // default off
         int? clusterThreshold = null;
         int? clusterGap = null;
-        string? dbcDir = null;
-        string? areaAlpha = null;
-        string? areaLk = null;
         // export flags
         bool exportAdt = false;
         string? exportDir = null;
@@ -42,6 +39,9 @@ public static class Program
         string profile = "modified"; // modified|preserve
         bool useFallbacks = true;
         bool enableFixups = true;
+        string? remap = null;
+        bool verbose = false;
+        bool trackAssets = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -77,18 +77,6 @@ public static class Program
                     if (i + 1 >= args.Length) return Usage();
                     if (!int.TryParse(args[++i], out var cg)) return Usage();
                     clusterGap = cg;
-                    break;
-                case "--dbc-dir":
-                    if (i + 1 >= args.Length) return Usage();
-                    dbcDir = args[++i];
-                    break;
-                case "--area-alpha":
-                    if (i + 1 >= args.Length) return Usage();
-                    areaAlpha = args[++i];
-                    break;
-                case "--area-lk":
-                    if (i + 1 >= args.Length) return Usage();
-                    areaLk = args[++i];
                     break;
                 case "--web":
                     web = true;
@@ -137,6 +125,16 @@ public static class Program
                 case "--no-fixups":
                     enableFixups = false;
                     break;
+                case "--remap":
+                    if (i + 1 >= args.Length) return Usage();
+                    remap = args[++i];
+                    break;
+                case "--verbose":
+                    verbose = true;
+                    break;
+                case "--track-assets":
+                    trackAssets = true;
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
@@ -176,21 +174,6 @@ public static class Program
             Console.Error.WriteLine($"LK listfile not found: {lkListfile}");
             return 1;
         }
-        if (!string.IsNullOrWhiteSpace(dbcDir) && !Directory.Exists(dbcDir))
-        {
-            Console.Error.WriteLine($"DBC dir not found: {dbcDir}");
-            return 1;
-        }
-        if (!string.IsNullOrWhiteSpace(areaAlpha) && !File.Exists(areaAlpha))
-        {
-            Console.Error.WriteLine($"AreaTable alpha not found: {areaAlpha}");
-            return 1;
-        }
-        if (!string.IsNullOrWhiteSpace(areaLk) && !File.Exists(areaLk))
-        {
-            Console.Error.WriteLine($"AreaTable LK not found: {areaLk}");
-            return 1;
-        }
         if (exportAdt)
         {
             if (string.IsNullOrWhiteSpace(exportDir))
@@ -217,7 +200,6 @@ public static class Program
                     OutDir = outDir!,
                     ClusterThreshold = clusterThreshold ?? 10,
                     ClusterGap = clusterGap ?? 1000,
-                    DbcDir = dbcDir,
                     Web = web
                 });
 
@@ -237,9 +219,9 @@ public static class Program
                         AssetFuzzy = assetFuzzy,
                         UseFallbacks = useFallbacks,
                         EnableFixups = enableFixups,
-                        AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk,
-                        DbcDir = dbcDir
+                        RemapPath = remap,
+                        Verbose = verbose,
+                        TrackAssets = trackAssets,
                     });
                 }
             }
@@ -258,9 +240,6 @@ public static class Program
                     OutDir = outDir!,
                     ClusterThreshold = clusterThreshold ?? 10,
                     ClusterGap = clusterGap ?? 1000,
-                    DbcDir = dbcDir,
-                    AreaAlphaPath = areaAlpha,
-                    AreaLkPath = areaLk,
                 });
 
                 if (web)
@@ -285,9 +264,9 @@ public static class Program
                         AssetFuzzy = assetFuzzy,
                         UseFallbacks = useFallbacks,
                         EnableFixups = enableFixups,
-                        AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk,
-                        DbcDir = dbcDir
+                        RemapPath = remap,
+                        Verbose = verbose,
+                        TrackAssets = trackAssets,
                     });
                 }
             }

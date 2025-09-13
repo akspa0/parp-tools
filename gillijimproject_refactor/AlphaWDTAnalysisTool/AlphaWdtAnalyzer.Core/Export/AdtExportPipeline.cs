@@ -27,9 +27,9 @@ public static class AdtExportPipeline
         public bool EnableFixups { get; init; } = true;
         public string?[]? AssetRoots { get; init; }
         public bool LogExact { get; init; } = false;
-        public string? AreaAlphaPath { get; init; }
-        public string? AreaLkPath { get; init; }
-        public string? DbcDir { get; init; }
+        public string? RemapPath { get; init; }
+        public bool Verbose { get; init; } = false;
+        public bool TrackAssets { get; init; } = false;
     }
 
     public static void ExportSingle(Options opts)
@@ -56,16 +56,7 @@ public static class AdtExportPipeline
             inventory,
             opts.LogExact);
 
-        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
-
-        // Auto-export DBCs to CSV when provided
-        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
-            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
-            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
-        {
-            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
-            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
-        }
+        var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
         var adtScanner = new AdtScanner();
@@ -100,6 +91,8 @@ public static class AdtExportPipeline
                 var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                 alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
 
+                int currentMapId = ResolveMapIdByName(wdt.MapName);
+
                 var ctx = new AdtWotlkWriter.WriteContext
                 {
                     ExportDir = opts.ExportDir,
@@ -115,7 +108,10 @@ public static class AdtExportPipeline
                     AdtNumber = adtNum,
                     AdtOffset = offset,
                     MdnmFiles = wdt.MdnmFiles,
-                    MonmFiles = wdt.MonmFiles
+                    MonmFiles = wdt.MonmFiles,
+                    Verbose = opts.Verbose,
+                    TrackAssets = opts.TrackAssets,
+                    CurrentMapId = currentMapId
                 };
                 AdtWotlkWriter.WriteBinary(ctx);
             }
@@ -128,15 +124,6 @@ public static class AdtExportPipeline
         Directory.CreateDirectory(opts.ExportDir);
 
         var resolver = MultiListfileResolver.FromFiles(opts.LkListfilePath, opts.CommunityListfilePath);
-
-        // Auto-export DBCs to CSV when provided (once per batch)
-        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
-            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
-            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
-        {
-            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
-            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
-        }
 
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
@@ -167,7 +154,7 @@ public static class AdtExportPipeline
                     inventory,
                     opts.LogExact);
 
-                var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
+                var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
 
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
@@ -201,6 +188,8 @@ public static class AdtExportPipeline
                         var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                         alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
 
+                        int currentMapId = ResolveMapIdByName(wdt.MapName);
+
                         var ctx = new AdtWotlkWriter.WriteContext
                         {
                             ExportDir = opts.ExportDir,
@@ -216,7 +205,10 @@ public static class AdtExportPipeline
                             AdtNumber = adtNum,
                             AdtOffset = offset,
                             MdnmFiles = wdt.MdnmFiles,
-                            MonmFiles = wdt.MonmFiles
+                            MonmFiles = wdt.MonmFiles,
+                            Verbose = opts.Verbose,
+                            TrackAssets = opts.TrackAssets,
+                            CurrentMapId = currentMapId
                         };
                         AdtWotlkWriter.WriteBinary(ctx);
                     }
@@ -227,5 +219,14 @@ public static class AdtExportPipeline
                 Console.Error.WriteLine($"Export failed for {wdtPath}: {ex.Message}");
             }
         }
+    }
+
+    private static int ResolveMapIdByName(string mapName)
+    {
+        // Minimal classic mapping; extend as needed
+        if (mapName.Equals("Azeroth", StringComparison.OrdinalIgnoreCase)) return 0;
+        if (mapName.Equals("Kalimdor", StringComparison.OrdinalIgnoreCase)) return 1;
+        // fallback unknown
+        return -1;
     }
 }

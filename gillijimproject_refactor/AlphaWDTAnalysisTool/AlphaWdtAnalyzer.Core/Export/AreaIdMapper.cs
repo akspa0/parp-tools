@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 #if USE_DBCD
 using DBCD;
@@ -18,6 +19,13 @@ public sealed class AreaIdMapper
     private readonly Dictionary<int, string> _lkIdToName;
     private readonly HashSet<int> _lkIds;
     private readonly int? _lkFallbackOnMapDungeonId;
+    // Remap support
+    private readonly Dictionary<int, int> _explicitMap = new();
+    // Map-aware explicit mapping: key = "{mapId}:{areaNumber}"
+    private readonly Dictionary<string, int> _explicitMapByMap = new(StringComparer.Ordinal);
+    private readonly HashSet<int> _ignoreAlphaIds = new();
+    private readonly Dictionary<string, string[]> _aliases = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _disallowDoNotUseTargets = true;
 
     public int AlphaNameColumnIndex { get; }
     public int LkNameColumnIndex { get; }
@@ -27,7 +35,11 @@ public sealed class AreaIdMapper
         Dictionary<string, int> lkNameToId,
         Dictionary<int, string> lkIdToName,
         int alphaNameCol,
-        int lkNameCol)
+        int lkNameCol,
+        Dictionary<int, int>? explicitMap = null,
+        HashSet<int>? ignoreAlphaIds = null,
+        Dictionary<string, string[]>? aliases = null,
+        bool disallowDoNotUseTargets = true)
     {
         _alphaIdToName = alphaIdToName;
         _lkNameToId = lkNameToId;
@@ -36,6 +48,19 @@ public sealed class AreaIdMapper
         AlphaNameColumnIndex = alphaNameCol;
         LkNameColumnIndex = lkNameCol;
         _lkFallbackOnMapDungeonId = ResolveOnMapDungeonId(lkNameToId);
+        if (explicitMap is not null)
+        {
+            foreach (var kv in explicitMap) _explicitMap[kv.Key] = kv.Value;
+        }
+        if (ignoreAlphaIds is not null)
+        {
+            foreach (var id in ignoreAlphaIds) _ignoreAlphaIds.Add(id);
+        }
+        if (aliases is not null)
+        {
+            foreach (var kv in aliases) _aliases[kv.Key] = kv.Value;
+        }
+        _disallowDoNotUseTargets = disallowDoNotUseTargets;
     }
 
     // Deprecated signature retained for compatibility; returns null to force DBCD path
@@ -77,6 +102,62 @@ public sealed class AreaIdMapper
 #endif
     }
 
+    // New overload that can operate with remap-only if DBCD is unavailable.
+    public static AreaIdMapper? TryCreate(string? alphaDbcPath, string? lkDbcPath, string? dbdDefinitionsDir, string? remapPath)
+    {
+        // Load DBCD name dictionaries when available
+        Dictionary<int, string> alphaIdToName = new();
+        Dictionary<int, string> lkIdToName = new();
+        Dictionary<string, int> lkNameToId = new(StringComparer.OrdinalIgnoreCase);
+
+#if USE_DBCD
+        bool hasDbcd = !string.IsNullOrWhiteSpace(alphaDbcPath)
+                       && !string.IsNullOrWhiteSpace(lkDbcPath)
+                       && !string.IsNullOrWhiteSpace(dbdDefinitionsDir)
+                       && File.Exists(alphaDbcPath!)
+                       && File.Exists(lkDbcPath!)
+                       && Directory.Exists(dbdDefinitionsDir!);
+        if (hasDbcd)
+        {
+            try
+            {
+                alphaIdToName = LoadIdToNameDbcd(alphaDbcPath!, dbdDefinitionsDir!, TryGetAlphaBuilds());
+                lkIdToName = LoadIdToNameDbcd(lkDbcPath!, dbdDefinitionsDir!, new[] { "3.3.5.12340" });
+                foreach (var kv in lkIdToName)
+                {
+                    var norm = NormalizeName(kv.Value);
+                    if (!lkNameToId.ContainsKey(norm)) lkNameToId[norm] = kv.Key;
+                }
+            }
+            catch
+            {
+                // fall back to remap-only if provided
+            }
+        }
+#endif
+
+        // If neither DBCD names nor remap are available, bail out
+        bool hasRemap = !string.IsNullOrWhiteSpace(remapPath) && File.Exists(remapPath!);
+        if (!hasRemap && alphaIdToName.Count == 0 && lkIdToName.Count == 0)
+        {
+            return null;
+        }
+
+        // Parse remap if present
+        var (explicitMap, ignore, aliases, disallow, explicitByMap) = ParseRemapOrDefaults(remapPath);
+
+        return new AreaIdMapper(
+            alphaIdToName,
+            lkNameToId,
+            lkIdToName,
+            0,
+            0,
+            explicitMap,
+            ignore,
+            aliases,
+            disallow);
+    }
+
     public bool TryResolveById(int alphaAreaId, out int lkAreaId, out string reason)
     {
         if (_lkIds.Contains(alphaAreaId))
@@ -98,18 +179,91 @@ public sealed class AreaIdMapper
 
     public bool TryMap(int alphaAreaId, out int lkAreaId, out string? alphaName, out string? lkName)
     {
+        return TryMapDetailed(alphaAreaId, out lkAreaId, out alphaName, out lkName, out var _);
+    }
+
+    // Detailed mapping that returns a reason string for diagnostics/CSV
+    public bool TryMapDetailed(int alphaAreaId, out int lkAreaId, out string? alphaName, out string? lkName, out string reason)
+    {
+        return TryMapDetailed(alphaAreaId, currentMapId: null, out lkAreaId, out alphaName, out lkName, out reason);
+    }
+
+    // Map-aware overload: prefer explicit mappings that match the current map
+    public bool TryMapDetailed(int alphaAreaId, int? currentMapId, out int lkAreaId, out string? alphaName, out string? lkName, out string reason)
+    {
         lkAreaId = 0;
         alphaName = null;
         lkName = null;
+        reason = "unmapped";
 
+        // Ignore list short-circuit
+        if (_ignoreAlphaIds.Contains(alphaAreaId))
+        {
+            reason = "ignored";
+            return false;
+        }
+
+        // Prefer (mapId, areaNumber) exact match when available
+        if (currentMapId.HasValue)
+        {
+            var key = currentMapId.Value.ToString() + ":" + alphaAreaId.ToString();
+            if (_explicitMapByMap.TryGetValue(key, out var mapped))
+            {
+                lkAreaId = mapped;
+                _alphaIdToName.TryGetValue(alphaAreaId, out alphaName);
+                lkName = GetLkNameById(lkAreaId);
+                reason = "remap_explicit";
+                return true;
+            }
+        }
+
+        // Explicit map wins
+        if (_explicitMap.TryGetValue(alphaAreaId, out var explicitTarget))
+        {
+            lkAreaId = explicitTarget;
+            _alphaIdToName.TryGetValue(alphaAreaId, out alphaName);
+            lkName = GetLkNameById(lkAreaId);
+            reason = "remap_explicit";
+            return true;
+        }
+
+        // Name-based when names are available
         if (_alphaIdToName.TryGetValue(alphaAreaId, out var aName) && !string.IsNullOrWhiteSpace(aName))
         {
             alphaName = aName;
             var norm = NormalizeName(aName);
-            if (_lkNameToId.TryGetValue(norm, out lkAreaId))
+            if (TryResolveLkByName(norm, out lkAreaId))
             {
                 lkName = GetLkNameById(lkAreaId) ?? aName;
+                if (_disallowDoNotUseTargets && ContainsDoNotUse(lkName))
+                {
+                    // treat as unmapped if disallowed
+                    lkAreaId = 0;
+                    lkName = null;
+                    reason = "disallowed_target";
+                    return false;
+                }
+                reason = "name";
                 return true;
+            }
+
+            // Try alias variants
+            if (_aliases.TryGetValue(norm, out var variants))
+            {
+                foreach (var v in variants)
+                {
+                    var vn = NormalizeName(v);
+                    if (TryResolveLkByName(vn, out lkAreaId))
+                    {
+                        lkName = GetLkNameById(lkAreaId) ?? v;
+                        if (_disallowDoNotUseTargets && ContainsDoNotUse(lkName))
+                        {
+                            lkAreaId = 0; lkName = null; reason = "disallowed_target"; return false;
+                        }
+                        reason = "name_alias";
+                        return true;
+                    }
+                }
             }
         }
 
@@ -203,4 +357,88 @@ public sealed class AreaIdMapper
         norm = Regex.Replace(norm, "\\s+", " ");
         return norm.ToLowerInvariant();
     }
+
+    private static (Dictionary<int,int> explicitMap, HashSet<int> ignore, Dictionary<string,string[]> aliases, bool disallow, Dictionary<string,int> explicitMapByMap) ParseRemapOrDefaults(string? remapPath)
+    {
+        var explicitMap = new Dictionary<int, int>();
+        var ignore = new HashSet<int>();
+        var aliases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        bool disallow = true;
+        var explicitByMap = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(remapPath) || !File.Exists(remapPath!))
+        {
+            return (explicitMap, ignore, aliases, disallow, explicitByMap);
+        }
+
+        try
+        {
+            var json = File.ReadAllText(remapPath!);
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var doc = JsonSerializer.Deserialize<RemapRoot>(json, options);
+            if (doc is null) return (explicitMap, ignore, aliases, disallow, explicitByMap);
+
+            if (doc.aliases is not null)
+            {
+                foreach (var kv in doc.aliases)
+                {
+                    if (kv.Value is null) continue;
+                    var key = NormalizeName(kv.Key);
+                    var vals = kv.Value.Where(v => !string.IsNullOrWhiteSpace(v)).ToArray();
+                    aliases[key] = vals;
+                }
+            }
+            if (doc.explicit_map is not null)
+            {
+                foreach (var e in doc.explicit_map)
+                {
+                    explicitMap[e.src_areaNumber] = e.tgt_areaID;
+                    if (e.src_mapID.HasValue)
+                    {
+                        var key = e.src_mapID.Value.ToString() + ":" + e.src_areaNumber.ToString();
+                        explicitByMap[key] = e.tgt_areaID;
+                    }
+                }
+            }
+            if (doc.ignore_area_numbers is not null)
+            {
+                foreach (var n in doc.ignore_area_numbers) ignore.Add(n);
+            }
+            if (doc.options is not null)
+            {
+                disallow = doc.options.disallow_do_not_use_targets;
+            }
+        }
+        catch
+        {
+            // ignore parse errors; return defaults
+        }
+
+        return (explicitMap, ignore, aliases, disallow, explicitByMap);
+    }
+
+    private bool TryResolveLkByName(string normalizedName, out int lkAreaId)
+    {
+        lkAreaId = 0;
+        if (_lkNameToId.TryGetValue(normalizedName, out lkAreaId)) return true;
+        return false;
+    }
+
+    private static bool ContainsDoNotUse(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        return name.IndexOf("do not use", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private sealed class RemapRoot
+    {
+        public RemapMeta? meta { get; set; }
+        public Dictionary<string, string[]>? aliases { get; set; }
+        public List<ExplicitMapEntry>? explicit_map { get; set; }
+        public List<int>? ignore_area_numbers { get; set; }
+        public RemapOptions? options { get; set; }
+    }
+    private sealed class RemapMeta { public string? src_alias { get; set; } public string? src_build { get; set; } public string? tgt_build { get; set; } public string? generated_at { get; set; } }
+    private sealed class ExplicitMapEntry { public int src_areaNumber { get; set; } public int tgt_areaID { get; set; } public int? src_mapID { get; set; } public string? note { get; set; } }
+    private sealed class RemapOptions { public bool disallow_do_not_use_targets { get; set; } = true; }
 }
