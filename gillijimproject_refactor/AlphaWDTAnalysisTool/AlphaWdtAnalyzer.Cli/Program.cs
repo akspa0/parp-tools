@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using AlphaWdtAnalyzer.Core;
 using AlphaWdtAnalyzer.Core.Export;
 
@@ -14,8 +13,6 @@ public static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
         Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
-        Console.WriteLine("  DBCD mapping (no remap.json): add --dbd-dir <dir> --dbc-src <src DBFilesClient> --dbc-tgt <tgt DBFilesClient> [--src-alias 0.5.3|0.5.5|0.6.0] [--src-build <build>] [--tgt-build 3.3.5.12340] [--allow-do-not-use]");
-        Console.WriteLine("  Lazy mode: AlphaWdtAnalyzer --root <test_data> --out <out_dir> --export-adt --export-dir <out_dir> [--src-alias 0.5.3|0.5.5|0.6.0] [--verbose]");
         return 2;
     }
 
@@ -45,26 +42,12 @@ public static class Program
         string? remap = null;
         bool verbose = false;
         bool trackAssets = false;
-        string? dbdDir = null;
-        string? dbcSrc = null;
-        string? dbcTgt = null;
-        string? srcAlias = null;
-        string? srcBuild = null;
-        string? tgtBuild = null;
-        bool allowDoNotUse = false;
-        string? rootDir = null;
-        int sampleCount = 8; // limits per-tile sample rows in CSV
-        bool diagnosticsOnly = false; // skip ADT writing/patching for speed
 
         for (int i = 0; i < args.Length; i++)
         {
             var a = args[i];
             switch (a)
             {
-                case "--root":
-                    if (i + 1 >= args.Length) return Usage();
-                    rootDir = args[++i];
-                    break;
                 case "--input":
                     if (i + 1 >= args.Length) return Usage();
                     wdt = args[++i];
@@ -146,128 +129,16 @@ public static class Program
                     if (i + 1 >= args.Length) return Usage();
                     remap = args[++i];
                     break;
-                case "--dbd-dir":
-                    if (i + 1 >= args.Length) return Usage();
-                    dbdDir = args[++i];
-                    break;
-                case "--dbc-src":
-                    if (i + 1 >= args.Length) return Usage();
-                    dbcSrc = args[++i];
-                    break;
-                case "--dbc-tgt":
-                    if (i + 1 >= args.Length) return Usage();
-                    dbcTgt = args[++i];
-                    break;
-                case "--src-alias":
-                    if (i + 1 >= args.Length) return Usage();
-                    srcAlias = args[++i];
-                    break;
-                case "--src-build":
-                    if (i + 1 >= args.Length) return Usage();
-                    srcBuild = args[++i];
-                    break;
-                case "--tgt-build":
-                    if (i + 1 >= args.Length) return Usage();
-                    tgtBuild = args[++i];
-                    break;
-                case "--allow-do-not-use":
-                    allowDoNotUse = true;
-                    break;
                 case "--verbose":
                     verbose = true;
                     break;
                 case "--track-assets":
                     trackAssets = true;
                     break;
-                case "--sample-count":
-                    if (i + 1 >= args.Length) return Usage();
-                    if (!int.TryParse(args[++i], out sampleCount)) return Usage();
-                    if (sampleCount < 0) sampleCount = 0;
-                    break;
-                case "--diagnostics-only":
-                    diagnosticsOnly = true;
-                    break;
                 case "-h":
                 case "--help":
                     return Usage();
             }
-        }
-
-        // --- Simplified defaults & auto-detection ---
-        // Find repo root that contains test_data to resolve defaults
-        static string? FindRepoRootWithTestData()
-        {
-            // Try from BaseDirectory upwards
-            string? dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
-            {
-                if (Directory.Exists(Path.Combine(dir, "test_data"))) return dir;
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-            // Try from current working directory
-            dir = Directory.GetCurrentDirectory();
-            for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
-            {
-                if (Directory.Exists(Path.Combine(dir, "test_data"))) return dir;
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-            return null;
-        }
-
-        static string InferAliasFromAnyPath(string p)
-        {
-            var s = (p ?? string.Empty).Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).ToLowerInvariant();
-            if (s.Contains("0.5.3")) return "0.5.3";
-            if (s.Contains("0.5.5")) return "0.5.5";
-            if (s.Contains("0.6.0")) return "0.6.0";
-            return "0.5.3"; // sensible default for alpha
-        }
-
-        // Default listfiles from test_data root if not provided
-        var repoRoot = FindRepoRootWithTestData();
-        var testDataRoot = repoRoot is null ? null : Path.Combine(repoRoot, "test_data");
-        if (string.IsNullOrWhiteSpace(listfile) || !File.Exists(listfile))
-        {
-            var cand = testDataRoot is null ? null : Path.Combine(testDataRoot, "community-listfile-withcapitals.csv");
-            if (!string.IsNullOrWhiteSpace(cand) && File.Exists(cand)) listfile = cand;
-        }
-        if (string.IsNullOrWhiteSpace(lkListfile) || !File.Exists(lkListfile))
-        {
-            var cand = testDataRoot is null ? null : Path.Combine(testDataRoot, "World of Warcraft 3x.txt");
-            if (!string.IsNullOrWhiteSpace(cand) && File.Exists(cand)) lkListfile = cand;
-        }
-
-        // If exporting ADTs, default export-dir to --out (single output folder)
-        if (exportAdt && string.IsNullOrWhiteSpace(exportDir))
-        {
-            exportDir = outDir;
-        }
-
-        // Infer source alias/build from input path when not specified
-        string anyInputPath = !string.IsNullOrWhiteSpace(wdt) ? wdt! : (inputDir ?? string.Empty);
-        if (string.IsNullOrWhiteSpace(srcAlias) && !string.IsNullOrWhiteSpace(anyInputPath)) srcAlias = InferAliasFromAnyPath(anyInputPath);
-        if (string.IsNullOrWhiteSpace(srcBuild) && !string.IsNullOrWhiteSpace(srcAlias))
-        {
-            srcBuild = srcAlias switch { "0.5.3" => "0.5.3.3368", "0.5.5" => "0.5.5.3494", "0.6.0" => "0.6.0.3592", _ => srcBuild };
-        }
-        // Default target build to LK 3.3.5
-        tgtBuild ??= "3.3.5.12340";
-
-        // Auto-guess DBCD directories if available in repo
-        if (string.IsNullOrWhiteSpace(dbdDir) && repoRoot is not null)
-        {
-            var cand = Path.Combine(repoRoot, "lib", "WoWDBDefs", "definitions");
-            if (Directory.Exists(cand)) dbdDir = cand;
-        }
-        if (string.IsNullOrWhiteSpace(dbcSrc) && !string.IsNullOrWhiteSpace(srcAlias) && testDataRoot is not null)
-        {
-            var cand = Path.Combine(testDataRoot, srcAlias, "tree", "DBFilesClient");
-            if (Directory.Exists(cand)) dbcSrc = cand;
-        }
-        if (string.IsNullOrWhiteSpace(dbcTgt) && testDataRoot is not null)
-        {
-            var cand = Path.Combine(testDataRoot, "3.3.5", "tree", "DBFilesClient");
-            if (Directory.Exists(cand)) dbcTgt = cand;
         }
 
         // Apply profile
@@ -285,13 +156,10 @@ public static class Program
             wdt = null;
         }
 
-        var isRootMode = !string.IsNullOrWhiteSpace(rootDir);
-        var isBatch = isRootMode || !string.IsNullOrWhiteSpace(inputDir);
+        var isBatch = !string.IsNullOrWhiteSpace(inputDir);
 
-        // Validation: in root mode, only require --out; in other modes require input + out; listfiles default from test_data if omitted
-        if ((isBatch && !isRootMode && string.IsNullOrWhiteSpace(outDir)) ||
-            (!isBatch && (string.IsNullOrWhiteSpace(wdt) || string.IsNullOrWhiteSpace(outDir))) ||
-            (isRootMode && string.IsNullOrWhiteSpace(outDir)))
+        if ((isBatch && (string.IsNullOrWhiteSpace(listfile) || string.IsNullOrWhiteSpace(outDir))) ||
+            (!isBatch && (string.IsNullOrWhiteSpace(wdt) || string.IsNullOrWhiteSpace(listfile) || string.IsNullOrWhiteSpace(outDir))))
         {
             return Usage();
         }
@@ -306,32 +174,17 @@ public static class Program
             Console.Error.WriteLine($"LK listfile not found: {lkListfile}");
             return 1;
         }
+        if (exportAdt)
+        {
+            if (string.IsNullOrWhiteSpace(exportDir))
+            {
+                Console.Error.WriteLine("--export-adt requires --export-dir <dir>");
+                return 1;
+            }
+        }
 
         try
         {
-            // Lazy auto-discovery from --root
-            if (isRootMode)
-            {
-                var auto = AutoDiscoverFromRoot(rootDir!, srcAlias);
-                // Fill DBCD fields if not explicitly provided
-                dbdDir ??= Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "lib", "WoWDBDefs", "definitions");
-                if (!Directory.Exists(dbdDir)) dbdDir = Path.Combine("lib", "WoWDBDefs", "definitions");
-                dbcSrc ??= auto.DbcSrcDir;
-                dbcTgt ??= auto.DbcTgtDir;
-                if (string.IsNullOrWhiteSpace(srcAlias)) srcAlias = auto.SrcAlias; // honor preferred alias if provided
-                else if (!string.Equals(srcAlias, auto.SrcAlias, StringComparison.OrdinalIgnoreCase))
-                    Console.WriteLine($"[Auto] Requested src-alias '{srcAlias}' not found; using '{auto.SrcAlias}'");
-                // WDT search root defaults to the overall root; ExportBatch will scan recursively
-                inputDir ??= rootDir;
-                // Turn on ADT export by default if not set
-                if (exportAdt && string.IsNullOrWhiteSpace(exportDir)) exportDir = outDir;
-                if (!exportAdt)
-                {
-                    exportAdt = true;
-                    exportDir ??= outDir;
-                }
-            }
-
             if (isBatch)
             {
                 if (!Directory.Exists(inputDir!))
@@ -355,7 +208,7 @@ public static class Program
                     AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
                     {
                         InputRoot = inputDir!,
-                        CommunityListfilePath = listfile,
+                        CommunityListfilePath = listfile!,
                         LkListfilePath = lkListfile,
                         ExportDir = exportDir!,
                         FallbackTileset = fallbackTileset,
@@ -369,15 +222,6 @@ public static class Program
                         RemapPath = remap,
                         Verbose = verbose,
                         TrackAssets = trackAssets,
-                        DbdDir = dbdDir,
-                        DbcSrcDir = dbcSrc,
-                        DbcTgtDir = dbcTgt,
-                        SrcAlias = srcAlias,
-                        SrcBuild = srcBuild,
-                        TgtBuild = tgtBuild,
-                        AllowDoNotUse = allowDoNotUse,
-                        SampleCount = sampleCount,
-                        DiagnosticsOnly = diagnosticsOnly,
                     });
                 }
             }
@@ -423,15 +267,6 @@ public static class Program
                         RemapPath = remap,
                         Verbose = verbose,
                         TrackAssets = trackAssets,
-                        DbdDir = dbdDir,
-                        DbcSrcDir = dbcSrc,
-                        DbcTgtDir = dbcTgt,
-                        SrcAlias = srcAlias,
-                        SrcBuild = srcBuild,
-                        TgtBuild = tgtBuild,
-                        AllowDoNotUse = allowDoNotUse,
-                        SampleCount = sampleCount,
-                        DiagnosticsOnly = diagnosticsOnly,
                     });
                 }
             }
@@ -444,53 +279,5 @@ public static class Program
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
-    }
-
-    private static (string SrcAlias, string DbcSrcDir, string DbcTgtDir) AutoDiscoverFromRoot(string root, string? preferredAlias)
-    {
-        // Find DBFilesClient directories for classic and 3.3.5
-        string FindDbcDir(string token)
-        {
-            try
-            {
-                var dirs = Directory.EnumerateDirectories(root, "DBFilesClient", SearchOption.AllDirectories)
-                    .Where(d => d.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
-                    .OrderBy(d => d.Length)
-                    .ToList();
-                return dirs.FirstOrDefault() ?? string.Empty;
-            }
-            catch { return string.Empty; }
-        }
-
-        string srcAlias = "0.5.3";
-        string srcDir = string.Empty;
-        // If user requested a preferred alias, try it first exclusively
-        if (!string.IsNullOrWhiteSpace(preferredAlias))
-        {
-            var pref = preferredAlias.Trim();
-            srcAlias = pref;
-            srcDir = FindDbcDir(pref);
-        }
-        // Fallback to auto-discovery order
-        if (string.IsNullOrEmpty(srcDir)) { srcDir = FindDbcDir("0.5.3"); srcAlias = string.IsNullOrEmpty(srcDir) ? srcAlias : "0.5.3"; }
-        if (string.IsNullOrEmpty(srcDir)) { srcDir = FindDbcDir("0.5.5"); srcAlias = string.IsNullOrEmpty(srcDir) ? srcAlias : "0.5.5"; }
-        if (string.IsNullOrEmpty(srcDir)) { srcDir = FindDbcDir("0.6.0"); srcAlias = string.IsNullOrEmpty(srcDir) ? srcAlias : "0.6.0"; }
-        if (string.IsNullOrEmpty(srcDir))
-        {
-            // fallback: first DBFilesClient under root
-            try { srcDir = Directory.EnumerateDirectories(root, "DBFilesClient", SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty; } catch { }
-        }
-
-        string tgtDir = FindDbcDir("3.3.5");
-        if (string.IsNullOrEmpty(tgtDir))
-        {
-            // fallback: any DBFilesClient under root containing 3.3.5 token elsewhere
-            try {
-                tgtDir = Directory.EnumerateDirectories(root, "DBFilesClient", SearchOption.AllDirectories)
-                    .FirstOrDefault(d => d.IndexOf("3.3.5", StringComparison.OrdinalIgnoreCase) >= 0) ?? string.Empty;
-            } catch { }
-        }
-
-        return (srcAlias, srcDir, tgtDir);
     }
 }
