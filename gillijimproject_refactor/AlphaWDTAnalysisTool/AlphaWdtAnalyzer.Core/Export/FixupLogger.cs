@@ -53,8 +53,9 @@ public sealed class FixupLogger : IDisposable
         _initialized = true;
     }
 
-    private static string Csv(string s)
+    private static string Csv(string? s)
     {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
         if (s.Contains('"') || s.Contains(','))
         {
             return '"' + s.Replace("\"", "\"\"") + '"';

@@ -37,6 +37,7 @@ public sealed class AreaIdMapper
         int alphaNameCol,
         int lkNameCol,
         Dictionary<int, int>? explicitMap = null,
+        Dictionary<string, int>? explicitByMap = null,
         HashSet<int>? ignoreAlphaIds = null,
         Dictionary<string, string[]>? aliases = null,
         bool disallowDoNotUseTargets = true)
@@ -51,6 +52,10 @@ public sealed class AreaIdMapper
         if (explicitMap is not null)
         {
             foreach (var kv in explicitMap) _explicitMap[kv.Key] = kv.Value;
+        }
+        if (explicitByMap is not null)
+        {
+            foreach (var kv in explicitByMap) _explicitMapByMap[kv.Key] = kv.Value;
         }
         if (ignoreAlphaIds is not null)
         {
@@ -153,6 +158,7 @@ public sealed class AreaIdMapper
             0,
             0,
             explicitMap,
+            explicitByMap,
             ignore,
             aliases,
             disallow);
@@ -441,4 +447,33 @@ public sealed class AreaIdMapper
     private sealed class RemapMeta { public string? src_alias { get; set; } public string? src_build { get; set; } public string? tgt_build { get; set; } public string? generated_at { get; set; } }
     private sealed class ExplicitMapEntry { public int src_areaNumber { get; set; } public int tgt_areaID { get; set; } public int? src_mapID { get; set; } public string? note { get; set; } }
     private sealed class RemapOptions { public bool disallow_do_not_use_targets { get; set; } = true; }
+
+    // Public factory to create a mapper from an explicit map-aware dictionary
+    public static AreaIdMapper CreateFromExplicit(Dictionary<string, int> explicitByMap, bool disallowDoNotUseTargets)
+    {
+        var emptyAlpha = new Dictionary<int, string>();
+        var emptyLkNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var emptyLkIdToName = new Dictionary<int, string>();
+        return new AreaIdMapper(
+            emptyAlpha,
+            emptyLkNameToId,
+            emptyLkIdToName,
+            0,
+            0,
+            explicitMap: null,
+            explicitByMap: explicitByMap,
+            ignoreAlphaIds: null,
+            aliases: null,
+            disallowDoNotUseTargets: disallowDoNotUseTargets);
+    }
+}
+
+// Factory helpers
+public static partial class AreaIdMapperFactory
+{
+    /// <summary>
+    /// Create a map-aware AreaIdMapper from an explicit mapping of "mapId:areaNumber" -> tgt_areaID.
+    /// </summary>
+    public static AreaIdMapper CreateFromExplicit(Dictionary<string, int> explicitByMap, bool disallowDoNotUse)
+        => AreaIdMapper.CreateFromExplicit(explicitByMap, disallowDoNotUse);
 }

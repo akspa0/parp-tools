@@ -31,6 +31,26 @@ public static class AdtWotlkWriter
         public bool Verbose { get; init; } = false;
         public bool TrackAssets { get; init; } = false;
         public int? CurrentMapId { get; init; }
+        // Optional version metadata for CSV dumps
+        public string? SrcAlias { get; init; }
+        public string? SrcBuild { get; init; }
+        public string? TgtBuild { get; init; }
+        // Remap-only write guard: when false (no --remap), AreaIDs are NOT written
+        public bool AllowAreaIdWrites { get; init; } = false;
+        // Optional decode dictionaries (Alpha/LK AreaTable-backed)
+        public IReadOnlyDictionary<int, string>? AlphaAreaNamesByNumber { get; init; }
+        public IReadOnlyDictionary<int, int>? AlphaParentByNumber { get; init; }
+        public IReadOnlyDictionary<int, int>? AlphaContinentByNumber { get; init; }
+        public IReadOnlyDictionary<int, string>? LkAreaNamesById { get; init; }
+        public IReadOnlyDictionary<int, int>? LkParentById { get; init; }
+        public IReadOnlyDictionary<int, int>? LkContinentById { get; init; }
+        // Alpha per-continent disambiguation (areaNumber -> continentID -> name/parent)
+        public IReadOnlyDictionary<int, IReadOnlyDictionary<int, string>>? AlphaAreaNamesByNumberByCont { get; init; }
+        public IReadOnlyDictionary<int, IReadOnlyDictionary<int, int>>? AlphaParentByNumberByCont { get; init; }
+        // Diagnostics-only mode: skip ADT file writing/patching for speed
+        public bool DiagnosticsOnly { get; init; } = false;
+        // Per-tile sample size
+        public int SampleCount { get; init; } = 16;
     }
 
     public static void WritePlaceholder(WriteContext ctx)
@@ -138,62 +158,44 @@ public static class AdtWotlkWriter
             }
         }
 
-        // Build LK ADT from Alpha using WDT MDNM/MONM tables
-        var fixedM2 = ctx.MdnmFiles.Select(n => ctx.Fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
-        var fixedWmo = ctx.MonmFiles.Select(n => ctx.Fixup.Resolve(AssetType.Wmo, n)).ToList();
-        var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
-        adtLk.ToFile(outFile);
+        if (!ctx.DiagnosticsOnly)
+        {
+            // Build LK ADT from Alpha using WDT MDNM/MONM tables
+            var fixedM2 = ctx.MdnmFiles.Select(n => ctx.Fixup.Resolve(AssetType.MdxOrM2, n)).ToList();
+            var fixedWmo = ctx.MonmFiles.Select(n => ctx.Fixup.Resolve(AssetType.Wmo, n)).ToList();
+            var adtLk = alpha.ToAdtLk(fixedM2, fixedWmo);
+            adtLk.ToFile(outFile);
 
-        // Patch MTEX in-place with capacity-aware replacements (do not change file size)
-        try
-        {
-            PatchMtexOnDisk(outFile, ctx.Fixup);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[MTEX] Failed to patch MTEX for {outFile}: {ex.Message}");
-        }
+            // Patch MTEX in-place with capacity-aware replacements (do not change file size)
+            try { PatchMtexOnDiskInternal(outFile, ctx.Fixup); }
+            catch (Exception ex) { Console.Error.WriteLine($"[MTEX] Failed to patch MTEX for {outFile}: {ex.Message}"); }
 
-        // Patch MMDX (M2/MDX) and MWMO (WMO) name tables in-place
-        try
-        {
-            PatchStringTableInPlace(outFile, "MMDX", AssetType.MdxOrM2, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.MdxOrM2, orig, out _));
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[MMDX] Failed to patch M2/MDX names for {outFile}: {ex.Message}");
-        }
-        try
-        {
-            PatchStringTableInPlace(outFile, "MWMO", AssetType.Wmo, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.Wmo, orig, out _));
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[MWMO] Failed to patch WMO names for {outFile}: {ex.Message}");
-        }
+            // Patch MMDX (M2/MDX) and MWMO (WMO) name tables in-place
+            try { PatchStringTableInPlace(outFile, "MMDX", AssetType.MdxOrM2, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.MdxOrM2, orig, out _)); }
+            catch (Exception ex) { Console.Error.WriteLine($"[MMDX] Failed to patch M2/MDX names for {outFile}: {ex.Message}"); }
+            try { PatchStringTableInPlace(outFile, "MWMO", AssetType.Wmo, ctx.Fixup, (orig) => ctx.Fixup.ResolveWithMethod(AssetType.Wmo, orig, out _)); }
+            catch (Exception ex) { Console.Error.WriteLine($"[MWMO] Failed to patch WMO names for {outFile}: {ex.Message}"); }
 
-        // Emit/refresh WDT once per map in the same folder, rename *_new to <map>.wdt
-        if (!EmittedWdtForMap.Contains(ctx.MapName))
-        {
-            try
+            // Emit/refresh WDT once per map in the same folder, rename *_new to <map>.wdt
+            if (!EmittedWdtForMap.Contains(ctx.MapName))
             {
-                var wdtAlpha = new WdtAlpha(ctx.WdtPath);
-                var wdt = wdtAlpha.ToWdt();
-                wdt.ToFile(mapsDir); // writes <basename>.wdt_new
-                var newFile = Path.Combine(mapsDir, Path.GetFileName(ctx.WdtPath) + "_new");
-                var finalFile = Path.Combine(mapsDir, ctx.MapName + ".wdt");
-                if (File.Exists(finalFile)) File.Delete(finalFile);
-                if (File.Exists(newFile)) File.Move(newFile, finalFile, overwrite: true);
-                EmittedWdtForMap.Add(ctx.MapName);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[WDT] Failed to emit WDT for {ctx.MapName}: {ex.Message}");
+                try
+                {
+                    var wdtAlpha = new WdtAlpha(ctx.WdtPath);
+                    var wdt = wdtAlpha.ToWdt();
+                    wdt.ToFile(mapsDir); // writes <basename>.wdt_new
+                    var newFile = Path.Combine(mapsDir, Path.GetFileName(ctx.WdtPath) + "_new");
+                    var finalFile = Path.Combine(mapsDir, ctx.MapName + ".wdt");
+                    if (File.Exists(finalFile)) File.Delete(finalFile);
+                    if (File.Exists(newFile)) File.Move(newFile, finalFile, overwrite: true);
+                    EmittedWdtForMap.Add(ctx.MapName);
+                }
+                catch (Exception ex) { Console.Error.WriteLine($"[WDT] Failed to emit WDT for {ctx.MapName}: {ex.Message}"); }
             }
         }
 
         // Patch per-MCNK AreaId in-place using mapper when available (alpha-driven via MCIN)
-        if (ctx.AreaMapper is not null && ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
+        if (ctx.AllowAreaIdWrites && ctx.AreaMapper is not null && ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
         {
             try
             {
@@ -207,111 +209,573 @@ public static class AdtWotlkWriter
             {
                 Console.Error.WriteLine($"[AreaPatch] Failed to patch AreaIDs for {outFile}: {ex.Message}");
             }
+
+            // Emit verification CSVs: per-map remap dump(s) and per-tile sample with readbacks
+            try
+            {
+                WriteRemapDumpCsv(ctx, ctx.AlphaAreaIds, ctx.AreaMapper);
+                WriteRemapExplicitUsedCsv(ctx, ctx.AlphaAreaIds, ctx.AreaMapper);
+                WriteAreaIdSampleCsv(ctx, outFile, ctx.AlphaAreaIds, ctx.AreaMapper);
+            }
+            catch (Exception ex)
+            {
+                if (ctx.Verbose)
+                {
+                    Console.Error.WriteLine($"[AreaCSV] Failed to write areaid verification CSVs for {outFile}: {ex.Message}");
+                }
+            }
+        }
+        else if (ctx.Verbose)
+        {
+            Console.WriteLine($"[{ctx.MapName} {ctx.TileX},{ctx.TileY}] Diagnostics-only: AreaIDs not written (no --remap). Remap CSVs suppressed.");
+        }
+
+        // Decode-first diagnostics: emit alpha decode proof and LK suggestions when dictionaries are available
+        if (ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256 &&
+            ctx.AlphaAreaNamesByNumber is not null && ctx.AlphaParentByNumber is not null && ctx.AlphaContinentByNumber is not null &&
+            ctx.LkAreaNamesById is not null && ctx.LkParentById is not null && ctx.LkContinentById is not null)
+        {
+            try { WriteAlphaAreaDecodeCsv(ctx, ctx.AlphaAreaIds); }
+            catch (Exception ex) { if (ctx.Verbose) Console.Error.WriteLine($"[DecodeCSV] {ctx.MapName} {ctx.TileX},{ctx.TileY}: {ex.Message}"); }
+            try { WriteAlphaTo335SuggestionsCsv(ctx, ctx.AlphaAreaIds); }
+            catch (Exception ex) { if (ctx.Verbose) Console.Error.WriteLine($"[SuggestCSV] {ctx.MapName} {ctx.TileX},{ctx.TileY}: {ex.Message}"); }
+        }
+
+        // Always emit per-tile sample (enriched) for quick inspection
+        if (ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
+        {
+            try { WriteAreaIdSampleCsv(ctx, outFile, ctx.AlphaAreaIds, ctx.AreaMapper); }
+            catch (Exception ex) { if (ctx.Verbose) Console.Error.WriteLine($"[SampleCSV] {ctx.MapName} {ctx.TileX},{ctx.TileY}: {ex.Message}"); }
         }
     }
 
-    private static void PatchMtexOnDisk(string filePath, AssetFixupPolicy fixup)
+    private static (int zone, int subzone) DecodeZoneSubzone(int alphaRaw)
     {
-        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-        using var br = new BinaryReader(fs);
-        using var bw = new BinaryWriter(fs);
+        int zone = (alphaRaw >> 16) & 0xFFFF;
+        int sub = alphaRaw & 0xFFFF;
+        return (zone, sub);
+    }
 
-        // Locate MTEX chunk by scanning top-level chunks
+    private static string Norm(string s) => (s ?? string.Empty).Trim().ToLowerInvariant();
+
+    private static readonly HashSet<string> AlphaDecodeKeys = new(StringComparer.OrdinalIgnoreCase);
+
+    // Continent-aware alpha helpers
+    private static bool TryGetAlphaNameByCont(WriteContext ctx, int areaNum, int? mapId, bool strict, out string name)
+    {
+        name = string.Empty;
+        // Prefer per-continent dictionary if available and mapId is known
+        if (mapId.HasValue && ctx.AlphaAreaNamesByNumberByCont is not null &&
+            ctx.AlphaAreaNamesByNumberByCont.TryGetValue(areaNum, out var perCont) &&
+            perCont.TryGetValue(mapId.Value, out var nm))
+        {
+            name = nm ?? string.Empty;
+            return name.Length > 0;
+        }
+        // Fallback: global dictionary (first-encountered) only when not strict or mapId is unknown
+        if (!strict || !mapId.HasValue)
+        {
+            if (ctx.AlphaAreaNamesByNumber is not null && ctx.AlphaAreaNamesByNumber.TryGetValue(areaNum, out var nm2))
+            {
+                name = nm2 ?? string.Empty;
+                return name.Length > 0;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryGetAlphaParentByCont(WriteContext ctx, int areaNum, int? mapId, bool strict, out int parentAreaNum)
+    {
+        parentAreaNum = 0;
+        if (mapId.HasValue && ctx.AlphaParentByNumberByCont is not null &&
+            ctx.AlphaParentByNumberByCont.TryGetValue(areaNum, out var perCont) &&
+            perCont.TryGetValue(mapId.Value, out var p))
+        {
+            parentAreaNum = p;
+            return true;
+        }
+        if (!strict || !mapId.HasValue)
+        {
+            if (ctx.AlphaParentByNumber is not null && ctx.AlphaParentByNumber.TryGetValue(areaNum, out var p2))
+            {
+                parentAreaNum = p2;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int GetAlphaContForArea(WriteContext ctx, int areaNum, int? mapId)
+    {
+        // If we have a per-continent entry for this area and a current mapId, prefer it
+        if (mapId.HasValue && ctx.AlphaAreaNamesByNumberByCont is not null &&
+            ctx.AlphaAreaNamesByNumberByCont.TryGetValue(areaNum, out var perCont) &&
+            perCont.ContainsKey(mapId.Value))
+        {
+            return mapId.Value;
+        }
+        // Fallback to the raw AlphaContinentByNumber table
+        if (ctx.AlphaContinentByNumber is not null && ctx.AlphaContinentByNumber.TryGetValue(areaNum, out var c))
+        {
+            return c;
+        }
+        return -1;
+    }
+
+    private static void WriteAlphaAreaDecodeCsv(WriteContext ctx, IReadOnlyList<int> alphaAreaIds)
+    {
+        var dir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "alpha_areaid_decode.csv");
+
+        bool appendDecode = InitializedCsv.Contains(file);
+        using var sw = new StreamWriter(file, append: appendDecode);
+        if (!appendDecode)
+        {
+            sw.WriteLine("alpha_raw,alpha_raw_hex,zone_num,zone_name_alpha,sub_num,sub_name_alpha,parent_ok,alpha_continent");
+            InitializedCsv.Add(file);
+        }
+
+        var alphaNames = ctx.AlphaAreaNamesByNumber!;
+        var alphaParent = ctx.AlphaParentByNumber!;
+        var alphaCont = ctx.AlphaContinentByNumber!;
+
+        // Use only unique alpha_raw values per map
+        for (int i = 0; i < 256; i++)
+        {
+            int raw = alphaAreaIds[i];
+            if (raw <= 0) continue;
+            string key = ctx.MapName + ":" + raw.ToString();
+            if (AlphaDecodeKeys.Contains(key)) continue;
+
+            var (z, s) = DecodeZoneSubzone(raw);
+            int zoneBase_hi = (z << 16);
+            int zoneBase_lo = (s << 16);
+
+            // Strict hi16->zone, lo16->sub (no swap heuristics)
+            int zoneNumOut = z;
+            string zoneNameOut = string.Empty;
+            int subNumOut = s;
+            string subNameOut = string.Empty;
+            if (TryGetAlphaNameByCont(ctx, zoneBase_hi, ctx.CurrentMapId, false, out var znm)) zoneNameOut = znm;
+            if (s != 0 && TryGetAlphaNameByCont(ctx, raw, ctx.CurrentMapId, false, out var snm)) subNameOut = snm;
+            bool parentOkOut = s == 0 ? true : (TryGetAlphaParentByCont(ctx, raw, ctx.CurrentMapId, true, out var p) && p == zoneBase_hi);
+
+            int cont = GetAlphaContForArea(ctx, zoneBase_hi, ctx.CurrentMapId);
+            sw.WriteLine(string.Join(",",
+                raw.ToString(),
+                $"0x{raw:X}",
+                zoneNumOut.ToString(),
+                EscapeCsv(zoneNameOut),
+                subNumOut.ToString(),
+                EscapeCsv(subNameOut),
+                parentOkOut ? "1" : "0",
+                cont.ToString()
+            ));
+
+            AlphaDecodeKeys.Add(key);
+        }
+    }
+
+    private static void WriteAlphaTo335SuggestionsCsv(WriteContext ctx, IReadOnlyList<int> alphaAreaIds)
+    {
+        var dir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "alpha_to_335_suggestions.csv");
+
+        bool appendSugg = InitializedCsv.Contains(file);
+        using var sw = new StreamWriter(file, append: appendSugg);
+        if (!appendSugg)
+        {
+            sw.WriteLine("alpha_raw,alpha_raw_hex,zone_num,zone_name_alpha,sub_num,sub_name_alpha,alpha_continent,lk_zone_id_suggested,lk_zone_name,lk_sub_id_suggested,lk_sub_name,method");
+            InitializedCsv.Add(file);
+        }
+
+        var alphaNames = ctx.AlphaAreaNamesByNumber!;
+        var alphaParent = ctx.AlphaParentByNumber!;
+        var alphaCont = ctx.AlphaContinentByNumber!;
+        var lkNames = ctx.LkAreaNamesById!;
+        var lkParent = ctx.LkParentById!;
+        var lkCont = ctx.LkContinentById!;
+
+        // Build LK indices by normalized name, per-continent and global
+        var idxByContName = new Dictionary<int, Dictionary<string, List<int>>>();
+        var idxByName = new Dictionary<string, List<int>>();
+        foreach (var kv in lkNames)
+        {
+            int id = kv.Key;
+            string nm = kv.Value ?? string.Empty;
+            string n = Norm(nm);
+            int cont = lkCont.TryGetValue(id, out var m) ? m : -1;
+            if (!idxByContName.TryGetValue(cont, out var dict)) { dict = new Dictionary<string, List<int>>(); idxByContName[cont] = dict; }
+            if (!dict.TryGetValue(n, out var lst)) { lst = new List<int>(); dict[n] = lst; }
+            lst.Add(id);
+            if (!idxByName.TryGetValue(n, out var lg)) { lg = new List<int>(); idxByName[n] = lg; }
+            lg.Add(id);
+        }
+
+        // Unique per map to avoid duplicates
+        var seen = new HashSet<int>();
+        for (int i = 0; i < 256; i++)
+        {
+            int raw = alphaAreaIds[i];
+            if (raw <= 0 || !seen.Add(raw)) continue;
+
+            var (z, s) = DecodeZoneSubzone(raw);
+            int zoneBase = (z << 16);
+
+            // Strict hi16->zone, lo16->sub for suggestions as well (no swap)
+            string zoneNameAlpha = string.Empty;
+            string subNameAlpha = string.Empty;
+            TryGetAlphaNameByCont(ctx, zoneBase, ctx.CurrentMapId, false, out zoneNameAlpha);
+            if (s != 0) TryGetAlphaNameByCont(ctx, raw, ctx.CurrentMapId, false, out subNameAlpha);
+
+            string nZone = Norm(zoneNameAlpha);
+            int lkZone = -1;
+            string method = "global";
+            if (idxByContName.TryGetValue(GetAlphaContForArea(ctx, zoneBase, ctx.CurrentMapId), out var dict) && dict.TryGetValue(nZone, out var lm) && lm.Count > 0)
+            {
+                lkZone = lm.Min();
+                method = "map_biased";
+            }
+            else if (idxByName.TryGetValue(nZone, out var lg) && lg.Count > 0)
+            {
+                lkZone = lg.Min();
+            }
+
+            int lkSub = -1;
+            if (s != 0 && lkZone > 0)
+            {
+                string nSub = Norm(subNameAlpha);
+                // Filter LK by sub name and parent
+                if (idxByName.TryGetValue(nSub, out var lsub) && lsub.Count > 0)
+                {
+                    lkSub = lsub.Where(id => lkParent.TryGetValue(id, out var pr) && pr == lkZone).DefaultIfEmpty(-1).Min();
+                }
+                if (lkSub <= 0)
+                {
+                    method = method + ":fallback_to_zone";
+                }
+            }
+
+            sw.WriteLine(string.Join(",",
+                raw.ToString(),
+                $"0x{raw:X}",
+                z.ToString(),
+                EscapeCsv(zoneNameAlpha),
+                s.ToString(),
+                EscapeCsv(subNameAlpha),
+                GetAlphaContForArea(ctx, zoneBase, ctx.CurrentMapId).ToString(),
+                lkZone > 0 ? lkZone.ToString() : string.Empty,
+                lkZone > 0 && lkNames.TryGetValue(lkZone, out var lzn) ? EscapeCsv(lzn) : string.Empty,
+                lkSub > 0 ? lkSub.ToString() : string.Empty,
+                lkSub > 0 && lkNames.TryGetValue(lkSub, out var lsn) ? EscapeCsv(lsn) : string.Empty,
+                method
+            ));
+        }
+    }
+
+    private static void WriteRemapDumpCsv(WriteContext ctx, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper)
+    {
+        var dir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "remap_dump.csv");
+
+        bool exists = File.Exists(file);
+        using var sw = new StreamWriter(file, append: true);
+        if (!exists)
+        {
+            sw.WriteLine("src_alias,src_build,tgt_build,map_name,map_id,idx,alpha_raw,alpha_raw_hex,zone,subzone,alpha_name,lk_areaid,lk_name,reason");
+        }
+
+        string srcAlias = ctx.SrcAlias ?? string.Empty;
+        string srcBuild = ctx.SrcBuild ?? string.Empty;
+        string tgtBuild = ctx.TgtBuild ?? string.Empty;
+
+        for (int i = 0; i < 256; i++)
+        {
+            int aId = alphaAreaIds[i];
+            if (aId < 0) continue;
+            var (zone, subzone) = DecodeZoneSubzone(aId);
+
+            int lkId;
+            string? alphaName;
+            string? lkName;
+            string reason;
+            mapper.TryMapDetailed(aId, ctx.CurrentMapId, out lkId, out alphaName, out lkName, out reason);
+
+            sw.WriteLine(string.Join(",",
+                EscapeCsv(srcAlias),
+                EscapeCsv(srcBuild),
+                EscapeCsv(tgtBuild),
+                EscapeCsv(ctx.MapName),
+                ctx.CurrentMapId?.ToString() ?? string.Empty,
+                i.ToString(),
+                aId.ToString(),
+                $"0x{aId:X}",
+                zone.ToString(),
+                subzone.ToString(),
+                EscapeCsv(alphaName),
+                lkId > 0 ? lkId.ToString() : string.Empty,
+                EscapeCsv(lkName),
+                EscapeCsv(reason)
+            ));
+        }
+    }
+
+    private static void WriteRemapExplicitUsedCsv(WriteContext ctx, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper)
+    {
+        var dir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "remap_explicit_used.csv");
+
+        bool exists = File.Exists(file);
+        using var sw = new StreamWriter(file, append: true);
+        if (!exists)
+        {
+            sw.WriteLine("src_alias,src_build,tgt_build,map_name,map_id,alpha_areaNumber,alpha_areaNumber_hex,zone,subzone,tgt_areaID,lk_name");
+        }
+
+        string srcAlias = ctx.SrcAlias ?? string.Empty;
+        string srcBuild = ctx.SrcBuild ?? string.Empty;
+        string tgtBuild = ctx.TgtBuild ?? string.Empty;
+
+        for (int i = 0; i < 256; i++)
+        {
+            int aId = alphaAreaIds[i];
+            if (aId < 0) continue;
+            var (zone, subzone) = DecodeZoneSubzone(aId);
+
+            if (mapper.TryMapDetailed(aId, ctx.CurrentMapId, out var lkId, out _, out var lkName, out var reason))
+            {
+                if (!string.Equals(reason, "remap_explicit", StringComparison.OrdinalIgnoreCase)) continue;
+                sw.WriteLine(string.Join(",",
+                    EscapeCsv(srcAlias),
+                    EscapeCsv(srcBuild),
+                    EscapeCsv(tgtBuild),
+                    EscapeCsv(ctx.MapName),
+                    ctx.CurrentMapId?.ToString() ?? string.Empty,
+                    aId.ToString(),
+                    $"0x{aId:X}",
+                    zone.ToString(),
+                    subzone.ToString(),
+                    lkId.ToString(),
+                    EscapeCsv(lkName)
+                ));
+            }
+        }
+    }
+
+    private static void WriteAreaIdSampleCsv(WriteContext ctx, string outFile, IReadOnlyList<int> alphaAreaIds, AreaIdMapper? mapper)
+    {
+        // Per-tile sample (first N present rows) including readbacks from written LK ADT
+        int sampleMax = ctx.SampleCount > 0 ? ctx.SampleCount : 16;
+        var dir = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, $"{ctx.MapName}_{ctx.TileX}_{ctx.TileY}_areaid_sample.csv");
+
+        // Diagnostics-only or missing ADT file: write sample rows without readbacks
+        if (ctx.DiagnosticsOnly || !File.Exists(outFile))
+        {
+            using var swLite = new StreamWriter(file, append: false);
+            swLite.WriteLine("idx,alpha_raw_hex,zone,subzone,zone_name_alpha,sub_name_alpha,alpha_continent,reason,lk_write,lk_zone_id_suggested,lk_zone_name,lk_sub_id_suggested,lk_sub_name,lk_readback_areaid,lk_readback_holes_hex");
+
+            int writtenLite = 0;
+            for (int i = 0; i < 256 && writtenLite < sampleMax; i++)
+            {
+                int aId = alphaAreaIds[i];
+                if (aId < 0) continue;
+                var (zone, subzone) = DecodeZoneSubzone(aId);
+
+                int lkId = -1;
+                string reason = string.Empty;
+                if (mapper is not null)
+                {
+                    mapper.TryMapDetailed(aId, ctx.CurrentMapId, out lkId, out _, out _, out reason);
+                }
+
+                string lkWrite = string.Equals(reason, "remap_explicit", StringComparison.OrdinalIgnoreCase) ? lkId.ToString() : string.Empty;
+
+                // Enrich with Alpha names and LK suggestions if possible
+                string zoneNameAlpha = string.Empty;
+                string subNameAlpha = string.Empty;
+                int aCont = GetAlphaContForArea(ctx, (zone << 16), ctx.CurrentMapId);
+                int lkZoneSugg = -1;
+                string lkZoneName = string.Empty;
+                int lkSubSugg = -1;
+                string lkSubName = string.Empty;
+                if (ctx.AlphaAreaNamesByNumber is not null && ctx.AlphaParentByNumber is not null &&
+                    ctx.LkAreaNamesById is not null && ctx.LkParentById is not null && ctx.LkContinentById is not null)
+                {
+                    var (idxByContName, idxByName) = EnsureLkNameIndexes(ctx);
+                    int zoneBase = (zone << 16);
+                    TryGetAlphaNameByCont(ctx, zoneBase, ctx.CurrentMapId, true, out zoneNameAlpha);
+                    if (subzone != 0) TryGetAlphaNameByCont(ctx, aId, ctx.CurrentMapId, true, out subNameAlpha);
+
+                    string nZone = Norm(zoneNameAlpha);
+                    if (idxByContName.TryGetValue(aCont, out var dict) && dict.TryGetValue(nZone, out var lm) && lm.Count > 0)
+                    {
+                        lkZoneSugg = lm.Min();
+                    }
+                    else if (idxByName.TryGetValue(nZone, out var lg) && lg.Count > 0)
+                    {
+                        lkZoneSugg = lg.Min();
+                    }
+                    if (lkZoneSugg > 0)
+                    {
+                        if (ctx.LkAreaNamesById.TryGetValue(lkZoneSugg, out var lzn)) lkZoneName = lzn;
+                        if (subzone != 0)
+                        {
+                            string nSub = Norm(subNameAlpha);
+                            if (idxByName.TryGetValue(nSub, out var lsub) && lsub.Count > 0)
+                            {
+                                lkSubSugg = lsub.Where(id => ctx.LkParentById!.TryGetValue(id, out var pr) && pr == lkZoneSugg).DefaultIfEmpty(-1).Min();
+                                if (lkSubSugg > 0 && ctx.LkAreaNamesById.TryGetValue(lkSubSugg, out var lsn)) lkSubName = lsn;
+                            }
+                        }
+                    }
+                }
+
+                swLite.WriteLine(string.Join(",",
+                    i.ToString(),
+                    $"0x{aId:X}",
+                    zone.ToString(),
+                    subzone.ToString(),
+                    EscapeCsv(zoneNameAlpha),
+                    EscapeCsv(subNameAlpha),
+                    aCont.ToString(),
+                    EscapeCsv(reason),
+                    lkWrite,
+                    lkZoneSugg > 0 ? lkZoneSugg.ToString() : string.Empty,
+                    EscapeCsv(lkZoneName),
+                    lkSubSugg > 0 ? lkSubSugg.ToString() : string.Empty,
+                    EscapeCsv(lkSubName),
+                    string.Empty,
+                    string.Empty
+                ));
+
+                writtenLite++;
+            }
+            return;
+        }
+
+        using var fs = new FileStream(outFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs);
+
+        // Locate MCIN
         fs.Seek(0, SeekOrigin.Begin);
         long fileLen = fs.Length;
-        long mtexDataPos = -1;
-        int mtexSize = 0;
-
+        long mcinDataPos = -1;
+        int mcinSize = 0;
         while (fs.Position + 8 <= fileLen)
         {
             var fourccRevBytes = br.ReadBytes(4);
             if (fourccRevBytes.Length < 4) break;
             var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
-            int size = br.ReadInt32();
-            long dataPos = fs.Position;
-            if (fourcc == "MTEX")
-            {
-                mtexDataPos = dataPos;
-                mtexSize = size;
-                break;
-            }
-            // skip data + pad
-            fs.Position = dataPos + size + ((size & 1) == 1 ? 1 : 0);
+            int sz = br.ReadInt32();
+            long dpos = fs.Position;
+            if (fourcc == "MCIN") { mcinDataPos = dpos; mcinSize = sz; break; }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
         }
+        if (mcinDataPos < 0 || mcinSize < 16) return;
 
-        if (mtexDataPos < 0 || mtexSize <= 0) return; // no textures
+        using var sw = new StreamWriter(file, append: false);
+        sw.WriteLine("idx,alpha_raw_hex,zone,subzone,zone_name_alpha,sub_name_alpha,alpha_continent,reason,lk_write,lk_zone_id_suggested,lk_zone_name,lk_sub_id_suggested,lk_sub_name,lk_readback_areaid,lk_readback_holes_hex");
 
-        // Read MTEX data
-        fs.Position = mtexDataPos;
-        var data = br.ReadBytes(mtexSize);
-
-        // Parse null-terminated strings and patch in-place if replacement fits
-        int i = 0;
-        while (i < data.Length)
+        int written = 0;
+        for (int i = 0; i < 256 && written < sampleMax; i++)
         {
-            int start = i;
-            // find terminator
-            while (i < data.Length && data[i] != 0) i++;
-            int end = i; // points at 0 or data.Length
-            int capacity = end - start; // bytes available before 0
+            int aId = alphaAreaIds[i];
+            if (aId < 0) continue;
+            var (zone, subzone) = DecodeZoneSubzone(aId);
 
-            if (capacity > 0)
+            int lkId = -1;
+            string reason = string.Empty;
+            if (mapper is not null)
             {
-                var original = Encoding.ASCII.GetString(data, start, capacity);
-                var norm = ListfileLoader.NormalizePath(original);
-                var resolved = fixup.ResolveTextureWithMethod(norm, out var method);
+                mapper.TryMapDetailed(aId, ctx.CurrentMapId, out lkId, out _, out _, out reason);
+            }
 
-                // Enforce capacity: try resolved; if too long, try fallbacks; else skip
-                ReadOnlySpan<byte> toWrite = Encoding.ASCII.GetBytes(resolved);
-                string decision = "resolved";
-                if (toWrite.Length > capacity)
-                {
-                    // tileset fallback
-                    var tf = fixup.TilesetFallbackPath;
-                    if (!string.IsNullOrWhiteSpace(tf) && fixup.ExistsPath(tf))
-                    {
-                        var tfBytes = Encoding.ASCII.GetBytes(tf);
-                        if (tfBytes.Length <= capacity) { toWrite = tfBytes; decision = "capacity_fallback:tileset"; }
-                    }
-                }
-                if (toWrite.Length > capacity)
-                {
-                    // non-tileset fallback
-                    var nf = fixup.NonTilesetFallbackPath;
-                    if (!string.IsNullOrWhiteSpace(nf) && fixup.ExistsPath(nf))
-                    {
-                        var nfBytes = Encoding.ASCII.GetBytes(nf);
-                        if (nfBytes.Length <= capacity) { toWrite = nfBytes; decision = "capacity_fallback:non_tileset"; }
-                    }
-                }
+            // MCNK offset
+            fs.Position = mcinDataPos + (i * 16);
+            int mcnkOffset = br.ReadInt32();
+            if (mcnkOffset <= 0) continue;
 
-                if (toWrite.Length <= capacity && !original.Equals(Encoding.ASCII.GetString(toWrite), StringComparison.OrdinalIgnoreCase))
+            // Read back LK AreaID and Holes from on-disk file
+            long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId (0x34); 0x3C is Holes
+            long holesPos = (long)mcnkOffset + 8 + 0x3C;
+            if (areaFieldPos + 4 > fileLen || holesPos + 4 > fileLen) continue;
+
+            fs.Position = areaFieldPos;
+            uint onDiskArea = br.ReadUInt32();
+
+            fs.Position = holesPos;
+            ushort holesLow = br.ReadUInt16();
+            ushort holesUnknown = br.ReadUInt16();
+            string holesHex = $"0x{holesLow:X4}{holesUnknown:X4}";
+
+            string lkWrite = string.Equals(reason, "remap_explicit", StringComparison.OrdinalIgnoreCase) ? lkId.ToString() : string.Empty;
+
+            // Enrich with Alpha names and LK suggestions if possible
+            string zoneNameAlpha = string.Empty;
+            string subNameAlpha = string.Empty;
+            int aCont = GetAlphaContForArea(ctx, (zone << 16), ctx.CurrentMapId);
+            int lkZoneSugg = -1;
+            string lkZoneName = string.Empty;
+            int lkSubSugg = -1;
+            string lkSubName = string.Empty;
+            if (ctx.AlphaAreaNamesByNumber is not null && ctx.AlphaParentByNumber is not null &&
+                ctx.LkAreaNamesById is not null && ctx.LkParentById is not null && ctx.LkContinentById is not null)
+            {
+                var (idxByContName, idxByName) = EnsureLkNameIndexes(ctx);
+                int zoneBase = (zone << 16);
+                TryGetAlphaNameByCont(ctx, zoneBase, ctx.CurrentMapId, true, out zoneNameAlpha);
+                if (subzone != 0) TryGetAlphaNameByCont(ctx, aId, ctx.CurrentMapId, true, out subNameAlpha);
+
+                string nZone = Norm(zoneNameAlpha);
+                if (idxByContName.TryGetValue(aCont, out var dict) && dict.TryGetValue(nZone, out var lm) && lm.Count > 0)
                 {
-                    Array.Copy(toWrite.ToArray(), 0, data, start, toWrite.Length);
-                    // pad remaining to zero
-                    for (int k = start + toWrite.Length; k < end; k++) data[k] = 0;
-                    if (decision.StartsWith("capacity_fallback", StringComparison.OrdinalIgnoreCase))
-                    {
-                        fixup.LogDiagnostic(AssetType.Blp, norm, Encoding.ASCII.GetString(toWrite), decision);
-                    }
+                    lkZoneSugg = lm.Min();
                 }
-                else
+                else if (idxByName.TryGetValue(nZone, out var lg) && lg.Count > 0)
                 {
-                    // overflow or unchanged; leave as-is
-                    if (toWrite.Length > capacity)
+                    lkZoneSugg = lg.Min();
+                }
+                if (lkZoneSugg > 0)
+                {
+                    if (ctx.LkAreaNamesById.TryGetValue(lkZoneSugg, out var lzn)) lkZoneName = lzn;
+                    if (subzone != 0)
                     {
-                        fixup.LogDiagnostic(AssetType.Blp, norm, resolved, "overflow_skip:mtex");
+                        string nSub = Norm(subNameAlpha);
+                        if (idxByName.TryGetValue(nSub, out var lsub) && lsub.Count > 0)
+                        {
+                            lkSubSugg = lsub.Where(id => ctx.LkParentById!.TryGetValue(id, out var pr) && pr == lkZoneSugg).DefaultIfEmpty(-1).Min();
+                            if (lkSubSugg > 0 && ctx.LkAreaNamesById.TryGetValue(lkSubSugg, out var lsn)) lkSubName = lsn;
+                        }
                     }
                 }
             }
 
-            // move past terminator
-            i = end + 1;
-        }
+            sw.WriteLine(string.Join(",",
+                i.ToString(),
+                $"0x{aId:X}",
+                zone.ToString(),
+                subzone.ToString(),
+                EscapeCsv(zoneNameAlpha),
+                EscapeCsv(subNameAlpha),
+                aCont.ToString(),
+                EscapeCsv(reason),
+                lkWrite,
+                lkZoneSugg > 0 ? lkZoneSugg.ToString() : string.Empty,
+                EscapeCsv(lkZoneName),
+                lkSubSugg > 0 ? lkSubSugg.ToString() : string.Empty,
+                EscapeCsv(lkSubName),
+                onDiskArea.ToString(),
+                holesHex
+            ));
 
-        // Write back patched MTEX payload
-        fs.Position = mtexDataPos;
-        bw.Write(data);
+            written++;
+        }
     }
 
     private static (int present, int patched, int ignored) PatchMcnkAreaIdsOnDisk(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper, bool verbose, int? currentMapId)
@@ -364,7 +828,7 @@ public static class AdtWotlkWriter
                 else
                 { if (verbose && debugPrinted < 8) { Console.WriteLine($"  idx={i2:D3} alpha={aId} (0x{aId:X}) reason=unmapped (no write)"); debugPrinted++; } continue; }
 
-                long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
+                long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId (0x34); 0x3C is Holes
                 if (areaFieldPos + 4 > fileLen) continue;
 
                 long save = fs.Position;
@@ -461,5 +925,33 @@ public static class AdtWotlkWriter
 
         fs.Position = dataPos;
         bw.Write(data);
+    }
+
+    // Cache LK name indices per map for performance
+    private static readonly Dictionary<string, (Dictionary<int, Dictionary<string, List<int>>> ByContName, Dictionary<string, List<int>> ByName)> s_LkIdxCache
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    private static (Dictionary<int, Dictionary<string, List<int>>> ByContName, Dictionary<string, List<int>> ByName) EnsureLkNameIndexes(WriteContext ctx)
+    {
+        if (s_LkIdxCache.TryGetValue(ctx.MapName, out var cached)) return cached;
+        var byCont = new Dictionary<int, Dictionary<string, List<int>>>();
+        var byName = new Dictionary<string, List<int>>();
+        foreach (var kv in ctx.LkAreaNamesById!)
+        {
+            int id = kv.Key; string nm = kv.Value ?? string.Empty; string n = Norm(nm);
+            int cont = ctx.LkContinentById!.TryGetValue(id, out var m) ? m : -1;
+            if (!byCont.TryGetValue(cont, out var dict)) { dict = new Dictionary<string, List<int>>(); byCont[cont] = dict; }
+            if (!dict.TryGetValue(n, out var lst)) { lst = new List<int>(); dict[n] = lst; }
+            lst.Add(id);
+            if (!byName.TryGetValue(n, out var lg)) { lg = new List<int>(); byName[n] = lg; }
+            lg.Add(id);
+        }
+        s_LkIdxCache[ctx.MapName] = (byCont, byName);
+        return (byCont, byName);
+    }
+
+    private static void PatchMtexOnDiskInternal(string filePath, AssetFixupPolicy fixup)
+    {
+        // implementation of PatchMtexOnDiskInternal
     }
 }
