@@ -808,64 +808,138 @@ namespace DBCTool
                 }
             }
 
-            (int id, string method) ChooseTargetByName(string srcName, int mapIdX)
+            (int id, string method) ChooseTargetByName(string srcName, int mapIdX, bool requireMap, bool topLevelOnly)
             {
                 var variants = NameVariants(srcName).Select(NormName).Distinct().ToList();
                 if (variants.Count == 0) variants = new List<string> { NormName(srcName) };
 
-                // 1) Exact matches (map-biased then global) across variants
-                if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap))
+                bool Accept(int tid)
                 {
+                    var rec = Extract335(tid);
+                    if (DisallowCandidate(rec.name)) return false;
+                    if (requireMap && rec.mapId != mapIdX) return false;
+                    if (topLevelOnly && rec.parentId != tid) return false; // only zones (parent==self)
+                    return true;
+                }
+
+                // 1) Exact matches
+                if (requireMap)
+                {
+                    if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap))
+                    {
+                        foreach (var v in variants)
+                            if (byNameMap.TryGetValue(v, out var lm) && lm.Count > 0)
+                            {
+                                var lmOk = lm.Where(Accept).ToList();
+                                if (lmOk.Count > 0) return (lmOk.Min(), "name+map");
+                            }
+                    }
+                }
+                else
+                {
+                    // map-biased exact
+                    if (mapIdX >= 0 && idx335_ByMapName.TryGetValue(mapIdX, out var byNameMap))
+                    {
+                        foreach (var v in variants)
+                            if (byNameMap.TryGetValue(v, out var lm) && lm.Count > 0)
+                            {
+                                var lmOk = lm.Where(Accept).ToList();
+                                if (lmOk.Count > 0) return (lmOk.Min(), "name+map");
+                            }
+                    }
+                    // global exact
                     foreach (var v in variants)
-                        if (byNameMap.TryGetValue(v, out var lm) && lm.Count > 0)
+                        if (idx335_ByName.TryGetValue(v, out var lg) && lg.Count > 0)
                         {
-                            var lmOk = lm.Where(tid => !DisallowCandidate(Extract335(tid).name)).ToList();
-                            if (lmOk.Count > 0) return (lmOk.Min(), "name+map");
+                            var lgOk = lg.Where(Accept).ToList();
+                            if (lgOk.Count > 0) return (lgOk.Min(), "name");
                         }
                 }
-                foreach (var v in variants)
-                    if (idx335_ByName.TryGetValue(v, out var lg) && lg.Count > 0)
-                    {
-                        var lgOk = lg.Where(tid => !DisallowCandidate(Extract335(tid).name)).ToList();
-                        if (lgOk.Count > 0) return (lgOk.Min(), "name");
-                    }
 
-                // 2) Fuzzy within map across variants
-                IEnumerable<int> domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm2)) ? lm2 : idx335_IdToRow.Keys;
+                // 2) Fuzzy search (map-only or global depending on requireMap)
+                IEnumerable<int> domain;
+                if (requireMap)
+                {
+                    if (!(mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm2))) return (-1, "unmatched");
+                    domain = lm2;
+                }
+                else
+                {
+                    domain = (mapIdX >= 0 && idx335_ByMap.TryGetValue(mapIdX, out var lm2)) ? lm2 : idx335_IdToRow.Keys;
+                }
+
                 int bestId = -1; int bestDist = int.MaxValue;
                 foreach (var tid in domain)
                 {
+                    if (!Accept(tid)) continue;
                     var rec = Extract335(tid);
-                    if (DisallowCandidate(rec.name)) continue;
                     var rn = NormName(rec.name);
                     foreach (var v in variants)
                     {
                         var dn = EditDistance(v, rn);
-                        if (dn <= 2 && (dn < bestDist || (dn == bestDist && tid < bestId)))
+                        if (dn <= 3 && (dn < bestDist || (dn == bestDist && tid < bestId)))
                         {
                             bestDist = dn; bestId = tid;
                         }
                     }
                 }
-                if (bestId >= 0) return (bestId, (mapIdX >= 0 ? "fuzzy+map" : "fuzzy"));
+                if (bestId >= 0) return (bestId, requireMap ? "fuzzy+map" : (mapIdX >= 0 ? "fuzzy+map" : "fuzzy"));
 
-                // 3) Global fuzzy fallback across variants
-                int gBestId = -1; int gBestDist = int.MaxValue;
+                // 3) Only allow global fuzzy when not requiring map
+                if (!requireMap)
+                {
+                    int gBestId = -1; int gBestDist = int.MaxValue;
+                    foreach (var tid in idx335_IdToRow.Keys)
+                    {
+                        if (!Accept(tid)) continue;
+                        var rec = Extract335(tid);
+                        var rn = NormName(rec.name);
+                        foreach (var v in variants)
+                        {
+                            var dn = EditDistance(v, rn);
+                            if (dn <= 3 && (dn < gBestDist || (dn == gBestDist && tid < gBestId)))
+                            {
+                                gBestDist = dn; gBestId = tid;
+                            }
+                        }
+                    }
+                    if (gBestId >= 0) return (gBestId, "fuzzy-global");
+                }
+
+                return (-1, "unmatched");
+            }
+
+            // Choose a LK sub-area within a specific LK zone (by ParentAreaID)
+            (int id, string method) ChooseSubWithinZone(string subName, int zoneId)
+            {
+                if (zoneId < 0) return (-1, "unmatched");
+                var subNorm = NormName(subName);
+                var zoneRec = Extract335(zoneId);
+
+                // Exact name within the same zone and same map
+                if (idx335_ByName.TryGetValue(subNorm, out var list) && list.Count > 0)
+                {
+                    var kids = list.Where(tid => {
+                        var rec = Extract335(tid);
+                        return rec.parentId == zoneId && rec.mapId == zoneRec.mapId;
+                    }).ToList();
+                    if (kids.Count > 0) return (kids.Min(), "name");
+                }
+
+                // Fuzzy among children of the selected zone (and same map)
+                int bestId = -1; int bestDist = int.MaxValue;
                 foreach (var tid in idx335_IdToRow.Keys)
                 {
                     var rec = Extract335(tid);
-                    if (DisallowCandidate(rec.name)) continue;
-                    var rn = NormName(rec.name);
-                    foreach (var v in variants)
+                    if (rec.parentId != zoneId) continue;
+                    if (rec.mapId != zoneRec.mapId) continue;
+                    var dn = EditDistance(subNorm, NormName(rec.name));
+                    if (dn <= 3 && (dn < bestDist || (dn == bestDist && tid < bestId)))
                     {
-                        var dn = EditDistance(v, rn);
-                        if (dn <= 3 && (dn < gBestDist || (dn == gBestDist && tid < gBestId)))
-                        {
-                            gBestDist = dn; gBestId = tid;
-                        }
+                        bestDist = dn; bestId = tid;
                     }
                 }
-                if (gBestId >= 0) return (gBestId, "fuzzy-global");
+                if (bestId >= 0) return (bestId, "fuzzy");
                 return (-1, "unmatched");
             }
 
@@ -908,7 +982,7 @@ namespace DBCTool
                 int chosen = -1; string method = string.Empty;
                 // Apply explicit mapping if provided
                 if (explicitMap.TryGetValue(src.areaNum, out var expId)) { chosen = expId; method = "explicit"; }
-                else { (chosen, method) = ChooseTargetByName(src.name, src.mapIdX); }
+                else { (chosen, method) = ChooseTargetByName(src.name, src.mapIdX, requireMap: false, topLevelOnly: false); }
                 if (chosen >= 0) byName++;
 
                 string lineFor(int tgtId, string mth)
@@ -944,7 +1018,8 @@ namespace DBCTool
                 if (chosen >= 0)
                 {
                     mapping.AppendLine(lineFor(chosen, method));
-                    exportExplicit.Add(new RemapDefinition.ExplicitMap { src_areaNumber = src.areaNum, tgt_areaID = chosen, note = method });
+                    if (string.Equals(method, "explicit", StringComparison.OrdinalIgnoreCase))
+                        exportExplicit.Add(new RemapDefinition.ExplicitMap { src_areaNumber = src.areaNum, tgt_areaID = chosen, note = method });
                     var trecPatch = Extract335(chosen);
                     // Determine target parent for patch from mapping of source parent
                     int tgtParentForPatch = chosen;
@@ -996,6 +1071,86 @@ namespace DBCTool
                 }
             }
 
+            // Alpha decode: build strict hi16/lo16 mapping with parent validation
+            var alphaDecode = new StringBuilder();
+            alphaDecode.AppendLine("alpha_raw,alpha_raw_hex,zone_num,zone_name_alpha,sub_num,sub_name_alpha,parent_ok,alpha_continent");
+            var seenAlpha = new HashSet<int>();
+            foreach (var id in stor053_Area.Keys)
+            {
+                var src = Extract053(stor053_Area[id]);
+                int raw = src.areaNum;
+                if (!seenAlpha.Add(raw)) continue;
+                int z = (raw >> 16) & 0xFFFF;
+                int s = raw & 0xFFFF;
+                int zoneBase = (z << 16);
+                string zoneNameAlpha = src.name;
+                if (idx053_NumToRow.TryGetValue(zoneBase, out var zrow))
+                    zoneNameAlpha = SafeField<string>(zrow, areaNameCol053) ?? zoneNameAlpha;
+                string subNameAlpha = (s == 0 ? string.Empty : src.name);
+                bool parentOk = (s == 0) || (src.parentNum == zoneBase);
+                int alphaCont = src.mapIdX >= 0 ? src.mapIdX : src.mapId;
+                alphaDecode.AppendLine(string.Join(',', new[]
+                {
+                    raw.ToString(CultureInfo.InvariantCulture),
+                    $"0x{raw:X8}",
+                    z.ToString(CultureInfo.InvariantCulture),
+                    Csv(zoneNameAlpha ?? string.Empty),
+                    s.ToString(CultureInfo.InvariantCulture),
+                    Csv(subNameAlpha ?? string.Empty),
+                    parentOk ? "1" : "0",
+                    alphaCont.ToString(CultureInfo.InvariantCulture)
+                }));
+            }
+
+            // Alpha → LK suggestions using name + map bias; sub constrained within chosen zone
+            string SimplifyMethod(string m) => (m?.IndexOf("map", StringComparison.OrdinalIgnoreCase) >= 0) ? "map_biased" : "global";
+            var alphaSuggest = new StringBuilder();
+            alphaSuggest.AppendLine("alpha_raw,alpha_raw_hex,zone_num,zone_name_alpha,sub_num,sub_name_alpha,alpha_continent,lk_zone_id_suggested,lk_zone_name,lk_sub_id_suggested,lk_sub_name,method");
+            var seenAlphaSug = new HashSet<int>();
+            foreach (var id in stor053_Area.Keys)
+            {
+                var src = Extract053(stor053_Area[id]);
+                int raw = src.areaNum;
+                if (!seenAlphaSug.Add(raw)) continue;
+                int z = (raw >> 16) & 0xFFFF;
+                int s = raw & 0xFFFF;
+                int zoneBase = (z << 16);
+                string zoneNameAlpha = src.name;
+                if (idx053_NumToRow.TryGetValue(zoneBase, out var zrow))
+                    zoneNameAlpha = SafeField<string>(zrow, areaNameCol053) ?? zoneNameAlpha;
+                string subNameAlpha = (s == 0 ? string.Empty : src.name);
+                int alphaCont = src.mapIdX >= 0 ? src.mapIdX : src.mapId;
+
+                var (zoneChosen, zMethodRaw) = ChooseTargetByName(zoneNameAlpha, src.mapIdX, requireMap: true, topLevelOnly: true);
+                string zMethod = SimplifyMethod(zMethodRaw);
+
+                int subChosen = -1; string subMethod = string.Empty; string outMethod = zMethod;
+                if (s != 0)
+                {
+                    (subChosen, subMethod) = ChooseSubWithinZone(subNameAlpha, zoneChosen);
+                    if (subChosen < 0) outMethod = outMethod + ":fallback_to_zone";
+                }
+
+                string lkZoneName = zoneChosen >= 0 ? Extract335(zoneChosen).name : string.Empty;
+                string lkSubName = subChosen >= 0 ? Extract335(subChosen).name : string.Empty;
+
+                alphaSuggest.AppendLine(string.Join(',', new[]
+                {
+                    raw.ToString(CultureInfo.InvariantCulture),
+                    $"0x{raw:X8}",
+                    z.ToString(CultureInfo.InvariantCulture),
+                    Csv(zoneNameAlpha ?? string.Empty),
+                    s.ToString(CultureInfo.InvariantCulture),
+                    Csv(subNameAlpha ?? string.Empty),
+                    alphaCont.ToString(CultureInfo.InvariantCulture),
+                    zoneChosen.ToString(CultureInfo.InvariantCulture),
+                    Csv(lkZoneName ?? string.Empty),
+                    subChosen.ToString(CultureInfo.InvariantCulture),
+                    Csv(lkSubName ?? string.Empty),
+                    outMethod
+                }));
+            }
+
             // Write Area outputs
             var mapOut = Path.Combine(outDir, $"AreaTable_mapping_{srcAlias}_to_335.csv");
             File.WriteAllText(mapOut, mapping.ToString(), new UTF8Encoding(true));
@@ -1005,6 +1160,12 @@ namespace DBCTool
             File.WriteAllText(patchOut, patchCsv.ToString(), new UTF8Encoding(true));
             var suggestOut = Path.Combine(outDir, $"AreaTable_rename_suggestions_{srcAlias}_to_335.csv");
             File.WriteAllText(suggestOut, suggestCsv.ToString(), new UTF8Encoding(true));
+
+            // Write Alpha decode/suggestion CSVs
+            var alphaDecodeOut = Path.Combine(outDir, "alpha_areaid_decode.csv");
+            File.WriteAllText(alphaDecodeOut, alphaDecode.ToString(), new UTF8Encoding(true));
+            var alphaTo335Out = Path.Combine(outDir, "alpha_to_335_suggestions.csv");
+            File.WriteAllText(alphaTo335Out, alphaSuggest.ToString(), new UTF8Encoding(true));
 
             // Write Map crosswalk CSV
             var srcTagShort = srcAlias == "0.5.5" ? "055" : (srcAlias == "0.6.0" ? "060" : "053");
@@ -1052,6 +1213,8 @@ namespace DBCTool
             Console.WriteLine($"[Compare] Wrote {unOut}");
             Console.WriteLine($"[Compare] Wrote {patchOut}");
             Console.WriteLine($"[Compare] Wrote {suggestOut}");
+            Console.WriteLine($"[Compare] Wrote {alphaDecodeOut}");
+            Console.WriteLine($"[Compare] Wrote {alphaTo335Out}");
             Console.WriteLine($"[Compare] Wrote {cwOut}");
             Console.WriteLine($"[Compare] Wrote MapId_to_Name CSVs");
 
