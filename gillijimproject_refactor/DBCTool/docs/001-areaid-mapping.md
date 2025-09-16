@@ -41,12 +41,17 @@ Columns:
 - alpha_raw, alpha_raw_hex, zone_num, zone_name_alpha, sub_num, sub_name_alpha, alpha_continent, lk_zone_id_suggested, lk_zone_name, lk_sub_id_suggested, lk_sub_name, method
 
 Method:
-- Build LK indices: normalized-name → [IDs], and map-bias index (MapID → normalized-name → [IDs])
-- Suggest LK zone by normalized zone name:
-  - Prefer entries with LK.MapID == alpha_continent → method "map_biased"
-  - Else fall back to global name → method "global"
-- If sub != 0, suggest LK sub by normalized sub name filtered to LKParent == suggested-zone
-  - If no sub match, append ":fallback_to_zone" to method
+- Build LK indices: normalized-name → [IDs], plus a per-map index (MapID → normalized-name → [IDs]).
+- Zone suggestion (strict):
+  - Require LK.MapID == alpha_continent AND top-level (ParentAreaID == ID). No global fallback for zones.
+  - Method: "map_biased" when a zone is suggested; "unmatched" when none.
+- Sub suggestion (within chosen zone and same map):
+  - Try NameVariants (article flip + aliases) for exact: method "name" or "name_alias".
+  - Else fuzzy among children of the chosen zone: method "fuzzy".
+  - If no sub match, leave sub = -1 and append ":fallback_to_zone" to the zone method.
+- alpha_raw == 0 policy:
+  - Emit row with lk_zone_id_suggested = -1 and lk_sub_id_suggested = -1; method "alpha_zero".
+  - Rationale: 3.3.5 has no valid catch-all AreaTable ID for 0; engine shows "Unknown Zone".
 
 Suggestions are advisory only (never used for writes).
 
