@@ -723,6 +723,7 @@ namespace DBCTool
                 return (name, parentNameForInfer, areaNum, parentNum, cont, mapName ?? string.Empty, contX, mapNameX ?? string.Empty, path);
             }
 
+            int byName = 0, unmatched = 0, skippedDev = 0;
             // Alias table (data-guided) and name variants to catch common renames and articles
             var aliasMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
@@ -819,7 +820,7 @@ namespace DBCTool
 
             IEnumerable<string> NameVariants_Obsolete(string srcName)
             {
-                #if false
+#if false
                 var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var baseName = (srcName ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(baseName)) yield break;
@@ -843,7 +844,7 @@ namespace DBCTool
                     foreach (var a in al)
                         if (!string.IsNullOrWhiteSpace(a) && set.Add(a)) yield return a;
                 }
-                #endif
+#endif
                 yield break;
             }
 
@@ -976,7 +977,6 @@ namespace DBCTool
 
                 // Exact name (including alias/variant) within the same zone and same map
                 foreach (var v in variants)
-                {
                     if (idx335_ByName.TryGetValue(v, out var list) && list.Count > 0)
                     {
                         var kids = list.Where(tid => {
@@ -985,8 +985,6 @@ namespace DBCTool
                         }).ToList();
                         if (kids.Count > 0) return (kids.Min(), v == baseNorm ? "name" : "name_alias");
                     }
-                }
-
                 // Fuzzy among children of the selected zone (and same map)
                 int bestId = -1; int bestDist = int.MaxValue;
                 foreach (var tid in idx335_IdToRow.Keys)
@@ -1020,8 +1018,6 @@ namespace DBCTool
             });
             mapping.AppendLine(header);
             unmatchedCsv.AppendLine(header);
-
-            int byName = 0, unmatched = 0, skippedDev = 0;
             var exportExplicit = new List<RemapDefinition.ExplicitMap>();
             var ignoredAreas = new List<int>();
             var mappingByMap = new Dictionary<int, StringBuilder>();
@@ -1056,13 +1052,13 @@ namespace DBCTool
                     else
                     {
                         // Sub-area: resolve parent zone first on same map, then sub within that zone
-                        var (zoneChosen, zMethod) = ChooseTargetByName(src.parentNameForInfer, src.mapIdX, requireMap: true, topLevelOnly: true);
+                        var (zoneChosen, zMethodRaw) = ChooseTargetByName(src.parentNameForInfer, src.mapIdX, requireMap: true, topLevelOnly: true);
                         if (zoneChosen >= 0)
                         {
                             var sub = ChooseSubWithinZone(src.name, zoneChosen);
                             chosen = sub.id;
-                            method = $"zone:{zMethod}:sub({sub.method})";
-                            if (chosen < 0) method = $"zone:{zMethod}:zone_only_no_sub";
+                            method = $"zone:{zMethodRaw}:sub({sub.method})";
+                            if (chosen < 0) method = $"zone:{zMethodRaw}:zone_only_no_sub";
                         }
                         else
                         {
@@ -1428,7 +1424,7 @@ namespace DBCTool
             string DirTok(string s)
             {
                 if (string.IsNullOrWhiteSpace(s)) return string.Empty;
-                var parts = s.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var parts = s.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).ToLowerInvariant().Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 return parts.Length > 0 ? parts[^1] : s.Trim();
             }
 
@@ -1438,6 +1434,7 @@ namespace DBCTool
             string idColAreaTgt = DetectIdColumn(storTgt_Area);
             string areaNameColSrc = FirstNonEmpty("AreaName_lang", "AreaName", "Name");
             string areaNameColTgt = FirstNonEmpty("AreaName_lang", "AreaName", "Name");
+            string parentColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "ParentAreaNum" : "ParentAreaID";
 
             // Build MapID→row (real IDs)
             var srcMapById = new Dictionary<int, DBCDRow>();
@@ -1485,6 +1482,7 @@ namespace DBCTool
             // Build 3.3.5 Area indices
             var idxTgtTopZonesByMap = new Dictionary<int, Dictionary<string, int>>(); // mapId -> normName -> areaID
             var idxTgtChildrenByZone = new Dictionary<int, Dictionary<string, int>>(); // parentAreaID -> normName -> areaID
+            var tgtIdToRow = new Dictionary<int, DBCDRow>();
             foreach (var key in storTgt_Area.Keys)
             {
                 var row = storTgt_Area[key];
@@ -1493,6 +1491,7 @@ namespace DBCTool
                 int parentId = SafeField<int>(row, "ParentAreaID");
                 if (parentId <= 0) parentId = id;
                 int mapId = SafeField<int>(row, "ContinentID");
+                tgtIdToRow[id] = row;
                 if (parentId == id)
                 {
                     if (!idxTgtTopZonesByMap.TryGetValue(mapId, out var dict)) { dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); idxTgtTopZonesByMap[mapId] = dict; }
@@ -1505,13 +1504,66 @@ namespace DBCTool
                 }
             }
 
-            // Source Area index for parent name lookup (AreaNumber) and map inference (ContinentID crosswalk)
-            var idxSrcNumToRow = new Dictionary<int, DBCDRow>();
+            // Source Area indices: AreaNumber -> all rows (avoid cross-continent collisions)
+            var idxSrcNumToRows = new Dictionary<int, List<DBCDRow>>();
             foreach (var sid in storSrc_Area.Keys)
             {
                 var srow = storSrc_Area[sid];
                 int areaKey = SafeField<int>(srow, (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "AreaNumber" : "ID");
-                if (areaKey > 0 && !idxSrcNumToRow.ContainsKey(areaKey)) idxSrcNumToRow[areaKey] = srow;
+                if (areaKey <= 0) continue;
+                if (!idxSrcNumToRows.TryGetValue(areaKey, out var list)) { list = new List<DBCDRow>(); idxSrcNumToRows[areaKey] = list; }
+                list.Add(srow);
+            }
+
+            // Chain helpers (top→leaf)
+            List<string> BuildSrcChainNamesPref(int leafAreaNum, int preferredCont, string leafName)
+            {
+                var chain = new List<string>();
+                var visited = new HashSet<int>();
+                int cur = leafAreaNum;
+                int guard = 0;
+                bool first = true;
+                while (guard++ < 64)
+                {
+                    DBCDRow r = null;
+                    if (idxSrcNumToRows.TryGetValue(cur, out var rows) && rows != null && rows.Count > 0)
+                    {
+                        r = rows.FirstOrDefault(x => SafeField<int>(x, "ContinentID") == preferredCont) ?? rows[0];
+                    }
+                    if (r == null) break;
+                    string n = first && !string.IsNullOrWhiteSpace(leafName)
+                        ? leafName
+                        : (FirstNonEmpty(SafeField<string>(r, areaNameColSrc)) ?? string.Empty);
+                    chain.Add(Norm(n));
+                    int p = SafeField<int>(r, parentColSrc);
+                    if (p <= 0 || p == cur || !visited.Add(cur)) break;
+                    cur = p;
+                    first = false;
+                }
+                chain.Reverse();
+                return chain;
+            }
+
+            int TryMatchChainExact(int mapIdOnTgt, List<string> srcChain, out int matchedDepth)
+            {
+                matchedDepth = 0;
+                if (srcChain == null || srcChain.Count == 0) return -1;
+                if (!idxTgtTopZonesByMap.TryGetValue(mapIdOnTgt, out var zones)) return -1;
+                if (!zones.TryGetValue(srcChain[0], out var cur)) return -1;
+                matchedDepth = 1;
+                for (int i = 1; i < srcChain.Count; i++)
+                {
+                    if (idxTgtChildrenByZone.TryGetValue(cur, out var kids) && kids.TryGetValue(srcChain[i], out var next))
+                    {
+                        cur = next;
+                        matchedDepth++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                return cur;
             }
 
             // Outputs
@@ -1537,111 +1589,155 @@ namespace DBCTool
                 var row = storSrc_Area[key];
                 string nm = FirstNonEmpty(SafeField<string>(row, areaNameColSrc)) ?? string.Empty;
                 int areaNum = SafeField<int>(row, (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "AreaNumber" : "ID");
-                int parentNum = SafeField<int>(row, (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "ParentAreaNum" : "ParentAreaID");
+                int parentNum = SafeField<int>(row, parentColSrc);
                 if (parentNum <= 0) parentNum = areaNum;
-                int cont = SafeField<int>(row, "ContinentID");
-                string mapName = srcMapById.TryGetValue(cont, out var sm) ? (FirstNonEmpty(SafeField<string>(sm, "MapName_lang"), SafeField<string>(sm, "MapName"), SafeField<string>(sm, "InternalName"), DirTok(SafeField<string>(sm, "Directory"))) ?? string.Empty) : string.Empty;
-                var hasMapX = cw053To335.TryGetValue(cont, out var mapIdX);
-                string mapNameX = hasMapX && tgtMapById.TryGetValue(mapIdX, out var tm) ? (FirstNonEmpty(SafeField<string>(tm, "MapName_lang"), SafeField<string>(tm, "MapName"), SafeField<string>(tm, "InternalName"), DirTok(SafeField<string>(tm, "Directory"))) ?? string.Empty) : string.Empty;
-                string parentName = nm;
-                if (parentNum != areaNum && idxSrcNumToRow.TryGetValue(parentNum, out var pRow)) parentName = FirstNonEmpty(SafeField<string>(pRow, areaNameColSrc)) ?? parentName;
-                string path = (!string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/" : string.Empty) + $"{Norm(parentName)}/{Norm(nm)}";
+                int contRaw = SafeField<int>(row, "ContinentID");
 
-                int chosen = -1; string method = string.Empty; int tgtParentId = -1; string tgtName = string.Empty; string tgtParentName = string.Empty; int tgtMap = -1; string tgtMapName = string.Empty; string tgtPath = string.Empty;
-                if (hasMapX)
+                int contResolved = -1;
+                int mapIdX = -1;
+                bool hasMapX = false;
+                List<string> srcChain = null;
+                int bestDepth = -1;
+                int bestZoneHit = -1;
+                int chosen = -1;
+                string method = string.Empty;
+
+                foreach (var contC in new[] { contRaw, 0, 1 })
                 {
-                    // Zone vs Sub
-                    bool isZone = (parentNum == areaNum);
-                    if (isZone)
+                    var chainC = BuildSrcChainNamesPref(areaNum, contC, nm);
+                    int mapXC = -1;
+                    bool hasXC = cw053To335.TryGetValue(contC, out mapXC);
+                    if (!hasXC && tgtMapById.ContainsKey(contC)) { mapXC = contC; hasXC = true; }
+                    if (!hasXC) continue;
+                    int depth;
+                    int matched = TryMatchChainExact(mapXC, chainC, out depth);
+                    int zoneHit = 0;
+                    if (chainC.Count > 0 && idxTgtTopZonesByMap.TryGetValue(mapXC, out var zmap) && zmap.ContainsKey(chainC[0])) zoneHit = 1;
+                    if (depth > bestDepth || (depth == bestDepth && zoneHit > bestZoneHit))
                     {
-                        if (idxTgtTopZonesByMap.TryGetValue(mapIdX, out var zones) && zones.TryGetValue(Norm(nm), out var zId))
-                        {
-                            chosen = zId; method = "v2:zone:exact";
-                        }
-                    }
-                    else
-                    {
-                        int zoneId = -1;
-                        if (idxTgtTopZonesByMap.TryGetValue(mapIdX, out var zones) && zones.TryGetValue(Norm(parentName), out var zId)) zoneId = zId;
-                        if (zoneId >= 0 && idxTgtChildrenByZone.TryGetValue(zoneId, out var kids) && kids.TryGetValue(Norm(nm), out var sId))
-                        {
-                            chosen = sId; method = "v2:sub:exact";
-                        }
-                        else if (zoneId >= 0)
-                        {
-                            method = "v2:zone_only_no_sub";
-                        }
+                        bestDepth = depth;
+                        bestZoneHit = zoneHit;
+                        contResolved = contC;
+                        mapIdX = mapXC;
+                        hasMapX = true;
+                        srcChain = chainC;
+                        chosen = (depth == chainC.Count) ? matched : -1;
+                        if (chosen >= 0) break;
                     }
                 }
+
+                if (!hasMapX)
+                {
+                    contResolved = contRaw;
+                    if (cw053To335.TryGetValue(contResolved, out var mxTmp)) { mapIdX = mxTmp; hasMapX = true; }
+                    else if (tgtMapById.ContainsKey(contResolved)) { mapIdX = contResolved; hasMapX = true; }
+                    srcChain = BuildSrcChainNamesPref(areaNum, contResolved >= 0 ? contResolved : 0, nm);
+                }
+
+                string mapName = srcMapById.TryGetValue(contResolved, out var sm) ? (FirstNonEmpty(SafeField<string>(sm, "MapName_lang"), SafeField<string>(sm, "MapName"), SafeField<string>(sm, "InternalName"), DirTok(SafeField<string>(sm, "Directory"))) ?? string.Empty) : string.Empty;
+                string mapNameX = hasMapX && tgtMapById.TryGetValue(mapIdX, out var tm) ? (FirstNonEmpty(SafeField<string>(tm, "MapName_lang"), SafeField<string>(tm, "MapName"), SafeField<string>(tm, "InternalName"), DirTok(SafeField<string>(tm, "Directory"))) ?? string.Empty) : string.Empty;
+                var chainPath = string.Join('/', srcChain ?? new List<string>());
+                string path;
+                if (!string.IsNullOrWhiteSpace(mapNameX))
+                    path = $"{Norm(mapNameX)}/{chainPath}";
+                else
+                    path = chainPath;
 
                 if (chosen >= 0)
                 {
-                    // Extract tgt details
-                    var tRow = storTgt_Area[storTgt_Area.Keys.First(k => {
-                        try { return (!string.IsNullOrWhiteSpace(idColAreaTgt) ? SafeField<int>(storTgt_Area[k], idColAreaTgt) : k) == chosen; } catch { return false; }
-                    })];
-                    tgtName = FirstNonEmpty(SafeField<string>(tRow, areaNameColTgt)) ?? string.Empty;
-                    tgtParentId = SafeField<int>(tRow, "ParentAreaID"); if (tgtParentId <= 0) tgtParentId = chosen;
-                    tgtMap = SafeField<int>(tRow, "ContinentID");
-                    tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mn) ? mn : string.Empty;
-                    tgtParentName = tgtParentId == chosen ? tgtName : (storTgt_Area.Keys.Select(k => storTgt_Area[k]).Select(r => (r, id: (!string.IsNullOrWhiteSpace(idColAreaTgt) ? SafeField<int>(r, idColAreaTgt) : 0))).Where(x => x.id == tgtParentId).Select(x => FirstNonEmpty(SafeField<string>(x.r, areaNameColTgt))).FirstOrDefault() ?? string.Empty);
-                    tgtPath = $"{Norm(tgtMapName)}/{Norm(tgtParentName)}/{Norm(tgtName)}";
-                }
-
-                var line = string.Join(',', new[]
-                {
-                    key.ToString(CultureInfo.InvariantCulture),
-                    areaNum.ToString(CultureInfo.InvariantCulture),
-                    parentNum.ToString(CultureInfo.InvariantCulture),
-                    Csv(nm),
-                    cont.ToString(CultureInfo.InvariantCulture),
-                    Csv(mapName),
-                    hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1",
-                    Csv(mapNameX),
-                    Csv(path),
-                    (chosen >= 0 ? chosen.ToString(CultureInfo.InvariantCulture) : "-1"),
-                    Csv(tgtName),
-                    tgtParentId.ToString(CultureInfo.InvariantCulture),
-                    Csv(tgtParentName),
-                    tgtMap.ToString(CultureInfo.InvariantCulture),
-                    Csv(tgtMapName),
-                    Csv(tgtPath),
-                    (string.IsNullOrWhiteSpace(method) ? "unmatched" : method)
-                });
-                if (chosen >= 0) mapping.AppendLine(line); else unmatched.AppendLine(line);
-                if (hasMapX)
-                {
-                    if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine("src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name"); perMap[mapIdX] = tuple; }
-                    if (chosen >= 0) tuple.map.AppendLine(line); else tuple.un.AppendLine(line);
-                    if (chosen >= 0)
+                    if (tgtIdToRow.TryGetValue(chosen, out var tRow))
                     {
-                        tuple.patch.AppendLine(string.Join(',', new[]
+                        string tgtName = FirstNonEmpty(SafeField<string>(tRow, areaNameColTgt)) ?? string.Empty;
+                        int tgtParentId = SafeField<int>(tRow, "ParentAreaID");
+                        int tgtMap = SafeField<int>(tRow, "ContinentID");
+                        string tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mn) ? mn : string.Empty;
+                        string tgtParentName = FirstNonEmpty(SafeField<string>(tgtIdToRow.TryGetValue(tgtParentId, out var prowT) ? prowT : tRow, areaNameColTgt)) ?? tgtName;
+                        string tgtPath = $"{Norm(tgtMapName)}/{Norm(tgtParentName)}/{Norm(tgtName)}";
+
+                        var line = string.Join(',', new[]
                         {
-                            cont.ToString(CultureInfo.InvariantCulture),
-                            Csv(mapName),
+                            key.ToString(CultureInfo.InvariantCulture),
                             areaNum.ToString(CultureInfo.InvariantCulture),
                             parentNum.ToString(CultureInfo.InvariantCulture),
                             Csv(nm),
-                            hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1",
+                            contResolved.ToString(CultureInfo.InvariantCulture),
+                            Csv(mapName),
+                            (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
                             Csv(mapNameX),
+                            Csv(path),
                             chosen.ToString(CultureInfo.InvariantCulture),
-                            (chosen >= 0 ? (tgtParentId.ToString(CultureInfo.InvariantCulture)) : "-1"),
-                            Csv(tgtName)
-                        }));
+                            Csv(tgtName),
+                            tgtParentId.ToString(CultureInfo.InvariantCulture),
+                            Csv(tgtParentName),
+                            tgtMap.ToString(CultureInfo.InvariantCulture),
+                            Csv(tgtMapName),
+                            Csv(tgtPath),
+                            "exact"
+                        });
+                        mapping.AppendLine(line);
+                        if (hasMapX)
+                        {
+                            if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine("src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name"); perMap[mapIdX] = tuple; }
+                            tuple.map.AppendLine(line);
+                            tuple.patch.AppendLine(string.Join(',', new[]
+                            {
+                                contResolved.ToString(CultureInfo.InvariantCulture),
+                                Csv(mapName),
+                                areaNum.ToString(CultureInfo.InvariantCulture),
+                                parentNum.ToString(CultureInfo.InvariantCulture),
+                                Csv(nm),
+                                hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1",
+                                Csv(mapNameX),
+                                chosen.ToString(CultureInfo.InvariantCulture),
+                                tgtParentId.ToString(CultureInfo.InvariantCulture),
+                                Csv(tgtName)
+                            }));
+                        }
+                    }
+                }
+                else
+                {
+                    var line = string.Join(',', new[]
+                    {
+                        key.ToString(CultureInfo.InvariantCulture),
+                        areaNum.ToString(CultureInfo.InvariantCulture),
+                        parentNum.ToString(CultureInfo.InvariantCulture),
+                        Csv(nm),
+                        contResolved.ToString(CultureInfo.InvariantCulture),
+                        Csv(mapName),
+                        (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
+                        Csv(mapNameX),
+                        Csv(path),
+                        "-1",
+                        string.Empty,
+                        "-1",
+                        string.Empty,
+                        "-1",
+                        string.Empty,
+                        string.Empty,
+                        "unmatched"
+                    });
+                    unmatched.AppendLine(line);
+                    if (hasMapX)
+                    {
+                        if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine("src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name"); perMap[mapIdX] = tuple; }
+                        tuple.un.AppendLine(line);
                     }
                 }
             }
 
-            // Write outputs under v2 folder
-            File.WriteAllText(Path.Combine(outDir, $"AreaTable_mapping_{srcAlias}_to_335.csv"), mapping.ToString(), new UTF8Encoding(true));
-            File.WriteAllText(Path.Combine(outDir, $"AreaTable_unmatched_{srcAlias}_to_335.csv"), unmatched.ToString(), new UTF8Encoding(true));
-            File.WriteAllText(Path.Combine(outDir, $"Area_patch_crosswalk_{srcAlias}_to_335.csv"), patch.ToString(), new UTF8Encoding(true));
+            // Write per-map outputs (flat files: map{ID} suffix)
             foreach (var kv in perMap)
             {
                 File.WriteAllText(Path.Combine(outDir, $"AreaTable_mapping_map{kv.Key}_{srcAlias}_to_335.csv"), kv.Value.map.ToString(), new UTF8Encoding(true));
                 File.WriteAllText(Path.Combine(outDir, $"AreaTable_unmatched_map{kv.Key}_{srcAlias}_to_335.csv"), kv.Value.un.ToString(), new UTF8Encoding(true));
                 File.WriteAllText(Path.Combine(outDir, $"Area_patch_crosswalk_map{kv.Key}_{srcAlias}_to_335.csv"), kv.Value.patch.ToString(), new UTF8Encoding(true));
             }
+
+            // Write outputs under v2 folder
+            File.WriteAllText(Path.Combine(outDir, $"AreaTable_mapping_{srcAlias}_to_335.csv"), mapping.ToString(), new UTF8Encoding(true));
+            File.WriteAllText(Path.Combine(outDir, $"AreaTable_unmatched_{srcAlias}_to_335.csv"), unmatched.ToString(), new UTF8Encoding(true));
+            File.WriteAllText(Path.Combine(outDir, $"Area_patch_crosswalk_{srcAlias}_to_335.csv"), patch.ToString(), new UTF8Encoding(true));
 
             Console.WriteLine("[V2] Wrote mapping/unmatched/patch CSVs under out/compare/v2/");
             Console.WriteLine("[V2] Done.");
@@ -1766,5 +1862,33 @@ namespace DBCTool
                 public bool disallow_do_not_use_targets { get; set; } = true;
             }
         }
+
+#if false
+        private static List<string> BuildTgtChainNames(int leafId)
+        {
+            var chain = new List<string>();
+            var visited = new HashSet<int>();
+            int cur = leafId;
+            int guard = 0;
+            while (guard++ < 64)
+            {
+                DBCDRow r = null;
+                if (stor335_Area.TryGetValue(cur, out var r))
+                {
+                    string n = FirstNonEmpty(SafeField<string>(r, "AreaName_lang"), SafeField<string>(r, "AreaName"), SafeField<string>(r, "Name")) ?? string.Empty;
+                    chain.Add(NormName(n));
+                    int p = SafeField<int>(r, "ParentAreaID");
+                    if (p <= 0 || p == cur || !visited.Add(cur)) break;
+                    cur = p;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            chain.Reverse();
+            return chain;
+        }
+#endif
     }
 }
