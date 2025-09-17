@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using DBCTool.V2.Core;
 using GillijimProject.WowFiles.Alpha;
 
 namespace AlphaWdtAnalyzer.Core.Export;
@@ -22,7 +23,9 @@ public static class AdtWotlkWriter
         public required AssetFixupPolicy Fixup { get; init; }
         public bool ConvertToMh2o { get; init; }
         public AreaIdMapper? AreaMapper { get; init; }
+        public AreaIdMapperV2? AreaMapperV2 { get; init; }
         public IReadOnlyList<int>? AlphaAreaIds { get; init; }
+        public DbcPatchMapping? PatchMapping { get; init; }
         public required string WdtPath { get; init; }
         public required int AdtNumber { get; init; }
         public required int AdtOffset { get; init; }
@@ -31,6 +34,93 @@ public static class AdtWotlkWriter
         public bool Verbose { get; init; } = false;
         public bool TrackAssets { get; init; } = false;
         public int? CurrentMapId { get; init; }
+    }
+
+    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapperV2? mapper, bool verbose, int? currentMapId, AreaIdMapper? legacyMapper, DbcPatchMapping? patchMap)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        using var br = new BinaryReader(fs);
+        using var bw = new BinaryWriter(fs);
+
+        // Locate MCIN to get MCNK offsets
+        fs.Seek(0, SeekOrigin.Begin);
+        long fileLen = fs.Length;
+        long mcinDataPos = -1;
+        int mcinSize = 0;
+
+        while (fs.Position + 8 <= fileLen)
+        {
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
+            int sz = br.ReadInt32();
+            long dpos = fs.Position;
+            if (fourcc == "MCIN") { mcinDataPos = dpos; mcinSize = sz; break; }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+        }
+
+        int present = 0, patched = 0;
+        int debugPrinted = 0;
+        if (mcinDataPos >= 0 && mcinSize >= 16)
+        {
+            for (int i2 = 0; i2 < 256; i2++)
+            {
+                fs.Position = mcinDataPos + (i2 * 16);
+                int mcnkOffset = br.ReadInt32();
+                if (mcnkOffset <= 0) continue;
+                present++;
+
+                int contRaw = currentMapId ?? -1;
+                int lkAreaId = 0;
+                string method = "fallback0";
+                // Use AlphaAreaIds captured from the Alpha ADT (zone<<16|sub). This is authoritative.
+                int aIdNum = -1;
+                if (alphaAreaIds is not null && alphaAreaIds.Count == 256)
+                {
+                    int alt = alphaAreaIds[i2];
+                    if (alt > 0)
+                    {
+                        aIdNum = ((alt >> 16) == 0) ? (alt << 16) : alt;
+                    }
+                }
+
+                // Prefer explicit remap from legacy mapper when available
+                bool mapped = false;
+                if (legacyMapper is not null && legacyMapper.TryMapDetailed(aIdNum, currentMapId, out var explicitId, out _, out _, out var explicitReason) && string.Equals(explicitReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
+                {
+                    lkAreaId = explicitId; method = explicitReason; mapped = true;
+                }
+                else if (patchMap is not null && aIdNum > 0 && patchMap.TryMap(contRaw, aIdNum, out var csvId))
+                {
+                    lkAreaId = csvId; method = "patch_csv"; mapped = true;
+                }
+                else if (aIdNum > 0 && mapper is not null && mapper.TryMapArea(contRaw, aIdNum, out lkAreaId, out method))
+                {
+                    mapped = true;
+                }
+                if (!mapped)
+                {
+                    lkAreaId = 0; method = "fallback0"; // safe fallback per V2 rules (onmapdungeon handled internally too)
+                }
+
+                long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
+                if (areaFieldPos + 4 > fileLen) continue;
+
+                long save = fs.Position;
+                fs.Position = areaFieldPos;
+                bw.Write((uint)lkAreaId);
+                fs.Position = areaFieldPos;
+                uint onDisk = br.ReadUInt32();
+                fs.Position = save;
+                patched++;
+                if (verbose && debugPrinted < 8)
+                {
+                    Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method} onDisk={onDisk} (0x{onDisk:X})");
+                    debugPrinted++;
+                }
+            }
+        }
+        return (present, patched);
     }
 
     public static void WritePlaceholder(WriteContext ctx)
@@ -53,9 +143,11 @@ public static class AdtWotlkWriter
                 bool rowMapped = false;
                 if (ctx.AreaMapper is not null)
                 {
-                    if (ctx.AreaMapper.TryMapDetailed(aId, out _, out _, out _, out _))
+                    if (ctx.AreaMapper.TryMapDetailed(aId, ctx.CurrentMapId, out _, out _, out _, out var reason))
                     {
-                        rowMapped = true;
+                        // Count as mapped only when write gate would allow it (explicit remap)
+                        if (string.Equals(reason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
+                            rowMapped = true;
                     }
                 }
                 if (rowMapped) mapped++; else unmapped++;
@@ -192,8 +284,24 @@ public static class AdtWotlkWriter
             }
         }
 
-        // Patch per-MCNK AreaId in-place using mapper when available (alpha-driven via MCIN)
-        if (ctx.AreaMapper is not null && ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
+        // Patch per-MCNK AreaId in-place when we have any modern mapping source (patch CSVs or V2 tables).
+        if (ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256 && (ctx.PatchMapping is not null || ctx.AreaMapperV2 is not null))
+        {
+            try
+            {
+                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, ctx.AlphaAreaIds, ctx.AreaMapperV2, ctx.Verbose, ctx.CurrentMapId, ctx.AreaMapper, ctx.PatchMapping);
+                if (ctx.Verbose)
+                {
+                    Console.WriteLine($"[{ctx.MapName} {ctx.TileX},{ctx.TileY}] AreaIds(V2): present={present} patched={patched}");
+                    try { WriteAreaVerifyCsv(ctx, outFile); } catch (Exception ex) { Console.Error.WriteLine($"[AreaVerify] Failed for {outFile}: {ex.Message}"); }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AreaPatchV2] Failed to patch AreaIDs for {outFile}: {ex.Message}");
+            }
+        }
+        else if (ctx.AreaMapper is not null && ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
         {
             try
             {
@@ -201,6 +309,7 @@ public static class AdtWotlkWriter
                 if (ctx.Verbose)
                 {
                     Console.WriteLine($"[{ctx.MapName} {ctx.TileX},{ctx.TileY}] AreaIds: present={present} patched={patched} ignored={ignored}");
+                    try { WriteAreaVerifyCsv(ctx, outFile); } catch (Exception ex) { Console.Error.WriteLine($"[AreaVerify] Failed for {outFile}: {ex.Message}"); }
                 }
             }
             catch (Exception ex)
@@ -461,5 +570,107 @@ public static class AdtWotlkWriter
 
         fs.Position = dataPos;
         bw.Write(data);
+    }
+
+    // Emit a per-tile verification CSV of AreaIDs written on disk vs mapping (verbose mode only)
+    private static void WriteAreaVerifyCsv(WriteContext ctx, string adtPath)
+    {
+        var verifyPath = Path.Combine(ctx.ExportDir, "csv", "maps", ctx.MapName, $"areaid_verify_{ctx.TileX}_{ctx.TileY}.csv");
+        Directory.CreateDirectory(Path.GetDirectoryName(verifyPath)!);
+        using var fs = new FileStream(adtPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs);
+
+        // Locate MCIN
+        fs.Seek(0, SeekOrigin.Begin);
+        long fileLen = fs.Length;
+        long mcinDataPos = -1;
+        int mcinSize = 0;
+        while (fs.Position + 8 <= fileLen)
+        {
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
+            int sz = br.ReadInt32();
+            long dpos = fs.Position;
+            if (fourcc == "MCIN") { mcinDataPos = dpos; mcinSize = sz; break; }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+        }
+
+        using var sw = new StreamWriter(verifyPath, append: false, Encoding.UTF8);
+        sw.WriteLine("tile_x,tile_y,chunk_index,alpha_raw,lk_areaid,on_disk,reason,lk_name");
+        if (mcinDataPos < 0 || mcinSize < 16) return;
+
+        for (int i = 0; i < 256; i++)
+        {
+            // Read Alpha Unknown3 per chunk for verification
+            fs.Position = mcinDataPos + (i * 16);
+            int mcnkOffset = br.ReadInt32();
+            uint onDisk = 0;
+            if (mcnkOffset > 0)
+            {
+                long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK.AreaId
+                if (areaFieldPos + 4 <= fileLen)
+                {
+                    fs.Position = areaFieldPos;
+                    onDisk = br.ReadUInt32();
+                }
+            }
+            // Use the original AlphaAreaIds captured from the source Alpha ADT
+            int alphaRaw = -1;
+            if (ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256)
+            {
+                int alt = ctx.AlphaAreaIds[i];
+                if (alt > 0)
+                {
+                    alphaRaw = ((alt >> 16) == 0) ? (alt << 16) : alt;
+                }
+            }
+
+            int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty;
+            if (alphaRaw >= 0)
+            {
+                if (ctx.AreaMapperV2 is not null)
+                {
+                    // Prefer explicit remap override when present
+                    if (ctx.AreaMapper is not null && ctx.AreaMapper.TryMapDetailed(alphaRaw, ctx.CurrentMapId, out var explicitId, out _, out _, out var expReason) && string.Equals(expReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        lkAreaId = explicitId; reason = "remap_explicit";
+                    }
+                    else if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.PatchMapping.TryMap(ctx.CurrentMapId.Value, alphaRaw, out var csvId))
+                    {
+                        lkAreaId = csvId; reason = "patch_csv";
+                    }
+                    else if (ctx.AreaMapperV2.TryMapArea(ctx.CurrentMapId ?? -1, alphaRaw, out lkAreaId, out var method))
+                    {
+                        reason = method;
+                        // Name lookup is optional here
+                    }
+                    else
+                    {
+                        lkAreaId = 0; reason = "fallback0";
+                    }
+                }
+                else if (ctx.AreaMapper is not null)
+                {
+                    if (ctx.AreaMapper.TryMapDetailed(alphaRaw, ctx.CurrentMapId, out lkAreaId, out _, out var lkNameTmp, out var rsn))
+                    {
+                        reason = rsn;
+                        lkName = lkNameTmp ?? string.Empty;
+                    }
+                }
+            }
+
+            sw.WriteLine(string.Join(',', new[]
+            {
+                ctx.TileX.ToString(),
+                ctx.TileY.ToString(),
+                i.ToString(),
+                alphaRaw.ToString(),
+                lkAreaId.ToString(),
+                onDisk.ToString(),
+                reason,
+                EscapeCsv(lkName)
+            }));
+        }
     }
 }

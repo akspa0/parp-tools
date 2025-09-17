@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using GillijimProject.WowFiles.Alpha;
+using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
 using AlphaWdtAnalyzer.Core.Assets;
 
@@ -30,6 +31,14 @@ public static class AdtExportPipeline
         public string? RemapPath { get; init; }
         public bool Verbose { get; init; } = false;
         public bool TrackAssets { get; init; } = false;
+        // Optional DBCTool.V2 integration (when provided, enables AreaIdMapperV2)
+        public string? DbdDir { get; init; }
+        public string? DbctoolSrcAlias { get; init; } // e.g., 0.5.3 | 0.5.5 | 0.6.0
+        public string? DbctoolSrcDir { get; init; }   // folder with source DBCs
+        public string? DbctoolLkDir { get; init; }    // folder with 3.3.5 DBCs
+        // Optional: Use precomputed DBCTool.V2 patch CSV(s)
+        public string? DbctoolPatchDir { get; init; } // directory containing Area_patch_crosswalk_*.csv
+        public string? DbctoolPatchFile { get; init; } // specific patch CSV file
     }
 
     public static void ExportSingle(Options opts)
@@ -57,8 +66,27 @@ public static class AdtExportPipeline
             opts.LogExact);
 
         var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
+        AreaIdMapperV2? areaMapperV2 = null;
+        if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
+        {
+            var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
+            areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
+        }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
+        // Load DBCTool.V2 patch mapping if provided
+        DbcPatchMapping? patchMap = null;
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
+        {
+            patchMap = new DbcPatchMapping();
+            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) && File.Exists(opts.DbctoolPatchFile!))
+                patchMap.LoadFile(opts.DbctoolPatchFile!);
+            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
+            {
+                foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.TopDirectoryOnly))
+                    patchMap.LoadFile(f);
+            }
+        }
         var adtScanner = new AdtScanner();
         var result = adtScanner.Scan(wdt);
 
@@ -103,6 +131,8 @@ public static class AdtExportPipeline
                     Fixup = fixup,
                     ConvertToMh2o = opts.ConvertToMh2o,
                     AreaMapper = areaMapper,
+                    AreaMapperV2 = areaMapperV2,
+                    PatchMapping = patchMap,
                     AlphaAreaIds = alphaAreaIds,
                     WdtPath = wdt.WdtPath,
                     AdtNumber = adtNum,
@@ -155,6 +185,25 @@ public static class AdtExportPipeline
                     opts.LogExact);
 
                 var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
+                AreaIdMapperV2? areaMapperV2 = null;
+                if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
+                {
+                    var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
+                    areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
+                }
+                // Load DBCTool.V2 patch mapping if provided
+                DbcPatchMapping? patchMap = null;
+                if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
+                {
+                    patchMap = new DbcPatchMapping();
+                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) && File.Exists(opts.DbctoolPatchFile!))
+                        patchMap.LoadFile(opts.DbctoolPatchFile!);
+                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
+                    {
+                        foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.TopDirectoryOnly))
+                            patchMap.LoadFile(f);
+                    }
+                }
 
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
@@ -200,6 +249,8 @@ public static class AdtExportPipeline
                             Fixup = fixup,
                             ConvertToMh2o = opts.ConvertToMh2o,
                             AreaMapper = areaMapper,
+                            AreaMapperV2 = areaMapperV2,
+                            PatchMapping = patchMap,
                             AlphaAreaIds = alphaAreaIds,
                             WdtPath = wdt.WdtPath,
                             AdtNumber = adtNum,
@@ -216,7 +267,7 @@ public static class AdtExportPipeline
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Export failed for {wdtPath}: {ex.Message}");
+                Console.Error.WriteLine($"Export failed for {wdtPath}: {ex}");
             }
         }
     }

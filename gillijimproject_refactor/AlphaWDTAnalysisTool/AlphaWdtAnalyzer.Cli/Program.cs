@@ -11,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--verbose] [--track-assets]]");
         return 2;
     }
 
@@ -42,6 +42,8 @@ public static class Program
         string? remap = null;
         bool verbose = false;
         bool trackAssets = false;
+        string? dbdDir = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
+        string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -128,6 +130,30 @@ public static class Program
                 case "--remap":
                     if (i + 1 >= args.Length) return Usage();
                     remap = args[++i];
+                    break;
+                case "--dbd-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbdDir = args[++i];
+                    break;
+                case "--dbctool-src-alias":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolSrcAlias = args[++i];
+                    break;
+                case "--dbctool-src-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolSrcDir = args[++i];
+                    break;
+                case "--dbctool-lk-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolLkDir = args[++i];
+                    break;
+                case "--dbctool-patch-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolPatchDir = args[++i];
+                    break;
+                case "--dbctool-patch-file":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolPatchFile = args[++i];
                     break;
                 case "--verbose":
                     verbose = true;
@@ -222,6 +248,12 @@ public static class Program
                         RemapPath = remap,
                         Verbose = verbose,
                         TrackAssets = trackAssets,
+                        DbdDir = dbdDir,
+                        DbctoolSrcAlias = dbctoolSrcAlias,
+                        DbctoolSrcDir = dbctoolSrcDir,
+                        DbctoolLkDir = dbctoolLkDir,
+                        DbctoolPatchDir = dbctoolPatchDir,
+                        DbctoolPatchFile = dbctoolPatchFile,
                     });
                 }
             }
@@ -267,6 +299,12 @@ public static class Program
                         RemapPath = remap,
                         Verbose = verbose,
                         TrackAssets = trackAssets,
+                        DbdDir = dbdDir,
+                        DbctoolSrcAlias = dbctoolSrcAlias,
+                        DbctoolSrcDir = dbctoolSrcDir,
+                        DbctoolLkDir = dbctoolLkDir,
+                        DbctoolPatchDir = dbctoolPatchDir,
+                        DbctoolPatchFile = dbctoolPatchFile,
                     });
                 }
             }
