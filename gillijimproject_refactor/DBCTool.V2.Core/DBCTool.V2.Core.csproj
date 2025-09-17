@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Reuse DBCD from local wow.tools clone -->
+    <ProjectReference Include="..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Link shared implementation files from DBCTool.V2 -->
+    <Compile Include="..\DBCTool.V2\IO\DbdcHelper.cs" Link="Shared\DbdcHelper.cs" />
+    <Compile Include="..\DBCTool.V2\Mapping\AreaMatcher.cs" Link="Shared\AreaMatcher.cs" />
+    <Compile Include="..\DBCTool.V2\Crosswalk\MapCrosswalkService.cs" Link="Shared\MapCrosswalkService.cs" />
+    <Compile Include="..\DBCTool.V2\Domain\Contracts.cs" Link="Shared\Contracts.cs" />
+    <Compile Include="..\DBCTool.V2\Domain\Models.cs" Link="Shared\Models.cs" />
+    <Compile Include="..\DBCTool.V2\Core\AreaIdMapperV2.cs" Link="AreaIdMapperV2.cs" />
+  </ItemGroup>
+</Project>
