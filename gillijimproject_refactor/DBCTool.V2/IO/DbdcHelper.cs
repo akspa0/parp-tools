@@ -79,6 +79,8 @@ public static class DbdcHelper
     {
         // Alpha → LK spelling corrections
         ["aszhara"] = "azshara",
+        ["shadowfang"] = "shadowfang keep",
+        ["south seas"] = "south seas unused",
     };
 
     // Additional aliases provided via config/runtime
@@ -88,6 +90,8 @@ public static class DbdcHelper
     {
         var n = Norm(s);
         if (string.IsNullOrEmpty(n)) return string.Empty;
+        // Drop leading article 'the '
+        if (n.StartsWith("the ")) n = n.Substring(4).TrimStart();
         if (ExtraAliases.TryGetValue(n, out var mapped)) n = mapped;
         else if (NameAliases.TryGetValue(n, out mapped)) n = mapped;
         var sb = new StringBuilder(n.Length);

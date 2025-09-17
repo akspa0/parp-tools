@@ -273,6 +273,6 @@ internal static class Program
         if (t is "055" or "0.5.5" or "5.5") return "0.5.5";
         if (t is "060" or "0.6.0" or "6.0" or "0.6") return "0.6.0";
         if (t is "335" or "3.3.5" or "3.3") return "3.3.5";
-        return s;
+        return string.IsNullOrEmpty(s) ? string.Empty : s;
     }
 }

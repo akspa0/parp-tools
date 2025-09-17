@@ -158,6 +158,8 @@ public sealed class AlphaDecoderV2 : IAlphaDecoder
             if (!ZoneOwner.TryGetValue(zb, out var owner)) continue;
             foreach (var alt in ZoneIndex.Keys.Where(k => k.zoneBase == zb && k.cont != owner))
             {
+                // Skip expected churn between continents 0 and 1
+                if ((owner == 0 && alt.cont == 1) || (owner == 1 && alt.cont == 0)) continue;
                 var keyStr = $"{zb}:{owner}:{alt.cont}";
                 if (seen.Add(keyStr))
                     an.AppendLine(string.Join(',', new[] { $"0x{zb:X8}", owner.ToString(CultureInfo.InvariantCulture), alt.cont.ToString(CultureInfo.InvariantCulture) }));
