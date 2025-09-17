@@ -29,6 +29,7 @@ public sealed class AreaIdMapperV2
     private readonly string _areaNameColSrc;
     private readonly string _areaNameColTgt;
     private readonly string _keyColSrc;
+    private readonly string _idColSrc;
 
     private readonly Dictionary<int, Dictionary<string, int>> _idxTgtTopZonesByMap = new();
     private readonly Dictionary<int, Dictionary<string, int>> _idxTgtChildrenByZone = new();
@@ -59,6 +60,7 @@ public sealed class AreaIdMapperV2
         _srcAlias = srcAlias;
 
         _keyColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "AreaNumber" : "ID";
+        _idColSrc = DetectIdColumn(_storSrcArea);
         _areaNameColSrc = DetectColumn(_storSrcArea, "AreaName_lang", "AreaName", "Name");
         _areaNameColTgt = DetectColumn(_storTgtArea, "AreaName_lang", "AreaName", "Name");
 
@@ -131,6 +133,21 @@ public sealed class AreaIdMapperV2
     {
         targetId = 0;
         method = "unmatched";
+
+        // Accept Alpha AreaTable.ID inputs by resolving to AreaNumber first
+        if (areaNum > 0 && (areaNum >> 16) == 0 && areaNum != 0xEEEE)
+        {
+            foreach (var key in _storSrcArea.Keys)
+            {
+                var row = _storSrcArea[key];
+                int idVal = string.IsNullOrWhiteSpace(_idColSrc) ? key : SafeField<int>(row, _idColSrc);
+                if (idVal == areaNum)
+                {
+                    areaNum = SafeField<int>(row, _keyColSrc);
+                    break;
+                }
+            }
+        }
 
         int area_hi16 = (areaNum >> 16) & 0xFFFF;
         int area_lo16 = areaNum & 0xFFFF;
