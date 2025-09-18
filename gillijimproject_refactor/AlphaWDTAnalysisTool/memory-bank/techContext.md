@@ -1,26 +1,15 @@
 # Tech Context — AlphaWDTAnalysisTool
 
-## DBCD + WoWDBDefs
-- We use DBCD from `lib/wow.tools.local` with WoWDBDefs definitions from `lib/WoWDBDefs/definitions/`.
-- LK DBD build is hardcoded to `3.3.5.12340` for all LK DBC loads.
-- Alpha builds: we attempt `0.5.5.3494` then `0.5.3.3368` for 0.5.x data.
-- We no longer use any RawDBC reader anywhere.
+## Mapping inputs (DBCTool.V2)
+- This tool consumes DBCTool.V2 per-source-map crosswalks from a `compare/v2/` directory via CLI `--dbctool-patch-dir`.
+- Optionally, `--dbctool-lk-dir` supplies LK DBCs for target map guard and legend names only; mapping remains CSV-driven.
+- Strict CSV-only: no heuristics, no zone-base fallback, no name matching inside this tool.
 
-## AreaTable Decoding & Export
-- When `--dbc-dir`, `--area-alpha`, and `--area-lk` are supplied, we export:
-  - `csv/dbc/AreaTable_Alpha.csv`
-  - `csv/dbc/AreaTable_335.csv`
-- Mapping/patching is performed in the tool layer (no changes under `src/gillijimproject-csharp/WowFiles`).
-- [Planned] Replace minimal CSVs with DBCD-driven rich CSVs (decoded fields, parent/continent/flags), and improve per-tile mapping CSV accordingly.
-
-## AreaID Mapping & Writes Alignment
-- Remap-only writes: MCNK AreaId is patched only when the mapper reports `reason == "remap_explicit"`.
-- Map-aware stats: Placeholder summary counts a chunk as mapped only when a remap is explicit for the current map (passes `currentMapId`).
-- Verification CSV (verbose mode): After patching, emit `csv/maps/<MapName>/areaid_verify_<x>_<y>.csv` with per-MCNK rows:
-  - `tile_x,tile_y,chunk_index,alpha_raw,lk_areaid,on_disk,reason,lk_name`.
-  - Purpose: confirm the numeric LK AreaID written on disk equals the resolved explicit remap.
-
-No suggestion logic lives here; DBCTool is the single source of truth for zone/sub suggestions (now map-locked zones and within-zone subs). This tool consumes `remap.json` only.
+## AreaID write path
+- For each present MCNK, read Alpha area number from `Unknown3` (uint32 at `mcnk+8+0x38`, packed `zone<<16|sub`).
+- Look up `(src_mapName, src_areaNumber)` in per-map crosswalks. If found and non-zero, write LK `AreaId` (uint32 at `mcnk+8+0x34`).
+- If no explicit per-map row exists, write `0`.
+- Verbose runs emit `csv/maps/<MapName>/areaid_verify_<x>_<y>.csv` with: `tile_x,tile_y,chunk_index,alpha_raw,lk_areaid,on_disk,reason`.
 
 ## Asset Fixups (Strategy)
 - In-place patchers for ADT string tables (no chunk growth, no offset changes):

@@ -54,10 +54,25 @@ dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --s53
   - `shadowfang` → `shadowfang keep`
   - `south seas` → `south seas unused`
 
+### Compound zone strings (parent + child in LK names)
+
+Some LK 3.3.5 AreaTable names include the parent zone as a prefix (e.g., `western plaguelands: hearthglen`). Alpha-side children may exist only as child rows without the parent prefix. This can lead to non-matches in strict map-locked exact name matching.
+
+- Strategy:
+  - Keep primary matching strict and map-locked.
+  - Rely on rename/fuzzy fallbacks (unique-only) to bridge these differences where safe.
+  - Prefer explicit per-map CSV corrections when available to avoid ambiguity.
+
+If you encounter systematic non-matches due to compounded names, consider adding explicit rows in the per-map patch CSVs or expanding aliases to normalize prefixes.
+
 ## Notes & guarantees
 - Per-map outputs are map-locked where appropriate. Cross-map renames are tagged via `match_method = rename_*`.
 - Fallback0 CSVs contain only truly unmatched rows (or special-cased `onmapdungeon`).
 - Anomalies CSV suppresses 0↔1 churn which is expected for early content duplication.
+
+Additional guarantees:
+- Primary map-locked pass never emits cross-map targets.
+- Rename/fuzzy steps are gated by uniqueness to avoid accidental cross-map leakage.
 
 ## Reuse as a library
 See `docs/DBCTool.V2-API.md` for the `AreaIdMapperV2` programmatic API.
