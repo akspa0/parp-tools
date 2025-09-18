@@ -1,4 +1,14 @@
 # DBCTool.V2 — AreaTable mapping (Alpha → 3.3.5)
+## Minimal end-to-end run
+
+1. Prepare inputs as described in [Input Data Preparation](docs/input-data-prep.md).
+2. Generate crosswalks and audits (example: 0.5.3 source):
+   ```bash
+   dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --s53
+   ```
+   After running, files are written under `dbctool_outputs/session_*/compare/` and `compare/v2/`.
+3. Use the generated per-map crosswalks in downstream tools (e.g., AlphaWDTAnalysisTool) and, after export, run the verify aggregator (see that tool's docs).
+
 
 DBCTool.V2 generates per-map CSVs and patches to remap Alpha-era AreaTable area numbers (zone<<16|sub) to Wrath of the Lich King (3.3.5) AreaTable IDs with strong safety rules.
 
@@ -30,8 +40,8 @@ This README explains how it works, how to run it, and how to reuse it from other
 - **On Map Dungeon**: Any “On Map Dungeon” rows map to 0 in the fallback streams.
 - **Parent-agnostic patch**: For matched rows, set `tgt_parentID = tgt_areaID`.
 
-## Outputs
-All written under `dbctool_outputs/session_*/compare/` and `compare/v2/`:
+## What gets written after running
+After you run DBCTool.V2, outputs are written under `dbctool_outputs/session_*/compare/` and `compare/v2/`:
 - `compare/v2/AreaTable_mapping_{src}_to_335.csv`
 - `compare/v2/AreaTable_unmatched_{src}_to_335.csv`
 - `compare/v2/Area_patch_crosswalk_{src}_to_335.csv`

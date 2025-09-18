@@ -5,6 +5,9 @@ This guide explains the exact input layout expected by DBCTool.V2 and (for conte
 - Purpose: define a reproducible folder structure for Alpha 0.5.3/0.5.5/0.6.0 and LK 3.3.5 inputs.
 - Philosophy: minimal assumptions, preservation-first; no DBC edits, numeric-only mapping.
 
+> Note: This document only prepares inputs. No CSVs or outputs are created until you run the tools.
+> Next step: follow the Quick start in [areaid-restoration-approach.md](areaid-restoration-approach.md).
+
 ---
 
 ## What DBCTool.V2 consumes

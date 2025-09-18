@@ -12,7 +12,7 @@ Preservation-first mapping of Alpha-era terrain to LK AreaIDs using strict, nume
 
 - Alpha MCNK AreaId packs as a 32-bit value: `hi16 = zone`, `lo16 = sub`.
   - Validation: the `ParentAreaNum` of a child row must equal the zone base.
-  - See `compare/alpha_areaid_decode_v2.csv` for decoded rows and validation flags.
+  - After running DBCTool.V2 (see Quick start), you can inspect `DBCTool.V2/dbctool_outputs/session_*/compare/alpha_areaid_decode_v2.csv` for decoded rows and validation flags.
 - Target is LK 3.3.5 AreaTable IDs and names (for reporting only).
 - Optional pivot via 0.6.0 to bridge early renames and zone reshuffles.
 
@@ -123,12 +123,21 @@ These outcomes reflect the source material: if Alpha didn’t paint subzones int
 Prerequisite: Follow [Input Data Preparation](input-data-prep.md) to organize your `tree/` folder before running the tools.
 
 1. Generate DBCTool crosswalks for 0.5.x (and optional 0.6.0) and 3.3.5.
-2. Assemble patch directory for the patcher containing at least:
+
+   Example (0.5.3 as source):
+   ```bash
+   dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --s53
+   ```
+
+   After running, outputs are written under:
+   `DBCTool.V2/dbctool_outputs/session_*/compare/` and `compare/v2/`.
+
+2. Assemble a patch directory for the patcher containing at least (from the previous step):
    - `Area_patch_crosswalk_via060_map{0|1}_0.5.3_to_335.csv`
    - `Area_patch_crosswalk_via060_map{0|1}_0.5.5_to_335.csv`
    - `Area_patch_crosswalk_overrides_map{0|1}_0.5.5_to_335.csv` (optional, for local fixes)
 3. Run AlphaWdtAnalyzer export with `--dbctool-patch-dir` and `--dbctool-lk-dir`, plus `--verbose` for verify CSVs.
-4. Run `tools/agg-area-verify.ps1` on the export root and inspect the per-map summaries.
+4. After export, run `tools/agg-area-verify.ps1` on the export root and then inspect the per-map summaries.
 5. If any real `alpha_raw` remain unmapped, add exact numeric override rows.
 
 ---

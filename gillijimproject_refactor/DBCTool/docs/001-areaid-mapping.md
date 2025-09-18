@@ -76,11 +76,11 @@ Schema (example):
 - src_areaNumber is the full 32-bit alpha Unknown3 (zone<<16 | sub), matching ADT raw.
 - Writes in AlphaWDTAnalysisTool will be driven by explicit_map only.
 
-Outputs written by `--compare-area`:
-- `out/compare/alpha_areaid_decode.csv`
-- `out/compare/alpha_to_335_suggestions.csv`
-- `out/compare/Map_crosswalk_<src>_to_335.csv`
-- Mapping diagnostics CSVs under `out/compare/`
+Outputs written by `--compare-area` (timestamped session):
+- `dbctool_outputs/<session>/compare/alpha_areaid_decode.csv`
+- `dbctool_outputs/<session>/compare/alpha_to_335_suggestions.csv`
+- `dbctool_outputs/<session>/compare/Map_crosswalk_<src>_to_335.csv`
+- Mapping diagnostics CSVs under `dbctool_outputs/<session>/compare/`
 
 ## DBCTool Implementation Plan
 - Extend Program.CompareAreas() to emit:
@@ -88,7 +88,7 @@ Outputs written by `--compare-area`:
   - out/compare/alpha_to_335_suggestions.csv
 - If `--export-remap <file>` is provided, write remap.json with explicit_map only
 - CLI examples:
-  dotnet run -- --dbd-dir lib/WoWDBDefs/definitions --out out --compare-area --input 0.5.3=.../DBFilesClient --input 3.3.5=.../DBFilesClient --export-remap out/alpha053_to_335_remap.json --allow-do-not-use
+  dotnet run -- --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --compare-area --input 0.5.3=.../DBFilesClient --input 3.3.5=.../DBFilesClient --export-remap dbctool_outputs/alpha053_to_335_remap.json --allow-do-not-use
 
 ## AlphaWDTAnalysisTool Backport (later)
 - Keep remap-only writes:

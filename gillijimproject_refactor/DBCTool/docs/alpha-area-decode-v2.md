@@ -53,29 +53,28 @@ Scan all Alpha rows and build groups per `(cont, zoneBase)`:
 For each `(cont, zoneBase)`:
 - Choose canonical `zoneName` by majority among validated zone rows (`parent_ok==true`).
 - If none validated, pick the most frequent name; tag as `weak`.
-- Record: `ZoneIndex[(cont, zoneBase)] = { zoneName, parent_ok_count, total }`.
+- Record: `ZoneIndex[(cont, zoneBase)] = { zoneName, validatedCount, totalCount }`.
 
 ### Pass 2: Resolve Subzones (per continent)
 
 For each `(cont, zoneBase, sub_lo16)`:
 - Accept only rows with `parent_ok==true`.
 - Choose canonical `subName` by majority; mark `ambiguous` on ties.
-- Record: `SubIndex[(cont, zoneBase, sub_lo16)] = { subName, parent_ok, examples }`.
+- Record: `SubIndex[(cont, zoneBase, sub_lo16)] = { subName, parentOk }`.
 
 ### Pass 3: Conflict Resolution
 
 - If the same `zoneBase` appears across multiple continents, assign ownership to the continent with highest count of validated rows; record others as anomalies.
 - If the same `(zoneBase, sub_lo16)` appears under multiple continents or zones, keep the variant under the continent/zone that owns the `zoneBase`; others become anomalies.
-- Assign confidence tags: `strong` (validated), `weak` (no validation), `conflict`, `anomalous`.
 
 ### Pass 4: Outputs
 
-Write two CSVs for audit:
-- `out/compare/alpha_areaid_decode_v2.csv`
+Write two CSVs for audit under the timestamped session folder:
+- `dbctool_outputs/<session>/compare/alpha_areaid_decode_v2.csv`
   - Columns:
-    - `alpha_raw, alpha_raw_hex, cont, area_hi16, area_lo16, parent_hi16, parent_lo16, zone_base_hex, zone_name, sub_lo16, sub_name, parent_ok, confidence, notes`
-- `out/compare/alpha_areaid_anomalies.csv`
-  - Summaries of cross‑continent and parent inconsistencies, with examples.
+    - `alpha_raw, alpha_raw_hex, cont, area_hi16, area_lo16, parent_hi16, parent_lo16, zone_base_hex, zone_name, sub_lo16, sub_name, parent_ok`
+- `dbctool_outputs/<session>/compare/alpha_areaid_anomalies.csv`
+  - Summaries of cross‑continent and parent inconsistencies.
 
 ## Integration into `CompareAreas` V2
 
@@ -108,15 +107,15 @@ Location: `DBCTool/Program.cs`, function `CompareAreas` (V2 section).
 Dictionary<(int cont, int zoneBase), ZoneRec> ZoneIndex;
 Dictionary<(int cont, int zoneBase, int subLo), SubRec> SubIndex;
 
-record ZoneRec(string zoneName, int validatedCount, int totalCount, string confidence);
-record SubRec(string subName, bool parentOk, string confidence);
+record ZoneRec(string zoneName, int validatedCount, int totalCount);
+record SubRec(string subName);
 ```
 
 ## Implementation Steps (small patches)
 
 1) Add `BuildAlphaAreaDecodeV2(storSrc_Area)` in `Program.cs` next to `CompareAreas`:
 - Performs Pass 0–4.
-- Writes `alpha_areaid_decode_v2.csv` and `alpha_areaid_anomalies.csv`.
+- Writes `alpha_areaid_decode_v2.csv` and anomalies CSV.
 
 2) Integrate into V2:
 - Replace `BuildSrcChainNamesPref(...)` usage with decoded chain from indices.
@@ -141,7 +140,6 @@ record SubRec(string subName, bool parentOk, string confidence);
 ## Open Questions
 
 - Do we need continent‑biased tie‑breakers for rare ambiguous cases after decode? (If yes, apply within the same continent only.)
-- Should we propagate confidence tags into V2 outputs for downstream review?
 
 ## Next Actions
 
