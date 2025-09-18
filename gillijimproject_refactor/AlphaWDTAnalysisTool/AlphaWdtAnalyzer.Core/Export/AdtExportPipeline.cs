@@ -7,6 +7,7 @@ using GillijimProject.WowFiles.Alpha;
 using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
 using AlphaWdtAnalyzer.Core.Assets;
+using System.Text;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -128,7 +129,9 @@ public static class AdtExportPipeline
             if (offset <= 0) return;
             var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
             var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
-            int currentMapId = ResolveMapIdByName(wdt.MapName);
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+            if (opts.Verbose)
+                Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
 
             var ctx = new AdtWotlkWriter.WriteContext
             {
@@ -158,6 +161,8 @@ public static class AdtExportPipeline
                 PatchOnly = opts.PatchOnly,
                 NoZoneFallback = opts.NoZoneFallback,
             };
+            if (opts.Verbose && patchMap is not null)
+                Console.WriteLine($"[PatchMap] per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)}");
             AdtWotlkWriter.WriteBinary(ctx);
         }
 
@@ -272,7 +277,9 @@ public static class AdtExportPipeline
                     var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
                     var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
 
-                    int currentMapId = ResolveMapIdByName(wdt.MapName);
+                    int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+                    if (opts.Verbose)
+                        Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
 
                     var ctx = new AdtWotlkWriter.WriteContext
                     {
@@ -301,6 +308,8 @@ public static class AdtExportPipeline
                         VizHtml = opts.VizHtml,
                         PatchOnly = opts.PatchOnly
                     };
+                    if (opts.Verbose && patchMap is not null)
+                        Console.WriteLine($"[PatchMap] per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)}");
                     AdtWotlkWriter.WriteBinary(ctx);
                 }
 
@@ -329,12 +338,71 @@ public static class AdtExportPipeline
         }
     }
 
-    private static int ResolveMapIdByName(string mapName)
+    private static int ResolveMapIdFromDbc(string mapName, string? lkDir, bool verbose)
     {
-        // Minimal classic mapping; extend as needed
-        if (mapName.Equals("Azeroth", StringComparison.OrdinalIgnoreCase)) return 0;
-        if (mapName.Equals("Kalimdor", StringComparison.OrdinalIgnoreCase)) return 1;
-        // fallback unknown
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(lkDir))
+            {
+                var mapDbc = Path.Combine(lkDir!, "Map.dbc");
+                if (File.Exists(mapDbc))
+                {
+                    return ReadMapDbcIdByDirectory(mapDbc, mapName);
+                }
+                else if (verbose)
+                {
+                    Console.Error.WriteLine($"[MapId] Map.dbc not found under --dbctool-lk-dir: {mapDbc}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (verbose) Console.Error.WriteLine($"[MapId] Error resolving map id for {mapName}: {ex.Message}");
+        }
+        return -1;
+    }
+
+    private static int ReadMapDbcIdByDirectory(string dbcPath, string targetName)
+    {
+        using var fs = new FileStream(dbcPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs, Encoding.UTF8, leaveOpen: false);
+        // Read header
+        var magic = br.ReadBytes(4);
+        if (magic.Length != 4) return -1;
+        int recordCount = br.ReadInt32();
+        int fieldCount = br.ReadInt32();
+        int recordSize = br.ReadInt32();
+        int stringBlockSize = br.ReadInt32();
+        var records = br.ReadBytes(recordCount * recordSize);
+        var stringBlock = br.ReadBytes(stringBlockSize);
+        for (int i = 0; i < recordCount; i++)
+        {
+            int baseOff = i * recordSize;
+            var ints = new int[fieldCount];
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int off = baseOff + (f * 4);
+                if (off + 4 <= records.Length) ints[f] = BitConverter.ToInt32(records, off);
+            }
+            int id = (fieldCount > 0) ? ints[0] : -1;
+            if (id < 0) continue;
+            // Compare against all string fields in the row; Map.dbc directory/name position varies across builds
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int sOff = ints[f];
+                if (sOff > 0 && sOff < stringBlock.Length)
+                {
+                    int end = sOff;
+                    while (end < stringBlock.Length && stringBlock[end] != 0) end++;
+                    if (end > sOff)
+                    {
+                        var s = Encoding.UTF8.GetString(stringBlock, sOff, end - sOff);
+                        if (!string.IsNullOrWhiteSpace(s) && s.Equals(targetName, StringComparison.OrdinalIgnoreCase))
+                            return id;
+                    }
+                }
+            }
+        }
         return -1;
     }
 }

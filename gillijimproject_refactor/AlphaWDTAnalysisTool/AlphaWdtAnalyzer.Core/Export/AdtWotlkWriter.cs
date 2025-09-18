@@ -122,7 +122,7 @@ public static class AdtWotlkWriter
         }
     }
 
-    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapperV2? mapper, bool verbose, int? currentMapId, AreaIdMapper? legacyMapper, DbcPatchMapping? patchMap, bool patchOnly, bool noZoneFallback)
+    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, string mapName, IReadOnlyList<int> alphaAreaIds, AreaIdMapperV2? mapper, bool verbose, int? currentMapId, AreaIdMapper? legacyMapper, DbcPatchMapping? patchMap, bool patchOnly, bool noZoneFallback)
     {
         using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, bufferSize: 65536, options: FileOptions.RandomAccess);
         using var br = new BinaryReader(fs);
@@ -187,32 +187,12 @@ public static class AdtWotlkWriter
 
                 // Try strategies in order, enforcing cross-map guard when LK DBC is available
                 bool mapped = false;
-                // 1) Legacy explicit remap
-                if (!patchOnly && !mapped && legacyMapper is not null && aIdNum > 0
-                    && legacyMapper.TryMapDetailed(aIdNum, currentMapId, out var explicitId, out _, out _, out var explicitReason)
-                    && string.Equals(explicitReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
+                // 0) CSV numeric direct (src_areaNumber) – scoped by src_mapName to avoid cross-map leakage
+                if (!mapped && patchMap is not null && aIdNum > 0 && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvIdNum))
                 {
-                    if (ValidateTargetMap(explicitId, currentMapId)) { lkAreaId = explicitId; method = explicitReason; mapped = true; }
+                    lkAreaId = csvIdNum; method = "patch_csv_num"; mapped = true;
                 }
-                // 2) CSV exact (zone<<16|sub)
-                if (!mapped && patchMap is not null && aIdNum > 0 && patchMap.TryMap(contRaw, aIdNum, out var csvId))
-                {
-                    if (ValidateTargetMap(csvId, currentMapId)) { lkAreaId = csvId; method = "patch_csv"; mapped = true; }
-                }
-                // 2b) CSV zone-only (zone<<16|0) fallback if sub missing and allowed
-                if (!mapped && !noZoneFallback && patchMap is not null && aIdNum > 0)
-                {
-                    int zoneBase = (aIdNum & unchecked((int)0xFFFF0000));
-                    if (zoneBase > 0 && patchMap.TryMap(contRaw, zoneBase, out var csvZone))
-                    {
-                        if (ValidateTargetMap(csvZone, currentMapId)) { lkAreaId = csvZone; method = "patch_csv_zone"; mapped = true; }
-                    }
-                }
-                // 3) Live V2 (disabled in PatchOnly)
-                if (!patchOnly && !mapped && aIdNum > 0 && mapper is not null && mapper.TryMapArea(contRaw, aIdNum, out var v2Id, out var v2Method))
-                {
-                    if (ValidateTargetMap(v2Id, currentMapId)) { lkAreaId = v2Id; method = v2Method; mapped = true; }
-                }
+                // Strict mode: no numeric zone fallback; no other fallbacks
                 // 4) Fallback 0
                 if (!mapped) { lkAreaId = 0; method = "fallback0"; }
 
@@ -413,7 +393,7 @@ public static class AdtWotlkWriter
         {
             try
             {
-                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, ctx.AlphaAreaIds, ctx.AreaMapperV2, ctx.Verbose, ctx.CurrentMapId, ctx.AreaMapper, ctx.PatchMapping, ctx.PatchOnly, ctx.NoZoneFallback);
+                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, ctx.MapName, ctx.AlphaAreaIds, ctx.AreaMapperV2, ctx.Verbose, ctx.CurrentMapId, ctx.AreaMapper, ctx.PatchMapping, ctx.PatchOnly, ctx.NoZoneFallback);
                 if (ctx.Verbose)
                 {
                     Console.WriteLine($"[{ctx.MapName} {ctx.TileX},{ctx.TileY}] AreaIds(V2): present={present} patched={patched}");
@@ -751,7 +731,7 @@ public static class AdtWotlkWriter
         }
 
         using var sw = new StreamWriter(verifyPath, append: false, Encoding.UTF8);
-        sw.WriteLine("tile_x,tile_y,chunk_index,alpha_raw,lk_areaid,on_disk,reason,lk_name");
+        sw.WriteLine("tile_x,tile_y,chunk_index,alpha_raw,lk_areaid,tgt_parentid,on_disk,reason,lk_name");
         if (mcinDataPos < 0 || mcinSize < 16) return;
 
         for (int i = 0; i < 256; i++)
@@ -780,51 +760,24 @@ public static class AdtWotlkWriter
                 }
             }
 
-            int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty;
+            int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty; int tgtParent = 0;
             if (alphaRaw >= 0)
             {
-                if (ctx.AreaMapperV2 is not null)
+                // Strict: only numeric CSV per-map mapping
+                if (ctx.PatchMapping is not null && ctx.PatchMapping.TryMapBySrcAreaSimple(ctx.MapName, alphaRaw, out var csvNum))
                 {
-                    // Prefer explicit remap override when present
-                    if (ctx.AreaMapper is not null && ctx.AreaMapper.TryMapDetailed(alphaRaw, ctx.CurrentMapId, out var explicitId, out _, out _, out var expReason) && string.Equals(expReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lkAreaId = explicitId; reason = "remap_explicit";
-                    }
-                    else if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.PatchMapping.TryMap(ctx.CurrentMapId.Value, alphaRaw, out var csvId))
-                    {
-                        lkAreaId = csvId; reason = "patch_csv";
-                    }
-                    else if (!ctx.NoZoneFallback && ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue)
-                    {
-                        int zoneBase = (alphaRaw & unchecked((int)0xFFFF0000));
-                        if (zoneBase > 0 && ctx.PatchMapping.TryMap(ctx.CurrentMapId.Value, zoneBase, out var csvZone))
-                        {
-                            lkAreaId = csvZone; reason = "patch_csv_zone";
-                        }
-                        else if (ctx.AreaMapperV2.TryMapArea(ctx.CurrentMapId ?? -1, alphaRaw, out lkAreaId, out var method))
-                        {
-                            reason = method;
-                        }
-                        else { lkAreaId = 0; reason = "fallback0"; }
-                    }
-                    else if (ctx.AreaMapperV2.TryMapArea(ctx.CurrentMapId ?? -1, alphaRaw, out lkAreaId, out var method))
-                    {
-                        reason = method;
-                        // Name lookup is optional here
-                    }
-                    else
-                    {
-                        lkAreaId = 0; reason = "fallback0";
-                    }
+                    lkAreaId = csvNum; reason = "patch_csv_num";
                 }
-                else if (ctx.AreaMapper is not null)
+                else
                 {
-                    if (ctx.AreaMapper.TryMapDetailed(alphaRaw, ctx.CurrentMapId, out lkAreaId, out _, out var lkNameTmp, out var rsn))
-                    {
-                        reason = rsn;
-                        lkName = lkNameTmp ?? string.Empty;
-                    }
+                    lkAreaId = 0; reason = "unmapped";
                 }
+            }
+
+            if (lkAreaId > 0 && ctx.PatchMapping is not null)
+            {
+                // best-effort: capture parent id from CSV mapping for auditing
+                if (!ctx.PatchMapping.TryGetTargetParentId(lkAreaId, out tgtParent)) tgtParent = 0;
             }
 
             sw.WriteLine(string.Join(',', new[]
@@ -834,6 +787,7 @@ public static class AdtWotlkWriter
                 i.ToString(),
                 alphaRaw.ToString(),
                 lkAreaId.ToString(),
+                tgtParent.ToString(),
                 onDisk.ToString(),
                 reason,
                 EscapeCsv(lkName)
