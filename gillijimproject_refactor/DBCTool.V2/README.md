@@ -4,6 +4,11 @@ DBCTool.V2 generates per-map CSVs and patches to remap Alpha-era AreaTable area 
 
 This README explains how it works, how to run it, and how to reuse it from other tools.
 
+## Documentation
+
+- AreaID Restoration Approach: [docs/areaid-restoration-approach.md](docs/areaid-restoration-approach.md)
+- Input Data Preparation: [docs/input-data-prep.md](docs/input-data-prep.md)
+
 ## Highlights
 - Zone-only matching with strict map lock from the source row’s ContinentID
 - Optional pivot via 0.6.0 to bridge Alpha name changes
