@@ -7,19 +7,21 @@ namespace AlphaWdtAnalyzer.Core.Export;
 
 /// <summary>
 /// Loads DBCTool.V2 patch CSVs (Area_patch_crosswalk_*.csv) and provides fast lookup
-/// from (src_mapId, src_areaNumber) to target 3.3.5 AreaID.
+/// from (src_mapId, src_areaNumber) to target 3.3.5 AreaID. Also captures tgt_parentID and tgt_name when available.
 /// </summary>
 public sealed class DbcPatchMapping
 {
     private readonly Dictionary<int, Dictionary<int, int>> _bySrcMap = new(); // src_mapId -> (src_areaNumber -> tgt_areaID)
     private readonly Dictionary<int, int> _global = new(); // src_areaNumber -> tgt_areaID (from global files)
+    private readonly Dictionary<int, string> _tgtNameById = new(); // tgt_areaID -> tgt_name (best-effort)
+    private readonly Dictionary<int, int> _tgtParentById = new(); // tgt_areaID -> tgt_parentID (best-effort)
 
     public void LoadFile(string csvPath)
     {
         if (!File.Exists(csvPath)) return;
         using var sr = new StreamReader(csvPath);
         string? header = sr.ReadLine();
-        int srcMapIdx = -1, srcAreaIdx = -1, tgtIdIdx = -1;
+        int srcMapIdx = -1, srcAreaIdx = -1, tgtIdIdx = -1, tgtNameIdx = -1, tgtParentIdx = -1;
         bool hasHeader = false;
         if (header is not null)
         {
@@ -30,6 +32,8 @@ public sealed class DbcPatchMapping
                 if (c == "src_mapid") srcMapIdx = i;
                 else if (c == "src_areanumber") srcAreaIdx = i;
                 else if (c == "tgt_areaid") tgtIdIdx = i;
+                else if (c == "tgt_name") tgtNameIdx = i;
+                else if (c == "tgt_parentid") tgtParentIdx = i;
             }
             hasHeader = srcAreaIdx >= 0 && tgtIdIdx >= 0; // src_mapId optional (global file)
             if (!hasHeader)
@@ -58,6 +62,15 @@ public sealed class DbcPatchMapping
                 if (!int.TryParse(cells[srcAreaIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var sArea)) continue;
                 if (!int.TryParse(cells[tgtIdIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tId)) continue;
                 Insert(sMap, sArea, tId);
+                if (tgtNameIdx >= 0 && tgtNameIdx < cells.Length)
+                {
+                    var nm = cells[tgtNameIdx]?.Trim();
+                    if (!string.IsNullOrEmpty(nm) && !_tgtNameById.ContainsKey(tId)) _tgtNameById[tId] = nm;
+                }
+                if (tgtParentIdx >= 0 && tgtParentIdx < cells.Length && int.TryParse(cells[tgtParentIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tPar))
+                {
+                    if (tPar > 0) _tgtParentById[tId] = tPar;
+                }
             }
             else
             {
@@ -69,6 +82,17 @@ public sealed class DbcPatchMapping
                     if (!int.TryParse(cells2[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var sArea)) continue;
                     if (!int.TryParse(cells2[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tId)) continue;
                     Insert(sMap, sArea, tId);
+                    // Name at index 9 if present
+                    if (cells2.Length >= 10)
+                    {
+                        var nm = cells2[9]?.Trim();
+                        if (!string.IsNullOrEmpty(nm) && !_tgtNameById.ContainsKey(tId)) _tgtNameById[tId] = nm;
+                    }
+                    // Parent at index 8 if present
+                    if (cells2.Length >= 9 && int.TryParse(cells2[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tPar))
+                    {
+                        if (tPar > 0) _tgtParentById[tId] = tPar;
+                    }
                 }
             }
         }
@@ -96,6 +120,20 @@ public sealed class DbcPatchMapping
         {
             _global[srcAreaNumber] = targetId;
         }
+    }
+
+    public bool TryGetTargetName(int targetId, out string name)
+    {
+        if (_tgtNameById.TryGetValue(targetId, out name!)) return true;
+        name = string.Empty;
+        return false;
+    }
+
+    public bool TryGetTargetParentId(int targetId, out int parentId)
+    {
+        if (_tgtParentById.TryGetValue(targetId, out parentId)) return true;
+        parentId = 0;
+        return false;
     }
 
     private static string[] SplitCsv(string line)

@@ -60,7 +60,8 @@ internal static class Program
                 dbdDir: opts.DbdDir ?? TryResolveDbdDir() ?? DefaultDbdDir,
                 outBase: outBase,
                 localeStr: opts.Locale ?? DefaultLocale,
-                inputs: opts.Inputs
+                inputs: opts.Inputs,
+                chainVia060: opts.ChainVia060
             );
         }
         if (opts.DumpArea || opts.QuickDump)
@@ -85,12 +86,18 @@ internal static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
         Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
-        Console.WriteLine("    --compare-area-v2 --input 0.5.3=path/to/0.5.3/DBFilesClient --input 3.3.5=path/to/3.3.5/DBFilesClient");
+        Console.WriteLine("    --compare-area-v2 --input 0.5.3=path/to/0.5.3/DBFilesClient --input 3.3.5=path/to/3.3.5/DBFilesClient [--chain-via-060 --mid-alias 0.6.0 --mid-dir path/to/0.6.0/DBFilesClient]");
         Console.WriteLine();
         Console.WriteLine("Dump raw AreaTable CSVs for src and 3.3.5:");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
         Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
         Console.WriteLine("    --dump-area --input 0.5.3=path/to/0.5.3/DBFilesClient --input 3.3.5=path/to/3.3.5/DBFilesClient");
+        Console.WriteLine();
+        Console.WriteLine("Chain via 0.6.0 example:");
+        Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
+        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
+        Console.WriteLine("    --compare-area-v2 --input 0.5.3=..\\test_data\\0.5.3\\tree\\DBFilesClient --input 3.3.5=..\\test_data\\3.3.5\\tree\\DBFilesClient \\");
+        Console.WriteLine("    --chain-via-060 --mid-alias 0.6.0 --mid-dir ..\\test_data\\0.6.0\\tree\\DBFilesClient");
         Console.WriteLine();
         Console.WriteLine("Quick shorthands (auto-detect paths to minimize typing):");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --qc");
@@ -117,7 +124,10 @@ internal static class Program
         bool S53,
         bool S55,
         bool S60,
-        List<(string build, string dir)> Inputs
+        List<(string build, string dir)> Inputs,
+        bool ChainVia060,
+        string? MidAlias,
+        string? MidDir
     );
 
     private static Opts ParseArgs(string[] args)
@@ -130,6 +140,7 @@ internal static class Program
         string? srcAlias = null;
         bool s53 = false, s55 = false, s60 = false;
         var inputs = new List<(string build, string dir)>();
+        bool chainVia060 = false; string? midAlias = null; string? midDir = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -145,6 +156,9 @@ internal static class Program
             else if (a == "--s53") { s53 = true; srcAlias ??= "0.5.3"; }
             else if (a == "--s55") { s55 = true; srcAlias ??= "0.5.5"; }
             else if (a == "--s60") { s60 = true; srcAlias ??= "0.6.0"; }
+            else if (a == "--chain-via-060") { chainVia060 = true; }
+            else if (a == "--mid-alias" && i + 1 < args.Length) { midAlias = NormalizeAlias(args[++i]); }
+            else if (a == "--mid-dir" && i + 1 < args.Length) { midDir = args[++i]; }
             else if (a == "--input" && i + 1 < args.Length)
             {
                 var spec = args[++i];
@@ -154,7 +168,13 @@ internal static class Program
                 inputs.Add((build, dir));
             }
         }
-        return new Opts(dbdDir, outRoot, locale, dumpArea, compareAreaV2, quickDump, quickCompare, srcAlias, s53, s55, s60, inputs);
+        // If mid alias/dir provided, inject into inputs for uniform handling
+        if (!string.IsNullOrWhiteSpace(midDir))
+        {
+            var alias = string.IsNullOrWhiteSpace(midAlias) ? "0.6.0" : midAlias!;
+            inputs.Add((alias, midDir!));
+        }
+        return new Opts(dbdDir, outRoot, locale, dumpArea, compareAreaV2, quickDump, quickCompare, srcAlias, s53, s55, s60, inputs, chainVia060, midAlias, midDir);
     }
 
     private static void AutoPopulateDefaults(ref Opts opts)

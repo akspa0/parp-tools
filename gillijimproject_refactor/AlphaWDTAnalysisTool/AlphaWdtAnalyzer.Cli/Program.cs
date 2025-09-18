@@ -11,8 +11,8 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--verbose] [--track-assets]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
         return 2;
     }
 
@@ -44,6 +44,7 @@ public static class Program
         bool trackAssets = false;
         string? dbdDir = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
         string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
+        bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -155,6 +156,26 @@ public static class Program
                     if (i + 1 >= args.Length) return Usage();
                     dbctoolPatchFile = args[++i];
                     break;
+                case "--viz-svg":
+                    vizSvg = true;
+                    break;
+                case "--viz-html":
+                    vizHtml = true;
+                    break;
+                case "--patch-only":
+                    patchOnly = true;
+                    break;
+                case "--no-zone-fallback":
+                    noZoneFallback = true;
+                    break;
+                case "--viz-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    vizDir = args[++i];
+                    break;
+                case "--mdp":
+                    if (i + 1 >= args.Length) return Usage();
+                    if (int.TryParse(args[++i], out var mdpVal) && mdpVal > 0) mdp = mdpVal; else return Usage();
+                    break;
                 case "--verbose":
                     verbose = true;
                     break;
@@ -254,6 +275,12 @@ public static class Program
                         DbctoolLkDir = dbctoolLkDir,
                         DbctoolPatchDir = dbctoolPatchDir,
                         DbctoolPatchFile = dbctoolPatchFile,
+                        VizSvg = vizSvg,
+                        VizHtml = vizHtml,
+                        PatchOnly = patchOnly,
+                        NoZoneFallback = noZoneFallback,
+                        MaxDegreeOfParallelism = mdp,
+                        VizDir = vizDir,
                     });
                 }
             }
@@ -305,6 +332,11 @@ public static class Program
                         DbctoolLkDir = dbctoolLkDir,
                         DbctoolPatchDir = dbctoolPatchDir,
                         DbctoolPatchFile = dbctoolPatchFile,
+                        VizSvg = vizSvg,
+                        VizHtml = vizHtml,
+                        PatchOnly = patchOnly,
+                        NoZoneFallback = noZoneFallback,
+                        VizDir = vizDir,
                     });
                 }
             }

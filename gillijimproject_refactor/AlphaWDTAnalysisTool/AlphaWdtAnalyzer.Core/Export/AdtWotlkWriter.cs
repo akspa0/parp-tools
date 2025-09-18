@@ -12,6 +12,11 @@ public static class AdtWotlkWriter
 {
     private static readonly HashSet<string> InitializedCsv = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> EmittedWdtForMap = new(StringComparer.OrdinalIgnoreCase);
+    // LK DBC caches (AreaID -> MapID/Name) loaded on demand when LkDbcDir is provided
+    private static readonly object s_lkCacheLock = new();
+    private static string? s_lkDbcDir;
+    private static Dictionary<int, int>? s_lkMapByAreaId;
+    private static Dictionary<int, string>? s_lkNameByAreaId;
 
     public sealed class WriteContext
     {
@@ -34,11 +39,92 @@ public static class AdtWotlkWriter
         public bool Verbose { get; init; } = false;
         public bool TrackAssets { get; init; } = false;
         public int? CurrentMapId { get; init; }
+        // Visualization
+        public bool VizSvg { get; init; } = false;
+        public string? VizDir { get; init; }
+        public string? LkDbcDir { get; init; }
+        public bool VizHtml { get; init; } = false;
+        public bool PatchOnly { get; init; } = false;
+        public bool NoZoneFallback { get; init; } = false;
     }
 
-    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapperV2? mapper, bool verbose, int? currentMapId, AreaIdMapper? legacyMapper, DbcPatchMapping? patchMap)
+    private static bool ValidateTargetMap(int lkAreaId, int? expectedMapId)
     {
-        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        if (lkAreaId <= 0) return true; // allow 0
+        if (!expectedMapId.HasValue || expectedMapId.Value < 0) return true; // no guard
+        var cache = s_lkMapByAreaId;
+        if (cache is null) return true; // no DBC
+        return cache.TryGetValue(lkAreaId, out var map) ? map == expectedMapId.Value : true;
+    }
+
+    private static void EnsureLkCache()
+    {
+        if (s_lkMapByAreaId is not null && s_lkNameByAreaId is not null) return;
+        var dir = s_lkDbcDir;
+        if (string.IsNullOrWhiteSpace(dir)) return;
+        lock (s_lkCacheLock)
+        {
+            if (s_lkMapByAreaId is not null && s_lkNameByAreaId is not null) return;
+            try
+            {
+                var areaDbc = Path.Combine(dir, "AreaTable.dbc");
+                if (!File.Exists(areaDbc)) return;
+                // Minimal raw DBC reader for AreaTable: WDBC/WDB2 header, then records, then string block.
+                using var fs = File.OpenRead(areaDbc);
+                using var br = new BinaryReader(fs, Encoding.UTF8, leaveOpen: false);
+                var magicBytes = br.ReadBytes(4);
+                if (magicBytes.Length != 4) return;
+                int recordCount = br.ReadInt32();
+                int fieldCount = br.ReadInt32();
+                int recordSize  = br.ReadInt32();
+                int stringBlockSize = br.ReadInt32();
+                var recordsData = br.ReadBytes(recordCount * recordSize);
+                var stringBlock = br.ReadBytes(stringBlockSize);
+                var mapById = new Dictionary<int, int>();
+                var nameById = new Dictionary<int, string>();
+                for (int i = 0; i < recordCount; i++)
+                {
+                    int baseOff = i * recordSize;
+                    // Read ints
+                    var ints = new int[fieldCount];
+                    for (int f = 0; f < fieldCount; f++)
+                    {
+                        int off = baseOff + (f * 4);
+                        if (off + 4 <= recordsData.Length) ints[f] = BitConverter.ToInt32(recordsData, off);
+                    }
+                    int id = (fieldCount > 0) ? ints[0] : 0;
+                    if (id <= 0) continue;
+                    int contId = (fieldCount > 1) ? ints[1] : 0; // heuristic: ContinentID
+                    // Find first string in row
+                    string name = string.Empty;
+                    for (int f = 0; f < fieldCount; f++)
+                    {
+                        int off = ints[f];
+                        if (off > 0 && off < stringBlock.Length)
+                        {
+                            // read cstring
+                            int end = off;
+                            while (end < stringBlock.Length && stringBlock[end] != 0) end++;
+                            if (end > off)
+                            {
+                                name = Encoding.UTF8.GetString(stringBlock, off, end - off);
+                                break;
+                            }
+                        }
+                    }
+                    mapById[id] = contId;
+                    if (!nameById.ContainsKey(id)) nameById[id] = name;
+                }
+                s_lkMapByAreaId = mapById;
+                s_lkNameByAreaId = nameById;
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
+    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapperV2? mapper, bool verbose, int? currentMapId, AreaIdMapper? legacyMapper, DbcPatchMapping? patchMap, bool patchOnly, bool noZoneFallback)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, bufferSize: 65536, options: FileOptions.RandomAccess);
         using var br = new BinaryReader(fs);
         using var bw = new BinaryWriter(fs);
 
@@ -61,12 +147,27 @@ public static class AdtWotlkWriter
 
         int present = 0, patched = 0;
         int debugPrinted = 0;
+        // Pre-read MCIN offsets to avoid 256 seeks per ADT
+        byte[] mcinBytes = Array.Empty<byte>();
+        if (mcinDataPos >= 0 && mcinSize >= 16)
+        {
+            fs.Position = mcinDataPos;
+            int need = Math.Min(mcinSize, 256 * 16);
+            mcinBytes = br.ReadBytes(need);
+        }
+
         if (mcinDataPos >= 0 && mcinSize >= 16)
         {
             for (int i2 = 0; i2 < 256; i2++)
             {
-                fs.Position = mcinDataPos + (i2 * 16);
-                int mcnkOffset = br.ReadInt32();
+                int mcnkOffset;
+                if (mcinBytes.Length >= (i2 + 1) * 16)
+                    mcnkOffset = BitConverter.ToInt32(mcinBytes, i2 * 16);
+                else
+                {
+                    fs.Position = mcinDataPos + (i2 * 16);
+                    mcnkOffset = br.ReadInt32();
+                }
                 if (mcnkOffset <= 0) continue;
                 present++;
 
@@ -84,40 +185,60 @@ public static class AdtWotlkWriter
                     }
                 }
 
-                // Prefer explicit remap from legacy mapper when available
+                // Try strategies in order, enforcing cross-map guard when LK DBC is available
                 bool mapped = false;
-                if (legacyMapper is not null && legacyMapper.TryMapDetailed(aIdNum, currentMapId, out var explicitId, out _, out _, out var explicitReason) && string.Equals(explicitReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
+                // 1) Legacy explicit remap
+                if (!patchOnly && !mapped && legacyMapper is not null && aIdNum > 0
+                    && legacyMapper.TryMapDetailed(aIdNum, currentMapId, out var explicitId, out _, out _, out var explicitReason)
+                    && string.Equals(explicitReason, "remap_explicit", StringComparison.OrdinalIgnoreCase))
                 {
-                    lkAreaId = explicitId; method = explicitReason; mapped = true;
+                    if (ValidateTargetMap(explicitId, currentMapId)) { lkAreaId = explicitId; method = explicitReason; mapped = true; }
                 }
-                else if (patchMap is not null && aIdNum > 0 && patchMap.TryMap(contRaw, aIdNum, out var csvId))
+                // 2) CSV exact (zone<<16|sub)
+                if (!mapped && patchMap is not null && aIdNum > 0 && patchMap.TryMap(contRaw, aIdNum, out var csvId))
                 {
-                    lkAreaId = csvId; method = "patch_csv"; mapped = true;
+                    if (ValidateTargetMap(csvId, currentMapId)) { lkAreaId = csvId; method = "patch_csv"; mapped = true; }
                 }
-                else if (aIdNum > 0 && mapper is not null && mapper.TryMapArea(contRaw, aIdNum, out lkAreaId, out method))
+                // 2b) CSV zone-only (zone<<16|0) fallback if sub missing and allowed
+                if (!mapped && !noZoneFallback && patchMap is not null && aIdNum > 0)
                 {
-                    mapped = true;
+                    int zoneBase = (aIdNum & unchecked((int)0xFFFF0000));
+                    if (zoneBase > 0 && patchMap.TryMap(contRaw, zoneBase, out var csvZone))
+                    {
+                        if (ValidateTargetMap(csvZone, currentMapId)) { lkAreaId = csvZone; method = "patch_csv_zone"; mapped = true; }
+                    }
                 }
-                if (!mapped)
+                // 3) Live V2 (disabled in PatchOnly)
+                if (!patchOnly && !mapped && aIdNum > 0 && mapper is not null && mapper.TryMapArea(contRaw, aIdNum, out var v2Id, out var v2Method))
                 {
-                    lkAreaId = 0; method = "fallback0"; // safe fallback per V2 rules (onmapdungeon handled internally too)
+                    if (ValidateTargetMap(v2Id, currentMapId)) { lkAreaId = v2Id; method = v2Method; mapped = true; }
                 }
+                // 4) Fallback 0
+                if (!mapped) { lkAreaId = 0; method = "fallback0"; }
 
                 long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
                 if (areaFieldPos + 4 > fileLen) continue;
 
                 long save = fs.Position;
                 fs.Position = areaFieldPos;
-                bw.Write((uint)lkAreaId);
-                fs.Position = areaFieldPos;
-                uint onDisk = br.ReadUInt32();
-                fs.Position = save;
-                patched++;
-                if (verbose && debugPrinted < 8)
+                uint existing = br.ReadUInt32();
+                if (existing != (uint)lkAreaId)
                 {
-                    Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method} onDisk={onDisk} (0x{onDisk:X})");
+                    fs.Position = areaFieldPos;
+                    bw.Write((uint)lkAreaId);
+                    patched++;
+                    if (verbose && debugPrinted < 8)
+                    {
+                        Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) existing={existing} (0x{existing:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method}");
+                        debugPrinted++;
+                    }
+                }
+                else if (verbose && debugPrinted < 8)
+                {
+                    Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) unchanged={existing} (0x{existing:X}) method={method}");
                     debugPrinted++;
                 }
+                fs.Position = save;
             }
         }
         return (present, patched);
@@ -284,12 +405,15 @@ public static class AdtWotlkWriter
             }
         }
 
+        // Prepare LK DBC cache if provided (for cross-map guard and legend names)
+        if (!string.IsNullOrWhiteSpace(ctx.LkDbcDir)) { s_lkDbcDir = ctx.LkDbcDir; EnsureLkCache(); }
+
         // Patch per-MCNK AreaId in-place when we have any modern mapping source (patch CSVs or V2 tables).
         if (ctx.AlphaAreaIds is not null && ctx.AlphaAreaIds.Count == 256 && (ctx.PatchMapping is not null || ctx.AreaMapperV2 is not null))
         {
             try
             {
-                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, ctx.AlphaAreaIds, ctx.AreaMapperV2, ctx.Verbose, ctx.CurrentMapId, ctx.AreaMapper, ctx.PatchMapping);
+                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, ctx.AlphaAreaIds, ctx.AreaMapperV2, ctx.Verbose, ctx.CurrentMapId, ctx.AreaMapper, ctx.PatchMapping, ctx.PatchOnly, ctx.NoZoneFallback);
                 if (ctx.Verbose)
                 {
                     Console.WriteLine($"[{ctx.MapName} {ctx.TileX},{ctx.TileY}] AreaIds(V2): present={present} patched={patched}");
@@ -316,6 +440,13 @@ public static class AdtWotlkWriter
             {
                 Console.Error.WriteLine($"[AreaPatch] Failed to patch AreaIDs for {outFile}: {ex.Message}");
             }
+        }
+
+        // Optional: visualization output (SVG grid + legend CSV)
+        if (ctx.VizSvg)
+        {
+            try { WriteAreaVisualizationSvg(ctx, outFile); }
+            catch (Exception ex) { Console.Error.WriteLine($"[Viz] Failed for {outFile}: {ex.Message}"); }
         }
     }
 
@@ -425,7 +556,7 @@ public static class AdtWotlkWriter
 
     private static (int present, int patched, int ignored) PatchMcnkAreaIdsOnDisk(string filePath, IReadOnlyList<int> alphaAreaIds, AreaIdMapper mapper, bool verbose, int? currentMapId)
     {
-        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, bufferSize: 65536, options: FileOptions.RandomAccess);
         using var br = new BinaryReader(fs);
         using var bw = new BinaryWriter(fs);
 
@@ -448,6 +579,15 @@ public static class AdtWotlkWriter
 
         int present = 0, patched = 0, ignored = 0;
         int debugPrinted = 0;
+        // Pre-read MCIN offsets to avoid seeks
+        byte[] mcinBytes = Array.Empty<byte>();
+        if (mcinDataPos >= 0 && mcinSize >= 16)
+        {
+            fs.Position = mcinDataPos;
+            int need = Math.Min(mcinSize, 256 * 16);
+            mcinBytes = br.ReadBytes(need);
+        }
+
         if (mcinDataPos >= 0 && mcinSize >= 16)
         {
             for (int i2 = 0; i2 < 256; i2++)
@@ -456,8 +596,14 @@ public static class AdtWotlkWriter
                 if (aId < 0) continue; // no MCNK present
                 present++;
 
-                fs.Position = mcinDataPos + (i2 * 16);
-                int mcnkOffset = br.ReadInt32();
+                int mcnkOffset;
+                if (mcinBytes.Length >= (i2 + 1) * 16)
+                    mcnkOffset = BitConverter.ToInt32(mcinBytes, i2 * 16);
+                else
+                {
+                    fs.Position = mcinDataPos + (i2 * 16);
+                    mcnkOffset = br.ReadInt32();
+                }
                 if (mcnkOffset <= 0) continue;
 
                 // Map strictly by explicit remap, with map-awareness
@@ -478,16 +624,24 @@ public static class AdtWotlkWriter
 
                 long save = fs.Position;
                 fs.Position = areaFieldPos;
-                bw.Write((uint)lkAreaId); // write full 32-bit LE
-                fs.Position = areaFieldPos;
                 uint onDisk = br.ReadUInt32();
-                fs.Position = save;
-                patched++;
-                if (verbose && debugPrinted < 8)
+                if (onDisk != (uint)lkAreaId)
                 {
-                    Console.WriteLine($"  idx={i2:D3} alpha={aId} (0x{aId:X}) -> write={lkAreaId} (0x{lkAreaId:X}) onDisk={onDisk} (0x{onDisk:X})");
+                    fs.Position = areaFieldPos;
+                    bw.Write((uint)lkAreaId); // write full 32-bit LE
+                    patched++;
+                    if (verbose && debugPrinted < 8)
+                    {
+                        Console.WriteLine($"  idx={i2:D3} alpha={aId} (0x{aId:X}) existing={onDisk} (0x{onDisk:X}) -> write={lkAreaId} (0x{lkAreaId:X})");
+                        debugPrinted++;
+                    }
+                }
+                else if (verbose && debugPrinted < 8)
+                {
+                    Console.WriteLine($"  idx={i2:D3} alpha={aId} (0x{aId:X}) unchanged={onDisk} (0x{onDisk:X})");
                     debugPrinted++;
                 }
+                fs.Position = save;
             }
         }
         return (present, patched, ignored);
@@ -640,6 +794,19 @@ public static class AdtWotlkWriter
                     {
                         lkAreaId = csvId; reason = "patch_csv";
                     }
+                    else if (!ctx.NoZoneFallback && ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue)
+                    {
+                        int zoneBase = (alphaRaw & unchecked((int)0xFFFF0000));
+                        if (zoneBase > 0 && ctx.PatchMapping.TryMap(ctx.CurrentMapId.Value, zoneBase, out var csvZone))
+                        {
+                            lkAreaId = csvZone; reason = "patch_csv_zone";
+                        }
+                        else if (ctx.AreaMapperV2.TryMapArea(ctx.CurrentMapId ?? -1, alphaRaw, out lkAreaId, out var method))
+                        {
+                            reason = method;
+                        }
+                        else { lkAreaId = 0; reason = "fallback0"; }
+                    }
                     else if (ctx.AreaMapperV2.TryMapArea(ctx.CurrentMapId ?? -1, alphaRaw, out lkAreaId, out var method))
                     {
                         reason = method;
@@ -672,5 +839,222 @@ public static class AdtWotlkWriter
                 EscapeCsv(lkName)
             }));
         }
+    }
+
+    // Per-tile SVG visualization with legend CSV. Uses LK AreaID on disk and optional cached LK names.
+    private static void WriteAreaVisualizationSvg(WriteContext ctx, string adtPath)
+    {
+        using var fs = new FileStream(adtPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs);
+        fs.Seek(0, SeekOrigin.Begin);
+        long fileLen = fs.Length;
+        long mcinDataPos = -1; int mcinSize = 0;
+        while (fs.Position + 8 <= fileLen)
+        {
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(Encoding.ASCII.GetString(fourccRevBytes));
+            int sz = br.ReadInt32(); long dpos = fs.Position;
+            if (fourcc == "MCIN") { mcinDataPos = dpos; mcinSize = sz; break; }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+        }
+        if (mcinDataPos < 0 || mcinSize < 16) return;
+
+        var grid = new int[256]; for (int i = 0; i < 256; i++) grid[i] = -1;
+        for (int i = 0; i < 256; i++)
+        {
+            fs.Position = mcinDataPos + (i * 16);
+            int mcnkOffset = br.ReadInt32();
+            if (mcnkOffset <= 0) { grid[i] = -1; continue; }
+            long pos = (long)mcnkOffset + 8 + 0x34;
+            if (pos + 4 > fileLen) { grid[i] = -1; continue; }
+            fs.Position = pos;
+            grid[i] = (int)br.ReadUInt32();
+        }
+
+        // Aggregate counts for legend
+        var counts = new Dictionary<int, int>();
+        foreach (var v in grid) counts[v] = counts.TryGetValue(v, out var c) ? c + 1 : 1;
+
+        // Colors
+        static string HexFor(int id)
+        {
+            if (id < 0) return "#FF00FF"; // missing
+            if (id == 0) return "#FFFFFF"; // unknown -> whiteplate
+            var c = ColorForAreaId(id); return ToHex(c);
+        }
+
+        // SVG grid (16x16, 32px cells)
+        int cell = 32, cols = 16, rows = 16, width = cols * cell, height = rows * cell;
+        var sb = new StringBuilder();
+        sb.AppendLine($"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>");
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < cols; x++)
+            {
+                int idx = (y * 16) + x; int id = grid[idx];
+                int px = x * cell, py = y * cell; string fill = HexFor(id);
+                sb.AppendLine($"<rect x='{px}' y='{py}' width='{cell}' height='{cell}' fill='{fill}' stroke='#999' stroke-width='1' />");
+            }
+        }
+        sb.AppendLine("</svg>");
+
+        string vizRoot = !string.IsNullOrWhiteSpace(ctx.VizDir) ? ctx.VizDir! : Path.Combine(ctx.ExportDir, "viz");
+        string outDir = Path.Combine(vizRoot, "maps", ctx.MapName);
+        Directory.CreateDirectory(outDir);
+        File.WriteAllText(Path.Combine(outDir, $"tile_{ctx.TileX}_{ctx.TileY}.svg"), sb.ToString(), Encoding.UTF8);
+
+        if (!ctx.VizHtml)
+        {
+            var nameById = s_lkNameByAreaId ?? new Dictionary<int, string>();
+            using var sw = new StreamWriter(Path.Combine(outDir, $"legend_tile_{ctx.TileX}_{ctx.TileY}.csv"), append: false, Encoding.UTF8);
+            sw.WriteLine("areaId,name,color_hex,count_chunks");
+            foreach (var kv in counts.OrderBy(k => k.Key))
+            {
+                int id = kv.Key; int count = kv.Value; string color = HexFor(id);
+                nameById.TryGetValue(id, out var nm); nm ??= string.Empty;
+                sw.WriteLine(string.Join(',', id.ToString(), EscapeCsv(nm), color, count.ToString()));
+            }
+        }
+    }
+
+    private static (byte r, byte g, byte b) ColorForAreaId(int id)
+    {
+        // Stable HSL hash -> RGB. Avoid very light colors since 0 is white.
+        double h = (Math.Abs(id) * 2654435761u % 360u);
+        double s = 0.65; double l = 0.50;
+        return HslToRgb(h, s, l);
+    }
+
+    private static (byte r, byte g, byte b) HslToRgb(double h, double s, double l)
+    {
+        h = h % 360; if (h < 0) h += 360;
+        double c = (1 - Math.Abs(2 * l - 1)) * s;
+        double x = c * (1 - Math.Abs((h / 60) % 2 - 1));
+        double m = l - c / 2;
+        double r1 = 0, g1 = 0, b1 = 0;
+        if (h < 60) { r1 = c; g1 = x; }
+        else if (h < 120) { r1 = x; g1 = c; }
+        else if (h < 180) { g1 = c; b1 = x; }
+        else if (h < 240) { g1 = x; b1 = c; }
+        else if (h < 300) { r1 = x; b1 = c; }
+        else { r1 = c; b1 = x; }
+        byte r = (byte)Math.Round((r1 + m) * 255);
+        byte g = (byte)Math.Round((g1 + m) * 255);
+        byte b = (byte)Math.Round((b1 + m) * 255);
+        return (r, g, b);
+    }
+
+    private static string ToHex((byte r, byte g, byte b) c) => $"#{c.r:X2}{c.g:X2}{c.b:X2}";
+    
+    // Stitched per-map HTML with inline SVG and a single legend. Reads on-disk ADTs only.
+    public static void WriteMapVisualizationHtml(string exportDir, string mapName, DbcPatchMapping? patchMap, string? vizDir)
+    {
+        const int tiles = 64; const int chunksPerTile = 16; int grid = tiles * chunksPerTile; // 1024
+        const int pxPerChunk = 4; int width = grid * pxPerChunk; int height = grid * pxPerChunk;
+
+        // Aggregate AreaIDs per chunk across all tiles
+        var worldDir = Path.Combine(exportDir, "World", "Maps", mapName);
+        var matrix = new int[grid, grid];
+        for (int y = 0; y < grid; y++) for (int x = 0; x < grid; x++) matrix[y, x] = -1;
+        if (Directory.Exists(worldDir))
+        {
+            for (int ty = 0; ty < tiles; ty++)
+            {
+                for (int tx = 0; tx < tiles; tx++)
+                {
+                    var adt = Path.Combine(worldDir, $"{mapName}_{tx}_{ty}.adt");
+                    if (!File.Exists(adt)) continue;
+                    try
+                    {
+                        using var fs = new FileStream(adt, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        using var br = new BinaryReader(fs);
+                        // Find MCIN
+                        fs.Seek(0, SeekOrigin.Begin);
+                        long len = fs.Length; long mcinPos = -1; int mcinSize = 0;
+                        while (fs.Position + 8 <= len)
+                        {
+                            var rev = br.ReadBytes(4); if (rev.Length < 4) break;
+                            var fcc = ReverseFourCC(Encoding.ASCII.GetString(rev));
+                            int sz = br.ReadInt32(); long dpos = fs.Position;
+                            if (fcc == "MCIN") { mcinPos = dpos; mcinSize = sz; break; }
+                            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+                        }
+                        if (mcinPos < 0 || mcinSize < 16) continue;
+                        for (int i = 0; i < 256; i++)
+                        {
+                            fs.Position = mcinPos + (i * 16);
+                            int mcnkOff = br.ReadInt32();
+                            int cx = (tx * chunksPerTile) + (i % 16);
+                            int cy = (ty * chunksPerTile) + (i / 16);
+                            if (mcnkOff <= 0) { matrix[cy, cx] = -1; continue; }
+                            long apos = (long)mcnkOff + 8 + 0x34;
+                            if (apos + 4 > len) { matrix[cy, cx] = -1; continue; }
+                            fs.Position = apos;
+                            matrix[cy, cx] = (int)br.ReadUInt32();
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+        }
+
+        // Aggregate counts for legend
+        var counts = new Dictionary<int, int>();
+        for (int y = 0; y < grid; y++) for (int x = 0; x < grid; x++)
+        {
+            int id = matrix[y, x]; counts[id] = counts.TryGetValue(id, out var c) ? c + 1 : 1;
+        }
+
+        // Prepare legend rows using names from CSVs (if present)
+        var legendRows = new List<(int id, string name, string hex, int count)>();
+        foreach (var kv in counts.OrderByDescending(k => k.Value))
+        {
+            int id = kv.Key; if (id < 0) continue; // skip missing
+            int count = kv.Value;
+            string nm = string.Empty;
+            if (patchMap is not null && id > 0 && patchMap.TryGetTargetName(id, out var nm0)) nm = nm0;
+            string hex = id == 0 ? "#FFFFFF" : ToHex(ColorForAreaId(id));
+            legendRows.Add((id, nm, hex, count));
+        }
+
+        // Build stitched SVG
+        var svg = new StringBuilder();
+        svg.AppendLine($"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>");
+        for (int y = 0; y < grid; y++)
+        {
+            for (int x = 0; x < grid; x++)
+            {
+                int id = matrix[y, x];
+                string fill = id switch { -1 => "#FF00FF", 0 => "#FFFFFF", _ => ToHex(ColorForAreaId(id)) };
+                int px = x * pxPerChunk; int py = y * pxPerChunk;
+                svg.AppendLine($"<rect x='{px}' y='{py}' width='{pxPerChunk}' height='{pxPerChunk}' fill='{fill}' stroke='#777' stroke-width='0.2' />");
+            }
+        }
+        // Tile grid every 16 chunks
+        for (int t = 0; t <= grid; t += 16)
+        {
+            int p = t * pxPerChunk;
+            svg.AppendLine($"<line x1='{p}' y1='0' x2='{p}' y2='{height}' stroke='#000' stroke-width='1' opacity='0.25' />");
+            svg.AppendLine($"<line x1='0' y1='{p}' x2='{width}' y2='{p}' stroke='#000' stroke-width='1' opacity='0.25' />");
+        }
+        svg.AppendLine("</svg>");
+
+        // Build HTML
+        var html = new StringBuilder();
+        html.AppendLine("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Map Visualization</title>");
+        html.AppendLine("<style>body{font-family:sans-serif} .wrap{display:flex;gap:16px} .legend{max-height:95vh;overflow:auto} table{border-collapse:collapse} td,th{border:1px solid #ccc;padding:4px 8px} .sw{display:inline-block;width:16px;height:16px;border:1px solid #999;margin-right:6px;vertical-align:middle}</style></head><body>");
+        html.AppendLine($"<h1>{mapName} AreaIDs</h1><div class='wrap'><div class='svg'>{svg}</div><div class='legend'><h2>Legend</h2><table><tr><th>AreaID</th><th>Name</th><th>Color</th><th>Count</th></tr>");
+        foreach (var row in legendRows)
+        {
+            string sw = $"<span class='sw' style='background:{row.hex}'></span>";
+            html.AppendLine($"<tr><td>{row.id}</td><td>{EscapeCsv(row.name)}</td><td>{sw}{row.hex}</td><td>{row.count}</td></tr>");
+        }
+        html.AppendLine("</table></div></div></body></html>");
+
+        string root = !string.IsNullOrWhiteSpace(vizDir) ? vizDir! : Path.Combine(exportDir, "viz");
+        string outDir = Path.Combine(root, "maps", mapName);
+        Directory.CreateDirectory(outDir);
+        File.WriteAllText(Path.Combine(outDir, "index.html"), html.ToString(), Encoding.UTF8);
     }
 }

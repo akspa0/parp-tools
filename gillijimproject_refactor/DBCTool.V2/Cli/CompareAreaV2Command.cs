@@ -15,7 +15,7 @@ namespace DBCTool.V2.Cli;
 
 internal sealed class CompareAreaV2Command
 {
-    public int Run(string dbdDir, string outBase, string localeStr, List<(string build, string dir)> inputs)
+    public int Run(string dbdDir, string outBase, string localeStr, List<(string build, string dir)> inputs, bool chainVia060)
     {
         // Resolve required inputs
         string? dir053 = null, dir055 = null, dir060 = null, dir335 = null;
@@ -202,10 +202,48 @@ internal sealed class CompareAreaV2Command
         var mapSrcNames = BuildMapNames(storSrc_Map);
         var mapTgtNames = BuildMapNames(storTgt_Map);
 
+        // Special-case overrides and forced parents for strict chain via 0.6.0
+        // Keys are normalized with NormKey(s)
+        var overrideTargetMapBySrcKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Dev/test content relocated to Development (map 451) in later builds
+            ["programmerisle"] = 451,
+            ["designerisland"] = 451,
+            ["jeffnequadrant"] = 451,
+            ["jeffnwquadrant"] = 451,
+            ["jeffsequadrant"] = 451,
+            ["jeffswquadrant"] = 451,
+            ["deadmanshole"] = 451,
+        };
+
+        var forcePivotParentBySrcKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Known oddities: source listed as zone in 0.5.x but should be sub under these parents later
+            ["twilightgrove"] = "duskwood",
+            ["caerdarrow"] = "western plaguelands",
+            ["darrowmerelake"] = "western plaguelands",
+            ["stonewroughtpass"] = "searing gorge",
+        };
+
+        var fuzzyOddities = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "twilightgrove","caerdarrow","darrowmerelake"
+        };
+
+        // Some 0.6.0 top-level zones become subzones under different parents in 3.3.5.
+        // Re-parent the LK chain accordingly before trying to match against 3.3.5.
+        var lkParentByPivotZone = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["darrowmerelake"] = "western plaguelands",
+            ["stonewroughtpass"] = "searing gorge",
+        };
+
         // Prepare CSV builders
         var mapping = new StringBuilder();
         var unmatched = new StringBuilder();
         var patch = new StringBuilder();
+        var patchVia060 = new StringBuilder();
+        var trace = new StringBuilder();
         var header = string.Join(',', new[]
         {
             "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_mapId_xwalk","src_mapName_xwalk","src_path",
@@ -215,10 +253,16 @@ internal sealed class CompareAreaV2Command
         unmatched.AppendLine(header);
         var patchHeader = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name";
         patch.AppendLine(patchHeader);
+        var patchHeaderVia060 = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,mid060_mapId,mid060_mapName,mid060_areaID,mid060_parentID,mid060_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name";
+        patchVia060.AppendLine(patchHeaderVia060);
+        var traceHeader = "src_row_id,src_areaNumber,src_parentNumber,src_name,src_mapId,src_chain,pivot_mapId,pivot_chain,lk_mapId,lk_chain,chosen_tgt_id,matched_depth,method";
+        trace.AppendLine(traceHeader);
         var patchFallback = new StringBuilder();
         patchFallback.AppendLine(patchHeader);
         var perMap = new Dictionary<int, (StringBuilder map, StringBuilder un, StringBuilder patch)>();
         var perMapFallback = new Dictionary<int, StringBuilder>();
+        var perMapVia060 = new Dictionary<int, StringBuilder>();
+        var perMapTrace = new Dictionary<int, StringBuilder>();
 
         // Source columns
         string parentColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "ParentAreaNum" : "ParentAreaID";
@@ -247,20 +291,22 @@ internal sealed class CompareAreaV2Command
             if (cw053To335.TryGetValue(contResolved, out var mx)) { mapIdX = mx; hasMapX = true; }
             else if (mapTgtNames.ContainsKey(contResolved)) { mapIdX = contResolved; hasMapX = true; }
 
-            // Compose zone-only chain: [zoneName] using the zone row on the same continent
+            // Compose source chain strictly by names: zone-only for zones; [zone, sub] for subzones
             var chain = new List<string>();
             if (area_lo16 == 0)
             {
+                // Zone row: use its own name
                 if (!string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
             }
             else
             {
+                // Sub row: first resolve zone name from its zone row, then add sub name from current row
                 if (idxSrcZoneByCont.TryGetValue((contResolved, zoneBase), out var zrow))
                 {
                     string zname = FirstNonEmpty(SafeField<string>(zrow, areaNameColSrc)) ?? string.Empty;
                     if (!string.IsNullOrWhiteSpace(zname)) chain.Add(NormKey(zname));
                 }
-                if (chain.Count == 0 && !string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
+                if (!string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
             }
 
             string mapName = mapSrcNames.TryGetValue(contResolved, out var mnSrc) ? mnSrc : string.Empty;
@@ -269,53 +315,204 @@ internal sealed class CompareAreaV2Command
             string path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{chainPath}" : chainPath;
 
             int chosen = -1; int depth = 0; string method = string.Empty;
-            if (hasMapX && chain.Count > 0)
+            if (!chainVia060 && hasMapX && chain.Count > 0)
             {
+                // Direct 0.5.x → 3.3.5 chain when not forcing via 0.6.0
                 chosen = matcher.TryMatchChainExact(mapIdX, chain, idxTgtTopZonesByMap, idxTgtChildrenByZone, out depth);
             }
 
-            // Pivot via 0.6.0 if direct match is missing or partial
-            if ((chosen < 0 || depth < chain.Count) && has060 && chain.Count > 0)
+            // Pivot via 0.6.0 (chain) when requested, or as fallback when direct is missing/partial
+            int chosen060 = -1; int depth060 = 0; int pivotMapIdX = -1; bool hasPivot = false;
+            int midParentId = -1; string midName = string.Empty; string midParentName = string.Empty; int midMapOut = -1; string midMapName = string.Empty;
+            string pivotChainDesc = string.Empty; string lkChainDesc = string.Empty;
+            if (((chainVia060) || (chosen < 0 || depth < chain.Count)) && has060 && chain.Count > 0)
             {
-                int pivotMapIdX = -1; bool hasPivot = false;
                 if (cwSrcTo060.TryGetValue(contResolved, out var mx060)) { pivotMapIdX = mx060; hasPivot = true; }
                 else if (map060Names.ContainsKey(contResolved)) { pivotMapIdX = contResolved; hasPivot = true; }
                 if (hasPivot)
                 {
-                    int chosen060 = matcher.TryMatchChainExact(pivotMapIdX, chain, idx060TopZonesByMap, idx060ChildrenByZone, out var depth060);
-                    if (chosen060 >= 0)
+                    // Attempt strict child resolution on pivot map first when source chain is zone-only or oddity
+                    string srcKeyNorm = NormKey(nm);
+                    bool isZoneOnlyChain = chain.Count == 1;
+                    int localChosen060 = -1; int localParent060 = -1;
+                    string zoneName060 = string.Empty; string subName060 = string.Empty;
+
+                    int forcedParent060 = -1; // track even if child not present in 0.6.0
+                    string forcedParentNameRaw = string.Empty; // allow name-only fallback when 0.6.0 lacks the zone row
+                    if (isZoneOnlyChain)
                     {
-                        var pivotRow = id060ToRow[chosen060];
-                        int pParent = SafeField<int>(pivotRow, parentCol060);
-                        if (pParent <= 0) pParent = chosen060;
-                        int zoneId060 = pParent == chosen060 ? chosen060 : pParent;
-                        var zoneRow060 = id060ToRow[zoneId060];
-                        string zoneName060 = FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? string.Empty;
-                        string subName060 = (pParent != chosen060) ? (FirstNonEmpty(SafeField<string>(pivotRow, areaNameCol060)) ?? string.Empty) : string.Empty;
+                        // Forced parent rule for known oddities
+                        if (forcePivotParentBySrcKey.TryGetValue(srcKeyNorm, out var forceParentRaw))
+                        {
+                            forcedParentNameRaw = forceParentRaw;
+                            var parentKey = NormKey(forceParentRaw);
+                            if (idx060TopZonesByMap.TryGetValue(pivotMapIdX, out var tops) && tops.TryGetValue(parentKey, out var zoneId060fp))
+                            {
+                                forcedParent060 = zoneId060fp;
+                                if (idx060ChildrenByZone.TryGetValue(zoneId060fp, out var kids) && kids.TryGetValue(srcKeyNorm, out var childId060))
+                                {
+                                    localChosen060 = childId060; localParent060 = zoneId060fp;
+                                }
+                            }
+                        }
+
+                        // Exact child scan across pivot map if still unresolved
+                        if (localChosen060 < 0)
+                        {
+                            int foundParent = -1, foundChild = -1, matches = 0;
+                            foreach (var kv in idx060ChildrenByZone)
+                            {
+                                int parentId = kv.Key;
+                                if (!id060ToRow.TryGetValue(parentId, out var pRow0)) continue;
+                                int pMap = SafeField<int>(pRow0, "ContinentID");
+                                if (pMap != pivotMapIdX) continue;
+                                var kids = kv.Value;
+                                if (kids.TryGetValue(srcKeyNorm, out var child))
+                                {
+                                    matches++; foundParent = parentId; foundChild = child;
+                                    if (matches > 1) break;
+                                }
+                            }
+                            if (matches == 1) { localChosen060 = foundChild; localParent060 = foundParent; }
+                        }
+
+                        // Minimal fuzzy only for oddities (EditDistance <= 1 and unique)
+                        if (localChosen060 < 0 && fuzzyOddities.Contains(srcKeyNorm))
+                        {
+                            int foundParent = -1, foundChild = -1, matches = 0;
+                            foreach (var kv in idx060ChildrenByZone)
+                            {
+                                int parentId = kv.Key;
+                                if (!id060ToRow.TryGetValue(parentId, out var pRow0)) continue;
+                                int pMap = SafeField<int>(pRow0, "ContinentID");
+                                if (pMap != pivotMapIdX) continue;
+                                foreach (var kid in kv.Value)
+                                {
+                                    int dist = EditDistance(srcKeyNorm, kid.Key);
+                                    if (dist <= 1)
+                                    {
+                                        matches++; foundParent = parentId; foundChild = kid.Value;
+                                        if (matches > 1) break;
+                                    }
+                                }
+                                if (matches > 1) break;
+                            }
+                            if (matches == 1) { localChosen060 = foundChild; localParent060 = foundParent; }
+                        }
+                    }
+
+                    // Fallback: original chain match on pivot map
+                    if (localChosen060 < 0)
+                    {
+                        localChosen060 = matcher.TryMatchChainExact(pivotMapIdX, chain, idx060TopZonesByMap, idx060ChildrenByZone, out depth060);
+                    }
+
+                    if (localChosen060 >= 0 || forcedParent060 > 0 || (!string.IsNullOrWhiteSpace(forcedParentNameRaw) && isZoneOnlyChain))
+                    {
+                        if (localChosen060 >= 0)
+                        {
+                            chosen060 = localChosen060;
+                            var pivotRow = id060ToRow[chosen060];
+                            int pParent = SafeField<int>(pivotRow, parentCol060);
+                            if (pParent <= 0) pParent = chosen060;
+                            int zoneId060 = pParent == chosen060 ? (localParent060 > 0 ? localParent060 : chosen060) : pParent;
+                            var zoneRow060 = id060ToRow[zoneId060];
+                            zoneName060 = FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? string.Empty;
+                            subName060 = (pParent != chosen060 || localParent060 > 0) ? (FirstNonEmpty(SafeField<string>(pivotRow, areaNameCol060)) ?? string.Empty) : string.Empty;
+
+                            // capture mid outputs
+                            midParentId = (localParent060 > 0) ? localParent060 : pParent;
+                            midName = FirstNonEmpty(SafeField<string>(pivotRow, areaNameCol060)) ?? string.Empty;
+                            midMapOut = pivotMapIdX;
+                            midMapName = map060Names.TryGetValue(midMapOut, out var mmn) ? mmn : string.Empty;
+                            midParentName = (midParentId == chosen060) ? (FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? midName) : (FirstNonEmpty(SafeField<string>(id060ToRow[midParentId], areaNameCol060)) ?? midName);
+                        }
+                        else if (forcedParent060 > 0) // forced parent with 0.6.0 zone row; build pivot via parent row + src name
+                        {
+                            var zoneRow060 = id060ToRow[forcedParent060];
+                            zoneName060 = FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? string.Empty;
+                            subName060 = nm;
+                            chosen060 = -1; // no concrete 0.6.0 child
+                            // capture mid outputs (parent only)
+                            midParentId = forcedParent060;
+                            midName = nm;
+                            midMapOut = pivotMapIdX;
+                            midMapName = map060Names.TryGetValue(midMapOut, out var mmn2) ? mmn2 : string.Empty;
+                            midParentName = FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? string.Empty;
+                        }
+                        else // name-only forced parent (0.6.0 lacks the zone row); build LK chain using names directly
+                        {
+                            zoneName060 = forcedParentNameRaw;
+                            subName060 = nm;
+                            chosen060 = -1;
+                            midParentId = -1;
+                            midName = nm;
+                            midMapOut = pivotMapIdX;
+                            midMapName = map060Names.TryGetValue(midMapOut, out var mmn2) ? mmn2 : string.Empty;
+                            midParentName = forcedParentNameRaw;
+                        }
+
                         var pivotChain = new List<string>();
                         if (!string.IsNullOrWhiteSpace(zoneName060)) pivotChain.Add(NormKey(zoneName060));
                         if (!string.IsNullOrWhiteSpace(subName060)) pivotChain.Add(NormKey(subName060));
 
-                        int lkMapIdX = -1; bool hasLk = false;
-                        if (cw060To335.TryGetValue(pivotMapIdX, out var m335)) { lkMapIdX = m335; hasLk = true; }
-                        else if (mapTgtNames.ContainsKey(pivotMapIdX)) { lkMapIdX = pivotMapIdX; hasLk = true; }
-                        if (hasLk && pivotChain.Count > 0)
+                        // Build the LK chain (may be the same as pivot chain or re-parented)
+                        var lkChain = new List<string>(pivotChain);
+                        if (lkChain.Count > 0)
                         {
-                            int chosenLK = matcher.TryMatchChainExact(lkMapIdX, pivotChain, idxTgtTopZonesByMap, idxTgtChildrenByZone, out var depthLK);
+                            var pz = lkChain[0];
+                            if (lkParentByPivotZone.TryGetValue(pz, out var lkParentName))
+                            {
+                                var parentKey = NormKey(lkParentName);
+                                if (lkChain.Count >= 2)
+                                {
+                                    lkChain = new List<string> { parentKey, lkChain[1] };
+                                }
+                                else
+                                {
+                                    // Zone-only case: the original pivot zone becomes a child under the mapped parent
+                                    lkChain = new List<string> { parentKey, pz };
+                                }
+                            }
+                        }
+
+                        int lkMapIdX = -1; bool hasLk = false;
+                        if (overrideTargetMapBySrcKey.TryGetValue(srcKeyNorm, out var oMap)) { lkMapIdX = oMap; hasLk = true; }
+                        else if (cw060To335.TryGetValue(pivotMapIdX, out var m335)) { lkMapIdX = m335; hasLk = true; }
+                        else if (mapTgtNames.ContainsKey(pivotMapIdX)) { lkMapIdX = pivotMapIdX; hasLk = true; }
+                        pivotChainDesc = string.Join('/', pivotChain);
+                        lkChainDesc = string.Join('/', lkChain);
+
+                        if (hasLk && lkChain.Count > 0)
+                        {
+                            int chosenLK = matcher.TryMatchChainExact(lkMapIdX, lkChain, idxTgtTopZonesByMap, idxTgtChildrenByZone, out var depthLK);
                             if (chosenLK >= 0)
                             {
                                 chosen = chosenLK; depth = depthLK; mapIdX = lkMapIdX; hasMapX = true;
                                 mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn2) ? mn2 : string.Empty;
-                                path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{chainPath}" : chainPath;
-                                method = (depth == pivotChain.Count) ? "pivot_060" : "pivot_060_zone_only";
+                                path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{lkChainDesc}" : lkChainDesc;
+                                method = (lkChain.Count >= 2 && pivotChain.Count == 1 && lkChain[1] == pivotChain[0]) ?
+                                    "pivot_060_reparent" : ((depth == lkChain.Count) ? "pivot_060" : "pivot_060_zone_only");
+                            }
+                            else
+                            {
+                                // Fallback: treat sub name as a top-level on the same LK map (handles cases like Caer Darrow, Darrowmere Lake, Stonewrought Pass)
+                                var subKey = (lkChain.Count >= 2 ? lkChain[1] : NormKey(subName060));
+                                if (!string.IsNullOrWhiteSpace(subKey) && idxTgtTopZonesByMap.TryGetValue(lkMapIdX, out var topsLk) && topsLk.TryGetValue(subKey, out var topId))
+                                {
+                                    chosen = topId; depth = 1; mapIdX = lkMapIdX; hasMapX = true;
+                                    mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn2b) ? mn2b : string.Empty;
+                                    path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{subKey}" : subKey;
+                                    method = "pivot_060_top_on_map";
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Global rename match: unique top-level zone across LK (cross-map allowed)
-            if (chosen < 0 && chain.Count > 0)
+            // Global rename match: unique top-level zone across LK (cross-map allowed) - disabled in chainVia060 mode
+            if (!chainVia060 && chosen < 0 && chain.Count > 0)
             {
                 var keyNorm = chain[0];
                 if (idxTgtTopGlobal.TryGetValue(keyNorm, out var rec))
@@ -327,8 +524,8 @@ internal sealed class CompareAreaV2Command
                 }
             }
 
-            // Global rename match for child names (use the current row's own name)
-            if (chosen < 0 && !string.IsNullOrWhiteSpace(nm))
+            // Global rename match for child names (use the current row's own name) - disabled in chainVia060 mode
+            if (!chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
             {
                 var keyNorm2 = NormKey(nm);
                 if (idxTgtChildGlobal.TryGetValue(keyNorm2, out var rec2))
@@ -341,7 +538,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Fuzzy rename (top-level) if still unmatched
-            if (chosen < 0 && chain.Count > 0)
+            if (!chainVia060 && chosen < 0 && chain.Count > 0)
             {
                 var keyNorm = chain[0];
                 var (fid, fmap, ok) = FindBestFuzzy(keyNorm, lkTopList, 2);
@@ -353,8 +550,8 @@ internal sealed class CompareAreaV2Command
                 }
             }
 
-            // Fuzzy rename (child) using row name if still unmatched
-            if (chosen < 0 && !string.IsNullOrWhiteSpace(nm))
+            // Fuzzy rename (child) using row name if still unmatched - disabled in chainVia060 mode
+            if (!chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
             {
                 var keyNorm = NormKey(nm);
                 var (fid, fmap, ok) = FindBestFuzzy(keyNorm, lkChildList, 2);
@@ -367,7 +564,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Exact-key fallback across LK with map preference (prefer map 0, then 1)
-            if (chosen < 0)
+            if (!chainVia060 && chosen < 0)
             {
                 int pref(int m) => (m == 0 ? 0 : (m == 1 ? 1 : 2));
                 if (chain.Count > 0)
@@ -403,9 +600,13 @@ internal sealed class CompareAreaV2Command
                 int tgtParentId = SafeField<int>(tRow, "ParentAreaID");
                 int tgtMap = SafeField<int>(tRow, "ContinentID");
                 string tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mn) ? mn : string.Empty;
-                // For patch emission, ignore parent and self-parent the target
-                int tgtParentIdOut = chosen;
-                string tgtParentName = FirstNonEmpty(SafeField<string>(tRow, areaNameColTgt)) ?? tgtName;
+                // Resolve actual parent row/name; default to self when missing
+                if (tgtParentId <= 0) tgtParentId = chosen;
+                string tgtParentName = tgtName;
+                if (tgtParentId != chosen && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
+                {
+                    tgtParentName = FirstNonEmpty(SafeField<string>(pRow, areaNameColTgt)) ?? tgtName;
+                }
                 string tgtPath = $"{Norm(tgtMapName)}/{Norm(tgtName)}";
                 if (string.IsNullOrEmpty(method)) method = (depth == chain.Count) ? "exact" : "zone_only";
 
@@ -444,9 +645,52 @@ internal sealed class CompareAreaV2Command
                         hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1",
                         Csv(mapNameX),
                         chosen.ToString(CultureInfo.InvariantCulture),
-                        tgtParentIdOut.ToString(CultureInfo.InvariantCulture),
+                        tgtParentId.ToString(CultureInfo.InvariantCulture),
                         Csv(tgtName)
                     }));
+                    // Also emit via060 patch row when chain was used or requested (mid columns)
+                    if (chainVia060)
+                    {
+                        if (!perMapVia060.TryGetValue(mapIdX, out var via)) { via = new StringBuilder(); via.AppendLine(patchHeaderVia060); perMapVia060[mapIdX] = via; }
+                        via.AppendLine(string.Join(',', new[]
+                        {
+                            contResolved.ToString(CultureInfo.InvariantCulture),
+                            Csv(mapName),
+                            areaNum.ToString(CultureInfo.InvariantCulture),
+                            parentNum.ToString(CultureInfo.InvariantCulture),
+                            Csv(nm),
+                            (midMapOut >= 0 ? midMapOut.ToString(CultureInfo.InvariantCulture) : "-1"),
+                            Csv(midMapName),
+                            (chosen060 >= 0 ? chosen060.ToString(CultureInfo.InvariantCulture) : "-1"),
+                            (midParentId > 0 ? midParentId.ToString(CultureInfo.InvariantCulture) : "-1"),
+                            Csv(midName),
+                            hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1",
+                            Csv(mapNameX),
+                            chosen.ToString(CultureInfo.InvariantCulture),
+                            tgtParentId.ToString(CultureInfo.InvariantCulture),
+                            Csv(tgtName)
+                        }));
+                        // Trace for matched rows
+                        var tr = string.Join(',', new[]
+                        {
+                            key.ToString(CultureInfo.InvariantCulture),
+                            areaNum.ToString(CultureInfo.InvariantCulture),
+                            parentNum.ToString(CultureInfo.InvariantCulture),
+                            Csv(nm),
+                            contResolved.ToString(CultureInfo.InvariantCulture),
+                            Csv(string.Join('/', chain)),
+                            (midMapOut >= 0 ? midMapOut.ToString(CultureInfo.InvariantCulture) : "-1"),
+                            Csv(pivotChainDesc),
+                            (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
+                            Csv(lkChainDesc),
+                            chosen.ToString(CultureInfo.InvariantCulture),
+                            depth.ToString(CultureInfo.InvariantCulture),
+                            method
+                        });
+                        trace.AppendLine(tr);
+                        if (!perMapTrace.TryGetValue(mapIdX, out var tmap)) { tmap = new StringBuilder(); tmap.AppendLine(traceHeader); perMapTrace[mapIdX] = tmap; }
+                        perMapTrace[mapIdX].AppendLine(tr);
+                    }
                 }
                 // Do not include matched rows in fallback0 CSVs
             }
@@ -473,6 +717,32 @@ internal sealed class CompareAreaV2Command
                     "unmatched"
                 });
                 unmatched.AppendLine(line);
+                // Append trace row for unmatched when via-060 is on
+                if (chainVia060)
+                {
+                    var tr = string.Join(',', new[]
+                    {
+                        key.ToString(CultureInfo.InvariantCulture),
+                        areaNum.ToString(CultureInfo.InvariantCulture),
+                        parentNum.ToString(CultureInfo.InvariantCulture),
+                        Csv(nm),
+                        contResolved.ToString(CultureInfo.InvariantCulture),
+                        Csv(string.Join('/', chain)),
+                        (pivotMapIdX >= 0 ? pivotMapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
+                        Csv(pivotChainDesc),
+                        (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
+                        Csv(lkChainDesc),
+                        "-1",
+                        "0",
+                        "unmatched"
+                    });
+                    trace.AppendLine(tr);
+                    if (hasMapX)
+                    {
+                        if (!perMapTrace.TryGetValue(mapIdX, out var tmap)) { tmap = new StringBuilder(); tmap.AppendLine(traceHeader); perMapTrace[mapIdX] = tmap; }
+                        perMapTrace[mapIdX].AppendLine(tr);
+                    }
+                }
                 if (hasMapX)
                 {
                     if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine("src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name"); perMap[mapIdX] = tuple; }
@@ -524,10 +794,21 @@ internal sealed class CompareAreaV2Command
         File.WriteAllText(mappingPath, mapping.ToString(), new UTF8Encoding(true));
         File.WriteAllText(unmatchedPath, unmatched.ToString(), new UTF8Encoding(true));
         File.WriteAllText(patchPath, patch.ToString(), new UTF8Encoding(true));
+        if (patchVia060.Length > 0 && chainVia060)
+        {
+            var patchPathVia060 = Path.Combine(compareV2Dir, $"Area_patch_crosswalk_via060_{srcAlias}_to_335.csv");
+            File.WriteAllText(patchPathVia060, patchVia060.ToString(), new UTF8Encoding(true));
+        }
         File.WriteAllText(patchFallbackPath, patchFallback.ToString(), new UTF8Encoding(true));
+        if (chainVia060)
+        {
+            File.WriteAllText(Path.Combine(compareV2Dir, $"Area_chain_trace_{srcAlias}_to_335.csv"), trace.ToString(), new UTF8Encoding(true));
+        }
 
-        // Dump raw AreaTable rows for source and target into compare/v2 for inspection
+        // Dump raw AreaTable rows for source, mid (0.6.0 pivot when present), and target into compare/v2 for inspection
         DumpAreaTable(storSrc_Area, compareV2Dir, srcAlias);
+        if (has060 && stor060_Area is not null)
+            DumpAreaTable(stor060_Area, compareV2Dir, "0.6.0");
         DumpAreaTable(storTgt_Area, compareV2Dir, "3.3.5");
 
         foreach (var kv in perMap)
@@ -537,6 +818,10 @@ internal sealed class CompareAreaV2Command
             File.WriteAllText(Path.Combine(compareV2Dir, $"Area_patch_crosswalk_map{kv.Key}_{srcAlias}_to_335.csv"), kv.Value.patch.ToString(), new UTF8Encoding(true));
             if (perMapFallback.TryGetValue(kv.Key, out var pfb))
                 File.WriteAllText(Path.Combine(compareV2Dir, $"Area_patch_with_fallback0_map{kv.Key}_{srcAlias}_to_335.csv"), pfb.ToString(), new UTF8Encoding(true));
+            if (chainVia060 && perMapVia060.TryGetValue(kv.Key, out var via))
+                File.WriteAllText(Path.Combine(compareV2Dir, $"Area_patch_crosswalk_via060_map{kv.Key}_{srcAlias}_to_335.csv"), via.ToString(), new UTF8Encoding(true));
+            if (chainVia060 && perMapTrace.TryGetValue(kv.Key, out var tmap))
+                File.WriteAllText(Path.Combine(compareV2Dir, $"Area_chain_trace_map{kv.Key}_{srcAlias}_to_335.csv"), tmap.ToString(), new UTF8Encoding(true));
         }
 
         // Write diagnostics: zones missing in target map

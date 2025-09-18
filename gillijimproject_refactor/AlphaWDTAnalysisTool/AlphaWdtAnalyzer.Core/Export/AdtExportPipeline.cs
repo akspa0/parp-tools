@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using GillijimProject.WowFiles.Alpha;
 using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
@@ -39,6 +40,13 @@ public static class AdtExportPipeline
         // Optional: Use precomputed DBCTool.V2 patch CSV(s)
         public string? DbctoolPatchDir { get; init; } // directory containing Area_patch_crosswalk_*.csv
         public string? DbctoolPatchFile { get; init; } // specific patch CSV file
+        // Visualization
+        public bool VizSvg { get; init; } = false;
+        public string? VizDir { get; init; }
+        public bool VizHtml { get; init; } = false;
+        public bool PatchOnly { get; init; } = false;
+        public int? MaxDegreeOfParallelism { get; init; }
+        public bool NoZoneFallback { get; init; } = false;
     }
 
     public static void ExportSingle(Options opts)
@@ -51,7 +59,7 @@ public static class AdtExportPipeline
         var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
         Directory.CreateDirectory(logDir);
         using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
-        var inventory = new AssetInventory(opts.AssetRoots);
+        var inventory = new AssetInventory(opts.AssetRoots?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!));
         var fixup = new AssetFixupPolicy(
             resolver,
             opts.FallbackTileset,
@@ -87,6 +95,11 @@ public static class AdtExportPipeline
                     patchMap.LoadFile(f);
             }
         }
+        else if (opts.PatchOnly)
+        {
+            Console.Error.WriteLine("[PatchOnly] Missing --dbctool-patch-dir or --dbctool-patch-file. Patch-only mode requires CSV crosswalks. Aborting.");
+            return;
+        }
         var adtScanner = new AdtScanner();
         var result = adtScanner.Scan(wdt);
 
@@ -106,45 +119,64 @@ public static class AdtExportPipeline
             }
         }
 
-        foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
+        void ProcessTile(int x, int y)
         {
             var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
             var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
-
-            IReadOnlyList<int>? alphaAreaIds = null;
             int adtNum = (y * 64) + x;
             int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
-            if (offset > 0)
+            if (offset <= 0) return;
+            var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+            var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
+            int currentMapId = ResolveMapIdByName(wdt.MapName);
+
+            var ctx = new AdtWotlkWriter.WriteContext
             {
-                var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
-                alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+                ExportDir = opts.ExportDir,
+                MapName = wdt.MapName,
+                TileX = x,
+                TileY = y,
+                Placements = g,
+                Fixup = fixup,
+                ConvertToMh2o = opts.ConvertToMh2o,
+                AreaMapper = areaMapper,
+                AreaMapperV2 = areaMapperV2,
+                PatchMapping = patchMap,
+                AlphaAreaIds = alphaAreaIds,
+                WdtPath = wdt.WdtPath,
+                AdtNumber = adtNum,
+                AdtOffset = offset,
+                MdnmFiles = wdt.MdnmFiles,
+                MonmFiles = wdt.MonmFiles,
+                Verbose = opts.Verbose,
+                TrackAssets = opts.TrackAssets,
+                CurrentMapId = currentMapId,
+                VizSvg = opts.VizSvg,
+                VizDir = opts.VizDir,
+                LkDbcDir = opts.DbctoolLkDir,
+                VizHtml = opts.VizHtml,
+                PatchOnly = opts.PatchOnly,
+                NoZoneFallback = opts.NoZoneFallback,
+            };
+            AdtWotlkWriter.WriteBinary(ctx);
+        }
 
-                int currentMapId = ResolveMapIdByName(wdt.MapName);
+        var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
+        bool canParallel = !opts.EnableFixups && !opts.TrackAssets; // Fixup logging isn't thread-safe
+        int mdp = opts.MaxDegreeOfParallelism ?? Environment.ProcessorCount;
+        if (canParallel && tileList.Count > 1)
+        {
+            Parallel.ForEach(tileList, new ParallelOptions { MaxDegreeOfParallelism = mdp }, t => ProcessTile(t.tx, t.ty));
+        }
+        else
+        {
+            foreach (var (x, y) in tileList) ProcessTile(x, y);
+        }
 
-                var ctx = new AdtWotlkWriter.WriteContext
-                {
-                    ExportDir = opts.ExportDir,
-                    MapName = wdt.MapName,
-                    TileX = x,
-                    TileY = y,
-                    Placements = g,
-                    Fixup = fixup,
-                    ConvertToMh2o = opts.ConvertToMh2o,
-                    AreaMapper = areaMapper,
-                    AreaMapperV2 = areaMapperV2,
-                    PatchMapping = patchMap,
-                    AlphaAreaIds = alphaAreaIds,
-                    WdtPath = wdt.WdtPath,
-                    AdtNumber = adtNum,
-                    AdtOffset = offset,
-                    MdnmFiles = wdt.MdnmFiles,
-                    MonmFiles = wdt.MonmFiles,
-                    Verbose = opts.Verbose,
-                    TrackAssets = opts.TrackAssets,
-                    CurrentMapId = currentMapId
-                };
-                AdtWotlkWriter.WriteBinary(ctx);
-            }
+        if (opts.VizHtml)
+        {
+            try { AdtWotlkWriter.WriteMapVisualizationHtml(opts.ExportDir, wdt.MapName, patchMap, opts.VizDir); }
+            catch (Exception ex) { Console.Error.WriteLine($"[VizMap] Failed for {wdt.MapName}: {ex.Message}"); }
         }
     }
 
@@ -158,7 +190,7 @@ public static class AdtExportPipeline
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
 
-        var inventory = new AssetInventory(opts.AssetRoots);
+        var inventory = new AssetInventory(opts.AssetRoots?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!));
 
         foreach (var wdtPath in wdts)
         {
@@ -204,6 +236,11 @@ public static class AdtExportPipeline
                             patchMap.LoadFile(f);
                     }
                 }
+                else if (opts.PatchOnly)
+                {
+                    Console.Error.WriteLine($"[PatchOnly] Missing --dbctool-patch-dir or --dbctool-patch-file for map {mapName}. Patch-only requires CSV crosswalks. Skipping map.");
+                    continue;
+                }
 
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
@@ -224,45 +261,65 @@ public static class AdtExportPipeline
                     }
                 }
 
-                foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
+                void ProcessTileB(int x, int y)
                 {
                     var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
                     var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
 
-                    IReadOnlyList<int>? alphaAreaIds = null;
                     int adtNum = (y * 64) + x;
                     int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
-                    if (offset > 0)
+                    if (offset <= 0) return;
+                    var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+                    var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
+
+                    int currentMapId = ResolveMapIdByName(wdt.MapName);
+
+                    var ctx = new AdtWotlkWriter.WriteContext
                     {
-                        var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
-                        alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+                        ExportDir = opts.ExportDir,
+                        MapName = wdt.MapName,
+                        TileX = x,
+                        TileY = y,
+                        Placements = g,
+                        Fixup = fixup,
+                        ConvertToMh2o = opts.ConvertToMh2o,
+                        AreaMapper = areaMapper,
+                        AreaMapperV2 = areaMapperV2,
+                        PatchMapping = patchMap,
+                        AlphaAreaIds = alphaAreaIds,
+                        WdtPath = wdt.WdtPath,
+                        AdtNumber = adtNum,
+                        AdtOffset = offset,
+                        MdnmFiles = wdt.MdnmFiles,
+                        MonmFiles = wdt.MonmFiles,
+                        Verbose = opts.Verbose,
+                        TrackAssets = opts.TrackAssets,
+                        CurrentMapId = currentMapId,
+                        VizSvg = opts.VizSvg,
+                        VizDir = opts.VizDir,
+                        LkDbcDir = opts.DbctoolLkDir,
+                        VizHtml = opts.VizHtml,
+                        PatchOnly = opts.PatchOnly
+                    };
+                    AdtWotlkWriter.WriteBinary(ctx);
+                }
 
-                        int currentMapId = ResolveMapIdByName(wdt.MapName);
+                var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
+                bool canParallel = !opts.EnableFixups && !opts.TrackAssets;
+                int mdp = opts.MaxDegreeOfParallelism ?? Environment.ProcessorCount;
+                if (canParallel && tileList.Count > 1)
+                {
+                    Parallel.ForEach(tileList, new ParallelOptions { MaxDegreeOfParallelism = mdp }, t => ProcessTileB(t.tx, t.ty));
+                }
+                else
+                {
+                    foreach (var (x, y) in tileList) ProcessTileB(x, y);
+                }
 
-                        var ctx = new AdtWotlkWriter.WriteContext
-                        {
-                            ExportDir = opts.ExportDir,
-                            MapName = wdt.MapName,
-                            TileX = x,
-                            TileY = y,
-                            Placements = g,
-                            Fixup = fixup,
-                            ConvertToMh2o = opts.ConvertToMh2o,
-                            AreaMapper = areaMapper,
-                            AreaMapperV2 = areaMapperV2,
-                            PatchMapping = patchMap,
-                            AlphaAreaIds = alphaAreaIds,
-                            WdtPath = wdt.WdtPath,
-                            AdtNumber = adtNum,
-                            AdtOffset = offset,
-                            MdnmFiles = wdt.MdnmFiles,
-                            MonmFiles = wdt.MonmFiles,
-                            Verbose = opts.Verbose,
-                            TrackAssets = opts.TrackAssets,
-                            CurrentMapId = currentMapId
-                        };
-                        AdtWotlkWriter.WriteBinary(ctx);
-                    }
+                if (opts.VizHtml)
+                {
+                    try { AdtWotlkWriter.WriteMapVisualizationHtml(opts.ExportDir, mapName, patchMap, opts.VizDir); }
+                    catch (Exception ex) { Console.Error.WriteLine($"[VizMap] Failed for {mapName}: {ex.Message}"); }
                 }
             }
             catch (Exception ex)
