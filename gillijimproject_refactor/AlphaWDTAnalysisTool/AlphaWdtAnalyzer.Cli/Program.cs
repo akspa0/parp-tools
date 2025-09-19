@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using AlphaWdtAnalyzer.Core;
 using AlphaWdtAnalyzer.Core.Export;
 
@@ -7,6 +8,52 @@ namespace AlphaWdtAnalyzer.Cli;
 
 public static class Program
 {
+    // Minimal console tee to mirror stdout/stderr to a log file (AWDT only)
+    private sealed class TeeTextWriter : TextWriter
+    {
+        private readonly TextWriter _primary;
+        private readonly StreamWriter _file;
+        public TeeTextWriter(TextWriter primary, string filePath)
+        {
+            _primary = primary;
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            _file = new StreamWriter(filePath, append: false, Encoding.UTF8) { AutoFlush = true };
+        }
+        public override Encoding Encoding => Encoding.UTF8;
+        public override void Write(char value) { _primary.Write(value); _file.Write(value); }
+        public override void Write(string? value) { _primary.Write(value); _file.Write(value); }
+        public override void WriteLine(string? value) { _primary.WriteLine(value); _file.WriteLine(value); }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { try { _file.Flush(); _file.Dispose(); } catch { } }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class ConsoleTee : IDisposable
+    {
+        private readonly TextWriter _prevOut;
+        private readonly TextWriter _prevErr;
+        private readonly TeeTextWriter _teeOut;
+        private readonly TeeTextWriter _teeErr;
+        private ConsoleTee(TextWriter prevOut, TextWriter prevErr, TeeTextWriter teeOut, TeeTextWriter teeErr)
+        { _prevOut = prevOut; _prevErr = prevErr; _teeOut = teeOut; _teeErr = teeErr; }
+        public static ConsoleTee Start(string logPath)
+        {
+            var prevOut = Console.Out; var prevErr = Console.Error;
+            var teeOut = new TeeTextWriter(prevOut, logPath);
+            var teeErr = new TeeTextWriter(prevErr, logPath);
+            Console.SetOut(teeOut); Console.SetError(teeErr);
+            Console.WriteLine($"[Log] Mirroring console to {logPath}");
+            return new ConsoleTee(prevOut, prevErr, teeOut, teeErr);
+        }
+        public void Dispose()
+        {
+            try { Console.SetOut(_prevOut); Console.SetError(_prevErr); } catch { }
+            try { _teeOut.Dispose(); _teeErr.Dispose(); } catch { }
+        }
+    }
+
     private static int Usage()
     {
         Console.WriteLine("AlphaWdtAnalyzer");
@@ -234,121 +281,140 @@ public static class Program
             }
         }
 
+        // Determine log root (AWDT only): prefer exportDir when exporting ADTs, else outDir
+        string? logRoot = null;
+        if (!string.IsNullOrWhiteSpace(exportDir)) logRoot = exportDir;
+        else if (!string.IsNullOrWhiteSpace(outDir)) logRoot = outDir;
+
         try
         {
-            if (isBatch)
+            // Start console tee if we have a destination
+            string? logPath = null; IDisposable? teeScope = null;
+            if (!string.IsNullOrWhiteSpace(logRoot))
             {
-                if (!Directory.Exists(inputDir!))
+                try
                 {
-                    Console.Error.WriteLine($"Input directory not found: {inputDir}");
-                    return 1;
+                    var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    logPath = Path.Combine(logRoot!, $"awdt_run_{stamp}.log");
+                    teeScope = ConsoleTee.Start(logPath);
                 }
+                catch { /* best-effort */ }
+            }
 
-                BatchAnalysis.Run(new BatchAnalysis.Options
+            try
+            {
+                if (isBatch)
                 {
-                    InputRoot = inputDir!,
-                    ListfilePath = listfile!,
-                    OutDir = outDir!,
-                    ClusterThreshold = clusterThreshold ?? 10,
-                    ClusterGap = clusterGap ?? 1000,
-                    Web = web
-                });
-
-                if (exportAdt)
-                {
-                    AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
+                    BatchAnalysis.Run(new BatchAnalysis.Options
                     {
                         InputRoot = inputDir!,
-                        CommunityListfilePath = listfile!,
-                        LkListfilePath = lkListfile,
-                        ExportDir = exportDir!,
-                        FallbackTileset = fallbackTileset,
-                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
-                        FallbackWmo = fallbackWmo,
-                        FallbackM2 = fallbackM2,
-                        ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy,
-                        UseFallbacks = useFallbacks,
-                        EnableFixups = enableFixups,
-                        RemapPath = remap,
-                        Verbose = verbose,
-                        TrackAssets = trackAssets,
-                        DbdDir = dbdDir,
-                        DbctoolOutRoot = dbctoolOutRoot,
-                        DbctoolSrcAlias = dbctoolSrcAlias,
-                        DbctoolSrcDir = dbctoolSrcDir,
-                        DbctoolLkDir = dbctoolLkDir,
-                        DbctoolPatchDir = dbctoolPatchDir,
-                        DbctoolPatchFile = dbctoolPatchFile,
-                        VizSvg = vizSvg,
-                        VizHtml = vizHtml,
-                        PatchOnly = patchOnly,
-                        NoZoneFallback = noZoneFallback,
-                        MaxDegreeOfParallelism = mdp,
-                        VizDir = vizDir,
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                        Web = web
                     });
-                }
-            }
-            else
-            {
-                if (!File.Exists(wdt!))
-                {
-                    Console.Error.WriteLine($"WDT not found: {wdt}");
-                    return 1;
-                }
 
-                AnalysisPipeline.Run(new AnalysisPipeline.Options
-                {
-                    WdtPath = wdt!,
-                    ListfilePath = listfile!,
-                    OutDir = outDir!,
-                    ClusterThreshold = clusterThreshold ?? 10,
-                    ClusterGap = clusterGap ?? 1000,
-                });
-
-                if (web)
-                {
-                    WebAssetsWriter.Write(outDir!);
-                    Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
-                }
-
-                if (exportAdt)
-                {
-                    AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
+                    if (exportAdt)
                     {
-                        SingleWdtPath = wdt!,
-                        CommunityListfilePath = listfile!,
-                        LkListfilePath = lkListfile,
-                        ExportDir = exportDir!,
-                        FallbackTileset = fallbackTileset,
-                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
-                        FallbackWmo = fallbackWmo,
-                        FallbackM2 = fallbackM2,
-                        ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy,
-                        UseFallbacks = useFallbacks,
-                        EnableFixups = enableFixups,
-                        RemapPath = remap,
-                        Verbose = verbose,
-                        TrackAssets = trackAssets,
-                        DbdDir = dbdDir,
-                        DbctoolOutRoot = dbctoolOutRoot,
-                        DbctoolSrcAlias = dbctoolSrcAlias,
-                        DbctoolSrcDir = dbctoolSrcDir,
-                        DbctoolLkDir = dbctoolLkDir,
-                        DbctoolPatchDir = dbctoolPatchDir,
-                        DbctoolPatchFile = dbctoolPatchFile,
-                        VizSvg = vizSvg,
-                        VizHtml = vizHtml,
-                        PatchOnly = patchOnly,
-                        NoZoneFallback = noZoneFallback,
-                        VizDir = vizDir,
-                    });
+                        AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
+                        {
+                            InputRoot = inputDir!,
+                            CommunityListfilePath = listfile!,
+                            LkListfilePath = lkListfile,
+                            ExportDir = exportDir!,
+                            FallbackTileset = fallbackTileset,
+                            FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                            FallbackWmo = fallbackWmo,
+                            FallbackM2 = fallbackM2,
+                            ConvertToMh2o = mh2o,
+                            AssetFuzzy = assetFuzzy,
+                            UseFallbacks = useFallbacks,
+                            EnableFixups = enableFixups,
+                            RemapPath = remap,
+                            Verbose = verbose,
+                            TrackAssets = trackAssets,
+                            DbdDir = dbdDir,
+                            DbctoolOutRoot = dbctoolOutRoot,
+                            DbctoolSrcAlias = dbctoolSrcAlias,
+                            DbctoolSrcDir = dbctoolSrcDir,
+                            DbctoolLkDir = dbctoolLkDir,
+                            DbctoolPatchDir = dbctoolPatchDir,
+                            DbctoolPatchFile = dbctoolPatchFile,
+                            VizSvg = vizSvg,
+                            VizHtml = vizHtml,
+                            PatchOnly = patchOnly,
+                            NoZoneFallback = noZoneFallback,
+                            MaxDegreeOfParallelism = mdp,
+                            VizDir = vizDir,
+                        });
+                    }
                 }
-            }
+                else
+                {
+                    if (!File.Exists(wdt!))
+                    {
+                        Console.Error.WriteLine($"WDT not found: {wdt}");
+                        return 1;
+                    }
 
-            Console.WriteLine("Analysis complete.");
-            return 0;
+                    AnalysisPipeline.Run(new AnalysisPipeline.Options
+                    {
+                        WdtPath = wdt!,
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                    });
+
+                    if (web)
+                    {
+                        WebAssetsWriter.Write(outDir!);
+                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
+                    }
+
+                    if (exportAdt)
+                    {
+                        AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
+                        {
+                            SingleWdtPath = wdt!,
+                            CommunityListfilePath = listfile!,
+                            LkListfilePath = lkListfile,
+                            ExportDir = exportDir!,
+                            FallbackTileset = fallbackTileset,
+                            FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                            FallbackWmo = fallbackWmo,
+                            FallbackM2 = fallbackM2,
+                            ConvertToMh2o = mh2o,
+                            AssetFuzzy = assetFuzzy,
+                            UseFallbacks = useFallbacks,
+                            EnableFixups = enableFixups,
+                            RemapPath = remap,
+                            Verbose = verbose,
+                            TrackAssets = trackAssets,
+                            DbdDir = dbdDir,
+                            DbctoolOutRoot = dbctoolOutRoot,
+                            DbctoolSrcAlias = dbctoolSrcAlias,
+                            DbctoolSrcDir = dbctoolSrcDir,
+                            DbctoolLkDir = dbctoolLkDir,
+                            DbctoolPatchDir = dbctoolPatchDir,
+                            DbctoolPatchFile = dbctoolPatchFile,
+                            VizSvg = vizSvg,
+                            VizHtml = vizHtml,
+                            PatchOnly = patchOnly,
+                            NoZoneFallback = noZoneFallback,
+                            VizDir = vizDir,
+                        });
+                    }
+                }
+
+                Console.WriteLine("Analysis complete.");
+                return 0;
+            }
+            finally
+            {
+                teeScope?.Dispose();
+            }
         }
         catch (Exception ex)
         {

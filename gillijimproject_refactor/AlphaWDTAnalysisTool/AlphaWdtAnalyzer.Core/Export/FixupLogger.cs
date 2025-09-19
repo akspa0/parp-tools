@@ -11,10 +11,30 @@ public sealed class FixupLogger : IDisposable
     private bool _initialized;
     private StreamWriter? _writer;
     private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
+    // Per-tile context and counters
+    private string? _curMap;
+    private int _curTileX;
+    private int _curTileY;
+    private int _tileFuzzy;
+    private int _tileCapacity;
+    private int _tileOverflow;
 
     public FixupLogger(string path)
     {
         _path = path;
+    }
+
+    public void BeginTile(string mapName, int tileX, int tileY)
+    {
+        _curMap = mapName; _curTileX = tileX; _curTileY = tileY;
+        _tileFuzzy = 0; _tileCapacity = 0; _tileOverflow = 0;
+    }
+
+    public (int fuzzy, int capacity, int overflow) EndTile()
+    {
+        var r = (_tileFuzzy, _tileCapacity, _tileOverflow);
+        _curMap = null; // clear context after tile finishes
+        return r;
     }
 
     public void Write(FixupRecord rec)
@@ -36,11 +56,22 @@ public sealed class FixupLogger : IDisposable
         _seen.Add(key);
 
         Ensure();
+        // Update tile counters if we have an active tile
+        if (!string.IsNullOrWhiteSpace(_curMap))
+        {
+            if (m.StartsWith("fuzzy", StringComparison.OrdinalIgnoreCase)) _tileFuzzy++;
+            else if (m.StartsWith("capacity", StringComparison.OrdinalIgnoreCase)) _tileCapacity++;
+            else if (m.StartsWith("overflow", StringComparison.OrdinalIgnoreCase)) _tileOverflow++;
+        }
+
         _writer!.WriteLine(string.Join(',',
             rec.Type,
             Csv(rec.Original),
             Csv(rec.Resolved),
-            Csv(rec.Method)));
+            Csv(rec.Method),
+            Csv(_curMap),
+            _curTileX.ToString(CultureInfo.InvariantCulture),
+            _curTileY.ToString(CultureInfo.InvariantCulture)));
     }
 
     private void Ensure()
@@ -48,7 +79,7 @@ public sealed class FixupLogger : IDisposable
         if (_initialized) return;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         _writer = new StreamWriter(_path, append: false);
-        _writer.WriteLine("type,original,resolved,method");
+        _writer.WriteLine("type,original,resolved,method,map,tile_x,tile_y");
         _writer.Flush();
         _initialized = true;
     }

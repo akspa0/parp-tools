@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Threading;
 using GillijimProject.WowFiles.Alpha;
 using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
@@ -140,13 +141,19 @@ public static class AdtExportPipeline
             }
         }
 
+        int processed = 0;
+        int totalTiles = 0;
         void ProcessTile(int x, int y)
         {
+            if (totalTiles == 0) totalTiles = candidateTiles.Count;
             var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
             var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
             int adtNum = (y * 64) + x;
             int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
             if (offset <= 0) return;
+            var n = Interlocked.Increment(ref processed);
+            if (!opts.Verbose)
+                Console.WriteLine($"[Tile] {wdt.MapName} {x},{y} ({n}/{totalTiles})");
             var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
             var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
             int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
@@ -183,7 +190,11 @@ public static class AdtExportPipeline
             };
             if (opts.Verbose && patchMap is not null)
                 Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
+            // Track asset fixups per tile
+            fixupLogger.BeginTile(wdt.MapName, x, y);
             AdtWotlkWriter.WriteBinary(ctx);
+            var (fuzzy, capacity, overflow) = fixupLogger.EndTile();
+            Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
         }
 
         var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
@@ -305,20 +316,25 @@ public static class AdtExportPipeline
                     }
                 }
 
-                void ProcessTileB(int x, int y)
-                {
-                    var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
-                    var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
+                int processedB = 0; int totalTilesB = 0;
+        void ProcessTileB(int x, int y)
+        {
+            if (totalTilesB == 0) totalTilesB = candidateTiles.Count;
+            var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
+            var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
 
-                    int adtNum = (y * 64) + x;
-                    int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
-                    if (offset <= 0) return;
-                    var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
-                    var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
+            int adtNum = (y * 64) + x;
+            int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
+            if (offset <= 0) return;
+            var n = Interlocked.Increment(ref processedB);
+            if (!opts.Verbose)
+                Console.WriteLine($"[Tile] {wdt.MapName} {x},{y} ({n}/{totalTilesB})");
+            var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+            var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
 
-                    int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
-                    if (opts.Verbose)
-                        Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+            if (opts.Verbose)
+                Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
 
                     var ctx = new AdtWotlkWriter.WriteContext
                     {
@@ -349,7 +365,10 @@ public static class AdtExportPipeline
                     };
                     if (opts.Verbose && patchMap is not null)
                         Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
+                    fixupLogger.BeginTile(wdt.MapName, x, y);
                     AdtWotlkWriter.WriteBinary(ctx);
+                    var (fuzzy, capacity, overflow) = fixupLogger.EndTile();
+                    Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
                 }
 
                 var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
