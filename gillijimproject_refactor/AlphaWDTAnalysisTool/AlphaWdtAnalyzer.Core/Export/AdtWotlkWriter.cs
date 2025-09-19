@@ -192,8 +192,12 @@ public static class AdtWotlkWriter
                 {
                     lkAreaId = csvIdNum; method = "patch_csv_num"; mapped = true;
                 }
-                // Strict mode: no numeric zone fallback; no other fallbacks
-                // 4) Fallback 0
+                // 0b) CSV numeric direct by target mapId (guarded by CurrentMapId)
+                if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0 && patchMap.TryMapByTarget(currentMapId.Value, aIdNum, out var csvIdNumMap))
+                {
+                    lkAreaId = csvIdNumMap; method = "patch_csv_num_mapX"; mapped = true;
+                }
+                // Strict mode: no other fallbacks
                 if (!mapped) { lkAreaId = 0; method = "fallback0"; }
 
                 long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
@@ -770,7 +774,15 @@ public static class AdtWotlkWriter
                 }
                 else
                 {
-                    lkAreaId = 0; reason = "unmapped";
+                    // Try strict mapId-locked numeric fallback
+                    if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
+                    {
+                        lkAreaId = csvNumMap; reason = "patch_csv_num_mapX";
+                    }
+                    else
+                    {
+                        lkAreaId = 0; reason = "unmapped";
+                    }
                 }
             }
 

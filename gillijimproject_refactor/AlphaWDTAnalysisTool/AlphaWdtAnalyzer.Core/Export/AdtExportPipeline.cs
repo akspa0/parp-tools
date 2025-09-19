@@ -92,7 +92,7 @@ public static class AdtExportPipeline
                 patchMap.LoadFile(opts.DbctoolPatchFile!);
             if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
             {
-                foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.TopDirectoryOnly))
+                foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
                     patchMap.LoadFile(f);
             }
         }
@@ -237,7 +237,7 @@ public static class AdtExportPipeline
                         patchMap.LoadFile(opts.DbctoolPatchFile!);
                     if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
                     {
-                        foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.TopDirectoryOnly))
+                        foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
                             patchMap.LoadFile(f);
                     }
                 }
