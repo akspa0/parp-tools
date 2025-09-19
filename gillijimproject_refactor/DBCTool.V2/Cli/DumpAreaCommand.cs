@@ -38,7 +38,7 @@ internal sealed class DumpAreaCommand
         var storSrc_Area = LoadTable("AreaTable", CanonicalizeBuild(srcAlias), srcDir!, dbdProvider, locale);
         var storTgt_Area = LoadTable("AreaTable", CanonicalizeBuild("3.3.5"), dir335!, dbdProvider, locale);
 
-        var rawDir = Path.Combine(outBase, "raw");
+        var rawDir = Path.Combine(outBase, srcAlias, "raw");
         Directory.CreateDirectory(rawDir);
 
         DumpAreaTable(Path.Combine(rawDir, $"AreaTable_{srcAlias.Replace('.', '_')}.csv"), storSrc_Area, srcAlias);

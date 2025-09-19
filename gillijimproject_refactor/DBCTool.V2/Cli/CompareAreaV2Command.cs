@@ -40,8 +40,9 @@ internal sealed class CompareAreaV2Command
             return 2;
         }
 
-        // Output folders
-        var compareDir = Path.Combine(outBase, "compare");
+        // Output folders (stable, version-specific): outBase/<srcAlias>/compare/v2
+        var outAliasRoot = Path.Combine(outBase, srcAlias);
+        var compareDir = Path.Combine(outAliasRoot, "compare");
         var compareV2Dir = Path.Combine(compareDir, "v2");
         Directory.CreateDirectory(compareDir);
         Directory.CreateDirectory(compareV2Dir);

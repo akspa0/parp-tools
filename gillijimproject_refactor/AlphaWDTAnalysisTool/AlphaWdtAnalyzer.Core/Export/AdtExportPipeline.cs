@@ -35,6 +35,7 @@ public static class AdtExportPipeline
         public bool TrackAssets { get; init; } = false;
         // Optional DBCTool.V2 integration (when provided, enables AreaIdMapperV2)
         public string? DbdDir { get; init; }
+        public string? DbctoolOutRoot { get; init; } // preferred: root folder containing <alias>/compare/v2
         public string? DbctoolSrcAlias { get; init; } // e.g., 0.5.3 | 0.5.5 | 0.6.0
         public string? DbctoolSrcDir { get; init; }   // folder with source DBCs
         public string? DbctoolLkDir { get; init; }    // folder with 3.3.5 DBCs
@@ -83,8 +84,10 @@ public static class AdtExportPipeline
         }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
-        // Load DBCTool.V2 patch mapping if provided
+        // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
         DbcPatchMapping? patchMap = null;
+        string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, opts.SingleWdtPath, null);
+        string patchDirUsed = string.Empty;
         if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
         {
             patchMap = new DbcPatchMapping();
@@ -92,13 +95,30 @@ public static class AdtExportPipeline
                 patchMap.LoadFile(opts.DbctoolPatchFile!);
             if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
             {
+                patchDirUsed = opts.DbctoolPatchDir!;
                 foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
                     patchMap.LoadFile(f);
             }
         }
+        else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+        {
+            var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
+            if (Directory.Exists(v2Dir))
+            {
+                patchDirUsed = v2Dir;
+                patchMap = new DbcPatchMapping();
+                foreach (var f in Directory.EnumerateFiles(v2Dir, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
+                    patchMap.LoadFile(f);
+            }
+            else if (opts.PatchOnly)
+            {
+                Console.Error.WriteLine($"[PatchOnly] No CSVs found under --dbctool-out-root: {v2Dir}");
+                return;
+            }
+        }
         else if (opts.PatchOnly)
         {
-            Console.Error.WriteLine("[PatchOnly] Missing --dbctool-patch-dir or --dbctool-patch-file. Patch-only mode requires CSV crosswalks. Aborting.");
+            Console.Error.WriteLine("[PatchOnly] Missing --dbctool-out-root or --dbctool-patch-dir/--dbctool-patch-file. Patch-only mode requires CSV crosswalks. Aborting.");
             return;
         }
         var adtScanner = new AdtScanner();
@@ -162,7 +182,7 @@ public static class AdtExportPipeline
                 NoZoneFallback = opts.NoZoneFallback,
             };
             if (opts.Verbose && patchMap is not null)
-                Console.WriteLine($"[PatchMap] per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)}");
+                Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
             AdtWotlkWriter.WriteBinary(ctx);
         }
 
@@ -228,8 +248,10 @@ public static class AdtExportPipeline
                     var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
                     areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
                 }
-                // Load DBCTool.V2 patch mapping if provided
+                // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
                 DbcPatchMapping? patchMap = null;
+                string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, wdt.WdtPath, opts.InputRoot);
+                string patchDirUsed = string.Empty;
                 if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
                 {
                     patchMap = new DbcPatchMapping();
@@ -237,13 +259,30 @@ public static class AdtExportPipeline
                         patchMap.LoadFile(opts.DbctoolPatchFile!);
                     if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
                     {
+                        patchDirUsed = opts.DbctoolPatchDir!;
                         foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
                             patchMap.LoadFile(f);
                     }
                 }
+                else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+                {
+                    var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
+                    if (Directory.Exists(v2Dir))
+                    {
+                        patchDirUsed = v2Dir;
+                        patchMap = new DbcPatchMapping();
+                        foreach (var f in Directory.EnumerateFiles(v2Dir, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
+                            patchMap.LoadFile(f);
+                    }
+                    else if (opts.PatchOnly)
+                    {
+                        Console.Error.WriteLine($"[PatchOnly] No CSVs found under --dbctool-out-root: {v2Dir} for map {mapName}. Skipping map.");
+                        continue;
+                    }
+                }
                 else if (opts.PatchOnly)
                 {
-                    Console.Error.WriteLine($"[PatchOnly] Missing --dbctool-patch-dir or --dbctool-patch-file for map {mapName}. Patch-only requires CSV crosswalks. Skipping map.");
+                    Console.Error.WriteLine($"[PatchOnly] Missing --dbctool-out-root or --dbctool-patch-dir/--dbctool-patch-file for map {mapName}. Skipping map.");
                     continue;
                 }
 
@@ -309,7 +348,7 @@ public static class AdtExportPipeline
                         PatchOnly = opts.PatchOnly
                     };
                     if (opts.Verbose && patchMap is not null)
-                        Console.WriteLine($"[PatchMap] per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)}");
+                        Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
                     AdtWotlkWriter.WriteBinary(ctx);
                 }
 
@@ -404,5 +443,23 @@ public static class AdtExportPipeline
             }
         }
         return -1;
+    }
+
+    private static string ResolveSrcAlias(string? explicitAlias, string? singleWdtPath, string? inputRoot)
+    {
+        static string Normalize(string s)
+        {
+            var t = (s ?? string.Empty).Trim().ToLowerInvariant();
+            if (t is "053" or "0.5.3" or "5.3") return "0.5.3";
+            if (t is "055" or "0.5.5" or "5.5") return "0.5.5";
+            if (t is "060" or "0.6.0" or "6.0" or "0.6") return "0.6.0";
+            return s ?? string.Empty;
+        }
+        if (!string.IsNullOrWhiteSpace(explicitAlias)) return Normalize(explicitAlias!);
+        var corpus = ($"{singleWdtPath}|{inputRoot}" ?? string.Empty).ToLowerInvariant();
+        if (corpus.Contains("0.6.0") || corpus.Contains("\\060\\") || corpus.Contains("/060/") || corpus.Contains("0_6_0")) return "0.6.0";
+        if (corpus.Contains("0.5.5") || corpus.Contains("\\055\\") || corpus.Contains("/055/") || corpus.Contains("0_5_5")) return "0.5.5";
+        if (corpus.Contains("0.5.3") || corpus.Contains("\\053\\") || corpus.Contains("/053/") || corpus.Contains("0_5_3")) return "0.5.3";
+        return "0.5.3"; // default
     }
 }

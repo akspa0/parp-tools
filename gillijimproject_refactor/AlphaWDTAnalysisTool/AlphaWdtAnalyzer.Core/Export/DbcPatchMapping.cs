@@ -252,7 +252,8 @@ public sealed class DbcPatchMapping
                 }
             }
         }
-        if (tgtMapIdX >= 0)
+        // Populate target-locked numeric mapping strictly from via060 rows with non-zero target
+        if (isVia060 && targetId > 0 && tgtMapIdX >= 0)
         {
             if (!_byTgtMapX.TryGetValue(tgtMapIdX, out var d2)) { d2 = new Dictionary<int, int>(); _byTgtMapX[tgtMapIdX] = d2; }
             d2[srcAreaNumber] = targetId;
@@ -284,6 +285,7 @@ public sealed class DbcPatchMapping
     public int PerMapCount => _bySrcMap.Sum(kv => kv.Value.Count);
     public IReadOnlyCollection<int> MapIds => _bySrcMap.Keys.ToList().AsReadOnly();
     public int CountByName(string mapName) => string.IsNullOrWhiteSpace(mapName) ? 0 : (_bySrcName.TryGetValue(mapName, out var d) ? d.Count : 0);
+    public int CountByTargetMap(int mapId) => _byTgtMapX.TryGetValue(mapId, out var d) ? d.Count : 0;
 
     private static string[] SplitCsv(string line)
     {

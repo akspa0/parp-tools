@@ -7,7 +7,7 @@ namespace DBCTool.V2.Cli;
 
 internal static class Program
 {
-    private const string DefaultOutBase = "dbctool_outputs";
+    private const string DefaultOutBase = "dbctool_out";
     private const string DefaultDbdDir = "lib/WoWDBDefs/definitions";
     private const string DefaultLocale = "enUS";
 
@@ -35,9 +35,8 @@ internal static class Program
             }
         }
 
-        // Session folder: dbctool_outputs/session_YYYYMMDD_HHmmss
-        var session = $"session_{DateTime.Now:yyyyMMdd_HHmmss}";
-        var outBase = Path.Combine(opts.OutRoot ?? DefaultOutBase, session);
+        // Stable output root (no session folders): dbctool_out/
+        var outBase = opts.OutRoot ?? DefaultOutBase;
         Directory.CreateDirectory(outBase);
 
         // If only a source alias/flag is provided, default to quick compare (target is always 3.3.5)
@@ -85,17 +84,17 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
-        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
+        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_out --locale enUS \\");
         Console.WriteLine("    --compare-area-v2 --input 0.5.3=path/to/0.5.3/DBFilesClient --input 3.3.5=path/to/3.3.5/DBFilesClient [--chain-via-060 --mid-alias 0.6.0 --mid-dir path/to/0.6.0/DBFilesClient]");
         Console.WriteLine();
         Console.WriteLine("Dump raw AreaTable CSVs for src and 3.3.5:");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
-        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
+        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_out --locale enUS \\");
         Console.WriteLine("    --dump-area --input 0.5.3=path/to/0.5.3/DBFilesClient --input 3.3.5=path/to/3.3.5/DBFilesClient");
         Console.WriteLine();
         Console.WriteLine("Chain via 0.6.0 example:");
         Console.WriteLine("  dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- \\");
-        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_outputs --locale enUS \\");
+        Console.WriteLine("    --dbd-dir lib/WoWDBDefs/definitions --out dbctool_out --locale enUS \\");
         Console.WriteLine("    --compare-area-v2 --input 0.5.3=..\\test_data\\0.5.3\\tree\\DBFilesClient --input 3.3.5=..\\test_data\\3.3.5\\tree\\DBFilesClient \\");
         Console.WriteLine("    --chain-via-060 --mid-alias 0.6.0 --mid-dir ..\\test_data\\0.6.0\\tree\\DBFilesClient");
         Console.WriteLine();
