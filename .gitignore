@@ -448,3 +448,7 @@ ADTPrefabTool/lib/wow.export/
 
 # gillijimproject-refactor
 gillijimproject_refactor/test_data
+
+# libs...
+*libs/*
+
