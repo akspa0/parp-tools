@@ -48,6 +48,21 @@ public static class AdtWotlkWriter
         public bool NoZoneFallback { get; init; } = false;
     }
 
+    // Resolve the human-friendly LK continent name used in tgt_mapName_xwalk columns
+    // This differs from Map.dbc directory names (e.g., 0 -> "Eastern Kingdoms", not "Azeroth").
+    private static string? ResolveTargetMapNameFromId(int? mapId)
+    {
+        if (!mapId.HasValue || mapId.Value < 0) return null;
+        return mapId.Value switch
+        {
+            0 => "Eastern Kingdoms",
+            1 => "Kalimdor",
+            530 => "Outland",
+            571 => "Northrend",
+            _ => null,
+        };
+    }
+
     private static bool ValidateTargetMap(int lkAreaId, int? expectedMapId)
     {
         if (lkAreaId <= 0) return true; // allow 0
@@ -185,20 +200,31 @@ public static class AdtWotlkWriter
                     }
                 }
 
-                // Try strategies in order, enforcing cross-map guard when LK DBC is available
+                // Try strategies in order (prefer precise target-map-locked mapping first)
                 bool mapped = false;
-                // 0) CSV numeric direct (src_areaNumber) – scoped by src_mapName to avoid cross-map leakage
+                // 0a) CSV numeric direct by target mapId (guarded by CurrentMapId) with via060 preference
+                if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0
+                    && patchMap.TryMapByTargetViaFirst(currentMapId.Value, aIdNum, out var csvIdNumMap, out var mapVia))
+                {
+                    lkAreaId = csvIdNumMap; method = mapVia ? "patch_csv_num_mapX_via060" : "patch_csv_num_mapX"; mapped = true;
+                }
+                // 0b) CSV numeric direct by target mapName (strict map-locked by name) with via060 preference
+                if (!mapped && patchMap is not null && aIdNum > 0)
+                {
+                    var tgtName = ResolveTargetMapNameFromId(currentMapId);
+                    if (!string.IsNullOrWhiteSpace(tgtName)
+                        && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var csvIdNumMapName, out var nameVia))
+                    {
+                        lkAreaId = csvIdNumMapName; method = nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX"; mapped = true;
+                    }
+                }
+                // 0c) CSV numeric direct (src_areaNumber) – scoped by src_mapName
                 if (!mapped && patchMap is not null && aIdNum > 0 && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvIdNum))
                 {
                     lkAreaId = csvIdNum; method = "patch_csv_num"; mapped = true;
                 }
-                // 0b) CSV numeric direct by target mapId (guarded by CurrentMapId)
-                if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0 && patchMap.TryMapByTarget(currentMapId.Value, aIdNum, out var csvIdNumMap))
-                {
-                    lkAreaId = csvIdNumMap; method = "patch_csv_num_mapX"; mapped = true;
-                }
                 // Strict mode: no other fallbacks
-                if (!mapped) { lkAreaId = 0; method = "fallback0"; }
+                if (!mapped) { lkAreaId = 0; method = "unmapped"; }
 
                 long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
                 if (areaFieldPos + 4 > fileLen) continue;
@@ -767,22 +793,23 @@ public static class AdtWotlkWriter
             int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty; int tgtParent = 0;
             if (alphaRaw >= 0)
             {
-                // Strict: only numeric CSV per-map mapping
-                if (ctx.PatchMapping is not null && ctx.PatchMapping.TryMapBySrcAreaSimple(ctx.MapName, alphaRaw, out var csvNum))
+                // Strict: numeric CSV mapping in order: mapId-locked, mapName-locked, then per-map src-name
+                if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
                 {
-                    lkAreaId = csvNum; reason = "patch_csv_num";
+                    lkAreaId = csvNumMap; reason = "patch_csv_num_mapX";
                 }
-                else
+                else if (ctx.PatchMapping is not null)
                 {
-                    // Try strict mapId-locked numeric fallback
-                    if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
+                    var tName = ResolveTargetMapNameFromId(ctx.CurrentMapId);
+                    if (!string.IsNullOrWhiteSpace(tName) && ctx.PatchMapping.TryMapByTargetName(tName!, alphaRaw, out var csvNumMapName))
                     {
-                        lkAreaId = csvNumMap; reason = "patch_csv_num_mapX";
+                        lkAreaId = csvNumMapName; reason = "patch_csv_num_mapNameX";
                     }
-                    else
+                    else if (ctx.PatchMapping.TryMapBySrcAreaSimple(ctx.MapName, alphaRaw, out var csvNum))
                     {
-                        lkAreaId = 0; reason = "unmapped";
+                        lkAreaId = csvNum; reason = "patch_csv_num";
                     }
+                    else { lkAreaId = 0; reason = "unmapped"; }
                 }
             }
 

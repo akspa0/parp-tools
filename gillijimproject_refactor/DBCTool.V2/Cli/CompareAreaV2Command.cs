@@ -278,7 +278,13 @@ internal sealed class CompareAreaV2Command
             var row = storSrc_Area[key];
             string nm = FirstNonEmpty(SafeField<string>(row, areaNameColSrc)) ?? string.Empty;
             int areaNum = SafeField<int>(row, keyColSrc);
+            // Zone-only mapping: ignore sub rows entirely
             int parentNum = SafeField<int>(row, parentColSrc);
+            if ((areaNum & 0xFFFF) != 0)
+            {
+                continue;
+            }
+
             if (parentNum <= 0) parentNum = areaNum;
             int contRaw = SafeField<int>(row, "ContinentID");
 
@@ -292,22 +298,33 @@ internal sealed class CompareAreaV2Command
             if (cw053To335.TryGetValue(contResolved, out var mx)) { mapIdX = mx; hasMapX = true; }
             else if (mapTgtNames.ContainsKey(contResolved)) { mapIdX = contResolved; hasMapX = true; }
 
-            // Compose source chain strictly by names: zone-only for zones; [zone, sub] for subzones
+            // Compose source chain strictly by zone name (ignore sub components in 0.5.x packed values)
             var chain = new List<string>();
-            if (area_lo16 == 0)
+            string zoneName = string.Empty;
+
+            if (idxSrcZoneByCont.TryGetValue((contResolved, zoneBase), out var zoneRowForChain))
             {
-                // Zone row: use its own name
-                if (!string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
+                zoneName = FirstNonEmpty(SafeField<string>(zoneRowForChain, areaNameColSrc)) ?? string.Empty;
             }
-            else
+
+            if (string.IsNullOrWhiteSpace(zoneName))
             {
-                // Sub row: first resolve zone name from its zone row, then add sub name from current row
-                if (idxSrcZoneByCont.TryGetValue((contResolved, zoneBase), out var zrow))
+                // Fallbacks: use the current row's name (zone rows) or parent-resolved name when missing
+                if (area_lo16 == 0 && !string.IsNullOrWhiteSpace(nm))
                 {
-                    string zname = FirstNonEmpty(SafeField<string>(zrow, areaNameColSrc)) ?? string.Empty;
-                    if (!string.IsNullOrWhiteSpace(zname)) chain.Add(NormKey(zname));
+                    zoneName = nm;
                 }
-                if (!string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
+            }
+
+            if (string.IsNullOrWhiteSpace(zoneName))
+            {
+                // Without a zone name we cannot build a deterministic match; track as unmatched later
+                zoneName = nm;
+            }
+
+            if (!string.IsNullOrWhiteSpace(zoneName))
+            {
+                chain.Add(NormKey(zoneName));
             }
 
             string mapName = mapSrcNames.TryGetValue(contResolved, out var mnSrc) ? mnSrc : string.Empty;
@@ -601,15 +618,42 @@ internal sealed class CompareAreaV2Command
                 int tgtParentId = SafeField<int>(tRow, "ParentAreaID");
                 int tgtMap = SafeField<int>(tRow, "ContinentID");
                 string tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mn) ? mn : string.Empty;
-                // Resolve actual parent row/name; default to self when missing
+                // Promote to top-level zone when the matched record is a child
+                bool promotedToParent = false;
                 if (tgtParentId <= 0) tgtParentId = chosen;
                 string tgtParentName = tgtName;
-                if (tgtParentId != chosen && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
+                if (tgtParentId != chosen && tgtParentId > 0 && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
                 {
-                    tgtParentName = FirstNonEmpty(SafeField<string>(pRow, areaNameColTgt)) ?? tgtName;
+                    promotedToParent = true;
+                    chosen = tgtParentId;
+                    tgtName = FirstNonEmpty(SafeField<string>(pRow, areaNameColTgt)) ?? tgtParentName;
+                    tgtParentName = tgtName;
+                    tgtParentId = chosen;
+                    tgtMap = SafeField<int>(pRow, "ContinentID");
+                    tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mnParent) ? mnParent : tgtMapName;
+                    mapIdX = tgtMap;
+                    hasMapX = true;
+                    mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mnX) ? mnX : mapNameX;
+                    path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{NormKey(tgtName)}" : NormKey(tgtName);
                 }
+                else
+                {
+                    tgtParentName = tgtName;
+                    tgtParentId = chosen;
+                }
+
                 string tgtPath = $"{Norm(tgtMapName)}/{Norm(tgtName)}";
-                if (string.IsNullOrEmpty(method)) method = (depth == chain.Count) ? "exact" : "zone_only";
+                if (string.IsNullOrEmpty(method) || string.Equals(method, "exact", StringComparison.OrdinalIgnoreCase) || string.Equals(method, "zone_only", StringComparison.OrdinalIgnoreCase))
+                {
+                    method = "exact_zone";
+                }
+                if (string.Equals(method, "rename_global_child", StringComparison.OrdinalIgnoreCase)) method = "rename_global";
+                if (string.Equals(method, "rename_fuzzy_child", StringComparison.OrdinalIgnoreCase)) method = "rename_fuzzy";
+                if (string.Equals(method, "rename_exact_global_child", StringComparison.OrdinalIgnoreCase)) method = "rename_exact_global";
+                if (promotedToParent)
+                {
+                    method = method.Contains("_parent", StringComparison.OrdinalIgnoreCase) ? method : $"{method}_parent";
+                }
 
                 var line = string.Join(',', new[]
                 {
@@ -715,7 +759,7 @@ internal sealed class CompareAreaV2Command
                     "-1",
                     string.Empty,
                     string.Empty,
-                    "unmatched"
+                    "unmatched_zone"
                 });
                 unmatched.AppendLine(line);
                 // Append trace row for unmatched when via-060 is on
