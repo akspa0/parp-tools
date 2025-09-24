@@ -93,6 +93,11 @@ internal sealed class CompareAreaV2Command
         var map060Names = new Dictionary<int, string>();
         var cwSrcTo060 = new Dictionary<int, int>();
         var cw060To335 = new Dictionary<int, int>();
+        var midNodeInfo = new Dictionary<(int mapId, int areaNum), AreaNodeInfo>();
+        var midZonesByMap = new Dictionary<int, HashSet<int>>();
+        var midChildrenByParent = new Dictionary<(int mapId, int zoneBase), List<int>>();
+        var midAreaCanonical = new Dictionary<(int mapId, int areaNum), (string name, int priority)>();
+        var midZoneCanonical = new Dictionary<(int mapId, int zoneBase), (string name, int priority)>();
         if (has060)
         {
             stor060_Area = DbdcHelper.LoadTable("AreaTable", CanonicalizeBuild("0.6.0"),  dir060!, dbdProvider, locale);
@@ -108,16 +113,26 @@ internal sealed class CompareAreaV2Command
                 int parentId = SafeField<int>(row, parentCol060);
                 if (parentId <= 0) parentId = id;
                 int mapId = SafeField<int>(row, "ContinentID");
+                bool isZone = parentId == id;
+                int zoneId = isZone ? id : parentId;
+                midNodeInfo[(mapId, id)] = new AreaNodeInfo(id, parentId, mapId, name);
+                PromoteAreaName(midAreaCanonical, (mapId, id), name, 1);
                 id060ToRow[id] = row;
-                if (parentId == id)
+                if (isZone)
                 {
                     if (!idx060TopZonesByMap.TryGetValue(mapId, out var dict)) { dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); idx060TopZonesByMap[mapId] = dict; }
                     dict[NormKey(name)] = id;
+                    if (!midZonesByMap.TryGetValue(mapId, out var zoneSet)) { zoneSet = new HashSet<int>(); midZonesByMap[mapId] = zoneSet; }
+                    zoneSet.Add(zoneId);
+                    PromoteZoneName(midZoneCanonical, (mapId, zoneId), name, 1);
                 }
                 else
                 {
                     if (!idx060ChildrenByZone.TryGetValue(parentId, out var dict)) { dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); idx060ChildrenByZone[parentId] = dict; }
                     dict[NormKey(name)] = id;
+                    var childKey = (mapId, zoneId);
+                    if (!midChildrenByParent.TryGetValue(childKey, out var kids)) { kids = new List<int>(); midChildrenByParent[childKey] = kids; }
+                    kids.Add(id);
                 }
             }
             cwSrcTo060 = crosswalk.Build053To335(storSrc_Map, stor060_Map);
@@ -263,11 +278,13 @@ internal sealed class CompareAreaV2Command
         var crosswalkV3 = new StringBuilder();
         var crosswalkV3Header = string.Join(',', new[]
         {
-            "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_path",
+            "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_mapId_resolved","src_zone_base","src_zone_name","src_area_name","src_path",
             "mid060_areaID","mid060_name","mid060_parentID","mid060_parent_name","mid060_mapId","mid060_mapName","mid060_chain",
             "tgt_areaID","tgt_name","tgt_parentID","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_chain","match_method"
         });
         crosswalkV3.AppendLine(crosswalkV3Header);
+        var perMapCrosswalk = new Dictionary<int, StringBuilder>();
+        var perMapCrosswalkMid = new Dictionary<int, StringBuilder>();
         var header = string.Join(',', new[]
         {
             "src_row_id","src_areaNumber","src_parentNumber","src_zone_hi16","src_sub_lo16","src_parent_hi16","src_parent_lo16",
@@ -747,6 +764,21 @@ internal sealed class CompareAreaV2Command
                     method
                 });
                 mapping.AppendLine(line);
+                string canonicalZoneName = !string.IsNullOrWhiteSpace(lkChainDisplay)
+                    ? lkChainDisplay.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty
+                    : ResolveCanonicalName(srcZoneCanonical, (mapResolved, zoneBase));
+                if (string.IsNullOrWhiteSpace(canonicalZoneName) && !string.IsNullOrWhiteSpace(zoneName))
+                {
+                    canonicalZoneName = zoneName;
+                }
+                string canonicalAreaName = !string.IsNullOrWhiteSpace(lkChainDisplay) && lkChainDisplay.Contains('/')
+                    ? lkChainDisplay.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? string.Empty
+                    : ResolveCanonicalName(srcAreaCanonical, (mapResolved, areaNum));
+                if (string.IsNullOrWhiteSpace(canonicalAreaName) && !string.IsNullOrWhiteSpace(subName))
+                {
+                    canonicalAreaName = subName;
+                }
+
                 var crosswalkLine = string.Join(',', new[]
                 {
                     key.ToString(CultureInfo.InvariantCulture),
@@ -755,6 +787,10 @@ internal sealed class CompareAreaV2Command
                     Csv(nm),
                     contResolved.ToString(CultureInfo.InvariantCulture),
                     Csv(mapName),
+                    mapResolved.ToString(CultureInfo.InvariantCulture),
+                    zoneBase.ToString(CultureInfo.InvariantCulture),
+                    Csv(canonicalZoneName),
+                    Csv(canonicalAreaName),
                     Csv(path),
                     (midChosenId >= 0 ? midChosenId.ToString(CultureInfo.InvariantCulture) : "-1"),
                     Csv(midName),
@@ -773,6 +809,23 @@ internal sealed class CompareAreaV2Command
                     method
                 });
                 crosswalkV3.AppendLine(crosswalkLine);
+                if (!perMapCrosswalk.TryGetValue(mapResolved, out var mapCrosswalk))
+                {
+                    mapCrosswalk = new StringBuilder();
+                    mapCrosswalk.AppendLine(crosswalkV3Header);
+                    perMapCrosswalk[mapResolved] = mapCrosswalk;
+                }
+                mapCrosswalk.AppendLine(crosswalkLine);
+                if (midMapOut >= 0)
+                {
+                    if (!perMapCrosswalkMid.TryGetValue(midMapOut, out var midCrosswalk))
+                    {
+                        midCrosswalk = new StringBuilder();
+                        midCrosswalk.AppendLine(crosswalkV3Header);
+                        perMapCrosswalkMid[midMapOut] = midCrosswalk;
+                    }
+                    midCrosswalk.AppendLine(crosswalkLine);
+                }
                 if (hasMapX)
                 {
                     if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine(patchHeader); perMap[mapIdX] = tuple; }
@@ -882,6 +935,17 @@ internal sealed class CompareAreaV2Command
                     "unmatched_zone"
                 });
                 unmatched.AppendLine(line);
+                int mapResolvedUnmatched = hasMapX ? mapIdX : contResolved;
+                string canonicalZoneNameUn = ResolveCanonicalName(srcZoneCanonical, (mapResolvedUnmatched, zoneBase));
+                if (string.IsNullOrWhiteSpace(canonicalZoneNameUn) && !string.IsNullOrWhiteSpace(zoneName))
+                {
+                    canonicalZoneNameUn = zoneName;
+                }
+                string canonicalAreaNameUn = ResolveCanonicalName(srcAreaCanonical, (mapResolvedUnmatched, areaNum));
+                if (string.IsNullOrWhiteSpace(canonicalAreaNameUn) && !string.IsNullOrWhiteSpace(subName))
+                {
+                    canonicalAreaNameUn = subName;
+                }
                 var crosswalkUnmatched = string.Join(',', new[]
                 {
                     key.ToString(CultureInfo.InvariantCulture),
@@ -890,6 +954,10 @@ internal sealed class CompareAreaV2Command
                     Csv(nm),
                     contResolved.ToString(CultureInfo.InvariantCulture),
                     Csv(mapName),
+                    mapResolvedUnmatched.ToString(CultureInfo.InvariantCulture),
+                    zoneBase.ToString(CultureInfo.InvariantCulture),
+                    Csv(canonicalZoneNameUn),
+                    Csv(canonicalAreaNameUn),
                     Csv(path),
                     (chosen060 >= 0 ? chosen060.ToString(CultureInfo.InvariantCulture) : "-1"),
                     Csv(midName),
@@ -908,6 +976,13 @@ internal sealed class CompareAreaV2Command
                     "unmatched_zone"
                 });
                 crosswalkV3.AppendLine(crosswalkUnmatched);
+                if (!perMapCrosswalk.TryGetValue(mapResolvedUnmatched, out var mapCrosswalkUn))
+                {
+                    mapCrosswalkUn = new StringBuilder();
+                    mapCrosswalkUn.AppendLine(crosswalkV3Header);
+                    perMapCrosswalk[mapResolvedUnmatched] = mapCrosswalkUn;
+                }
+                mapCrosswalkUn.AppendLine(crosswalkUnmatched);
                 // Append trace row for unmatched when via-060 is on
                 if (chainVia060)
                 {
@@ -1004,12 +1079,28 @@ internal sealed class CompareAreaV2Command
         File.WriteAllText(patchPath, patch.ToString(), new UTF8Encoding(true));
         var crosswalkV3Path = Path.Combine(compareV3Dir, $"Area_crosswalk_v3_{srcAlias}_to_335.csv");
         File.WriteAllText(crosswalkV3Path, crosswalkV3.ToString(), new UTF8Encoding(true));
+        foreach (var kv in perMapCrosswalk)
+        {
+            var perMapPath = Path.Combine(compareV3Dir, $"Area_crosswalk_v3_map{kv.Key}_{srcAlias}_to_335.csv");
+            File.WriteAllText(perMapPath, kv.Value.ToString(), new UTF8Encoding(true));
+        }
         var hierarchyYamlPath = Path.Combine(compareV3Dir, "Area_hierarchy_335.yaml");
         var hierarchyYaml = BuildHierarchyYaml(tgtZonesByMap, tgtChildrenByParent, tgtNodeInfo, mapTgtNames);
         File.WriteAllText(hierarchyYamlPath, hierarchyYaml, new UTF8Encoding(true));
         var srcHierarchyYamlPath = Path.Combine(compareV3Dir, $"Area_hierarchy_src_{srcAlias}.yaml");
         var srcHierarchyYaml = BuildSourceHierarchyYaml(srcZonesByMap, srcChildrenByParent, srcNodeInfo, srcZoneCanonical, srcAreaCanonical, mapSrcNames);
         File.WriteAllText(srcHierarchyYamlPath, srcHierarchyYaml, new UTF8Encoding(true));
+        if (has060)
+        {
+            var midYamlPath = Path.Combine(compareV3Dir, "Area_hierarchy_mid_0.6.0.yaml");
+            var midYaml = BuildSourceHierarchyYaml(midZonesByMap, midChildrenByParent, midNodeInfo, midZoneCanonical, midAreaCanonical, map060Names);
+            File.WriteAllText(midYamlPath, midYaml, new UTF8Encoding(true));
+            foreach (var kv in perMapCrosswalkMid)
+            {
+                var midPerMapPath = Path.Combine(compareV3Dir, $"Area_crosswalk_via060_map{kv.Key}_{srcAlias}_to_335.csv");
+                File.WriteAllText(midPerMapPath, kv.Value.ToString(), new UTF8Encoding(true));
+            }
+        }
         if (patchVia060.Length > 0 && chainVia060)
         {
             var patchPathVia060 = Path.Combine(compareV2Dir, $"Area_patch_crosswalk_via060_{srcAlias}_to_335.csv");
