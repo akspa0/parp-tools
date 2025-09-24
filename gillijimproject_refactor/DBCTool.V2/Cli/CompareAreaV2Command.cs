@@ -247,7 +247,8 @@ internal sealed class CompareAreaV2Command
         var trace = new StringBuilder();
         var header = string.Join(',', new[]
         {
-            "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_mapId_xwalk","src_mapName_xwalk","src_path",
+            "src_row_id","src_areaNumber","src_parentNumber","src_zone_hi16","src_sub_lo16","src_parent_hi16","src_parent_lo16",
+            "src_name","src_mapId","src_mapName","src_mapId_xwalk","src_mapName_xwalk","src_path",
             "tgt_id_335","tgt_name","tgt_parent_id","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_path","match_method"
         });
         mapping.AppendLine(header);
@@ -278,13 +279,7 @@ internal sealed class CompareAreaV2Command
             var row = storSrc_Area[key];
             string nm = FirstNonEmpty(SafeField<string>(row, areaNameColSrc)) ?? string.Empty;
             int areaNum = SafeField<int>(row, keyColSrc);
-            // Zone-only mapping: ignore sub rows entirely
             int parentNum = SafeField<int>(row, parentColSrc);
-            if ((areaNum & 0xFFFF) != 0)
-            {
-                continue;
-            }
-
             if (parentNum <= 0) parentNum = areaNum;
             int contRaw = SafeField<int>(row, "ContinentID");
 
@@ -301,6 +296,7 @@ internal sealed class CompareAreaV2Command
             // Compose source chain strictly by zone name (ignore sub components in 0.5.x packed values)
             var chain = new List<string>();
             string zoneName = string.Empty;
+            string subName = area_lo16 > 0 ? nm : string.Empty;
 
             if (idxSrcZoneByCont.TryGetValue((contResolved, zoneBase), out var zoneRowForChain))
             {
@@ -309,22 +305,20 @@ internal sealed class CompareAreaV2Command
 
             if (string.IsNullOrWhiteSpace(zoneName))
             {
-                // Fallbacks: use the current row's name (zone rows) or parent-resolved name when missing
+                // Fallback for zones missing explicit name entries: use the current row when it is the zone itself
                 if (area_lo16 == 0 && !string.IsNullOrWhiteSpace(nm))
                 {
                     zoneName = nm;
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(zoneName))
-            {
-                // Without a zone name we cannot build a deterministic match; track as unmatched later
-                zoneName = nm;
-            }
-
             if (!string.IsNullOrWhiteSpace(zoneName))
             {
                 chain.Add(NormKey(zoneName));
+            }
+            if (area_lo16 > 0 && !string.IsNullOrWhiteSpace(subName))
+            {
+                chain.Add(NormKey(subName));
             }
 
             string mapName = mapSrcNames.TryGetValue(contResolved, out var mnSrc) ? mnSrc : string.Empty;
@@ -333,10 +327,16 @@ internal sealed class CompareAreaV2Command
             string path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{chainPath}" : chainPath;
 
             int chosen = -1; int depth = 0; string method = string.Empty;
+            string lkChainDisplay = string.Empty;
+            string pivotChainDisplay = string.Empty;
             if (!chainVia060 && hasMapX && chain.Count > 0)
             {
                 // Direct 0.5.x → 3.3.5 chain when not forcing via 0.6.0
                 chosen = matcher.TryMatchChainExact(mapIdX, chain, idxTgtTopZonesByMap, idxTgtChildrenByZone, out depth);
+                if (chosen >= 0)
+                {
+                    lkChainDisplay = BuildLkChainDisplay(chosen, tgtIdToRow, areaNameColTgt);
+                }
             }
 
             // Pivot via 0.6.0 (chain) when requested, or as fallback when direct is missing/partial
@@ -470,6 +470,7 @@ internal sealed class CompareAreaV2Command
                             midParentName = forcedParentNameRaw;
                         }
 
+                        pivotChainDisplay = BuildDisplayChain(zoneName060, subName060);
                         var pivotChain = new List<string>();
                         if (!string.IsNullOrWhiteSpace(zoneName060)) pivotChain.Add(NormKey(zoneName060));
                         if (!string.IsNullOrWhiteSpace(subName060)) pivotChain.Add(NormKey(subName060));
@@ -622,7 +623,7 @@ internal sealed class CompareAreaV2Command
                 bool promotedToParent = false;
                 if (tgtParentId <= 0) tgtParentId = chosen;
                 string tgtParentName = tgtName;
-                if (tgtParentId != chosen && tgtParentId > 0 && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
+                if (area_lo16 == 0 && tgtParentId != chosen && tgtParentId > 0 && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
                 {
                     promotedToParent = true;
                     chosen = tgtParentId;
@@ -654,12 +655,22 @@ internal sealed class CompareAreaV2Command
                 {
                     method = method.Contains("_parent", StringComparison.OrdinalIgnoreCase) ? method : $"{method}_parent";
                 }
+                else if (area_lo16 > 0 && !method.Contains("_sub", StringComparison.OrdinalIgnoreCase))
+                {
+                    method = $"{method}_sub";
+                }
+
+                lkChainDisplay = BuildLkChainDisplay(chosen, tgtIdToRow, areaNameColTgt);
 
                 var line = string.Join(',', new[]
                 {
                     key.ToString(CultureInfo.InvariantCulture),
                     areaNum.ToString(CultureInfo.InvariantCulture),
                     parentNum.ToString(CultureInfo.InvariantCulture),
+                    area_hi16.ToString(CultureInfo.InvariantCulture),
+                    area_lo16.ToString(CultureInfo.InvariantCulture),
+                    ((parentNum >> 16) & 0xFFFF).ToString(CultureInfo.InvariantCulture),
+                    (parentNum & 0xFFFF).ToString(CultureInfo.InvariantCulture),
                     Csv(nm),
                     contResolved.ToString(CultureInfo.InvariantCulture),
                     Csv(mapName),
@@ -716,6 +727,9 @@ internal sealed class CompareAreaV2Command
                             Csv(tgtName)
                         }));
                         // Trace for matched rows
+                        var pivotOut = !string.IsNullOrWhiteSpace(pivotChainDisplay) ? pivotChainDisplay : pivotChainDesc;
+                        var lkOut = !string.IsNullOrWhiteSpace(lkChainDisplay) ? lkChainDisplay : lkChainDesc;
+
                         var tr = string.Join(',', new[]
                         {
                             key.ToString(CultureInfo.InvariantCulture),
@@ -725,9 +739,9 @@ internal sealed class CompareAreaV2Command
                             contResolved.ToString(CultureInfo.InvariantCulture),
                             Csv(string.Join('/', chain)),
                             (midMapOut >= 0 ? midMapOut.ToString(CultureInfo.InvariantCulture) : "-1"),
-                            Csv(pivotChainDesc),
+                            Csv(pivotOut),
                             (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
-                            Csv(lkChainDesc),
+                            Csv(lkOut),
                             chosen.ToString(CultureInfo.InvariantCulture),
                             depth.ToString(CultureInfo.InvariantCulture),
                             method
@@ -746,6 +760,10 @@ internal sealed class CompareAreaV2Command
                     key.ToString(CultureInfo.InvariantCulture),
                     areaNum.ToString(CultureInfo.InvariantCulture),
                     parentNum.ToString(CultureInfo.InvariantCulture),
+                    area_hi16.ToString(CultureInfo.InvariantCulture),
+                    area_lo16.ToString(CultureInfo.InvariantCulture),
+                    ((parentNum >> 16) & 0xFFFF).ToString(CultureInfo.InvariantCulture),
+                    (parentNum & 0xFFFF).ToString(CultureInfo.InvariantCulture),
                     Csv(nm),
                     contResolved.ToString(CultureInfo.InvariantCulture),
                     Csv(mapName),
@@ -765,6 +783,9 @@ internal sealed class CompareAreaV2Command
                 // Append trace row for unmatched when via-060 is on
                 if (chainVia060)
                 {
+                    var pivotOut = !string.IsNullOrWhiteSpace(pivotChainDisplay) ? pivotChainDisplay : pivotChainDesc;
+                    var lkOut = !string.IsNullOrWhiteSpace(lkChainDisplay) ? lkChainDisplay : lkChainDesc;
+
                     var tr = string.Join(',', new[]
                     {
                         key.ToString(CultureInfo.InvariantCulture),
@@ -774,9 +795,9 @@ internal sealed class CompareAreaV2Command
                         contResolved.ToString(CultureInfo.InvariantCulture),
                         Csv(string.Join('/', chain)),
                         (pivotMapIdX >= 0 ? pivotMapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
-                        Csv(pivotChainDesc),
+                        Csv(pivotOut),
                         (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
-                        Csv(lkChainDesc),
+                        Csv(lkOut),
                         "-1",
                         "0",
                         "unmatched"
@@ -892,6 +913,37 @@ internal sealed class CompareAreaV2Command
 
         Console.WriteLine("[V2] Wrote mapping/unmatched/patch CSVs under compare/v2/ and audit CSVs under compare/.");
         return 0;
+    }
+
+    private static string BuildDisplayChain(string? zoneName, string? subName)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(zoneName)) parts.Add(zoneName.Trim());
+        if (!string.IsNullOrWhiteSpace(subName)) parts.Add(subName.Trim());
+        return string.Join('/', parts);
+    }
+
+    private static string BuildLkChainDisplay(int lkAreaId, Dictionary<int, DBCDRow> tgtIdToRow, string areaNameColTgt)
+    {
+        if (!tgtIdToRow.TryGetValue(lkAreaId, out var row))
+        {
+            return string.Empty;
+        }
+
+        int parentId = SafeField<int>(row, "ParentAreaID");
+        if (parentId <= 0 || parentId == lkAreaId)
+        {
+            string name = FirstNonEmpty(SafeField<string>(row, areaNameColTgt)) ?? string.Empty;
+            return BuildDisplayChain(name, null);
+        }
+
+        string zoneName = string.Empty;
+        if (tgtIdToRow.TryGetValue(parentId, out var pRow))
+        {
+            zoneName = FirstNonEmpty(SafeField<string>(pRow, areaNameColTgt)) ?? string.Empty;
+        }
+        string subName = FirstNonEmpty(SafeField<string>(row, areaNameColTgt)) ?? string.Empty;
+        return BuildDisplayChain(zoneName, subName);
     }
 
     // Simple edit distance for fuzzy rename (Levenshtein)

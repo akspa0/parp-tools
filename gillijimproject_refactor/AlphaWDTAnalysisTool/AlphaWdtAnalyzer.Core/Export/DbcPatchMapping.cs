@@ -1,10 +1,3 @@
-    private static int NormalizeZone(int areaNumber)
-    {
-        if (areaNumber <= 0) return areaNumber;
-        int hi = (areaNumber >> 16) & 0xFFFF;
-        return hi << 16;
-    }
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -31,6 +24,25 @@ public sealed class DbcPatchMapping
     private readonly Dictionary<string, Dictionary<int, int>> _byTgtNameXVia = new(StringComparer.OrdinalIgnoreCase); // via060 only
     private readonly Dictionary<int, (int target, bool via)> _bySrcAreaBest = new(); // src_areaNumber -> best tgt_areaID, prefer via060
     private readonly Dictionary<string, Dictionary<int, (int target, bool via)>> _bestBySrcNameArea = new(StringComparer.OrdinalIgnoreCase); // src_mapName -> (src_areaNumber -> best tgt)
+    private readonly Dictionary<int, ZoneEntry> _zoneByBase = new(); // zoneBase -> entry
+    private readonly Dictionary<int, Dictionary<int, ZoneEntry>> _subByZoneBase = new(); // zoneBase -> (subLo -> entry)
+
+    private readonly struct ZoneEntry
+    {
+        public ZoneEntry(int targetId, int targetParentId, int targetMapId, bool via060)
+        {
+            TargetId = targetId;
+            TargetParentId = targetParentId;
+            TargetMapId = targetMapId;
+            Via060 = via060;
+        }
+
+        public int TargetId { get; }
+        public int TargetParentId { get; }
+        public int TargetMapId { get; }
+        public bool Via060 { get; }
+        public bool IsChild => TargetParentId > 0 && TargetParentId != TargetId;
+    }
 
     // Strict mode: no inferred targets, no LK dump usage in numeric mapping.
 
@@ -91,7 +103,6 @@ public sealed class DbcPatchMapping
                 if (srcAreaIdx < 0 || srcAreaIdx >= cells.Length) continue;
                 if (tgtIdIdx < 0 || tgtIdIdx >= cells.Length) continue;
                 if (!int.TryParse(cells[srcAreaIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var sArea)) continue;
-                var zoneArea = NormalizeZone(sArea);
                 if (!int.TryParse(cells[tgtIdIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tId)) continue;
                 int tMapX = -1;
                 if (tgtMapXIdx >= 0 && tgtMapXIdx < cells.Length)
@@ -102,7 +113,7 @@ public sealed class DbcPatchMapping
                 int? tParOpt = null;
                 if (tgtParentIdx >= 0 && tgtParentIdx < cells.Length && int.TryParse(cells[tgtParentIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tParHdr))
                     tParOpt = tParHdr;
-                Insert(sMap, zoneArea, tId, sMapName, tMapX, tMapNameX, isVia060, tParOpt);
+                Insert(sMap, sArea, tId, sMapName, tMapX, tMapNameX, isVia060, tParOpt);
                 if (tgtNameIdx >= 0 && tgtNameIdx < cells.Length)
                 {
                     var nm = cells[tgtNameIdx]?.Trim();
@@ -119,7 +130,6 @@ public sealed class DbcPatchMapping
                     int.TryParse(cells2[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var sMap);
                     string sMapName = (cells2.Length > 1 ? (cells2[1] ?? string.Empty).Trim() : string.Empty);
                     if (!int.TryParse(cells2[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var sArea)) continue;
-                    var zoneArea = NormalizeZone(sArea);
                     if (!int.TryParse(cells2[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tId)) continue;
                     int tMapX = -1;
                     if (cells2.Length > 5)
@@ -128,7 +138,7 @@ public sealed class DbcPatchMapping
                     int? tParOpt = null;
                     if (cells2.Length >= 9 && int.TryParse(cells2[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tPar2))
                         tParOpt = tPar2;
-                    Insert(sMap, zoneArea, tId, sMapName, tMapX, tMapNameX, isVia060, tParOpt);
+                    Insert(sMap, sArea, tId, sMapName, tMapX, tMapNameX, isVia060, tParOpt);
                     // Name at index 9 if present
                     if (cells2.Length >= 10)
                     {
@@ -145,8 +155,7 @@ public sealed class DbcPatchMapping
     public bool TryMap(int srcMapId, int srcAreaNumber, out int targetId)
     {
         // Strict: only return when explicit per-map entry exists
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (_bySrcMap.TryGetValue(srcMapId, out var dict) && dict.TryGetValue(zoneArea, out targetId))
+        if (_bySrcMap.TryGetValue(srcMapId, out var dict) && dict.TryGetValue(srcAreaNumber, out targetId))
             return true;
         targetId = 0;
         return false;
@@ -154,8 +163,7 @@ public sealed class DbcPatchMapping
 
     public bool TryMapByName(string srcMapName, int srcAreaNumber, out int targetId)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (!string.IsNullOrWhiteSpace(srcMapName) && _bySrcName.TryGetValue(srcMapName, out var dict) && dict.TryGetValue(zoneArea, out targetId))
+        if (!string.IsNullOrWhiteSpace(srcMapName) && _bySrcName.TryGetValue(srcMapName, out var dict) && dict.TryGetValue(srcAreaNumber, out targetId))
             return true;
         targetId = 0;
         return false;
@@ -163,8 +171,7 @@ public sealed class DbcPatchMapping
 
     public bool TryMapByTarget(int tgtMapIdX, int srcAreaNumber, out int targetId)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (_byTgtMapX.TryGetValue(tgtMapIdX, out var dict) && dict.TryGetValue(zoneArea, out targetId)) return true;
+        if (_byTgtMapX.TryGetValue(tgtMapIdX, out var dict) && dict.TryGetValue(srcAreaNumber, out targetId)) return true;
         targetId = 0;
         return false;
     }
@@ -172,9 +179,8 @@ public sealed class DbcPatchMapping
     // Prefer via060 mapping when present; expose whether the hit came from via060
     public bool TryMapByTargetViaFirst(int tgtMapIdX, int srcAreaNumber, out int targetId, out bool via060)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (_byTgtMapXVia.TryGetValue(tgtMapIdX, out var dVia) && dVia.TryGetValue(zoneArea, out targetId)) { via060 = true; return true; }
-        if (_byTgtMapX.TryGetValue(tgtMapIdX, out var dAny) && dAny.TryGetValue(zoneArea, out targetId)) { via060 = false; return true; }
+        if (_byTgtMapXVia.TryGetValue(tgtMapIdX, out var dVia) && dVia.TryGetValue(srcAreaNumber, out targetId)) { via060 = true; return true; }
+        if (_byTgtMapX.TryGetValue(tgtMapIdX, out var dAny) && dAny.TryGetValue(srcAreaNumber, out targetId)) { via060 = false; return true; }
         targetId = 0; via060 = false; return false;
     }
 
@@ -182,10 +188,9 @@ public sealed class DbcPatchMapping
     // Prefer via060 when available, but accept non-via if via is absent.
     public bool TryMapBySrcAreaSimple(string srcMapName, int srcAreaNumber, out int targetId)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
         if (!string.IsNullOrWhiteSpace(srcMapName)
             && _bestBySrcNameArea.TryGetValue(srcMapName, out var dict)
-            && dict.TryGetValue(zoneArea, out var rec))
+            && dict.TryGetValue(srcAreaNumber, out var rec))
         {
             targetId = rec.target;
             return targetId > 0;
@@ -196,27 +201,24 @@ public sealed class DbcPatchMapping
 
     public bool TryMapByTargetName(string tgtMapName, int srcAreaNumber, out int targetId)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameX.TryGetValue(tgtMapName, out var dict) && dict.TryGetValue(zoneArea, out targetId)) return true;
+        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameX.TryGetValue(tgtMapName, out var dict) && dict.TryGetValue(srcAreaNumber, out targetId)) return true;
         targetId = 0;
         return false;
     }
 
     public bool TryMapByTargetNameViaFirst(string tgtMapName, int srcAreaNumber, out int targetId, out bool via060)
     {
-        var zoneArea = NormalizeZone(srcAreaNumber);
-        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameXVia.TryGetValue(tgtMapName, out var dVia) && dVia.TryGetValue(zoneArea, out targetId)) { via060 = true; return true; }
-        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameX.TryGetValue(tgtMapName, out var dAny) && dAny.TryGetValue(zoneArea, out targetId)) { via060 = false; return true; }
+        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameXVia.TryGetValue(tgtMapName, out var dVia) && dVia.TryGetValue(srcAreaNumber, out targetId)) { via060 = true; return true; }
+        if (!string.IsNullOrWhiteSpace(tgtMapName) && _byTgtNameX.TryGetValue(tgtMapName, out var dAny) && dAny.TryGetValue(srcAreaNumber, out targetId)) { via060 = false; return true; }
         targetId = 0; via060 = false; return false;
     }
 
     public bool TryMapByAnyTarget(int srcAreaNumber, out int targetId)
     {
         int hits = 0; int cand = 0;
-        var zoneArea = NormalizeZone(srcAreaNumber);
         foreach (var kv in _byTgtMapX)
         {
-            if (kv.Value.TryGetValue(zoneArea, out var tid))
+            if (kv.Value.TryGetValue(srcAreaNumber, out var tid))
             {
                 hits++; cand = tid;
                 if (hits > 1) break;
@@ -228,6 +230,9 @@ public sealed class DbcPatchMapping
 
     private void Insert(int srcMapId, int srcAreaNumber, int targetId, string? srcMapName, int tgtMapIdX, string? tgtMapNameX, bool isVia060, int? tgtParentId)
     {
+        int zoneBase = (srcAreaNumber & unchecked((int)0xFFFF0000));
+        int subLo = srcAreaNumber & 0xFFFF;
+
         if (srcMapId >= 0)
         {
             if (!_bySrcMap.TryGetValue(srcMapId, out var dict)) { dict = new Dictionary<int, int>(); _bySrcMap[srcMapId] = dict; }
@@ -250,10 +255,13 @@ public sealed class DbcPatchMapping
         }
         if (!string.IsNullOrWhiteSpace(srcMapName))
         {
-            if (!_bySrcName.TryGetValue(srcMapName, out var byArea)) { byArea = new Dictionary<int, int>(); _bySrcName[srcMapName] = byArea; }
+            if (!_bySrcName.TryGetValue(srcMapName, out var byArea))
+            {
+                byArea = new Dictionary<int, int>();
+                _bySrcName[srcMapName] = byArea;
+            }
             byArea[srcAreaNumber] = targetId;
 
-            // Strict per-map numeric mapping: accept any non-zero target for this src_mapName; prefer via060 when both exist
             if (targetId > 0)
             {
                 if (!_bestBySrcNameArea.TryGetValue(srcMapName, out var bestDict))
@@ -261,20 +269,24 @@ public sealed class DbcPatchMapping
                     bestDict = new Dictionary<int, (int target, bool via)>();
                     _bestBySrcNameArea[srcMapName] = bestDict;
                 }
+
                 if (bestDict.TryGetValue(srcAreaNumber, out var cur2))
                 {
-                    // Replace only if current is non-via and new is via060
+                    // Prefer via060 over non-via
                     if (!cur2.via && isVia060)
+                    {
                         bestDict[srcAreaNumber] = (targetId, true);
+                    }
                     else if (cur2.via == isVia060 && tgtParentId.HasValue)
                     {
-                        // If both have same via flag, prefer child target (tgt_parentid > 0) over parent
+                        // Prefer child matches when both have same via flag
                         var curIsChild = _tgtParentById.TryGetValue(cur2.target, out var p1) && p1 > 0;
                         var newIsChild = tgtParentId.Value > 0;
                         if (newIsChild && !curIsChild)
+                        {
                             bestDict[srcAreaNumber] = (targetId, isVia060);
+                        }
                     }
-                    // else keep existing mapping
                 }
                 else
                 {
@@ -359,6 +371,45 @@ public sealed class DbcPatchMapping
         {
             _tgtParentById[targetId] = tgtParentId.Value;
         }
+
+        var entry = new ZoneEntry(targetId, tgtParentId ?? 0, tgtMapIdX, isVia060);
+        if (subLo == 0)
+        {
+            // Zone-level entry
+            if (!_zoneByBase.TryGetValue(zoneBase, out var existing))
+            {
+                _zoneByBase[zoneBase] = entry;
+            }
+            else if (ShouldReplace(existing, entry))
+            {
+                _zoneByBase[zoneBase] = entry;
+            }
+        }
+        else
+        {
+            if (!_subByZoneBase.TryGetValue(zoneBase, out var dict))
+            {
+                dict = new Dictionary<int, ZoneEntry>();
+                _subByZoneBase[zoneBase] = dict;
+            }
+            if (!dict.TryGetValue(subLo, out var existingSub) || ShouldReplace(existingSub, entry))
+            {
+                dict[subLo] = entry;
+            }
+        }
+    }
+
+    private static bool ShouldReplace(ZoneEntry existing, ZoneEntry candidate)
+    {
+        if (candidate.TargetId <= 0) return false;
+        if (existing.TargetId <= 0) return true;
+        if (!existing.Via060 && candidate.Via060) return true;
+        if (existing.Via060 == candidate.Via060)
+        {
+            // Prefer child over parent
+            if (!existing.IsChild && candidate.IsChild) return true;
+        }
+        return false;
     }
 
     // No LK dump or heuristic resolution in strict mode
