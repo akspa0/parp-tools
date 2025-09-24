@@ -28,13 +28,14 @@
   - CompareArea V2 implemented in `DBCTool.V2/Cli/CompareAreaV2Command.cs` with strict map-locked matching, optional 0.6.0 pivot, and stable CSV outputs (`mapping`/`unmatched`/`patch`/`patch_via060`/`trace`).
   - Crosswalks resolved for 0.5.x → 3.3.5 and via 0.6.0 when requested; path composition uses `contResolved`.
   - `053-viz/csv/*` generated (asset listings and ID-range summaries).
+  - CSV schema now exposes `tgt_child_ids` / `tgt_child_names`, enabling LK child hierarchy inspection.
 
 - Known Issues
   - `053-viz/viz/maps/Azeroth/index.html` is static and renders only AreaID 0; it is not wired to DBCTool outputs.
   - `DeadminesInstance` shows AreaIDs as 0 in visualization despite expected matches in 0.6.0 and 3.3.5.
+  - Alpha ADTs often emit parent-only AreaIDs; exporter currently lacks pivot-powered fallback to resolve LK child IDs.
 
 - Next Steps
-  - Inspect `trace.csv` for Deadmines rows to verify `method`, `depth`, and `mapIdX`.
-  - Validate 0.6.0 pivot behavior and child indices for instance maps; confirm LK re-parenting rules where applicable.
+  - Implement Plan 002: reinstate 0.6.0 pivot columns, extend `DbcPatchMapping`/`AdtWotlkWriter` to consume them, and verify sub-zone exports across outdoor + instance tiles.
   - Rewire visualization to consume DBCTool V2 CSV outputs for coloring instead of ADT-embedded area metadata.
-  - Add focused tests for instances and oddities to prevent regressions.
+  - Add focused tests for instances and oddities to prevent regressions once exporter logic stabilizes.

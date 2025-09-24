@@ -26,6 +26,10 @@ public sealed class DbcPatchMapping
     private readonly Dictionary<string, Dictionary<int, (int target, bool via)>> _bestBySrcNameArea = new(StringComparer.OrdinalIgnoreCase); // src_mapName -> (src_areaNumber -> best tgt)
     private readonly Dictionary<int, ZoneEntry> _zoneByBase = new(); // zoneBase -> entry
     private readonly Dictionary<int, Dictionary<int, ZoneEntry>> _subByZoneBase = new(); // zoneBase -> (subLo -> entry)
+    private readonly Dictionary<int, MidEntry> _midBySrcArea = new(); // src_areaNumber -> mid info
+    private readonly Dictionary<int, (int targetId, bool via)> _tgtByMidArea = new(); // mid_areaID -> target areaID
+    private readonly Dictionary<int, IReadOnlyList<int>> _childIdsByTarget = new(); // tgt_zoneId -> child areaIDs
+    private readonly Dictionary<int, IReadOnlyList<string>> _childNamesByTarget = new(); // tgt_zoneId -> child names
 
     private readonly struct ZoneEntry
     {
@@ -44,6 +48,24 @@ public sealed class DbcPatchMapping
         public bool IsChild => TargetParentId > 0 && TargetParentId != TargetId;
     }
 
+    private readonly struct MidEntry
+    {
+        public MidEntry(int midAreaId, int midMapId, int midParentId, string midChain, bool via060)
+        {
+            MidAreaId = midAreaId;
+            MidMapId = midMapId;
+            MidParentId = midParentId;
+            MidChain = midChain;
+            Via060 = via060;
+        }
+
+        public int MidAreaId { get; }
+        public int MidMapId { get; }
+        public int MidParentId { get; }
+        public string MidChain { get; }
+        public bool Via060 { get; }
+    }
+
     // Strict mode: no inferred targets, no LK dump usage in numeric mapping.
 
     public void LoadFile(string csvPath)
@@ -55,6 +77,8 @@ public sealed class DbcPatchMapping
         bool hasHeader = false;
         bool isVia060 = csvPath.IndexOf("via060", StringComparison.OrdinalIgnoreCase) >= 0;
         string[]? headerCols = null;
+        int midMapIdx = -1, midAreaIdx = -1, midParentIdx = -1, midChainIdx = -1;
+        int childIdsIdx = -1, childNamesIdx = -1;
         if (header is not null)
         {
             var cols = SplitCsv(header);
@@ -70,6 +94,12 @@ public sealed class DbcPatchMapping
                 else if (c == "tgt_mapname_xwalk") tgtMapNameXIdx = i;
                 else if (c == "tgt_name") tgtNameIdx = i;
                 else if (c == "tgt_parentid") tgtParentIdx = i;
+                else if (c == "mid060_mapid") midMapIdx = i;
+                else if (c == "mid060_areaid") midAreaIdx = i;
+                else if (c == "mid060_parentid") midParentIdx = i;
+                else if (c == "mid060_chain") midChainIdx = i;
+                else if (c == "tgt_child_ids") childIdsIdx = i;
+                else if (c == "tgt_child_names") childNamesIdx = i;
                 // keep src_name if present
                 else if (c == "src_name") { /* captured later via index lookup */ }
             }
@@ -120,6 +150,66 @@ public sealed class DbcPatchMapping
                     if (!string.IsNullOrEmpty(nm) && !_tgtNameById.ContainsKey(tId)) _tgtNameById[tId] = nm;
                 }
                 if (tParOpt.HasValue && tParOpt.Value > 0) _tgtParentById[tId] = tParOpt.Value;
+
+                // Capture mid/pivot metadata when available
+                int midMapId = -1;
+                if (midMapIdx >= 0 && midMapIdx < cells.Length)
+                    int.TryParse(cells[midMapIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out midMapId);
+                int midAreaId = -1;
+                if (midAreaIdx >= 0 && midAreaIdx < cells.Length)
+                    int.TryParse(cells[midAreaIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out midAreaId);
+                int midParentId = -1;
+                if (midParentIdx >= 0 && midParentIdx < cells.Length)
+                    int.TryParse(cells[midParentIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out midParentId);
+                string midChain = string.Empty;
+                if (midChainIdx >= 0 && midChainIdx < cells.Length)
+                    midChain = (cells[midChainIdx] ?? string.Empty).Trim();
+
+                if (midAreaId > 0)
+                {
+                    _midBySrcArea[sArea] = new MidEntry(midAreaId, midMapId, midParentId, midChain, isVia060);
+                    if (tId > 0)
+                    {
+                        if (!_tgtByMidArea.TryGetValue(midAreaId, out var existing) || (!existing.via && isVia060))
+                        {
+                            _tgtByMidArea[midAreaId] = (tId, isVia060);
+                        }
+                    }
+                }
+
+                if (childIdsIdx >= 0 && childIdsIdx < cells.Length && tId > 0)
+                {
+                    var rawIds = cells[childIdsIdx]?.Trim();
+                    if (!string.IsNullOrEmpty(rawIds))
+                    {
+                        var splitIds = rawIds.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        var parsedIds = new List<int>(splitIds.Length);
+                        foreach (var part in splitIds)
+                        {
+                            if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var cid) && cid > 0)
+                            {
+                                parsedIds.Add(cid);
+                            }
+                        }
+                        if (parsedIds.Count > 0)
+                        {
+                            var distinct = parsedIds.Distinct().OrderBy(x => x).ToArray();
+                            _childIdsByTarget[tId] = distinct;
+                        }
+                    }
+                }
+                if (childNamesIdx >= 0 && childNamesIdx < cells.Length && tId > 0)
+                {
+                    var rawNames = cells[childNamesIdx]?.Trim();
+                    if (!string.IsNullOrEmpty(rawNames))
+                    {
+                        var splitNames = rawNames.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        if (splitNames.Length > 0)
+                        {
+                            _childNamesByTarget[tId] = splitNames.ToArray();
+                        }
+                    }
+                }
             }
             else
             {
@@ -226,6 +316,99 @@ public sealed class DbcPatchMapping
         }
         if (hits == 1) { targetId = cand; return true; }
         targetId = 0; return false;
+    }
+
+    public bool TryMapSubZone(int zoneBase, int subLo, int? mapIdHint, out int targetId, out bool via060)
+    {
+        targetId = 0; via060 = false;
+        if (zoneBase == 0 || subLo <= 0) return false;
+        if (_subByZoneBase.TryGetValue(zoneBase, out var dict) && dict.TryGetValue(subLo, out var entry))
+        {
+            if (!MatchesMap(entry, mapIdHint)) return false;
+            if (entry.TargetId <= 0) return false;
+            targetId = entry.TargetId;
+            via060 = entry.Via060;
+            return true;
+        }
+        return false;
+    }
+
+    public bool TryMapZone(int zoneBase, int? mapIdHint, out int targetId, out bool via060)
+    {
+        targetId = 0; via060 = false;
+        if (zoneBase == 0) return false;
+        if (_zoneByBase.TryGetValue(zoneBase, out var entry))
+        {
+            if (!MatchesMap(entry, mapIdHint)) return false;
+            if (entry.TargetId <= 0) return false;
+            targetId = entry.TargetId;
+            via060 = entry.Via060;
+            return true;
+        }
+        return false;
+    }
+
+    public bool TryMapBySrcAreaNumber(int srcAreaNumber, out int targetId, out bool via060)
+    {
+        targetId = 0; via060 = false;
+        if (_bySrcAreaBest.TryGetValue(srcAreaNumber, out var rec))
+        {
+            if (rec.target > 0)
+            {
+                targetId = rec.target;
+                via060 = rec.via;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public bool TryMapViaMid(int srcAreaNumber, out int targetId, out int midAreaId, out bool via060)
+    {
+        targetId = 0;
+        midAreaId = 0;
+        via060 = false;
+        if (_midBySrcArea.TryGetValue(srcAreaNumber, out var mid))
+        {
+            midAreaId = mid.MidAreaId;
+            via060 = mid.Via060;
+            if (mid.MidAreaId > 0 && _tgtByMidArea.TryGetValue(mid.MidAreaId, out var pair))
+            {
+                targetId = pair.targetId;
+                if (pair.via) via060 = true;
+                return targetId > 0;
+            }
+        }
+        return false;
+    }
+
+    public bool TryGetMidInfo(int srcAreaNumber, out int midAreaId, out int midMapId, out int midParentId, out string midChain, out bool via060)
+    {
+        if (_midBySrcArea.TryGetValue(srcAreaNumber, out var mid))
+        {
+            midAreaId = mid.MidAreaId;
+            midMapId = mid.MidMapId;
+            midParentId = mid.MidParentId;
+            midChain = mid.MidChain;
+            via060 = mid.Via060;
+            return true;
+        }
+        midAreaId = 0;
+        midMapId = -1;
+        midParentId = -1;
+        midChain = string.Empty;
+        via060 = false;
+        return false;
+    }
+
+    public IReadOnlyList<int> GetChildCandidateIds(int targetZoneId)
+    {
+        return _childIdsByTarget.TryGetValue(targetZoneId, out var list) ? list : Array.Empty<int>();
+    }
+
+    public IReadOnlyList<string> GetChildCandidateNames(int targetZoneId)
+    {
+        return _childNamesByTarget.TryGetValue(targetZoneId, out var list) ? list : Array.Empty<string>();
     }
 
     private void Insert(int srcMapId, int srcAreaNumber, int targetId, string? srcMapName, int tgtMapIdX, string? tgtMapNameX, bool isVia060, int? tgtParentId)
@@ -397,6 +580,13 @@ public sealed class DbcPatchMapping
                 dict[subLo] = entry;
             }
         }
+    }
+
+    private static bool MatchesMap(ZoneEntry entry, int? mapIdHint)
+    {
+        if (!mapIdHint.HasValue || mapIdHint.Value < 0) return true;
+        if (entry.TargetMapId < 0) return true;
+        return entry.TargetMapId == mapIdHint.Value;
     }
 
     private static bool ShouldReplace(ZoneEntry existing, ZoneEntry candidate)

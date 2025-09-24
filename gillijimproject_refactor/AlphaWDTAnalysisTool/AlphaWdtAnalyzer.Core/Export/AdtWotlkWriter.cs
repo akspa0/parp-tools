@@ -162,6 +162,12 @@ public static class AdtWotlkWriter
 
         int present = 0, patched = 0;
         int debugPrinted = 0;
+        List<string>? verboseLog = verbose ? new List<string>() : null;
+
+        static string NormalizeNameToken(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant();
+        }
         // Pre-read MCIN offsets to avoid 256 seeks per ADT
         byte[] mcinBytes = Array.Empty<byte>();
         if (mcinDataPos >= 0 && mcinSize >= 16)
@@ -202,6 +208,94 @@ public static class AdtWotlkWriter
 
                 // Try strategies in order (prefer precise target-map-locked mapping first)
                 bool mapped = false;
+                int zoneBase = aIdNum & unchecked((int)0xFFFF0000);
+                int subLo = aIdNum & 0xFFFF;
+
+                int midAreaHint = 0;
+                int midMapHint = -1;
+                int midParentHint = -1;
+                string midChainHint = string.Empty;
+                bool midViaHint = false;
+                bool hasMidInfo = false;
+                if (patchMap is not null && aIdNum > 0)
+                {
+                    hasMidInfo = patchMap.TryGetMidInfo(aIdNum, out midAreaHint, out midMapHint, out midParentHint, out midChainHint, out midViaHint);
+                }
+
+                bool hasZoneCandidate = false;
+                int zoneCandidateId = 0;
+                bool zoneCandidateVia = false;
+                if (patchMap is not null && aIdNum > 0 && zoneBase != 0)
+                {
+                    hasZoneCandidate = patchMap.TryMapZone(zoneBase, currentMapId, out zoneCandidateId, out zoneCandidateVia);
+                }
+
+                // -1) CSV lookups keyed by hi/lo pairs and per-map area numbers
+                if (!mapped && patchMap is not null && aIdNum > 0)
+                {
+                    if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var csvSubId, out var viaSub))
+                    {
+                        lkAreaId = csvSubId; method = viaSub ? "patch_csv_sub_via060" : "patch_csv_sub"; mapped = true;
+                    }
+                    else if (patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvByName))
+                    {
+                        lkAreaId = csvByName; method = "patch_csv_num"; mapped = true;
+                    }
+                    else if (patchMap.TryMapBySrcAreaNumber(aIdNum, out var csvExactId, out var viaExact))
+                    {
+                        lkAreaId = csvExactId; method = viaExact ? "patch_csv_exact_via060" : "patch_csv_exact"; mapped = true;
+                    }
+                    else if (patchMap.TryMapViaMid(aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
+                    {
+                        lkAreaId = csvMidId; method = viaMid ? "patch_csv_mid_via060" : "patch_csv_mid"; mapped = true;
+                        if (!hasMidInfo && midAreaResolved > 0)
+                        {
+                            midAreaHint = midAreaResolved;
+                        }
+                    }
+                }
+
+                if (!mapped && hasZoneCandidate && hasMidInfo)
+                {
+                    var childIds = patchMap.GetChildCandidateIds(zoneCandidateId);
+                    var childNames = patchMap.GetChildCandidateNames(zoneCandidateId);
+                    if (childIds.Count > 0 && childNames.Count > 0)
+                    {
+                        var tokens = new List<string>();
+                        void AddToken(string value)
+                        {
+                            var norm = NormalizeNameToken(value);
+                            if (!string.IsNullOrEmpty(norm) && !tokens.Contains(norm)) tokens.Add(norm);
+                        }
+
+                        AddToken(midChainHint);
+                        if (!string.IsNullOrWhiteSpace(midChainHint))
+                        {
+                            var segments = midChainHint.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                            foreach (var seg in segments)
+                            {
+                                AddToken(seg);
+                            }
+                        }
+
+                        for (int idx = 0; idx < Math.Min(childIds.Count, childNames.Count); idx++)
+                        {
+                            var childNorm = NormalizeNameToken(childNames[idx]);
+                            if (tokens.Count == 0 || tokens.Contains(childNorm))
+                            {
+                                lkAreaId = childIds[idx];
+                                method = (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child";
+                                mapped = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!mapped && hasZoneCandidate)
+                {
+                    lkAreaId = zoneCandidateId; method = zoneCandidateVia ? "patch_csv_zone_via060" : "patch_csv_zone"; mapped = true;
+                }
                 // 0a) CSV numeric direct by target mapId (guarded by CurrentMapId) with via060 preference
                 if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0
                     && patchMap.TryMapByTargetViaFirst(currentMapId.Value, aIdNum, out var csvIdNumMap, out var mapVia))
@@ -218,11 +312,7 @@ public static class AdtWotlkWriter
                         lkAreaId = csvIdNumMapName; method = nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX"; mapped = true;
                     }
                 }
-                // 0c) CSV numeric direct (src_areaNumber) – scoped by src_mapName
-                if (!mapped && patchMap is not null && aIdNum > 0 && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvIdNum))
-                {
-                    lkAreaId = csvIdNum; method = "patch_csv_num"; mapped = true;
-                }
+                // 0c) (reserved) -- handled in -1 block above
                 // Strict mode: no other fallbacks
                 if (!mapped) { lkAreaId = 0; method = "unmapped"; }
 
@@ -232,23 +322,30 @@ public static class AdtWotlkWriter
                 long save = fs.Position;
                 fs.Position = areaFieldPos;
                 uint existing = br.ReadUInt32();
+                string logEntry = $"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) midArea={midAreaHint} midChain='{midChainHint}' zoneBase=0x{zoneBase:X} subLo=0x{subLo:X} existing={existing} (0x{existing:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method}";
+                verboseLog?.Add(logEntry);
+
                 if (existing != (uint)lkAreaId)
                 {
                     fs.Position = areaFieldPos;
                     bw.Write((uint)lkAreaId);
                     patched++;
-                    if (verbose && debugPrinted < 8)
-                    {
-                        Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) existing={existing} (0x{existing:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method}");
-                        debugPrinted++;
-                    }
                 }
-                else if (verbose && debugPrinted < 8)
+
+                if (verbose && debugPrinted < 8)
                 {
-                    Console.WriteLine($"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) unchanged={existing} (0x{existing:X}) method={method}");
+                    Console.WriteLine(logEntry);
                     debugPrinted++;
                 }
                 fs.Position = save;
+            }
+        }
+        if (verboseLog is not null && verboseLog.Count > 0)
+        {
+            Console.WriteLine("[V2] AreaID mappings for tile:");
+            foreach (var line in verboseLog)
+            {
+                Console.WriteLine(line);
             }
         }
         return (present, patched);

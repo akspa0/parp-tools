@@ -1,16 +1,15 @@
 # Active Context
 
-- Current Focus: Refactor the working parity implementation into a reusable library (`GillijimProject.Core`) and integrate Warcraft.NET for safer, more efficient ADT writing. Maintain LK output compatibility.
+- Current Focus: Restore sub-zone AreaID fidelity for Alpha (0.5.x) → LK (3.3.5) exports by enriching DBCTool crosswalks with child hierarchies and reintroducing the 0.6.0 pivot while keeping prior parity work intact.
 - Recent Changes:
   - Achieved 1:1 C++ → C# parity for Alpha WDT → Wrath ADT conversion.
-  - Fixed MMID/MWID off-by-one (no spurious final offset); corrected MCVT forward FourCC usage; ensured MH2O is omitted when empty; enforced MCLQ written last in MCNK.
-  - Stabilized ADT outputs validated with 010 Editor templates.
+  - Fixed MMID/MWID off-by-one, MCVT FourCC orientation, MH2O omission, and MCNK `MCLQ` ordering; outputs validated with 010 templates.
+  - Updated `CompareAreaV2Command` to emit `tgt_child_ids` / `tgt_child_names` so LK hierarchies are preserved in CSV outputs.
 - Next Steps:
-  - Create `GillijimProject.Core` (Class Library, net9.0) and move core parsing/conversion/writing logic behind a public API.
-  - Keep `GillijimProject.Cli` as a thin wrapper over the library.
-  - Add test project for smoke/integration tests over representative Alpha WDT/ADT samples.
-  - Introduce Warcraft.NET as writer backend where applicable; add adapters/facades as needed.
-  - Document the public API (XML docs) and prepare for NuGet packaging.
+  - Re-enable the 0.6.0 pivot inside DBCTool mapping so 0.5.x collisions can flow through canonical mid IDs before selecting LK targets.
+  - Extend `DbcPatchMapping`/`AdtWotlkWriter` to consume pivot and child data (new lookups, verbose logging) and prefer sub-zone targets when Alpha tiles only expose parent IDs.
+  - Regenerate crosswalks and verify instance maps (Deadmines, Wailing Caverns, etc.) patch to the correct LK child IDs.
+  - Continue long-term refactor toward `GillijimProject.Core` / `GillijimProject.Cli` once mapping stability is achieved.
 - Decisions:
   - Library-first architecture; CLI delegates to library.
   - Forward FourCC in memory; reversed on disk by serializer.
@@ -19,20 +18,14 @@
 ## Session Updates (DBCTool.V2 + AlphaWDTAnalysisTool)
 
 - Recent Changes
-  - Implemented CompareArea V2 pipeline in `DBCTool.V2/Cli/CompareAreaV2Command.cs`:
-    - Built indices for source zones and optional 0.6.0 pivot.
-    - Enforced strict map lock with `TryMatchChainExact(mapIdX, chain, ...)` only.
-    - Added optional 0.6.0 pivot resolution with forced-parent overrides and minimal fuzzy only for declared oddities.
-    - Composed `path` as `mapNameX/zone[/sub]` using `contResolved`/crosswalk for the map.
-    - Emitted stable CSVs: `mapping.csv`, `unmatched.csv`, `patch.csv`, `patch_via060.csv`, `trace.csv`.
-  - Crosswalks built for 0.5.x → 3.3.5 and optional 0.6.0 pivot; global rename fallbacks disabled when `chainVia060`.
-  - Generated `053-viz/csv/*` artifacts; static viz currently shows only AreaID 0.
+  - `CompareAreaV2Command` now writes LK child listings to the mapping CSVs, capturing full hierarchies per zone.
+  - Added verbose ADT exporter logging to trace all 256 MCNK assignments, including chosen methods and zone/sub components.
 
 - Current Focus
-  - Investigate `DeadminesInstance` AreaIDs reported as 0 despite good 0.6.0 and 3.3.5 matches.
+  - Plan and implement the 0.6.0 pivot revival and downstream consumer updates required to restore sub-zone mapping.
 
 - Next Steps
-  - Instrument and inspect `trace.csv` rows for Deadmines: verify `method`, `depth`, and `mapIdX`.
-  - Validate pivot map selection and child resolution (`idxTgtChildrenByZone`) for instance flows.
-  - Rewire visualization to consume DBCTool V2 CSV outputs (e.g., `mapping.csv`/`trace.csv`) instead of ADT-embedded area fields.
-  - Add targeted unit tests for instance/oddity paths and LK chain re-parenting.
+  - Update DBCTool schema/output to include mid-build columns and regenerate compare artifacts.
+  - Teach `DbcPatchMapping` to map `src → mid → LK`, exposing helpers for exporter fallbacks.
+  - Adjust `AdtWotlkWriter` lookup order to leverage the new pivot/child data before falling back to parent zones.
+  - Verify results on outdoor + instance tiles and document in planning / regression notes.
