@@ -285,6 +285,13 @@ internal sealed class CompareAreaV2Command
         crosswalkV3.AppendLine(crosswalkV3Header);
         var perMapCrosswalk = new Dictionary<int, StringBuilder>();
         var perMapCrosswalkMid = new Dictionary<int, StringBuilder>();
+        var perMapUnified = new Dictionary<int, StringBuilder>();
+        var unifiedHeader = string.Join(',', new[]
+        {
+            "src_mapId_resolved","src_zone_base","src_areaNumber","src_zone_name","src_area_name",
+            "mid_mapId","mid_zone_id","mid_areaID","mid_zone_name","mid_area_name",
+            "tgt_mapId","tgt_zone_id","tgt_areaID","tgt_zone_name","tgt_area_name","match_method"
+        });
         var header = string.Join(',', new[]
         {
             "src_row_id","src_areaNumber","src_parentNumber","src_zone_hi16","src_sub_lo16","src_parent_hi16","src_parent_lo16",
@@ -826,6 +833,38 @@ internal sealed class CompareAreaV2Command
                     }
                     midCrosswalk.AppendLine(crosswalkLine);
                 }
+                if (!perMapUnified.TryGetValue(mapResolved, out var unifiedBuilder))
+                {
+                    unifiedBuilder = new StringBuilder();
+                    unifiedBuilder.AppendLine(unifiedHeader);
+                    perMapUnified[mapResolved] = unifiedBuilder;
+                }
+                int midZoneId = midParentOut > 0 ? midParentOut : (midChosenId >= 0 ? midChosenId : -1);
+                string midZoneName = (midMapOut >= 0 && midZoneId > 0) ? ResolveCanonicalName(midZoneCanonical, (midMapOut, midZoneId)) : string.Empty;
+                if (string.IsNullOrWhiteSpace(midZoneName) && !string.IsNullOrWhiteSpace(midParentName)) midZoneName = midParentName;
+                string midAreaName = (midMapOut >= 0 && midChosenId >= 0) ? ResolveCanonicalName(midAreaCanonical, (midMapOut, midChosenId)) : string.Empty;
+                if (string.IsNullOrWhiteSpace(midAreaName) && !string.IsNullOrWhiteSpace(midName)) midAreaName = midName;
+                string tgtZoneName = ResolveTargetAreaName(tgtIdToRow, tgtParentId, areaNameColTgt);
+                string tgtAreaName = ResolveTargetAreaName(tgtIdToRow, chosen, areaNameColTgt);
+                unifiedBuilder.AppendLine(string.Join(',', new[]
+                {
+                    mapResolved.ToString(CultureInfo.InvariantCulture),
+                    zoneBase.ToString(CultureInfo.InvariantCulture),
+                    areaNum.ToString(CultureInfo.InvariantCulture),
+                    Csv(canonicalZoneName),
+                    Csv(canonicalAreaName),
+                    (midMapOut >= 0 ? midMapOut.ToString(CultureInfo.InvariantCulture) : "-1"),
+                    (midZoneId > 0 ? midZoneId.ToString(CultureInfo.InvariantCulture) : "-1"),
+                    (midChosenId >= 0 ? midChosenId.ToString(CultureInfo.InvariantCulture) : "-1"),
+                    Csv(midZoneName),
+                    Csv(midAreaName),
+                    tgtMap.ToString(CultureInfo.InvariantCulture),
+                    tgtParentId.ToString(CultureInfo.InvariantCulture),
+                    chosen.ToString(CultureInfo.InvariantCulture),
+                    Csv(tgtZoneName),
+                    Csv(tgtAreaName),
+                    method
+                }));
                 if (hasMapX)
                 {
                     if (!perMap.TryGetValue(mapIdX, out var tuple)) { tuple = (new StringBuilder(), new StringBuilder(), new StringBuilder()); tuple.map.AppendLine(header); tuple.un.AppendLine(header); tuple.patch.AppendLine(patchHeader); perMap[mapIdX] = tuple; }
@@ -1339,6 +1378,62 @@ internal sealed class CompareAreaV2Command
         if (dict.TryGetValue(key, out var entry) && !string.IsNullOrWhiteSpace(entry.name))
         {
             return entry.name;
+        }
+        return string.Empty;
+    }
+
+    private static bool TryInferMidFromCanonical(
+        string zoneName,
+        string areaName,
+        Dictionary<int, HashSet<int>> zonesByMap,
+        Dictionary<(int mapId, int zoneId), List<int>> childrenByParent,
+        Dictionary<(int mapId, int zoneId), (string name, int priority)> zoneCanonical,
+        Dictionary<(int mapId, int areaNum), (string name, int priority)> areaCanonical,
+        out int mapId,
+        out int zoneId,
+        out int areaId)
+    {
+        mapId = -1;
+        zoneId = -1;
+        areaId = -1;
+        if (string.IsNullOrWhiteSpace(zoneName)) return false;
+        var zoneNorm = NormKey(zoneName);
+        foreach (var kv in zonesByMap)
+        {
+            foreach (var z in kv.Value)
+            {
+                var canonical = ResolveCanonicalName(zoneCanonical, (kv.Key, z));
+                if (string.IsNullOrWhiteSpace(canonical)) continue;
+                if (NormKey(canonical) != zoneNorm) continue;
+                mapId = kv.Key;
+                zoneId = z;
+                if (!string.IsNullOrWhiteSpace(areaName)
+                    && childrenByParent.TryGetValue((mapId, zoneId), out var children))
+                {
+                    var areaNorm = NormKey(areaName);
+                    foreach (var child in children)
+                    {
+                        var childName = ResolveCanonicalName(areaCanonical, (mapId, child));
+                        if (!string.IsNullOrWhiteSpace(childName) && NormKey(childName) == areaNorm)
+                        {
+                            areaId = child;
+                            return true;
+                        }
+                    }
+                }
+                areaId = -1;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static string ResolveTargetAreaName(Dictionary<int, DBCDRow> tgtIdToRow, int areaId, string areaNameColTgt)
+    {
+        if (areaId <= 0) return string.Empty;
+        if (tgtIdToRow.TryGetValue(areaId, out var row))
+        {
+            return FirstNonEmpty(SafeField<string>(row, areaNameColTgt)) ?? string.Empty;
         }
         return string.Empty;
     }
