@@ -212,9 +212,11 @@ internal sealed class CompareAreaV2Command
         // Map names
         var mapSrcNames = BuildMapNames(storSrc_Map);
         var mapTgtNames = BuildMapNames(storTgt_Map);
-        var srcNodeInfo = new Dictionary<int, AreaNodeInfo>();
-        var srcZonesByMap = new Dictionary<int, List<int>>();
-        var srcChildrenByParent = new Dictionary<int, List<int>>();
+        var srcNodeInfo = new Dictionary<(int mapId, int areaNum), AreaNodeInfo>();
+        var srcZonesByMap = new Dictionary<int, HashSet<int>>();
+        var srcChildrenByParent = new Dictionary<(int mapId, int zoneBase), List<int>>();
+        var srcAreaCanonical = new Dictionary<(int mapId, int areaNum), (string name, int priority)>();
+        var srcZoneCanonical = new Dictionary<(int mapId, int zoneBase), (string name, int priority)>();
 
         // Special-case overrides and forced parents for strict chain via 0.6.0
         // Keys are normalized with NormKey(s)
@@ -305,19 +307,6 @@ internal sealed class CompareAreaV2Command
             if (parentNum <= 0) parentNum = areaNum;
             int contRaw = SafeField<int>(row, "ContinentID");
 
-            srcNodeInfo[areaNum] = new AreaNodeInfo(areaNum, parentNum, contRaw, nm);
-            if ((areaNum & 0xFFFF) == 0)
-            {
-                if (!srcZonesByMap.TryGetValue(contRaw, out var list)) { list = new List<int>(); srcZonesByMap[contRaw] = list; }
-                list.Add(areaNum);
-            }
-            else
-            {
-                int zoneBase = areaNum & unchecked((int)0xFFFF0000);
-                if (!srcChildrenByParent.TryGetValue(zoneBase, out var kids)) { kids = new List<int>(); srcChildrenByParent[zoneBase] = kids; }
-                kids.Add(areaNum);
-            }
-
             int area_hi16 = (areaNum >> 16) & 0xFFFF;
             int area_lo16 = areaNum & 0xFFFF;
             int zoneBase = area_hi16 << 16;
@@ -327,6 +316,22 @@ internal sealed class CompareAreaV2Command
             int mapIdX = -1; bool hasMapX = false;
             if (cw053To335.TryGetValue(contResolved, out var mx)) { mapIdX = mx; hasMapX = true; }
             else if (mapTgtNames.ContainsKey(contResolved)) { mapIdX = contResolved; hasMapX = true; }
+            int mapResolved = hasMapX ? mapIdX : contResolved;
+
+            var nodeKey = (mapResolved, areaNum);
+            srcNodeInfo[nodeKey] = new AreaNodeInfo(areaNum, parentNum, mapResolved, nm);
+            PromoteAreaName(srcAreaCanonical, nodeKey, nm, 1);
+            if (area_lo16 == 0)
+            {
+                if (!srcZonesByMap.TryGetValue(mapResolved, out var set)) { set = new HashSet<int>(); srcZonesByMap[mapResolved] = set; }
+                set.Add(zoneBase);
+            }
+            else
+            {
+                var childKey = (mapResolved, zoneBase);
+                if (!srcChildrenByParent.TryGetValue(childKey, out var kids)) { kids = new List<int>(); srcChildrenByParent[childKey] = kids; }
+                kids.Add(areaNum);
+            }
 
             // Compose source chain strictly by zone name (ignore sub components in 0.5.x packed values)
             var chain = new List<string>();
@@ -347,6 +352,10 @@ internal sealed class CompareAreaV2Command
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(zoneName))
+            {
+                PromoteZoneName(srcZoneCanonical, (mapResolved, zoneBase), zoneName, 1);
+            }
             if (!string.IsNullOrWhiteSpace(zoneName))
             {
                 chain.Add(NormKey(zoneName));
@@ -999,7 +1008,7 @@ internal sealed class CompareAreaV2Command
         var hierarchyYaml = BuildHierarchyYaml(tgtZonesByMap, tgtChildrenByParent, tgtNodeInfo, mapTgtNames);
         File.WriteAllText(hierarchyYamlPath, hierarchyYaml, new UTF8Encoding(true));
         var srcHierarchyYamlPath = Path.Combine(compareV3Dir, $"Area_hierarchy_src_{srcAlias}.yaml");
-        var srcHierarchyYaml = BuildHierarchyYaml(srcZonesByMap, srcChildrenByParent, srcNodeInfo, mapSrcNames);
+        var srcHierarchyYaml = BuildSourceHierarchyYaml(srcZonesByMap, srcChildrenByParent, srcNodeInfo, srcZoneCanonical, srcAreaCanonical, mapSrcNames);
         File.WriteAllText(srcHierarchyYamlPath, srcHierarchyYaml, new UTF8Encoding(true));
         if (patchVia060.Length > 0 && chainVia060)
         {
@@ -1199,6 +1208,126 @@ internal sealed class CompareAreaV2Command
         value ??= string.Empty;
         var escaped = value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         return $"\"{escaped}\"";
+    }
+
+    private static void PromoteAreaName(
+        Dictionary<(int mapId, int areaNum), (string name, int priority)> dict,
+        (int mapId, int areaNum) key,
+        string candidate,
+        int priority)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return;
+        candidate = candidate.Trim();
+        if (!dict.TryGetValue(key, out var existing)
+            || priority > existing.priority
+            || (priority == existing.priority && string.IsNullOrWhiteSpace(existing.name)))
+        {
+            dict[key] = (candidate, priority);
+        }
+    }
+
+    private static void PromoteZoneName(
+        Dictionary<(int mapId, int zoneBase), (string name, int priority)> dict,
+        (int mapId, int zoneBase) key,
+        string candidate,
+        int priority)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return;
+        candidate = candidate.Trim();
+        if (!dict.TryGetValue(key, out var existing)
+            || priority > existing.priority
+            || (priority == existing.priority && string.IsNullOrWhiteSpace(existing.name)))
+        {
+            dict[key] = (candidate, priority);
+        }
+    }
+
+    private static string ResolveCanonicalName<TKey>(Dictionary<TKey, (string name, int priority)> dict, TKey key)
+        where TKey : notnull
+    {
+        if (dict.TryGetValue(key, out var entry) && !string.IsNullOrWhiteSpace(entry.name))
+        {
+            return entry.name;
+        }
+        return string.Empty;
+    }
+
+    private static string BuildSourceHierarchyYaml(
+        Dictionary<int, HashSet<int>> zonesByMap,
+        Dictionary<(int mapId, int zoneBase), List<int>> childrenByParent,
+        Dictionary<(int mapId, int areaNum), AreaNodeInfo> nodeInfo,
+        Dictionary<(int mapId, int zoneBase), (string name, int priority)> zoneCanonical,
+        Dictionary<(int mapId, int areaNum), (string name, int priority)> areaCanonical,
+        Dictionary<int, string> mapNames)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("maps:");
+        foreach (var mapId in zonesByMap.Keys.OrderBy(id => id))
+        {
+            mapNames.TryGetValue(mapId, out var mapName);
+            sb.AppendLine($"  - mapId: {mapId}");
+            sb.AppendLine($"    mapName: {YamlQuote(mapName)}");
+
+            if (!zonesByMap.TryGetValue(mapId, out var zoneSet) || zoneSet.Count == 0)
+            {
+                sb.AppendLine("    zones:");
+                sb.AppendLine("      []");
+                continue;
+            }
+
+            sb.AppendLine("    zones:");
+            foreach (var zoneBase in zoneSet.OrderBy(z => z))
+            {
+                var zoneKey = (mapId, zoneBase);
+                string zoneName = ResolveCanonicalName(zoneCanonical, zoneKey);
+                int zoneParentId = zoneBase;
+                if (nodeInfo.TryGetValue(zoneKey, out var zoneInfo))
+                {
+                    if (!string.IsNullOrWhiteSpace(zoneInfo.Name) && string.IsNullOrWhiteSpace(zoneName))
+                    {
+                        zoneName = zoneInfo.Name;
+                    }
+                    zoneParentId = zoneInfo.ParentId;
+                }
+
+                sb.AppendLine($"      - areaId: {zoneBase}");
+                sb.AppendLine($"        name: {YamlQuote(zoneName)}");
+                sb.AppendLine($"        parentId: {zoneParentId}");
+                sb.AppendLine("        children:");
+
+                var childKey = (mapId, zoneBase);
+                if (childrenByParent.TryGetValue(childKey, out var children) && children.Count > 0)
+                {
+                    foreach (var childArea in children.Distinct().OrderBy(a => a))
+                    {
+                        var childNodeKey = (mapId, childArea);
+                        string childName = ResolveCanonicalName(areaCanonical, childNodeKey);
+                        int childParentId = zoneBase;
+                        int childMapId = mapId;
+                        if (nodeInfo.TryGetValue(childNodeKey, out var childInfo))
+                        {
+                            if (!string.IsNullOrWhiteSpace(childInfo.Name) && string.IsNullOrWhiteSpace(childName))
+                            {
+                                childName = childInfo.Name;
+                            }
+                            childParentId = childInfo.ParentId;
+                            childMapId = childInfo.MapId;
+                        }
+
+                        sb.AppendLine($"          - areaId: {childArea}");
+                        sb.AppendLine($"            name: {YamlQuote(childName)}");
+                        sb.AppendLine($"            parentId: {childParentId}");
+                        sb.AppendLine($"            mapId: {childMapId}");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("          []");
+                }
+            }
+        }
+
+        return sb.ToString();
     }
 
     // Simple edit distance for fuzzy rename (Levenshtein)
