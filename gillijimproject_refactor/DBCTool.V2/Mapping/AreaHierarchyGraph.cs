@@ -37,6 +37,20 @@ public sealed class AreaHierarchyGraph
     public IReadOnlyDictionary<int, AreaHierarchyNode> NodesByAreaId => _nodesByAreaId;
 
     public AreaHierarchyNode? FindArea(int areaId) => _nodesByAreaId.TryGetValue(areaId, out var node) ? node : null;
+
+    public IEnumerable<AreaHierarchyNode> EnumerateNodes()
+    {
+        foreach (var map in _maps)
+        {
+            foreach (var zone in map.Zones)
+            {
+                foreach (var node in zone.SelfAndDescendants())
+                {
+                    yield return node;
+                }
+            }
+        }
+    }
 }
 
 public sealed class AreaHierarchyMap

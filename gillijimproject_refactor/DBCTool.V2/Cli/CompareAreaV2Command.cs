@@ -6,9 +6,10 @@ using DBCTool.V2.AlphaDecode;
 using DBCTool.V2.Crosswalk;
 using DBCTool.V2.Mapping;
 using System;
-using System.Text;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text;
 using static DBCTool.V2.IO.DbdcHelper;
 
 namespace DBCTool.V2.Cli;
@@ -48,6 +49,53 @@ internal sealed class CompareAreaV2Command
         Directory.CreateDirectory(compareDir);
         Directory.CreateDirectory(compareV2Dir);
         Directory.CreateDirectory(compareV3Dir);
+
+        string aliasSlug = srcAlias.Replace('.', '_');
+
+        // Optional hierarchy graphs (YAML emitted by prior runs)
+        AreaHierarchyGraph? srcHierarchy = null;
+        AreaHierarchyGraph? tgtHierarchy = null;
+        Dictionary<(int mapId, int areaId), HierarchyPairingCandidate>? hierarchyPairings = null;
+        try
+        {
+            var srcHierarchyPath = Path.Combine(compareV3Dir, $"Area_hierarchy_src_{srcAlias}.yaml");
+            if (File.Exists(srcHierarchyPath))
+            {
+                srcHierarchy = AreaHierarchyLoader.LoadFromFile(srcHierarchyPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[V2] WARN: Failed to load source hierarchy YAML: {ex.Message}");
+        }
+        try
+        {
+            var tgtHierarchyPath = Path.Combine(compareV3Dir, "Area_hierarchy_335.yaml");
+            if (File.Exists(tgtHierarchyPath))
+            {
+                tgtHierarchy = AreaHierarchyLoader.LoadFromFile(tgtHierarchyPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[V2] WARN: Failed to load target hierarchy YAML: {ex.Message}");
+        }
+
+        if (srcHierarchy is not null && tgtHierarchy is not null)
+        {
+            try
+            {
+                var pairings = HierarchyPairingGenerator.GenerateCandidates(srcHierarchy, tgtHierarchy);
+                var pairingPath = Path.Combine(compareV3Dir, $"Area_pairings_{aliasSlug}_to_335.csv");
+                WriteHierarchyPairings(pairingPath, pairings);
+                Console.WriteLine($"[V3] Wrote hierarchy pairing candidates -> {pairingPath}");
+                hierarchyPairings = pairings.ToDictionary(p => (p.SrcMapId, p.SrcAreaId));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[V3] WARN: Failed to generate hierarchy pairings: {ex.Message}");
+            }
+        }
 
         // Load storages
         var dbdProvider = new FilesystemDBDProvider(dbdDir);
@@ -420,6 +468,7 @@ internal sealed class CompareAreaV2Command
             var overrideNotes = new List<string>();
             string lkChainDisplay = string.Empty;
             string pivotChainDisplay = string.Empty;
+            bool matchedByHierarchy = false;
             if (!chainVia060 && hasMapX && chain.Count > 0)
             {
                 // Direct 0.5.x → 3.3.5 chain when not forcing via 0.6.0
@@ -671,7 +720,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Global rename match: unique top-level zone across LK (cross-map allowed) - disabled in chainVia060 mode
-            if (!chainVia060 && chosen < 0 && chain.Count > 0)
+            if (!matchedByHierarchy && !chainVia060 && chosen < 0 && chain.Count > 0)
             {
                 var keyNorm = chain[0];
                 if (idxTgtTopGlobal.TryGetValue(keyNorm, out var rec))
@@ -685,7 +734,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Global rename match for child names (use the current row's own name) - disabled in chainVia060 mode
-            if (!chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
+            if (!matchedByHierarchy && !chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
             {
                 var keyNorm2 = NormKey(nm);
                 if (idxTgtChildGlobal.TryGetValue(keyNorm2, out var rec2))
@@ -699,7 +748,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Fuzzy rename (top-level) if still unmatched
-            if (!chainVia060 && chosen < 0 && chain.Count > 0)
+            if (!matchedByHierarchy && !chainVia060 && chosen < 0 && chain.Count > 0)
             {
                 var keyNorm = chain[0];
                 var (fid, fmap, ok) = FindBestFuzzy(keyNorm, lkTopList, 2);
@@ -713,7 +762,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Fuzzy rename (child) using row name if still unmatched - disabled in chainVia060 mode
-            if (!chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
+            if (!matchedByHierarchy && !chainVia060 && chosen < 0 && !string.IsNullOrWhiteSpace(nm))
             {
                 var keyNorm = NormKey(nm);
                 var (fid, fmap, ok) = FindBestFuzzy(keyNorm, lkChildList, 2);
@@ -727,7 +776,7 @@ internal sealed class CompareAreaV2Command
             }
 
             // Exact-key fallback across LK with map preference (prefer map 0, then 1)
-            if (!chainVia060 && chosen < 0)
+            if (!matchedByHierarchy && !chainVia060 && chosen < 0)
             {
                 int pref(int m) => (m == 0 ? 0 : (m == 1 ? 1 : 2));
                 if (chain.Count > 0)
@@ -1745,5 +1794,78 @@ internal sealed class CompareAreaV2Command
             "3.3.5" => "3.3.5.12340",
             _ => alias
         };
+    }
+
+    private static void WriteHierarchyPairings(string path, IReadOnlyList<HierarchyPairingCandidate> pairings)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        writer.WriteLine("src_mapId,src_areaId,src_parentId,src_isZone,src_name,match_count,matches");
+        foreach (var candidate in pairings)
+        {
+            var matches = BuildMatchSummary(candidate.Matches);
+            writer.WriteLine(string.Join(',', new[]
+            {
+                candidate.SrcMapId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcAreaId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcParentId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcIsZone ? "1" : "0",
+                Csv(candidate.SrcName),
+                candidate.Matches.Count.ToString(CultureInfo.InvariantCulture),
+                Csv(matches)
+            }));
+        }
+    }
+
+    private static string BuildMatchSummary(IReadOnlyList<HierarchyPairingMatch> matches)
+    {
+        if (matches.Count == 0) return string.Empty;
+        var parts = new string[matches.Count];
+        for (int i = 0; i < matches.Count; i++)
+        {
+            var match = matches[i];
+            var state = match.IsUnused ? "unused" : "active";
+            parts[i] = $"{match.MapId}:{match.AreaId}:{match.ParentAreaId}:{match.Reason}:{state}:{match.Name}";
+        }
+        return string.Join('|', parts);
+    }
+
+    private static (int MapId, int AreaId, string Method, string Note, bool Ambiguous)? SelectHierarchyMatch(HierarchyPairingCandidate candidate, int preferredMapId, int fallbackMapId, bool hasPreferred)
+    {
+        if (candidate.Matches.Count == 0) return null;
+
+        var ordered = candidate.Matches
+            .Select(m => new
+            {
+                Match = m,
+                Priority = ScoreMatch(m, preferredMapId, fallbackMapId, hasPreferred)
+            })
+            .Where(x => x.Priority >= 0)
+            .OrderBy(x => x.Priority)
+            .ThenBy(x => x.Match.IsUnused ? 1 : 0)
+            .ToList();
+
+        if (ordered.Count == 0) return null;
+
+        var best = ordered[0];
+        bool ambiguous = ordered.Count > 1 && ordered[1].Priority == best.Priority;
+        string note = $"hierarchy={best.Match.Reason}";
+        if (best.Match.IsUnused) note += "(unused)";
+        return (best.Match.MapId, best.Match.AreaId, best.Match.Reason, note, ambiguous);
+    }
+
+    private static int ScoreMatch(HierarchyPairingMatch match, int preferredMapId, int fallbackMapId, bool hasPreferred)
+    {
+        int baseScore = match.Reason.StartsWith("map", StringComparison.OrdinalIgnoreCase) ? 0 : 10;
+        if (hasPreferred)
+        {
+            if (match.MapId == preferredMapId) return baseScore;
+            return baseScore + 5;
+        }
+
+        if (match.MapId == fallbackMapId) return baseScore + 1;
+        if (match.MapId == preferredMapId) return baseScore;
+        if (fallbackMapId >= 0) return baseScore + 4;
+        return baseScore + 6;
     }
 }
