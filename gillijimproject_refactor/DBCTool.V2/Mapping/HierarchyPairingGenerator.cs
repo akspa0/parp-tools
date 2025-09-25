@@ -7,6 +7,51 @@ namespace DBCTool.V2.Mapping;
 
 public static class HierarchyPairingGenerator
 {
+    public sealed record HierarchySourceRecord(int MapId, string? MapName, IReadOnlyList<HierarchyNodeRecord> Nodes);
+
+    public sealed record HierarchyNodeRecord(int AreaId, int ParentId, string Name);
+
+    public static AreaHierarchyGraph BuildGraphFromRows(IEnumerable<HierarchySourceRecord> maps)
+    {
+        if (maps is null) throw new ArgumentNullException(nameof(maps));
+
+        var mapList = new List<AreaHierarchyMap>();
+        foreach (var map in maps)
+        {
+            var zoneById = new Dictionary<int, AreaHierarchyNode>();
+            var nodesById = new Dictionary<int, AreaHierarchyNode>();
+
+            foreach (var zone in map.Nodes.Where(n => n.ParentId == n.AreaId))
+            {
+                var node = new AreaHierarchyNode(map.MapId, zone.AreaId, zone.Name, zone.ParentId, isZone: true, parent: null);
+                zoneById[zone.AreaId] = node;
+                nodesById[zone.AreaId] = node;
+            }
+
+            foreach (var nodeRec in map.Nodes.Where(n => n.ParentId != n.AreaId))
+            {
+                if (!nodesById.TryGetValue(nodeRec.ParentId, out var parent))
+                {
+                    if (!zoneById.TryGetValue(nodeRec.ParentId, out parent))
+                    {
+                        parent = new AreaHierarchyNode(map.MapId, nodeRec.ParentId, string.Empty, nodeRec.ParentId, isZone: true, parent: null);
+                        zoneById[nodeRec.ParentId] = parent;
+                        nodesById[nodeRec.ParentId] = parent;
+                    }
+                }
+
+                var child = new AreaHierarchyNode(map.MapId, nodeRec.AreaId, nodeRec.Name, nodeRec.ParentId, isZone: false, parent);
+                parent.AddChild(child);
+                nodesById[nodeRec.AreaId] = child;
+            }
+
+            var zones = zoneById.Values.ToList();
+            mapList.Add(new AreaHierarchyMap(map.MapId, map.MapName ?? string.Empty, zones));
+        }
+
+        return new AreaHierarchyGraph(mapList);
+    }
+
     public static IReadOnlyList<HierarchyPairingCandidate> GenerateCandidates(AreaHierarchyGraph srcGraph, AreaHierarchyGraph tgtGraph)
     {
         if (srcGraph is null) throw new ArgumentNullException(nameof(srcGraph));

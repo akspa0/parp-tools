@@ -81,7 +81,30 @@ internal sealed class CompareAreaV2Command
             Console.WriteLine($"[V2] WARN: Failed to load target hierarchy YAML: {ex.Message}");
         }
 
-        if (srcHierarchy is not null && tgtHierarchy is not null)
+        // Load storages
+        var dbdProvider = new FilesystemDBDProvider(dbdDir);
+        var locale = ParseLocale(localeStr);
+
+        var storSrc_Area = DbdcHelper.LoadTable("AreaTable", CanonicalizeBuild(srcAlias), srcDir!, dbdProvider, locale);
+        var storSrc_Map  = DbdcHelper.LoadTable("Map",       CanonicalizeBuild(srcAlias), srcDir!, dbdProvider, locale);
+        var storTgt_Area = DbdcHelper.LoadTable("AreaTable", CanonicalizeBuild("3.3.5"),  dir335!, dbdProvider, locale);
+        var storTgt_Map  = DbdcHelper.LoadTable("Map",       CanonicalizeBuild("3.3.5"),  dir335!, dbdProvider, locale);
+
+        string parentColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "ParentAreaNum" : "ParentAreaID";
+        string keyColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "AreaNumber" : "ID";
+        string areaNameColSrc = DetectColumn(storSrc_Area, "AreaName_lang", "AreaName", "Name");
+        string areaNameColTgt = DetectColumn(storTgt_Area, "AreaName_lang", "AreaName", "Name");
+
+        if (srcHierarchy is null)
+        {
+            srcHierarchy = HierarchyPairingGenerator.BuildGraphFromRows(BuildSourceGraph(storSrc_Area, storSrc_Map, areaNameColSrc, parentColSrc, keyColSrc));
+        }
+        if (tgtHierarchy is null)
+        {
+            tgtHierarchy = HierarchyPairingGenerator.BuildGraphFromRows(BuildTargetGraph(storTgt_Area, storTgt_Map, areaNameColTgt));
+        }
+
+        if (hierarchyPairings is null)
         {
             try
             {
@@ -96,15 +119,6 @@ internal sealed class CompareAreaV2Command
                 Console.WriteLine($"[V3] WARN: Failed to generate hierarchy pairings: {ex.Message}");
             }
         }
-
-        // Load storages
-        var dbdProvider = new FilesystemDBDProvider(dbdDir);
-        var locale = ParseLocale(localeStr);
-
-        var storSrc_Area = DbdcHelper.LoadTable("AreaTable", CanonicalizeBuild(srcAlias), srcDir!, dbdProvider, locale);
-        var storSrc_Map  = DbdcHelper.LoadTable("Map",       CanonicalizeBuild(srcAlias), srcDir!, dbdProvider, locale);
-        var storTgt_Area = DbdcHelper.LoadTable("AreaTable", CanonicalizeBuild("3.3.5"),  dir335!, dbdProvider, locale);
-        var storTgt_Map  = DbdcHelper.LoadTable("Map",       CanonicalizeBuild("3.3.5"),  dir335!, dbdProvider, locale);
 
         // Build source indices for zone-only resolution
         // (contRaw, zoneBase) -> zone row (lo16==0)
@@ -204,7 +218,6 @@ internal sealed class CompareAreaV2Command
         var tgtNodeInfo = new Dictionary<int, AreaNodeInfo>();
         var tgtZonesByMap = new Dictionary<int, List<int>>();
         var tgtChildrenByParent = new Dictionary<int, List<int>>();
-        string areaNameColTgt = DetectColumn(storTgt_Area, "AreaName_lang", "AreaName", "Name");
         foreach (var key in storTgt_Area.Keys)
         {
             var row = storTgt_Area[key];
@@ -385,9 +398,7 @@ internal sealed class CompareAreaV2Command
         var perMapTrace = new Dictionary<int, StringBuilder>();
 
         // Source columns
-        string parentColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "ParentAreaNum" : "ParentAreaID";
-        string keyColSrc = (srcAlias == "0.5.3" || srcAlias == "0.5.5") ? "AreaNumber" : "ID";
-        string areaNameColSrc = DetectColumn(storSrc_Area, "AreaName_lang", "AreaName", "Name");
+        // Source columns already resolved above
 
         // Diagnostics: track missing zones per target map
         var zoneMissing = new Dictionary<int, HashSet<string>>();
@@ -1867,5 +1878,63 @@ internal sealed class CompareAreaV2Command
         if (match.MapId == preferredMapId) return baseScore;
         if (fallbackMapId >= 0) return baseScore + 4;
         return baseScore + 6;
+    }
+
+    private static IEnumerable<HierarchyPairingGenerator.HierarchySourceRecord> BuildSourceGraph(IDBCDStorage storSrc_Area, IDBCDStorage storSrc_Map, string areaNameColSrc, string parentColSrc, string keyColSrc)
+    {
+        var mapNames = BuildMapNames(storSrc_Map);
+        var nodesByMap = new Dictionary<int, List<HierarchyPairingGenerator.HierarchyNodeRecord>>();
+
+        foreach (var key in storSrc_Area.Keys)
+        {
+            var row = storSrc_Area[key];
+            int areaNum = SafeField<int>(row, keyColSrc);
+            int parentNum = SafeField<int>(row, parentColSrc);
+            if (parentNum <= 0) parentNum = areaNum;
+            int mapId = SafeField<int>(row, "ContinentID");
+            string name = FirstNonEmpty(SafeField<string>(row, areaNameColSrc)) ?? string.Empty;
+
+            if (!nodesByMap.TryGetValue(mapId, out var list))
+            {
+                list = new List<HierarchyPairingGenerator.HierarchyNodeRecord>();
+                nodesByMap[mapId] = list;
+            }
+            list.Add(new HierarchyPairingGenerator.HierarchyNodeRecord(areaNum, parentNum, name));
+        }
+
+        foreach (var kv in nodesByMap)
+        {
+            mapNames.TryGetValue(kv.Key, out var mapName);
+            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kv.Key, mapName, kv.Value);
+        }
+    }
+
+    private static IEnumerable<HierarchyPairingGenerator.HierarchySourceRecord> BuildTargetGraph(IDBCDStorage storTgt_Area, IDBCDStorage storTgt_Map, string areaNameColTgt)
+    {
+        var mapNames = BuildMapNames(storTgt_Map);
+        var nodesByMap = new Dictionary<int, List<HierarchyPairingGenerator.HierarchyNodeRecord>>();
+
+        foreach (var key in storTgt_Area.Keys)
+        {
+            var row = storTgt_Area[key];
+            int id = SafeField<int>(row, "ID");
+            int parentId = SafeField<int>(row, "ParentAreaID");
+            if (parentId <= 0) parentId = id;
+            int mapId = SafeField<int>(row, "ContinentID");
+            string name = FirstNonEmpty(SafeField<string>(row, areaNameColTgt)) ?? string.Empty;
+
+            if (!nodesByMap.TryGetValue(mapId, out var list))
+            {
+                list = new List<HierarchyPairingGenerator.HierarchyNodeRecord>();
+                nodesByMap[mapId] = list;
+            }
+            list.Add(new HierarchyPairingGenerator.HierarchyNodeRecord(id, parentId, name));
+        }
+
+        foreach (var kv in nodesByMap)
+        {
+            mapNames.TryGetValue(kv.Key, out var mapName);
+            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kv.Key, mapName, kv.Value);
+        }
     }
 }
