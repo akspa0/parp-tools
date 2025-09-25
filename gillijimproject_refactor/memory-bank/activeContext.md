@@ -1,14 +1,16 @@
 # Active Context
 
-- Current Focus: Restore sub-zone AreaID fidelity for Alpha (0.5.x) → LK (3.3.5) exports by enriching DBCTool crosswalks with child hierarchies, reintroducing the 0.6.0 pivot, and normalizing 0.5.x map-scoped zone definitions.
+- Current Focus: Restore sub-zone AreaID fidelity for Alpha (0.5.x) → LK (3.3.5) exports by enriching DBCTool crosswalks with child hierarchies, reintroducing the 0.6.0 pivot, normalizing 0.5.x map-scoped zone definitions, and keeping mid-pivot lookups map-locked.
 - Recent Changes:
   - Achieved 1:1 C++ → C# parity for Alpha WDT → Wrath ADT conversion.
   - Fixed MMID/MWID off-by-one, MCVT FourCC orientation, MH2O omission, and MCNK `MCLQ` ordering; outputs validated with 010 templates.
   - Updated `CompareAreaV2Command` to emit `tgt_child_ids` / `tgt_child_names` so LK hierarchies are preserved in CSV outputs.
+  - `AdtWotlkWriter.PatchMcnkAreaIdsOnDiskV2()` now preserves existing alpha AreaIDs when no LK mapping exists (`method=unmapped_preserve`).
+  - `DbcPatchMapping` persists mid entries keyed by `(src_mapId, src_areaNumber)` and `(mid_mapId, mid_areaId)` to avoid cross-continent collisions.
 - Next Steps:
-  - Re-enable the 0.6.0 pivot inside DBCTool mapping so 0.5.x collisions can flow through canonical mid IDs before selecting LK targets.
-  - Extend `DbcPatchMapping`/`AdtWotlkWriter` to consume pivot and child data (new lookups, verbose logging) and prefer sub-zone targets when Alpha tiles only expose parent IDs.
-  - Regenerate crosswalks and verify instance maps (Deadmines, Wailing Caverns, etc.) patch to the correct LK child IDs.
+  - Finalize helper plumbing in `DbcPatchMapping` (`TryResolveSourceMapId`, shared `TryGetMidEntry`) and update `AdtWotlkWriter` to pass the correct source map ID into mid lookups.
+  - Re-run AlphaWDTAnalysisTool on Azeroth after the helper wiring to verify Kalimdor pivots (e.g., Darkshore) no longer appear.
+  - Regenerate crosswalks and verify instance maps (Deadmines, Wailing Caverns, etc.) patch to the correct LK child IDs once pivots are stable.
   - Continue long-term refactor toward `GillijimProject.Core` / `GillijimProject.Cli` once mapping stability is achieved.
 - Decisions:
   - Library-first architecture; CLI delegates to library.
