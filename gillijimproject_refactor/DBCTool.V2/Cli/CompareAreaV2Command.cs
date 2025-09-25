@@ -261,6 +261,28 @@ internal sealed class CompareAreaV2Command
             "twilightgrove","caerdarrow","darrowmerelake"
         };
 
+        AddNameAliases(new[]
+        {
+            new KeyValuePair<string, string>("Lik'ash Tar Pits", "Lakkari Tar Pits"),
+            new KeyValuePair<string, string>("Likkari Tar Pits", "Lakkari Tar Pits")
+        });
+
+        static IEnumerable<KeyValuePair<string, string>> ColonAliases(IEnumerable<string> names)
+        {
+            foreach (var raw in names)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var parts = raw.Split(':', 2, StringSplitOptions.TrimEntries);
+                if (parts.Length != 2) continue;
+                var join = $"{parts[0]} {parts[1]}";
+                yield return new KeyValuePair<string, string>(raw, join);
+                yield return new KeyValuePair<string, string>(join, raw);
+            }
+        }
+
+        AddNameAliases(ColonAliases(lkChildList.Select(t => t.key)));
+        AddNameAliases(ColonAliases(lkTopList.Select(t => t.key)));
+
         // Some 0.6.0 top-level zones become subzones under different parents in 3.3.5.
         // Re-parent the LK chain accordingly before trying to match against 3.3.5.
         var lkParentByPivotZone = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -280,7 +302,7 @@ internal sealed class CompareAreaV2Command
         {
             "src_row_id","src_areaNumber","src_parentNumber","src_name","src_mapId","src_mapName","src_mapId_resolved","src_zone_base","src_zone_name","src_area_name","src_path",
             "mid060_areaID","mid060_name","mid060_parentID","mid060_parent_name","mid060_mapId","mid060_mapName","mid060_chain",
-            "tgt_areaID","tgt_name","tgt_parentID","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_chain","match_method"
+            "tgt_areaID","tgt_name","tgt_parentID","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_chain","match_method","override_notes"
         });
         crosswalkV3.AppendLine(crosswalkV3Header);
         var perMapCrosswalk = new Dictionary<int, StringBuilder>();
@@ -290,22 +312,22 @@ internal sealed class CompareAreaV2Command
         {
             "src_mapId_resolved","src_zone_base","src_areaNumber","src_zone_name","src_area_name",
             "mid_mapId","mid_zone_id","mid_areaID","mid_zone_name","mid_area_name",
-            "tgt_mapId","tgt_zone_id","tgt_areaID","tgt_zone_name","tgt_area_name","match_method"
+            "tgt_mapId","tgt_zone_id","tgt_areaID","tgt_zone_name","tgt_area_name","match_method","override_notes"
         });
         var header = string.Join(',', new[]
         {
             "src_row_id","src_areaNumber","src_parentNumber","src_zone_hi16","src_sub_lo16","src_parent_hi16","src_parent_lo16",
             "src_name","src_mapId","src_mapName","src_mapId_xwalk","src_mapName_xwalk","src_path",
             "mid060_mapId","mid060_mapName","mid060_areaID","mid060_parentID","mid060_chain",
-            "tgt_id_335","tgt_name","tgt_parent_id","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_path","tgt_child_ids","tgt_child_names","match_method"
+            "tgt_id_335","tgt_name","tgt_parent_id","tgt_parent_name","tgt_mapId","tgt_mapName","tgt_path","tgt_child_ids","tgt_child_names","match_method","override_notes"
         });
         mapping.AppendLine(header);
         unmatched.AppendLine(header);
-        var patchHeader = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,mid060_mapId,mid060_mapName,mid060_areaID,mid060_parentID,mid060_chain,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name,tgt_child_ids,tgt_child_names";
+        var patchHeader = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,mid060_mapId,mid060_mapName,mid060_areaID,mid060_parentID,mid060_chain,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name,tgt_child_ids,tgt_child_names,match_method,override_notes";
         patch.AppendLine(patchHeader);
-        var patchHeaderVia060 = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,mid060_mapId,mid060_mapName,mid060_areaID,mid060_parentID,mid060_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name,tgt_child_ids,tgt_child_names";
+        var patchHeaderVia060 = "src_mapId,src_mapName,src_areaNumber,src_parentNumber,src_name,mid060_mapId,mid060_mapName,mid060_areaID,mid060_parentID,mid060_name,tgt_mapId_xwalk,tgt_mapName_xwalk,tgt_areaID,tgt_parentID,tgt_name,tgt_child_ids,tgt_child_names,match_method,override_notes";
         patchVia060.AppendLine(patchHeaderVia060);
-        var traceHeader = "src_row_id,src_areaNumber,src_parentNumber,src_name,src_mapId,src_chain,pivot_mapId,pivot_chain,lk_mapId,lk_chain,chosen_tgt_id,matched_depth,method";
+        var traceHeader = "src_row_id,src_areaNumber,src_parentNumber,src_name,src_mapId,src_chain,pivot_mapId,pivot_chain,lk_mapId,lk_chain,chosen_tgt_id,matched_depth,method,override_notes";
         trace.AppendLine(traceHeader);
         var patchFallback = new StringBuilder();
         patchFallback.AppendLine(patchHeader);
@@ -395,6 +417,7 @@ internal sealed class CompareAreaV2Command
             string path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{chainPath}" : chainPath;
 
             int chosen = -1; int depth = 0; string method = string.Empty;
+            var overrideNotes = new List<string>();
             string lkChainDisplay = string.Empty;
             string pivotChainDisplay = string.Empty;
             if (!chainVia060 && hasMapX && chain.Count > 0)
@@ -583,6 +606,7 @@ internal sealed class CompareAreaV2Command
                                 path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{lkChainDesc}" : lkChainDesc;
                                 method = (lkChain.Count >= 2 && pivotChain.Count == 1 && lkChain[1] == pivotChain[0]) ?
                                     "pivot_060_reparent" : ((depth == lkChain.Count) ? "pivot_060" : "pivot_060_zone_only");
+                                overrideNotes.Add($"pivot_chain={pivotChainDisplay}");
                             }
                             else
                             {
@@ -594,6 +618,7 @@ internal sealed class CompareAreaV2Command
                                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn2b) ? mn2b : string.Empty;
                                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{subKey}" : subKey;
                                     method = "pivot_060_top_on_map";
+                                    overrideNotes.Add($"pivot_top_on_map={subKey}");
                                 }
                             }
                         }
@@ -655,6 +680,7 @@ internal sealed class CompareAreaV2Command
                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn2) ? mn2 : string.Empty;
                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{keyNorm}" : keyNorm;
                     method = "rename_global";
+                    overrideNotes.Add($"rename_global={keyNorm}");
                 }
             }
 
@@ -668,6 +694,7 @@ internal sealed class CompareAreaV2Command
                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn3) ? mn3 : string.Empty;
                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{keyNorm2}" : keyNorm2;
                     method = "rename_global_child";
+                    overrideNotes.Add($"rename_global_child={keyNorm2}");
                 }
             }
 
@@ -679,6 +706,7 @@ internal sealed class CompareAreaV2Command
                 if (ok)
                 {
                     chosen = fid; depth = 1; mapIdX = fmap; hasMapX = true; method = "rename_fuzzy";
+                    overrideNotes.Add($"rename_fuzzy={keyNorm}");
                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn4) ? mn4 : string.Empty;
                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{keyNorm}" : keyNorm;
                 }
@@ -692,6 +720,7 @@ internal sealed class CompareAreaV2Command
                 if (ok)
                 {
                     chosen = fid; depth = 1; mapIdX = fmap; hasMapX = true; method = "rename_fuzzy_child";
+                    overrideNotes.Add($"rename_fuzzy_child={keyNorm}");
                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn5) ? mn5 : string.Empty;
                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{keyNorm}" : keyNorm;
                 }
@@ -708,6 +737,7 @@ internal sealed class CompareAreaV2Command
                     if (hits.Count > 0)
                     {
                         chosen = hits[0].id; mapIdX = hits[0].map; hasMapX = true; depth = 1; method = "rename_exact_global";
+                        overrideNotes.Add($"rename_exact_global={k}");
                         mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn6) ? mn6 : string.Empty;
                         path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{k}" : k;
                     }
@@ -719,6 +749,7 @@ internal sealed class CompareAreaV2Command
                     if (hitsChild.Count > 0)
                     {
                         chosen = hitsChild[0].id; mapIdX = hitsChild[0].map; hasMapX = true; depth = 1; method = "rename_exact_global_child";
+                        overrideNotes.Add($"rename_exact_global_child={k2}");
                         mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mn7) ? mn7 : string.Empty;
                         path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{k2}" : k2;
                     }
@@ -728,17 +759,22 @@ internal sealed class CompareAreaV2Command
             // Special-case: ***On Map Dungeon*** -> force target 0 in fallback
             bool isOnMapDungeon = string.Equals(NormKey(nm), "onmapdungeon", StringComparison.OrdinalIgnoreCase);
 
+            var originalMethod = method;
+            bool matchedChildTarget = originalMethod.IndexOf("_child", StringComparison.OrdinalIgnoreCase) >= 0;
+
             if (!isOnMapDungeon && chosen >= 0 && tgtIdToRow.TryGetValue(chosen, out var tRow))
             {
                 string tgtName = FirstNonEmpty(SafeField<string>(tRow, areaNameColTgt)) ?? string.Empty;
                 int tgtParentId = SafeField<int>(tRow, "ParentAreaID");
                 int tgtMap = SafeField<int>(tRow, "ContinentID");
                 string tgtMapName = mapTgtNames.TryGetValue(tgtMap, out var mn) ? mn : string.Empty;
+                string tgtParentNameResolved = ResolveTargetAreaName(tgtIdToRow, tgtParentId, areaNameColTgt);
                 // Promote to top-level zone when the matched record is a child
                 bool promotedToParent = false;
                 if (tgtParentId <= 0) tgtParentId = chosen;
                 string tgtParentName = tgtName;
-                if (area_lo16 == 0 && tgtParentId != chosen && tgtParentId > 0 && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
+                bool keepChildForZone = matchedChildTarget && area_lo16 == 0 && NormKey(tgtName) == NormKey(nm);
+                if (area_lo16 == 0 && tgtParentId != chosen && tgtParentId > 0 && !keepChildForZone && tgtIdToRow.TryGetValue(tgtParentId, out var pRow))
                 {
                     promotedToParent = true;
                     chosen = tgtParentId;
@@ -752,10 +788,22 @@ internal sealed class CompareAreaV2Command
                     mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mnX) ? mnX : mapNameX;
                     path = !string.IsNullOrWhiteSpace(mapNameX) ? $"{Norm(mapNameX)}/{NormKey(tgtName)}" : NormKey(tgtName);
                 }
-                else
+                else if (!keepChildForZone)
                 {
                     tgtParentName = tgtName;
                     tgtParentId = chosen;
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(tgtParentNameResolved))
+                    {
+                        tgtParentName = tgtParentNameResolved;
+                    }
+                    else if (tgtParentId > 0 && tgtIdToRow.TryGetValue(tgtParentId, out var parentRow))
+                    {
+                        tgtParentName = FirstNonEmpty(SafeField<string>(parentRow, areaNameColTgt)) ?? tgtParentName;
+                    }
+                    overrideNotes.Add("retain_child_for_zone");
                 }
 
                 string tgtPath = $"{Norm(tgtMapName)}/{Norm(tgtName)}";
@@ -769,11 +817,14 @@ internal sealed class CompareAreaV2Command
                 if (promotedToParent)
                 {
                     method = method.Contains("_parent", StringComparison.OrdinalIgnoreCase) ? method : $"{method}_parent";
+                    overrideNotes.Add("promoted_to_parent");
                 }
-                else if (area_lo16 > 0 && !method.Contains("_sub", StringComparison.OrdinalIgnoreCase))
+                else if ((area_lo16 > 0 || keepChildForZone) && !method.Contains("_sub", StringComparison.OrdinalIgnoreCase))
                 {
                     method = $"{method}_sub";
                 }
+
+                var overrideNotesStr = overrideNotes.Count == 0 ? string.Empty : string.Join('|', overrideNotes);
 
                 lkChainDisplay = BuildLkChainDisplay(chosen, tgtIdToRow, areaNameColTgt);
 
@@ -843,7 +894,8 @@ internal sealed class CompareAreaV2Command
                     Csv(tgtPath),
                     Csv(childIdsStr),
                     Csv(childNamesStr),
-                    method
+                    method,
+                    Csv(overrideNotesStr)
                 });
                 mapping.AppendLine(line);
                 string canonicalZoneName = !string.IsNullOrWhiteSpace(lkChainDisplay)
@@ -888,7 +940,8 @@ internal sealed class CompareAreaV2Command
                     tgtMap.ToString(CultureInfo.InvariantCulture),
                     Csv(tgtMapName),
                     Csv(lkChainDisplay),
-                    method
+                    method,
+                    Csv(overrideNotesStr)
                 });
                 crosswalkV3.AppendLine(crosswalkLine);
                 if (!perMapCrosswalk.TryGetValue(mapResolved, out var mapCrosswalk))
@@ -938,7 +991,8 @@ internal sealed class CompareAreaV2Command
                     chosen.ToString(CultureInfo.InvariantCulture),
                     Csv(tgtZoneName),
                     Csv(tgtAreaName),
-                    method
+                    method,
+                    Csv(overrideNotesStr)
                 }));
                 if (hasMapX)
                 {
@@ -962,7 +1016,9 @@ internal sealed class CompareAreaV2Command
                         tgtParentId.ToString(CultureInfo.InvariantCulture),
                         Csv(tgtName),
                         Csv(childIdsStr),
-                        Csv(childNamesStr)
+                        Csv(childNamesStr),
+                        method,
+                        Csv(overrideNotesStr)
                     }));
                     // Also emit via060 patch row when chain was used or requested (mid columns)
                     if (chainVia060)
@@ -986,7 +1042,9 @@ internal sealed class CompareAreaV2Command
                             tgtParentId.ToString(CultureInfo.InvariantCulture),
                             Csv(tgtName),
                             Csv(childIdsStr),
-                            Csv(childNamesStr)
+                            Csv(childNamesStr),
+                            method,
+                            Csv(overrideNotesStr)
                         }));
                         // Trace for matched rows
                         var pivotOut = !string.IsNullOrWhiteSpace(pivotChainDisplay) ? pivotChainDisplay : pivotChainDesc;

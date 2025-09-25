@@ -687,7 +687,7 @@ public sealed class DbcPatchMapping
     private static bool MatchesMap(ZoneEntry entry, int? mapIdHint)
     {
         if (!mapIdHint.HasValue || mapIdHint.Value < 0) return true;
-        if (entry.TargetMapId < 0) return true;
+        if (entry.TargetMapId < 0) return false;
         return entry.TargetMapId == mapIdHint.Value;
     }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -46,6 +47,78 @@ public static class AdtWotlkWriter
         public bool VizHtml { get; init; } = false;
         public bool PatchOnly { get; init; } = false;
         public bool NoZoneFallback { get; init; } = false;
+    }
+
+    private static string BeautifyToken(string token)
+    {
+        var cleaned = (token ?? string.Empty).Replace('_', ' ').Replace('-', ' ').Trim();
+        if (cleaned.Length == 0) return string.Empty;
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(cleaned);
+    }
+
+    private static string FormatChain(string? chain)
+    {
+        if (string.IsNullOrWhiteSpace(chain)) return string.Empty;
+        var tokens = chain.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(BeautifyToken)
+            .Where(t => !string.IsNullOrWhiteSpace(t));
+        return string.Join(" / ", tokens);
+    }
+
+    private static string DescribeMap(int? mapId)
+    {
+        if (!mapId.HasValue || mapId.Value < 0) return "unknown";
+        var name = ResolveTargetMapNameFromId(mapId.Value);
+        return name is null ? mapId.Value.ToString(CultureInfo.InvariantCulture) : $"{mapId.Value} ({name})";
+    }
+
+    private static bool TryGetTargetMapId(int areaId, out int mapId)
+    {
+        mapId = -1;
+        var cache = s_lkMapByAreaId;
+        if (cache is null) return false;
+        return cache.TryGetValue(areaId, out mapId);
+    }
+
+    private static string DescribeTarget(int areaId, DbcPatchMapping? patchMap)
+    {
+        if (areaId <= 0)
+        {
+            return areaId == 0 ? "0 (unassigned)" : areaId.ToString(CultureInfo.InvariantCulture);
+        }
+
+        EnsureLkCache();
+        string name = string.Empty;
+        if (patchMap is not null && patchMap.TryGetTargetName(areaId, out var nm) && !string.IsNullOrWhiteSpace(nm))
+        {
+            name = nm;
+        }
+        else if (s_lkNameByAreaId is not null && s_lkNameByAreaId.TryGetValue(areaId, out var lkName) && !string.IsNullOrWhiteSpace(lkName))
+        {
+            name = lkName;
+        }
+
+        string mapDisplay = string.Empty;
+        if (TryGetTargetMapId(areaId, out var mapId) && mapId >= 0)
+        {
+            mapDisplay = DescribeMap(mapId);
+        }
+
+        var pieces = new List<string> { areaId.ToString(CultureInfo.InvariantCulture) };
+        if (!string.IsNullOrWhiteSpace(name)) pieces.Add(name);
+        if (!string.IsNullOrWhiteSpace(mapDisplay)) pieces.Add(mapDisplay);
+        return string.Join(" | ", pieces);
+    }
+
+    private static string BuildSourceDisplay(string mapName, string midChain, int zoneBase, int subLo, int alphaId)
+    {
+        var pieces = new List<string>();
+        if (!string.IsNullOrWhiteSpace(mapName)) pieces.Add(mapName.Trim());
+        var chain = FormatChain(midChain);
+        if (!string.IsNullOrWhiteSpace(chain)) pieces.Add(chain);
+        pieces.Add($"alpha=0x{alphaId:X8}");
+        pieces.Add($"zone=0x{zoneBase:X8} sub=0x{subLo:X4}");
+        return string.Join(" | ", pieces);
     }
 
     // Resolve the human-friendly LK continent name used in tgt_mapName_xwalk columns
@@ -247,24 +320,40 @@ public static class AdtWotlkWriter
                 }
 
                 // -1) CSV lookups keyed by hi/lo pairs and per-map area numbers
+                var mapRejects = verbose ? new List<string>() : null;
+
+                bool AcceptCandidate(int candidateId, string candidateMethod)
+                {
+                    if (candidateId <= 0) return false;
+                    if (currentMapId.HasValue && currentMapId.Value >= 0 && !ValidateTargetMap(candidateId, currentMapId))
+                    {
+                        var expected = DescribeMap(currentMapId);
+                        mapRejects?.Add($"    [map_mismatch] candidate={DescribeTarget(candidateId, patchMap)} method={candidateMethod} expectedMap={expected}");
+                        return false;
+                    }
+                    lkAreaId = candidateId;
+                    method = candidateMethod;
+                    mapped = true;
+                    return true;
+                }
+
                 if (!mapped && patchMap is not null && aIdNum > 0)
                 {
                     if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var csvSubId, out var viaSub))
                     {
-                        lkAreaId = csvSubId; method = viaSub ? "patch_csv_sub_via060" : "patch_csv_sub"; mapped = true;
+                        AcceptCandidate(csvSubId, viaSub ? "patch_csv_sub_via060" : "patch_csv_sub");
                     }
                     else if (patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvByName))
                     {
-                        lkAreaId = csvByName; method = "patch_csv_num"; mapped = true;
+                        AcceptCandidate(csvByName, "patch_csv_num");
                     }
                     else if (patchMap.TryMapBySrcAreaNumber(aIdNum, out var csvExactId, out var viaExact))
                     {
-                        lkAreaId = csvExactId; method = viaExact ? "patch_csv_exact_via060" : "patch_csv_exact"; mapped = true;
+                        AcceptCandidate(csvExactId, viaExact ? "patch_csv_exact_via060" : "patch_csv_exact");
                     }
                     else if (patchMap.TryMapViaMid(currentMapId, aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
                     {
-                        lkAreaId = csvMidId; method = viaMid ? "patch_csv_mid_via060" : "patch_csv_mid"; mapped = true;
-                        if (!hasMidInfo && midAreaResolved > 0)
+                        if (AcceptCandidate(csvMidId, viaMid ? "patch_csv_mid_via060" : "patch_csv_mid") && !hasMidInfo && midAreaResolved > 0)
                         {
                             midAreaHint = midAreaResolved;
                         }
@@ -299,10 +388,10 @@ public static class AdtWotlkWriter
                             var childNorm = NormalizeNameToken(childNames[idx]);
                             if (tokens.Count == 0 || tokens.Contains(childNorm))
                             {
-                                lkAreaId = childIds[idx];
-                                method = (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child";
-                                mapped = true;
-                                break;
+                                if (AcceptCandidate(childIds[idx], (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child"))
+                                {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -310,13 +399,13 @@ public static class AdtWotlkWriter
 
                 if (!mapped && hasZoneCandidate)
                 {
-                    lkAreaId = zoneCandidateId; method = zoneCandidateVia ? "patch_csv_zone_via060" : "patch_csv_zone"; mapped = true;
+                    AcceptCandidate(zoneCandidateId, zoneCandidateVia ? "patch_csv_zone_via060" : "patch_csv_zone");
                 }
                 // 0a) CSV numeric direct by target mapId (guarded by CurrentMapId) with via060 preference
                 if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0
                     && patchMap.TryMapByTargetViaFirst(currentMapId.Value, aIdNum, out var csvIdNumMap, out var mapVia))
                 {
-                    lkAreaId = csvIdNumMap; method = mapVia ? "patch_csv_num_mapX_via060" : "patch_csv_num_mapX"; mapped = true;
+                    AcceptCandidate(csvIdNumMap, mapVia ? "patch_csv_num_mapX_via060" : "patch_csv_num_mapX");
                 }
                 // 0b) CSV numeric direct by target mapName (strict map-locked by name) with via060 preference
                 if (!mapped && patchMap is not null && aIdNum > 0)
@@ -325,7 +414,7 @@ public static class AdtWotlkWriter
                     if (!string.IsNullOrWhiteSpace(tgtName)
                         && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var csvIdNumMapName, out var nameVia))
                     {
-                        lkAreaId = csvIdNumMapName; method = nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX"; mapped = true;
+                        AcceptCandidate(csvIdNumMapName, nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX");
                     }
                 }
                 // 0c) (reserved) -- handled in -1 block above
@@ -343,7 +432,11 @@ public static class AdtWotlkWriter
                 int effectiveWrite = hasMappedTarget ? lkAreaId : (int)existing;
                 string methodLogged = hasMappedTarget ? method : (method == "unmapped" ? "unmapped_preserve" : method);
 
-                string logEntry = $"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) midArea={midAreaHint} midChain='{midChainHint}' zoneBase=0x{zoneBase:X} subLo=0x{subLo:X} existing={existing} (0x{existing:X}) -> write={effectiveWrite} (0x{effectiveWrite:X}) method={methodLogged}";
+                string mapDisplay = DescribeMap(currentMapId);
+                string sourceDisplay = BuildSourceDisplay(mapName, midChainHint, zoneBase, subLo, aIdNum);
+                string existingDisplay = DescribeTarget((int)existing, patchMap);
+                string writeDisplay = hasMappedTarget ? DescribeTarget(lkAreaId, patchMap) : existingDisplay;
+                string logEntry = $"  [AreaMap] map={mapDisplay} idx={i2:D3} src={sourceDisplay} existing={existingDisplay} -> write={writeDisplay} method={methodLogged}";
                 verboseLog?.Add(logEntry);
 
                 if (hasMappedTarget && existing != (uint)lkAreaId)
@@ -351,6 +444,14 @@ public static class AdtWotlkWriter
                     fs.Position = areaFieldPos;
                     bw.Write((uint)lkAreaId);
                     patched++;
+                }
+
+                if (verbose && mapRejects is not null && mapRejects.Count > 0 && debugPrinted < 8)
+                {
+                    foreach (var reject in mapRejects)
+                    {
+                        Console.WriteLine(reject);
+                    }
                 }
 
                 if (verbose && debugPrinted < 8)
