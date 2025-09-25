@@ -198,8 +198,7 @@ public class McnkAlpha : Mcnk
 
     public int GetAlphaAreaId()
     {
-        // Alpha area id appears stored in the high 16 bits of this 32-bit field
-        return unchecked((int)((_mcnkAlphaHeader.Unknown3 >> 16) & 0xFFFF));
+        return unchecked((int)_mcnkAlphaHeader.Unknown3);
     }
 
     public override string ToString()

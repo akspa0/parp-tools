@@ -11,4 +11,7 @@
     <!-- Keep the same relative reference used by the existing DBCTool project -->
     <ProjectReference Include="..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="13.7.1" />
+  </ItemGroup>
 </Project>
