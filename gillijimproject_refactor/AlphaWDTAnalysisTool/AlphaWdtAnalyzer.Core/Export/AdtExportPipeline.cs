@@ -52,6 +52,39 @@ public static class AdtExportPipeline
         public bool NoZoneFallback { get; init; } = false;
     }
 
+    private static IEnumerable<string> EnumerateCrosswalkCsvs(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) yield break;
+        var patterns = new[] { "Area_patch_crosswalk_*.csv", "Area_crosswalk_v*.csv" };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pattern in patterns)
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories))
+            {
+                if (seen.Add(file)) yield return file;
+            }
+        }
+    }
+
+    private static string ResolvePatchFilePath(string patchFile, string? patchDir, string? outRoot, string alias)
+    {
+        if (Path.IsPathFullyQualified(patchFile)) return patchFile;
+        if (!string.IsNullOrWhiteSpace(patchDir) && Directory.Exists(patchDir))
+        {
+            var combined = Path.Combine(patchDir, patchFile);
+            if (File.Exists(combined)) return combined;
+        }
+        if (!string.IsNullOrWhiteSpace(outRoot))
+        {
+            var v3 = Path.Combine(outRoot, alias, "compare", "v3", patchFile);
+            if (File.Exists(v3)) return v3;
+            var v2 = Path.Combine(outRoot, alias, "compare", "v2", patchFile);
+            if (File.Exists(v2)) return v2;
+        }
+        var cwd = Path.Combine(Directory.GetCurrentDirectory(), patchFile);
+        return cwd;
+    }
+
     public static void ExportSingle(Options opts)
     {
         if (string.IsNullOrWhiteSpace(opts.SingleWdtPath)) throw new ArgumentException("SingleWdtPath required", nameof(opts.SingleWdtPath));
@@ -92,24 +125,58 @@ public static class AdtExportPipeline
         if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
         {
             patchMap = new DbcPatchMapping();
-            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) && File.Exists(opts.DbctoolPatchFile!))
-                patchMap.LoadFile(opts.DbctoolPatchFile!);
+            bool loadedAny = false;
+            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile))
+            {
+                var resolvedFile = ResolvePatchFilePath(opts.DbctoolPatchFile!, opts.DbctoolPatchDir, opts.DbctoolOutRoot, aliasUsed);
+                if (File.Exists(resolvedFile))
+                {
+                    patchMap.LoadFile(resolvedFile);
+                    loadedAny = true;
+                }
+                else if (opts.Verbose)
+                {
+                    Console.Error.WriteLine($"[PatchMap] Patch file not found: {resolvedFile}");
+                }
+            }
             if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
             {
                 patchDirUsed = opts.DbctoolPatchDir!;
-                foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
+                foreach (var f in EnumerateCrosswalkCsvs(opts.DbctoolPatchDir!))
+                {
                     patchMap.LoadFile(f);
+                    loadedAny = true;
+                }
+            }
+            if (!loadedAny)
+            {
+                patchMap = null;
             }
         }
         else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
         {
             var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
-            if (Directory.Exists(v2Dir))
+            var v3Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v3");
+            var searchDirs = new List<string>();
+            if (Directory.Exists(v3Dir)) searchDirs.Add(v3Dir);
+            if (Directory.Exists(v2Dir)) searchDirs.Add(v2Dir);
+            if (searchDirs.Count > 0)
             {
-                patchDirUsed = v2Dir;
+                patchDirUsed = searchDirs[0];
                 patchMap = new DbcPatchMapping();
-                foreach (var f in Directory.EnumerateFiles(v2Dir, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
-                    patchMap.LoadFile(f);
+                bool loadedAny = false;
+                foreach (var dir in searchDirs)
+                {
+                    foreach (var f in EnumerateCrosswalkCsvs(dir))
+                    {
+                        patchMap.LoadFile(f);
+                        loadedAny = true;
+                    }
+                }
+                if (!loadedAny)
+                {
+                    patchMap = null;
+                }
             }
             else if (opts.PatchOnly)
             {
@@ -266,24 +333,58 @@ public static class AdtExportPipeline
                 if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
                 {
                     patchMap = new DbcPatchMapping();
-                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) && File.Exists(opts.DbctoolPatchFile!))
-                        patchMap.LoadFile(opts.DbctoolPatchFile!);
+                    bool loadedAny = false;
+                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile))
+                    {
+                        var resolvedFile = ResolvePatchFilePath(opts.DbctoolPatchFile!, opts.DbctoolPatchDir, opts.DbctoolOutRoot, aliasUsed);
+                        if (File.Exists(resolvedFile))
+                        {
+                            patchMap.LoadFile(resolvedFile);
+                            loadedAny = true;
+                        }
+                        else if (opts.Verbose)
+                        {
+                            Console.Error.WriteLine($"[PatchMap] Patch file not found: {resolvedFile}");
+                        }
+                    }
                     if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
                     {
                         patchDirUsed = opts.DbctoolPatchDir!;
-                        foreach (var f in Directory.EnumerateFiles(opts.DbctoolPatchDir!, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
+                        foreach (var f in EnumerateCrosswalkCsvs(opts.DbctoolPatchDir!))
+                        {
                             patchMap.LoadFile(f);
+                            loadedAny = true;
+                        }
+                    }
+                    if (!loadedAny)
+                    {
+                        patchMap = null;
                     }
                 }
                 else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
                 {
                     var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
-                    if (Directory.Exists(v2Dir))
+                    var v3Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v3");
+                    var searchDirs = new List<string>();
+                    if (Directory.Exists(v3Dir)) searchDirs.Add(v3Dir);
+                    if (Directory.Exists(v2Dir)) searchDirs.Add(v2Dir);
+                    if (searchDirs.Count > 0)
                     {
-                        patchDirUsed = v2Dir;
+                        patchDirUsed = searchDirs[0];
                         patchMap = new DbcPatchMapping();
-                        foreach (var f in Directory.EnumerateFiles(v2Dir, "Area_patch_crosswalk_*.csv", SearchOption.AllDirectories))
-                            patchMap.LoadFile(f);
+                        bool loadedAny = false;
+                        foreach (var dir in searchDirs)
+                        {
+                            foreach (var f in EnumerateCrosswalkCsvs(dir))
+                            {
+                                patchMap.LoadFile(f);
+                                loadedAny = true;
+                            }
+                        }
+                        if (!loadedAny)
+                        {
+                            patchMap = null;
+                        }
                     }
                     else if (opts.PatchOnly)
                     {

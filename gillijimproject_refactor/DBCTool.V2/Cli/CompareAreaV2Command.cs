@@ -410,6 +410,7 @@ internal sealed class CompareAreaV2Command
             // Pivot via 0.6.0 (chain) when requested, or as fallback when direct is missing/partial
             int chosen060 = -1; int depth060 = 0; int pivotMapIdX = -1; bool hasPivot = false;
             int midParentId = -1; string midName = string.Empty; string midParentName = string.Empty; int midMapOut = -1; string midMapName = string.Empty;
+            int midAreaResolved = -1;
             string pivotChainDesc = string.Empty; string lkChainDesc = string.Empty;
             if (((chainVia060) || (chosen < 0 || depth < chain.Count)) && has060 && chain.Count > 0)
             {
@@ -498,6 +499,7 @@ internal sealed class CompareAreaV2Command
                         if (localChosen060 >= 0)
                         {
                             chosen060 = localChosen060;
+                            midAreaResolved = chosen060;
                             var pivotRow = id060ToRow[chosen060];
                             int pParent = SafeField<int>(pivotRow, parentCol060);
                             if (pParent <= 0) pParent = chosen060;
@@ -525,6 +527,7 @@ internal sealed class CompareAreaV2Command
                             midMapOut = pivotMapIdX;
                             midMapName = map060Names.TryGetValue(midMapOut, out var mmn2) ? mmn2 : string.Empty;
                             midParentName = FirstNonEmpty(SafeField<string>(zoneRow060, areaNameCol060)) ?? string.Empty;
+                            midAreaResolved = forcedParent060;
                         }
                         else // name-only forced parent (0.6.0 lacks the zone row); build LK chain using names directly
                         {
@@ -596,6 +599,50 @@ internal sealed class CompareAreaV2Command
                         }
                     }
                 }
+            }
+
+            if (has060 && midMapOut < 0)
+            {
+                string zoneNameForMid = ResolveCanonicalName(srcZoneCanonical, (mapResolved, zoneBase));
+                if (string.IsNullOrWhiteSpace(zoneNameForMid)) zoneNameForMid = zoneName;
+                string areaNameForMid = string.Empty;
+                if (area_lo16 > 0)
+                {
+                    areaNameForMid = ResolveCanonicalName(srcAreaCanonical, (mapResolved, areaNum));
+                    if (string.IsNullOrWhiteSpace(areaNameForMid)) areaNameForMid = subName;
+                }
+                else
+                {
+                    areaNameForMid = subName;
+                }
+
+                if (!string.IsNullOrWhiteSpace(zoneNameForMid)
+                    && TryInferMidFromCanonical(zoneNameForMid, areaNameForMid, midZonesByMap, midChildrenByParent, midZoneCanonical, midAreaCanonical,
+                        out var inferredMapId, out var inferredZoneId, out var inferredAreaId))
+                {
+                    midMapOut = inferredMapId;
+                    midParentId = inferredZoneId;
+                    midMapName = map060Names.TryGetValue(inferredMapId, out var inferredMapName) ? inferredMapName : string.Empty;
+                    midParentName = ResolveCanonicalName(midZoneCanonical, (inferredMapId, inferredZoneId));
+                    if (string.IsNullOrWhiteSpace(midParentName)) midParentName = zoneNameForMid;
+                    if (inferredAreaId > 0)
+                    {
+                        midAreaResolved = inferredAreaId;
+                        midName = ResolveCanonicalName(midAreaCanonical, (inferredMapId, inferredAreaId));
+                        if (string.IsNullOrWhiteSpace(midName)) midName = areaNameForMid;
+                    }
+                    else
+                    {
+                        midAreaResolved = -1;
+                        if (string.IsNullOrWhiteSpace(midName)) midName = areaNameForMid;
+                    }
+                }
+            }
+
+            if (midAreaResolved < 0 && midParentId > 0)
+            {
+                midAreaResolved = midParentId;
+                if (string.IsNullOrWhiteSpace(midName)) midName = midParentName;
             }
 
             // Global rename match: unique top-level zone across LK (cross-map allowed) - disabled in chainVia060 mode
@@ -732,12 +779,40 @@ internal sealed class CompareAreaV2Command
 
                 (string childIdsStr, string childNamesStr) = BuildTargetChildrenInfo(tgtIdToRow, idxTgtChildrenByZone, chosen, tgtParentId, areaNameColTgt);
 
-                string midMapNameOut = hasPivot && pivotMapIdX >= 0 && map060Names.TryGetValue(pivotMapIdX, out var mmOut) ? mmOut : string.Empty;
+                string midMapNameOut = string.Empty;
+                if (midMapOut >= 0 && map060Names.TryGetValue(midMapOut, out var mmOut))
+                {
+                    midMapNameOut = mmOut;
+                }
+                else if (hasPivot && pivotMapIdX >= 0 && map060Names.TryGetValue(pivotMapIdX, out var mmFallback))
+                {
+                    midMapNameOut = mmFallback;
+                }
                 string midChainOut = string.Empty;
-                int midChosenId = chosen060;
-                int midParentOut = midParentId;
+                int midChosenId = midAreaResolved >= 0 ? midAreaResolved : chosen060;
+                int midParentOut = midParentId > 0 ? midParentId : (midChosenId > 0 ? midChosenId : midParentId);
                 if (!string.IsNullOrWhiteSpace(pivotChainDisplay)) midChainOut = pivotChainDisplay;
                 else if (!string.IsNullOrWhiteSpace(pivotChainDesc)) midChainOut = pivotChainDesc;
+                else if (midMapOut >= 0)
+                {
+                    var midZoneDisplay = midParentOut > 0 ? ResolveCanonicalName(midZoneCanonical, (midMapOut, midParentOut)) : string.Empty;
+                    if (string.IsNullOrWhiteSpace(midZoneDisplay)) midZoneDisplay = midParentName;
+                    var midSubDisplay = string.Empty;
+                    if (midChosenId > 0 && midParentOut > 0 && midChosenId != midParentOut)
+                    {
+                        midSubDisplay = ResolveCanonicalName(midAreaCanonical, (midMapOut, midChosenId));
+                        if (string.IsNullOrWhiteSpace(midSubDisplay)) midSubDisplay = midName;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(midName) && !string.Equals(midName, midZoneDisplay, StringComparison.OrdinalIgnoreCase))
+                    {
+                        midSubDisplay = midName;
+                    }
+                    midChainOut = BuildDisplayChain(midZoneDisplay, midSubDisplay);
+                    if (string.IsNullOrWhiteSpace(midChainOut))
+                    {
+                        midChainOut = midZoneDisplay;
+                    }
+                }
 
                 var line = string.Join(',', new[]
                 {

@@ -26,10 +26,11 @@ public sealed class DbcPatchMapping
     private readonly Dictionary<string, Dictionary<int, (int target, bool via)>> _bestBySrcNameArea = new(StringComparer.OrdinalIgnoreCase); // src_mapName -> (src_areaNumber -> best tgt)
     private readonly Dictionary<int, ZoneEntry> _zoneByBase = new(); // zoneBase -> entry
     private readonly Dictionary<int, Dictionary<int, ZoneEntry>> _subByZoneBase = new(); // zoneBase -> (subLo -> entry)
-    private readonly Dictionary<int, MidEntry> _midBySrcArea = new(); // src_areaNumber -> mid info
-    private readonly Dictionary<int, (int targetId, bool via)> _tgtByMidArea = new(); // mid_areaID -> target areaID
+    private readonly Dictionary<(int srcMapId, int srcAreaNumber), MidEntry> _midBySrcArea = new(); // (src_mapId, src_areaNumber) -> mid info
+    private readonly Dictionary<(int mapId, int midAreaId), (int targetId, bool via)> _tgtByMidArea = new(); // (mid_mapID, mid_areaID) -> target areaID
     private readonly Dictionary<int, IReadOnlyList<int>> _childIdsByTarget = new(); // tgt_zoneId -> child areaIDs
     private readonly Dictionary<int, IReadOnlyList<string>> _childNamesByTarget = new(); // tgt_zoneId -> child names
+    private readonly Dictionary<string, int> _srcMapIdByName = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly struct ZoneEntry
     {
@@ -144,6 +145,11 @@ public sealed class DbcPatchMapping
                 if (tgtParentIdx >= 0 && tgtParentIdx < cells.Length && int.TryParse(cells[tgtParentIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tParHdr))
                     tParOpt = tParHdr;
                 Insert(sMap, sArea, tId, sMapName, tMapX, tMapNameX, isVia060, tParOpt);
+                if (!string.IsNullOrWhiteSpace(sMapName) && sMap >= 0)
+                {
+                    if (!_srcMapIdByName.ContainsKey(sMapName))
+                        _srcMapIdByName[sMapName] = sMap;
+                }
                 if (tgtNameIdx >= 0 && tgtNameIdx < cells.Length)
                 {
                     var nm = cells[tgtNameIdx]?.Trim();
@@ -155,6 +161,8 @@ public sealed class DbcPatchMapping
                 int midMapId = -1;
                 if (midMapIdx >= 0 && midMapIdx < cells.Length)
                     int.TryParse(cells[midMapIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out midMapId);
+                if (midMapId < 0 && sMap >= 0)
+                    midMapId = sMap;
                 int midAreaId = -1;
                 if (midAreaIdx >= 0 && midAreaIdx < cells.Length)
                     int.TryParse(cells[midAreaIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out midAreaId);
@@ -165,14 +173,25 @@ public sealed class DbcPatchMapping
                 if (midChainIdx >= 0 && midChainIdx < cells.Length)
                     midChain = (cells[midChainIdx] ?? string.Empty).Trim();
 
-                if (midAreaId > 0)
+                bool hasPivotData = midAreaIdx >= 0 || midParentIdx >= 0 || midMapIdx >= 0 || !string.IsNullOrWhiteSpace(midChain);
+                int midAreaForEntry = midAreaId;
+                if (midAreaForEntry <= 0 && midParentId > 0)
                 {
-                    _midBySrcArea[sArea] = new MidEntry(midAreaId, midMapId, midParentId, midChain, isVia060);
-                    if (tId > 0)
+                    midAreaForEntry = midParentId;
+                }
+
+                if (midAreaForEntry > 0 || hasPivotData)
+                {
+                    var midMapForEntry = midMapId >= 0 ? midMapId : sMap;
+                    int srcMapKey = sMap >= 0 ? sMap : -1;
+                    _midBySrcArea[(srcMapKey, sArea)] = new MidEntry(midAreaForEntry, midMapForEntry, midParentId > 0 ? midParentId : midAreaForEntry, midChain, isVia060);
+                    if (midAreaForEntry > 0 && tId > 0)
                     {
-                        if (!_tgtByMidArea.TryGetValue(midAreaId, out var existing) || (!existing.via && isVia060))
+                        var midMapKey = midMapForEntry >= 0 ? midMapForEntry : -1;
+                        var key = (midMapKey, midAreaForEntry);
+                        if (!_tgtByMidArea.TryGetValue(key, out var existing) || (!existing.via && isVia060))
                         {
-                            _tgtByMidArea[midAreaId] = (tId, isVia060);
+                            _tgtByMidArea[key] = (tId, isVia060);
                         }
                     }
                 }
@@ -363,28 +382,43 @@ public sealed class DbcPatchMapping
         return false;
     }
 
-    public bool TryMapViaMid(int srcAreaNumber, out int targetId, out int midAreaId, out bool via060)
+    public bool TryResolveSourceMapId(string? srcMapName, out int mapId)
+    {
+        mapId = -1;
+        if (string.IsNullOrWhiteSpace(srcMapName))
+        {
+            return false;
+        }
+        return _srcMapIdByName.TryGetValue(srcMapName, out mapId);
+    }
+
+    public bool TryMapViaMid(int? srcMapId, int srcAreaNumber, out int targetId, out int midAreaId, out bool via060)
     {
         targetId = 0;
         midAreaId = 0;
         via060 = false;
-        if (_midBySrcArea.TryGetValue(srcAreaNumber, out var mid))
+        if (TryGetMidEntry(srcMapId, srcAreaNumber, out var mid))
         {
             midAreaId = mid.MidAreaId;
             via060 = mid.Via060;
-            if (mid.MidAreaId > 0 && _tgtByMidArea.TryGetValue(mid.MidAreaId, out var pair))
+            if (mid.MidAreaId > 0)
             {
-                targetId = pair.targetId;
-                if (pair.via) via060 = true;
-                return targetId > 0;
+                var midMapKey = mid.MidMapId >= 0 ? mid.MidMapId : -1;
+                var key = (midMapKey, mid.MidAreaId);
+                if (_tgtByMidArea.TryGetValue(key, out var pair))
+                {
+                    targetId = pair.targetId;
+                    if (pair.via) via060 = true;
+                    return targetId > 0;
+                }
             }
         }
         return false;
     }
 
-    public bool TryGetMidInfo(int srcAreaNumber, out int midAreaId, out int midMapId, out int midParentId, out string midChain, out bool via060)
+    public bool TryGetMidInfo(int? srcMapId, int srcAreaNumber, out int midAreaId, out int midMapId, out int midParentId, out string midChain, out bool via060)
     {
-        if (_midBySrcArea.TryGetValue(srcAreaNumber, out var mid))
+        if (TryGetMidEntry(srcMapId, srcAreaNumber, out var mid))
         {
             midAreaId = mid.MidAreaId;
             midMapId = mid.MidMapId;
@@ -401,6 +435,21 @@ public sealed class DbcPatchMapping
         return false;
     }
 
+    public bool TryGetMidInfo(int srcAreaNumber, out int midAreaId, out int midMapId, out int midParentId, out string midChain, out bool via060)
+    {
+        return TryGetMidInfo(null, srcAreaNumber, out midAreaId, out midMapId, out midParentId, out midChain, out via060);
+    }
+
+    public bool TryGetMidInfo(int srcAreaNumber, out int midAreaId)
+    {
+        if (TryGetMidInfo(null, srcAreaNumber, out midAreaId, out _, out _, out _, out _))
+        {
+            return true;
+        }
+        midAreaId = 0;
+        return false;
+    }
+
     public IReadOnlyList<int> GetChildCandidateIds(int targetZoneId)
     {
         return _childIdsByTarget.TryGetValue(targetZoneId, out var list) ? list : Array.Empty<int>();
@@ -409,6 +458,59 @@ public sealed class DbcPatchMapping
     public IReadOnlyList<string> GetChildCandidateNames(int targetZoneId)
     {
         return _childNamesByTarget.TryGetValue(targetZoneId, out var list) ? list : Array.Empty<string>();
+    }
+
+    private bool TryGetMidEntry(int? srcMapId, int srcAreaNumber, out MidEntry entry)
+    {
+        entry = default;
+        int mapKey = srcMapId.GetValueOrDefault(-1);
+        if (_midBySrcArea.TryGetValue((mapKey, srcAreaNumber), out entry))
+        {
+            return true;
+        }
+
+        if (_midBySrcArea.TryGetValue((-1, srcAreaNumber), out entry))
+        {
+            return true;
+        }
+
+        bool hasCandidate = false;
+        MidEntry candidate = default;
+        foreach (var kv in _midBySrcArea)
+        {
+            if (kv.Key.srcAreaNumber != srcAreaNumber) continue;
+
+            if (srcMapId.HasValue && srcMapId.Value >= 0)
+            {
+                if (kv.Key.srcMapId == srcMapId.Value)
+                {
+                    entry = kv.Value;
+                    return true;
+                }
+            }
+
+            if (!hasCandidate)
+            {
+                candidate = kv.Value;
+                hasCandidate = true;
+            }
+            else
+            {
+                // Multiple candidates without a map hint; treat as ambiguous
+                if (!srcMapId.HasValue || srcMapId.Value < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (hasCandidate)
+        {
+            entry = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     private void Insert(int srcMapId, int srcAreaNumber, int targetId, string? srcMapName, int tgtMapIdX, string? tgtMapNameX, bool isVia060, int? tgtParentId)

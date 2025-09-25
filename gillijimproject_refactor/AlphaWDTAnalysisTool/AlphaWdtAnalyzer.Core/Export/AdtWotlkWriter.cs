@@ -219,7 +219,7 @@ public static class AdtWotlkWriter
                 bool hasMidInfo = false;
                 if (patchMap is not null && aIdNum > 0)
                 {
-                    hasMidInfo = patchMap.TryGetMidInfo(aIdNum, out midAreaHint, out midMapHint, out midParentHint, out midChainHint, out midViaHint);
+                    hasMidInfo = patchMap.TryGetMidInfo(currentMapId, aIdNum, out midAreaHint, out midMapHint, out midParentHint, out midChainHint, out midViaHint);
                 }
 
                 bool hasZoneCandidate = false;
@@ -228,6 +228,22 @@ public static class AdtWotlkWriter
                 if (patchMap is not null && aIdNum > 0 && zoneBase != 0)
                 {
                     hasZoneCandidate = patchMap.TryMapZone(zoneBase, currentMapId, out zoneCandidateId, out zoneCandidateVia);
+                }
+
+                if (verbose && patchMap is not null && aIdNum > 0 && subLo > 0 && debugPrinted < 24)
+                {
+                    var zoneDiagBase = zoneBase;
+                    var subDiag = subLo;
+                    bool mapScoped = currentMapId.HasValue && currentMapId.Value >= 0;
+                    bool anyMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, null, out var anyId, out var anyVia);
+                    bool mapMatch = false;
+                    int mapMatchId = 0;
+                    bool mapMatchVia = false;
+                    if (mapScoped)
+                    {
+                        mapMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, currentMapId, out mapMatchId, out mapMatchVia);
+                    }
+                    Console.WriteLine($"  [Diag] zoneBase=0x{zoneDiagBase:X} subLo=0x{subDiag:X} mapId={currentMapId} anyMatch={anyMatch} anyId={anyId} anyVia={anyVia} mapMatch={mapMatch} mapMatchId={mapMatchId} mapMatchVia={mapMatchVia}");
                 }
 
                 // -1) CSV lookups keyed by hi/lo pairs and per-map area numbers
@@ -245,7 +261,7 @@ public static class AdtWotlkWriter
                     {
                         lkAreaId = csvExactId; method = viaExact ? "patch_csv_exact_via060" : "patch_csv_exact"; mapped = true;
                     }
-                    else if (patchMap.TryMapViaMid(aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
+                    else if (patchMap.TryMapViaMid(currentMapId, aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
                     {
                         lkAreaId = csvMidId; method = viaMid ? "patch_csv_mid_via060" : "patch_csv_mid"; mapped = true;
                         if (!hasMidInfo && midAreaResolved > 0)
@@ -255,7 +271,7 @@ public static class AdtWotlkWriter
                     }
                 }
 
-                if (!mapped && hasZoneCandidate && hasMidInfo)
+                if (!mapped && hasZoneCandidate && hasMidInfo && patchMap is not null)
                 {
                     var childIds = patchMap.GetChildCandidateIds(zoneCandidateId);
                     var childNames = patchMap.GetChildCandidateNames(zoneCandidateId);
@@ -322,10 +338,15 @@ public static class AdtWotlkWriter
                 long save = fs.Position;
                 fs.Position = areaFieldPos;
                 uint existing = br.ReadUInt32();
-                string logEntry = $"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) midArea={midAreaHint} midChain='{midChainHint}' zoneBase=0x{zoneBase:X} subLo=0x{subLo:X} existing={existing} (0x{existing:X}) -> write={lkAreaId} (0x{lkAreaId:X}) method={method}";
+
+                bool hasMappedTarget = mapped && lkAreaId > 0;
+                int effectiveWrite = hasMappedTarget ? lkAreaId : (int)existing;
+                string methodLogged = hasMappedTarget ? method : (method == "unmapped" ? "unmapped_preserve" : method);
+
+                string logEntry = $"  [V2] idx={i2:D3} alpha={aIdNum} (0x{aIdNum:X}) midArea={midAreaHint} midChain='{midChainHint}' zoneBase=0x{zoneBase:X} subLo=0x{subLo:X} existing={existing} (0x{existing:X}) -> write={effectiveWrite} (0x{effectiveWrite:X}) method={methodLogged}";
                 verboseLog?.Add(logEntry);
 
-                if (existing != (uint)lkAreaId)
+                if (hasMappedTarget && existing != (uint)lkAreaId)
                 {
                     fs.Position = areaFieldPos;
                     bw.Write((uint)lkAreaId);
