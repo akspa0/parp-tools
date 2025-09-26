@@ -9,11 +9,108 @@ using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
 using AlphaWdtAnalyzer.Core.Assets;
 using System.Text;
+using System.Text.Json;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
 public static class AdtExportPipeline
 {
+    private sealed class MapIndexBuilder
+    {
+        private sealed class TileEntry
+        {
+            public required int TileX { get; init; }
+            public required int TileY { get; init; }
+            public required string AdtPath { get; init; }
+            public string? AreaVerifyPath { get; init; }
+        }
+
+        private readonly string _exportDir;
+        private readonly string _mapName;
+        private readonly List<TileEntry> _tiles = new();
+        private readonly Dictionary<string, string> _logs = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SortedDictionary<string, string> _artifacts = new(StringComparer.OrdinalIgnoreCase);
+
+        public MapIndexBuilder(string exportDir, string mapName)
+        {
+            _exportDir = exportDir;
+            _mapName = mapName;
+        }
+
+        public void AddTile(int tileX, int tileY, string adtRelativePath, string? areaVerifyRelativePath)
+        {
+            _tiles.Add(new TileEntry
+            {
+                TileX = tileX,
+                TileY = tileY,
+                AdtPath = adtRelativePath,
+                AreaVerifyPath = areaVerifyRelativePath,
+            });
+        }
+
+        public void RegisterVerboseLog(string? absoluteLogPath)
+        {
+            if (string.IsNullOrWhiteSpace(absoluteLogPath) || !File.Exists(absoluteLogPath!)) return;
+            _logs["verbose"] = ToRelative(absoluteLogPath!);
+        }
+
+        public void AddArtifact(string name, string? absolutePath)
+        {
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(absolutePath)) return;
+            if (!File.Exists(absolutePath!)) return;
+            _artifacts[name] = ToRelative(absolutePath!);
+        }
+
+        public void WriteIndex()
+        {
+            var indexDir = Path.Combine(_exportDir, "maps", _mapName);
+            Directory.CreateDirectory(indexDir);
+
+            var payload = new
+            {
+                map = _mapName,
+                tiles = _tiles.Select(t => new
+                {
+                    tile_x = t.TileX,
+                    tile_y = t.TileY,
+                    adt = t.AdtPath,
+                    area_verify = t.AreaVerifyPath,
+                }).ToArray(),
+                logs = _logs,
+                artifacts = _artifacts,
+                tile_count = _tiles.Count,
+            };
+
+            WriteJson(Path.Combine(indexDir, "index.json"), payload);
+            WriteJson(Path.Combine(indexDir, SanitizeFileName(_mapName) + ".json"), payload);
+        }
+
+        private string ToRelative(string absolutePath)
+        {
+            var fullRoot = Path.GetFullPath(_exportDir);
+            var fullPath = Path.GetFullPath(absolutePath);
+            return Path.GetRelativePath(fullRoot, fullPath);
+        }
+
+        private static void WriteJson(string path, object payload)
+        {
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(payload, options), Encoding.UTF8);
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "map";
+            var invalid = Path.GetInvalidFileNameChars();
+            var chars = value.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray();
+            var sanitized = new string(chars).Replace(' ', '_');
+            return string.IsNullOrWhiteSpace(sanitized) ? "map" : sanitized;
+        }
+    }
+
     public sealed class Options
     {
         public string? SingleWdtPath { get; init; }
@@ -51,6 +148,7 @@ public static class AdtExportPipeline
         public bool PatchOnly { get; init; } = false;
         public int? MaxDegreeOfParallelism { get; init; }
         public bool NoZoneFallback { get; init; } = false;
+        public bool AllowCsvFallback { get; init; } = false;
     }
 
     private static IEnumerable<string> EnumerateCrosswalkCsvs(string directory)
@@ -218,6 +316,8 @@ public static class AdtExportPipeline
 
         int processed = 0;
         int totalTiles = 0;
+        var mapIndex = new MapIndexBuilder(opts.ExportDir, wdt.MapName);
+
         void ProcessTile(int x, int y)
         {
             if (totalTiles == 0) totalTiles = candidateTiles.Count;
@@ -262,6 +362,7 @@ public static class AdtExportPipeline
                 VizHtml = opts.VizHtml,
                 PatchOnly = opts.PatchOnly,
                 NoZoneFallback = opts.NoZoneFallback,
+                AllowCsvFallback = opts.AllowCsvFallback,
             };
             if (opts.Verbose && patchMap is not null)
                 Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
@@ -270,6 +371,16 @@ public static class AdtExportPipeline
             AdtWotlkWriter.WriteBinary(ctx);
             var (fuzzy, capacity, overflow) = fixupLogger.EndTile();
             Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
+
+            var adtPath = Path.Combine(opts.ExportDir, "World", "Maps", wdt.MapName, $"{wdt.MapName}_{x}_{y}.adt");
+            var adtRelative = Path.GetRelativePath(opts.ExportDir, adtPath);
+            string? areaVerifyRelative = null;
+            var areaVerifyPath = Path.Combine(opts.ExportDir, "csv", "maps", wdt.MapName, $"areaid_verify_{x}_{y}.csv");
+            if (File.Exists(areaVerifyPath))
+            {
+                areaVerifyRelative = Path.GetRelativePath(opts.ExportDir, areaVerifyPath);
+            }
+            mapIndex.AddTile(x, y, adtRelative, areaVerifyRelative);
         }
 
         var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
@@ -289,6 +400,15 @@ public static class AdtExportPipeline
             try { AdtWotlkWriter.WriteMapVisualizationHtml(opts.ExportDir, wdt.MapName, patchMap, opts.VizDir); }
             catch (Exception ex) { Console.Error.WriteLine($"[VizMap] Failed for {wdt.MapName}: {ex.Message}"); }
         }
+
+        var verboseLogPath = AdtWotlkWriter.TryGetVerboseLogPath(wdt.MapName);
+        mapIndex.RegisterVerboseLog(verboseLogPath);
+        var mapCsvDir = Path.Combine(opts.ExportDir, "csv", "maps", wdt.MapName);
+        var assetFixupsPath = Path.Combine(mapCsvDir, "asset_fixups.csv");
+        var placementsPath = Path.Combine(mapCsvDir, "placements.csv");
+        mapIndex.AddArtifact("asset_fixups", assetFixupsPath);
+        mapIndex.AddArtifact("placements", placementsPath);
+        mapIndex.WriteIndex();
     }
 
     public static void ExportBatch(Options opts)
@@ -313,6 +433,8 @@ public static class AdtExportPipeline
                 var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
                 Directory.CreateDirectory(logDir);
                 using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
+
+                var mapIndex = new MapIndexBuilder(opts.ExportDir, mapName);
 
                 var fixup = new AssetFixupPolicy(
                     resolver,

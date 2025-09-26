@@ -60,6 +60,8 @@
    - Diff viewer comparing original vs. rollback ADT stats (counts, bounding boxes).
    - Optional preview: render placement positions via existing visualization pipeline.
 
+   We need a way to be able to search through the assets and placements and identify which ADTs and AreaIds are affected by the uniqueID ranges, too. We may want to keep track of the pre-converted AreaTable entries/IDs, as well, since there may be a correlation to chronological placements and zone creation, hidden in that data.
+
 ## Risks & Mitigations
 
 - **Risk**: Incomplete ADT parsing for placements may corrupt files.
