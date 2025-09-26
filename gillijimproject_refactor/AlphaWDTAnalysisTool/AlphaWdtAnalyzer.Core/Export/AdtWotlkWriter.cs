@@ -367,26 +367,64 @@ public static class AdtWotlkWriter
                     if (childIds.Count > 0 && childNames.Count > 0)
                     {
                         var tokens = new List<string>();
-                        void AddToken(string value)
+                        void AddTokenVariants(string value)
                         {
-                            var norm = NormalizeNameToken(value);
-                            if (!string.IsNullOrEmpty(norm) && !tokens.Contains(norm)) tokens.Add(norm);
+                            foreach (var variant in EnumerateTokenVariants(value))
+                            {
+                                if (!tokens.Contains(variant)) tokens.Add(variant);
+                            }
                         }
 
-                        AddToken(midChainHint);
+                        IEnumerable<string> EnumerateTokenVariants(string value)
+                        {
+                            var primary = NormalizeNameToken(value);
+                            if (!string.IsNullOrEmpty(primary)) yield return primary;
+
+                            if (string.IsNullOrWhiteSpace(value)) yield break;
+
+                            static IEnumerable<string> SplitAndNormalize(string source)
+                            {
+                                var delimiters = new[] { ':', '-', '/', '|', '\\' };
+                                var parts = source.Split(delimiters, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                                foreach (var part in parts)
+                                {
+                                    var pn = NormalizeNameToken(part);
+                                    if (!string.IsNullOrEmpty(pn)) yield return pn;
+                                }
+                            }
+
+                            var splitParts = SplitAndNormalize(value).Distinct().ToArray();
+                            foreach (var part in splitParts)
+                            {
+                                yield return part;
+                            }
+
+                            if (splitParts.Length > 1)
+                            {
+                                var joined = string.Join(' ', splitParts);
+                                if (!string.IsNullOrEmpty(joined)) yield return joined;
+                            }
+                        }
+
+                        AddTokenVariants(midChainHint);
                         if (!string.IsNullOrWhiteSpace(midChainHint))
                         {
                             var segments = midChainHint.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                             foreach (var seg in segments)
                             {
-                                AddToken(seg);
+                                AddTokenVariants(seg);
                             }
                         }
 
                         for (int idx = 0; idx < Math.Min(childIds.Count, childNames.Count); idx++)
                         {
                             var childNorm = NormalizeNameToken(childNames[idx]);
-                            if (tokens.Count == 0 || tokens.Contains(childNorm))
+                            if (tokens.Count == 0)
+                            {
+                                AddTokenVariants(childNames[idx]);
+                            }
+
+                            if (tokens.Contains(childNorm))
                             {
                                 if (AcceptCandidate(childIds[idx], (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child"))
                                 {

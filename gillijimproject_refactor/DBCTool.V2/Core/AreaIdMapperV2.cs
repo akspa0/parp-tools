@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using DBCD;
@@ -45,13 +46,15 @@ public sealed class AreaIdMapperV2
     private readonly Dictionary<int, string> _mapTgtNames;
 
     private readonly AreaMatcher _matcher = new();
+    private readonly Dictionary<string, List<AreaRenameOverride>> _renameOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     private AreaIdMapperV2(
         IDBCDStorage storSrcArea,
         IDBCDStorage storSrcMap,
         IDBCDStorage storTgtArea,
         IDBCDStorage storTgtMap,
-        string srcAlias)
+        string srcAlias,
+        IEnumerable<AreaRenameOverride>? renameOverrides)
     {
         _storSrcArea = storSrcArea;
         _storSrcMap = storSrcMap;
@@ -116,9 +119,24 @@ public sealed class AreaIdMapperV2
         _cw053To335 = crosswalk.Build053To335(_storSrcMap, _storTgtMap);
         _mapSrcNames = BuildMapNames(_storSrcMap);
         _mapTgtNames = BuildMapNames(_storTgtMap);
+
+        if (renameOverrides is not null)
+        {
+            foreach (var ov in renameOverrides)
+            {
+                var key = NormKey(ov.From);
+                if (string.IsNullOrEmpty(key)) continue;
+                if (!_renameOverrides.TryGetValue(key, out var list))
+                {
+                    list = new List<AreaRenameOverride>();
+                    _renameOverrides[key] = list;
+                }
+                list.Add(ov);
+            }
+        }
     }
 
-    public static AreaIdMapperV2? TryCreate(string dbdDir, string srcAlias, string srcDir, string dir335)
+    public static AreaIdMapperV2? TryCreate(string dbdDir, string srcAlias, string srcDir, string dir335, IEnumerable<AreaRenameOverride>? renameOverrides = null)
     {
         if (string.IsNullOrWhiteSpace(dbdDir) || string.IsNullOrWhiteSpace(srcAlias) || string.IsNullOrWhiteSpace(srcDir) || string.IsNullOrWhiteSpace(dir335)) return null;
         var provider = new FilesystemDBDProvider(dbdDir);
@@ -126,7 +144,7 @@ public sealed class AreaIdMapperV2
         var storSrcMap  = LoadTable("Map",       CanonicalizeBuild(srcAlias), srcDir, provider, DBCD.Locale.EnUS);
         var storTgtArea = LoadTable("AreaTable", CanonicalizeBuild("3.3.5"),  dir335, provider, DBCD.Locale.EnUS);
         var storTgtMap  = LoadTable("Map",       CanonicalizeBuild("3.3.5"),  dir335, provider, DBCD.Locale.EnUS);
-        return new AreaIdMapperV2(storSrcArea, storSrcMap, storTgtArea, storTgtMap, srcAlias);
+        return new AreaIdMapperV2(storSrcArea, storSrcMap, storTgtArea, storTgtMap, srcAlias, renameOverrides);
     }
 
     public bool TryMapArea(int contRaw, int areaNum, out int targetId, out string method)
@@ -166,9 +184,35 @@ public sealed class AreaIdMapperV2
         if (_cw053To335.TryGetValue(contRaw, out var mx)) { mapIdX = mx; hasMapX = true; }
         else if (_mapTgtNames.ContainsKey(contRaw)) { mapIdX = contRaw; hasMapX = true; }
 
+        string nm = GetSrcName(areaNum);
+        // Map-locked rename overrides (CompareArea V3)
+        var normSourceName = string.IsNullOrWhiteSpace(nm) ? string.Empty : NormKey(nm);
+        if (!string.IsNullOrEmpty(normSourceName) && _renameOverrides.TryGetValue(normSourceName, out var overrides) && overrides.Count > 0)
+        {
+            AreaRenameOverride? selected = null;
+            if (hasMapX)
+            {
+                selected = overrides.FirstOrDefault(o => o.TargetMapId == mapIdX);
+            }
+            else if (overrides.Count == 1)
+            {
+                selected = overrides[0];
+            }
+
+            if (selected is not null && _tgtIdToRow.TryGetValue(selected.TargetAreaId, out var overrideRow))
+            {
+                int overrideMap = SafeField<int>(overrideRow, "ContinentID");
+                if (!hasMapX || MapsAreEquivalent(overrideMap, mapIdX))
+                {
+                    targetId = selected.TargetAreaId;
+                    method = "rename_override";
+                    return true;
+                }
+            }
+        }
+
         // Build zone-only chain
         var chain = new List<string>();
-        string nm = GetSrcName(areaNum);
         if (area_lo16 == 0)
         {
             if (!string.IsNullOrWhiteSpace(nm)) chain.Add(NormKey(nm));
@@ -279,4 +323,75 @@ public sealed class AreaIdMapperV2
             _ => alias
         };
     }
+
+    private static bool MapsAreEquivalent(int a, int b)
+    {
+        if (a == b) return true;
+        return (a == 451 && b == 0) || (a == 0 && b == 451);
+    }
+
+    public static List<AreaRenameOverride> LoadRenameOverridesCsv(string path)
+    {
+        var list = new List<AreaRenameOverride>();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return list;
+
+        foreach (var line in File.ReadLines(path))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+            if (trimmed.StartsWith('#')) continue;
+
+            var parts = SplitCsvLine(trimmed);
+            if (parts.Count < 4) continue;
+
+            var from = parts[0].Trim().Trim('"');
+            var to = parts[1].Trim().Trim('"');
+            if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to)) continue;
+
+            if (!int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mapId)) continue;
+            if (!int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var areaId)) continue;
+
+            list.Add(new AreaRenameOverride(from, to, mapId, areaId));
+        }
+
+        return list;
+    }
+
+    private static List<string> SplitCsvLine(string line)
+    {
+        var values = new List<string>();
+        var sb = new StringBuilder();
+        bool inQuotes = false;
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            char ch = line[i];
+            if (ch == '"')
+            {
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                    continue;
+                }
+
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (ch == ',' && !inQuotes)
+            {
+                values.Add(sb.ToString());
+                sb.Clear();
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        values.Add(sb.ToString());
+        return values;
+    }
+
+    public sealed record AreaRenameOverride(string From, string TargetName, int TargetMapId, int TargetAreaId);
 }

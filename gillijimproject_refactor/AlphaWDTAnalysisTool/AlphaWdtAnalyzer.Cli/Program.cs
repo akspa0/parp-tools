@@ -90,7 +90,7 @@ public static class Program
         bool verbose = false;
         bool trackAssets = false;
         string? dbdDir = null; string? dbctoolOutRoot = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
-        string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
+        string? dbctoolPatchDir = null; string? dbctoolPatchFile = null; string? dbctoolRenameOverrides = null;
         bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
 
         for (int i = 0; i < args.Length; i++)
@@ -206,6 +206,17 @@ public static class Program
                 case "--dbctool-patch-file":
                     if (i + 1 >= args.Length) return Usage();
                     dbctoolPatchFile = args[++i];
+                    break;
+                case "--dbctool-rename-overrides":
+                    if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                    {
+                        dbctoolRenameOverrides = args[++i];
+                    }
+                    else
+                    {
+                        dbctoolRenameOverrides = string.Empty; // signal flag present; use auto-discovery
+                        if (verbose) Console.WriteLine("[CLI] --dbctool-rename-overrides flag present; will auto-discover overrides CSV");
+                    }
                     break;
                 case "--viz-svg":
                     vizSvg = true;
@@ -341,6 +352,7 @@ public static class Program
                             DbctoolLkDir = dbctoolLkDir,
                             DbctoolPatchDir = dbctoolPatchDir,
                             DbctoolPatchFile = dbctoolPatchFile,
+                            DbctoolRenameOverridesPath = dbctoolRenameOverrides,
                             VizSvg = vizSvg,
                             VizHtml = vizHtml,
                             PatchOnly = patchOnly,
@@ -399,6 +411,7 @@ public static class Program
                             DbctoolLkDir = dbctoolLkDir,
                             DbctoolPatchDir = dbctoolPatchDir,
                             DbctoolPatchFile = dbctoolPatchFile,
+                            DbctoolRenameOverridesPath = dbctoolRenameOverrides,
                             VizSvg = vizSvg,
                             VizHtml = vizHtml,
                             PatchOnly = patchOnly,

@@ -43,6 +43,7 @@ public static class AdtExportPipeline
         // Optional: Use precomputed DBCTool.V2 patch CSV(s)
         public string? DbctoolPatchDir { get; init; } // directory containing Area_patch_crosswalk_*.csv
         public string? DbctoolPatchFile { get; init; } // specific patch CSV file
+        public string? DbctoolRenameOverridesPath { get; init; }
         // Visualization
         public bool VizSvg { get; init; } = false;
         public string? VizDir { get; init; }
@@ -111,10 +112,17 @@ public static class AdtExportPipeline
 
         var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
         AreaIdMapperV2? areaMapperV2 = null;
+        List<AreaIdMapperV2.AreaRenameOverride>? renameOverrides = null;
         if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
         {
             var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
-            areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
+            var renamePath = ResolveRenameOverridesPath(opts, alias);
+            if (!string.IsNullOrWhiteSpace(renamePath))
+            {
+                renameOverrides = AreaIdMapperV2.LoadRenameOverridesCsv(renamePath!);
+                if (opts.Verbose) Console.WriteLine($"[Rename] Loaded {renameOverrides.Count} overrides from {renamePath}");
+            }
+            areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!, renameOverrides);
         }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
@@ -321,10 +329,17 @@ public static class AdtExportPipeline
 
                 var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
                 AreaIdMapperV2? areaMapperV2 = null;
+                List<AreaIdMapperV2.AreaRenameOverride>? renameOverrides = null;
                 if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
                 {
                     var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
-                    areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
+                    var renamePath = ResolveRenameOverridesPath(opts, alias);
+                    if (!string.IsNullOrWhiteSpace(renamePath))
+                    {
+                        renameOverrides = AreaIdMapperV2.LoadRenameOverridesCsv(renamePath!);
+                        if (opts.Verbose) Console.WriteLine($"[Rename] Loaded {renameOverrides.Count} overrides from {renamePath}");
+                    }
+                    areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!, renameOverrides);
                 }
                 // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
                 DbcPatchMapping? patchMap = null;
@@ -519,6 +534,65 @@ public static class AdtExportPipeline
             if (verbose) Console.Error.WriteLine($"[MapId] Error resolving map id for {mapName}: {ex.Message}");
         }
         return -1;
+    }
+
+    private static string? ResolveRenameOverridesPath(Options opts, string alias)
+    {
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolRenameOverridesPath))
+        {
+            var explicitPath = ResolveCandidatePath(opts.DbctoolRenameOverridesPath!, opts.DbctoolPatchDir, opts.DbctoolOutRoot, alias);
+            if (!string.IsNullOrWhiteSpace(explicitPath) && File.Exists(explicitPath))
+            {
+                return explicitPath;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+        {
+            var v3 = Path.Combine(opts.DbctoolOutRoot!, alias, "compare", "v3", "Area_rename_overrides.csv");
+            if (File.Exists(v3)) return v3;
+
+            var v2 = Path.Combine(opts.DbctoolOutRoot!, alias, "compare", "v2", "Area_rename_overrides.csv");
+            if (File.Exists(v2)) return v2;
+        }
+
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
+        {
+            var directFile = Path.Combine(opts.DbctoolPatchDir!, "Area_rename_overrides.csv");
+            if (File.Exists(directFile)) return directFile;
+        }
+
+        var cwd = Path.Combine(Directory.GetCurrentDirectory(), "Area_rename_overrides.csv");
+        if (File.Exists(cwd)) return cwd;
+
+        return null;
+    }
+
+    private static string? ResolveCandidatePath(string candidate, string? patchDir, string? outRoot, string alias)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)) return null;
+
+        if (Path.IsPathFullyQualified(candidate) && File.Exists(candidate)) return candidate;
+
+        if (!Path.IsPathFullyQualified(candidate))
+        {
+            if (!string.IsNullOrWhiteSpace(patchDir))
+            {
+                var combined = Path.Combine(patchDir!, candidate);
+                if (File.Exists(combined)) return combined;
+            }
+            if (!string.IsNullOrWhiteSpace(outRoot))
+            {
+                var combined = Path.Combine(outRoot!, alias, "compare", "v3", candidate);
+                if (File.Exists(combined)) return combined;
+                combined = Path.Combine(outRoot!, alias, "compare", "v2", candidate);
+                if (File.Exists(combined)) return combined;
+            }
+            var cwd = Path.Combine(Directory.GetCurrentDirectory(), candidate);
+            if (File.Exists(cwd)) return cwd;
+        }
+
+        return File.Exists(candidate) ? candidate : null;
     }
 
     private static int ReadMapDbcIdByDirectory(string dbcPath, string targetName)

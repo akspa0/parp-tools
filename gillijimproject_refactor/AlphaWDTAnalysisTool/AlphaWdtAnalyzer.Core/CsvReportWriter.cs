@@ -103,12 +103,30 @@ public static class CsvReportWriter
     public static void WriteIdRangesByMap(string outDir, IEnumerable<(string MapName, UniqueIdClusterer.Cluster Cluster)> entries)
     {
         Directory.CreateDirectory(outDir);
+        var list = entries.ToList();
+
         var path = Path.Combine(outDir, "id_ranges_by_map.csv");
-        using var sw = new StreamWriter(path);
-        sw.WriteLine("map,min_id,max_id,count");
-        foreach (var e in entries.OrderBy(e => e.MapName).ThenBy(e => e.Cluster.MinId))
+        using (var sw = new StreamWriter(path))
         {
-            sw.WriteLine($"{Escape(e.MapName)},{e.Cluster.MinId},{e.Cluster.MaxId},{e.Cluster.Count}");
+            sw.WriteLine("map,min_id,max_id,count");
+            foreach (var e in list.OrderBy(e => e.MapName).ThenBy(e => e.Cluster.MinId))
+            {
+                sw.WriteLine($"{Escape(e.MapName)},{e.Cluster.MinId},{e.Cluster.MaxId},{e.Cluster.Count}");
+            }
+        }
+
+        var perMapDir = Path.Combine(outDir, "id_ranges_by_map");
+        Directory.CreateDirectory(perMapDir);
+        foreach (var grouping in list.GroupBy(e => e.MapName, StringComparer.OrdinalIgnoreCase))
+        {
+            var fileName = $"id_ranges_{SanitizeFileSegment(grouping.Key)}.csv";
+            var mapPath = Path.Combine(perMapDir, fileName);
+            using var mapWriter = new StreamWriter(mapPath);
+            mapWriter.WriteLine("min_id,max_id,count");
+            foreach (var entry in grouping.OrderBy(e => e.Cluster.MinId))
+            {
+                mapWriter.WriteLine($"{entry.Cluster.MinId},{entry.Cluster.MaxId},{entry.Cluster.Count}");
+            }
         }
     }
 
@@ -140,5 +158,14 @@ public static class CsvReportWriter
             return '"' + s.Replace("\"", "\"\"") + '"';
         }
         return s;
+    }
+
+    private static string SanitizeFileSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "map";
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = value.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray();
+        var sanitized = new string(chars).Replace(' ', '_');
+        return string.IsNullOrWhiteSpace(sanitized) ? "map" : sanitized;
     }
 }
