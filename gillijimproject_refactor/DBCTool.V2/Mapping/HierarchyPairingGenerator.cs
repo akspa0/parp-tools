@@ -52,12 +52,14 @@ public static class HierarchyPairingGenerator
         return new AreaHierarchyGraph(mapList);
     }
 
-    public static IReadOnlyList<HierarchyPairingCandidate> GenerateCandidates(AreaHierarchyGraph srcGraph, AreaHierarchyGraph tgtGraph)
+    public static IReadOnlyList<HierarchyPairingCandidate> GenerateCandidates(AreaHierarchyGraph srcGraph, AreaHierarchyGraph tgtGraph, IEnumerable<HierarchyPairingMatch>? supplementalMatches = null)
     {
         if (srcGraph is null) throw new ArgumentNullException(nameof(srcGraph));
         if (tgtGraph is null) throw new ArgumentNullException(nameof(tgtGraph));
 
         var indices = BuildIndex(tgtGraph);
+
+        var suppleByKey = BuildSupplementalIndex(supplementalMatches);
 
         var results = new List<HierarchyPairingCandidate>();
         foreach (var srcNode in srcGraph.EnumerateNodes())
@@ -76,6 +78,17 @@ public static class HierarchyPairingGenerator
                 CollectMatches(indices.Global, variants, matches, dedupe, scope: "global");
             }
 
+            if (suppleByKey.TryGetValue((srcNode.MapId, srcNode.AreaId), out var extras))
+            {
+                foreach (var extra in extras)
+                {
+                    if (dedupe.Add((extra.AreaId, extra.MapId)))
+                    {
+                        matches.Add(extra);
+                    }
+                }
+            }
+
             results.Add(new HierarchyPairingCandidate(
                 srcNode.MapId,
                 srcNode.AreaId,
@@ -86,6 +99,23 @@ public static class HierarchyPairingGenerator
         }
 
         return results;
+    }
+
+    private static Dictionary<(int mapId, int areaId), List<HierarchyPairingMatch>> BuildSupplementalIndex(IEnumerable<HierarchyPairingMatch>? matches)
+    {
+        var dict = new Dictionary<(int mapId, int areaId), List<HierarchyPairingMatch>>();
+        if (matches is null) return dict;
+        foreach (var match in matches)
+        {
+            var key = (match.MapId, match.AreaId);
+            if (!dict.TryGetValue(key, out var list))
+            {
+                list = new List<HierarchyPairingMatch>();
+                dict[key] = list;
+            }
+            list.Add(match);
+        }
+        return dict;
     }
 
     private static (Dictionary<int, Dictionary<string, List<AreaHierarchyNode>>> ByMap, Dictionary<string, List<AreaHierarchyNode>> Global) BuildIndex(AreaHierarchyGraph graph)

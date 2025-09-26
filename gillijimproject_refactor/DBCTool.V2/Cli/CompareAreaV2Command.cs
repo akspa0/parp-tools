@@ -6,6 +6,7 @@ using DBCTool.V2.AlphaDecode;
 using DBCTool.V2.Crosswalk;
 using DBCTool.V2.Mapping;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -95,6 +96,13 @@ internal sealed class CompareAreaV2Command
         string areaNameColSrc = DetectColumn(storSrc_Area, "AreaName_lang", "AreaName", "Name");
         string areaNameColTgt = DetectColumn(storTgt_Area, "AreaName_lang", "AreaName", "Name");
 
+        var renameAliasConfigs = LoadRenameAliasConfigs(compareV3Dir);
+
+        foreach (var alias in renameAliasConfigs)
+        {
+            DbdcHelper.AddNameAlias(alias.From, alias.To);
+        }
+
         if (srcHierarchy is null)
         {
             srcHierarchy = HierarchyPairingGenerator.BuildGraphFromRows(BuildSourceGraph(storSrc_Area, storSrc_Map, areaNameColSrc, parentColSrc, keyColSrc));
@@ -104,19 +112,41 @@ internal sealed class CompareAreaV2Command
             tgtHierarchy = HierarchyPairingGenerator.BuildGraphFromRows(BuildTargetGraph(storTgt_Area, storTgt_Map, areaNameColTgt));
         }
 
+        Dictionary<string, (int mapId, int areaId)> renameOverrides = new(StringComparer.OrdinalIgnoreCase);
+
         if (hierarchyPairings is null)
         {
             try
             {
-                var pairings = HierarchyPairingGenerator.GenerateCandidates(srcHierarchy, tgtHierarchy);
+                var resolvedOverrides = ResolveRenameOverrides(renameAliasConfigs, tgtHierarchy);
+                foreach (var kvp in resolvedOverrides)
+                {
+                    renameOverrides[kvp.Key] = (kvp.Value.MapId, kvp.Value.AreaId);
+                }
+
+                var supplemental = BuildSupplementalMatches(srcHierarchy, resolvedOverrides);
+                var pairings = HierarchyPairingGenerator.GenerateCandidates(srcHierarchy, tgtHierarchy, supplemental);
                 var pairingPath = Path.Combine(compareV3Dir, $"Area_pairings_{aliasSlug}_to_335.csv");
                 WriteHierarchyPairings(pairingPath, pairings);
                 Console.WriteLine($"[V3] Wrote hierarchy pairing candidates -> {pairingPath}");
+
+                var pairingsUnmatchedPath = Path.Combine(compareV3Dir, $"Area_pairings_unmatched_{aliasSlug}_to_335.csv");
+                WriteHierarchyPairingsUnmatched(pairingsUnmatchedPath, pairings);
+                Console.WriteLine($"[V3] Wrote hierarchy unmatched report -> {pairingsUnmatchedPath}");
+
                 hierarchyPairings = pairings.ToDictionary(p => (p.SrcMapId, p.SrcAreaId));
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[V3] WARN: Failed to generate hierarchy pairings: {ex.Message}");
+            }
+        }
+        else
+        {
+            var resolvedOverrides = ResolveRenameOverrides(renameAliasConfigs, tgtHierarchy);
+            foreach (var kvp in resolvedOverrides)
+            {
+                renameOverrides[kvp.Key] = (kvp.Value.MapId, kvp.Value.AreaId);
             }
         }
 
@@ -480,7 +510,33 @@ internal sealed class CompareAreaV2Command
             string lkChainDisplay = string.Empty;
             string pivotChainDisplay = string.Empty;
             bool matchedByHierarchy = false;
-            if (!chainVia060 && hasMapX && chain.Count > 0)
+            var srcKeyNorm = NormKey(nm);
+            if (renameOverrides.TryGetValue(srcKeyNorm, out var forced))
+            {
+                chosen = forced.areaId;
+                mapIdX = forced.mapId;
+                hasMapX = true;
+                mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mnRename) ? mnRename : string.Empty;
+                method = "rename_override";
+                overrideNotes.Add($"rename_override={nm}");
+                depth = chain.Count;
+                matchedByHierarchy = true;
+                lkChainDisplay = BuildLkChainDisplay(chosen, tgtIdToRow, areaNameColTgt);
+            }
+            else if (chain.Count > 0 && renameOverrides.TryGetValue(chain.Last(), out var forcedTarget))
+            {
+                chosen = forcedTarget.areaId;
+                mapIdX = forcedTarget.mapId;
+                hasMapX = true;
+                mapNameX = mapTgtNames.TryGetValue(mapIdX, out var mnRename) ? mnRename : string.Empty;
+                method = "rename_override";
+                overrideNotes.Add($"rename_override={nm}");
+                depth = chain.Count;
+                matchedByHierarchy = true;
+                lkChainDisplay = BuildLkChainDisplay(chosen, tgtIdToRow, areaNameColTgt);
+            }
+
+            if (!matchedByHierarchy && !chainVia060 && hasMapX && chain.Count > 0)
             {
                 // Direct 0.5.x → 3.3.5 chain when not forcing via 0.6.0
                 chosen = matcher.TryMatchChainExact(mapIdX, chain, idxTgtTopZonesByMap, idxTgtChildrenByZone, out depth);
@@ -502,7 +558,6 @@ internal sealed class CompareAreaV2Command
                 if (hasPivot)
                 {
                     // Attempt strict child resolution on pivot map first when source chain is zone-only or oddity
-                    string srcKeyNorm = NormKey(nm);
                     bool isZoneOnlyChain = chain.Count == 1;
                     int localChosen060 = -1; int localParent060 = -1;
                     string zoneName060 = string.Empty; string subName060 = string.Empty;
@@ -1828,6 +1883,25 @@ internal sealed class CompareAreaV2Command
         }
     }
 
+    private static void WriteHierarchyPairingsUnmatched(string path, IReadOnlyList<HierarchyPairingCandidate> pairings)
+    {
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        writer.WriteLine("src_mapId,src_areaId,src_parentId,src_isZone,src_name");
+        foreach (var candidate in pairings)
+        {
+            if (candidate.Matches.Count > 0) continue;
+            writer.WriteLine(string.Join(',', new[]
+            {
+                candidate.SrcMapId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcAreaId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcParentId.ToString(CultureInfo.InvariantCulture),
+                candidate.SrcIsZone ? "1" : "0",
+                Csv(candidate.SrcName)
+            }));
+        }
+    }
+
     private static string BuildMatchSummary(IReadOnlyList<HierarchyPairingMatch> matches)
     {
         if (matches.Count == 0) return string.Empty;
@@ -1902,10 +1976,10 @@ internal sealed class CompareAreaV2Command
             list.Add(new HierarchyPairingGenerator.HierarchyNodeRecord(areaNum, parentNum, name));
         }
 
-        foreach (var kv in nodesByMap)
+        foreach (var kvp in nodesByMap)
         {
-            mapNames.TryGetValue(kv.Key, out var mapName);
-            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kv.Key, mapName, kv.Value);
+            mapNames.TryGetValue(kvp.Key, out var mapName);
+            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kvp.Key, mapName, kvp.Value);
         }
     }
 
@@ -1931,10 +2005,243 @@ internal sealed class CompareAreaV2Command
             list.Add(new HierarchyPairingGenerator.HierarchyNodeRecord(id, parentId, name));
         }
 
-        foreach (var kv in nodesByMap)
+        foreach (var kvp in nodesByMap)
         {
-            mapNames.TryGetValue(kv.Key, out var mapName);
-            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kv.Key, mapName, kv.Value);
+            mapNames.TryGetValue(kvp.Key, out var mapName);
+            yield return new HierarchyPairingGenerator.HierarchySourceRecord(kvp.Key, mapName, kvp.Value);
         }
     }
+
+    private static IEnumerable<HierarchyPairingMatch> BuildSupplementalMatches(AreaHierarchyGraph srcGraph, IReadOnlyDictionary<string, ResolvedRenameOverride> overrides)
+    {
+        var matches = new List<HierarchyPairingMatch>();
+        if (srcGraph is null || overrides.Count == 0) return matches;
+
+        var srcByKey = new Dictionary<string, List<AreaHierarchyNode>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in srcGraph.EnumerateNodes())
+        {
+            var key = NormKey(node.Name);
+            if (string.IsNullOrEmpty(key)) continue;
+            if (!srcByKey.TryGetValue(key, out var list))
+            {
+                list = new List<AreaHierarchyNode>();
+                srcByKey[key] = list;
+            }
+            list.Add(node);
+        }
+
+        foreach (var kvp in overrides)
+        {
+            if (!srcByKey.TryGetValue(kvp.Key, out var sources)) continue;
+            var resolved = kvp.Value;
+            foreach (var srcNode in sources)
+            {
+                matches.Add(new HierarchyPairingMatch(
+                    resolved.MapId,
+                    resolved.AreaId,
+                    resolved.TargetName,
+                    resolved.ParentAreaId,
+                    $"alias:{resolved.From}->{resolved.TargetName}",
+                    resolved.IsTargetUnused));
+            }
+        }
+
+        return matches;
+    }
+
+    private static List<RenameAliasConfig> LoadRenameAliasConfigs(string compareV3Dir)
+    {
+        var configs = new Dictionary<string, RenameAliasConfig>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Lik'ash Tar Pits"] = new("Lik'ash Tar Pits", "Lakkari Tar Pits", 269, 3706),
+            ["Lik'kari Tar Pits"] = new("Lik'kari Tar Pits", "Lakkari Tar Pits", 269, 3706),
+            ["Likkari Tar Pits"] = new("Likkari Tar Pits", "Lakkari Tar Pits", 269, 3706),
+            ["Tranquil Gardens Cemetary"] = new("Tranquil Gardens Cemetary", "Tranquil Gardens Cemetery", 0, 121)
+        };
+
+        var candidatePaths = new List<string>();
+        if (!string.IsNullOrWhiteSpace(compareV3Dir))
+        {
+            candidatePaths.Add(Path.Combine(compareV3Dir, "Area_rename_overrides.csv"));
+        }
+
+        var baseDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrWhiteSpace(baseDir))
+        {
+            candidatePaths.Add(Path.Combine(baseDir, "Area_rename_overrides.csv"));
+            candidatePaths.Add(Path.Combine(baseDir, "Config", "Area_rename_overrides.csv"));
+        }
+
+        foreach (var pathCandidate in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(pathCandidate)) continue;
+            try
+            {
+                LoadRenameAliasCsv(pathCandidate, configs);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[V3] WARN: Failed to load rename overrides from '{pathCandidate}': {ex.Message}");
+            }
+        }
+
+        return configs.Values.ToList();
+    }
+
+    private static void LoadRenameAliasCsv(string path, Dictionary<string, RenameAliasConfig> configs)
+    {
+        using var reader = new StreamReader(path);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
+
+            var parts = SplitCsvLine(trimmed);
+            if (parts.Count < 2) continue;
+
+            var from = parts[0].Trim().Trim('"');
+            var to = parts[1].Trim().Trim('"');
+            if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to)) continue;
+
+            int? targetMap = null;
+            int? targetArea = null;
+
+            if (parts.Count > 2 && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mapId))
+            {
+                targetMap = mapId;
+            }
+
+            if (parts.Count > 3 && int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var areaId))
+            {
+                targetArea = areaId;
+            }
+
+            configs[from] = new RenameAliasConfig(from, to, targetMap, targetArea);
+        }
+    }
+
+    private static List<string> SplitCsvLine(string line)
+    {
+        var values = new List<string>();
+        var sb = new StringBuilder();
+        bool inQuotes = false;
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            char ch = line[i];
+            if (ch == '"')
+            {
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                    continue;
+                }
+
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (ch == ',' && !inQuotes)
+            {
+                values.Add(sb.ToString());
+                sb.Clear();
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        values.Add(sb.ToString());
+        return values;
+    }
+
+    private static IReadOnlyDictionary<string, ResolvedRenameOverride> ResolveRenameOverrides(IEnumerable<RenameAliasConfig> configs, AreaHierarchyGraph tgtGraph)
+    {
+        var result = new Dictionary<string, ResolvedRenameOverride>(StringComparer.OrdinalIgnoreCase);
+        if (configs is null || tgtGraph is null) return result;
+
+        var mapLookup = new Dictionary<int, Dictionary<string, AreaHierarchyNode>>();
+        var globalLookup = new Dictionary<string, AreaHierarchyNode>(StringComparer.OrdinalIgnoreCase);
+        var ambiguous = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var map in tgtGraph.Maps)
+        {
+            var dict = new Dictionary<string, AreaHierarchyNode>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in map.Zones.SelectMany(z => z.SelfAndDescendants()))
+            {
+                var key = NormKey(node.Name);
+                if (string.IsNullOrEmpty(key)) continue;
+
+                if (!dict.ContainsKey(key))
+                {
+                    dict[key] = node;
+                }
+
+                if (!ambiguous.Contains(key))
+                {
+                    if (!globalLookup.TryGetValue(key, out var existing))
+                    {
+                        globalLookup[key] = node;
+                    }
+                    else if (existing.AreaId != node.AreaId)
+                    {
+                        globalLookup.Remove(key);
+                        ambiguous.Add(key);
+                    }
+                }
+            }
+            mapLookup[map.MapId] = dict;
+        }
+
+        foreach (var config in configs)
+        {
+            var fromKey = NormKey(config.From);
+            if (string.IsNullOrEmpty(fromKey)) continue;
+
+            AreaHierarchyNode? target = null;
+            if (config.TargetAreaId.HasValue)
+            {
+                target = tgtGraph.FindArea(config.TargetAreaId.Value);
+            }
+
+            if (target is null)
+            {
+                var toKey = NormKey(config.To);
+                if (!string.IsNullOrEmpty(toKey))
+                {
+                    if (config.TargetMapId.HasValue && mapLookup.TryGetValue(config.TargetMapId.Value, out var perMap) && perMap.TryGetValue(toKey, out var mapNode))
+                    {
+                        target = mapNode;
+                    }
+                    else if (globalLookup.TryGetValue(toKey, out var globalNode))
+                    {
+                        target = globalNode;
+                    }
+                }
+            }
+
+            if (target is null)
+            {
+                Console.WriteLine($"[V3] WARN: rename alias '{config.From}' -> '{config.To}' could not resolve target area.");
+                continue;
+            }
+
+            result[fromKey] = new ResolvedRenameOverride(
+                config.From,
+                target.Name,
+                fromKey,
+                target.MapId,
+                target.AreaId,
+                target.Parent?.AreaId ?? target.AreaId,
+                target.IsUnused);
+        }
+
+        return result;
+    }
+
+    private sealed record RenameAliasConfig(string From, string To, int? TargetMapId, int? TargetAreaId);
+
+    private sealed record ResolvedRenameOverride(string From, string TargetName, string NormalizedFrom, int MapId, int AreaId, int ParentAreaId, bool IsTargetUnused);
 }
