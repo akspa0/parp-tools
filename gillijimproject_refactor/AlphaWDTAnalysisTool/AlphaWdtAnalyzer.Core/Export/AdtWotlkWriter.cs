@@ -18,6 +18,10 @@ public static class AdtWotlkWriter
     private static string? s_lkDbcDir;
     private static Dictionary<int, int>? s_lkMapByAreaId;
     private static Dictionary<int, string>? s_lkNameByAreaId;
+    private static readonly HashSet<(int expectedMapId, int actualMapId)> s_mapGuardOverrides = new()
+    {
+        (0, 451) // Programmer Isle / Designer Island moved from Azeroth (0) to Dev Map (451)
+    };
 
     public sealed class WriteContext
     {
@@ -140,9 +144,12 @@ public static class AdtWotlkWriter
     {
         if (lkAreaId <= 0) return true; // allow 0
         if (!expectedMapId.HasValue || expectedMapId.Value < 0) return true; // no guard
+        EnsureLkCache();
         var cache = s_lkMapByAreaId;
         if (cache is null) return true; // no DBC
-        return cache.TryGetValue(lkAreaId, out var map) ? map == expectedMapId.Value : true;
+        if (!cache.TryGetValue(lkAreaId, out var map)) return true;
+        if (map == expectedMapId.Value) return true;
+        return s_mapGuardOverrides.Contains((expectedMapId.Value, map));
     }
 
     private static void EnsureLkCache()

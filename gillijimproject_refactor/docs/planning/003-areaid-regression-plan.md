@@ -29,6 +29,7 @@
 - **Step 2 – Verify Strategy Ordering**
   - Audit `AdtWotlkWriter.PatchMcnkAreaIdsOnDiskV2()` to confirm the restored helpers are called before numeric fallbacks.
   - Add targeted logging (guarded by `Verbose`) to surface method hits per tile and validate mid-chain usage.
+  - Maintain an explicit override table (`s_mapGuardOverrides` in `AdtWotlkWriter.cs`) for legacy areas whose continent IDs changed in LK (e.g., Programmer Isle / Designer Island now on map 451) so expected map IDs (0) are still honored.
 
 - **Step 3 – Crosswalk Consistency Checks**
   - Regenerate DBCTool outputs for maps 0 and 1.
