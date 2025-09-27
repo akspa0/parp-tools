@@ -17,6 +17,8 @@ public sealed record PlacementRange(
     string FilePath
 );
 
+public sealed record RangeCsvResult(string PerMapPath, string TimelinePath);
+
 public sealed record RangeRule(uint Min, uint Max);
 
 public sealed class RangeConfig

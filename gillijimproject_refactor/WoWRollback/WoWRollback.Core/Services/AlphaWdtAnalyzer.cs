@@ -47,9 +47,7 @@ public static class AlphaWdtAnalyzer
                 if (!uniqueIds.Any()) continue;
 
                 object? typeValue = tileGroup.Key.Type;
-                var placementKind = string.Equals(typeValue?.ToString(), "M2", StringComparison.OrdinalIgnoreCase)
-                    ? PlacementKind.M2
-                    : PlacementKind.WMO;
+                var placementKind = ResolvePlacementKind(typeValue);
 
                 var range = new PlacementRange(
                     tileGroup.Key.MapName,
@@ -82,4 +80,33 @@ public static class AlphaWdtAnalyzer
         return results;
     }
 
+    private static PlacementKind ResolvePlacementKind(object? typeValue)
+    {
+        static string? NormalizeLabel(object? value)
+        {
+            if (value is null) return null;
+
+            if (value is Enum enumValue)
+            {
+                return Enum.GetName(enumValue.GetType(), enumValue);
+            }
+
+            return value.ToString();
+        }
+
+        var typeLabel = NormalizeLabel(typeValue);
+        if (typeLabel is null)
+        {
+            return PlacementKind.WMO;
+        }
+
+        var normalized = typeLabel
+            .Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .ToUpperInvariant();
+
+        return normalized is "M2" or "MDX" or "MDXORM2"
+            ? PlacementKind.M2
+            : PlacementKind.WMO;
+    }
 }
