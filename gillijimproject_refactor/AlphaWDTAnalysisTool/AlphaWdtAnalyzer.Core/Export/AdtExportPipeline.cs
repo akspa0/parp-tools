@@ -2,9 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Threading;
 using GillijimProject.WowFiles.Alpha;
+using DBCTool.V2.Core;
 using AlphaWdtAnalyzer.Core.Dbc;
 using AlphaWdtAnalyzer.Core.Assets;
+using System.Text;
 
 namespace AlphaWdtAnalyzer.Core.Export;
 
@@ -27,9 +31,58 @@ public static class AdtExportPipeline
         public bool EnableFixups { get; init; } = true;
         public string?[]? AssetRoots { get; init; }
         public bool LogExact { get; init; } = false;
-        public string? AreaAlphaPath { get; init; }
-        public string? AreaLkPath { get; init; }
-        public string? DbcDir { get; init; }
+        public string? RemapPath { get; init; }
+        public bool Verbose { get; init; } = false;
+        public bool TrackAssets { get; init; } = false;
+        // Optional DBCTool.V2 integration (when provided, enables AreaIdMapperV2)
+        public string? DbdDir { get; init; }
+        public string? DbctoolOutRoot { get; init; } // preferred: root folder containing <alias>/compare/v2
+        public string? DbctoolSrcAlias { get; init; } // e.g., 0.5.3 | 0.5.5 | 0.6.0
+        public string? DbctoolSrcDir { get; init; }   // folder with source DBCs
+        public string? DbctoolLkDir { get; init; }    // folder with 3.3.5 DBCs
+        // Optional: Use precomputed DBCTool.V2 patch CSV(s)
+        public string? DbctoolPatchDir { get; init; } // directory containing Area_patch_crosswalk_*.csv
+        public string? DbctoolPatchFile { get; init; } // specific patch CSV file
+        // Visualization
+        public bool VizSvg { get; init; } = false;
+        public string? VizDir { get; init; }
+        public bool VizHtml { get; init; } = false;
+        public bool PatchOnly { get; init; } = false;
+        public int? MaxDegreeOfParallelism { get; init; }
+        public bool NoZoneFallback { get; init; } = false;
+    }
+
+    private static IEnumerable<string> EnumerateCrosswalkCsvs(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) yield break;
+        var patterns = new[] { "Area_patch_crosswalk_*.csv", "Area_crosswalk_v*.csv" };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pattern in patterns)
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories))
+            {
+                if (seen.Add(file)) yield return file;
+            }
+        }
+    }
+
+    private static string ResolvePatchFilePath(string patchFile, string? patchDir, string? outRoot, string alias)
+    {
+        if (Path.IsPathFullyQualified(patchFile)) return patchFile;
+        if (!string.IsNullOrWhiteSpace(patchDir) && Directory.Exists(patchDir))
+        {
+            var combined = Path.Combine(patchDir, patchFile);
+            if (File.Exists(combined)) return combined;
+        }
+        if (!string.IsNullOrWhiteSpace(outRoot))
+        {
+            var v3 = Path.Combine(outRoot, alias, "compare", "v3", patchFile);
+            if (File.Exists(v3)) return v3;
+            var v2 = Path.Combine(outRoot, alias, "compare", "v2", patchFile);
+            if (File.Exists(v2)) return v2;
+        }
+        var cwd = Path.Combine(Directory.GetCurrentDirectory(), patchFile);
+        return cwd;
     }
 
     public static void ExportSingle(Options opts)
@@ -42,7 +95,7 @@ public static class AdtExportPipeline
         var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
         Directory.CreateDirectory(logDir);
         using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
-        var inventory = new AssetInventory(opts.AssetRoots);
+        var inventory = new AssetInventory(opts.AssetRoots?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!));
         var fixup = new AssetFixupPolicy(
             resolver,
             opts.FallbackTileset,
@@ -56,18 +109,86 @@ public static class AdtExportPipeline
             inventory,
             opts.LogExact);
 
-        var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
-
-        // Auto-export DBCs to CSV when provided
-        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
-            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
-            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
+        var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
+        AreaIdMapperV2? areaMapperV2 = null;
+        if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
         {
-            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
-            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
+            var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
+            areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
         }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
+        // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
+        DbcPatchMapping? patchMap = null;
+        string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, opts.SingleWdtPath, null);
+        string patchDirUsed = string.Empty;
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
+        {
+            patchMap = new DbcPatchMapping();
+            bool loadedAny = false;
+            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile))
+            {
+                var resolvedFile = ResolvePatchFilePath(opts.DbctoolPatchFile!, opts.DbctoolPatchDir, opts.DbctoolOutRoot, aliasUsed);
+                if (File.Exists(resolvedFile))
+                {
+                    patchMap.LoadFile(resolvedFile);
+                    loadedAny = true;
+                }
+                else if (opts.Verbose)
+                {
+                    Console.Error.WriteLine($"[PatchMap] Patch file not found: {resolvedFile}");
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
+            {
+                patchDirUsed = opts.DbctoolPatchDir!;
+                foreach (var f in EnumerateCrosswalkCsvs(opts.DbctoolPatchDir!))
+                {
+                    patchMap.LoadFile(f);
+                    loadedAny = true;
+                }
+            }
+            if (!loadedAny)
+            {
+                patchMap = null;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+        {
+            var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
+            var v3Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v3");
+            var searchDirs = new List<string>();
+            if (Directory.Exists(v3Dir)) searchDirs.Add(v3Dir);
+            if (Directory.Exists(v2Dir)) searchDirs.Add(v2Dir);
+            if (searchDirs.Count > 0)
+            {
+                patchDirUsed = searchDirs[0];
+                patchMap = new DbcPatchMapping();
+                bool loadedAny = false;
+                foreach (var dir in searchDirs)
+                {
+                    foreach (var f in EnumerateCrosswalkCsvs(dir))
+                    {
+                        patchMap.LoadFile(f);
+                        loadedAny = true;
+                    }
+                }
+                if (!loadedAny)
+                {
+                    patchMap = null;
+                }
+            }
+            else if (opts.PatchOnly)
+            {
+                Console.Error.WriteLine($"[PatchOnly] No CSVs found under --dbctool-out-root: {v2Dir}");
+                return;
+            }
+        }
+        else if (opts.PatchOnly)
+        {
+            Console.Error.WriteLine("[PatchOnly] Missing --dbctool-out-root or --dbctool-patch-dir/--dbctool-patch-file. Patch-only mode requires CSV crosswalks. Aborting.");
+            return;
+        }
         var adtScanner = new AdtScanner();
         var result = adtScanner.Scan(wdt);
 
@@ -87,38 +208,78 @@ public static class AdtExportPipeline
             }
         }
 
-        foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
+        int processed = 0;
+        int totalTiles = 0;
+        void ProcessTile(int x, int y)
         {
+            if (totalTiles == 0) totalTiles = candidateTiles.Count;
             var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
             var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
-
-            IReadOnlyList<int>? alphaAreaIds = null;
             int adtNum = (y * 64) + x;
             int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
-            if (offset > 0)
-            {
-                var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
-                alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+            if (offset <= 0) return;
+            var n = Interlocked.Increment(ref processed);
+            if (!opts.Verbose)
+                Console.WriteLine($"[Tile] {wdt.MapName} {x},{y} ({n}/{totalTiles})");
+            var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+            var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+            if (opts.Verbose)
+                Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
 
-                var ctx = new AdtWotlkWriter.WriteContext
-                {
-                    ExportDir = opts.ExportDir,
-                    MapName = wdt.MapName,
-                    TileX = x,
-                    TileY = y,
-                    Placements = g,
-                    Fixup = fixup,
-                    ConvertToMh2o = opts.ConvertToMh2o,
-                    AreaMapper = areaMapper,
-                    AlphaAreaIds = alphaAreaIds,
-                    WdtPath = wdt.WdtPath,
-                    AdtNumber = adtNum,
-                    AdtOffset = offset,
-                    MdnmFiles = wdt.MdnmFiles,
-                    MonmFiles = wdt.MonmFiles
-                };
-                AdtWotlkWriter.WriteBinary(ctx);
-            }
+            var ctx = new AdtWotlkWriter.WriteContext
+            {
+                ExportDir = opts.ExportDir,
+                MapName = wdt.MapName,
+                TileX = x,
+                TileY = y,
+                Placements = g,
+                Fixup = fixup,
+                ConvertToMh2o = opts.ConvertToMh2o,
+                AreaMapper = areaMapper,
+                AreaMapperV2 = areaMapperV2,
+                PatchMapping = patchMap,
+                AlphaAreaIds = alphaAreaIds,
+                WdtPath = wdt.WdtPath,
+                AdtNumber = adtNum,
+                AdtOffset = offset,
+                MdnmFiles = wdt.MdnmFiles,
+                MonmFiles = wdt.MonmFiles,
+                Verbose = opts.Verbose,
+                TrackAssets = opts.TrackAssets,
+                CurrentMapId = currentMapId,
+                VizSvg = opts.VizSvg,
+                VizDir = opts.VizDir,
+                LkDbcDir = opts.DbctoolLkDir,
+                VizHtml = opts.VizHtml,
+                PatchOnly = opts.PatchOnly,
+                NoZoneFallback = opts.NoZoneFallback,
+            };
+            if (opts.Verbose && patchMap is not null)
+                Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
+            // Track asset fixups per tile
+            fixupLogger.BeginTile(wdt.MapName, x, y);
+            AdtWotlkWriter.WriteBinary(ctx);
+            var (fuzzy, capacity, overflow) = fixupLogger.EndTile();
+            Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
+        }
+
+        var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
+        bool canParallel = !opts.EnableFixups && !opts.TrackAssets; // Fixup logging isn't thread-safe
+        int mdp = opts.MaxDegreeOfParallelism ?? Environment.ProcessorCount;
+        if (canParallel && tileList.Count > 1)
+        {
+            Parallel.ForEach(tileList, new ParallelOptions { MaxDegreeOfParallelism = mdp }, t => ProcessTile(t.tx, t.ty));
+        }
+        else
+        {
+            foreach (var (x, y) in tileList) ProcessTile(x, y);
+        }
+
+        if (opts.VizHtml)
+        {
+            try { AdtWotlkWriter.WriteMapVisualizationHtml(opts.ExportDir, wdt.MapName, patchMap, opts.VizDir); }
+            catch (Exception ex) { Console.Error.WriteLine($"[VizMap] Failed for {wdt.MapName}: {ex.Message}"); }
         }
     }
 
@@ -129,19 +290,10 @@ public static class AdtExportPipeline
 
         var resolver = MultiListfileResolver.FromFiles(opts.LkListfilePath, opts.CommunityListfilePath);
 
-        // Auto-export DBCs to CSV when provided (once per batch)
-        if (!string.IsNullOrWhiteSpace(opts.DbcDir) &&
-            !string.IsNullOrWhiteSpace(opts.AreaAlphaPath) &&
-            !string.IsNullOrWhiteSpace(opts.AreaLkPath))
-        {
-            var outCsvDir = Path.Combine(opts.ExportDir, "csv", "dbc");
-            AreaTableDbcExporter.ExportAlphaAndLkToCsv(opts.AreaAlphaPath!, opts.AreaLkPath!, opts.DbcDir!, outCsvDir);
-        }
-
         var wdts = Directory.EnumerateFiles(opts.InputRoot!, "*.wdt", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
 
-        var inventory = new AssetInventory(opts.AssetRoots);
+        var inventory = new AssetInventory(opts.AssetRoots?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!));
 
         foreach (var wdtPath in wdts)
         {
@@ -167,7 +319,84 @@ public static class AdtExportPipeline
                     inventory,
                     opts.LogExact);
 
-                var areaMapper = AreaIdMapper.TryCreate(opts.AreaAlphaPath, opts.AreaLkPath, opts.DbcDir);
+                var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
+                AreaIdMapperV2? areaMapperV2 = null;
+                if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
+                {
+                    var alias = string.IsNullOrWhiteSpace(opts.DbctoolSrcAlias) ? "0.5.3" : opts.DbctoolSrcAlias!;
+                    areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, alias, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
+                }
+                // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
+                DbcPatchMapping? patchMap = null;
+                string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, wdt.WdtPath, opts.InputRoot);
+                string patchDirUsed = string.Empty;
+                if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
+                {
+                    patchMap = new DbcPatchMapping();
+                    bool loadedAny = false;
+                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile))
+                    {
+                        var resolvedFile = ResolvePatchFilePath(opts.DbctoolPatchFile!, opts.DbctoolPatchDir, opts.DbctoolOutRoot, aliasUsed);
+                        if (File.Exists(resolvedFile))
+                        {
+                            patchMap.LoadFile(resolvedFile);
+                            loadedAny = true;
+                        }
+                        else if (opts.Verbose)
+                        {
+                            Console.Error.WriteLine($"[PatchMap] Patch file not found: {resolvedFile}");
+                        }
+                    }
+                    if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchDir) && Directory.Exists(opts.DbctoolPatchDir!))
+                    {
+                        patchDirUsed = opts.DbctoolPatchDir!;
+                        foreach (var f in EnumerateCrosswalkCsvs(opts.DbctoolPatchDir!))
+                        {
+                            patchMap.LoadFile(f);
+                            loadedAny = true;
+                        }
+                    }
+                    if (!loadedAny)
+                    {
+                        patchMap = null;
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+                {
+                    var v2Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v2");
+                    var v3Dir = Path.Combine(opts.DbctoolOutRoot!, aliasUsed, "compare", "v3");
+                    var searchDirs = new List<string>();
+                    if (Directory.Exists(v3Dir)) searchDirs.Add(v3Dir);
+                    if (Directory.Exists(v2Dir)) searchDirs.Add(v2Dir);
+                    if (searchDirs.Count > 0)
+                    {
+                        patchDirUsed = searchDirs[0];
+                        patchMap = new DbcPatchMapping();
+                        bool loadedAny = false;
+                        foreach (var dir in searchDirs)
+                        {
+                            foreach (var f in EnumerateCrosswalkCsvs(dir))
+                            {
+                                patchMap.LoadFile(f);
+                                loadedAny = true;
+                            }
+                        }
+                        if (!loadedAny)
+                        {
+                            patchMap = null;
+                        }
+                    }
+                    else if (opts.PatchOnly)
+                    {
+                        Console.Error.WriteLine($"[PatchOnly] No CSVs found under --dbctool-out-root: {v2Dir} for map {mapName}. Skipping map.");
+                        continue;
+                    }
+                }
+                else if (opts.PatchOnly)
+                {
+                    Console.Error.WriteLine($"[PatchOnly] Missing --dbctool-out-root or --dbctool-patch-dir/--dbctool-patch-file for map {mapName}. Skipping map.");
+                    continue;
+                }
 
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
@@ -188,44 +417,169 @@ public static class AdtExportPipeline
                     }
                 }
 
-                foreach (var (x, y) in candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty))
-                {
-                    var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
-                    var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
+                int processedB = 0; int totalTilesB = 0;
+        void ProcessTileB(int x, int y)
+        {
+            if (totalTilesB == 0) totalTilesB = candidateTiles.Count;
+            var hasGroup = placementsByTile.TryGetValue((x, y), out var group);
+            var g = hasGroup ? group! : Array.Empty<PlacementRecord>();
 
-                    IReadOnlyList<int>? alphaAreaIds = null;
-                    int adtNum = (y * 64) + x;
-                    int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
-                    if (offset > 0)
+            int adtNum = (y * 64) + x;
+            int offset = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
+            if (offset <= 0) return;
+            var n = Interlocked.Increment(ref processedB);
+            if (!opts.Verbose)
+                Console.WriteLine($"[Tile] {wdt.MapName} {x},{y} ({n}/{totalTilesB})");
+            var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
+            var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
+
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+            if (opts.Verbose)
+                Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
+
+                    var ctx = new AdtWotlkWriter.WriteContext
                     {
-                        var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
-                        alphaAreaIds = alpha.GetAlphaMcnkAreaIds();
+                        ExportDir = opts.ExportDir,
+                        MapName = wdt.MapName,
+                        TileX = x,
+                        TileY = y,
+                        Placements = g,
+                        Fixup = fixup,
+                        ConvertToMh2o = opts.ConvertToMh2o,
+                        AreaMapper = areaMapper,
+                        AreaMapperV2 = areaMapperV2,
+                        PatchMapping = patchMap,
+                        AlphaAreaIds = alphaAreaIds,
+                        WdtPath = wdt.WdtPath,
+                        AdtNumber = adtNum,
+                        AdtOffset = offset,
+                        MdnmFiles = wdt.MdnmFiles,
+                        MonmFiles = wdt.MonmFiles,
+                        Verbose = opts.Verbose,
+                        TrackAssets = opts.TrackAssets,
+                        CurrentMapId = currentMapId,
+                        VizSvg = opts.VizSvg,
+                        VizDir = opts.VizDir,
+                        LkDbcDir = opts.DbctoolLkDir,
+                        VizHtml = opts.VizHtml,
+                        PatchOnly = opts.PatchOnly
+                    };
+                    if (opts.Verbose && patchMap is not null)
+                        Console.WriteLine($"[PatchMap] alias={aliasUsed} dir={patchDirUsed} per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} by-name[{wdt.MapName}]={patchMap.CountByName(wdt.MapName)} by-tgt-map[{currentMapId}]={patchMap.CountByTargetMap(currentMapId)}");
+                    fixupLogger.BeginTile(wdt.MapName, x, y);
+                    AdtWotlkWriter.WriteBinary(ctx);
+                    var (fuzzy, capacity, overflow) = fixupLogger.EndTile();
+                    Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
+                }
 
-                        var ctx = new AdtWotlkWriter.WriteContext
-                        {
-                            ExportDir = opts.ExportDir,
-                            MapName = wdt.MapName,
-                            TileX = x,
-                            TileY = y,
-                            Placements = g,
-                            Fixup = fixup,
-                            ConvertToMh2o = opts.ConvertToMh2o,
-                            AreaMapper = areaMapper,
-                            AlphaAreaIds = alphaAreaIds,
-                            WdtPath = wdt.WdtPath,
-                            AdtNumber = adtNum,
-                            AdtOffset = offset,
-                            MdnmFiles = wdt.MdnmFiles,
-                            MonmFiles = wdt.MonmFiles
-                        };
-                        AdtWotlkWriter.WriteBinary(ctx);
-                    }
+                var tileList = candidateTiles.OrderBy(t => t.tx).ThenBy(t => t.ty).ToList();
+                bool canParallel = !opts.EnableFixups && !opts.TrackAssets;
+                int mdp = opts.MaxDegreeOfParallelism ?? Environment.ProcessorCount;
+                if (canParallel && tileList.Count > 1)
+                {
+                    Parallel.ForEach(tileList, new ParallelOptions { MaxDegreeOfParallelism = mdp }, t => ProcessTileB(t.tx, t.ty));
+                }
+                else
+                {
+                    foreach (var (x, y) in tileList) ProcessTileB(x, y);
+                }
+
+                if (opts.VizHtml)
+                {
+                    try { AdtWotlkWriter.WriteMapVisualizationHtml(opts.ExportDir, mapName, patchMap, opts.VizDir); }
+                    catch (Exception ex) { Console.Error.WriteLine($"[VizMap] Failed for {mapName}: {ex.Message}"); }
                 }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Export failed for {wdtPath}: {ex.Message}");
+                Console.Error.WriteLine($"Export failed for {wdtPath}: {ex}");
             }
         }
+    }
+
+    private static int ResolveMapIdFromDbc(string mapName, string? lkDir, bool verbose)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(lkDir))
+            {
+                var mapDbc = Path.Combine(lkDir!, "Map.dbc");
+                if (File.Exists(mapDbc))
+                {
+                    return ReadMapDbcIdByDirectory(mapDbc, mapName);
+                }
+                else if (verbose)
+                {
+                    Console.Error.WriteLine($"[MapId] Map.dbc not found under --dbctool-lk-dir: {mapDbc}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (verbose) Console.Error.WriteLine($"[MapId] Error resolving map id for {mapName}: {ex.Message}");
+        }
+        return -1;
+    }
+
+    private static int ReadMapDbcIdByDirectory(string dbcPath, string targetName)
+    {
+        using var fs = new FileStream(dbcPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs, Encoding.UTF8, leaveOpen: false);
+        // Read header
+        var magic = br.ReadBytes(4);
+        if (magic.Length != 4) return -1;
+        int recordCount = br.ReadInt32();
+        int fieldCount = br.ReadInt32();
+        int recordSize = br.ReadInt32();
+        int stringBlockSize = br.ReadInt32();
+        var records = br.ReadBytes(recordCount * recordSize);
+        var stringBlock = br.ReadBytes(stringBlockSize);
+        for (int i = 0; i < recordCount; i++)
+        {
+            int baseOff = i * recordSize;
+            var ints = new int[fieldCount];
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int off = baseOff + (f * 4);
+                if (off + 4 <= records.Length) ints[f] = BitConverter.ToInt32(records, off);
+            }
+            int id = (fieldCount > 0) ? ints[0] : -1;
+            if (id < 0) continue;
+            // Compare against all string fields in the row; Map.dbc directory/name position varies across builds
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int sOff = ints[f];
+                if (sOff > 0 && sOff < stringBlock.Length)
+                {
+                    int end = sOff;
+                    while (end < stringBlock.Length && stringBlock[end] != 0) end++;
+                    if (end > sOff)
+                    {
+                        var s = Encoding.UTF8.GetString(stringBlock, sOff, end - sOff);
+                        if (!string.IsNullOrWhiteSpace(s) && s.Equals(targetName, StringComparison.OrdinalIgnoreCase))
+                            return id;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static string ResolveSrcAlias(string? explicitAlias, string? singleWdtPath, string? inputRoot)
+    {
+        static string Normalize(string s)
+        {
+            var t = (s ?? string.Empty).Trim().ToLowerInvariant();
+            if (t is "053" or "0.5.3" or "5.3") return "0.5.3";
+            if (t is "055" or "0.5.5" or "5.5") return "0.5.5";
+            if (t is "060" or "0.6.0" or "6.0" or "0.6") return "0.6.0";
+            return s ?? string.Empty;
+        }
+        if (!string.IsNullOrWhiteSpace(explicitAlias)) return Normalize(explicitAlias!);
+        var corpus = ($"{singleWdtPath}|{inputRoot}" ?? string.Empty).ToLowerInvariant();
+        if (corpus.Contains("0.6.0") || corpus.Contains("\\060\\") || corpus.Contains("/060/") || corpus.Contains("0_6_0")) return "0.6.0";
+        if (corpus.Contains("0.5.5") || corpus.Contains("\\055\\") || corpus.Contains("/055/") || corpus.Contains("0_5_5")) return "0.5.5";
+        if (corpus.Contains("0.5.3") || corpus.Contains("\\053\\") || corpus.Contains("/053/") || corpus.Contains("0_5_3")) return "0.5.3";
+        return "0.5.3"; // default
     }
 }

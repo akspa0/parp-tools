@@ -1,4 +1,12 @@
-# DBCTool
+# DBCTool (LEGACY — Unmaintained)
+
+> Legacy notice: This tool is no longer maintained and is kept for historical context.
+> Please use `DBCTool.V2` instead:
+> - `DBCTool.V2/README.md`
+> - `DBCTool.V2/docs/areaid-restoration-approach.md`
+> - `DBCTool.V2/docs/input-data-prep.md`
+
+---
 
 Filesystem-only DBC → CSV exporter and Area remapping helper built on DBCD (wow.tools.local).
 

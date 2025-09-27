@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using AlphaWdtAnalyzer.Core;
 using AlphaWdtAnalyzer.Core.Export;
 
@@ -7,12 +8,58 @@ namespace AlphaWdtAnalyzer.Cli;
 
 public static class Program
 {
+    // Minimal console tee to mirror stdout/stderr to a log file (AWDT only)
+    private sealed class TeeTextWriter : TextWriter
+    {
+        private readonly TextWriter _primary;
+        private readonly StreamWriter _file;
+        public TeeTextWriter(TextWriter primary, string filePath)
+        {
+            _primary = primary;
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            _file = new StreamWriter(filePath, append: false, Encoding.UTF8) { AutoFlush = true };
+        }
+        public override Encoding Encoding => Encoding.UTF8;
+        public override void Write(char value) { _primary.Write(value); _file.Write(value); }
+        public override void Write(string? value) { _primary.Write(value); _file.Write(value); }
+        public override void WriteLine(string? value) { _primary.WriteLine(value); _file.WriteLine(value); }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { try { _file.Flush(); _file.Dispose(); } catch { } }
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class ConsoleTee : IDisposable
+    {
+        private readonly TextWriter _prevOut;
+        private readonly TextWriter _prevErr;
+        private readonly TeeTextWriter _teeOut;
+        private readonly TeeTextWriter _teeErr;
+        private ConsoleTee(TextWriter prevOut, TextWriter prevErr, TeeTextWriter teeOut, TeeTextWriter teeErr)
+        { _prevOut = prevOut; _prevErr = prevErr; _teeOut = teeOut; _teeErr = teeErr; }
+        public static ConsoleTee Start(string logPath)
+        {
+            var prevOut = Console.Out; var prevErr = Console.Error;
+            var teeOut = new TeeTextWriter(prevOut, logPath);
+            var teeErr = new TeeTextWriter(prevErr, logPath);
+            Console.SetOut(teeOut); Console.SetError(teeErr);
+            Console.WriteLine($"[Log] Mirroring console to {logPath}");
+            return new ConsoleTee(prevOut, prevErr, teeOut, teeErr);
+        }
+        public void Dispose()
+        {
+            try { Console.SetOut(_prevOut); Console.SetError(_prevErr); } catch { }
+            try { _teeOut.Dispose(); _teeErr.Dispose(); } catch { }
+        }
+    }
+
     private static int Usage()
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
         return 2;
     }
 
@@ -26,9 +73,6 @@ public static class Program
         bool web = false; // default off
         int? clusterThreshold = null;
         int? clusterGap = null;
-        string? dbcDir = null;
-        string? areaAlpha = null;
-        string? areaLk = null;
         // export flags
         bool exportAdt = false;
         string? exportDir = null;
@@ -42,6 +86,12 @@ public static class Program
         string profile = "modified"; // modified|preserve
         bool useFallbacks = true;
         bool enableFixups = true;
+        string? remap = null;
+        bool verbose = false;
+        bool trackAssets = false;
+        string? dbdDir = null; string? dbctoolOutRoot = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
+        string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
+        bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -77,18 +127,6 @@ public static class Program
                     if (i + 1 >= args.Length) return Usage();
                     if (!int.TryParse(args[++i], out var cg)) return Usage();
                     clusterGap = cg;
-                    break;
-                case "--dbc-dir":
-                    if (i + 1 >= args.Length) return Usage();
-                    dbcDir = args[++i];
-                    break;
-                case "--area-alpha":
-                    if (i + 1 >= args.Length) return Usage();
-                    areaAlpha = args[++i];
-                    break;
-                case "--area-lk":
-                    if (i + 1 >= args.Length) return Usage();
-                    areaLk = args[++i];
                     break;
                 case "--web":
                     web = true;
@@ -137,6 +175,64 @@ public static class Program
                 case "--no-fixups":
                     enableFixups = false;
                     break;
+                case "--remap":
+                    if (i + 1 >= args.Length) return Usage();
+                    remap = args[++i];
+                    break;
+                case "--dbd-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbdDir = args[++i];
+                    break;
+                case "--dbctool-out-root":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolOutRoot = args[++i];
+                    break;
+                case "--dbctool-src-alias":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolSrcAlias = args[++i];
+                    break;
+                case "--dbctool-src-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolSrcDir = args[++i];
+                    break;
+                case "--dbctool-lk-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolLkDir = args[++i];
+                    break;
+                case "--dbctool-patch-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolPatchDir = args[++i];
+                    break;
+                case "--dbctool-patch-file":
+                    if (i + 1 >= args.Length) return Usage();
+                    dbctoolPatchFile = args[++i];
+                    break;
+                case "--viz-svg":
+                    vizSvg = true;
+                    break;
+                case "--viz-html":
+                    vizHtml = true;
+                    break;
+                case "--patch-only":
+                    patchOnly = true;
+                    break;
+                case "--no-zone-fallback":
+                    noZoneFallback = true;
+                    break;
+                case "--viz-dir":
+                    if (i + 1 >= args.Length) return Usage();
+                    vizDir = args[++i];
+                    break;
+                case "--mdp":
+                    if (i + 1 >= args.Length) return Usage();
+                    if (int.TryParse(args[++i], out var mdpVal) && mdpVal > 0) mdp = mdpVal; else return Usage();
+                    break;
+                case "--verbose":
+                    verbose = true;
+                    break;
+                case "--track-assets":
+                    trackAssets = true;
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
@@ -176,21 +272,6 @@ public static class Program
             Console.Error.WriteLine($"LK listfile not found: {lkListfile}");
             return 1;
         }
-        if (!string.IsNullOrWhiteSpace(dbcDir) && !Directory.Exists(dbcDir))
-        {
-            Console.Error.WriteLine($"DBC dir not found: {dbcDir}");
-            return 1;
-        }
-        if (!string.IsNullOrWhiteSpace(areaAlpha) && !File.Exists(areaAlpha))
-        {
-            Console.Error.WriteLine($"AreaTable alpha not found: {areaAlpha}");
-            return 1;
-        }
-        if (!string.IsNullOrWhiteSpace(areaLk) && !File.Exists(areaLk))
-        {
-            Console.Error.WriteLine($"AreaTable LK not found: {areaLk}");
-            return 1;
-        }
         if (exportAdt)
         {
             if (string.IsNullOrWhiteSpace(exportDir))
@@ -200,100 +281,140 @@ public static class Program
             }
         }
 
+        // Determine log root (AWDT only): prefer exportDir when exporting ADTs, else outDir
+        string? logRoot = null;
+        if (!string.IsNullOrWhiteSpace(exportDir)) logRoot = exportDir;
+        else if (!string.IsNullOrWhiteSpace(outDir)) logRoot = outDir;
+
         try
         {
-            if (isBatch)
+            // Start console tee if we have a destination
+            string? logPath = null; IDisposable? teeScope = null;
+            if (!string.IsNullOrWhiteSpace(logRoot))
             {
-                if (!Directory.Exists(inputDir!))
+                try
                 {
-                    Console.Error.WriteLine($"Input directory not found: {inputDir}");
-                    return 1;
+                    var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    logPath = Path.Combine(logRoot!, $"awdt_run_{stamp}.log");
+                    teeScope = ConsoleTee.Start(logPath);
                 }
+                catch { /* best-effort */ }
+            }
 
-                BatchAnalysis.Run(new BatchAnalysis.Options
+            try
+            {
+                if (isBatch)
                 {
-                    InputRoot = inputDir!,
-                    ListfilePath = listfile!,
-                    OutDir = outDir!,
-                    ClusterThreshold = clusterThreshold ?? 10,
-                    ClusterGap = clusterGap ?? 1000,
-                    DbcDir = dbcDir,
-                    Web = web
-                });
-
-                if (exportAdt)
-                {
-                    AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
+                    BatchAnalysis.Run(new BatchAnalysis.Options
                     {
                         InputRoot = inputDir!,
-                        CommunityListfilePath = listfile!,
-                        LkListfilePath = lkListfile,
-                        ExportDir = exportDir!,
-                        FallbackTileset = fallbackTileset,
-                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
-                        FallbackWmo = fallbackWmo,
-                        FallbackM2 = fallbackM2,
-                        ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy,
-                        UseFallbacks = useFallbacks,
-                        EnableFixups = enableFixups,
-                        AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk,
-                        DbcDir = dbcDir
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                        Web = web
                     });
-                }
-            }
-            else
-            {
-                if (!File.Exists(wdt!))
-                {
-                    Console.Error.WriteLine($"WDT not found: {wdt}");
-                    return 1;
-                }
 
-                AnalysisPipeline.Run(new AnalysisPipeline.Options
-                {
-                    WdtPath = wdt!,
-                    ListfilePath = listfile!,
-                    OutDir = outDir!,
-                    ClusterThreshold = clusterThreshold ?? 10,
-                    ClusterGap = clusterGap ?? 1000,
-                    DbcDir = dbcDir,
-                    AreaAlphaPath = areaAlpha,
-                    AreaLkPath = areaLk,
-                });
-
-                if (web)
-                {
-                    WebAssetsWriter.Write(outDir!);
-                    Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
-                }
-
-                if (exportAdt)
-                {
-                    AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
+                    if (exportAdt)
                     {
-                        SingleWdtPath = wdt!,
-                        CommunityListfilePath = listfile!,
-                        LkListfilePath = lkListfile,
-                        ExportDir = exportDir!,
-                        FallbackTileset = fallbackTileset,
-                        FallbackNonTilesetBlp = fallbackNonTilesetBlp,
-                        FallbackWmo = fallbackWmo,
-                        FallbackM2 = fallbackM2,
-                        ConvertToMh2o = mh2o,
-                        AssetFuzzy = assetFuzzy,
-                        UseFallbacks = useFallbacks,
-                        EnableFixups = enableFixups,
-                        AreaAlphaPath = areaAlpha,
-                        AreaLkPath = areaLk,
-                        DbcDir = dbcDir
-                    });
+                        AdtExportPipeline.ExportBatch(new AdtExportPipeline.Options
+                        {
+                            InputRoot = inputDir!,
+                            CommunityListfilePath = listfile!,
+                            LkListfilePath = lkListfile,
+                            ExportDir = exportDir!,
+                            FallbackTileset = fallbackTileset,
+                            FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                            FallbackWmo = fallbackWmo,
+                            FallbackM2 = fallbackM2,
+                            ConvertToMh2o = mh2o,
+                            AssetFuzzy = assetFuzzy,
+                            UseFallbacks = useFallbacks,
+                            EnableFixups = enableFixups,
+                            RemapPath = remap,
+                            Verbose = verbose,
+                            TrackAssets = trackAssets,
+                            DbdDir = dbdDir,
+                            DbctoolOutRoot = dbctoolOutRoot,
+                            DbctoolSrcAlias = dbctoolSrcAlias,
+                            DbctoolSrcDir = dbctoolSrcDir,
+                            DbctoolLkDir = dbctoolLkDir,
+                            DbctoolPatchDir = dbctoolPatchDir,
+                            DbctoolPatchFile = dbctoolPatchFile,
+                            VizSvg = vizSvg,
+                            VizHtml = vizHtml,
+                            PatchOnly = patchOnly,
+                            NoZoneFallback = noZoneFallback,
+                            MaxDegreeOfParallelism = mdp,
+                            VizDir = vizDir,
+                        });
+                    }
                 }
-            }
+                else
+                {
+                    if (!File.Exists(wdt!))
+                    {
+                        Console.Error.WriteLine($"WDT not found: {wdt}");
+                        return 1;
+                    }
 
-            Console.WriteLine("Analysis complete.");
-            return 0;
+                    AnalysisPipeline.Run(new AnalysisPipeline.Options
+                    {
+                        WdtPath = wdt!,
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                    });
+
+                    if (web)
+                    {
+                        WebAssetsWriter.Write(outDir!);
+                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
+                    }
+
+                    if (exportAdt)
+                    {
+                        AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
+                        {
+                            SingleWdtPath = wdt!,
+                            CommunityListfilePath = listfile!,
+                            LkListfilePath = lkListfile,
+                            ExportDir = exportDir!,
+                            FallbackTileset = fallbackTileset,
+                            FallbackNonTilesetBlp = fallbackNonTilesetBlp,
+                            FallbackWmo = fallbackWmo,
+                            FallbackM2 = fallbackM2,
+                            ConvertToMh2o = mh2o,
+                            AssetFuzzy = assetFuzzy,
+                            UseFallbacks = useFallbacks,
+                            EnableFixups = enableFixups,
+                            RemapPath = remap,
+                            Verbose = verbose,
+                            TrackAssets = trackAssets,
+                            DbdDir = dbdDir,
+                            DbctoolOutRoot = dbctoolOutRoot,
+                            DbctoolSrcAlias = dbctoolSrcAlias,
+                            DbctoolSrcDir = dbctoolSrcDir,
+                            DbctoolLkDir = dbctoolLkDir,
+                            DbctoolPatchDir = dbctoolPatchDir,
+                            DbctoolPatchFile = dbctoolPatchFile,
+                            VizSvg = vizSvg,
+                            VizHtml = vizHtml,
+                            PatchOnly = patchOnly,
+                            NoZoneFallback = noZoneFallback,
+                            VizDir = vizDir,
+                        });
+                    }
+                }
+
+                Console.WriteLine("Analysis complete.");
+                return 0;
+            }
+            finally
+            {
+                teeScope?.Dispose();
+            }
         }
         catch (Exception ex)
         {

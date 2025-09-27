@@ -13,9 +13,10 @@ This folder contains the tool and its CLI.
 - Exports WotLK ADTs using a faithful ported writer:
   - ADTs are written to `World/Maps/<MapName>/<MapName>_<x>_<y>.adt`.
   - A WDT file is written once per map as `World/Maps/<MapName>/<MapName>.wdt`.
-- Area ID analysis (Alpha):
-  - Emits `csv/maps/<MapName>/areaid_mapping.csv` with per-MCNK rows.
-  - Patches MCNK `AreaId` fields in-place in the exported ADTs using `AreaTable.dbc` mappings (name-based, with fallback).
+- Area ID patching (strict, CSV-only):
+  - Consumes DBCTool.V2 crosswalks from `compare/v2/` and applies per-source-map numeric mappings only.
+  - No name-based heuristics and no zone-base fallback. If there is no explicit per-map CSV row, we write `0`.
+  - A per-tile verify CSV is emitted in verbose mode to audit what was written.
 - Asset fixups using a community listfile and an optional LK listfile path.
 - Optional web UI assets to view analysis output.
 
@@ -83,30 +84,22 @@ CLI entry point: `AlphaWDTAnalysisTool/AlphaWdtAnalyzer.Cli/Program.cs`.
 ```
 AlphaWdtAnalyzer
 Usage:
-  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--area-alpha <AreaTable.dbc>] [--area-lk <AreaTable.dbc>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]
-  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--dbc-dir <dir>] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off]]
+  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> --out <output_dir> \
+              [--lk-listfile <3x.txt>] [--viz-html] [--no-fixups] \
+              --export-adt --export-dir <dir> --dbctool-patch-dir <compare/v2/dir> [--dbctool-lk-dir <LK DBC dir>]
+  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> --out <output_dir> \
+              [--lk-listfile <3x.txt>] [--viz-html] [--no-fixups] \
+              --export-adt --export-dir <dir> --dbctool-patch-dir <compare/v2/dir> [--dbctool-lk-dir <LK DBC dir>]
 ```
 
-Key options:
+Key options (mapping/patching):
 
-- `--input <map.wdt>`: Single-map mode (can also pass a directory; treated as `--input-dir`).
-- `--input-dir <dir>`: Batch mode; recurses for `*.wdt`.
-- `--listfile <community.csv>`: Community listfile used for path normalization and asset fixups.
-- `--lk-listfile <3x.txt>`: Optional LK listfile for better asset resolution.
-- `--out <out_dir>`: Analysis output root.
-- `--dbc-dir <dir>`: Optional directory for DBC reading (when doing deeper analysis).
-- `--area-alpha <AreaTable_alpha.dbc>`: Alpha AreaTable for AreaID mapping (recommended for patching).
-- `--area-lk <AreaTable_lk.dbc>`: LK AreaTable to resolve LK names and IDs (recommended for patching).
-- `--web`/`--no-web`: Emit web assets for the analysis summary (single-map mode).
-- Export flags:
-  - `--export-adt`: Enable ADT export.
-  - `--export-dir <dir>`: ADT export root (separate from `--out`).
-  - `--fallback-tileset <blp>`: Fallback BLP path for tileset textures.
-  - `--fallback-wmo <wmo>`: Fallback WMO when references are missing.
-  - `--fallback-m2 <m2>`: Fallback M2/MDX when references are missing.
-  - `--fallback-blp <blp>`: Fallback non-tileset BLP.
-  - `--no-mh2o`: Disable MH2O.
-  - `--asset-fuzzy on|off`: Toggle fuzzy matching for asset fixups (default: on).
+- `--dbctool-patch-dir <dir>`: Path to DBCTool.V2 session `compare/v2/` directory. Consumed for strict per-map numeric mapping.
+- `--dbctool-lk-dir <dir>`: Optional LK DBC folder (for map guard/name legend only). Mapping itself is CSV-driven only.
+
+Other options:
+
+- `--input` / `--input-dir`, `--listfile`, `--lk-listfile`, `--out`, `--viz-html`, `--no-fixups`, `--export-adt`, `--export-dir`.
 
 ---
 
@@ -158,7 +151,7 @@ When `--export-adt` is enabled, files are written under the export root (`--expo
   csv/
     maps/
       <MapName>/
-        areaid_mapping.csv                # per-MCNK AreaID analysis
+        areaid_verify_<x>_<y>.csv        # per-MCNK AreaID verify (verbose runs)
 ```
 
 Notes:
@@ -170,11 +163,10 @@ Notes:
 
 ## AreaID Mapping & Patching
 
-- Provide `--area-alpha` (Alpha `AreaTable.dbc`) to decode Alpha AreaID names.
-- Provide `--area-lk` (LK `AreaTable.dbc`) to resolve LK names and IDs.
-- The tool writes a CSV with one row per present MCNK:
-  - `tile_x,tile_y,mcnk_index,alpha_area_id,alpha_name,lk_area_id,lk_name,mapped,mapping_reason`
-- After writing an ADT, the tool patches the LK `MCNK.AreaId` field in-place when a mapping is found. Name-based matching is preferred; a minimal fallback may apply (e.g., "On Map Dungeon").
+- Strict CSV-only mapping: no heuristics, no zone-base fallback.
+- The tool consumes DBCTool.V2 crosswalks and patches `MCNK.AreaId` in-place when a per-map numeric CSV row exists for the given `src_areaNumber (zone<<16|sub)`.
+- If no per-map CSV mapping exists, `0` is written. Special rows that explicitly map to 0 (e.g., "On Map Dungeon") remain 0.
+- In verbose mode, a per-tile verify CSV is written to audit the alpha value, chosen LK area, and reason.
 
 ---
 
@@ -218,19 +210,19 @@ dotnet run --project .\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli -- \
   --lk-listfile "<path-to>\World of Warcraft 3x.txt" \
   --out "<output-root>" \
   --export-adt --export-dir "<export-root>" \
-  --area-alpha "<path-to>\AreaTable.dbc" \
-  --dbc-dir ".\lib\WoWDBDefs\definitions"
+  --dbctool-patch-dir ".\DBCTool.V2\dbctool_outputs\<session>\compare\v2" \
+  --dbctool-lk-dir ".\test_data\3.3.5\tree\DBFilesClient"
 ```
 
 ---
 
 ## Troubleshooting
 
-- __Listfile not found__: Ensure `--listfile` and `--lk-listfile` paths are valid. The CLI verifies and will exit with a message if not found.
-- __No ADTs written__: Check if the WDT has non-zero tile offsets. The tool only writes tiles with `MAIN` offsets > 0. See the exported folder for the WDT to confirm tiles.
-- __AreaID CSV empty__: Provide `--area-alpha` to decode Alpha Area IDs. `--area-lk` improves LK mapping quality but is optional.
-- __Unexpected asset paths__: Turn `--asset-fuzzy off` to disable fuzzy fixups. Verify listfile contents.
-- __Web UI assets__: Use `--web` (single-map mode) to emit web assets to `<out>/web/`.
+- **Listfile not found**: Ensure `--listfile` and `--lk-listfile` paths are valid.
+- **No ADTs written**: Check if the WDT has non-zero tile offsets. Only tiles with `MAIN` offsets > 0 are written.
+- **Area IDs all zero**: Confirm `--dbctool-patch-dir` points at the correct DBCTool.V2 `compare/v2/` folder and that your map-specific CSV has non-zero `tgt_areaID` rows for the `src_areaNumber` values you expect.
+- **Unexpected asset paths**: Turn `--no-fixups` on or disable fuzzy in your profile to preserve original paths.
+- **Web UI assets**: Use `--viz-html` to emit HTML summary when available.
 
 ---
 

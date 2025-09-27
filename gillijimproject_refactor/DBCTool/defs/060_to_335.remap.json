@@ -1,0 +1,2738 @@
+﻿{
+  "meta": {
+    "src_alias": "0.6.0",
+    "src_build": "0.6.0.3592",
+    "tgt_build": "3.3.5.12340",
+    "generated_at": "2025-09-12T20:13:03.7587279Z"
+  },
+  "aliases": {
+    "dark portal": [
+      "the dark portal"
+    ],
+    "demonic stronghold": [
+      "dreadmaul hold"
+    ],
+    "shadowfang": [
+      "shadowfang keep"
+    ],
+    "lik\u0027ash tar pits": [
+      "lakkari tar pits"
+    ],
+    "kargathia outpost": [
+      "kargathia keep"
+    ],
+    "the wellspring river": [
+      "wellspring river"
+    ],
+    "wellspring river": [
+      "the wellspring river"
+    ]
+  },
+  "explicit_map": [
+    {
+      "src_areaNumber": 249,
+      "tgt_areaID": 210,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 251,
+      "tgt_areaID": 212,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 252,
+      "tgt_areaID": 213,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 253,
+      "tgt_areaID": 214,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 255,
+      "tgt_areaID": 216,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 256,
+      "tgt_areaID": 217,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 257,
+      "tgt_areaID": 218,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 258,
+      "tgt_areaID": 219,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 259,
+      "tgt_areaID": 220,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 260,
+      "tgt_areaID": 221,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 261,
+      "tgt_areaID": 222,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 262,
+      "tgt_areaID": 223,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 263,
+      "tgt_areaID": 224,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 264,
+      "tgt_areaID": 225,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 265,
+      "tgt_areaID": 226,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 266,
+      "tgt_areaID": 227,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 267,
+      "tgt_areaID": 228,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 269,
+      "tgt_areaID": 230,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 272,
+      "tgt_areaID": 232,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 275,
+      "tgt_areaID": 233,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 277,
+      "tgt_areaID": 235,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 278,
+      "tgt_areaID": 236,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 279,
+      "tgt_areaID": 2006,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 280,
+      "tgt_areaID": 238,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 281,
+      "tgt_areaID": 239,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 282,
+      "tgt_areaID": 240,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 283,
+      "tgt_areaID": 241,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 284,
+      "tgt_areaID": 242,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 285,
+      "tgt_areaID": 243,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 286,
+      "tgt_areaID": 244,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 287,
+      "tgt_areaID": 245,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 288,
+      "tgt_areaID": 246,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 289,
+      "tgt_areaID": 247,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 290,
+      "tgt_areaID": 248,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 293,
+      "tgt_areaID": 249,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 294,
+      "tgt_areaID": 250,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 296,
+      "tgt_areaID": 885,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 297,
+      "tgt_areaID": 253,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 298,
+      "tgt_areaID": 254,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 299,
+      "tgt_areaID": 255,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 300,
+      "tgt_areaID": 256,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 301,
+      "tgt_areaID": 257,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 303,
+      "tgt_areaID": 259,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 305,
+      "tgt_areaID": 260,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 306,
+      "tgt_areaID": 261,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 307,
+      "tgt_areaID": 262,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 309,
+      "tgt_areaID": 264,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 310,
+      "tgt_areaID": 265,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 312,
+      "tgt_areaID": 267,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 314,
+      "tgt_areaID": 269,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 316,
+      "tgt_areaID": 271,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 318,
+      "tgt_areaID": 273,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 320,
+      "tgt_areaID": 274,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 321,
+      "tgt_areaID": 275,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 323,
+      "tgt_areaID": 277,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 324,
+      "tgt_areaID": 278,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 325,
+      "tgt_areaID": 279,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 326,
+      "tgt_areaID": 280,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 327,
+      "tgt_areaID": 281,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 330,
+      "tgt_areaID": 283,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 331,
+      "tgt_areaID": 284,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 332,
+      "tgt_areaID": 285,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 333,
+      "tgt_areaID": 286,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 334,
+      "tgt_areaID": 287,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 335,
+      "tgt_areaID": 288,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 336,
+      "tgt_areaID": 289,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 337,
+      "tgt_areaID": 290,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 340,
+      "tgt_areaID": 293,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 341,
+      "tgt_areaID": 294,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 342,
+      "tgt_areaID": 295,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 343,
+      "tgt_areaID": 296,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 344,
+      "tgt_areaID": 297,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 345,
+      "tgt_areaID": 298,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 346,
+      "tgt_areaID": 299,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 347,
+      "tgt_areaID": 300,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 348,
+      "tgt_areaID": 301,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 349,
+      "tgt_areaID": 302,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 350,
+      "tgt_areaID": 303,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 351,
+      "tgt_areaID": 304,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 352,
+      "tgt_areaID": 305,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 353,
+      "tgt_areaID": 306,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 356,
+      "tgt_areaID": 309,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 357,
+      "tgt_areaID": 310,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 358,
+      "tgt_areaID": 311,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 359,
+      "tgt_areaID": 312,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 360,
+      "tgt_areaID": 313,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 361,
+      "tgt_areaID": 314,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 362,
+      "tgt_areaID": 315,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 363,
+      "tgt_areaID": 316,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 364,
+      "tgt_areaID": 317,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 365,
+      "tgt_areaID": 318,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 366,
+      "tgt_areaID": 319,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 367,
+      "tgt_areaID": 320,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 368,
+      "tgt_areaID": 321,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 369,
+      "tgt_areaID": 322,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 370,
+      "tgt_areaID": 323,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 372,
+      "tgt_areaID": 325,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 373,
+      "tgt_areaID": 326,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 374,
+      "tgt_areaID": 327,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 375,
+      "tgt_areaID": 328,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 377,
+      "tgt_areaID": 329,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 378,
+      "tgt_areaID": 330,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 379,
+      "tgt_areaID": 331,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 380,
+      "tgt_areaID": 332,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 381,
+      "tgt_areaID": 333,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 383,
+      "tgt_areaID": 335,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 384,
+      "tgt_areaID": 336,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 385,
+      "tgt_areaID": 337,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 386,
+      "tgt_areaID": 338,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 388,
+      "tgt_areaID": 340,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 390,
+      "tgt_areaID": 341,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 391,
+      "tgt_areaID": 342,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 392,
+      "tgt_areaID": 343,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 393,
+      "tgt_areaID": 344,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 394,
+      "tgt_areaID": 867,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 395,
+      "tgt_areaID": 868,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 396,
+      "tgt_areaID": 347,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 397,
+      "tgt_areaID": 348,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 1,
+      "tgt_areaID": 1,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 2,
+      "tgt_areaID": 2,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 3,
+      "tgt_areaID": 3,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 4,
+      "tgt_areaID": 4,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 7,
+      "tgt_areaID": 5,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 8,
+      "tgt_areaID": 6,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 9,
+      "tgt_areaID": 7,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 12,
+      "tgt_areaID": 10,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 14,
+      "tgt_areaID": 12,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 15,
+      "tgt_areaID": 13,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 16,
+      "tgt_areaID": 14,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 17,
+      "tgt_areaID": 15,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 18,
+      "tgt_areaID": 16,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 20,
+      "tgt_areaID": 18,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 21,
+      "tgt_areaID": 19,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 23,
+      "tgt_areaID": 21,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 24,
+      "tgt_areaID": 22,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 25,
+      "tgt_areaID": 23,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 28,
+      "tgt_areaID": 25,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 30,
+      "tgt_areaID": 26,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 32,
+      "tgt_areaID": 27,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 33,
+      "tgt_areaID": 28,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 34,
+      "tgt_areaID": 29,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 35,
+      "tgt_areaID": 30,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 36,
+      "tgt_areaID": 31,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 37,
+      "tgt_areaID": 32,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 38,
+      "tgt_areaID": 33,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 40,
+      "tgt_areaID": 34,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 42,
+      "tgt_areaID": 36,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 43,
+      "tgt_areaID": 37,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 44,
+      "tgt_areaID": 38,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 45,
+      "tgt_areaID": 39,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 46,
+      "tgt_areaID": 40,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 47,
+      "tgt_areaID": 41,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 49,
+      "tgt_areaID": 42,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 51,
+      "tgt_areaID": 43,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 53,
+      "tgt_areaID": 44,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 55,
+      "tgt_areaID": 706,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 56,
+      "tgt_areaID": 47,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 57,
+      "tgt_areaID": 48,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 59,
+      "tgt_areaID": 49,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 61,
+      "tgt_areaID": 51,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 62,
+      "tgt_areaID": 52,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 63,
+      "tgt_areaID": 53,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 64,
+      "tgt_areaID": 54,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 69,
+      "tgt_areaID": 59,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 70,
+      "tgt_areaID": 60,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 72,
+      "tgt_areaID": 62,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 73,
+      "tgt_areaID": 673,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 74,
+      "tgt_areaID": 64,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 75,
+      "tgt_areaID": 65,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 76,
+      "tgt_areaID": 66,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 77,
+      "tgt_areaID": 67,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 80,
+      "tgt_areaID": 688,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 85,
+      "tgt_areaID": 73,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 86,
+      "tgt_areaID": 74,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 88,
+      "tgt_areaID": 76,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 89,
+      "tgt_areaID": 77,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 91,
+      "tgt_areaID": 78,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 94,
+      "tgt_areaID": 81,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 95,
+      "tgt_areaID": 82,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 96,
+      "tgt_areaID": 83,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 97,
+      "tgt_areaID": 84,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 98,
+      "tgt_areaID": 85,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 99,
+      "tgt_areaID": 86,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 101,
+      "tgt_areaID": 88,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 103,
+      "tgt_areaID": 90,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 104,
+      "tgt_areaID": 91,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 105,
+      "tgt_areaID": 92,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 106,
+      "tgt_areaID": 93,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 107,
+      "tgt_areaID": 94,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 108,
+      "tgt_areaID": 95,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 109,
+      "tgt_areaID": 96,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 111,
+      "tgt_areaID": 97,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 115,
+      "tgt_areaID": 99,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 116,
+      "tgt_areaID": 100,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 118,
+      "tgt_areaID": 102,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 121,
+      "tgt_areaID": 104,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 122,
+      "tgt_areaID": 105,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 123,
+      "tgt_areaID": 106,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 125,
+      "tgt_areaID": 107,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 126,
+      "tgt_areaID": 108,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 127,
+      "tgt_areaID": 109,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 128,
+      "tgt_areaID": 110,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 129,
+      "tgt_areaID": 111,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 130,
+      "tgt_areaID": 112,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 131,
+      "tgt_areaID": 113,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 132,
+      "tgt_areaID": 114,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 133,
+      "tgt_areaID": 115,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 134,
+      "tgt_areaID": 116,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 135,
+      "tgt_areaID": 117,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 136,
+      "tgt_areaID": 118,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 137,
+      "tgt_areaID": 119,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 138,
+      "tgt_areaID": 120,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 139,
+      "tgt_areaID": 121,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 141,
+      "tgt_areaID": 122,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 142,
+      "tgt_areaID": 123,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 143,
+      "tgt_areaID": 124,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 144,
+      "tgt_areaID": 125,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 145,
+      "tgt_areaID": 126,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 146,
+      "tgt_areaID": 127,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 147,
+      "tgt_areaID": 128,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 148,
+      "tgt_areaID": 129,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 149,
+      "tgt_areaID": 130,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 150,
+      "tgt_areaID": 131,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 152,
+      "tgt_areaID": 133,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 154,
+      "tgt_areaID": 135,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 155,
+      "tgt_areaID": 136,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 156,
+      "tgt_areaID": 137,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 157,
+      "tgt_areaID": 138,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 158,
+      "tgt_areaID": 139,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 159,
+      "tgt_areaID": 140,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 160,
+      "tgt_areaID": 141,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 161,
+      "tgt_areaID": 142,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 162,
+      "tgt_areaID": 143,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 163,
+      "tgt_areaID": 144,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 164,
+      "tgt_areaID": 145,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 165,
+      "tgt_areaID": 146,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 166,
+      "tgt_areaID": 147,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 167,
+      "tgt_areaID": 148,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 168,
+      "tgt_areaID": 149,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 170,
+      "tgt_areaID": 151,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 172,
+      "tgt_areaID": 152,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 187,
+      "tgt_areaID": 712,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 189,
+      "tgt_areaID": 157,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 190,
+      "tgt_areaID": 158,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 192,
+      "tgt_areaID": 159,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 193,
+      "tgt_areaID": 160,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 195,
+      "tgt_areaID": 161,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 197,
+      "tgt_areaID": 163,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 198,
+      "tgt_areaID": 164,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 199,
+      "tgt_areaID": 165,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 200,
+      "tgt_areaID": 166,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 201,
+      "tgt_areaID": 167,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 202,
+      "tgt_areaID": 168,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 203,
+      "tgt_areaID": 169,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 204,
+      "tgt_areaID": 170,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 205,
+      "tgt_areaID": 171,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 206,
+      "tgt_areaID": 34,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 207,
+      "tgt_areaID": 173,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 208,
+      "tgt_areaID": 696,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 209,
+      "tgt_areaID": 175,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 211,
+      "tgt_areaID": 177,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 212,
+      "tgt_areaID": 178,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 213,
+      "tgt_areaID": 179,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 214,
+      "tgt_areaID": 180,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 215,
+      "tgt_areaID": 181,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 219,
+      "tgt_areaID": 182,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 221,
+      "tgt_areaID": 184,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 222,
+      "tgt_areaID": 185,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 223,
+      "tgt_areaID": 186,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 224,
+      "tgt_areaID": 187,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 225,
+      "tgt_areaID": 188,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 227,
+      "tgt_areaID": 190,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 228,
+      "tgt_areaID": 191,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 229,
+      "tgt_areaID": 192,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 230,
+      "tgt_areaID": 193,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 231,
+      "tgt_areaID": 194,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 232,
+      "tgt_areaID": 195,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 233,
+      "tgt_areaID": 196,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 236,
+      "tgt_areaID": 198,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 237,
+      "tgt_areaID": 199,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 240,
+      "tgt_areaID": 202,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 241,
+      "tgt_areaID": 203,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 242,
+      "tgt_areaID": 204,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 243,
+      "tgt_areaID": 205,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 244,
+      "tgt_areaID": 206,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 246,
+      "tgt_areaID": 208,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 247,
+      "tgt_areaID": 209,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 656,
+      "tgt_areaID": 494,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 657,
+      "tgt_areaID": 495,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 676,
+      "tgt_areaID": 496,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 696,
+      "tgt_areaID": 714,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 697,
+      "tgt_areaID": 717,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 698,
+      "tgt_areaID": 716,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 699,
+      "tgt_areaID": 2070,
+      "note": "fuzzy-global"
+    },
+    {
+      "src_areaNumber": 700,
+      "tgt_areaID": 713,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 701,
+      "tgt_areaID": 715,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 702,
+      "tgt_areaID": 503,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 721,
+      "tgt_areaID": 509,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 838,
+      "tgt_areaID": 523,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 839,
+      "tgt_areaID": 521,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 398,
+      "tgt_areaID": 349,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 400,
+      "tgt_areaID": 351,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 401,
+      "tgt_areaID": 352,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 404,
+      "tgt_areaID": 354,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 405,
+      "tgt_areaID": 355,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 406,
+      "tgt_areaID": 356,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 407,
+      "tgt_areaID": 707,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 408,
+      "tgt_areaID": 358,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 409,
+      "tgt_areaID": 359,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 410,
+      "tgt_areaID": 360,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 411,
+      "tgt_areaID": 361,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 413,
+      "tgt_areaID": 363,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 414,
+      "tgt_areaID": 364,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 415,
+      "tgt_areaID": 365,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 416,
+      "tgt_areaID": 366,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 417,
+      "tgt_areaID": 367,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 418,
+      "tgt_areaID": 368,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 419,
+      "tgt_areaID": 369,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 420,
+      "tgt_areaID": 370,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 421,
+      "tgt_areaID": 371,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 422,
+      "tgt_areaID": 372,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 424,
+      "tgt_areaID": 373,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 426,
+      "tgt_areaID": 375,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 427,
+      "tgt_areaID": 376,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 430,
+      "tgt_areaID": 379,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 432,
+      "tgt_areaID": 381,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 433,
+      "tgt_areaID": 382,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 435,
+      "tgt_areaID": 384,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 436,
+      "tgt_areaID": 385,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 438,
+      "tgt_areaID": 387,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 439,
+      "tgt_areaID": 388,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 440,
+      "tgt_areaID": 389,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 441,
+      "tgt_areaID": 390,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 442,
+      "tgt_areaID": 391,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 443,
+      "tgt_areaID": 392,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 444,
+      "tgt_areaID": 393,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 445,
+      "tgt_areaID": 394,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 446,
+      "tgt_areaID": 395,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 447,
+      "tgt_areaID": 396,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 448,
+      "tgt_areaID": 397,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 449,
+      "tgt_areaID": 398,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 450,
+      "tgt_areaID": 399,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 452,
+      "tgt_areaID": 400,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 454,
+      "tgt_areaID": 402,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 455,
+      "tgt_areaID": 403,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 456,
+      "tgt_areaID": 404,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 458,
+      "tgt_areaID": 406,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 459,
+      "tgt_areaID": 407,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 460,
+      "tgt_areaID": 408,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 461,
+      "tgt_areaID": 409,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 463,
+      "tgt_areaID": 410,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 464,
+      "tgt_areaID": 411,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 465,
+      "tgt_areaID": 412,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 466,
+      "tgt_areaID": 413,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 468,
+      "tgt_areaID": 415,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 469,
+      "tgt_areaID": 416,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 470,
+      "tgt_areaID": 708,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 471,
+      "tgt_areaID": 418,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 472,
+      "tgt_areaID": 419,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 474,
+      "tgt_areaID": 711,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 475,
+      "tgt_areaID": 710,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 476,
+      "tgt_areaID": 709,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 477,
+      "tgt_areaID": 424,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 478,
+      "tgt_areaID": 425,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 479,
+      "tgt_areaID": 426,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 480,
+      "tgt_areaID": 427,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 482,
+      "tgt_areaID": 429,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 483,
+      "tgt_areaID": 430,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 484,
+      "tgt_areaID": 431,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 485,
+      "tgt_areaID": 432,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 486,
+      "tgt_areaID": 433,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 487,
+      "tgt_areaID": 434,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 488,
+      "tgt_areaID": 435,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 489,
+      "tgt_areaID": 436,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 490,
+      "tgt_areaID": 437,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 491,
+      "tgt_areaID": 438,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 492,
+      "tgt_areaID": 439,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 493,
+      "tgt_areaID": 440,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 496,
+      "tgt_areaID": 442,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 495,
+      "tgt_areaID": 544,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 497,
+      "tgt_areaID": 443,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 498,
+      "tgt_areaID": 444,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 499,
+      "tgt_areaID": 445,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 504,
+      "tgt_areaID": 450,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 505,
+      "tgt_areaID": 451,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 506,
+      "tgt_areaID": 452,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 507,
+      "tgt_areaID": 453,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 508,
+      "tgt_areaID": 454,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 509,
+      "tgt_areaID": 455,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 511,
+      "tgt_areaID": 457,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 512,
+      "tgt_areaID": 816,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 513,
+      "tgt_areaID": 459,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 514,
+      "tgt_areaID": 460,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 515,
+      "tgt_areaID": 461,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 516,
+      "tgt_areaID": 462,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 517,
+      "tgt_areaID": 463,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 518,
+      "tgt_areaID": 464,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 536,
+      "tgt_areaID": 465,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 537,
+      "tgt_areaID": 466,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 538,
+      "tgt_areaID": 467,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 539,
+      "tgt_areaID": 468,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 540,
+      "tgt_areaID": 469,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 541,
+      "tgt_areaID": 470,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 542,
+      "tgt_areaID": 471,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 543,
+      "tgt_areaID": 472,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 556,
+      "tgt_areaID": 473,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 576,
+      "tgt_areaID": 474,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 87,
+      "tgt_areaID": 75,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 425,
+      "tgt_areaID": 374,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 54,
+      "tgt_areaID": 45,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 226,
+      "tgt_areaID": 189,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 382,
+      "tgt_areaID": 334,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 431,
+      "tgt_areaID": 225,
+      "note": "fuzzy-global"
+    },
+    {
+      "src_areaNumber": 473,
+      "tgt_areaID": 420,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 13,
+      "tgt_areaID": 11,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 41,
+      "tgt_areaID": 35,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 68,
+      "tgt_areaID": 58,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 92,
+      "tgt_areaID": 79,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 120,
+      "tgt_areaID": 103,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 151,
+      "tgt_areaID": 132,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 188,
+      "tgt_areaID": 156,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 220,
+      "tgt_areaID": 183,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 245,
+      "tgt_areaID": 207,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 276,
+      "tgt_areaID": 984,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 302,
+      "tgt_areaID": 258,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 328,
+      "tgt_areaID": 282,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 371,
+      "tgt_areaID": 324,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 403,
+      "tgt_areaID": 353,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 428,
+      "tgt_areaID": 377,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 434,
+      "tgt_areaID": 383,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 457,
+      "tgt_areaID": 405,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 481,
+      "tgt_areaID": 428,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 503,
+      "tgt_areaID": 449,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 19,
+      "tgt_areaID": 17,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 113,
+      "tgt_areaID": 98,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 169,
+      "tgt_areaID": 150,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 196,
+      "tgt_areaID": 162,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 250,
+      "tgt_areaID": 211,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 322,
+      "tgt_areaID": 276,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 387,
+      "tgt_areaID": 339,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 453,
+      "tgt_areaID": 401,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 510,
+      "tgt_areaID": 456,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 100,
+      "tgt_areaID": 87,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 102,
+      "tgt_areaID": 89,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 238,
+      "tgt_areaID": 200,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 239,
+      "tgt_areaID": 201,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 311,
+      "tgt_areaID": 266,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 315,
+      "tgt_areaID": 270,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 354,
+      "tgt_areaID": 307,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 355,
+      "tgt_areaID": 308,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 596,
+      "tgt_areaID": 475,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 597,
+      "tgt_areaID": 476,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 598,
+      "tgt_areaID": 477,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 599,
+      "tgt_areaID": 478,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 600,
+      "tgt_areaID": 479,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 609,
+      "tgt_areaID": 486,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 602,
+      "tgt_areaID": 480,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 603,
+      "tgt_areaID": 481,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 604,
+      "tgt_areaID": 482,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 26,
+      "tgt_areaID": 24,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 606,
+      "tgt_areaID": 483,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 607,
+      "tgt_areaID": 484,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 608,
+      "tgt_areaID": 485,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 60,
+      "tgt_areaID": 50,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 153,
+      "tgt_areaID": 134,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 235,
+      "tgt_areaID": 197,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 317,
+      "tgt_areaID": 272,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 399,
+      "tgt_areaID": 350,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 429,
+      "tgt_areaID": 378,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 437,
+      "tgt_areaID": 966,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 467,
+      "tgt_areaID": 414,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 501,
+      "tgt_areaID": 447,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 271,
+      "tgt_areaID": 231,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 295,
+      "tgt_areaID": 251,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 10,
+      "tgt_areaID": 8,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 11,
+      "tgt_areaID": 9,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 616,
+      "tgt_areaID": 487,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 173,
+      "tgt_areaID": 153,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 618,
+      "tgt_areaID": 488,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 186,
+      "tgt_areaID": 154,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 500,
+      "tgt_areaID": 446,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 502,
+      "tgt_areaID": 448,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 412,
+      "tgt_areaID": 362,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 636,
+      "tgt_areaID": 489,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 71,
+      "tgt_areaID": 61,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 93,
+      "tgt_areaID": 80,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 117,
+      "tgt_areaID": 101,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 254,
+      "tgt_areaID": 697,
+      "note": "name"
+    },
+    {
+      "src_areaNumber": 308,
+      "tgt_areaID": 263,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 313,
+      "tgt_areaID": 268,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 338,
+      "tgt_areaID": 291,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 339,
+      "tgt_areaID": 292,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 637,
+      "tgt_areaID": 490,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 638,
+      "tgt_areaID": 491,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 639,
+      "tgt_areaID": 492,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 640,
+      "tgt_areaID": 493,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 716,
+      "tgt_areaID": 504,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 717,
+      "tgt_areaID": 505,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 718,
+      "tgt_areaID": 506,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 719,
+      "tgt_areaID": 507,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 720,
+      "tgt_areaID": 508,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 722,
+      "tgt_areaID": 510,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 736,
+      "tgt_areaID": 511,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 796,
+      "tgt_areaID": 512,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 797,
+      "tgt_areaID": 513,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 798,
+      "tgt_areaID": 514,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 799,
+      "tgt_areaID": 515,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 800,
+      "tgt_areaID": 516,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 801,
+      "tgt_areaID": 517,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 802,
+      "tgt_areaID": 518,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 803,
+      "tgt_areaID": 519,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 804,
+      "tgt_areaID": 520,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 805,
+      "tgt_areaID": 521,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 806,
+      "tgt_areaID": 522,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 807,
+      "tgt_areaID": 523,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 808,
+      "tgt_areaID": 524,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 809,
+      "tgt_areaID": 689,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 810,
+      "tgt_areaID": 526,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 811,
+      "tgt_areaID": 527,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 812,
+      "tgt_areaID": 528,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 813,
+      "tgt_areaID": 133,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 814,
+      "tgt_areaID": 329,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 815,
+      "tgt_areaID": 329,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 816,
+      "tgt_areaID": 532,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 817,
+      "tgt_areaID": 533,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 818,
+      "tgt_areaID": 534,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 819,
+      "tgt_areaID": 535,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 820,
+      "tgt_areaID": 536,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 821,
+      "tgt_areaID": 537,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 836,
+      "tgt_areaID": 230,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 837,
+      "tgt_areaID": 230,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 856,
+      "tgt_areaID": 542,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 876,
+      "tgt_areaID": 543,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 877,
+      "tgt_areaID": 544,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 878,
+      "tgt_areaID": 329,
+      "note": "fuzzy\u002Bmap"
+    },
+    {
+      "src_areaNumber": 879,
+      "tgt_areaID": 329,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 880,
+      "tgt_areaID": 283,
+      "note": "name\u002Bmap"
+    },
+    {
+      "src_areaNumber": 881,
+      "tgt_areaID": 283,
+      "note": "name\u002Bmap"
+    }
+  ],
+  "ignore_area_numbers": [
+    65,
+    66,
+    67,
+    82,
+    83,
+    84,
+    210,
+    22,
+    81,
+    268
+  ],
+  "options": {
+    "disallow_do_not_use_targets": true
+  }
+}

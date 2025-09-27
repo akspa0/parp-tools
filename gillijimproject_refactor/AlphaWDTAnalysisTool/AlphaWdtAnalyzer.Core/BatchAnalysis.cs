@@ -14,7 +14,6 @@ public static class BatchAnalysis
         public required string OutDir { get; init; }
         public int ClusterThreshold { get; init; } = 10;
         public int ClusterGap { get; init; } = 1000;
-        public string? DbcDir { get; init; }
         public bool Web { get; init; } = false;
     }
 
