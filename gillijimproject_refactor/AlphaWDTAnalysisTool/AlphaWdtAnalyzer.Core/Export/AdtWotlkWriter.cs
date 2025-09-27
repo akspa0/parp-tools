@@ -22,6 +22,14 @@ public static class AdtWotlkWriter
     {
         (0, 451) // Programmer Isle / Designer Island moved from Azeroth (0) to Dev Map (451)
     };
+    private static readonly HashSet<int> s_forceZeroMapIds = new()
+    {
+        17 // Kalidar prototype map: no LK AreaTable entries exist, preserve as 0
+    };
+    private static readonly HashSet<string> s_forceZeroMapNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Kalidar"
+    };
 
     public sealed class WriteContext
     {
@@ -272,7 +280,6 @@ public static class AdtWotlkWriter
                 if (mcnkOffset <= 0) continue;
                 present++;
 
-                int contRaw = currentMapId ?? -1;
                 int lkAreaId = 0;
                 string method = "fallback0";
                 // Use AlphaAreaIds captured from the Alpha ADT (zone<<16|sub). This is authoritative.
@@ -286,148 +293,158 @@ public static class AdtWotlkWriter
                     }
                 }
 
-                // Try strategies in order (prefer precise target-map-locked mapping first)
                 bool mapped = false;
-                int zoneBase = aIdNum & unchecked((int)0xFFFF0000);
-                int subLo = aIdNum & 0xFFFF;
-
+                bool forceZeroMapFlag = (currentMapId.HasValue && s_forceZeroMapIds.Contains(currentMapId.Value))
+                    || (!currentMapId.HasValue && s_forceZeroMapNames.Contains(mapName));
+                int zoneBase = (aIdNum > 0) ? (aIdNum & unchecked((int)0xFFFF0000)) : 0;
+                int subLo = (aIdNum > 0) ? (aIdNum & 0xFFFF) : 0;
                 int midAreaHint = 0;
                 int midMapHint = -1;
                 int midParentHint = -1;
                 string midChainHint = string.Empty;
                 bool midViaHint = false;
                 bool hasMidInfo = false;
-                if (patchMap is not null && aIdNum > 0)
-                {
-                    hasMidInfo = patchMap.TryGetMidInfo(currentMapId, aIdNum, out midAreaHint, out midMapHint, out midParentHint, out midChainHint, out midViaHint);
-                }
-
-                bool hasZoneCandidate = false;
-                int zoneCandidateId = 0;
-                bool zoneCandidateVia = false;
-                if (patchMap is not null && aIdNum > 0 && zoneBase != 0)
-                {
-                    hasZoneCandidate = patchMap.TryMapZone(zoneBase, currentMapId, out zoneCandidateId, out zoneCandidateVia);
-                }
-
-                if (verbose && patchMap is not null && aIdNum > 0 && subLo > 0 && debugPrinted < 24)
-                {
-                    var zoneDiagBase = zoneBase;
-                    var subDiag = subLo;
-                    bool mapScoped = currentMapId.HasValue && currentMapId.Value >= 0;
-                    bool anyMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, null, out var anyId, out var anyVia);
-                    bool mapMatch = false;
-                    int mapMatchId = 0;
-                    bool mapMatchVia = false;
-                    if (mapScoped)
-                    {
-                        mapMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, currentMapId, out mapMatchId, out mapMatchVia);
-                    }
-                    Console.WriteLine($"  [Diag] zoneBase=0x{zoneDiagBase:X} subLo=0x{subDiag:X} mapId={currentMapId} anyMatch={anyMatch} anyId={anyId} anyVia={anyVia} mapMatch={mapMatch} mapMatchId={mapMatchId} mapMatchVia={mapMatchVia}");
-                }
-
-                // -1) CSV lookups keyed by hi/lo pairs and per-map area numbers
                 var mapRejects = verbose ? new List<string>() : null;
 
-                bool AcceptCandidate(int candidateId, string candidateMethod)
+                if (forceZeroMapFlag)
                 {
-                    if (candidateId <= 0) return false;
-                    if (currentMapId.HasValue && currentMapId.Value >= 0 && !ValidateTargetMap(candidateId, currentMapId))
-                    {
-                        var expected = DescribeMap(currentMapId);
-                        mapRejects?.Add($"    [map_mismatch] candidate={DescribeTarget(candidateId, patchMap)} method={candidateMethod} expectedMap={expected}");
-                        return false;
-                    }
-                    lkAreaId = candidateId;
-                    method = candidateMethod;
+                    lkAreaId = 0;
+                    method = "map_forced_zero";
                     mapped = true;
-                    return true;
+                    goto WriteArea;
                 }
-
-                if (!mapped && patchMap is not null && aIdNum > 0)
+                else
                 {
-                    if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var csvSubId, out var viaSub))
+                    if (patchMap is not null && aIdNum > 0)
                     {
-                        AcceptCandidate(csvSubId, viaSub ? "patch_csv_sub_via060" : "patch_csv_sub");
+                        hasMidInfo = patchMap.TryGetMidInfo(currentMapId, aIdNum, out midAreaHint, out midMapHint, out midParentHint, out midChainHint, out midViaHint);
                     }
-                    else if (patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvByName))
-                    {
-                        AcceptCandidate(csvByName, "patch_csv_num");
-                    }
-                    else if (patchMap.TryMapBySrcAreaNumber(aIdNum, out var csvExactId, out var viaExact))
-                    {
-                        AcceptCandidate(csvExactId, viaExact ? "patch_csv_exact_via060" : "patch_csv_exact");
-                    }
-                    else if (patchMap.TryMapViaMid(currentMapId, aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
-                    {
-                        if (AcceptCandidate(csvMidId, viaMid ? "patch_csv_mid_via060" : "patch_csv_mid") && !hasMidInfo && midAreaResolved > 0)
-                        {
-                            midAreaHint = midAreaResolved;
-                        }
-                    }
-                }
 
-                if (!mapped && hasZoneCandidate && hasMidInfo && patchMap is not null)
-                {
-                    var childIds = patchMap.GetChildCandidateIds(zoneCandidateId);
-                    var childNames = patchMap.GetChildCandidateNames(zoneCandidateId);
-                    if (childIds.Count > 0 && childNames.Count > 0)
+                    bool hasZoneCandidate = false;
+                    int zoneCandidateId = 0;
+                    bool zoneCandidateVia = false;
+                    if (patchMap is not null && aIdNum > 0 && zoneBase != 0)
                     {
-                        var tokens = new List<string>();
-                        void AddToken(string value)
-                        {
-                            var norm = NormalizeNameToken(value);
-                            if (!string.IsNullOrEmpty(norm) && !tokens.Contains(norm)) tokens.Add(norm);
-                        }
+                        hasZoneCandidate = patchMap.TryMapZone(zoneBase, currentMapId, out zoneCandidateId, out zoneCandidateVia);
+                    }
 
-                        AddToken(midChainHint);
-                        if (!string.IsNullOrWhiteSpace(midChainHint))
+                    if (verbose && patchMap is not null && aIdNum > 0 && subLo > 0 && debugPrinted < 24)
+                    {
+                        var zoneDiagBase = zoneBase;
+                        var subDiag = subLo;
+                        bool mapScoped = currentMapId.HasValue && currentMapId.Value >= 0;
+                        bool anyMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, null, out var anyId, out var anyVia);
+                        bool mapMatch = false;
+                        int mapMatchId = 0;
+                        bool mapMatchVia = false;
+                        if (mapScoped)
                         {
-                            var segments = midChainHint.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                            foreach (var seg in segments)
+                            mapMatch = patchMap.TryMapSubZone(zoneDiagBase, subDiag, currentMapId, out mapMatchId, out mapMatchVia);
+                        }
+                        Console.WriteLine($"  [Diag] zoneBase=0x{zoneDiagBase:X} subLo=0x{subDiag:X} mapId={currentMapId} anyMatch={anyMatch} anyId={anyId} anyVia={anyVia} mapMatch={mapMatch} mapMatchId={mapMatchId} mapMatchVia={mapMatchVia}");
+                    }
+
+                    bool AcceptCandidate(int candidateId, string candidateMethod)
+                    {
+                        if (candidateId <= 0) return false;
+                        if (currentMapId.HasValue && currentMapId.Value >= 0 && !ValidateTargetMap(candidateId, currentMapId))
+                        {
+                            var expected = DescribeMap(currentMapId);
+                            mapRejects?.Add($"    [map_mismatch] candidate={DescribeTarget(candidateId, patchMap)} method={candidateMethod} expectedMap={expected}");
+                            return false;
+                        }
+                        lkAreaId = candidateId;
+                        method = candidateMethod;
+                        mapped = true;
+                        return true;
+                    }
+
+                    if (!mapped && patchMap is not null && aIdNum > 0)
+                    {
+                        if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var csvSubId, out var viaSub))
+                        {
+                            AcceptCandidate(csvSubId, viaSub ? "patch_csv_sub_via060" : "patch_csv_sub");
+                        }
+                        else if (patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var csvByName))
+                        {
+                            AcceptCandidate(csvByName, "patch_csv_num");
+                        }
+                        else if (patchMap.TryMapBySrcAreaNumber(aIdNum, out var csvExactId, out var viaExact))
+                        {
+                            AcceptCandidate(csvExactId, viaExact ? "patch_csv_exact_via060" : "patch_csv_exact");
+                        }
+                        else if (patchMap.TryMapViaMid(currentMapId, aIdNum, out var csvMidId, out var midAreaResolved, out var viaMid))
+                        {
+                            if (AcceptCandidate(csvMidId, viaMid ? "patch_csv_mid_via060" : "patch_csv_mid") && !hasMidInfo && midAreaResolved > 0)
                             {
-                                AddToken(seg);
+                                midAreaHint = midAreaResolved;
                             }
                         }
+                    }
 
-                        for (int idx = 0; idx < Math.Min(childIds.Count, childNames.Count); idx++)
+                    if (!mapped && hasZoneCandidate && hasMidInfo && patchMap is not null)
+                    {
+                        var childIds = patchMap.GetChildCandidateIds(zoneCandidateId);
+                        var childNames = patchMap.GetChildCandidateNames(zoneCandidateId);
+                        if (childIds.Count > 0 && childNames.Count > 0)
                         {
-                            var childNorm = NormalizeNameToken(childNames[idx]);
-                            if (tokens.Count == 0 || tokens.Contains(childNorm))
+                            var tokens = new List<string>();
+                            void AddToken(string value)
                             {
-                                if (AcceptCandidate(childIds[idx], (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child"))
+                                var norm = NormalizeNameToken(value);
+                                if (!string.IsNullOrEmpty(norm) && !tokens.Contains(norm)) tokens.Add(norm);
+                            }
+
+                            AddToken(midChainHint);
+                            if (!string.IsNullOrWhiteSpace(midChainHint))
+                            {
+                                var segments = midChainHint.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                foreach (var seg in segments)
                                 {
-                                    break;
+                                    AddToken(seg);
+                                }
+                            }
+
+                            for (int idx = 0; idx < Math.Min(childIds.Count, childNames.Count); idx++)
+                            {
+                                var childNorm = NormalizeNameToken(childNames[idx]);
+                                if (tokens.Count == 0 || tokens.Contains(childNorm))
+                                {
+                                    if (AcceptCandidate(childIds[idx], (midViaHint || zoneCandidateVia) ? "patch_csv_mid_child_via060" : "patch_csv_mid_child"))
+                                    {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                if (!mapped && hasZoneCandidate)
-                {
-                    AcceptCandidate(zoneCandidateId, zoneCandidateVia ? "patch_csv_zone_via060" : "patch_csv_zone");
-                }
-                // 0a) CSV numeric direct by target mapId (guarded by CurrentMapId) with via060 preference
-                if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0
-                    && patchMap.TryMapByTargetViaFirst(currentMapId.Value, aIdNum, out var csvIdNumMap, out var mapVia))
-                {
-                    AcceptCandidate(csvIdNumMap, mapVia ? "patch_csv_num_mapX_via060" : "patch_csv_num_mapX");
-                }
-                // 0b) CSV numeric direct by target mapName (strict map-locked by name) with via060 preference
-                if (!mapped && patchMap is not null && aIdNum > 0)
-                {
-                    var tgtName = ResolveTargetMapNameFromId(currentMapId);
-                    if (!string.IsNullOrWhiteSpace(tgtName)
-                        && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var csvIdNumMapName, out var nameVia))
+                    if (!mapped && hasZoneCandidate)
                     {
-                        AcceptCandidate(csvIdNumMapName, nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX");
+                        AcceptCandidate(zoneCandidateId, zoneCandidateVia ? "patch_csv_zone_via060" : "patch_csv_zone");
                     }
+                    // 0a) CSV numeric direct by target mapId (guarded by CurrentMapId) with via060 preference
+                    if (!mapped && patchMap is not null && aIdNum > 0 && currentMapId.HasValue && currentMapId.Value >= 0
+                        && patchMap.TryMapByTargetViaFirst(currentMapId.Value, aIdNum, out var csvIdNumMap, out var mapVia))
+                    {
+                        AcceptCandidate(csvIdNumMap, mapVia ? "patch_csv_num_mapX_via060" : "patch_csv_num_mapX");
+                    }
+                    // 0b) CSV numeric direct by target mapName (strict map-locked by name) with via060 preference
+                    if (!mapped && patchMap is not null && aIdNum > 0)
+                    {
+                        var tgtName = ResolveTargetMapNameFromId(currentMapId);
+                        if (!string.IsNullOrWhiteSpace(tgtName)
+                            && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var csvIdNumMapName, out var nameVia))
+                        {
+                            AcceptCandidate(csvIdNumMapName, nameVia ? "patch_csv_num_mapNameX_via060" : "patch_csv_num_mapNameX");
+                        }
+                    }
+                    // 0c) (reserved) -- handled in -1 block above
+                    // Strict mode: no other fallbacks
+                    if (!mapped) { lkAreaId = 0; method = "unmapped"; mapped = true; }
                 }
-                // 0c) (reserved) -- handled in -1 block above
-                // Strict mode: no other fallbacks
-                if (!mapped) { lkAreaId = 0; method = "unmapped"; }
 
+WriteArea:
                 long areaFieldPos = (long)mcnkOffset + 8 + 0x34; // LK MCNK header AreaId
                 if (areaFieldPos + 4 > fileLen) continue;
 
@@ -435,21 +452,26 @@ public static class AdtWotlkWriter
                 fs.Position = areaFieldPos;
                 uint existing = br.ReadUInt32();
 
+                bool forceZeroMap = forceZeroMapFlag;
                 bool hasMappedTarget = mapped && lkAreaId > 0;
-                int effectiveWrite = hasMappedTarget ? lkAreaId : (int)existing;
-                string methodLogged = hasMappedTarget ? method : (method == "unmapped" ? "unmapped_preserve" : method);
+                bool shouldZero = forceZeroMap || (!hasMappedTarget);
+                bool shouldWrite = hasMappedTarget || shouldZero;
+                int effectiveWrite = shouldZero ? 0 : lkAreaId;
+                string methodLogged = shouldZero
+                    ? (method == "map_forced_zero" ? "map_forced_zero" : "unmapped_zero")
+                    : method;
 
                 string mapDisplay = DescribeMap(currentMapId);
                 string sourceDisplay = BuildSourceDisplay(mapName, midChainHint, zoneBase, subLo, aIdNum);
                 string existingDisplay = DescribeTarget((int)existing, patchMap);
-                string writeDisplay = hasMappedTarget ? DescribeTarget(lkAreaId, patchMap) : existingDisplay;
+                string writeDisplay = shouldZero ? "0 (forced)" : DescribeTarget(lkAreaId, patchMap);
                 string logEntry = $"  [AreaMap] map={mapDisplay} idx={i2:D3} src={sourceDisplay} existing={existingDisplay} -> write={writeDisplay} method={methodLogged}";
                 verboseLog?.Add(logEntry);
 
-                if (hasMappedTarget && existing != (uint)lkAreaId)
+                if (shouldWrite && existing != (uint)effectiveWrite)
                 {
                     fs.Position = areaFieldPos;
-                    bw.Write((uint)lkAreaId);
+                    bw.Write((uint)effectiveWrite);
                     patched++;
                 }
 

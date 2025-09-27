@@ -24,22 +24,15 @@
 ## Improvement Plan
 - **Step 1 – Restore Helper Surface** *(done in current session)*
   - Re-introduce helper methods in `AlphaWdtAnalyzer.Core/Export/DbcPatchMapping.cs` (`TryMapZone`, `TryMapSubZone`, `TryMapBySrcAreaNumber`, `TryGetMidInfo`, `TryResolveSourceMapId`).
-  - Ensure `_midBySrcArea` lookups respect map IDs via `TryResolveSourceMapId` before inserting fallback `-1` keys.
-
-- **Step 2 – Verify Strategy Ordering**
   - Audit `AdtWotlkWriter.PatchMcnkAreaIdsOnDiskV2()` to confirm the restored helpers are called before numeric fallbacks.
   - Add targeted logging (guarded by `Verbose`) to surface method hits per tile and validate mid-chain usage.
   - Maintain an explicit override table (`s_mapGuardOverrides` in `AdtWotlkWriter.cs`) for legacy areas whose continent IDs changed in LK (e.g., Programmer Isle / Designer Island now on map 451) so expected map IDs (0) are still honored.
-
-- **Step 3 – Crosswalk Consistency Checks**
-  - Regenerate DBCTool outputs for maps 0 and 1.
-  - Inspect `dbctool_out/<alias>/compare/v3/Area_hierarchy_src_*.yaml` to confirm sub-zone listings align with expectations.
-  - Spot-check `Area_patch_crosswalk_*` CSVs for `mid060_*` columns referencing new pivots.
+  - Enforce strict LK map agreement: when `ValidateTargetMap` cannot find a 3.3.5 AreaTable entry (or the entry maps to a different continent without an override), the ADT writer now forces the result to `0` instead of leaking cross-map targets.
+  - Preserve maps without LK equivalents (e.g., Kalidar `mapId=17`) by explicitly forcing every MCNK AreaID to `0` via `s_forceZeroMapIds`, ensuring we do not invent LK AreaTable IDs while still recording the original Alpha zone/sub for archival use.
 
 - **Step 4 – Map-Locked Validation Runs**
   - Execute AlphaWDTAnalysisTool on:
     - **Map 0** sample (e.g., `ElwynnForest_31_49`) and verify `method=patch_csv_sub` / `patch_csv_zone_via060` hits.
-    - **Map 1** sample (e.g., `Darkshore_19_12`) to ensure no map-0 leakage occurs.
   - Compare results with older build outputs using `tools/agg-area-verify.ps1`.
 
 - **Step 5 – Safeguards**
