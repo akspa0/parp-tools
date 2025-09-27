@@ -50,42 +50,68 @@ internal static class Program
         var wdtFile = opts["wdt-file"];
         var outRoot = opts.GetValueOrDefault("out", "");
         var mapName = Path.GetFileNameWithoutExtension(wdtFile);
-        
-        var sessionDir = OutputSession.Create(outRoot, mapName);
+
+        var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtFile)) ?? wdtFile);
+        var sessionDir = OutputSession.Create(outRoot, mapName, buildTag);
         Console.WriteLine($"[info] Archaeological analysis session: {sessionDir}");
         Console.WriteLine($"[info] Excavating Alpha WDT: {wdtFile}");
 
-        var ranges = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile).ToList();
-        var csv = RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{mapName}", ranges);
-        
-        Console.WriteLine($"[ok] Extracted {ranges.Count} archaeological placement layers");
-        Console.WriteLine($"[ok] Alpha UniqueID ranges written to: {csv}");
+        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile);
+        var csvResult = RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{mapName}", analysis.Ranges, analysis.Assets);
+
+        Console.WriteLine($"[ok] Extracted {analysis.Ranges.Count} archaeological placement layers");
+        Console.WriteLine($"[ok] Alpha UniqueID ranges written to: {csvResult.PerMapPath}");
+        if (!string.IsNullOrEmpty(csvResult.TimelinePath))
+        {
+            Console.WriteLine($"[ok] Timeline CSV: {csvResult.TimelinePath}");
+        }
+        if (!string.IsNullOrEmpty(csvResult.AssetLedgerPath))
+        {
+            Console.WriteLine($"[ok] Asset ledger CSV: {csvResult.AssetLedgerPath}");
+        }
+        if (!string.IsNullOrEmpty(csvResult.TimelineAssetsPath))
+        {
+            Console.WriteLine($"[ok] Timeline asset summary CSV: {csvResult.TimelineAssetsPath}");
+        }
+
         return 0;
     }
 
     private static int RunAnalyzeLkAdt(Dictionary<string, string> opts)
     {
-        Require(opts, "map");
         Require(opts, "input-dir");
         var map = opts["map"]; 
         var inputDir = opts["input-dir"]; 
         var outRoot = opts.GetValueOrDefault("out", "");
         
-        var sessionDir = OutputSession.Create(outRoot, map);
+        var buildTag = BuildTagResolver.ResolveForPath(inputDir);
+        var sessionDir = OutputSession.Create(outRoot, map, buildTag);
         Console.WriteLine($"[info] LK ADT analysis session: {sessionDir}");
         Console.WriteLine($"[info] Analyzing converted LK ADT files for map: {map}");
 
         var ranges = RangeScanner.AnalyzeRangesForMap(inputDir, map);
-        var csv = RangeCsvWriter.WritePerMapCsv(sessionDir, $"lk_{map}", ranges);
-        
+        var csvResult = RangeCsvWriter.WritePerMapCsv(sessionDir, $"lk_{map}", ranges);
+
         Console.WriteLine($"[ok] Extracted {ranges.Count} preserved placement ranges from LK ADTs");
-        Console.WriteLine($"[ok] LK UniqueID ranges written to: {csv}");
+        Console.WriteLine($"[ok] LK UniqueID ranges written to: {csvResult.PerMapPath}");
+        if (!string.IsNullOrEmpty(csvResult.TimelinePath))
+        {
+            Console.WriteLine($"[ok] LK timeline CSV: {csvResult.TimelinePath}");
+        }
+        if (!string.IsNullOrEmpty(csvResult.AssetLedgerPath))
+        {
+            Console.WriteLine($"[ok] LK asset ledger CSV: {csvResult.AssetLedgerPath}");
+        }
+        if (!string.IsNullOrEmpty(csvResult.TimelineAssetsPath))
+        {
+            Console.WriteLine($"[ok] LK timeline asset summary CSV: {csvResult.TimelineAssetsPath}");
+        }
+
         return 0;
     }
 
     private static int RunDryRun(Dictionary<string, string> opts)
     {
-        Require(opts, "map");
         Require(opts, "input-dir");
         var map = opts["map"]; var inputDir = opts["input-dir"]; var outRoot = opts.GetValueOrDefault("out", "");
 

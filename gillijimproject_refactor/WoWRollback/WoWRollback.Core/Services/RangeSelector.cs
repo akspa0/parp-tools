@@ -9,7 +9,7 @@ public static class RangeSelector
         // Exclude ranges take precedence: if id in exclude -> remove
         if (cfg.ExcludeRanges != null && cfg.ExcludeRanges.Count > 0)
         {
-            if (IsInRanges(cfg.ExcludeRanges, uniqueId)) return true;
+            if (IsInRanges(cfg.ExcludeRanges!, uniqueId)) return true;
         }
 
         // Include ranges behavior depends on mode
@@ -22,7 +22,7 @@ public static class RangeSelector
             return false;
         }
 
-        var inInclude = IsInRanges(cfg.IncludeRanges, uniqueId);
+        var inInclude = haveInclude && IsInRanges(cfg.IncludeRanges!, uniqueId);
 
         return mode switch
         {

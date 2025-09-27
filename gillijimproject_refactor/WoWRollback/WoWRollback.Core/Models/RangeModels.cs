@@ -17,7 +17,19 @@ public sealed record PlacementRange(
     string FilePath
 );
 
-public sealed record RangeCsvResult(string PerMapPath, string TimelinePath);
+public sealed record PlacementAsset(
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint? UniqueId,
+    string AssetPath,
+    string FilePath
+);
+
+public sealed record AlphaAnalysisResult(IReadOnlyList<PlacementRange> Ranges, IReadOnlyList<PlacementAsset> Assets);
+
+public sealed record RangeCsvResult(string PerMapPath, string TimelinePath, string? TimelineAssetsPath, string? AssetLedgerPath);
 
 public sealed record RangeRule(uint Min, uint Max);
 

@@ -17,13 +17,14 @@ public static class AlphaWdtAnalyzer
     /// <summary>
     /// Analyzes an Alpha WDT file and extracts placement UniqueID ranges from all tiles.
     /// </summary>
-    public static IEnumerable<PlacementRange> AnalyzeAlphaWdt(string wdtPath)
+    public static AlphaAnalysisResult AnalyzeAlphaWdt(string wdtPath)
     {
         if (!File.Exists(wdtPath))
             throw new FileNotFoundException($"Alpha WDT file not found: {wdtPath}");
 
         var mapName = Path.GetFileNameWithoutExtension(wdtPath);
-        var results = new List<PlacementRange>();
+        var ranges = new List<PlacementRange>();
+        var assets = new List<PlacementAsset>();
 
         Console.WriteLine($"[info] Beginning archaeological excavation of {mapName}...");
 
@@ -36,7 +37,24 @@ public static class AlphaWdtAnalyzer
             var adtScanner = new global::AlphaWdtAnalyzer.Core.AdtScanner();
             var adtResult = adtScanner.Scan(wdtScanner);
 
-            // Extract placement ranges grouped by tile and type
+            foreach (var placement in adtResult.Placements)
+            {
+                var placementKind = ResolvePlacementKind(placement.Type);
+                uint? uniqueId = placement.UniqueId.HasValue
+                    ? unchecked((uint)placement.UniqueId.Value)
+                    : null;
+
+                assets.Add(new PlacementAsset(
+                    placement.MapName,
+                    placement.TileY,
+                    placement.TileX,
+                    placementKind,
+                    uniqueId,
+                    placement.AssetPath,
+                    $"{placement.MapName}_{placement.TileX}_{placement.TileY}.adt"));
+            }
+
+            // Extract placement ranges grouped by tile and type (unique IDs only)
             var placementsByTile = adtResult.Placements
                 .Where(p => p.UniqueId.HasValue)
                 .GroupBy(p => new { p.MapName, p.TileX, p.TileY, p.Type });
@@ -60,7 +78,7 @@ public static class AlphaWdtAnalyzer
                     $"{tileGroup.Key.MapName}_{tileGroup.Key.TileX}_{tileGroup.Key.TileY}.adt"
                 );
 
-                results.Add(range);
+                ranges.Add(range);
 
                 // Archaeological significance logging
                 Console.WriteLine($"[artifact] Found {placementKind} sedimentary layer: " +
@@ -69,7 +87,7 @@ public static class AlphaWdtAnalyzer
                     $"({uniqueIds.Count} artifacts)");
             }
 
-            Console.WriteLine($"[excavation-complete] Unearthed {results.Count} archaeological layers from {mapName}");
+            Console.WriteLine($"[excavation-complete] Unearthed {ranges.Count} archaeological layers from {mapName}");
         }
         catch (Exception ex)
         {
@@ -77,7 +95,7 @@ public static class AlphaWdtAnalyzer
             // Return partial results if any were found
         }
 
-        return results;
+        return new AlphaAnalysisResult(ranges, assets);
     }
 
     private static PlacementKind ResolvePlacementKind(object? typeValue)
