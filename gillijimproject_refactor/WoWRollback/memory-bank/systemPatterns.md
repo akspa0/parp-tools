@@ -59,3 +59,10 @@ Alpha CSV + LK CSV → EvolutionAnalyzer → Content Preservation Analysis → e
 - **Reuse AlphaWDTAnalysisTool Logic**: Leverage existing WDT parsing capabilities
 - **Standalone Operation**: Independent tool that doesn't modify source tools
 - **Configurable Thresholds**: Archaeological significance parameters (gap sizes, minimum cluster sizes)
+
+## Visualization & Diff Pipeline (2025-09-29)
+- **Overlays**: Per-tile JSON grouped by version (sediment layer), containing plotted points with normalized and pixel coords, plus kit/subkit.
+- **Diffs**: Per-tile JSON between two versions with Added/Removed/Moved/Changed sets. Matching by `asset_path` + spatial proximity; UIDs may change.
+- **Minimap**: Compose PNGs from BLP via `lib/wow.tools.local` adapter. World→tile→pixel transform per ADT v18.
+- **Static Viewer**: Portable HTML/JS/CSS copied under comparison output; loads overlays/diffs on demand; version switch defaults to 0.5.3 when available.
+- **Tiny-File Rule**: Each service in its own small file (≤~150 LOC): `CoordinateTransformer`, `MinimapComposer`, `OverlayBuilder`, `OverlayDiffBuilder`, `ViewerReportWriter`.

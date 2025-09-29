@@ -41,3 +41,21 @@ We're digital archaeologists uncovering fossilized remains of 20+ year old game 
   - Aggregate `stats` per tile
 - Added CLI flag `--yaml-report` to `compare-versions` to generate YAML alongside CSVs.
 - Purpose: enable interactive exploration (sorting/filtering by kit/subkit, tracing borrowed assets across maps/versions).
+
+## Next Focus: Visualization & Diff Viewer (2025-09-29)
+- Objective: Build a static web viewer to visualize per-tile sediment layers and diffs between versions.
+- Defaults:
+  - Default selected version: `0.5.3` (if present; else earliest chronologically)
+  - Minimap tile size: 512x512 px
+  - Diff thresholds: proximity D=10 world units; moved epsilon=0.5% of tile width
+- CLI Additions:
+  - `--viewer-report` to generate viewer assets (minimaps, overlays, diffs)
+  - `--default-version <ver>` to set initial selection
+  - `--diff <A,B>` to compute diff overlays
+- Pipeline (tiny modules):
+  - `CoordinateTransformer` (world→tile→pixel using ADT v18)
+  - `MinimapComposer` (BLP decode via lib/wow.tools.local)
+  - `OverlayBuilder` (per-tile per-version JSON)
+  - `OverlayDiffBuilder` (Added/Removed/Moved/Changed)
+  - `ViewerReportWriter` (copies static viewer, writes assets)
+- Matching for diffs (UIDs can change): asset_path equality + spatial proximity, with sensible tie-breakers.
