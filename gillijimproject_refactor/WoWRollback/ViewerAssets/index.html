@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WoW Rollback Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>WoW Rollback Comparison Viewer</h1>
+            <div id="comparisonInfo"></div>
+        </header>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="versionSelect">Version:</label>
+                <select id="versionSelect"></select>
+            </div>
+            <div class="control-group">
+                <label for="mapSelect">Map:</label>
+                <select id="mapSelect"></select>
+            </div>
+            <div class="control-group">
+                <label for="searchTile">Search Tile:</label>
+                <input type="text" id="searchTile" placeholder="e.g., 30_30 or r30c30">
+            </div>
+        </div>
+
+        <div id="tileGrid" class="tile-grid"></div>
+
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-item">
+                <span class="color-box" style="background: #4CAF50;"></span>
+                <span>Available in selected version</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #9E9E9E;"></span>
+                <span>Not available in selected version</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { init } from './js/main.js';
+        init();
+    </script>
+</body>
+</html>
