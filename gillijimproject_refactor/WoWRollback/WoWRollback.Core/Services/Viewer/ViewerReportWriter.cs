@@ -52,10 +52,8 @@ public sealed class ViewerReportWriter
         var viewerRoot = Path.Combine(comparisonDirectory, "viewer");
         Directory.CreateDirectory(viewerRoot);
 
-        var minimapRoot = Path.Combine(viewerRoot, "minimap");
         var overlaysRoot = Path.Combine(viewerRoot, "overlays");
         var diffsRoot = Path.Combine(viewerRoot, "diffs");
-        Directory.CreateDirectory(minimapRoot);
         Directory.CreateDirectory(overlaysRoot);
         Directory.CreateDirectory(diffsRoot);
 
@@ -79,10 +77,8 @@ public sealed class ViewerReportWriter
         {
             var mapName = mapGroup.Key;
             var safeMap = Sanitize(mapName);
-            var mapMinimapDir = Path.Combine(minimapRoot, safeMap);
             var mapOverlayDir = Path.Combine(overlaysRoot, safeMap);
             var mapDiffDir = Path.Combine(diffsRoot, safeMap);
-            Directory.CreateDirectory(mapMinimapDir);
             Directory.CreateDirectory(mapOverlayDir);
             Directory.CreateDirectory(mapDiffDir);
 
@@ -96,16 +92,33 @@ public sealed class ViewerReportWriter
             {
                 var (row, col) = tileGroup.Key;
 
-                Stream tileStream = Stream.Null;
-                if (minimapLocator.TryOpen(mapName, row, col, out var located) && located is not null)
-                {
-                    tileStream = located;
-                }
+                // Export minimap for each version that has this tile
+                var versionsForTile = tileGroup
+                    .Select(e => e.Version)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
-                var minimapPath = Path.Combine(mapMinimapDir, $"tile_r{row}_c{col}.png");
-                using (tileStream)
+                foreach (var version in versionsForTile)
                 {
-                    _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                    var safeVersion = Sanitize(version);
+                    var versionMinimapRoot = Path.Combine(viewerRoot, "minimap", safeVersion);
+                    var versionMapMinimapDir = Path.Combine(versionMinimapRoot, safeMap);
+                    Directory.CreateDirectory(versionMapMinimapDir);
+
+                    var hasTile = minimapLocator.TryGetTile(version, mapName, row, col, out var tileDescriptor);
+                    var minimapFile = $"{mapName}_{col}_{row}.png";
+                    var minimapPath = Path.Combine(versionMapMinimapDir, minimapFile);
+
+                    if (hasTile)
+                    {
+                        using var tileStream = tileDescriptor.Open();
+                        _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                    }
+                    else
+                    {
+                        _minimapComposer.WritePlaceholderAsync(minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                    }
                 }
 
                 var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
@@ -121,12 +134,6 @@ public sealed class ViewerReportWriter
                     File.WriteAllText(diffPath, diffJson);
                 }
 
-                var versionsForTile = tileGroup
-                    .Select(e => e.Version)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
                 if (!mapTileCatalog.TryGetValue(mapName, out var tileList))
                 {
                     tileList = new List<TileDescriptor>();
@@ -139,6 +146,7 @@ public sealed class ViewerReportWriter
 
         WriteIndexJson(viewerRoot, result, mapTileCatalog, chosenDefaultVersion, effectiveDiffPair);
         WriteConfigJson(viewerRoot, resolvedOptions, chosenDefaultVersion, effectiveDiffPair);
+        CopyViewerAssets(viewerRoot);
 
         return viewerRoot;
     }
@@ -260,6 +268,70 @@ public sealed class ViewerReportWriter
 
         var configPath = Path.Combine(viewerRoot, "config.json");
         File.WriteAllText(configPath, JsonSerializer.Serialize(config, jsonOptions));
+    }
+
+    private static void CopyViewerAssets(string viewerRoot)
+    {
+        // Find ViewerAssets directory relative to this assembly
+        var assemblyDir = Path.GetDirectoryName(typeof(ViewerReportWriter).Assembly.Location);
+        if (assemblyDir is null) return;
+
+        // Search upward from assembly location for ViewerAssets
+        var currentDir = assemblyDir;
+        string? assetsPath = null;
+
+        for (int i = 0; i < 6; i++) // Search up to 6 levels
+        {
+            var candidate = Path.Combine(currentDir, "ViewerAssets");
+            if (Directory.Exists(candidate))
+            {
+                assetsPath = candidate;
+                break;
+            }
+
+            var parent = Directory.GetParent(currentDir);
+            if (parent is null) break;
+            currentDir = parent.FullName;
+        }
+
+        if (assetsPath is null || !Directory.Exists(assetsPath)) return;
+
+        try
+        {
+            // Copy HTML files
+            CopyIfExists(Path.Combine(assetsPath, "index.html"), Path.Combine(viewerRoot, "index.html"));
+            CopyIfExists(Path.Combine(assetsPath, "tile.html"), Path.Combine(viewerRoot, "tile.html"));
+            CopyIfExists(Path.Combine(assetsPath, "test.html"), Path.Combine(viewerRoot, "test.html"));
+            CopyIfExists(Path.Combine(assetsPath, "styles.css"), Path.Combine(viewerRoot, "styles.css"));
+            CopyIfExists(Path.Combine(assetsPath, "README.md"), Path.Combine(viewerRoot, "README.md"));
+            CopyIfExists(Path.Combine(assetsPath, "start-viewer.ps1"), Path.Combine(viewerRoot, "start-viewer.ps1"));
+
+            // Copy JS directory
+            var jsSource = Path.Combine(assetsPath, "js");
+            var jsTarget = Path.Combine(viewerRoot, "js");
+
+            if (Directory.Exists(jsSource))
+            {
+                Directory.CreateDirectory(jsTarget);
+                foreach (var file in Directory.GetFiles(jsSource, "*.js"))
+                {
+                    var fileName = Path.GetFileName(file);
+                    File.Copy(file, Path.Combine(jsTarget, fileName), overwrite: true);
+                }
+            }
+        }
+        catch
+        {
+            // Fail silently - viewer will just be missing interactive assets
+        }
+    }
+
+    private static void CopyIfExists(string source, string destination)
+    {
+        if (File.Exists(source))
+        {
+            File.Copy(source, destination, overwrite: true);
+        }
     }
 
     private static string Sanitize(string value)

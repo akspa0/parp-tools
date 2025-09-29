@@ -2,11 +2,11 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using BLPSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using Warcraft.NET.Files.BLP;
 
 namespace WoWRollback.Core.Services.Viewer;
 
@@ -54,9 +54,12 @@ public sealed class MinimapComposer
         {
             if (IsBlp(buffer))
             {
-                var blpBytes = buffer.ToArray();
-                var blp = new BLP(blpBytes);
-                image = blp.GetMipMap(0);
+                buffer.Seek(0, SeekOrigin.Begin);
+                using var blpStream = new MemoryStream(buffer.ToArray());
+                using var blp = new BLPFile(blpStream);
+                var pixels = blp.GetPixels(0, out var width, out var height);
+                using var bgraImage = Image.LoadPixelData<Bgra32>(pixels, width, height);
+                image = bgraImage.CloneAs<Rgba32>();
             }
             else
             {

@@ -7,27 +7,34 @@ namespace WoWRollback.Core.Services.Viewer;
 
 internal sealed class MinimapLocator
 {
-    private readonly Dictionary<string, Dictionary<(int Row, int Col), string>> _mapTiles;
+    // Version -> Map -> (Row, Col) -> Tile
+    private readonly Dictionary<string, Dictionary<string, Dictionary<(int Row, int Col), MinimapTile>>> _versionMapTiles;
+    private readonly string? _testDataRoot;
 
-    private MinimapLocator(Dictionary<string, Dictionary<(int, int), string>> mapTiles)
+    private MinimapLocator(Dictionary<string, Dictionary<string, Dictionary<(int, int), MinimapTile>>> versionMapTiles, string? testDataRoot)
     {
-        _mapTiles = mapTiles;
+        _versionMapTiles = versionMapTiles;
+        _testDataRoot = testDataRoot;
     }
 
     public static MinimapLocator Build(string rootDirectory, IReadOnlyList<string> versions)
     {
         var comparer = StringComparer.OrdinalIgnoreCase;
-        var mapTiles = new Dictionary<string, Dictionary<(int, int), string>>(comparer);
+        var versionMapTiles = new Dictionary<string, Dictionary<string, Dictionary<(int, int), MinimapTile>>>(comparer);
+
+        var testDataRoot = DetectTestDataRoot(rootDirectory);
 
         if (string.IsNullOrWhiteSpace(rootDirectory) || versions.Count == 0)
-            return new MinimapLocator(mapTiles);
+            return new MinimapLocator(versionMapTiles, testDataRoot);
 
         var versionDirectories = ResolveVersionDirectories(rootDirectory, versions);
-        foreach (var (_, versionDirectory) in versionDirectories.OrderBy(kvp => kvp.Key, comparer))
+        var locator = new MinimapLocator(versionMapTiles, testDataRoot);
+
+        foreach (var (versionKey, versionDirectory) in versionDirectories.OrderBy(kvp => kvp.Key, comparer))
         {
             try
             {
-                LoadVersion(versionDirectory, mapTiles);
+                locator.LoadVersion(versionKey, versionDirectory);
             }
             catch
             {
@@ -35,28 +42,15 @@ internal sealed class MinimapLocator
             }
         }
 
-        return new MinimapLocator(mapTiles);
+        return locator;
     }
 
-    public bool TryOpen(string map, int tileRow, int tileCol, out Stream? stream)
+    public bool TryGetTile(string version, string map, int tileRow, int tileCol, out MinimapTile tile)
     {
-        stream = null;
-        if (!_mapTiles.TryGetValue(map, out var tiles))
-            return false;
-
-        if (!tiles.TryGetValue((tileRow, tileCol), out var path) || string.IsNullOrWhiteSpace(path))
-            return false;
-
-        try
-        {
-            stream = File.OpenRead(path);
-            return true;
-        }
-        catch
-        {
-            stream = null;
-            return false;
-        }
+        tile = default;
+        if (!_versionMapTiles.TryGetValue(version, out var mapTiles)) return false;
+        if (!mapTiles.TryGetValue(map, out var tiles)) return false;
+        return tiles.TryGetValue((tileRow, tileCol), out tile);
     }
 
     private static Dictionary<string, string> ResolveVersionDirectories(string rootDirectory, IReadOnlyList<string> versions)
@@ -110,43 +104,70 @@ internal sealed class MinimapLocator
         }
     }
 
-    private static void LoadVersion(string versionDirectory, Dictionary<string, Dictionary<(int, int), string>> mapTiles)
+    private void LoadVersion(string versionKey, string versionDirectory)
     {
-        var minimapRoot = FindMinimapRoot(versionDirectory);
+        var minimapRoot = FindMinimapRoot(versionDirectory) ?? ResolveSharedMinimapRoot(versionKey);
+
         if (minimapRoot is null) return;
 
-        var entries = new List<MinimapEntry>();
+        var allEntries = new List<MinimapEntry>();
 
         foreach (var trsPath in GetCandidateTrsFiles(minimapRoot))
         {
             try
             {
-                entries.AddRange(ParseTrsFile(trsPath, minimapRoot));
+                allEntries.AddRange(ParseTrsFile(trsPath, minimapRoot));
             }
             catch
             {
-                // Ignore malformed TRS; fallback to directory scan below.
+                // ignore malformed TRS and continue
             }
         }
 
-        if (entries.Count == 0)
+        if (allEntries.Count == 0)
         {
-            entries.AddRange(ScanMinimapDirectory(minimapRoot));
+            allEntries.AddRange(ScanMinimapDirectory(minimapRoot));
         }
 
-        foreach (var entry in entries)
+        // Ensure version entry exists
+        if (!_versionMapTiles.TryGetValue(versionKey, out var mapTiles))
         {
-            if (!File.Exists(entry.FullPath)) continue;
+            mapTiles = new Dictionary<string, Dictionary<(int, int), MinimapTile>>(StringComparer.OrdinalIgnoreCase);
+            _versionMapTiles[versionKey] = mapTiles;
+        }
+
+        var checksumLookup = new Dictionary<(string Map, int X, int Y), string>();
+
+        foreach (var entry in allEntries)
+        {
+            var resolvedPath = ResolveEntryPath(entry, versionDirectory, versionKey);
+            if (resolvedPath is null) continue;
+
             if (!mapTiles.TryGetValue(entry.MapName, out var tiles))
             {
-                tiles = new Dictionary<(int, int), string>();
+                tiles = new Dictionary<(int, int), MinimapTile>();
                 mapTiles[entry.MapName] = tiles;
             }
 
             var key = (entry.TileRow, entry.TileCol);
-            if (!tiles.ContainsKey(key))
+            var checksumKey = (entry.MapName, entry.TileCol, entry.TileRow);
+
+            if (!checksumLookup.TryGetValue(checksumKey, out var checksum))
             {
-                tiles[key] = entry.FullPath;
+                checksum = ComputeFileMd5(resolvedPath);
+                checksumLookup[checksumKey] = checksum;
+                if (!tiles.ContainsKey(key))
+                    tiles[key] = new MinimapTile(resolvedPath, entry.TileCol, entry.TileRow, versionKey, false);
+            }
+            else
+            {
+                var currentChecksum = ComputeFileMd5(resolvedPath);
+                if (!string.Equals(checksum, currentChecksum, StringComparison.OrdinalIgnoreCase))
+                {
+                    var altTile = new MinimapTile(resolvedPath, entry.TileCol, entry.TileRow, versionKey, true);
+                    tiles[key] = altTile;
+                    checksumLookup[checksumKey] = currentChecksum;
+                }
             }
         }
     }
@@ -159,8 +180,12 @@ internal sealed class MinimapLocator
         {
             Combine(versionDirectory, "tree", "World", "Textures", "Minimap"),
             Combine(versionDirectory, "tree", "world", "textures", "minimap"),
+            Combine(versionDirectory, "tree", "Textures", "Minimap"),
+            Combine(versionDirectory, "tree", "textures", "Minimap"),
             Combine(versionDirectory, "World", "Textures", "Minimap"),
-            Combine(versionDirectory, "world", "textures", "minimap")
+            Combine(versionDirectory, "world", "textures", "minimap"),
+            Combine(versionDirectory, "Textures", "Minimap"),
+            Combine(versionDirectory, "textures", "minimap")
         };
 
         foreach (var path in preferred)
@@ -257,7 +282,7 @@ internal sealed class MinimapLocator
 
             var relativePath = actualCandidate.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
             var fullPath = Path.Combine(baseDir!, relativePath);
-            entries.Add(new MinimapEntry(currentMap, tileY, tileX, fullPath));
+            entries.Add(new MinimapEntry(currentMap, tileY, tileX, fullPath, actualCandidate));
         }
 
         return entries;
@@ -279,7 +304,8 @@ internal sealed class MinimapLocator
                     if (coords.Length != 2) continue;
                     if (!int.TryParse(coords[0], out var tileX)) continue;
                     if (!int.TryParse(coords[1], out var tileY)) continue;
-                    entries.Add(new MinimapEntry(mapName, tileY, tileX, blp));
+                    var relative = Path.GetRelativePath(minimapRoot, blp);
+                    entries.Add(new MinimapEntry(mapName, tileY, tileX, blp, relative));
                 }
             }
         }
@@ -291,5 +317,154 @@ internal sealed class MinimapLocator
         return entries;
     }
 
-    private readonly record struct MinimapEntry(string MapName, int TileRow, int TileCol, string FullPath);
+    private static string? DetectTestDataRoot(string rootDirectory)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(rootDirectory);
+            if (Path.GetFileName(fullPath).Equals("test_data", StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullPath))
+                return fullPath;
+
+            var current = new DirectoryInfo(fullPath);
+            for (var depth = 0; depth < 5 && current is not null; depth++, current = current.Parent)
+            {
+                var candidate = Path.Combine(current.FullName, "test_data");
+                if (Directory.Exists(candidate))
+                    return candidate;
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return null;
+    }
+    private string? ResolveEntryPath(MinimapEntry entry, string versionDirectory, string versionKey)
+    {
+        static string Normalize(string path)
+        {
+            var normalized = path
+                .Replace('\\', Path.DirectorySeparatorChar)
+                .Replace('/', Path.DirectorySeparatorChar);
+            return normalized.TrimStart(Path.DirectorySeparatorChar).TrimEnd(Path.DirectorySeparatorChar);
+        }
+
+        if (File.Exists(entry.FullPath))
+            return entry.FullPath;
+        var originalNormalized = Normalize(entry.OriginalPath);
+
+        var candidate = Path.Combine(versionDirectory, originalNormalized);
+        if (File.Exists(candidate))
+            return candidate;
+
+        if (_testDataRoot is not null)
+        {
+            var sharedRoot = ResolveSharedMinimapRoot(versionKey);
+            if (sharedRoot is not null)
+            {
+                candidate = Path.Combine(sharedRoot, originalNormalized);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+
+            foreach (var alias in EnumerateVersionAliases(versionKey))
+            {
+                var aliasRoot = Path.Combine(_testDataRoot, alias);
+                candidate = Path.Combine(aliasRoot, originalNormalized);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+
+            candidate = Path.Combine(_testDataRoot, originalNormalized);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        try
+        {
+            var parent = Directory.GetParent(versionDirectory);
+            if (parent is not null)
+            {
+                candidate = Path.Combine(parent.FullName, originalNormalized);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+        }
+        catch
+        {
+            // ignore IO exceptions during fallback
+        }
+
+        return null;
+    }
+
+    private static string ComputeFileMd5(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        var hash = md5.ComputeHash(stream);
+        return BitConverter.ToString(hash).Replace("-", string.Empty);
+    }
+
+    internal readonly record struct MinimapTile(string SourcePath, int TileX, int TileY, string Version, bool IsAlternate)
+    {
+        public Stream Open() => File.OpenRead(SourcePath);
+
+        public string BuildFileName(string mapName) => $"{mapName}_{TileX}_{TileY}{(IsAlternate ? "__alt" : string.Empty)}.png";
+    }
+
+    private string? ResolveSharedMinimapRoot(string versionKey)
+    {
+        if (_testDataRoot is null) return null;
+
+        foreach (var alias in EnumerateVersionAliases(versionKey))
+        {
+            foreach (var candidate in EnumerateMinimapRootCandidates(Path.Combine(_testDataRoot, alias)))
+            {
+                if (Directory.Exists(candidate))
+                    return candidate;
+            }
+        }
+
+        foreach (var fallback in EnumerateMinimapRootCandidates(_testDataRoot))
+        {
+            if (Directory.Exists(fallback))
+                return fallback;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateMinimapRootCandidates(string basePath)
+    {
+        yield return Path.Combine(basePath, "tree", "World", "Textures", "Minimap");
+        yield return Path.Combine(basePath, "tree", "world", "textures", "minimap");
+        yield return Path.Combine(basePath, "tree", "Textures", "Minimap");
+        yield return Path.Combine(basePath, "tree", "textures", "Minimap");
+        yield return Path.Combine(basePath, "World", "Textures", "Minimap");
+        yield return Path.Combine(basePath, "world", "textures", "minimap");
+        yield return Path.Combine(basePath, "Textures", "Minimap");
+        yield return Path.Combine(basePath, "textures", "minimap");
+    }
+
+    private static IEnumerable<string> EnumerateVersionAliases(string versionKey)
+    {
+        if (string.IsNullOrWhiteSpace(versionKey)) yield break;
+
+        var normalized = versionKey.Trim();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        string initial = normalized.Replace('/', '.');
+        if (seen.Add(initial)) yield return initial;
+
+        var parts = initial.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        for (var length = parts.Length - 1; length >= 1; length--)
+        {
+            var alias = string.Join('.', parts.Take(length));
+            if (seen.Add(alias)) yield return alias;
+        }
+    }
+
+    private readonly record struct MinimapEntry(string MapName, int TileRow, int TileCol, string FullPath, string OriginalPath);
 }

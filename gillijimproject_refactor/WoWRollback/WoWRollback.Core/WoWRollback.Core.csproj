@@ -12,4 +12,8 @@
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="BLPSharp" Version="0.1.0" />
+  </ItemGroup>
+
 </Project>
