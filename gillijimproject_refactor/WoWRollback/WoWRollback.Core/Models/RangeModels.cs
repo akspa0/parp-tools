@@ -50,3 +50,120 @@ public sealed record PlacementEntry(
     uint UniqueId,
     string FilePath
 );
+
+public sealed record VersionRangeEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint MinUniqueId,
+    uint MaxUniqueId,
+    string FilePath,
+    IReadOnlyList<string> Assets
+);
+
+public sealed record MapVersionSummary(
+    string Version,
+    string Map,
+    int RangeCount,
+    uint MinUniqueId,
+    uint MaxUniqueId,
+    int DistinctAssetCount
+);
+
+public sealed record RangeOverlapEntry(
+    string VersionA,
+    string MapA,
+    int TileRowA,
+    int TileColA,
+    PlacementKind KindA,
+    uint MinUniqueIdA,
+    uint MaxUniqueIdA,
+    string VersionB,
+    string MapB,
+    int TileRowB,
+    int TileColB,
+    PlacementKind KindB,
+    uint MinUniqueIdB,
+    uint MaxUniqueIdB,
+    uint OverlapMin,
+    uint OverlapMax
+);
+
+public sealed record AssetFirstSeenEntry(
+    string AssetPath,
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint MinUniqueId,
+    uint MaxUniqueId
+);
+
+public sealed record AssetFolderSummary(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    string Folder,
+    int AssetCount
+);
+
+public sealed record AssetFolderTimelineEntry(
+    string Version,
+    string Folder,
+    int Depth,
+    int DistinctAssetCount,
+    int DistinctMapCount,
+    int DistinctTileCount,
+    uint MinUniqueId,
+    uint MaxUniqueId,
+    IReadOnlyList<string> Maps,
+    IReadOnlyList<string> Subfolders
+);
+
+public sealed record VersionComparisonResult(
+    string RootDirectory,
+    string ComparisonKey,
+    IReadOnlyList<string> Versions,
+    IReadOnlyList<VersionRangeEntry> RangeEntries,
+    IReadOnlyList<MapVersionSummary> MapSummaries,
+    IReadOnlyList<RangeOverlapEntry> Overlaps,
+    IReadOnlyList<AssetFirstSeenEntry> AssetFirstSeen,
+    IReadOnlyList<AssetFolderSummary> AssetFolderSummaries,
+    IReadOnlyList<AssetFolderTimelineEntry> AssetFolderTimeline,
+    IReadOnlyList<AssetTimelineEntry> AssetTimeline,
+    IReadOnlyList<string> Warnings
+);
+
+public sealed record ComparisonOutputPaths(
+    string ComparisonDirectory,
+    string VersionRangesPath,
+    string MapSummaryPath,
+    string OverlapPath,
+    string AssetFirstSeenPath,
+    string AssetFolderSummaryPath,
+    string AssetFolderTimelinePath,
+    string AssetTimelinePath
+);
+
+public sealed record AssetTimelineEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint UniqueId,
+    string AssetPath,
+    string Folder,
+    string Category,
+    string Subcategory
+);
+
+public sealed record MapEntries(
+    IReadOnlyList<VersionRangeEntry> Ranges,
+    IReadOnlyList<PlacementAsset> Assets
+);

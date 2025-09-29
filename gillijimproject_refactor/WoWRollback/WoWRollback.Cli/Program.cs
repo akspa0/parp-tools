@@ -31,6 +31,8 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "dry-run":
                     return RunDryRun(opts);
+                case "compare-versions":
+                    return RunCompareVersions(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -74,6 +76,41 @@ internal static class Program
             Console.WriteLine($"[ok] Timeline asset summary CSV: {csvResult.TimelineAssetsPath}");
         }
 
+        return 0;
+    }
+
+    private static int RunCompareVersions(Dictionary<string, string> opts)
+    {
+        Require(opts, "versions");
+        var root = opts.GetValueOrDefault("root", opts.GetValueOrDefault("out", ""));
+
+        var versions = opts["versions"].Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        IReadOnlyList<string>? maps = null;
+        if (opts.TryGetValue("maps", out var mapsSpec) && !string.IsNullOrWhiteSpace(mapsSpec))
+        {
+            maps = mapsSpec.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+        }
+
+        Console.WriteLine($"[info] Comparing versions: {string.Join(", ", versions)}");
+        if (!string.IsNullOrWhiteSpace(root)) Console.WriteLine($"[info] Root directory: {root}");
+        if (maps is not null && maps.Count > 0) Console.WriteLine($"[info] Map filter: {string.Join(", ", maps)}");
+
+        var result = VersionComparisonService.CompareVersions(root, versions, maps);
+        var paths = VersionComparisonWriter.WriteOutputs(root, result);
+
+        Console.WriteLine($"[ok] Comparison key: {result.ComparisonKey}");
+        Console.WriteLine($"[ok] Outputs written to: {paths.ComparisonDirectory}");
+        if (result.Warnings.Count > 0)
+        {
+            Console.WriteLine($"[warn] {result.Warnings.Count} warnings emitted. See warnings_{result.ComparisonKey}.txt");
+        }
         return 0;
     }
 
@@ -183,6 +220,9 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
+        Console.WriteLine();
+        Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>]");
+        Console.WriteLine("    Compare placement ranges across versions; outputs CSVs under rollback_outputs/comparisons/<key>");
         Console.WriteLine();
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
