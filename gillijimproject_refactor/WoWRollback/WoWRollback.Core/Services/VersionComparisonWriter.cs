@@ -26,6 +26,9 @@ public static class VersionComparisonWriter
         var designKitRangesPath = Path.Combine(comparisonDirectory, $"design_kit_ranges_{result.ComparisonKey}.csv");
         var designKitSummaryPath = Path.Combine(comparisonDirectory, $"design_kit_summary_{result.ComparisonKey}.csv");
         var designKitTimelinePath = Path.Combine(comparisonDirectory, $"design_kit_timeline_{result.ComparisonKey}.csv");
+        var designKitAssetDetailsPath = Path.Combine(comparisonDirectory, $"design_kit_asset_details_{result.ComparisonKey}.csv");
+        var uniqueIdAssetsPath = Path.Combine(comparisonDirectory, $"unique_id_assets_{result.ComparisonKey}.csv");
+        var assetTimelineDetailedPath = Path.Combine(comparisonDirectory, $"asset_timeline_detailed_{result.ComparisonKey}.csv");
 
         WriteVersionRanges(versionRangesPath, result.RangeEntries);
         WriteMapSummaries(mapSummaryPath, result.MapSummaries);
@@ -38,6 +41,9 @@ public static class VersionComparisonWriter
         WriteDesignKitRanges(designKitRangesPath, result.DesignKitRanges);
         WriteDesignKitSummary(designKitSummaryPath, result.DesignKitSummaries);
         WriteDesignKitTimeline(designKitTimelinePath, result.DesignKitTimeline);
+        WriteDesignKitAssetDetails(designKitAssetDetailsPath, result.DesignKitAssetDetails);
+        WriteUniqueIdAssets(uniqueIdAssetsPath, result.UniqueIdAssets);
+        WriteAssetTimelineDetailed(assetTimelineDetailedPath, result.AssetTimelineDetailed);
 
         if (result.Warnings.Count > 0)
         {
@@ -57,7 +63,10 @@ public static class VersionComparisonWriter
             designKitAssetsPath,
             designKitRangesPath,
             designKitSummaryPath,
-            designKitTimelinePath);
+            designKitTimelinePath,
+            designKitAssetDetailsPath,
+            uniqueIdAssetsPath,
+            assetTimelineDetailedPath);
     }
 
     private static void WriteVersionRanges(string path, IReadOnlyList<VersionRangeEntry> entries)
@@ -297,6 +306,95 @@ public static class VersionComparisonWriter
                 e.DistinctTileCount.ToString(CultureInfo.InvariantCulture),
                 e.MinUniqueId.ToString(CultureInfo.InvariantCulture),
                 e.MaxUniqueId.ToString(CultureInfo.InvariantCulture)
+            }));
+        }
+    }
+
+    private static void WriteDesignKitAssetDetails(string path, IReadOnlyList<DesignKitAssetDetailEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,map,tile_row,tile_col,kind,unique_id,asset_path,design_kit,source_rule,kit_root,subkit_path,subkit_top,subkit_depth,file_name,file_stem,ext,segment_count");
+        foreach (var e in entries)
+        {
+            var kind = e.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.Map),
+                e.TileRow.ToString(CultureInfo.InvariantCulture),
+                e.TileCol.ToString(CultureInfo.InvariantCulture),
+                kind,
+                e.UniqueId.ToString(CultureInfo.InvariantCulture),
+                Csv(e.AssetPath.Replace('\\','/')),
+                Csv(e.DesignKit),
+                Csv(e.SourceRule),
+                Csv(e.KitRoot),
+                Csv(e.SubkitPath),
+                Csv(e.SubkitTop),
+                e.SubkitDepth.ToString(CultureInfo.InvariantCulture),
+                Csv(e.FileName),
+                Csv(e.FileStem),
+                Csv(e.Extension),
+                e.SegmentCount.ToString(CultureInfo.InvariantCulture)
+            }));
+        }
+    }
+
+    private static void WriteUniqueIdAssets(string path, IReadOnlyList<UniqueIdAssetEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,map,tile_row,tile_col,kind,unique_id,asset_path,design_kit,subkit_path,source_rule,matched_range_min,matched_range_max,matched_range_file,matched_range_count");
+        foreach (var e in entries)
+        {
+            var kind = e.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.Map),
+                e.TileRow.ToString(CultureInfo.InvariantCulture),
+                e.TileCol.ToString(CultureInfo.InvariantCulture),
+                kind,
+                e.UniqueId.ToString(CultureInfo.InvariantCulture),
+                Csv(e.AssetPath.Replace('\\','/')),
+                Csv(e.DesignKit),
+                Csv(e.SubkitPath),
+                Csv(e.SourceRule),
+                e.MatchedRangeMin.ToString(CultureInfo.InvariantCulture),
+                e.MatchedRangeMax.ToString(CultureInfo.InvariantCulture),
+                Csv((e.MatchedRangeFile ?? string.Empty).Replace('\\','/')),
+                e.MatchedRangeCount.ToString(CultureInfo.InvariantCulture)
+            }));
+        }
+    }
+
+    private static void WriteAssetTimelineDetailed(string path, IReadOnlyList<AssetTimelineDetailedEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,map,tile_row,tile_col,kind,unique_id,asset_path,folder,category,subcategory,design_kit,source_rule,kit_root,subkit_path,subkit_top,subkit_depth,file_name,file_stem,ext");
+        foreach (var e in entries)
+        {
+            var kind = e.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.Map),
+                e.TileRow.ToString(CultureInfo.InvariantCulture),
+                e.TileCol.ToString(CultureInfo.InvariantCulture),
+                kind,
+                e.UniqueId.ToString(CultureInfo.InvariantCulture),
+                Csv(e.AssetPath.Replace('\\','/')),
+                Csv(e.Folder),
+                Csv(e.Category),
+                Csv(e.Subcategory),
+                Csv(e.DesignKit),
+                Csv(e.SourceRule),
+                Csv(e.KitRoot),
+                Csv(e.SubkitPath),
+                Csv(e.SubkitTop),
+                e.SubkitDepth.ToString(CultureInfo.InvariantCulture),
+                Csv(e.FileName),
+                Csv(e.FileStem),
+                Csv(e.Extension)
             }));
         }
     }

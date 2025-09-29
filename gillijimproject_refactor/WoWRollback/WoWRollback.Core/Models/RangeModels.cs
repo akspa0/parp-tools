@@ -140,6 +140,9 @@ public sealed record VersionComparisonResult(
     IReadOnlyList<DesignKitRangeEntry> DesignKitRanges,
     IReadOnlyList<DesignKitSummaryEntry> DesignKitSummaries,
     IReadOnlyList<DesignKitTimelineEntry> DesignKitTimeline,
+    IReadOnlyList<DesignKitAssetDetailEntry> DesignKitAssetDetails,
+    IReadOnlyList<UniqueIdAssetEntry> UniqueIdAssets,
+    IReadOnlyList<AssetTimelineDetailedEntry> AssetTimelineDetailed,
     IReadOnlyList<string> Warnings
 );
 
@@ -155,7 +158,10 @@ public sealed record ComparisonOutputPaths(
     string DesignKitAssetsPath,
     string DesignKitRangesPath,
     string DesignKitSummaryPath,
-    string DesignKitTimelinePath
+    string DesignKitTimelinePath,
+    string DesignKitAssetDetailsPath,
+    string UniqueIdAssetsPath,
+    string AssetTimelineDetailedPath
 );
 
 public sealed record AssetTimelineEntry(
@@ -221,4 +227,63 @@ public sealed record DesignKitTimelineEntry(
 public sealed record MapEntries(
     IReadOnlyList<VersionRangeEntry> Ranges,
     IReadOnlyList<PlacementAsset> Assets
+);
+
+public sealed record DesignKitAssetDetailEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint UniqueId,
+    string AssetPath,
+    string DesignKit,
+    string SourceRule,
+    string KitRoot,
+    string SubkitPath,
+    string SubkitTop,
+    int SubkitDepth,
+    string FileName,
+    string FileStem,
+    string Extension,
+    int SegmentCount
+);
+
+public sealed record UniqueIdAssetEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint UniqueId,
+    string AssetPath,
+    string DesignKit,
+    string SubkitPath,
+    string SourceRule,
+    uint MatchedRangeMin,
+    uint MatchedRangeMax,
+    string MatchedRangeFile,
+    int MatchedRangeCount
+);
+
+public sealed record AssetTimelineDetailedEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint UniqueId,
+    string AssetPath,
+    string Folder,
+    string Category,
+    string Subcategory,
+    string DesignKit,
+    string SourceRule,
+    string KitRoot,
+    string SubkitPath,
+    string SubkitTop,
+    int SubkitDepth,
+    string FileName,
+    string FileStem,
+    string Extension
 );

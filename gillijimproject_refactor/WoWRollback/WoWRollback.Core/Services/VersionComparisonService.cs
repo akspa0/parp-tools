@@ -127,6 +127,9 @@ public static class VersionComparisonService
         var designKitRanges = BuildDesignKitRanges(rangesByVersion);
         var designKitSummaries = BuildDesignKitSummaries(designKitAssets);
         var designKitTimeline = BuildDesignKitTimeline(designKitAssets, versionOrder);
+        var designKitAssetDetails = BuildDesignKitAssetDetails(designKitAssets);
+        var assetTimelineDetailed = BuildAssetTimelineDetailed(assetsByVersion, versionOrder);
+        var uniqueIdAssets = BuildUniqueIdAssets(assetsByVersion, rangesByVersion, versionOrder);
 
         var comparisonKey = BuildComparisonKey(actualVersions);
 
@@ -154,6 +157,9 @@ public static class VersionComparisonService
             designKitRanges,
             designKitSummaries,
             designKitTimeline,
+            designKitAssetDetails,
+            uniqueIdAssets,
+            assetTimelineDetailed,
             warnings);
     }
 
@@ -606,6 +612,9 @@ public static class VersionComparisonService
             Array.Empty<DesignKitRangeEntry>(),
             Array.Empty<DesignKitSummaryEntry>(),
             Array.Empty<DesignKitTimelineEntry>(),
+            Array.Empty<DesignKitAssetDetailEntry>(),
+            Array.Empty<UniqueIdAssetEntry>(),
+            Array.Empty<AssetTimelineDetailedEntry>(),
             warnings);
 
     private static PlacementKind ParseKind(string value) =>
@@ -687,6 +696,35 @@ public static class VersionComparisonService
 
         // Generic: pick first top-level folder
         return (segments[0], "generic-top");
+    }
+
+    private static (string KitRoot, string SubkitPath, string SubkitTop, int SubkitDepth, int SegmentCount) ComputeKitRootAndSubkit(string assetPath, string kit, string rule)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        int segs = segments.Length;
+        int rootLen = 1;
+        if (segs >= 3 && rule == "world-map-zone") rootLen = 3; // world/<map>/<zone>
+        else if (segs >= 4 && rule == "wmo-map-zone") rootLen = 4; // world/wmo/<map>/<zone>
+        else if (segs >= 3 && rule == "wmo-map-only") rootLen = 3; // world/wmo/<map>
+        else if (segs >= 2 && rule == "world-map-only") rootLen = 2; // world/<map>
+        else if (segs >= 1 && rule == "generic-top") rootLen = 1; // top segment
+
+        var kitRoot = string.Join('/', segments.Take(Math.Min(rootLen, segs)));
+        var remainder = segments.Skip(Math.Min(rootLen, segs)).ToArray();
+        var subkitPath = remainder.Length > 0 ? string.Join('/', remainder) : string.Empty;
+        var subkitTop = remainder.Length > 0 ? remainder[0] : "(none)";
+        var subkitDepth = remainder.Length;
+        return (kitRoot, subkitPath, subkitTop, subkitDepth, segs);
+    }
+
+    private static (string FileName, string FileStem, string Extension) ExtractFileParts(string assetPath)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var fileName = Path.GetFileName(normalized);
+        var ext = Path.GetExtension(fileName);
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return (fileName, stem, string.IsNullOrEmpty(ext) ? string.Empty : ext);
     }
 
     private static List<DesignKitAssetEntry> BuildDesignKitAssets(
@@ -841,6 +879,144 @@ public static class VersionComparisonService
         return list
             .OrderBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
             .ThenBy(e => versionOrder.TryGetValue(e.Version, out var ord) ? ord : int.MaxValue)
+            .ToList();
+    }
+
+    private static List<DesignKitAssetDetailEntry> BuildDesignKitAssetDetails(List<DesignKitAssetEntry> designKitAssets)
+    {
+        var list = new List<DesignKitAssetDetailEntry>();
+        foreach (var a in designKitAssets)
+        {
+            var (kitRoot, subkitPath, subkitTop, subkitDepth, segCount) = ComputeKitRootAndSubkit(a.AssetPath, a.DesignKit, a.SourceRule);
+            var (fn, stem, ext) = ExtractFileParts(a.AssetPath);
+            list.Add(new DesignKitAssetDetailEntry(
+                a.Version,
+                a.Map,
+                a.TileRow,
+                a.TileCol,
+                a.Kind,
+                a.UniqueId,
+                a.AssetPath,
+                a.DesignKit,
+                a.SourceRule,
+                kitRoot,
+                subkitPath,
+                subkitTop,
+                subkitDepth,
+                fn,
+                stem,
+                ext,
+                segCount));
+        }
+        return list
+            .OrderBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.AssetPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<AssetTimelineDetailedEntry> BuildAssetTimelineDetailed(
+        Dictionary<string, List<PlacementAsset>> assetsByVersion,
+        IReadOnlyDictionary<string, int> versionOrder)
+    {
+        var list = new List<AssetTimelineDetailedEntry>();
+        foreach (var (version, assets) in assetsByVersion)
+        {
+            foreach (var a in assets)
+            {
+                if (string.IsNullOrWhiteSpace(a.AssetPath)) continue;
+                var (kit, rule) = InferDesignKit(a.AssetPath);
+                var (kitRoot, subkitPath, subkitTop, subkitDepth, _) = ComputeKitRootAndSubkit(a.AssetPath, kit, rule);
+                var (fn, stem, ext) = ExtractFileParts(a.AssetPath);
+                list.Add(new AssetTimelineDetailedEntry(
+                    version,
+                    a.Map,
+                    a.TileRow,
+                    a.TileCol,
+                    a.Kind,
+                    a.UniqueId ?? 0,
+                    a.AssetPath,
+                    ExtractFolder(a.AssetPath, depth: 2),
+                    ExtractCategory(a.AssetPath),
+                    ExtractSubcategory(a.AssetPath),
+                    kit,
+                    rule,
+                    kitRoot,
+                    subkitPath,
+                    subkitTop,
+                    subkitDepth,
+                    fn,
+                    stem,
+                    ext));
+            }
+        }
+        return list
+            .OrderBy(e => versionOrder.TryGetValue(e.Version, out var order) ? order : int.MaxValue)
+            .ThenBy(e => e.Map, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.TileRow)
+            .ThenBy(e => e.TileCol)
+            .ThenBy(e => e.Kind)
+            .ThenBy(e => e.UniqueId)
+            .ToList();
+    }
+
+    private static List<UniqueIdAssetEntry> BuildUniqueIdAssets(
+        Dictionary<string, List<PlacementAsset>> assetsByVersion,
+        Dictionary<string, List<VersionRangeEntry>> rangesByVersion,
+        IReadOnlyDictionary<string, int> versionOrder)
+    {
+        var list = new List<UniqueIdAssetEntry>();
+        foreach (var (version, assets) in assetsByVersion)
+        {
+            foreach (var a in assets)
+            {
+                if (!a.UniqueId.HasValue || a.UniqueId.Value == 0 || string.IsNullOrWhiteSpace(a.AssetPath)) continue;
+                var uid = a.UniqueId.Value;
+                var (kit, rule) = InferDesignKit(a.AssetPath);
+                var (_, subkitPath, _, _, _) = ComputeKitRootAndSubkit(a.AssetPath, kit, rule);
+
+                rangesByVersion.TryGetValue(version, out var versionRanges);
+                var matches = (versionRanges ?? new List<VersionRangeEntry>()).Where(r =>
+                    r.Map.Equals(a.Map, StringComparison.OrdinalIgnoreCase) &&
+                    r.TileRow == a.TileRow &&
+                    r.TileCol == a.TileCol &&
+                    r.Kind == a.Kind &&
+                    r.MinUniqueId <= uid && uid <= r.MaxUniqueId).ToList();
+
+                var count = matches.Count;
+                uint min = 0, max = 0; string file = string.Empty;
+                if (count > 0)
+                {
+                    var primary = matches.OrderBy(m => m.MinUniqueId).First();
+                    min = primary.MinUniqueId;
+                    max = primary.MaxUniqueId;
+                    file = primary.FilePath ?? string.Empty;
+                }
+
+                list.Add(new UniqueIdAssetEntry(
+                    version,
+                    a.Map,
+                    a.TileRow,
+                    a.TileCol,
+                    a.Kind,
+                    uid,
+                    a.AssetPath,
+                    kit,
+                    subkitPath,
+                    rule,
+                    min,
+                    max,
+                    file,
+                    count));
+            }
+        }
+        return list
+            .OrderBy(e => versionOrder.TryGetValue(e.Version, out var order) ? order : int.MaxValue)
+            .ThenBy(e => e.Map, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.TileRow)
+            .ThenBy(e => e.TileCol)
+            .ThenBy(e => e.Kind)
+            .ThenBy(e => e.UniqueId)
             .ToList();
     }
 
