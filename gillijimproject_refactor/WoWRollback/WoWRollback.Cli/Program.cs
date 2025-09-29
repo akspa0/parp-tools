@@ -3,6 +3,7 @@ using System.Linq;
 using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Config;
+using WoWRollback.Core.Services.Viewer;
 
 namespace WoWRollback.Cli;
 
@@ -79,6 +80,68 @@ internal static class Program
         return 0;
     }
 
+    private static bool ShouldGenerateViewer(Dictionary<string, string> opts)
+    {
+        if (!opts.TryGetValue("viewer-report", out var value))
+            return false;
+
+        return !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ViewerOptions BuildViewerOptions(Dictionary<string, string> opts)
+    {
+        var defaults = ViewerOptions.CreateDefault();
+
+        var defaultVersion = opts.TryGetValue("default-version", out var requestedDefault)
+            ? requestedDefault
+            : defaults.DefaultVersion;
+
+        var minimapWidth = TryParseInt(opts, "minimap-width") ?? defaults.MinimapWidth;
+        var minimapHeight = TryParseInt(opts, "minimap-height") ?? defaults.MinimapHeight;
+        var distanceThreshold = TryParseDouble(opts, "distance-threshold") ?? defaults.DiffDistanceThreshold;
+        var moveEpsilon = TryParseDouble(opts, "move-epsilon") ?? defaults.MoveEpsilonRatio;
+
+        return new ViewerOptions(
+            defaultVersion,
+            DiffPair: null,
+            MinimapWidth: minimapWidth,
+            MinimapHeight: minimapHeight,
+            DiffDistanceThreshold: distanceThreshold,
+            MoveEpsilonRatio: moveEpsilon);
+    }
+
+    private static (string Baseline, string Comparison)? ParseDiffPair(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+            return null;
+
+        return (parts[0], parts[1]);
+    }
+
+    private static int? TryParseInt(Dictionary<string, string> opts, string key)
+    {
+        if (!opts.TryGetValue(key, out var value))
+            return null;
+
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static double? TryParseDouble(Dictionary<string, string> opts, string key)
+    {
+        if (!opts.TryGetValue(key, out var value))
+            return null;
+
+        return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
     private static int RunCompareVersions(Dictionary<string, string> opts)
     {
         Require(opts, "versions");
@@ -109,6 +172,22 @@ internal static class Program
         {
             var yamlRoot = VersionComparisonWriter.WriteYamlReports(root, result);
             Console.WriteLine($"[ok] YAML reports written to: {yamlRoot}");
+        }
+
+        if (ShouldGenerateViewer(opts))
+        {
+            var options = BuildViewerOptions(opts);
+            var diffPair = ParseDiffPair(opts.GetValueOrDefault("diff"));
+            var viewerWriter = new ViewerReportWriter();
+            var viewerRoot = viewerWriter.Generate(paths.ComparisonDirectory, result, options, diffPair);
+            if (string.IsNullOrEmpty(viewerRoot))
+            {
+                Console.WriteLine("[info] Viewer assets skipped (no placement data).");
+            }
+            else
+            {
+                Console.WriteLine($"[ok] Viewer assets written to: {viewerRoot}");
+            }
         }
 
         Console.WriteLine($"[ok] Comparison key: {result.ComparisonKey}");
@@ -228,8 +307,10 @@ internal static class Program
         Console.WriteLine("    Preview rollback effects without modifying files");
         Console.WriteLine();
         Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>] [--yaml-report]");
+        Console.WriteLine("                    [--viewer-report] [--default-version <ver>] [--diff base,comp]");
         Console.WriteLine("    Compare placement ranges across versions; outputs CSVs under rollback_outputs/comparisons/<key>");
-        Console.WriteLine("    If --yaml-report is present, also writes YAML exploration reports under .../<key>/yaml/");
+        Console.WriteLine("    If --yaml-report is present, also writes YAML exploration reports under .../<key>/yaml/.");
+        Console.WriteLine("    --viewer-report additionally emits minimaps, overlays, and diffs for the static viewer.");
         Console.WriteLine();
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");

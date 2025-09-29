@@ -626,6 +626,9 @@ public static class VersionComparisonService
     private static uint ParseUInt(string value) =>
         uint.Parse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture);
 
+    private static float ParseFloat(string value) =>
+        float.Parse(value.Trim(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture);
+
     private static IReadOnlyList<string> ParseAssets(string value) =>
         string.IsNullOrWhiteSpace(value)
             ? Array.Empty<string>()

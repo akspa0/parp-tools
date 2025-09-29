@@ -71,8 +71,7 @@ public sealed class MinimapComposer
 
             var encoder = new PngEncoder
             {
-                ColorType = PngColorType.RgbWithAlpha,
-                CompressionLevel = PngCompressionLevel.Default
+                ColorType = PngColorType.RgbWithAlpha
             };
 
             await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
@@ -133,8 +132,7 @@ public sealed class MinimapComposer
 
         var encoder = new PngEncoder
         {
-            ColorType = PngColorType.RgbWithAlpha,
-            CompressionLevel = PngCompressionLevel.Default
+            ColorType = PngColorType.RgbWithAlpha
         };
 
         await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
