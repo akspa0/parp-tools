@@ -1,0 +1,112 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using WoWRollback.Core.Models;
+
+namespace WoWRollback.Core.Services.Viewer;
+
+/// <summary>
+/// Builds per-tile overlay JSON grouping placements by version and kit/subkit metadata.
+/// </summary>
+public sealed class OverlayBuilder
+{
+    /// <summary>
+    /// Generates overlay JSON payload for a given map/tile.
+    /// </summary>
+    /// <param name="map">Map name.</param>
+    /// <param name="tileRow">Row index (0-63).</param>
+    /// <param name="tileCol">Column index (0-63).</param>
+    /// <param name="entries">Placement entries enriched with world coordinates.</param>
+    /// <param name="options">Viewer configuration.</param>
+    /// <returns>Serialized JSON text.</returns>
+    public string BuildOverlayJson(
+        string map,
+        int tileRow,
+        int tileCol,
+        IEnumerable<AssetTimelineDetailedEntry> entries,
+        ViewerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(entries);
+        options ??= ViewerOptions.CreateDefault();
+
+        var filtered = entries
+            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
+            .ToList();
+
+        var layers = filtered
+            .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+            .Select(versionGroup => new
+            {
+                version = versionGroup.Key,
+                kinds = versionGroup
+                    .GroupBy(e => e.Kind)
+                    .Select(kindGroup => new
+                    {
+                        kind = kindGroup.Key.ToString(),
+                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                    })
+                    .ToList()
+            })
+            .OrderBy(layer => layer.version, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var payload = new
+        {
+            map,
+            tile = new { row = tileRow, col = tileCol },
+            minimap = new { width = options.MinimapWidth, height = options.MinimapHeight },
+            layers
+        };
+
+        return JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            Converters = { new JsonStringEnumConverter() }
+        });
+    }
+
+    private static object BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
+    {
+        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
+        var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
+
+        return new
+        {
+            uniqueId = entry.UniqueId,
+            assetPath = entry.AssetPath,
+            folder = entry.Folder,
+            category = entry.Category,
+            subcategory = entry.Subcategory,
+            designKit = entry.DesignKit,
+            sourceRule = entry.SourceRule,
+            kitRoot = entry.KitRoot,
+            subkitPath = entry.SubkitPath,
+            subkitTop = entry.SubkitTop,
+            subkitDepth = entry.SubkitDepth,
+            fileName = entry.FileName,
+            fileStem = entry.FileStem,
+            extension = entry.Extension,
+            world = new
+            {
+                x = entry.WorldX,
+                y = entry.WorldY,
+                z = entry.WorldZ
+            },
+            local = new
+            {
+                x = Math.Round(localX, 6, MidpointRounding.AwayFromZero),
+                y = Math.Round(localY, 6, MidpointRounding.AwayFromZero)
+            },
+            pixel = new
+            {
+                x = Math.Round(pixelX, 2, MidpointRounding.AwayFromZero),
+                y = Math.Round(pixelY, 2, MidpointRounding.AwayFromZero)
+            }
+        };
+    }
+}

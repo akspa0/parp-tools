@@ -51,7 +51,10 @@ public static class AlphaWdtAnalyzer
                     placementKind,
                     uniqueId,
                     placement.AssetPath,
-                    $"{placement.MapName}_{placement.TileX}_{placement.TileY}.adt"));
+                    $"{placement.MapName}_{placement.TileX}_{placement.TileY}.adt",
+                    placement.WorldX,
+                    placement.WorldY,
+                    placement.WorldZ));
             }
 
             // Extract placement ranges grouped by tile and type (unique IDs only)

@@ -84,7 +84,7 @@ public static class RangeCsvWriter
     {
         var outPath = Path.Combine(sessionDir, $"assets_{map}.csv");
         using var sw = new StreamWriter(outPath, false);
-        sw.WriteLine("map,kind,unique_id,asset_path,tile_row,tile_col,file");
+        sw.WriteLine("map,kind,unique_id,asset_path,tile_row,tile_col,file,world_x,world_y,world_z");
         foreach (var asset in assets
                      .OrderBy(a => a.Map)
                      .ThenBy(a => a.Kind)
@@ -102,7 +102,10 @@ public static class RangeCsvWriter
                 asset.AssetPath.Replace('\\','/'),
                 asset.TileRow.ToString(CultureInfo.InvariantCulture),
                 asset.TileCol.ToString(CultureInfo.InvariantCulture),
-                asset.FilePath.Replace('\\','/')
+                asset.FilePath.Replace('\\','/'),
+                asset.WorldX.ToString(CultureInfo.InvariantCulture),
+                asset.WorldY.ToString(CultureInfo.InvariantCulture),
+                asset.WorldZ.ToString(CultureInfo.InvariantCulture)
             }));
         }
 

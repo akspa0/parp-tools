@@ -24,7 +24,10 @@ public sealed record PlacementAsset(
     PlacementKind Kind,
     uint? UniqueId,
     string AssetPath,
-    string FilePath
+    string FilePath,
+    float WorldX,
+    float WorldY,
+    float WorldZ
 );
 
 public sealed record AlphaAnalysisResult(IReadOnlyList<PlacementRange> Ranges, IReadOnlyList<PlacementAsset> Assets);
@@ -263,7 +266,10 @@ public sealed record UniqueIdAssetEntry(
     uint MatchedRangeMin,
     uint MatchedRangeMax,
     string MatchedRangeFile,
-    int MatchedRangeCount
+    int MatchedRangeCount,
+    float WorldX,
+    float WorldY,
+    float WorldZ
 );
 
 public sealed record AssetTimelineDetailedEntry(
@@ -285,5 +291,8 @@ public sealed record AssetTimelineDetailedEntry(
     int SubkitDepth,
     string FileName,
     string FileStem,
-    string Extension
+    string Extension,
+    float WorldX,
+    float WorldY,
+    float WorldZ
 );

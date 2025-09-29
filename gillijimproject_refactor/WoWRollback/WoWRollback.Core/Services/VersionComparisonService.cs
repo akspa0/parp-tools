@@ -291,7 +291,10 @@ public static class VersionComparisonService
                 if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tileRow)) continue;
                 if (!int.TryParse(parts[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tileCol)) continue;
                 var filePath = parts.Length > 6 ? parts[6].Trim() : string.Empty;
-                assets.Add(new PlacementAsset(mapName, tileRow, tileCol, kind, uniqueId, assetPath, filePath));
+                var worldX = parts.Length > 7 ? ParseFloat(parts[7]) : 0f;
+                var worldY = parts.Length > 8 ? ParseFloat(parts[8]) : 0f;
+                var worldZ = parts.Length > 9 ? ParseFloat(parts[9]) : 0f;
+                assets.Add(new PlacementAsset(mapName, tileRow, tileCol, kind, uniqueId, assetPath, filePath, worldX, worldY, worldZ));
                 var key = (mapName, tileRow, tileCol, kind);
                 if (!lookup.TryGetValue(key, out var set))
                 {
@@ -947,7 +950,10 @@ public static class VersionComparisonService
                     subkitDepth,
                     fn,
                     stem,
-                    ext));
+                    ext,
+                    a.WorldX,
+                    a.WorldY,
+                    a.WorldZ));
             }
         }
         return list
@@ -1007,7 +1013,10 @@ public static class VersionComparisonService
                     min,
                     max,
                     file,
-                    count));
+                    count,
+                    a.WorldX,
+                    a.WorldY,
+                    a.WorldZ));
             }
         }
         return list
