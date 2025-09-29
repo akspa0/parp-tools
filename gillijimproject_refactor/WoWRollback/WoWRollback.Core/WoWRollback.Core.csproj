@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
 
 </Project>
