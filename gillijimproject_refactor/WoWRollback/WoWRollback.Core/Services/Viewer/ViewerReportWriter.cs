@@ -71,6 +71,7 @@ public sealed class ViewerReportWriter
 
         var chosenDefaultVersion = SelectDefaultVersion(resolvedOptions, result);
         var effectiveDiffPair = ResolveDiffPair(diffPair, resolvedOptions, result);
+        var minimapLocator = MinimapLocator.Build(result.RootDirectory, result.Versions);
 
         var mapTileCatalog = new Dictionary<string, List<TileDescriptor>>(StringComparer.OrdinalIgnoreCase);
 
@@ -95,11 +96,16 @@ public sealed class ViewerReportWriter
             {
                 var (row, col) = tileGroup.Key;
 
-                // Minimap placeholder (until real imagery is wired up)
-                var minimapPath = Path.Combine(mapMinimapDir, $"tile_r{row}_c{col}.png");
-                using (var nullStream = Stream.Null)
+                Stream tileStream = Stream.Null;
+                if (minimapLocator.TryOpen(mapName, row, col, out var located) && located is not null)
                 {
-                    _minimapComposer.ComposeAsync(nullStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                    tileStream = located;
+                }
+
+                var minimapPath = Path.Combine(mapMinimapDir, $"tile_r{row}_c{col}.png");
+                using (tileStream)
+                {
+                    _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
                 }
 
                 var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
