@@ -104,6 +104,12 @@ internal static class Program
 
         var result = VersionComparisonService.CompareVersions(root, versions, maps);
         var paths = VersionComparisonWriter.WriteOutputs(root, result);
+        var wantYaml = opts.TryGetValue("yaml-report", out var yamlOpt) && !string.Equals(yamlOpt, "false", StringComparison.OrdinalIgnoreCase);
+        if (wantYaml)
+        {
+            var yamlRoot = VersionComparisonWriter.WriteYamlReports(root, result);
+            Console.WriteLine($"[ok] YAML reports written to: {yamlRoot}");
+        }
 
         Console.WriteLine($"[ok] Comparison key: {result.ComparisonKey}");
         Console.WriteLine($"[ok] Outputs written to: {paths.ComparisonDirectory}");
@@ -221,8 +227,9 @@ internal static class Program
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
         Console.WriteLine();
-        Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>]");
+        Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>] [--yaml-report]");
         Console.WriteLine("    Compare placement ranges across versions; outputs CSVs under rollback_outputs/comparisons/<key>");
+        Console.WriteLine("    If --yaml-report is present, also writes YAML exploration reports under .../<key>/yaml/");
         Console.WriteLine();
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");

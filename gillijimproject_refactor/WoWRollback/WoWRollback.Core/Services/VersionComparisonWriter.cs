@@ -310,6 +310,184 @@ public static class VersionComparisonWriter
         }
     }
 
+    public static string WriteYamlReports(string? rootDirectory, VersionComparisonResult result)
+    {
+        var baseDirectory = string.IsNullOrWhiteSpace(rootDirectory)
+            ? Path.Combine(Directory.GetCurrentDirectory(), "rollback_outputs")
+            : rootDirectory!;
+        var comparisonDirectory = Path.Combine(baseDirectory, "comparisons", result.ComparisonKey);
+        var yamlRoot = Path.Combine(comparisonDirectory, "yaml");
+        Directory.CreateDirectory(yamlRoot);
+
+        // Group tiles by map from DesignKitAssetDetails (most complete set)
+        var tilesByMap = result.DesignKitAssetDetails
+            .GroupBy(d => d.Map, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => (x.TileRow, x.TileCol)).Distinct().OrderBy(t => t.TileRow).ThenBy(t => t.TileCol).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+        // Write per-tile YAMLs under map subfolders
+        foreach (var (map, tiles) in tilesByMap)
+        {
+            var mapDir = Path.Combine(yamlRoot, "map", SanitizeDir(map));
+            Directory.CreateDirectory(mapDir);
+            foreach (var (row, col) in tiles)
+            {
+                var tilePath = Path.Combine(mapDir, $"tile_r{row}_c{col}.yaml");
+                WriteTileYaml(tilePath, map, row, col, result);
+            }
+        }
+
+        // Write index.yaml
+        var indexPath = Path.Combine(yamlRoot, "index.yaml");
+        WriteIndexYaml(indexPath, result, tilesByMap);
+
+        return yamlRoot;
+    }
+
+    private static void WriteIndexYaml(string path, VersionComparisonResult result, Dictionary<string, List<(int Row, int Col)>> tilesByMap)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine($"comparison_key: \"{Yaml(result.ComparisonKey)}\"");
+        sw.WriteLine("versions:");
+        foreach (var v in result.Versions)
+            sw.WriteLine($"  - \"{Yaml(v)}\"");
+        sw.WriteLine("maps:");
+        foreach (var kvp in tilesByMap.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            sw.WriteLine($"  - map: \"{Yaml(kvp.Key)}\"");
+            sw.WriteLine("    tiles:");
+            foreach (var t in kvp.Value)
+            {
+                var details = result.DesignKitAssetDetails.Where(d => d.Map.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase) && d.TileRow == t.Row && d.TileCol == t.Col);
+                var distinctAssets = details.Select(d => d.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                var uidCount = result.UniqueIdAssets.Count(u => u.Map.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase) && u.TileRow == t.Row && u.TileCol == t.Col);
+                sw.WriteLine($"      - row: {t.Row}");
+                sw.WriteLine($"        col: {t.Col}");
+                sw.WriteLine($"        distinct_assets: {distinctAssets}");
+                sw.WriteLine($"        uid_count: {uidCount}");
+            }
+        }
+    }
+
+    private static void WriteTileYaml(string path, string map, int row, int col, VersionComparisonResult result)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine($"header:");
+        sw.WriteLine($"  comparison_key: \"{Yaml(result.ComparisonKey)}\"");
+        sw.WriteLine($"  map: \"{Yaml(map)}\"");
+        sw.WriteLine($"  tile: {{ row: {row}, col: {col} }}");
+        sw.WriteLine("  versions:");
+        foreach (var v in result.Versions)
+            sw.WriteLine($"    - \"{Yaml(v)}\"");
+
+        // Sediment layers per version
+        sw.WriteLine("sediment_layers:");
+        foreach (var v in result.Versions)
+        {
+            sw.WriteLine($"  - version: \"{Yaml(v)}\"");
+            // Ranges
+            var ranges = result.RangeEntries.Where(r => r.Version.Equals(v, StringComparison.OrdinalIgnoreCase) && r.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && r.TileRow == row && r.TileCol == col)
+                .OrderBy(r => r.MinUniqueId).ToList();
+            sw.WriteLine("    ranges:");
+            foreach (var r in ranges)
+            {
+                var kind = r.Kind == PlacementKind.M2 ? "M2" : "WMO";
+                sw.WriteLine($"      - kind: {kind}");
+                sw.WriteLine($"        min_uid: {r.MinUniqueId}");
+                sw.WriteLine($"        max_uid: {r.MaxUniqueId}");
+                sw.WriteLine($"        file: \"{Yaml((r.FilePath ?? string.Empty).Replace('\\','/'))}\"");
+            }
+            // Kits and subkits derived from DesignKitAssetDetails
+            var detailsV = result.DesignKitAssetDetails.Where(d => d.Version.Equals(v, StringComparison.OrdinalIgnoreCase) && d.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && d.TileRow == row && d.TileCol == col).ToList();
+            var kits = detailsV.GroupBy(d => d.DesignKit, StringComparer.OrdinalIgnoreCase);
+            sw.WriteLine("    kits:");
+            foreach (var kg in kits.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var sourceRules = kg.Select(k => k.SourceRule).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var distinctAssets = kg.Select(k => k.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                sw.WriteLine($"      - design_kit: \"{Yaml(kg.Key)}\" ");
+                sw.WriteLine($"        asset_count: {kg.Count()}");
+                sw.WriteLine($"        distinct_assets: {distinctAssets}");
+                if (sourceRules.Count > 0)
+                {
+                    sw.WriteLine("        source_rules:");
+                    foreach (var r in sourceRules)
+                        sw.WriteLine($"          - \"{Yaml(r)}\"");
+                }
+                var subkits = kg.GroupBy(k => k.SubkitPath ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+                sw.WriteLine("        subkits:");
+                foreach (var sg in subkits.OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    var subDistinct = sg.Select(x => x.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                    sw.WriteLine($"          - path: \"{Yaml(sg.Key)}\" ");
+                    sw.WriteLine($"            asset_count: {sg.Count()}");
+                    sw.WriteLine($"            distinct_assets: {subDistinct}");
+                }
+            }
+        }
+
+        // Unique IDs across all versions for this tile
+        sw.WriteLine("unique_ids:");
+        var uids = result.UniqueIdAssets.Where(u => u.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && u.TileRow == row && u.TileCol == col)
+            .OrderBy(u => u.Version, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(u => u.Kind)
+            .ThenBy(u => u.UniqueId)
+            .ToList();
+        foreach (var u in uids)
+        {
+            var kind = u.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine($"  - uid: {u.UniqueId}");
+            sw.WriteLine($"    version: \"{Yaml(u.Version)}\"");
+            sw.WriteLine($"    kind: {kind}");
+            sw.WriteLine($"    asset_path: \"{Yaml(u.AssetPath.Replace('\\','/'))}\"");
+            sw.WriteLine($"    design_kit: \"{Yaml(u.DesignKit)}\"");
+            sw.WriteLine($"    subkit_path: \"{Yaml(u.SubkitPath)}\"");
+            sw.WriteLine($"    source_rule: \"{Yaml(u.SourceRule)}\"");
+            sw.WriteLine($"    matched_range: {{ min: {u.MatchedRangeMin}, max: {u.MatchedRangeMax}, file: \"{Yaml((u.MatchedRangeFile ?? string.Empty).Replace('\\','/'))}\", count: {u.MatchedRangeCount} }}");
+        }
+
+        // Stats
+        var allDetails = result.DesignKitAssetDetails.Where(d => d.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && d.TileRow == row && d.TileCol == col).ToList();
+        var totalAssets = allDetails.Count;
+        var totalDistinct = allDetails.Select(d => d.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var uidCount = uids.Count;
+        sw.WriteLine("stats:");
+        sw.WriteLine($"  total_assets: {totalAssets}");
+        sw.WriteLine($"  distinct_assets: {totalDistinct}");
+        sw.WriteLine($"  uid_count: {uidCount}");
+        var kitTotals = allDetails.GroupBy(d => d.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        sw.WriteLine("  kits:");
+        foreach (var kt in kitTotals)
+        {
+            var dcount = kt.Select(x => x.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            sw.WriteLine($"  - name: \"{Yaml(kt.Key)}\" ");
+            sw.WriteLine($"    asset_count: {kt.Count()}");
+            sw.WriteLine($"    distinct_assets: {dcount}");
+        }
+    }
+
+    private static string Yaml(string value)
+    {
+        if (value is null) return string.Empty;
+        var v = value.Replace("\"", "\\\"");
+        return v;
+    }
+
+    private static string SanitizeDir(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sb = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (Array.IndexOf(invalid, ch) >= 0 || ch == '/' || ch == '\\') sb.Append('_');
+            else sb.Append(ch);
+        }
+        return sb.ToString();
+    }
+
     private static void WriteDesignKitAssetDetails(string path, IReadOnlyList<DesignKitAssetDetailEntry> entries)
     {
         using var sw = new StreamWriter(path, false, Encoding.UTF8);

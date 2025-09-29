@@ -31,3 +31,13 @@
 
 ## Archaeological Perspective
 We're digital archaeologists uncovering fossilized remains of 20+ year old game development. Every UniqueID tells a story of work performed long ago, and the patterns reveal the sedimentary layers of WoW's evolution from 2000 to present day.
+
+## Update: Version Comparison + YAML Sediment Reports (2025-09-29)
+- Implemented per-ADT tile YAML reports under `rollback_outputs/comparisons/<key>/yaml/`.
+- Each tile report includes:
+  - `sediment_layers` per version (ranges with min/max UniqueID and source file)
+  - Kit and subkit tallies derived from asset paths
+  - `unique_ids` section correlating assets to matched ranges
+  - Aggregate `stats` per tile
+- Added CLI flag `--yaml-report` to `compare-versions` to generate YAML alongside CSVs.
+- Purpose: enable interactive exploration (sorting/filtering by kit/subkit, tracing borrowed assets across maps/versions).

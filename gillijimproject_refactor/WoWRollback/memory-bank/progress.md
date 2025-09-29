@@ -21,6 +21,18 @@
 - `RangeScanner`: Map-level range aggregation
 - `RangeCsvWriter`: Output generation with proper naming (`alpha_<map>`, `lk_<map>`)
 
+### Phase 4: Version Comparison Enhancements (2025-09-29)
+- Added detailed design kit analysis in `VersionComparisonService`:
+  - `DesignKitAssetDetails`, `UniqueIdAssets`, `AssetTimelineDetailed`
+- Extended `VersionComparisonWriter` to emit additional CSVs:
+  - `design_kit_asset_details_<key>.csv`
+  - `unique_id_assets_<key>.csv`
+  - `asset_timeline_detailed_<key>.csv`
+- Implemented per-ADT tile YAML reports and index:
+  - `.../comparisons/<key>/yaml/index.yaml`
+  - `.../comparisons/<key>/yaml/map/<Map>/tile_r<row>_c<col>.yaml`
+- CLI: Added `--yaml-report` flag to `compare-versions` to generate YAML alongside CSVs.
+
 ## 🔧 In Progress
 
 ### Alpha WDT Parsing Implementation
@@ -36,6 +48,9 @@ The `AlphaWdtAnalyzer` currently has placeholder TODO sections that need real im
 2. **Leverage existing AlphaWDTAnalysisTool parsing capabilities** 
 3. **Test with real Alpha WDT files** to verify extraction works
 4. **Compare outputs** with existing AlphaWDTAnalysisTool to ensure accuracy
+
+### Exploration UX (Future)
+- Build a small static site (or script) to browse YAML, filter by kit/subkit, and visualize sediment layers per tile.
 
 ### Future Phases
 - **Comparison Analysis**: `analyze-evolution` command comparing Alpha vs LK preservation
