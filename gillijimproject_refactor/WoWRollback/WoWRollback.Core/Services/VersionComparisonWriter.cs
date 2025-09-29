@@ -22,6 +22,10 @@ public static class VersionComparisonWriter
         var assetFolderSummaryPath = Path.Combine(comparisonDirectory, $"asset_folder_summary_{result.ComparisonKey}.csv");
         var assetFolderTimelinePath = Path.Combine(comparisonDirectory, $"asset_folder_timeline_{result.ComparisonKey}.csv");
         var assetTimelinePath = Path.Combine(comparisonDirectory, $"asset_timeline_{result.ComparisonKey}.csv");
+        var designKitAssetsPath = Path.Combine(comparisonDirectory, $"design_kit_assets_{result.ComparisonKey}.csv");
+        var designKitRangesPath = Path.Combine(comparisonDirectory, $"design_kit_ranges_{result.ComparisonKey}.csv");
+        var designKitSummaryPath = Path.Combine(comparisonDirectory, $"design_kit_summary_{result.ComparisonKey}.csv");
+        var designKitTimelinePath = Path.Combine(comparisonDirectory, $"design_kit_timeline_{result.ComparisonKey}.csv");
 
         WriteVersionRanges(versionRangesPath, result.RangeEntries);
         WriteMapSummaries(mapSummaryPath, result.MapSummaries);
@@ -30,6 +34,10 @@ public static class VersionComparisonWriter
         WriteAssetFolderSummary(assetFolderSummaryPath, result.AssetFolderSummaries);
         WriteAssetFolderTimeline(assetFolderTimelinePath, result.AssetFolderTimeline);
         WriteAssetTimeline(assetTimelinePath, result.AssetTimeline);
+        WriteDesignKitAssets(designKitAssetsPath, result.DesignKitAssets);
+        WriteDesignKitRanges(designKitRangesPath, result.DesignKitRanges);
+        WriteDesignKitSummary(designKitSummaryPath, result.DesignKitSummaries);
+        WriteDesignKitTimeline(designKitTimelinePath, result.DesignKitTimeline);
 
         if (result.Warnings.Count > 0)
         {
@@ -45,7 +53,11 @@ public static class VersionComparisonWriter
             assetFirstSeenPath,
             assetFolderSummaryPath,
             assetFolderTimelinePath,
-            assetTimelinePath);
+            assetTimelinePath,
+            designKitAssetsPath,
+            designKitRangesPath,
+            designKitSummaryPath,
+            designKitTimelinePath);
     }
 
     private static void WriteVersionRanges(string path, IReadOnlyList<VersionRangeEntry> entries)
@@ -200,6 +212,91 @@ public static class VersionComparisonWriter
                 Csv(entry.Folder),
                 Csv(entry.Category),
                 Csv(entry.Subcategory)
+            }));
+        }
+    }
+
+    private static void WriteDesignKitAssets(string path, IReadOnlyList<DesignKitAssetEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,map,tile_row,tile_col,kind,unique_id,asset_path,design_kit,source_rule");
+        foreach (var e in entries)
+        {
+            var kind = e.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.Map),
+                e.TileRow.ToString(CultureInfo.InvariantCulture),
+                e.TileCol.ToString(CultureInfo.InvariantCulture),
+                kind,
+                e.UniqueId.ToString(CultureInfo.InvariantCulture),
+                Csv(e.AssetPath.Replace('\\','/')),
+                Csv(e.DesignKit),
+                Csv(e.SourceRule)
+            }));
+        }
+    }
+
+    private static void WriteDesignKitRanges(string path, IReadOnlyList<DesignKitRangeEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,map,tile_row,tile_col,kind,min_unique_id,max_unique_id,design_kit,asset_count,distinct_asset_count,source_rule");
+        foreach (var e in entries)
+        {
+            var kind = e.Kind == PlacementKind.M2 ? "M2" : "WMO";
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.Map),
+                e.TileRow.ToString(CultureInfo.InvariantCulture),
+                e.TileCol.ToString(CultureInfo.InvariantCulture),
+                kind,
+                e.MinUniqueId.ToString(CultureInfo.InvariantCulture),
+                e.MaxUniqueId.ToString(CultureInfo.InvariantCulture),
+                Csv(e.DesignKit),
+                e.AssetCount.ToString(CultureInfo.InvariantCulture),
+                e.DistinctAssetCount.ToString(CultureInfo.InvariantCulture),
+                Csv(e.SourceRule)
+            }));
+        }
+    }
+
+    private static void WriteDesignKitSummary(string path, IReadOnlyList<DesignKitSummaryEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("version,design_kit,distinct_asset_count,asset_count,distinct_map_count,distinct_tile_count,min_unique_id,max_unique_id");
+        foreach (var e in entries)
+        {
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.Version),
+                Csv(e.DesignKit),
+                e.DistinctAssetCount.ToString(CultureInfo.InvariantCulture),
+                e.AssetCount.ToString(CultureInfo.InvariantCulture),
+                e.DistinctMapCount.ToString(CultureInfo.InvariantCulture),
+                e.DistinctTileCount.ToString(CultureInfo.InvariantCulture),
+                e.MinUniqueId.ToString(CultureInfo.InvariantCulture),
+                e.MaxUniqueId.ToString(CultureInfo.InvariantCulture)
+            }));
+        }
+    }
+
+    private static void WriteDesignKitTimeline(string path, IReadOnlyList<DesignKitTimelineEntry> entries)
+    {
+        using var sw = new StreamWriter(path, false, Encoding.UTF8);
+        sw.WriteLine("design_kit,version,asset_count,distinct_map_count,distinct_tile_count,min_unique_id,max_unique_id");
+        foreach (var e in entries)
+        {
+            sw.WriteLine(string.Join(',', new[]
+            {
+                Csv(e.DesignKit),
+                Csv(e.Version),
+                e.AssetCount.ToString(CultureInfo.InvariantCulture),
+                e.DistinctMapCount.ToString(CultureInfo.InvariantCulture),
+                e.DistinctTileCount.ToString(CultureInfo.InvariantCulture),
+                e.MinUniqueId.ToString(CultureInfo.InvariantCulture),
+                e.MaxUniqueId.ToString(CultureInfo.InvariantCulture)
             }));
         }
     }

@@ -23,6 +23,7 @@ public static class VersionComparisonService
         var requestedVersions = versionIdentifiers
             .Select(v => v?.Trim())
             .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -122,6 +123,10 @@ public static class VersionComparisonService
         var assetFolderSummaries = ComputeAssetFolderSummaries(rangesByVersion, assetsByVersion);
         var assetFolderTimeline = ComputeAssetFolderTimeline(assetsByVersion, versionOrder);
         var assetTimeline = BuildAssetTimeline(assetsByVersion, versionOrder);
+        var designKitAssets = BuildDesignKitAssets(assetsByVersion, versionOrder);
+        var designKitRanges = BuildDesignKitRanges(rangesByVersion);
+        var designKitSummaries = BuildDesignKitSummaries(designKitAssets);
+        var designKitTimeline = BuildDesignKitTimeline(designKitAssets, versionOrder);
 
         var comparisonKey = BuildComparisonKey(actualVersions);
 
@@ -145,6 +150,10 @@ public static class VersionComparisonService
             assetFolderSummaries,
             assetFolderTimeline,
             assetTimeline,
+            designKitAssets,
+            designKitRanges,
+            designKitSummaries,
+            designKitTimeline,
             warnings);
     }
 
@@ -593,6 +602,10 @@ public static class VersionComparisonService
             Array.Empty<AssetFolderSummary>(),
             Array.Empty<AssetFolderTimelineEntry>(),
             Array.Empty<AssetTimelineEntry>(),
+            Array.Empty<DesignKitAssetEntry>(),
+            Array.Empty<DesignKitRangeEntry>(),
+            Array.Empty<DesignKitSummaryEntry>(),
+            Array.Empty<DesignKitTimelineEntry>(),
             warnings);
 
     private static PlacementKind ParseKind(string value) =>
@@ -639,6 +652,196 @@ public static class VersionComparisonService
         if (segments.Length >= 4) return segments[3];
         if (segments.Length >= 3) return segments[2];
         return "(none)";
+    }
+
+    private static (string Kit, string Rule) InferDesignKit(string assetPath)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return ("(unknown)", "fallback");
+
+        // world/<map>/<zone>/...
+        if (segments[0].Equals("world", StringComparison.OrdinalIgnoreCase))
+        {
+            if (segments.Length >= 3 && !segments[1].Equals("wmo", StringComparison.OrdinalIgnoreCase))
+            {
+                return (segments[2], "world-map-zone");
+            }
+            // world/wmo/<map>/<zoneOrCategory>/...
+            if (segments.Length >= 4 && segments[1].Equals("wmo", StringComparison.OrdinalIgnoreCase))
+            {
+                var zoneOrCat = segments[3];
+                if (!zoneOrCat.Equals("buildings", StringComparison.OrdinalIgnoreCase) &&
+                    !zoneOrCat.Equals("doodads", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (zoneOrCat, "wmo-map-zone");
+                }
+                return (segments[2], "wmo-map-only");
+            }
+            if (segments.Length >= 2)
+            {
+                // world/<map>/...
+                return (segments[1], "world-map-only");
+            }
+        }
+
+        // Generic: pick first top-level folder
+        return (segments[0], "generic-top");
+    }
+
+    private static List<DesignKitAssetEntry> BuildDesignKitAssets(
+        Dictionary<string, List<PlacementAsset>> assetsByVersion,
+        IReadOnlyDictionary<string, int> versionOrder)
+    {
+        var list = new List<DesignKitAssetEntry>();
+        foreach (var (version, assets) in assetsByVersion)
+        {
+            foreach (var a in assets)
+            {
+                if (string.IsNullOrWhiteSpace(a.AssetPath)) continue;
+                var (kit, rule) = InferDesignKit(a.AssetPath);
+                list.Add(new DesignKitAssetEntry(
+                    version,
+                    a.Map,
+                    a.TileRow,
+                    a.TileCol,
+                    a.Kind,
+                    a.UniqueId ?? 0,
+                    a.AssetPath,
+                    kit,
+                    rule));
+            }
+        }
+        return list
+            .OrderBy(e => versionOrder.TryGetValue(e.Version, out var ord) ? ord : int.MaxValue)
+            .ThenBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.AssetPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<DesignKitRangeEntry> BuildDesignKitRanges(
+        Dictionary<string, List<VersionRangeEntry>> rangesByVersion)
+    {
+        var list = new List<DesignKitRangeEntry>();
+        foreach (var (version, ranges) in rangesByVersion)
+        {
+            foreach (var r in ranges)
+            {
+                var byKit = new Dictionary<string, (int Count, HashSet<string> Distinct, HashSet<string> Rules)>(StringComparer.OrdinalIgnoreCase);
+                foreach (var asset in r.Assets)
+                {
+                    if (string.IsNullOrWhiteSpace(asset)) continue;
+                    var (kit, rule) = InferDesignKit(asset);
+                    if (!byKit.TryGetValue(kit, out var agg)) agg = (0, new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    agg.Count++;
+                    agg.Distinct.Add(asset);
+                    agg.Rules.Add(rule);
+                    byKit[kit] = agg;
+                }
+                foreach (var (kit, agg) in byKit)
+                {
+                    var sourceRule = agg.Rules.Count == 1 ? agg.Rules.First() : "mixed";
+                    list.Add(new DesignKitRangeEntry(
+                        version,
+                        r.Map,
+                        r.TileRow,
+                        r.TileCol,
+                        r.Kind,
+                        r.MinUniqueId,
+                        r.MaxUniqueId,
+                        kit,
+                        agg.Count,
+                        agg.Distinct.Count,
+                        sourceRule));
+                }
+            }
+        }
+        return list
+            .OrderBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.Map, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.TileRow)
+            .ThenBy(e => e.TileCol)
+            .ThenBy(e => e.MinUniqueId)
+            .ToList();
+    }
+
+    private static List<DesignKitSummaryEntry> BuildDesignKitSummaries(
+        List<DesignKitAssetEntry> designKitAssets)
+    {
+        var list = new List<DesignKitSummaryEntry>();
+        foreach (var byVersion in designKitAssets.GroupBy(a => a.Version, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var g in byVersion.GroupBy(a => a.DesignKit, StringComparer.OrdinalIgnoreCase))
+            {
+                var maps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var tiles = new HashSet<(string Map, int Row, int Col)>();
+                uint minId = uint.MaxValue, maxId = 0;
+                foreach (var a in g)
+                {
+                    maps.Add(a.Map);
+                    tiles.Add((a.Map, a.TileRow, a.TileCol));
+                    if (a.UniqueId > 0)
+                    {
+                        if (a.UniqueId < minId) minId = a.UniqueId;
+                        if (a.UniqueId > maxId) maxId = a.UniqueId;
+                    }
+                }
+                if (minId == uint.MaxValue) minId = 0;
+                list.Add(new DesignKitSummaryEntry(
+                    byVersion.Key,
+                    g.Key,
+                    g.Select(a => a.AssetPath).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                    g.Count(),
+                    maps.Count,
+                    tiles.Count,
+                    minId,
+                    maxId));
+            }
+        }
+        return list
+            .OrderBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<DesignKitTimelineEntry> BuildDesignKitTimeline(
+        List<DesignKitAssetEntry> designKitAssets,
+        IReadOnlyDictionary<string, int> versionOrder)
+    {
+        var list = new List<DesignKitTimelineEntry>();
+        foreach (var byKit in designKitAssets.GroupBy(a => a.DesignKit, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var g in byKit.GroupBy(a => a.Version, StringComparer.OrdinalIgnoreCase))
+            {
+                var maps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var tiles = new HashSet<(string Map, int Row, int Col)>();
+                uint minId = uint.MaxValue, maxId = 0;
+                foreach (var a in g)
+                {
+                    maps.Add(a.Map);
+                    tiles.Add((a.Map, a.TileRow, a.TileCol));
+                    if (a.UniqueId > 0)
+                    {
+                        if (a.UniqueId < minId) minId = a.UniqueId;
+                        if (a.UniqueId > maxId) maxId = a.UniqueId;
+                    }
+                }
+                if (minId == uint.MaxValue) minId = 0;
+                list.Add(new DesignKitTimelineEntry(
+                    byKit.Key,
+                    g.Key,
+                    g.Count(),
+                    maps.Count,
+                    tiles.Count,
+                    minId,
+                    maxId));
+            }
+        }
+        return list
+            .OrderBy(e => e.DesignKit, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => versionOrder.TryGetValue(e.Version, out var ord) ? ord : int.MaxValue)
+            .ToList();
     }
 
     private static int FolderDepth(string folder)

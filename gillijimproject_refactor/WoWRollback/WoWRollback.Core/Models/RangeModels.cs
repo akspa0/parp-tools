@@ -136,6 +136,10 @@ public sealed record VersionComparisonResult(
     IReadOnlyList<AssetFolderSummary> AssetFolderSummaries,
     IReadOnlyList<AssetFolderTimelineEntry> AssetFolderTimeline,
     IReadOnlyList<AssetTimelineEntry> AssetTimeline,
+    IReadOnlyList<DesignKitAssetEntry> DesignKitAssets,
+    IReadOnlyList<DesignKitRangeEntry> DesignKitRanges,
+    IReadOnlyList<DesignKitSummaryEntry> DesignKitSummaries,
+    IReadOnlyList<DesignKitTimelineEntry> DesignKitTimeline,
     IReadOnlyList<string> Warnings
 );
 
@@ -147,7 +151,11 @@ public sealed record ComparisonOutputPaths(
     string AssetFirstSeenPath,
     string AssetFolderSummaryPath,
     string AssetFolderTimelinePath,
-    string AssetTimelinePath
+    string AssetTimelinePath,
+    string DesignKitAssetsPath,
+    string DesignKitRangesPath,
+    string DesignKitSummaryPath,
+    string DesignKitTimelinePath
 );
 
 public sealed record AssetTimelineEntry(
@@ -161,6 +169,53 @@ public sealed record AssetTimelineEntry(
     string Folder,
     string Category,
     string Subcategory
+);
+
+public sealed record DesignKitAssetEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint UniqueId,
+    string AssetPath,
+    string DesignKit,
+    string SourceRule
+);
+
+public sealed record DesignKitRangeEntry(
+    string Version,
+    string Map,
+    int TileRow,
+    int TileCol,
+    PlacementKind Kind,
+    uint MinUniqueId,
+    uint MaxUniqueId,
+    string DesignKit,
+    int AssetCount,
+    int DistinctAssetCount,
+    string SourceRule
+);
+
+public sealed record DesignKitSummaryEntry(
+    string Version,
+    string DesignKit,
+    int DistinctAssetCount,
+    int AssetCount,
+    int DistinctMapCount,
+    int DistinctTileCount,
+    uint MinUniqueId,
+    uint MaxUniqueId
+);
+
+public sealed record DesignKitTimelineEntry(
+    string DesignKit,
+    string Version,
+    int AssetCount,
+    int DistinctMapCount,
+    int DistinctTileCount,
+    uint MinUniqueId,
+    uint MaxUniqueId
 );
 
 public sealed record MapEntries(
