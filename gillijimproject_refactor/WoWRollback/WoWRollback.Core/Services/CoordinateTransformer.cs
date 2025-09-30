@@ -48,6 +48,7 @@ public static class CoordinateTransformer
 
     /// <summary>
     /// Converts normalized coordinates into pixel coordinates for a tile image.
+    /// Leaflet Y increases downward, WoW Y+ is West/up on map, so invert Y.
     /// </summary>
     public static (double PixelX, double PixelY) ToPixels(double localX, double localY, int width, int height)
     {
@@ -55,6 +56,7 @@ public static class CoordinateTransformer
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
 
         var px = ClampUnit(localX) * width;
+        // Keep Y inversion: localY=0 → bottom (height), localY=1 → top (0)
         var py = (1.0 - ClampUnit(localY)) * height;
         return (px, py);
     }

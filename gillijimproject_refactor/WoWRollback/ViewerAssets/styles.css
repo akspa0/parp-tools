@@ -17,19 +17,26 @@ body {
     color: #e0e0e0;
 }
 
-/* Full-page Leaflet map */
+/* Map container takes full page */
 #map {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 0;
+    z-index: 1;
 }
 
-/* Hamburger menu button */
-.hamburger {
-    position: absolute;
+/* Sedimentary Layers Panel */
+.layers-panel {
+    position: fixed;
+    right: 20px;
+    top: 80px;
+    width: 320px;
+    max-height: 70vh;
+    background: rgba(26, 26, 26, 0.95);
+    border: 1px solid #444;
+    border-radius: 8px;
     top: 10px;
     left: 10px;
     z-index: 1001;

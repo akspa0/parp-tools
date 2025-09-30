@@ -57,7 +57,23 @@
 
     <!-- Full-page Leaflet map -->
     <div id="map"></div>
-
+    
+    <!-- Sedimentary Layers Panel -->
+    <div id="layersPanel" class="layers-panel">
+        <div class="layers-header">
+            <h3>Sedimentary Layers</h3>
+            <button id="layersPanelToggle" class="panel-toggle">−</button>
+        </div>
+        <div class="layers-content">
+            <div class="layers-filter">
+                <input type="text" id="layersSearch" placeholder="Filter by UniqueID range...">
+            </div>
+            <div id="layersList" class="layers-list">
+                <!--Layers will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
         import { init } from './js/main.js';

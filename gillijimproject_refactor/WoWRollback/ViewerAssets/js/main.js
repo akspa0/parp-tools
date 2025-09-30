@@ -40,18 +40,18 @@ function initializeMap() {
     
     map = L.map('map', {
         crs: L.CRS.Simple,
-        minZoom: 0,
-        maxZoom: 5,
-        zoom: 0,
-        maxBounds: bounds,
-        maxBoundsViscosity: 1.0, // Prevent dragging outside bounds
-        zoomControl: true
+        minZoom: 0,       // Start at 0, no negative
+        maxZoom: 8,       // Allow deep zoom
+        zoom: 2,          // Start at medium zoom
+        zoomControl: true,
+        zoomSnap: 0.1,
+        zoomDelta: 0.5
     });
 
     objectMarkers.addTo(map);
     
-    // Set initial view to center of map at zoom level where tiles align
-    map.setView([32, 32], 0);
+    // Set initial view to center of map at zoom 1 (good overview)
+    map.setView([32, 32], 1);
     console.log('Map initialized with bounds:', bounds);
     console.log('Initial view: [32,32] at zoom 0');
 }
@@ -137,30 +137,34 @@ function updateTileLayer() {
 
     console.log(`Loading ${tiles.length} tiles for ${state.selectedMap}, version ${state.selectedVersion}`);
 
-    // Use simple tileLayer with URL template
-    // At zoom 6, with tileSize 512, each Leaflet tile = 1 game tile (64x64 grid)
-    // This is because at zoom 6: scale = 2^6 = 64, and 512/scale = 8 pixels per coordinate unit
-    // But we want 512 pixels per game tile, so we use zoom where this works out
-    const urlTemplate = `minimap/${state.selectedVersion}/${state.selectedMap}/${state.selectedMap}_{x}_{y}.png`;
-    
-    console.log(`Tile URL template: ${urlTemplate}`);
-
-    // Create a custom tile layer that bypasses Leaflet's coordinate system
+    // Simple direct tile layer - coords map 1:1 to game tiles
     const CustomTileLayer = L.GridLayer.extend({
-        createTile: function(coords) {
+        createTile: function(coords, done) {
             const tile = document.createElement('img');
-            const row = coords.y;
+            
+            // Direct 1:1 mapping at native zoom
             const col = coords.x;
+            const row = coords.y;
             
-            // At zoom 6, Leaflet uses native tile coordinates
-            const url = state.getMinimapPath(state.selectedMap, row, col, state.selectedVersion);
-            tile.src = url;
-            tile.style.width = '512px';
-            tile.style.height = '512px';
-            
-            tile.onerror = function() {
+            // Skip if out of bounds
+            if (col < 0 || col > 63 || row < 0 || row > 63) {
                 tile.style.backgroundColor = '#1a1a1a';
+                done(null, tile);
+                return tile;
+            }
+            
+            const url = `minimap/${state.selectedVersion}/${state.selectedMap}/${state.selectedMap}_${col}_${row}.png`;
+            
+            tile.onload = function() {
+                console.log(`✓ Loaded tile: ${col}_${row}`);
+                done(null, tile);
             };
+            tile.onerror = function() {
+                console.warn(`✗ Failed: ${url}`);
+                tile.style.backgroundColor = '#2a2a2a';
+                done(null, tile);
+            };
+            tile.src = url;
             
             return tile;
         }
@@ -170,10 +174,8 @@ function updateTileLayer() {
         tileSize: 512,
         noWrap: true,
         bounds: [[0, 0], [64, 64]],
-        minZoom: 0,
-        maxZoom: 5,
-        minNativeZoom: 6,
-        maxNativeZoom: 6
+        minNativeZoom: 0,
+        maxNativeZoom: 0
     });
 
     tileLayer.on('tileload', function(e) {
@@ -189,21 +191,27 @@ function updateTileLayer() {
         e.tile.alt = `${coords.y}_${coords.x}`;
     });
 
-    tileLayer.on('tileloadstart', function(e) {
-        const coords = e.coords;
-        console.log(`→ Requesting tile [${coords.y},${coords.x}]: ${urlTemplate.replace('{x}', coords.x).replace('{y}', coords.y)}`);
-    });
-
     tileLayer.addTo(map);
+
+    // Reload objects when map moves (debounced)
+    let updateTimeout;
+    map.on('moveend zoomend', () => {
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(() => {
+            updateObjectMarkers();
+        }, 300); // Wait 300ms after user stops moving
+    });
     
-    // Add click handler for tiles
     map.off('click', handleMapClick);
     map.on('click', handleMapClick);
     
     updateObjectMarkers();
 }
 
-function calculateBounds(tiles) {
+function getBounds() {
+    const tiles = state.getTilesForMap(state.selectedMap);
+    if (tiles.length === 0) return [[0, 0], [64, 64]];
+    
     const rows = tiles.map(t => t.row);
     const cols = tiles.map(t => t.col);
     const minRow = Math.min(...rows);
@@ -233,42 +241,60 @@ async function updateObjectMarkers() {
     objectMarkers.clearLayers();
     
     if (!showObjects) return;
-
-    const tiles = state.getTilesForMap(state.selectedMap);
     
-    for (const tile of tiles) {
-        try {
-            const overlayPath = state.getOverlayPath(state.selectedMap, tile.row, tile.col);
-            const data = await loadOverlay(overlayPath);
-            
-            const versionData = data.layers?.find(l => l.version === state.selectedVersion);
-            if (!versionData || !versionData.kinds) continue;
+    // Only load overlays for visible tiles (max 8x8 grid)
+    const bounds = map.getBounds();
+    let minRow = Math.max(0, Math.floor(bounds.getSouth()));
+    let maxRow = Math.min(63, Math.ceil(bounds.getNorth()));
+    let minCol = Math.max(0, Math.floor(bounds.getWest()));
+    let maxCol = Math.min(63, Math.ceil(bounds.getEast()));
+    
+    // Limit to 8x8 grid max
+    if (maxRow - minRow > 7) {
+        maxRow = minRow + 7;
+    }
+    if (maxCol - minCol > 7) {
+        maxCol = minCol + 7;
+    }
+    
+    const tileCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
+    console.log(`Loading objects for ${tileCount} tiles: r${minRow}-${maxRow}, c${minCol}-${maxCol}`);
+    
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            try {
+                const overlayPath = state.getOverlayPath(state.selectedMap, row, col);
+                const data = await loadOverlay(overlayPath);
+                
+                const versionData = data.layers?.find(l => l.version === state.selectedVersion);
+                if (!versionData || !versionData.kinds) continue;
 
-            const objects = versionData.kinds.flatMap(kind => kind.points || []);
-            
-            objects.forEach(obj => {
-                if (!obj.pixel || !obj.world || (obj.world.x === 0 && obj.world.y === 0 && obj.world.z === 0)) return;
+                const objects = versionData.kinds.flatMap(kind => kind.points || []);
                 
-                // Convert pixel coords to map coords
-                const y = tile.row + (obj.pixel.y / 512);
-                const x = tile.col + (obj.pixel.x / 512);
-                
-                const marker = L.circleMarker([y, x], {
-                    radius: 3,
-                    fillColor: '#2196F3',
-                    color: '#fff',
-                    weight: 1,
-                    fillOpacity: 0.8
-                }).bindPopup(`
-                    <strong>${obj.fileName || 'Unknown'}</strong><br>
-                    UID: ${obj.uniqueId || 'N/A'}<br>
-                    World: (${obj.world.x.toFixed(1)}, ${obj.world.y.toFixed(1)}, ${obj.world.z.toFixed(1)})
-                `);
-                
-                objectMarkers.addLayer(marker);
-            });
-        } catch (e) {
-            // Skip tiles without overlay data
+                objects.forEach(obj => {
+                    if (!obj.pixel || !obj.world || (obj.world.x === 0 && obj.world.y === 0 && obj.world.z === 0)) return;
+                    
+                    // Convert pixel coords to map coords
+                    const y = row + (obj.pixel.y / 512);
+                    const x = col + (obj.pixel.x / 512);
+                    
+                    const marker = L.circleMarker([y, x], {
+                        radius: 3,
+                        fillColor: '#2196F3',
+                        color: '#fff',
+                        weight: 1,
+                        fillOpacity: 0.8
+                    }).bindPopup(`
+                        <strong>${obj.fileName || 'Unknown'}</strong><br>
+                        UID: ${obj.uniqueId || 'N/A'}<br>
+                        World: (${obj.world.x.toFixed(1)}, ${obj.world.y.toFixed(1)}, ${obj.world.z.toFixed(1)})
+                    `);
+                    
+                    objectMarkers.addLayer(marker);
+                });
+            } catch (e) {
+                // Skip tiles without overlay data
+            }
         }
     }
 }
