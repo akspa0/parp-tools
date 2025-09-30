@@ -24,11 +24,25 @@ public static class CoordinateTransformer
 
     /// <summary>
     /// Computes normalized coordinates relative to the specified tile (0..1 range).
+    /// World coords are absolute. Tile covers a 533.33 yard square.
     /// </summary>
     public static (double LocalX, double LocalY) ComputeLocalCoordinates(double worldX, double worldY, int tileRow, int tileCol)
     {
-        var localX = (HalfTiles - (worldX / TileSpanYards)) - tileCol;
-        var localY = (HalfTiles - (worldY / TileSpanYards)) - tileRow;
+        // Calculate tile's world position (center of tile)
+        // Tile 32,32 is at world origin (0,0)
+        // Formula: worldPos = (32 - tileIndex) * 533.33333
+        var tileCenterX = (HalfTiles - tileCol) * TileSpanYards;
+        var tileCenterY = (HalfTiles - tileRow) * TileSpanYards;
+        
+        // Calculate offset from tile center, then normalize to [0,1]
+        // Tile spans ±266.666 yards from center = 533.33 total
+        var offsetX = worldX - tileCenterX;
+        var offsetY = worldY - tileCenterY;
+        
+        // Convert to [0,1] range: center is 0.5, edges are 0 and 1
+        var localX = 0.5 + (offsetX / TileSpanYards);
+        var localY = 0.5 + (offsetY / TileSpanYards);
+        
         return (ClampUnit(localX), ClampUnit(localY));
     }
 

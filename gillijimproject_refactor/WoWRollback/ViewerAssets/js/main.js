@@ -35,17 +35,25 @@ export async function init() {
 
 function initializeMap() {
     // Initialize Leaflet map with CRS.Simple for game coordinates
+    // Bounds represent the full 64x64 tile grid (0-63 range)
+    const bounds = [[0, 0], [64, 64]];
+    
     map = L.map('map', {
         crs: L.CRS.Simple,
-        minZoom: -2,
-        maxZoom: 2,
+        minZoom: 0,
+        maxZoom: 5,
+        zoom: 0,
+        maxBounds: bounds,
+        maxBoundsViscosity: 1.0, // Prevent dragging outside bounds
         zoomControl: true
     });
 
     objectMarkers.addTo(map);
     
-    // Set initial view
+    // Set initial view to center of map at zoom level where tiles align
     map.setView([32, 32], 0);
+    console.log('Map initialized with bounds:', bounds);
+    console.log('Initial view: [32,32] at zoom 0');
 }
 
 function setupUI() {
@@ -122,59 +130,75 @@ function updateTileLayer() {
     }
 
     const tiles = state.getTilesForMap(state.selectedMap);
-    if (tiles.length === 0) return;
+    if (tiles.length === 0) {
+        console.warn('No tiles found for map:', state.selectedMap);
+        return;
+    }
 
-    const tileBounds = calculateBounds(tiles);
+    console.log(`Loading ${tiles.length} tiles for ${state.selectedMap}, version ${state.selectedVersion}`);
 
-    // Create custom tile layer with strict bounds
-    tileLayer = L.tileLayer.wms('', {
+    // Use simple tileLayer with URL template
+    // At zoom 6, with tileSize 512, each Leaflet tile = 1 game tile (64x64 grid)
+    // This is because at zoom 6: scale = 2^6 = 64, and 512/scale = 8 pixels per coordinate unit
+    // But we want 512 pixels per game tile, so we use zoom where this works out
+    const urlTemplate = `minimap/${state.selectedVersion}/${state.selectedMap}/${state.selectedMap}_{x}_{y}.png`;
+    
+    console.log(`Tile URL template: ${urlTemplate}`);
+
+    // Create a custom tile layer that bypasses Leaflet's coordinate system
+    const CustomTileLayer = L.GridLayer.extend({
+        createTile: function(coords) {
+            const tile = document.createElement('img');
+            const row = coords.y;
+            const col = coords.x;
+            
+            // At zoom 6, Leaflet uses native tile coordinates
+            const url = state.getMinimapPath(state.selectedMap, row, col, state.selectedVersion);
+            tile.src = url;
+            tile.style.width = '512px';
+            tile.style.height = '512px';
+            
+            tile.onerror = function() {
+                tile.style.backgroundColor = '#1a1a1a';
+            };
+            
+            return tile;
+        }
+    });
+
+    tileLayer = new CustomTileLayer({
         tileSize: 512,
         noWrap: true,
-        bounds: tileBounds,
-        minNativeZoom: 0,
-        maxNativeZoom: 0
+        bounds: [[0, 0], [64, 64]],
+        minZoom: 0,
+        maxZoom: 5,
+        minNativeZoom: 6,
+        maxNativeZoom: 6
     });
-
-    // Override getTileUrl to use our custom tile structure
-    tileLayer.getTileUrl = function(coords) {
-        const row = 63 - coords.y; // Flip Y coordinate
-        const col = coords.x;
-        
-        // Validate coordinates are within 0-63 range
-        if (row < 0 || row > 63 || col < 0 || col > 63) {
-            console.warn(`Tile coords out of bounds: row=${row}, col=${col}`);
-            return null; // Return null for invalid tiles
-        }
-        
-        const tilePath = state.getMinimapPath(state.selectedMap, row, col, state.selectedVersion);
-        return tilePath;
-    };
 
     tileLayer.on('tileload', function(e) {
-        addTileLabel(e.tile, e.coords);
-    });
-
-    tileLayer.on('tileloadstart', function(e) {
-        e.tile.style.border = '1px solid #444';
+        const coords = e.coords;
+        console.log(`✓ Loaded tile [${coords.y},${coords.x}]`);
+        addTileLabel(e.tile, coords);
     });
 
     tileLayer.on('tileerror', function(e) {
-        const row = 63 - e.coords.y;
-        const col = e.coords.x;
+        const coords = e.coords;
+        console.warn(`✗ Failed tile [${coords.y},${coords.x}]`);
         e.tile.style.backgroundColor = '#2a2a2a';
-        e.tile.alt = `${row}_${col} (unavailable)`;
+        e.tile.alt = `${coords.y}_${coords.x}`;
+    });
+
+    tileLayer.on('tileloadstart', function(e) {
+        const coords = e.coords;
+        console.log(`→ Requesting tile [${coords.y},${coords.x}]: ${urlTemplate.replace('{x}', coords.x).replace('{y}', coords.y)}`);
     });
 
     tileLayer.addTo(map);
     
     // Add click handler for tiles
+    map.off('click', handleMapClick);
     map.on('click', handleMapClick);
-    
-    // Fit bounds and set max bounds to prevent scrolling outside map
-    // Convert plain array bounds to LatLngBounds for padding
-    const latLngBounds = L.latLngBounds(tileBounds);
-    map.setMaxBounds(latLngBounds.pad(0.5));
-    map.fitBounds(tileBounds);
     
     updateObjectMarkers();
 }
@@ -191,7 +215,7 @@ function calculateBounds(tiles) {
 }
 
 function addTileLabel(tileElement, coords) {
-    const row = 63 - coords.y;
+    const row = coords.y;
     const col = coords.x;
     
     const label = document.createElement('div');
@@ -253,14 +277,22 @@ function handleMapClick(e) {
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     
-    const row = Math.floor(lat);
-    const col = Math.floor(lng);
+    // Clamp to 0-63 range
+    const row = Math.max(0, Math.min(63, Math.floor(lat)));
+    const col = Math.max(0, Math.min(63, Math.floor(lng)));
+    
+    // Update sidebar click info
+    document.getElementById('clickedTile').textContent = `${row}_${col}`;
+    document.getElementById('clickedCoord').textContent = `Tile [${row},${col}] | Leaflet (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
     
     const tiles = state.getTilesForMap(state.selectedMap);
     const tile = tiles.find(t => t.row === row && t.col === col);
     
     if (tile && state.isTileAvailable(state.selectedMap, row, col, state.selectedVersion)) {
+        console.log(`Opening tile detail for [${row},${col}]`);
         openTileViewer(state.selectedMap, row, col);
+    } else {
+        console.log(`Tile [${row},${col}] not available for version ${state.selectedVersion}`);
     }
 }
 

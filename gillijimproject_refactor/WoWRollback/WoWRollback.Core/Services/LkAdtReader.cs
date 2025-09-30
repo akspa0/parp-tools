@@ -50,9 +50,20 @@ public class LkAdtReader
                 
                 int nameIndex = BitConverter.ToInt32(bytes, entryStart + 0);
                 int uniqueId = BitConverter.ToInt32(bytes, entryStart + 4);
-                float worldX = BitConverter.ToSingle(bytes, entryStart + 8);
-                float worldZ = BitConverter.ToSingle(bytes, entryStart + 12);
-                float worldY = BitConverter.ToSingle(bytes, entryStart + 16);
+                
+                // MDDF coordinates are relative to map corner, convert to world coords
+                // Formula from wowdev.wiki: posx = 32 * TILESIZE - mddf.position[0]
+                const float TILESIZE = 533.33333f;
+                const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
+                
+                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);
+                
+                // Convert from map-corner-relative to world coordinates (centered at origin)
+                float worldX = MAP_HALF_SIZE - rawX;
+                float worldY = MAP_HALF_SIZE - rawY;
+                float worldZ = rawZ; // Z is height, doesn't need conversion
                 
                 placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ, "M2"));
             }
@@ -96,9 +107,19 @@ public class LkAdtReader
                 
                 int nameIndex = BitConverter.ToInt32(bytes, entryStart + 0);
                 int uniqueId = BitConverter.ToInt32(bytes, entryStart + 4);
-                float worldX = BitConverter.ToSingle(bytes, entryStart + 8);
-                float worldZ = BitConverter.ToSingle(bytes, entryStart + 12);
-                float worldY = BitConverter.ToSingle(bytes, entryStart + 16);
+                
+                // MODF coordinates are relative to map corner, convert to world coords
+                const float TILESIZE = 533.33333f;
+                const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
+                
+                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);
+                
+                // Convert from map-corner-relative to world coordinates (centered at origin)
+                float worldX = MAP_HALF_SIZE - rawX;
+                float worldY = MAP_HALF_SIZE - rawY;
+                float worldZ = rawZ; // Z is height, doesn't need conversion
                 
                 placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ, "WMO"));
             }

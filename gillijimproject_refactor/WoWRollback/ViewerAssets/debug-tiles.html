@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tile Debug</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+        #debug { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; z-index: 9999; max-width: 400px; max-height: 90vh; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="debug">
+        <div id="log"></div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const log = document.getElementById('log');
+        function addLog(msg) {
+            const line = document.createElement('div');
+            line.textContent = new Date().toLocaleTimeString() + ' - ' + msg;
+            log.appendChild(line);
+            console.log(msg);
+        }
+        
+        addLog('Starting tile debug...');
+        
+        // Simple CRS.Simple map
+        const map = L.map('map', {
+            crs: L.CRS.Simple,
+            minZoom: -3,
+            maxZoom: 3
+        });
+        
+        addLog('Map created');
+        
+        // Test tile layer with zoom 6 for 1:1 coordinate mapping
+        const tileLayer = L.tileLayer('minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.png', {
+            tileSize: 512,
+            noWrap: true,
+            bounds: [[0, 0], [64, 64]],
+            minNativeZoom: 6,
+            maxNativeZoom: 6
+        });
+        
+        addLog('TileLayer created with URL template: minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.png');
+        
+        tileLayer.on('tileloadstart', function(e) {
+            addLog(`LOADSTART: [${e.coords.y},${e.coords.x}] z=${e.coords.z}`);
+        });
+        
+        tileLayer.on('tileload', function(e) {
+            addLog(`SUCCESS: [${e.coords.y},${e.coords.x}]`);
+        });
+        
+        tileLayer.on('tileerror', function(e) {
+            addLog(`ERROR: [${e.coords.y},${e.coords.x}]`);
+        });
+        
+        tileLayer.addTo(map);
+        addLog('TileLayer added to map');
+        
+        // Set view to center
+        map.setView([32, 32], 0);
+        addLog('View set to [32,32] zoom 0');
+        
+        // Log what Leaflet thinks the tile coords should be
+        setTimeout(() => {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            addLog(`Current center: [${center.lat.toFixed(2)}, ${center.lng.toFixed(2)}]`);
+            addLog(`Current zoom: ${zoom}`);
+            addLog(`Pixel origin: ${map.getPixelOrigin()}`);
+            
+            // Try to manually trigger tile load
+            const bounds = map.getBounds();
+            addLog(`Bounds: [[${bounds.getSouth().toFixed(2)},${bounds.getWest().toFixed(2)}], [${bounds.getNorth().toFixed(2)},${bounds.getEast().toFixed(2)}]]`);
+        }, 1000);
+    </script>
+</body>
+</html>
