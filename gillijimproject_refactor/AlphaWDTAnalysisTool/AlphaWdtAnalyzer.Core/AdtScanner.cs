@@ -39,23 +39,40 @@ public sealed class AdtScanner
             result.Tiles.Add(new MapTile(x, y, adtPath));
 
             // Parse MDDF entries (36 bytes each)
+            // Layout: [0-3] nameId, [4-7] uniqueId, [8-11] X, [12-15] Z, [16-19] Y, [20-35] rotation/scale/flags
             var mddf = adt.GetMddfRaw();
             const int mddfEntrySize = 36;
+            
+            // DEBUG: Log first entry if data exists
+            if (mddf.Length >= mddfEntrySize)
+            {
+                Console.WriteLine($"[DEBUG] Tile {x}_{y}: MDDF has {mddf.Length / mddfEntrySize} entries");
+                float testX = BitConverter.ToSingle(mddf, 8);
+                float testZ = BitConverter.ToSingle(mddf, 12);
+                float testY = BitConverter.ToSingle(mddf, 16);
+                Console.WriteLine($"[DEBUG] First MDDF entry coords: ({testX}, {testY}, {testZ})");
+            }
+            
             for (int start = 0; start + mddfEntrySize <= mddf.Length; start += mddfEntrySize)
             {
                 int nameIndex = BitConverter.ToInt32(mddf, start + 0);
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(mddf, start + 4); } catch { uniqueId = null; }
 
+                float worldX = BitConverter.ToSingle(mddf, start + 8);
+                float worldZ = BitConverter.ToSingle(mddf, start + 12);
+                float worldY = BitConverter.ToSingle(mddf, start + 16);
+
                 if (nameIndex >= 0 && nameIndex < mdnm.Count)
                 {
                     var p = mdnm[nameIndex];
                     result.M2Assets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.MdxOrM2, p, wdt.MapName, x, y, uniqueId));
+                    result.Placements.Add(new PlacementRecord(AssetType.MdxOrM2, p, wdt.MapName, x, y, uniqueId, worldX, worldY, worldZ));
                 }
             }
 
             // Parse MODF entries (64 bytes each)
+            // Layout: [0-3] nameId, [4-7] uniqueId, [8-11] X, [12-15] Z, [16-19] Y, [20-63] rotation/bbox/flags
             var modf = adt.GetModfRaw();
             const int modfEntrySize = 64;
             for (int start = 0; start + modfEntrySize <= modf.Length; start += modfEntrySize)
@@ -64,11 +81,15 @@ public sealed class AdtScanner
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(modf, start + 4); } catch { uniqueId = null; }
 
+                float worldX = BitConverter.ToSingle(modf, start + 8);
+                float worldZ = BitConverter.ToSingle(modf, start + 12);
+                float worldY = BitConverter.ToSingle(modf, start + 16);
+
                 if (nameIndex >= 0 && nameIndex < monm.Count)
                 {
                     var p = monm[nameIndex];
                     result.WmoAssets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.Wmo, p, wdt.MapName, x, y, uniqueId));
+                    result.Placements.Add(new PlacementRecord(AssetType.Wmo, p, wdt.MapName, x, y, uniqueId, worldX, worldY, worldZ));
                 }
             }
 

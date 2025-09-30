@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WoW Rollback Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
     <div class="container">
@@ -23,12 +25,17 @@
                 <select id="mapSelect"></select>
             </div>
             <div class="control-group">
-                <label for="searchTile">Search Tile:</label>
-                <input type="text" id="searchTile" placeholder="e.g., 30_30 or r30c30">
+                <label for="showObjects">Show Objects:</label>
+                <input type="checkbox" id="showObjects" checked>
+            </div>
+            <div class="control-group">
+                <label for="zoomLevel">Zoom:</label>
+                <input type="range" id="zoomLevel" min="50" max="200" value="100" step="10">
+                <span id="zoomValue">100%</span>
             </div>
         </div>
 
-        <div id="tileGrid" class="tile-grid"></div>
+        <div id="map"></div>
 
         <div class="legend">
             <h3>Legend</h3>
@@ -39,6 +46,10 @@
             <div class="legend-item">
                 <span class="color-box" style="background: #9E9E9E;"></span>
                 <span>Not available in selected version</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #2196F3; width: 8px; height: 8px; border-radius: 50%;"></span>
+                <span>Object placement</span>
             </div>
         </div>
     </div>
