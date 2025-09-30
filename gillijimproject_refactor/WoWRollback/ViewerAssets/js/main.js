@@ -52,8 +52,13 @@ function setupUI() {
     const versionSelect = document.getElementById('versionSelect');
     const mapSelect = document.getElementById('mapSelect');
     const showObjectsCheck = document.getElementById('showObjects');
-    const zoomSlider = document.getElementById('zoomLevel');
-    const zoomValue = document.getElementById('zoomValue');
+    
+    // Sidebar toggle
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('open');
+    });
 
     // Populate version select
     state.index.versions.forEach(version => {
@@ -119,17 +124,28 @@ function updateTileLayer() {
     const tiles = state.getTilesForMap(state.selectedMap);
     if (tiles.length === 0) return;
 
-    // Create custom tile layer
+    const tileBounds = calculateBounds(tiles);
+
+    // Create custom tile layer with strict bounds
     tileLayer = L.tileLayer.wms('', {
         tileSize: 512,
         noWrap: true,
-        bounds: calculateBounds(tiles)
+        bounds: tileBounds,
+        minNativeZoom: 0,
+        maxNativeZoom: 0
     });
 
     // Override getTileUrl to use our custom tile structure
     tileLayer.getTileUrl = function(coords) {
         const row = 63 - coords.y; // Flip Y coordinate
         const col = coords.x;
+        
+        // Validate coordinates are within 0-63 range
+        if (row < 0 || row > 63 || col < 0 || col > 63) {
+            console.warn(`Tile coords out of bounds: row=${row}, col=${col}`);
+            return null; // Return null for invalid tiles
+        }
+        
         const tilePath = state.getMinimapPath(state.selectedMap, row, col, state.selectedVersion);
         return tilePath;
     };
@@ -154,9 +170,11 @@ function updateTileLayer() {
     // Add click handler for tiles
     map.on('click', handleMapClick);
     
-    // Fit bounds
-    const bounds = calculateBounds(tiles);
-    map.fitBounds(bounds);
+    // Fit bounds and set max bounds to prevent scrolling outside map
+    // Convert plain array bounds to LatLngBounds for padding
+    const latLngBounds = L.latLngBounds(tileBounds);
+    map.setMaxBounds(latLngBounds.pad(0.5));
+    map.fitBounds(tileBounds);
     
     updateObjectMarkers();
 }

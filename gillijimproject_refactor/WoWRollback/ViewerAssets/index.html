@@ -2,42 +2,43 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>WoW Rollback Viewer</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="styles.css">
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>WoW Rollback Comparison Viewer</h1>
-            <div id="comparisonInfo"></div>
-        </header>
+    <!-- Sidebar overlay -->
+    <button id="sidebarToggle" class="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
 
-        <div class="controls">
-            <div class="control-group">
-                <label for="versionSelect">Version:</label>
-                <select id="versionSelect"></select>
-            </div>
-            <div class="control-group">
-                <label for="mapSelect">Map:</label>
-                <select id="mapSelect"></select>
-            </div>
-            <div class="control-group">
-                <label for="showObjects">Show Objects:</label>
-                <input type="checkbox" id="showObjects" checked>
-            </div>
-            <div class="control-group">
-                <label for="zoomLevel">Zoom:</label>
-                <input type="range" id="zoomLevel" min="50" max="200" value="100" step="10">
-                <span id="zoomValue">100%</span>
-            </div>
+    <div id="sidebar" class="sidebar">
+        <h2>WoW Version Comparison</h2>
+        <div id="comparisonInfo" class="info-section"></div>
+        
+        <div class="control-group">
+            <label for="versionSelect">Version:</label>
+            <select id="versionSelect"></select>
+        </div>
+        
+        <div class="control-group">
+            <label for="mapSelect">Map:</label>
+            <select id="mapSelect"></select>
+        </div>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="showObjects" checked> Show Objects
+            </label>
         </div>
 
-        <div id="map"></div>
-
-        <div class="legend">
+        <div class="info-section">
+            <strong>Last Click:</strong><br>
+            Tile: <span id="clickedTile">Click a tile</span><br>
+            Coord: <span id="clickedCoord">-</span>
             <h3>Legend</h3>
             <div class="legend-item">
                 <span class="color-box" style="background: #4CAF50;"></span>
@@ -54,6 +55,10 @@
         </div>
     </div>
 
+    <!-- Full-page Leaflet map -->
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
         import { init } from './js/main.js';
         init();
