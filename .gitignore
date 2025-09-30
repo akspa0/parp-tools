@@ -452,3 +452,5 @@ gillijimproject_refactor/test_data
 # libs...
 *libs/*
 
+# WoWRollback outputs
+*gillijimproject_refactor/WoWRollback/rollback_outputs/*
