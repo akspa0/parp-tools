@@ -24,6 +24,8 @@ public sealed class AdtScanner
         var monm = wdt.MonmFiles.Select(ListfileLoader.NormalizePath).ToList();
         var baseDir = Path.GetDirectoryName(wdt.WdtPath) ?? ".";
 
+        Console.WriteLine($"[AdtScanner] Scanning WDT: {wdt.MapName}, {wdt.AdtNumbers.Count} ADTs");
+
         foreach (var adtNum in wdt.AdtNumbers)
         {
             var off = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
@@ -39,19 +41,11 @@ public sealed class AdtScanner
             result.Tiles.Add(new MapTile(x, y, adtPath));
 
             // Parse MDDF entries (36 bytes each)
-            // Layout: [0-3] nameId, [4-7] uniqueId, [8-11] X, [12-15] Z, [16-19] Y, [20-35] rotation/scale/flags
+            // In Alpha 0.5.3, MDDF coordinates are ALWAYS (0,0,0) - they weren't implemented yet!
+            // Blizzard didn't add world positions to MDDF/MODF until later Alpha builds.
+            // We can only get tile coordinates, not actual world positions.
             var mddf = adt.GetMddfRaw();
             const int mddfEntrySize = 36;
-            
-            // DEBUG: Log first entry if data exists
-            if (mddf.Length >= mddfEntrySize)
-            {
-                Console.WriteLine($"[DEBUG] Tile {x}_{y}: MDDF has {mddf.Length / mddfEntrySize} entries");
-                float testX = BitConverter.ToSingle(mddf, 8);
-                float testZ = BitConverter.ToSingle(mddf, 12);
-                float testY = BitConverter.ToSingle(mddf, 16);
-                Console.WriteLine($"[DEBUG] First MDDF entry coords: ({testX}, {testY}, {testZ})");
-            }
             
             for (int start = 0; start + mddfEntrySize <= mddf.Length; start += mddfEntrySize)
             {
@@ -59,9 +53,10 @@ public sealed class AdtScanner
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(mddf, start + 4); } catch { uniqueId = null; }
 
-                float worldX = BitConverter.ToSingle(mddf, start + 8);
-                float worldZ = BitConverter.ToSingle(mddf, start + 12);
-                float worldY = BitConverter.ToSingle(mddf, start + 16);
+                // Coordinates are not stored in Alpha 0.5.3 MDDF - use tile center as fallback
+                float worldX = 0.0f;
+                float worldY = 0.0f;
+                float worldZ = 0.0f;
 
                 if (nameIndex >= 0 && nameIndex < mdnm.Count)
                 {

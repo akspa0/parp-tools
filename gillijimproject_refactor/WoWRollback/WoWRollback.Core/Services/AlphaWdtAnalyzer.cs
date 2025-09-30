@@ -16,8 +16,9 @@ public static class AlphaWdtAnalyzer
 {
     /// <summary>
     /// Analyzes an Alpha WDT file and extracts placement UniqueID ranges from all tiles.
+    /// If convertedAdtDir is provided, uses converted LK ADT files for accurate world coordinates.
     /// </summary>
-    public static AlphaAnalysisResult AnalyzeAlphaWdt(string wdtPath)
+    public static AlphaAnalysisResult AnalyzeAlphaWdt(string wdtPath, string? convertedAdtDir = null)
     {
         if (!File.Exists(wdtPath))
             throw new FileNotFoundException($"Alpha WDT file not found: {wdtPath}");
@@ -27,6 +28,8 @@ public static class AlphaWdtAnalyzer
         var assets = new List<PlacementAsset>();
 
         Console.WriteLine($"[info] Beginning archaeological excavation of {mapName}...");
+        if (convertedAdtDir != null)
+            Console.WriteLine($"[info] Using converted LK ADT files from: {convertedAdtDir}");
 
         try
         {
@@ -37,12 +40,27 @@ public static class AlphaWdtAnalyzer
             var adtScanner = new global::AlphaWdtAnalyzer.Core.AdtScanner();
             var adtResult = adtScanner.Scan(wdtScanner);
 
+            // Build coordinate lookup from converted LK ADT files if available
+            var coordinateLookup = BuildCoordinateLookup(mapName, adtResult, convertedAdtDir);
+
             foreach (var placement in adtResult.Placements)
             {
                 var placementKind = ResolvePlacementKind(placement.Type);
                 uint? uniqueId = placement.UniqueId.HasValue
                     ? unchecked((uint)placement.UniqueId.Value)
                     : null;
+
+                // Try to get coordinates from converted LK ADT
+                float worldX = placement.WorldX;
+                float worldY = placement.WorldY;
+                float worldZ = placement.WorldZ;
+                
+                if (uniqueId.HasValue && coordinateLookup.TryGetValue(uniqueId.Value, out var coords))
+                {
+                    worldX = coords.X;
+                    worldY = coords.Y;
+                    worldZ = coords.Z;
+                }
 
                 assets.Add(new PlacementAsset(
                     placement.MapName,
@@ -52,9 +70,9 @@ public static class AlphaWdtAnalyzer
                     uniqueId,
                     placement.AssetPath,
                     $"{placement.MapName}_{placement.TileX}_{placement.TileY}.adt",
-                    placement.WorldX,
-                    placement.WorldY,
-                    placement.WorldZ));
+                    worldX,
+                    worldY,
+                    worldZ));
             }
 
             // Extract placement ranges grouped by tile and type (unique IDs only)
@@ -99,6 +117,49 @@ public static class AlphaWdtAnalyzer
         }
 
         return new AlphaAnalysisResult(ranges, assets);
+    }
+
+    private static Dictionary<uint, (float X, float Y, float Z)> BuildCoordinateLookup(
+        string mapName,
+        global::AlphaWdtAnalyzer.Core.AdtScanner.Result adtResult,
+        string? convertedAdtDir)
+    {
+        var lookup = new Dictionary<uint, (float, float, float)>();
+        
+        if (string.IsNullOrEmpty(convertedAdtDir) || !Directory.Exists(convertedAdtDir))
+            return lookup;
+
+        Console.WriteLine($"[info] Building coordinate lookup from converted LK ADT files...");
+
+        // Get all unique tiles from the scan
+        var tiles = adtResult.Tiles.Distinct().ToList();
+        int coordsFound = 0;
+
+        foreach (var tile in tiles)
+        {
+            var adtFileName = $"{mapName}_{tile.X}_{tile.Y}.adt";
+            var adtPath = Path.Combine(convertedAdtDir, adtFileName);
+
+            if (!File.Exists(adtPath))
+                continue;
+
+            // Read MDDF and MODF from converted LK ADT
+            var mddfPlacements = LkAdtReader.ReadMddf(adtPath);
+            var modfPlacements = LkAdtReader.ReadModf(adtPath);
+
+            foreach (var placement in mddfPlacements.Concat(modfPlacements))
+            {
+                var uid = unchecked((uint)placement.UniqueId);
+                if (!lookup.ContainsKey(uid))
+                {
+                    lookup[uid] = (placement.WorldX, placement.WorldY, placement.WorldZ);
+                    coordsFound++;
+                }
+            }
+        }
+
+        Console.WriteLine($"[info] Found coordinates for {coordsFound} objects in converted LK ADT files");
+        return lookup;
     }
 
     private static PlacementKind ResolvePlacementKind(object? typeValue)

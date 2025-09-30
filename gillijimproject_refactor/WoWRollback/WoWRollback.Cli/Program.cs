@@ -52,6 +52,7 @@ internal static class Program
         Require(opts, "wdt-file");
         var wdtFile = opts["wdt-file"];
         var outRoot = opts.GetValueOrDefault("out", "");
+        var convertedAdtDir = opts.GetValueOrDefault("converted-adt-dir", null);
         var mapName = Path.GetFileNameWithoutExtension(wdtFile);
 
         var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtFile)) ?? wdtFile);
@@ -59,7 +60,7 @@ internal static class Program
         Console.WriteLine($"[info] Archaeological analysis session: {sessionDir}");
         Console.WriteLine($"[info] Excavating Alpha WDT: {wdtFile}");
 
-        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile);
+        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile, convertedAdtDir);
         var csvResult = RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{mapName}", analysis.Ranges, analysis.Assets);
 
         Console.WriteLine($"[ok] Extracted {analysis.Ranges.Count} archaeological placement layers");
