@@ -7,11 +7,22 @@ export class TileCanvas {
         this.image = null;
         this.width = this.config.minimap?.width || 512;
         this.height = this.config.minimap?.height || 512;
+        // Zoom/Pan state
+        this.scale = 1;
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this._panning = false;
+        this._last = { x: 0, y: 0 };
+
+        // Input handlers
+        this._bindInteractions();
     }
 
     async loadImage(path) {
         return new Promise((resolve, reject) => {
             const img = new Image();
+            img.decoding = 'async';
+            const src = path + (path.includes('?') ? '&' : '?') + 't=' + Date.now();
             img.onload = () => {
                 this.image = img;
                 this.canvas.width = img.width;
@@ -22,17 +33,23 @@ export class TileCanvas {
             img.onerror = () => {
                 reject(new Error(`Failed to load image: ${path}`));
             };
-            img.src = path;
+            img.src = src;
         });
     }
 
     draw() {
+        // Clear and apply transform
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Draw placeholder if no image
         if (!this.image) {
             this.drawPlaceholder();
             return;
         }
 
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.imageSmoothingEnabled = false;
+        this.ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
         this.ctx.drawImage(this.image, 0, 0);
     }
 
@@ -56,15 +73,17 @@ export class TileCanvas {
 
     drawOverlay(objects, colorMap) {
         if (!objects || objects.length === 0) return;
-
+        // Use current transform (same as image)
         objects.forEach(obj => {
             if (typeof obj.pixelX !== 'number' || typeof obj.pixelY !== 'number') return;
 
-            const color = colorMap[obj.diffType] || colorMap.default || '#4CAF50';
-            
+            const label = obj.label || obj.diffType || 'default';
+            const color = colorMap[label] || colorMap.default || '#4CAF50';
+            const radius = this._radiusFor(label);
+
             this.ctx.fillStyle = color;
             this.ctx.beginPath();
-            this.ctx.arc(obj.pixelX, obj.pixelY, 4, 0, 2 * Math.PI);
+            this.ctx.arc(obj.pixelX, obj.pixelY, radius, 0, 2 * Math.PI);
             this.ctx.fill();
 
             // Outline for visibility

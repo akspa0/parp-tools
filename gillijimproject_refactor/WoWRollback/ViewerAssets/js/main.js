@@ -1,5 +1,6 @@
 // Main entry point for index.html - Leaflet Map Viewer
 import { state } from './state.js';
+import { clearCache } from './overlayLoader.js';
 import { loadOverlay } from './overlayLoader.js';
 
 let map;
@@ -7,6 +8,7 @@ let tileLayer; // no longer used, kept for minimal diff
 let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
 let objectMarkers = L.layerGroup();
+let lastVersion = null;
 let showObjects = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
@@ -124,6 +126,17 @@ function setupUI() {
 }
 
 function onStateChange() {
+    // If version changed, clear caches and force rebuild of minimap overlays
+    if (lastVersion !== state.selectedVersion) {
+        lastVersion = state.selectedVersion;
+        clearCache();
+        // Remove all existing minimap image overlays so URLs (with version) are refreshed
+        for (const [, overlay] of minimapImages.entries()) {
+            minimapLayer.removeLayer(overlay);
+        }
+        minimapImages.clear();
+    }
+
     updateTileLayer();
     updateObjectMarkers();
     drawOverview();

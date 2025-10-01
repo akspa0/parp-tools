@@ -53,9 +53,12 @@ public static class CoordinateTransformer
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
 
         // Flip X to align with minimap tile orientation; keep Y non-inverted (top-left origin)
-        var px = (1.0 - ClampUnit(localX)) * width;
+        // Map normalized [0..1] into pixel index domain [0..W-1]/[0..H-1] to avoid crossing into adjacent tiles.
+        var w1 = Math.Max(1, width - 1);
+        var h1 = Math.Max(1, height - 1);
+        var px = (1.0 - ClampUnit(localX)) * w1;
         // Use top-left origin without inversion so Y grows downward with localY
-        var py = ClampUnit(localY) * height;
+        var py = ClampUnit(localY) * h1;
         return (px, py);
     }
 

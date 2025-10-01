@@ -42,8 +42,10 @@ export function applyRotate(lx, ly, rotateDeg) {
 }
 
 export function toPixels(lx, ly, width, height, invertY = true) {
-    const x = lx * width;
-    const y = (invertY ? (1 - ly) : ly) * height;
+    const w1 = Math.max(1, width - 1);
+    const h1 = Math.max(1, height - 1);
+    const x = lx * w1;
+    const y = (invertY ? (1 - ly) : ly) * h1;
     return { x, y };
 }
 

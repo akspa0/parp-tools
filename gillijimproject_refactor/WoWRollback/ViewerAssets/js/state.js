@@ -6,6 +6,7 @@ export class State {
         this.selectedVersion = null;
         this.selectedMap = null;
         this.listeners = [];
+        this.cacheBust = 0;
     }
 
     async loadIndex() {
@@ -44,6 +45,7 @@ export class State {
     setVersion(version) {
         if (this.index.versions.includes(version)) {
             this.selectedVersion = version;
+            this.cacheBust = Date.now();
             this.notify();
         }
     }
@@ -73,7 +75,8 @@ export class State {
 
     getMinimapPath(mapName, row, col, version) {
         // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.png
-        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.png`;
+        const t = this.cacheBust || 0;
+        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.png?t=${t}`;
     }
 
     getOverlayPath(mapName, row, col) {

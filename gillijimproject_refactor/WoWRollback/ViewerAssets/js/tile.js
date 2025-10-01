@@ -1,7 +1,7 @@
 // Tile detail viewer
 import { state } from './state.js';
 import { TileCanvas } from './tileCanvas.js';
-import { loadOverlay, loadDiff } from './overlayLoader.js';
+import { loadOverlay, loadDiff, clearCache } from './overlayLoader.js';
 import { autoFit, computeLocalForTile, toPixels } from './fit.js';
 
 let currentMap, currentRow, currentCol, currentVersion;
@@ -69,7 +69,19 @@ function drawOnCanvas(objects) {
         display.push({ pixelX: px.x, pixelY: px.y, diffType: o.diffType || 'default' });
     }
 
-    const colorMap = { default: '#4CAF50', added: '#4CAF50', removed: '#E53935', moved: '#FFB300', changed: '#8E24AA' };
+    const colorMap = {
+        // Diff colors
+        default: '#4CAF50',
+        added: '#4CAF50',
+        removed: '#E53935',
+        moved: '#FFB300',
+        changed: '#8E24AA',
+        // Type colors
+        wmo: '#FF9800',
+        m2: '#00E5FF',
+        mdx: '#00E5FF',
+        other: '#8BC34A'
+    };
     tileCanvas.drawOverlay(display, colorMap);
     const meanEdge = objects.length > 0 ? edgeAccum / objects.length : 0;
     updateDiagnostics(display, inRange, outRange, meanEdge);
@@ -135,6 +147,7 @@ function setupUI() {
 
     versionSelect.addEventListener('change', async (e) => {
         currentVersion = e.target.value;
+        clearCache();
         await loadTile();
     });
 
@@ -196,6 +209,16 @@ function setupUI() {
     if (fitInvertY) fitInvertY.addEventListener('change', () => { fit.invertY = fitInvertY.checked; renderObjects(); });
     if (fitAutoBtn) fitAutoBtn.addEventListener('click', () => { doAutoFit(); renderObjects(); });
     if (fitResetBtn) fitResetBtn.addEventListener('click', () => { resetFit(); });
+
+    // Zoom toolbar
+    const zoomInBtn = document.getElementById('zoomIn');
+    const zoomOutBtn = document.getElementById('zoomOut');
+    const zoomResetBtn = document.getElementById('zoomReset');
+    const zoomLevel = document.getElementById('zoomLevel');
+    const updateZoomLabel = () => { if (zoomLevel && tileCanvas) zoomLevel.textContent = `${tileCanvas.getZoom().toFixed(2)}x`; };
+    if (zoomInBtn) zoomInBtn.addEventListener('click', () => { tileCanvas.zoomIn(); updateZoomLabel(); renderObjects(); });
+    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => { tileCanvas.zoomOut(); updateZoomLabel(); renderObjects(); });
+    if (zoomResetBtn) zoomResetBtn.addEventListener('click', () => { tileCanvas.resetView(); updateZoomLabel(); renderObjects(); });
 }
 
 async function loadTile() {
@@ -276,7 +299,8 @@ function renderObjects() {
     objectList.innerHTML = objects.map(obj => createObjectItem(obj)).join('');
 
     // Draw markers on canvas using current fit
-    drawOnCanvas(objects);
+    const typed = objects.map(o => ({ ...o, label: classifyType(o) }));
+    drawOnCanvas(typed);
 }
 
 function createObjectItem(obj) {

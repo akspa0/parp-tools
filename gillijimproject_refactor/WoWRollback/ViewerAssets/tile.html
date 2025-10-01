@@ -15,6 +15,12 @@
 
         <div class="tile-content">
             <div class="canvas-container">
+                <div class="toolbar" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+                    <button id="zoomIn">+</button>
+                    <button id="zoomOut">−</button>
+                    <button id="zoomReset">Reset</button>
+                    <span style="color:#9E9E9E; font-size:0.9em;">Zoom: <span id="zoomLevel">1.00x</span></span>
+                </div>
                 <canvas id="tileCanvas"></canvas>
                 <div id="canvasOverlay" class="canvas-overlay"></div>
             </div>

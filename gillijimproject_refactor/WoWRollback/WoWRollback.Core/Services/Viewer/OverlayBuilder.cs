@@ -70,6 +70,66 @@ public sealed class OverlayBuilder
         });
     }
 
+    /// <summary>
+    /// Generates overlay JSON, forcing a layer entry for every version in <paramref name="allVersions"/>.
+    /// Versions without objects will have an empty kinds array.
+    /// </summary>
+    public string BuildOverlayJson(
+        string map,
+        int tileRow,
+        int tileCol,
+        IEnumerable<AssetTimelineDetailedEntry> entries,
+        IEnumerable<string> allVersions,
+        ViewerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(allVersions);
+        options ??= ViewerOptions.CreateDefault();
+
+        var filtered = entries
+            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
+            .ToList();
+
+        var byVersion = filtered
+            .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var layers = allVersions
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .Select(version => new
+            {
+                version,
+                kinds = (byVersion.TryGetValue(version, out var list)
+                        ? (IEnumerable<AssetTimelineDetailedEntry>)list
+                        : Array.Empty<AssetTimelineDetailedEntry>())
+                    .GroupBy(e => e.Kind)
+                    .Select(kindGroup => new
+                    {
+                        kind = kindGroup.Key.ToString(),
+                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                    })
+                    .ToList()
+            })
+            .ToList();
+
+        var payload = new
+        {
+            map,
+            tile = new { row = tileRow, col = tileCol },
+            minimap = new { width = options.MinimapWidth, height = options.MinimapHeight },
+            layers
+        };
+
+        return JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            Converters = { new JsonStringEnumConverter() }
+        });
+    }
+
     private static object BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);

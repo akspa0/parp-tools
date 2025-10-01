@@ -155,8 +155,8 @@ public sealed class ViewerReportWriter
                 }
 
                 var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
-                // Always write overlay JSON, even if no entries for this tile (results in empty layers)
-                var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, resolvedOptions);
+                // Always write overlay JSON, and include all versions (empty kinds when no objects)
+                var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, result.Versions, resolvedOptions);
                 File.WriteAllText(overlayPath, overlayJson);
 
                 if (effectiveDiffPair is { } pair &&

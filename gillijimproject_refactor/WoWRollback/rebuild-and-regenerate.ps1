@@ -27,9 +27,59 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "✓ Build complete" -ForegroundColor Green
 Write-Host ""
 
+# Helper: Discover map names from AlphaRoot when -Maps auto
+function Get-MapsFromAlphaRoot([string]$root) {
+    if (-not $root -or -not (Test-Path $root)) { return @() }
+    $results = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    $tryPaths = @(
+        Join-Path $root 'tree\World\Maps',
+        Join-Path $root 'tree\world\maps',
+        Join-Path $root 'World\Maps',
+        Join-Path $root 'world\maps'
+    )
+    foreach ($p in $tryPaths) {
+        if (Test-Path $p) {
+            Get-ChildItem -Path $p -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue |
+                ForEach-Object { [void]$results.Add($_.Directory.Name) }
+        }
+    }
+    # Also consider pre-numbered minimaps folder structure
+    $miniPaths = @(
+        Join-Path $root 'tree\World\Minimaps',
+        Join-Path $root 'tree\world\minimaps',
+        Join-Path $root 'World\Minimaps',
+        Join-Path $root 'world\minimaps'
+    )
+    foreach ($mp in $miniPaths) {
+        if (Test-Path $mp) {
+            Get-ChildItem -Path $mp -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { [void]$results.Add($_.Name) }
+        }
+    }
+    # Ensure commonly useful maps are included if present
+    foreach ($m in @('PVPZone01','Shadowfang')) { [void]$results.Add($m) }
+    return $results.ToArray() | Sort-Object
+}
+
 # Step 2: Regenerate comparison data
 Write-Host "[2/3] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
 $versionsArg = ($Versions -join ',')
+
+# Auto-discover maps if requested
+if ($Maps.Count -eq 1 -and $Maps[0].ToLower() -eq 'auto') {
+    if (-not $AlphaRoot) {
+        Write-Host "-Maps auto requires -AlphaRoot" -ForegroundColor Red
+        exit 1
+    }
+    $discovered = Get-MapsFromAlphaRoot -root $AlphaRoot
+    if (-not $discovered -or $discovered.Count -eq 0) {
+        Write-Host "No maps discovered under $AlphaRoot" -ForegroundColor Yellow
+        $Maps = @('Azeroth','Kalimdor','Kalidar','PVPZone01','Shadowfang')
+    } else {
+        $Maps = $discovered
+    }
+}
+
 $mapsArg = ($Maps -join ',')
 Write-Host ("Versions: {0}" -f $versionsArg) -ForegroundColor Gray
 Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
