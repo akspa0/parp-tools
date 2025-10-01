@@ -185,7 +185,12 @@ internal sealed class MinimapLocator
             Combine(versionDirectory, "World", "Textures", "Minimap"),
             Combine(versionDirectory, "world", "textures", "minimap"),
             Combine(versionDirectory, "Textures", "Minimap"),
-            Combine(versionDirectory, "textures", "minimap")
+            Combine(versionDirectory, "textures", "minimap"),
+            // Fallback: pre-numbered minimaps
+            Combine(versionDirectory, "tree", "World", "Minimaps"),
+            Combine(versionDirectory, "tree", "world", "minimaps"),
+            Combine(versionDirectory, "World", "Minimaps"),
+            Combine(versionDirectory, "world", "minimaps")
         };
 
         foreach (var path in preferred)
@@ -199,9 +204,16 @@ internal sealed class MinimapLocator
                 .FirstOrDefault(dir =>
                 {
                     var name = Path.GetFileName(dir);
-                    if (!name.Equals("minimap", StringComparison.OrdinalIgnoreCase)) return false;
                     var parent = Path.GetDirectoryName(dir);
-                    return parent is not null && Path.GetFileName(parent).Equals("textures", StringComparison.OrdinalIgnoreCase);
+                    if (name.Equals("minimap", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return parent is not null && Path.GetFileName(parent).Equals("textures", StringComparison.OrdinalIgnoreCase);
+                    }
+                    if (name.Equals("Minimaps", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return parent is not null && Path.GetFileName(parent).Equals("World", StringComparison.OrdinalIgnoreCase);
+                    }
+                    return false;
                 });
         }
         catch
@@ -409,6 +421,22 @@ internal sealed class MinimapLocator
         using var md5 = System.Security.Cryptography.MD5.Create();
         var hash = md5.ComputeHash(stream);
         return BitConverter.ToString(hash).Replace("-", string.Empty);
+    }
+
+    // --- Enumeration helpers to expose loaded maps/tiles ---
+    public IEnumerable<string> EnumerateMaps(string version)
+    {
+        if (!_versionMapTiles.TryGetValue(version, out var mapTiles)) yield break;
+        foreach (var map in mapTiles.Keys)
+            yield return map;
+    }
+
+    public IEnumerable<(int Row, int Col)> EnumerateTiles(string version, string map)
+    {
+        if (!_versionMapTiles.TryGetValue(version, out var mapTiles)) yield break;
+        if (!mapTiles.TryGetValue(map, out var tiles)) yield break;
+        foreach (var kv in tiles.Keys)
+            yield return kv;
     }
 
     internal readonly record struct MinimapTile(string SourcePath, int TileX, int TileY, string Version, bool IsAlternate)

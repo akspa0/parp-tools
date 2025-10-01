@@ -58,9 +58,39 @@ public sealed class ViewerReportWriter
         Directory.CreateDirectory(diffsRoot);
 
         var entries = result.AssetTimelineDetailed;
-        var maps = entries
-            .GroupBy(e => e.Map, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var minimapLocator = MinimapLocator.Build(result.RootDirectory, result.Versions);
+
+        // Collect map names from both placements and minimap sources
+        var mapNames = new HashSet<string>(comparer);
+        foreach (var m in entries.Select(e => e.Map)) mapNames.Add(m);
+        foreach (var v in result.Versions)
+        {
+            try
+            {
+                foreach (var m in minimapLocator.EnumerateMaps(v)) mapNames.Add(m);
+            }
+            catch { /* ignore per-version lookup errors */ }
+        }
+
+        var maps = mapNames
+            .OrderBy(n => n, comparer)
+            .Select(name => new
+            {
+                Name = name,
+                EntryTiles = entries
+                    .Where(e => string.Equals(e.Map, name, StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(e => (e.TileRow, e.TileCol))
+                    .Select(g => g.Key)
+                    .ToHashSet(),
+                MinimapTiles = result.Versions
+                    .SelectMany(v =>
+                    {
+                        try { return minimapLocator.EnumerateTiles(v, name); }
+                        catch { return Array.Empty<(int Row, int Col)>(); }
+                    })
+                    .ToHashSet()
+            })
             .ToList();
 
         var entriesByVersion = entries
@@ -69,35 +99,30 @@ public sealed class ViewerReportWriter
 
         var chosenDefaultVersion = SelectDefaultVersion(resolvedOptions, result);
         var effectiveDiffPair = ResolveDiffPair(diffPair, resolvedOptions, result);
-        var minimapLocator = MinimapLocator.Build(result.RootDirectory, result.Versions);
 
         var mapTileCatalog = new Dictionary<string, List<TileDescriptor>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var mapGroup in maps)
         {
-            var mapName = mapGroup.Key;
+            var mapName = mapGroup.Name;
             var safeMap = Sanitize(mapName);
             var mapOverlayDir = Path.Combine(overlaysRoot, safeMap);
             var mapDiffDir = Path.Combine(diffsRoot, safeMap);
             Directory.CreateDirectory(mapOverlayDir);
             Directory.CreateDirectory(mapDiffDir);
 
-            var tiles = mapGroup
-                .GroupBy(e => (e.TileRow, e.TileCol))
-                .OrderBy(g => g.Key.TileRow)
-                .ThenBy(g => g.Key.TileCol)
-                .ToList();
+            // Compute union of tiles from placements and minimap sources
+            var tileSet = new HashSet<(int Row, int Col)>();
+            foreach (var t in mapGroup.EntryTiles) tileSet.Add(t);
+            foreach (var t in mapGroup.MinimapTiles) tileSet.Add(t);
+            var tiles = tileSet.OrderBy(t => t.Row).ThenBy(t => t.Col).ToList();
 
             foreach (var tileGroup in tiles)
             {
-                var (row, col) = tileGroup.Key;
+                var (row, col) = tileGroup;
 
-                // Export minimap for each version that has this tile
-                var versionsForTile = tileGroup
-                    .Select(e => e.Version)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                // Export minimap for every version (write placeholder if unavailable)
+                var versionsForTile = result.Versions.OrderBy(v => v, comparer).ToList();
 
                 foreach (var version in versionsForTile)
                 {
@@ -130,6 +155,7 @@ public sealed class ViewerReportWriter
                 }
 
                 var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
+                // Always write overlay JSON, even if no entries for this tile (results in empty layers)
                 var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, resolvedOptions);
                 File.WriteAllText(overlayPath, overlayJson);
 
