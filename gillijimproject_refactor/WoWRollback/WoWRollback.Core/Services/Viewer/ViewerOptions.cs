@@ -10,7 +10,9 @@ public sealed record ViewerOptions(
     int MinimapWidth,
     int MinimapHeight,
     double DiffDistanceThreshold,
-    double MoveEpsilonRatio
+    double MoveEpsilonRatio,
+    string MinimapFormat,     // png | jpg | webp
+    int MinimapQuality        // 1..100, used for lossy formats
 )
 {
     public static ViewerOptions CreateDefault()
@@ -20,5 +22,7 @@ public sealed record ViewerOptions(
             MinimapWidth: 512,
             MinimapHeight: 512,
             DiffDistanceThreshold: 10.0,
-            MoveEpsilonRatio: 0.005);
+            MoveEpsilonRatio: 0.005,
+            MinimapFormat: "jpg",
+            MinimapQuality: 85);
 }

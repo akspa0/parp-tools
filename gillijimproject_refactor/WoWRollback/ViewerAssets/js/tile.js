@@ -66,7 +66,8 @@ function drawOnCanvas(objects) {
         const ex = Math.min(Math.abs(lx), Math.abs(1 - lx));
         const ey = Math.min(Math.abs(ly), Math.abs(1 - ly));
         edgeAccum += 0.5 * (ex + ey);
-        display.push({ pixelX: px.x, pixelY: px.y, diffType: o.diffType || 'default' });
+        // Preserve type label (wmo/m2/mdx/other) so renderer can color/size markers
+        display.push({ pixelX: px.x, pixelY: px.y, diffType: o.diffType || 'default', label: o.label });
     }
 
     const colorMap = {

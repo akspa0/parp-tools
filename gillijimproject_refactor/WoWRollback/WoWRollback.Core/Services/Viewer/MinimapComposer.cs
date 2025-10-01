@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using BLPSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
@@ -79,13 +80,40 @@ public sealed class MinimapComposer
                     }));
             }
 
-            var encoder = new PngEncoder
-            {
-                ColorType = PngColorType.RgbWithAlpha
-            };
-
+            // Choose encoder based on options.MinimapFormat (png | jpg | webp)
+            var fmt = (options.MinimapFormat ?? "png").Trim().ToLowerInvariant();
             await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+
+            if (fmt == "jpg" || fmt == "jpeg")
+            {
+                var enc = new JpegEncoder { Quality = Math.Clamp(options.MinimapQuality, 1, 100) };
+                await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+            }
+            else if (fmt == "webp")
+            {
+                // Attempt WebP; if encoder not available at runtime, fall back to JPEG
+                var q = Math.Clamp(options.MinimapQuality, 1, 100);
+                try
+                {
+#if HAS_WEBP
+                    // If project adds a WebP encoder package providing SaveAsWebpAsync
+                    await image.SaveAsWebpAsync(fileStream, quality: q, cancellationToken: cancellationToken).ConfigureAwait(false);
+#else
+                    var enc = new JpegEncoder { Quality = q };
+                    await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+#endif
+                }
+                catch
+                {
+                    var enc = new JpegEncoder { Quality = q };
+                    await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                var encoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+                await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -140,12 +168,35 @@ public sealed class MinimapComposer
             }
         });
 
-        var encoder = new PngEncoder
-        {
-            ColorType = PngColorType.RgbWithAlpha
-        };
-
+        var fmt = (options.MinimapFormat ?? "png").Trim().ToLowerInvariant();
         await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+        if (fmt == "jpg" || fmt == "jpeg")
+        {
+            var enc = new JpegEncoder { Quality = Math.Clamp(options.MinimapQuality, 1, 100) };
+            await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+        }
+        else if (fmt == "webp")
+        {
+            var q = Math.Clamp(options.MinimapQuality, 1, 100);
+            try
+            {
+#if HAS_WEBP
+                await image.SaveAsWebpAsync(fileStream, quality: q, cancellationToken: cancellationToken).ConfigureAwait(false);
+#else
+                var enc = new JpegEncoder { Quality = q };
+                await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+#endif
+            }
+            catch
+            {
+                var enc = new JpegEncoder { Quality = q };
+                await image.SaveAsJpegAsync(fileStream, enc, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            var encoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+            await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+        }
     }
 }

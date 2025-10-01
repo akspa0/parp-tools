@@ -11,7 +11,7 @@ export class State {
 
     async loadIndex() {
         try {
-            const response = await fetch('index.json');
+            const response = await fetch(`index.json?t=${Date.now()}`, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error(`Failed to load index.json: ${response.status} ${response.statusText}`);
             }
@@ -30,7 +30,7 @@ export class State {
 
     async loadConfig() {
         try {
-            const response = await fetch('config.json');
+            const response = await fetch(`config.json?t=${Date.now()}`, { cache: 'no-store' });
             if (response.ok) {
                 this.config = await response.json();
             } else {
@@ -54,6 +54,7 @@ export class State {
         const mapExists = this.index.maps.some(m => m.map === map);
         if (mapExists) {
             this.selectedMap = map;
+            this.cacheBust = Date.now();
             this.notify();
         }
     }
@@ -74,9 +75,10 @@ export class State {
     }
 
     getMinimapPath(mapName, row, col, version) {
-        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.png
+        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.<ext>
         const t = this.cacheBust || 0;
-        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.png?t=${t}`;
+        const ext = (this.config && this.config.minimap && this.config.minimap.ext) ? this.config.minimap.ext : 'png';
+        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.${ext}?t=${t}`;
     }
 
     getOverlayPath(mapName, row, col) {
@@ -103,6 +105,13 @@ function defaultConfig() {
     return {
         coordMode: 'wowtools',
         minimap: { width: 512, height: 512 },
+        wmoSwapXY: false,
+        wmoFlipY: true,
+        swapPixelXY: false,
+        flipPixelX: false,
+        flipPixelY: false,
+        rotate90: false,
+        maxMarkers: 5000,
         debugOverlayCorners: false
     };
 }

@@ -105,6 +105,8 @@ internal static class Program
         var minimapHeight = TryParseInt(opts, "minimap-height") ?? defaults.MinimapHeight;
         var distanceThreshold = TryParseDouble(opts, "distance-threshold") ?? defaults.DiffDistanceThreshold;
         var moveEpsilon = TryParseDouble(opts, "move-epsilon") ?? defaults.MoveEpsilonRatio;
+        var imageFormat = opts.TryGetValue("image-format", out var fmt) ? fmt : defaults.MinimapFormat;
+        var imageQuality = TryParseInt(opts, "image-quality") ?? defaults.MinimapQuality;
 
         return new ViewerOptions(
             defaultVersion,
@@ -112,7 +114,9 @@ internal static class Program
             MinimapWidth: minimapWidth,
             MinimapHeight: minimapHeight,
             DiffDistanceThreshold: distanceThreshold,
-            MoveEpsilonRatio: moveEpsilon);
+            MoveEpsilonRatio: moveEpsilon,
+            MinimapFormat: imageFormat,
+            MinimapQuality: imageQuality);
     }
 
     private static (string Baseline, string Comparison)? ParseDiffPair(string? value)
@@ -384,16 +388,15 @@ internal static class Program
 
                 if (normalizedAlphaRoot is null)
                 {
-                    throw new InvalidOperationException(
-                        $"Required comparison data for version '{version}', map '{map}' is missing under '{outputRoot}'. " +
-                        "Supply --alpha-root so the CLI can auto-generate the placement ranges.");
+                    Console.WriteLine($"[skip] Missing outputs for {version}/{map} and no --alpha-root provided. Skipping auto-generation.");
+                    continue;
                 }
 
                 var wdtPath = FindAlphaWdt(normalizedAlphaRoot, version, map);
                 if (wdtPath is null)
                 {
-                    throw new InvalidOperationException(
-                        $"Could not locate Alpha WDT for version '{version}', map '{map}' beneath '{normalizedAlphaRoot}'.");
+                    Console.WriteLine($"[skip] Could not locate Alpha WDT for version '{version}', map '{map}' under '{normalizedAlphaRoot}'.");
+                    continue;
                 }
 
                 var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtPath)) ?? wdtPath);
@@ -407,8 +410,16 @@ internal static class Program
                     Console.WriteLine($"[auto]  Converted ADTs: {convertedDir}");
                 }
 
-                var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir);
-                RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
+                try
+                {
+                    var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir);
+                    RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[skip] Analysis failed for {version}/{map}: {ex.Message}");
+                    // Continue with other maps/versions.
+                }
             }
         }
     }

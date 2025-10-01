@@ -49,13 +49,28 @@ We're digital archaeologists uncovering fossilized remains of 20+ year old game 
   - Minimap tile size: 512x512 px
   - Diff thresholds: proximity D=10 world units; moved epsilon=0.5% of tile width
 - CLI Additions:
-  - `--viewer-report` to generate viewer assets (minimaps, overlays, diffs)
   - `--default-version <ver>` to set initial selection
   - `--diff <A,B>` to compute diff overlays
 - Pipeline (tiny modules):
   - `CoordinateTransformer` (world→tile→pixel using ADT v18)
   - `MinimapComposer` (BLP decode via lib/wow.tools.local)
-  - `OverlayBuilder` (per-tile per-version JSON)
-  - `OverlayDiffBuilder` (Added/Removed/Moved/Changed)
   - `ViewerReportWriter` (copies static viewer, writes assets)
-- Matching for diffs (UIDs can change): asset_path equality + spatial proximity, with sensible tie-breakers.
+  - `ViewerReportWriter` (copies static viewer, writes assets)
+  - `ViewerReportWriter` (copies static viewer, writes assets)
+  - Matching for diffs (UIDs can change): asset_path equality + spatial proximity, with sensible tie-breakers.
+
+## Update: Plan 000 — Regressions & Pipeline Fixes (2025-10-01)
+**Current Focus**
+- Fix WMO XY flip, restore M2/MDX visibility, and update legend styling.
+- Ensure tiles page loads minimaps reliably by aligning `config.minimap.ext` with emitted files and cache-busting `index.json`/`config.json`.
+- Stabilize image pipeline: integrate true WebP encoder or default to JPG consistently.
+- Make rebuild script support complete clean rebuilds (wipe outputs, optional converter step) to avoid stale artifacts.
+
+**Next Steps**
+1. Extension consistency: ensure `ViewerReportWriter` emits `config.minimap.ext` equal to actual filenames in `viewer/minimap/`.
+2. Front-end cache-busting: fetch `index.json`/`config.json` with `?t=<now>`; persist map/version in URL.
+3. Marker correctness: prefer `obj.type` from overlays; unify pixel→lat/lng transforms; optional `wmoSwapXY` flag in `config`.
+4. Script deep clean: add aggressive cleanup to `rebuild-and-regenerate.ps1` before rebuild; print effective image extension.
+5. Analyze-LK ≥0.6.0: validate later-era inputs and tile math; add tests.
+
+See `memory-bank/plans/plan-000-regressions-and-pipeline.md` for full details.

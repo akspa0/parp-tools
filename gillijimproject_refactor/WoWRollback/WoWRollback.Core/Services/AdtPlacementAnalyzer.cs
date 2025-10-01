@@ -7,8 +7,11 @@ namespace WoWRollback.Core.Services;
 
 public static class AdtPlacementAnalyzer
 {
-    private const int MddfEntrySize = 36; // MDDF entry size in LK
-    private const int ModfEntrySize = 64; // MODF entry size in LK
+    // LK defaults; earlier (e.g., 0.6.0) commonly use smaller structs
+    private const int MddfEntrySizeLk = 36;
+    private const int MddfEntrySize060 = 32;
+    private const int ModfEntrySizeLk = 64;
+    private const int ModfEntrySize060 = 56;
 
     public static IEnumerable<PlacementRange> AnalyzeAdt(string adtPath)
     {
@@ -33,7 +36,7 @@ public static class AdtPlacementAnalyzer
         {
             int mddfAbs = mhdrStart + mddfRel;
             var mddf = new Mddf(fileBytes, mddfAbs);
-            var (count, minId, maxId) = ReadUniqueIdRange(mddf.Data, MddfEntrySize);
+            var (count, minId, maxId) = ReadUniqueIdRangeAuto(mddf.Data, isMddf: true);
             yield return new PlacementRange(map, row, col, PlacementKind.M2, count, minId, maxId, adtPath);
         }
 
@@ -43,7 +46,7 @@ public static class AdtPlacementAnalyzer
         {
             int modfAbs = mhdrStart + modfRel;
             var modf = new Modf(fileBytes, modfAbs);
-            var (count, minId, maxId) = ReadUniqueIdRange(modf.Data, ModfEntrySize);
+            var (count, minId, maxId) = ReadUniqueIdRangeAuto(modf.Data, isMddf: false);
             yield return new PlacementRange(map, row, col, PlacementKind.WMO, count, minId, maxId, adtPath);
         }
     }
@@ -66,7 +69,7 @@ public static class AdtPlacementAnalyzer
         {
             int mddfAbs = mhdrStart + mddfRel;
             var mddf = new Mddf(fileBytes, mddfAbs);
-            foreach (var id in EnumerateUniqueIds(mddf.Data, MddfEntrySize))
+            foreach (var id in EnumerateUniqueIdsAuto(mddf.Data, isMddf: true))
             {
                 yield return new PlacementEntry(map, row, col, PlacementKind.M2, id, adtPath);
             }
@@ -77,23 +80,44 @@ public static class AdtPlacementAnalyzer
         {
             int modfAbs = mhdrStart + modfRel;
             var modf = new Modf(fileBytes, modfAbs);
-            foreach (var id in EnumerateUniqueIds(modf.Data, ModfEntrySize))
+            foreach (var id in EnumerateUniqueIdsAuto(modf.Data, isMddf: false))
             {
                 yield return new PlacementEntry(map, row, col, PlacementKind.WMO, id, adtPath);
             }
         }
     }
 
-    private static (int count, uint min, uint max) ReadUniqueIdRange(byte[] data, int entrySize)
+    private static int DetermineEntrySize(byte[] data, bool isMddf)
     {
-        if (data.Length < entrySize) return (0, 0, 0);
+        if (data == null || data.Length < 8) return 0;
+        var candidates = isMddf
+            ? new[] { MddfEntrySizeLk, MddfEntrySize060 }
+            : new[] { ModfEntrySizeLk, ModfEntrySize060 };
+        foreach (var size in candidates)
+        {
+            if (size > 0 && data.Length % size == 0) return size;
+        }
+        // Fallback: prefer the larger known size if at least one full record fits
+        foreach (var size in candidates)
+        {
+            if (size > 0 && data.Length >= size) return size;
+        }
+        return 0;
+    }
+
+    private static (int count, uint min, uint max) ReadUniqueIdRangeAuto(byte[] data, bool isMddf)
+    {
+        int entrySize = DetermineEntrySize(data, isMddf);
+        if (entrySize <= 0 || data.Length < entrySize) return (0, 0, 0);
         int count = 0;
         uint min = uint.MaxValue;
         uint max = 0u;
         for (int start = 0; start + entrySize <= data.Length; start += entrySize)
         {
             // UniqueId is commonly the second field (offset +4) for both MDDF and MODF in LK
-            uint uniqueId = BitConverter.ToUInt32(data, start + 4);
+            int uidOffset = 4; // holds across 0.5.x/0.6.0/LK
+            if (start + uidOffset + 4 > data.Length) break;
+            uint uniqueId = BitConverter.ToUInt32(data, start + uidOffset);
             count++;
             if (uniqueId < min) min = uniqueId;
             if (uniqueId > max) max = uniqueId;
@@ -102,11 +126,15 @@ public static class AdtPlacementAnalyzer
         return (count, min, max);
     }
 
-    private static IEnumerable<uint> EnumerateUniqueIds(byte[] data, int entrySize)
+    private static IEnumerable<uint> EnumerateUniqueIdsAuto(byte[] data, bool isMddf)
     {
+        int entrySize = DetermineEntrySize(data, isMddf);
+        if (entrySize <= 0) yield break;
         for (int start = 0; start + entrySize <= data.Length; start += entrySize)
         {
-            yield return BitConverter.ToUInt32(data, start + 4);
+            int uidOffset = 4;
+            if (start + uidOffset + 4 > data.Length) yield break;
+            yield return BitConverter.ToUInt32(data, start + uidOffset);
         }
     }
 

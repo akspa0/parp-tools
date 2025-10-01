@@ -22,6 +22,22 @@ public sealed class ViewerReportWriter
     {
     }
 
+    private static string ResolveMinimapExtension(ViewerOptions options)
+    {
+        var fmt = (options.MinimapFormat ?? "png").Trim().ToLowerInvariant();
+#if HAS_WEBP
+        if (fmt == "webp") return "webp";
+#else
+        if (fmt == "webp") return "jpg";
+#endif
+        return fmt switch
+        {
+            "jpeg" => "jpg",
+            "jpg" => "jpg",
+            _ => "png"
+        };
+    }
+
     public ViewerReportWriter(
         MinimapComposer minimapComposer,
         OverlayBuilder overlayBuilder,
@@ -73,16 +89,36 @@ public sealed class ViewerReportWriter
             catch { /* ignore per-version lookup errors */ }
         }
 
+        // Build EntryTiles with fallback to world->tile indices when TileRow/TileCol are missing or out of range
+        var entryTilesByMap = new Dictionary<string, HashSet<(int Row, int Col)>>(comparer);
+        foreach (var e in entries)
+        {
+            if (string.IsNullOrWhiteSpace(e.Map)) continue;
+            if (!entryTilesByMap.TryGetValue(e.Map, out var set))
+            {
+                set = new HashSet<(int, int)>();
+                entryTilesByMap[e.Map] = set;
+            }
+            int r = e.TileRow;
+            int c = e.TileCol;
+            bool valid = r >= 0 && r <= 63 && c >= 0 && c <= 63;
+            if (!valid)
+            {
+                var (tr, tc) = CoordinateTransformer.ComputeTileIndices(e.WorldX, e.WorldY);
+                r = tr; c = tc;
+                valid = r >= 0 && r <= 63 && c >= 0 && c <= 63;
+            }
+            if (valid) set.Add((r, c));
+        }
+
         var maps = mapNames
             .OrderBy(n => n, comparer)
             .Select(name => new
             {
                 Name = name,
-                EntryTiles = entries
-                    .Where(e => string.Equals(e.Map, name, StringComparison.OrdinalIgnoreCase))
-                    .GroupBy(e => (e.TileRow, e.TileCol))
-                    .Select(g => g.Key)
-                    .ToHashSet(),
+                EntryTiles = entryTilesByMap.TryGetValue(name, out var set)
+                    ? set
+                    : new HashSet<(int Row, int Col)>(),
                 MinimapTiles = result.Versions
                     .SelectMany(v =>
                     {
@@ -102,6 +138,9 @@ public sealed class ViewerReportWriter
 
         var mapTileCatalog = new Dictionary<string, List<TileDescriptor>>(StringComparer.OrdinalIgnoreCase);
 
+        // Resolve effective minimap file extension (webp may fall back to jpg if encoder is unavailable)
+        var effectiveExt = ResolveMinimapExtension(resolvedOptions);
+
         foreach (var mapGroup in maps)
         {
             var mapName = mapGroup.Name;
@@ -115,7 +154,23 @@ public sealed class ViewerReportWriter
             var tileSet = new HashSet<(int Row, int Col)>();
             foreach (var t in mapGroup.EntryTiles) tileSet.Add(t);
             foreach (var t in mapGroup.MinimapTiles) tileSet.Add(t);
+
+            // Late fallback: if tile set is empty but we have entries for this map, derive from world coords
+            if (tileSet.Count == 0)
+            {
+                var fallbackEntries = entries.Where(e => string.Equals(e.Map, mapName, StringComparison.OrdinalIgnoreCase)).ToList();
+                Console.WriteLine($"[viewer] Map={mapName} initial tiles=0; fallbackEntries={fallbackEntries.Count}");
+                foreach (var e in fallbackEntries)
+                {
+                    var (tr, tc) = CoordinateTransformer.ComputeTileIndices(e.WorldX, e.WorldY);
+                    if (tr >= 0 && tr <= 63 && tc >= 0 && tc <= 63)
+                        tileSet.Add((tr, tc));
+                }
+            }
+
             var tiles = tileSet.OrderBy(t => t.Row).ThenBy(t => t.Col).ToList();
+
+            Console.WriteLine($"[viewer] Map={mapName} tiles={tiles.Count}");
 
             foreach (var tileGroup in tiles)
             {
@@ -131,7 +186,7 @@ public sealed class ViewerReportWriter
                     var versionMapMinimapDir = Path.Combine(versionMinimapRoot, safeMap);
                     Directory.CreateDirectory(versionMapMinimapDir);
 
-                    var minimapFile = $"{mapName}_{col}_{row}.png";
+                    var minimapFile = $"{mapName}_{col}_{row}.{effectiveExt}";
                     var minimapPath = Path.Combine(versionMapMinimapDir, minimapFile);
 
                     try
@@ -140,17 +195,20 @@ public sealed class ViewerReportWriter
                         {
                             using var tileStream = tileDescriptor.Open();
                             _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                            Console.WriteLine($"[minimap] {version}/{mapName} r{row} c{col} -> {Path.GetFileName(minimapPath)}");
                         }
                         else
                         {
                             // No source tile found → emit placeholder so tile pages still work
                             _minimapComposer.WritePlaceholderAsync(minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                            Console.WriteLine($"[minimap] placeholder {version}/{mapName} r{row} c{col} -> {Path.GetFileName(minimapPath)}");
                         }
                     }
                     catch
                     {
                         // Any decode or IO failure → write placeholder and continue
                         _minimapComposer.WritePlaceholderAsync(minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                        Console.WriteLine($"[minimap] error->placeholder {version}/{mapName} r{row} c{col}");
                     }
                 }
 
@@ -158,6 +216,7 @@ public sealed class ViewerReportWriter
                 // Always write overlay JSON, and include all versions (empty kinds when no objects)
                 var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, result.Versions, resolvedOptions);
                 File.WriteAllText(overlayPath, overlayJson);
+                Console.WriteLine($"[overlay] {mapName} r{row} c{col} -> {Path.GetFileName(overlayPath)}");
 
                 if (effectiveDiffPair is { } pair &&
                     entriesByVersion.TryGetValue(pair.Baseline, out var baselineEntries) &&
@@ -179,7 +238,7 @@ public sealed class ViewerReportWriter
         }
 
         WriteIndexJson(viewerRoot, result, mapTileCatalog, chosenDefaultVersion, effectiveDiffPair);
-        WriteConfigJson(viewerRoot, resolvedOptions, chosenDefaultVersion, effectiveDiffPair);
+        WriteConfigJson(viewerRoot, resolvedOptions, chosenDefaultVersion, effectiveDiffPair, effectiveExt);
         CopyViewerAssets(viewerRoot);
 
         return viewerRoot;
@@ -280,20 +339,23 @@ public sealed class ViewerReportWriter
         string viewerRoot,
         ViewerOptions options,
         string defaultVersion,
-        (string Baseline, string Comparison)? diffPair)
+        (string Baseline, string Comparison)? diffPair,
+        string effectiveExt)
     {
         var config = new
         {
             defaultVersion,
             diff = diffPair is null ? null : new { baseline = diffPair.Value.Baseline, comparison = diffPair.Value.Comparison },
-            minimap = new { width = options.MinimapWidth, height = options.MinimapHeight },
+            minimap = new { width = options.MinimapWidth, height = options.MinimapHeight, ext = effectiveExt },
             thresholds = new
             {
                 distance = options.DiffDistanceThreshold,
                 moveEpsilonRatio = options.MoveEpsilonRatio
             },
             coordMode = "wowtools",
-            debugOverlayCorners = false
+            debugOverlayCorners = false,
+            wmoSwapXY = false,
+            swapPixelXY = false
         };
 
         var jsonOptions = new JsonSerializerOptions

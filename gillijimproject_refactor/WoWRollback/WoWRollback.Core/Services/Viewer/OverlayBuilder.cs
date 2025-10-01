@@ -33,8 +33,19 @@ public sealed class OverlayBuilder
         ArgumentNullException.ThrowIfNull(entries);
         options ??= ViewerOptions.CreateDefault();
 
+        static bool IsInTile(AssetTimelineDetailedEntry e, string targetMap, int r, int c)
+        {
+            if (!e.Map.Equals(targetMap, StringComparison.OrdinalIgnoreCase)) return false;
+            var tr = e.TileRow;
+            var tc = e.TileCol;
+            var hasTile = tr >= 0 && tr <= 63 && tc >= 0 && tc <= 63;
+            if (hasTile) return tr == r && tc == c;
+            var computed = CoordinateTransformer.ComputeTileIndices(e.WorldX, e.WorldY);
+            return computed.TileRow == r && computed.TileCol == c;
+        }
+
         var filtered = entries
-            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
+            .Where(e => IsInTile(e, map, tileRow, tileCol))
             .ToList();
 
         var layers = filtered
@@ -88,7 +99,15 @@ public sealed class OverlayBuilder
         options ??= ViewerOptions.CreateDefault();
 
         var filtered = entries
-            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
+            .Where(e =>
+            {
+                if (!e.Map.Equals(map, StringComparison.OrdinalIgnoreCase)) return false;
+                var tr = e.TileRow; var tc = e.TileCol;
+                var hasTile = tr >= 0 && tr <= 63 && tc >= 0 && tc <= 63;
+                if (hasTile) return tr == tileRow && tc == tileCol;
+                var computed = CoordinateTransformer.ComputeTileIndices(e.WorldX, e.WorldY);
+                return computed.TileRow == tileRow && computed.TileCol == tileCol;
+            })
             .ToList();
 
         var byVersion = filtered
@@ -135,6 +154,25 @@ public sealed class OverlayBuilder
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
 
+        static string ClassifyType(AssetTimelineDetailedEntry e)
+        {
+            var kind = e.Kind.ToString();
+            if (!string.IsNullOrWhiteSpace(kind))
+            {
+                var k = kind.Trim().ToLowerInvariant();
+                if (k.Contains("wmo")) return "wmo";
+                if (k.Contains("m2") || k.Contains("mdx")) return "m2";
+            }
+            var ext = (e.Extension ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant();
+            return ext switch
+            {
+                "wmo" => "wmo",
+                "m2" => "m2",
+                "mdx" => "m2",
+                _ => "other"
+            };
+        }
+
         return new
         {
             uniqueId = entry.UniqueId,
@@ -151,6 +189,7 @@ public sealed class OverlayBuilder
             fileName = entry.FileName,
             fileStem = entry.FileStem,
             extension = entry.Extension,
+            type = ClassifyType(entry),
             world = new
             {
                 x = entry.WorldX,

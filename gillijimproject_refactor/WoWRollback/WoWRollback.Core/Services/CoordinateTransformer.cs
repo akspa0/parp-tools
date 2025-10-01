@@ -46,18 +46,16 @@ public static class CoordinateTransformer
 
     /// <summary>
     /// Converts normalized coordinates into pixel coordinates for a tile image.
+    /// Maps local [0..1] directly to pixel [0..W-1]/[0..H-1] with top-left origin (no axis flip).
     /// </summary>
     public static (double PixelX, double PixelY) ToPixels(double localX, double localY, int width, int height)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width), "Width must be positive.");
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
 
-        // Flip X to align with minimap tile orientation; keep Y non-inverted (top-left origin)
-        // Map normalized [0..1] into pixel index domain [0..W-1]/[0..H-1] to avoid crossing into adjacent tiles.
         var w1 = Math.Max(1, width - 1);
         var h1 = Math.Max(1, height - 1);
-        var px = (1.0 - ClampUnit(localX)) * w1;
-        // Use top-left origin without inversion so Y grows downward with localY
+        var px = ClampUnit(localX) * w1;
         var py = ClampUnit(localY) * h1;
         return (px, py);
     }

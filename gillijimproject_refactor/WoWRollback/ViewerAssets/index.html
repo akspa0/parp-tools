@@ -35,6 +35,22 @@
             </label>
         </div>
 
+        <div class="control-group">
+            <label style="display:block; margin-bottom:4px;">Object Types:</label>
+            <label style="display:block;"><input type="checkbox" id="showWmo" checked> WMO (orange)</label>
+            <label style="display:block;"><input type="checkbox" id="showM2" checked> M2/MDX (cyan)</label>
+            <label style="display:block;"><input type="checkbox" id="showOther" checked> Other (green)</label>
+        </div>
+
+        <div class="control-group">
+            <label style="display:block; margin-bottom:4px;">Pixel XY:</label>
+            <label style="display:block;"><input type="checkbox" id="swapPixelXY"> Swap XY (global)</label>
+            <label style="display:block;"><input type="checkbox" id="wmoSwapXY"> Swap XY for WMO only</label>
+            <label style="display:block;"><input type="checkbox" id="flipPixelX"> Flip X</label>
+            <label style="display:block;"><input type="checkbox" id="flipPixelY"> Flip Y</label>
+            <label style="display:block;"><input type="checkbox" id="rotate90"> Rotate 90°</label>
+        </div>
+
         <div class="info-section">
             <strong>Last Click:</strong><br>
             Tile: <span id="clickedTile">Click a tile</span><br>
@@ -49,8 +65,22 @@
                 <span>Not available in selected version</span>
             </div>
             <div class="legend-item">
-                <span class="color-box" style="background: #2196F3; width: 8px; height: 8px; border-radius: 50%;"></span>
-                <span>Object placement</span>
+                <span class="color-box" style="background: #FF9800; width: 10px; height: 10px; border-radius: 50%;"></span>
+                <span>WMO placement</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #00E5FF; width: 8px; height: 8px; border-radius: 50%;"></span>
+                <span>M2/MDX placement</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #4CAF50; width: 6px; height: 6px; border-radius: 50%;"></span>
+                <span>Other placement</span>
+            </div>
+            <div class="legend-item" style="margin-top:6px;">
+                <span>Markers: </span>
+                <span id="markerShown">0</span>
+                <span>/</span>
+                <span id="markerTotal">0</span>
             </div>
         </div>
     </div>

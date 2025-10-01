@@ -2,6 +2,7 @@
 import { state } from './state.js';
 import { clearCache } from './overlayLoader.js';
 import { loadOverlay } from './overlayLoader.js';
+import { computeLocalForTile, toPixels } from './fit.js';
 
 let map;
 let tileLayer; // no longer used, kept for minimal diff
@@ -9,7 +10,11 @@ let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
 let objectMarkers = L.layerGroup();
 let lastVersion = null;
+let lastMap = null;
 let showObjects = true;
+let showWmo = true;
+let showM2 = true;
+let showOther = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
 // Drag state for overview PiP
@@ -24,6 +29,16 @@ export async function init() {
         console.log('Index loaded:', state.index);
         await state.loadConfig();
         console.log('Config loaded:', state.config);
+        // Restore state from URL if present
+        const params = new URLSearchParams(window.location.search);
+        const urlVersion = params.get('version');
+        const urlMap = params.get('map');
+        if (urlVersion && state.index.versions.includes(urlVersion)) {
+            state.setVersion(urlVersion);
+        }
+        if (urlMap && state.index.maps.some(m => m.map === urlMap)) {
+            state.setMap(urlMap);
+        }
         
         initializeMap();
         setupUI();
@@ -49,19 +64,24 @@ function initializeMap() {
     map = L.map('map', {
         crs: L.CRS.Simple,
         minZoom: 0,
-        maxZoom: 8,
-        zoom: 2,
+        maxZoom: 12,
+        zoom: 3,
         zoomControl: true,
         zoomSnap: 0.1,
-        zoomDelta: 0.5
+        zoomDelta: 0.25
     });
 
     objectMarkers.addTo(map);
     minimapLayer.addTo(map);
     
-    // Set initial view to center
-    // Start roughly center; for wow.tools mapping lat ≈ 31–32 is center too
-    map.setView([32, 32], 2);
+    // Set initial view to current map bounds and zoom in a notch for clarity
+    const initialBounds = getBounds();
+    if (initialBounds) {
+        map.fitBounds(initialBounds);
+        map.setZoom(Math.min(map.getZoom() + 1, map.getMaxZoom()));
+    } else {
+        map.setView([32, 32], 3);
+    }
     console.log('Map initialized with WoW coordinate system (0,0 = NW)');
 }
 
@@ -69,6 +89,14 @@ function setupUI() {
     const versionSelect = document.getElementById('versionSelect');
     const mapSelect = document.getElementById('mapSelect');
     const showObjectsCheck = document.getElementById('showObjects');
+    const showWmoCheck = document.getElementById('showWmo');
+    const showM2Check = document.getElementById('showM2');
+    const showOtherCheck = document.getElementById('showOther');
+    const swapXYCheck = document.getElementById('swapPixelXY');
+    const wmoSwapXYCheck = document.getElementById('wmoSwapXY');
+    const flipXCheck = document.getElementById('flipPixelX');
+    const flipYCheck = document.getElementById('flipPixelY');
+    const rotate90Check = document.getElementById('rotate90');
     const layersSearch = document.getElementById('layersSearch');
     
     // Sidebar toggle
@@ -98,10 +126,20 @@ function setupUI() {
 
     versionSelect.addEventListener('change', (e) => {
         state.setVersion(e.target.value);
+        // Persist selection in URL without reload
+        const params = new URLSearchParams(window.location.search);
+        params.set('version', e.target.value);
+        params.set('map', state.selectedMap);
+        history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
     });
 
     mapSelect.addEventListener('change', (e) => {
         state.setMap(e.target.value);
+        // Persist selection in URL without reload
+        const params = new URLSearchParams(window.location.search);
+        params.set('map', e.target.value);
+        params.set('version', state.selectedVersion);
+        history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
     });
 
     showObjectsCheck.addEventListener('change', (e) => {
@@ -111,6 +149,51 @@ function setupUI() {
         } else {
             objectMarkers.remove();
         }
+        updateObjectMarkers();
+    });
+
+    if (showWmoCheck) showWmoCheck.addEventListener('change', () => { showWmo = showWmoCheck.checked; updateObjectMarkers(); });
+    if (showM2Check) showM2Check.addEventListener('change', () => { showM2 = showM2Check.checked; updateObjectMarkers(); });
+    if (showOtherCheck) showOtherCheck.addEventListener('change', () => { showOther = showOtherCheck.checked; updateObjectMarkers(); });
+    // Sync XY swap checkboxes with current config
+    if (showWmoCheck) showWmoCheck.checked = showWmo;
+    if (showM2Check) showM2Check.checked = showM2;
+    if (showOtherCheck) showOtherCheck.checked = showOther;
+    if (swapXYCheck) swapXYCheck.checked = !!(state.config && state.config.swapPixelXY);
+    if (wmoSwapXYCheck) wmoSwapXYCheck.checked = !!(state.config && state.config.wmoSwapXY);
+    if (flipXCheck) flipXCheck.checked = !!(state.config && state.config.flipPixelX);
+    if (flipYCheck) flipYCheck.checked = !!(state.config && state.config.flipPixelY);
+    if (rotate90Check) rotate90Check.checked = !!(state.config && state.config.rotate90);
+
+    if (swapXYCheck) swapXYCheck.addEventListener('change', () => {
+        if (!state.config) state.config = {};
+        state.config.swapPixelXY = swapXYCheck.checked;
+        updateObjectMarkers();
+        drawOverview();
+    });
+    if (wmoSwapXYCheck) wmoSwapXYCheck.addEventListener('change', () => {
+        if (!state.config) state.config = {};
+        state.config.wmoSwapXY = wmoSwapXYCheck.checked;
+        updateObjectMarkers();
+        drawOverview();
+    });
+    if (flipXCheck) flipXCheck.addEventListener('change', () => {
+        if (!state.config) state.config = {};
+        state.config.flipPixelX = flipXCheck.checked;
+        updateObjectMarkers();
+        drawOverview();
+    });
+    if (flipYCheck) flipYCheck.addEventListener('change', () => {
+        if (!state.config) state.config = {};
+        state.config.flipPixelY = flipYCheck.checked;
+        updateObjectMarkers();
+        drawOverview();
+    });
+    if (rotate90Check) rotate90Check.addEventListener('change', () => {
+        if (!state.config) state.config = {};
+        state.config.rotate90 = rotate90Check.checked;
+        updateObjectMarkers();
+        drawOverview();
     });
 
     // UniqueID range filter: supports "min-max" (e.g., 1000-2000)
@@ -126,15 +209,20 @@ function setupUI() {
 }
 
 function onStateChange() {
-    // If version changed, clear caches and force rebuild of minimap overlays
-    if (lastVersion !== state.selectedVersion) {
+    // Clear caches when version OR map changes to avoid stale tiles
+    const versionChanged = lastVersion !== state.selectedVersion;
+    const mapChanged = lastMap !== state.selectedMap;
+    if (versionChanged || mapChanged) {
         lastVersion = state.selectedVersion;
+        lastMap = state.selectedMap;
         clearCache();
-        // Remove all existing minimap image overlays so URLs (with version) are refreshed
+        // Remove all existing minimap image overlays so URLs refresh
         for (const [, overlay] of minimapImages.entries()) {
             minimapLayer.removeLayer(overlay);
         }
         minimapImages.clear();
+        // Clear object markers as they belong to previous map/version
+        objectMarkers.clearLayers();
     }
 
     updateTileLayer();
@@ -266,6 +354,10 @@ async function updateObjectMarkers() {
     
     if (!showObjects) return;
     
+    let totalShownAll = 0;
+    let totalEligibleAll = 0;
+    const displayedUIDs = new Set();
+
     // Only load overlays for visible tiles (max 8x8 grid)
     const bounds = map.getBounds();
     const latS = bounds.getSouth();
@@ -301,31 +393,83 @@ async function updateObjectMarkers() {
                 const versionData = data.layers?.find(l => l.version === state.selectedVersion);
                 if (!versionData || !versionData.kinds) continue;
 
-                const objects = versionData.kinds.flatMap(kind => kind.points || []);
+                const objects = versionData.kinds.flatMap(kind => (kind.points || []).map(p => ({ ...p, type: p.type || kind.type || kind.name })));
                 const tileW = (data.minimap && data.minimap.width) ? data.minimap.width : 512;
                 const tileH = (data.minimap && data.minimap.height) ? data.minimap.height : 512;
                 
-                objects.forEach(obj => {
-                    if (!obj.pixel || !obj.world || (obj.world.x === 0 && obj.world.y === 0 && obj.world.z === 0)) return;
-                    if (!passesUidFilter(obj.uniqueId)) return;
-                    
+                const colorMap = { wmo: '#FF9800', m2: '#00E5FF', mdx: '#00E5FF', other: '#4CAF50' };
+                let totalEligible = 0;
+                let added = 0;
+                const cap = (state.config && typeof state.config.maxMarkers === 'number') ? state.config.maxMarkers : 5000;
+                outer: for (const obj of objects) {
+                    // Prefer embedded pixel when present; validate via world if available to avoid cross-tile ghosts
+                    let basePx = null, basePy = null;
+                    const hasPixel = obj.pixel && Number.isFinite(obj.pixel.x) && Number.isFinite(obj.pixel.y);
+                    const worldReliable = obj.world && Number.isFinite(obj.world.x) && Number.isFinite(obj.world.y) && !(obj.world.x === 0 && obj.world.y === 0);
+                    if (worldReliable) {
+                        const vr = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
+                        if (!vr.inRange) {
+                            // World says this object doesn't belong to this tile → skip to prevent duplicates
+                            continue;
+                        }
+                    }
+
+                    if (hasPixel) {
+                        basePx = obj.pixel.x; basePy = obj.pixel.y;
+                    } else if (obj.world && Number.isFinite(obj.world.x) && Number.isFinite(obj.world.y)) {
+                        const r = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
+                        if (!r.inRange) continue;
+                        const p = toPixels(r.lx, r.ly, tileW, tileH, true);
+                        basePx = p.x; basePy = p.y;
+                    } else {
+                        continue;
+                    }
+                    if (!passesUidFilter(obj.uniqueId)) continue;
+                    const label = (obj.type && typeof obj.type === 'string') ? obj.type.toLowerCase() : classifyType(obj);
+                    if ((label === 'wmo' && !showWmo) || ((label === 'm2' || label === 'mdx') && !showM2) || (label !== 'wmo' && label !== 'm2' && label !== 'mdx' && !showOther)) continue;
+                    const fillColor = colorMap[label] || colorMap.other;
+                    const radius = (label === 'wmo') ? 6 : (label === 'm2' || label === 'mdx') ? 5 : 3;
+                    // Apply pixel transforms
+                    let px = basePx, py = basePy;
+                    const cfg = state.config || {};
+                    const doSwap = !!cfg.swapPixelXY || (!!cfg.wmoSwapXY && label === 'wmo');
+                    if (doSwap) { const t = px; px = py; py = t; }
+                    if (cfg.rotate90) { const t = px; px = py; py = (tileW - t); }
+                    if (label === 'wmo' && cfg.wmoFlipY) { py = tileH - py; }
+                    if (cfg.flipPixelX) { px = tileW - px; }
+                    if (cfg.flipPixelY) { py = tileH - py; }
                     // Convert pixel coords to lat/lng using coordMode
-                    const { lat, lng } = pixelToLatLng(row, col, obj.pixel.x, obj.pixel.y, tileW, tileH);
+                    const { lat, lng } = pixelToLatLng(row, col, px, py, tileW, tileH);
                     
+                    totalEligible++;
+                    if (added >= cap) { continue outer; }
                     const marker = L.circleMarker([lat, lng], {
-                        radius: 3,
-                        fillColor: '#2196F3',
+                        radius,
+                        fillColor,
                         color: '#fff',
                         weight: 1,
                         fillOpacity: 0.8
                     }).bindPopup(`
                         <strong>${obj.fileName || 'Unknown'}</strong><br>
                         UID: ${obj.uniqueId || 'N/A'}<br>
-                        World: (${obj.world.x.toFixed(1)}, ${obj.world.y.toFixed(1)}, ${obj.world.z.toFixed(1)})
+                        ${obj.world ? `World: (${Number(obj.world.x).toFixed(1)}, ${Number(obj.world.y).toFixed(1)}, ${Number(obj.world.z).toFixed(1)})` : 'World: N/A'}
                     `);
                     
+                    // De-duplicate by uniqueId across visible quilt
+                    const uid = obj.uniqueId ?? undefined;
+                    if (uid !== undefined) {
+                        if (displayedUIDs.has(uid)) {
+                            continue;
+                        }
+                        displayedUIDs.add(uid);
+                    }
                     objectMarkers.addLayer(marker);
-                });
+                    added++;
+                }
+
+                totalShownAll += added;
+                totalEligibleAll += totalEligible;
+                console.log(`[overlay] ${state.selectedMap} r${row} c${col} v=${state.selectedVersion} points=${objects.length} eligible=${totalEligible} shown=${added}`);
 
                 // Debug: draw overlay corner markers if enabled in config
                 if (state.config && state.config.debugOverlayCorners) {
@@ -348,10 +492,16 @@ async function updateObjectMarkers() {
                     });
                 }
             } catch (e) {
-                // Skip tiles without overlay data
+                console.warn(`overlay load failed for ${state.selectedMap} r${row} c${col}:`, e);
             }
         }
     }
+
+    // Update global counters after all tiles
+    const shownEl = document.getElementById('markerShown');
+    const totalEl = document.getElementById('markerTotal');
+    if (shownEl) shownEl.textContent = String(totalShownAll);
+    if (totalEl) totalEl.textContent = String(totalEligibleAll);
 }
 
 function handleMapClick(e) {
@@ -578,4 +728,12 @@ function passesUidFilter(uid) {
     const value = Number(uid);
     if (isNaN(value)) return false;
     return value >= uidFilter.min && value <= uidFilter.max;
+}
+
+function classifyType(obj) {
+    const extRaw = (obj.extension || obj.fileName || '').toString().toLowerCase();
+    const ext = extRaw.startsWith('.') ? extRaw.substring(1) : extRaw;
+    if (ext === 'wmo') return 'wmo';
+    if (ext === 'm2' || ext === 'mdx') return 'm2';
+    return 'other';
 }

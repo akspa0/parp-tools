@@ -6,6 +6,9 @@ param(
     [string[]]$Maps = @("DeadminesInstance"),
     [string[]]$Versions = @("0.5.3.3368","0.5.5.3494"),
     [string]$AlphaRoot,
+    [string]$ImageFormat = "webp",
+    [int]$ImageQuality = 85,
+    [switch]$Clean,
     [switch]$Serve,
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$ExtraArgs
@@ -16,6 +19,12 @@ Set-Location -Path $PSScriptRoot
 
 Write-Host "=== WoWRollback Rebuild & Regenerate ===" -ForegroundColor Cyan
 Write-Host ""
+
+# Optional clean
+if ($Clean) {
+    Write-Host "[0/3] Cleaning previous outputs..." -ForegroundColor Yellow
+    if (Test-Path "rollback_outputs") { Remove-Item "rollback_outputs" -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 # Step 1: Clean build
 Write-Host "[1/3] Building solution..." -ForegroundColor Yellow
@@ -31,34 +40,31 @@ Write-Host ""
 function Get-MapsFromAlphaRoot([string]$root) {
     if (-not $root -or -not (Test-Path $root)) { return @() }
     $results = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $tryPaths = @(
-        Join-Path $root 'tree\World\Maps',
-        Join-Path $root 'tree\world\maps',
-        Join-Path $root 'World\Maps',
-        Join-Path $root 'world\maps'
-    )
-    foreach ($p in $tryPaths) {
-        if (Test-Path $p) {
-            Get-ChildItem -Path $p -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue |
-                ForEach-Object { [void]$results.Add($_.Directory.Name) }
+
+    # Find maps via World/Maps/*.wdt anywhere under the root
+    $wdtFiles = Get-ChildItem -Path $root -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue
+    foreach ($f in $wdtFiles) {
+        $full = $f.FullName
+        if ($full -match '(?i)[\\/](World)[\\/]Maps[\\/]') {
+            [void]$results.Add($f.Directory.Name)
         }
     }
-    # Also consider pre-numbered minimaps folder structure
-    $miniPaths = @(
-        Join-Path $root 'tree\World\Minimaps',
-        Join-Path $root 'tree\world\minimaps',
-        Join-Path $root 'World\Minimaps',
-        Join-Path $root 'world\minimaps'
-    )
-    foreach ($mp in $miniPaths) {
-        if (Test-Path $mp) {
-            Get-ChildItem -Path $mp -Directory -ErrorAction SilentlyContinue |
-                ForEach-Object { [void]$results.Add($_.Name) }
+
+    # Also discover maps by presence of World/Minimaps/<Map>/ directories
+    $candidateDirs = Get-ChildItem -Path $root -Recurse -Directory -ErrorAction SilentlyContinue
+    foreach ($d in $candidateDirs) {
+        $parent = $d.Parent
+        if ($null -ne $parent -and $parent.Name -match '^(?i)Minimaps$') {
+            [void]$results.Add($d.Name)
         }
     }
-    # Ensure commonly useful maps are included if present
+
+    # Ensure commonly useful maps are included (only adds if present elsewhere)
     foreach ($m in @('PVPZone01','Shadowfang')) { [void]$results.Add($m) }
-    return $results.ToArray() | Sort-Object
+
+    # Return sorted list safely
+    $list = @($results)
+    return ($list | Sort-Object)
 }
 
 # Step 2: Regenerate comparison data
@@ -83,6 +89,7 @@ if ($Maps.Count -eq 1 -and $Maps[0].ToLower() -eq 'auto') {
 $mapsArg = ($Maps -join ',')
 Write-Host ("Versions: {0}" -f $versionsArg) -ForegroundColor Gray
 Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
+Write-Host ("Image: {0} (q={1})" -f $ImageFormat, $ImageQuality) -ForegroundColor Gray
 
  # Build dotnet run command with optional alpha-root and any extra pass-through args
  $cmd = @(
@@ -90,7 +97,9 @@ Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
     'compare-versions',
     '--versions', $versionsArg,
     '--maps', $mapsArg,
-    '--viewer-report'
+    '--viewer-report',
+    '--image-format', $ImageFormat,
+    '--image-quality', $ImageQuality
  )
  if ($AlphaRoot) { $cmd += @('--alpha-root', $AlphaRoot) }
  if ($ExtraArgs) { $cmd += $ExtraArgs }
