@@ -1,3 +1,11 @@
+function isCorner(px, py, w, h) {
+    const eps = 0.5;
+    const atLeft = px <= eps;
+    const atRight = px >= (w - 1 - eps);
+    const atTop = py <= eps;
+    const atBottom = py >= (h - 1 - eps);
+    return (atLeft || atRight) && (atTop || atBottom);
+}
 // Main entry point for index.html - Leaflet Map Viewer
 import { state } from './state.js';
 import { clearCache } from './overlayLoader.js';
@@ -15,6 +23,7 @@ let showObjects = true;
 let showWmo = true;
 let showM2 = true;
 let showOther = true;
+let showAdjacentRefs = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
 // Drag state for overview PiP
@@ -97,6 +106,7 @@ function setupUI() {
     const flipXCheck = document.getElementById('flipPixelX');
     const flipYCheck = document.getElementById('flipPixelY');
     const rotate90Check = document.getElementById('rotate90');
+    const showAdjacentRefsCheck = document.getElementById('showAdjacentRefs');
     const layersSearch = document.getElementById('layersSearch');
     
     // Sidebar toggle
@@ -164,6 +174,7 @@ function setupUI() {
     if (flipXCheck) flipXCheck.checked = !!(state.config && state.config.flipPixelX);
     if (flipYCheck) flipYCheck.checked = !!(state.config && state.config.flipPixelY);
     if (rotate90Check) rotate90Check.checked = !!(state.config && state.config.rotate90);
+    if (showAdjacentRefsCheck) showAdjacentRefsCheck.checked = true;
 
     if (swapXYCheck) swapXYCheck.addEventListener('change', () => {
         if (!state.config) state.config = {};
@@ -192,6 +203,11 @@ function setupUI() {
     if (rotate90Check) rotate90Check.addEventListener('change', () => {
         if (!state.config) state.config = {};
         state.config.rotate90 = rotate90Check.checked;
+        updateObjectMarkers();
+        drawOverview();
+    });
+    if (showAdjacentRefsCheck) showAdjacentRefsCheck.addEventListener('change', () => {
+        showAdjacentRefs = showAdjacentRefsCheck.checked;
         updateObjectMarkers();
         drawOverview();
     });
@@ -400,35 +416,30 @@ async function updateObjectMarkers() {
                 const colorMap = { wmo: '#FF9800', m2: '#00E5FF', mdx: '#00E5FF', other: '#4CAF50' };
                 let totalEligible = 0;
                 let added = 0;
+                let addedAdjacent = 0;
                 const cap = (state.config && typeof state.config.maxMarkers === 'number') ? state.config.maxMarkers : 5000;
                 outer: for (const obj of objects) {
-                    // Prefer embedded pixel when present; validate via world if available to avoid cross-tile ghosts
+                    // Require both pixel and reliable world like the last working build
                     let basePx = null, basePy = null;
                     const hasPixel = obj.pixel && Number.isFinite(obj.pixel.x) && Number.isFinite(obj.pixel.y);
                     const worldReliable = obj.world && Number.isFinite(obj.world.x) && Number.isFinite(obj.world.y) && !(obj.world.x === 0 && obj.world.y === 0);
-                    if (worldReliable) {
-                        const vr = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
-                        if (!vr.inRange) {
-                            // World says this object doesn't belong to this tile → skip to prevent duplicates
-                            continue;
-                        }
-                    }
+                    const adjacentRef = !!obj.isAdjacentRef;
+                    if (adjacentRef && !showAdjacentRefs) continue;
+                    if (!hasPixel || !worldReliable) continue;
 
-                    if (hasPixel) {
-                        basePx = obj.pixel.x; basePy = obj.pixel.y;
-                    } else if (obj.world && Number.isFinite(obj.world.x) && Number.isFinite(obj.world.y)) {
+                    basePx = obj.pixel.x; basePy = obj.pixel.y;
+                    // If pixel looks like a placeholder corner, recompute from world
+                    if (isCorner(basePx, basePy, tileW, tileH)) {
                         const r = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
                         if (!r.inRange) continue;
                         const p = toPixels(r.lx, r.ly, tileW, tileH, true);
                         basePx = p.x; basePy = p.y;
-                    } else {
-                        continue;
                     }
                     if (!passesUidFilter(obj.uniqueId)) continue;
                     const label = (obj.type && typeof obj.type === 'string') ? obj.type.toLowerCase() : classifyType(obj);
                     if ((label === 'wmo' && !showWmo) || ((label === 'm2' || label === 'mdx') && !showM2) || (label !== 'wmo' && label !== 'm2' && label !== 'mdx' && !showOther)) continue;
                     const fillColor = colorMap[label] || colorMap.other;
-                    const radius = (label === 'wmo') ? 6 : (label === 'm2' || label === 'mdx') ? 5 : 3;
+                    const baseRadius = (label === 'wmo') ? 6 : (label === 'm2' || label === 'mdx') ? 5 : 3;
                     // Apply pixel transforms
                     let px = basePx, py = basePy;
                     const cfg = state.config || {};
@@ -444,7 +455,7 @@ async function updateObjectMarkers() {
                     totalEligible++;
                     if (added >= cap) { continue outer; }
                     const marker = L.circleMarker([lat, lng], {
-                        radius,
+                        radius: baseRadius,
                         fillColor,
                         color: '#fff',
                         weight: 1,
@@ -455,21 +466,21 @@ async function updateObjectMarkers() {
                         ${obj.world ? `World: (${Number(obj.world.x).toFixed(1)}, ${Number(obj.world.y).toFixed(1)}, ${Number(obj.world.z).toFixed(1)})` : 'World: N/A'}
                     `);
                     
-                    // De-duplicate by uniqueId across visible quilt
+                    // De-duplicate by uniqueId across visible quilt (primaries only)
                     const uid = obj.uniqueId ?? undefined;
-                    if (uid !== undefined) {
+                    if (uid !== undefined && !adjacentRef) {
                         if (displayedUIDs.has(uid)) {
                             continue;
                         }
                         displayedUIDs.add(uid);
                     }
                     objectMarkers.addLayer(marker);
-                    added++;
+                    if (adjacentRef) { addedAdjacent++; } else { added++; }
                 }
 
                 totalShownAll += added;
                 totalEligibleAll += totalEligible;
-                console.log(`[overlay] ${state.selectedMap} r${row} c${col} v=${state.selectedVersion} points=${objects.length} eligible=${totalEligible} shown=${added}`);
+                console.log(`[overlay] ${state.selectedMap} r${row} c${col} v=${state.selectedVersion} points=${objects.length} eligible=${totalEligible} shown=${added} (+${addedAdjacent} adj)`);
 
                 // Debug: draw overlay corner markers if enabled in config
                 if (state.config && state.config.debugOverlayCorners) {
@@ -500,8 +511,10 @@ async function updateObjectMarkers() {
     // Update global counters after all tiles
     const shownEl = document.getElementById('markerShown');
     const totalEl = document.getElementById('markerTotal');
+    const adjEl = document.getElementById('markerAdj');
     if (shownEl) shownEl.textContent = String(totalShownAll);
     if (totalEl) totalEl.textContent = String(totalEligibleAll);
+    if (adjEl) adjEl.textContent = String(objectMarkers.getLayers().length - totalShownAll);
 }
 
 function handleMapClick(e) {

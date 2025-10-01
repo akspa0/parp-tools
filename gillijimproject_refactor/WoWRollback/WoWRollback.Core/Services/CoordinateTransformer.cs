@@ -23,13 +23,40 @@ public static class CoordinateTransformer
     }
 
     /// <summary>
-    /// Computes normalized coordinates relative to the specified tile (0..1 range) using wow.tools mapping.
+    /// Computes normalized world coordinates (±17066 range) from tile indices and local [0..1] coordinates.
+    /// Inverse of ComputeLocalCoordinates following the same wow.tools orientation.
+    /// </summary>
+    public static (double WorldX, double WorldY) ComputeWorldFromTileLocal(int tileRow, int tileCol, double localX, double localY)
+    {
+        // tx = HalfTiles - (worldX / TileSpan) = tileCol + (1 - localX)
+        // ty = HalfTiles - (worldY / TileSpan) = tileRow + localY
+        var tx = tileCol + (1.0 - ClampUnit(localX));
+        var ty = tileRow + ClampUnit(localY);
+        var worldX = (HalfTiles - tx) * TileSpanYards;
+        var worldY = (HalfTiles - ty) * TileSpanYards;
+        return (worldX, worldY);
+    }
+
+    /// <summary>
+    /// Computes normalized world coordinates from tile indices and pixel coordinates.
+    /// </summary>
+    public static (double WorldX, double WorldY) ComputeWorldFromTilePixel(int tileRow, int tileCol, double pixelX, double pixelY, int width, int height)
+    {
+        var w1 = Math.Max(1, width - 1);
+        var h1 = Math.Max(1, height - 1);
+        var localX = ClampUnit(pixelX / w1);
+        var localY = ClampUnit(pixelY / h1);
+        return ComputeWorldFromTileLocal(tileRow, tileCol, localX, localY);
+    }
+
+    /// <summary>
+    /// Computes raw local coordinates (unclamped) using wow.tools mapping for the specified tile.
     /// - Tile indices: row = floor(32 - worldY/533.33333), col = floor(32 - worldX/533.33333)
     /// - Local coords within tile:
-    ///     localX = 1 - frac(32 - worldX/533.33333)  // flip X to match minimap texture orientation (west to the right in image)
+    ///     localX = 1 - frac(32 - worldX/533.33333)
     ///     localY = frac(32 - worldY/533.33333)
     /// </summary>
-    public static (double LocalX, double LocalY) ComputeLocalCoordinates(double worldX, double worldY, int tileRow, int tileCol)
+    public static (double LocalX, double LocalY) ComputeLocalCoordinatesRaw(double worldX, double worldY, int tileRow, int tileCol)
     {
         // Compute continuous tile coordinates
         var tx = HalfTiles - (worldX / TileSpanYards);
@@ -40,8 +67,17 @@ public static class CoordinateTransformer
         // wow.tools orientation: X is flipped relative to world axis when rendered on minimap textures
         var localX = 1.0 - Frac(tx);
         var localY = Frac(ty);
+        return (localX, localY);
+    }
 
-        return (ClampUnit(localX), ClampUnit(localY));
+    /// <summary>
+    /// Computes normalized coordinates relative to the specified tile (0..1 range) using wow.tools mapping.
+    /// Calls ComputeLocalCoordinatesRaw and clamps to [0..1].
+    /// </summary>
+    public static (double LocalX, double LocalY) ComputeLocalCoordinates(double worldX, double worldY, int tileRow, int tileCol)
+    {
+        var (lx, ly) = ComputeLocalCoordinatesRaw(worldX, worldY, tileRow, tileCol);
+        return (ClampUnit(lx), ClampUnit(ly));
     }
 
     /// <summary>

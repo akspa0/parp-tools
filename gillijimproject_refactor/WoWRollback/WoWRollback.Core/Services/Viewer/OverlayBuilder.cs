@@ -151,8 +151,29 @@ public sealed class OverlayBuilder
 
     private static object BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
-        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
+        // Compute RAW local first to decide if the entry truly belongs to this tile
+        var (localRawX, localRawY) = CoordinateTransformer.ComputeLocalCoordinatesRaw(entry.WorldX, entry.WorldY, tileRow, tileCol);
+        var inRange = localRawX >= 0.0 && localRawX < 1.0 && localRawY >= 0.0 && localRawY < 1.0;
+        if (!inRange)
+        {
+            // Skip out-of-range placements to prevent corner ghosts on empty tiles
+            return null!;
+        }
+
+        var (localX, localY) = (Math.Clamp(localRawX, 0.0, 1.0), Math.Clamp(localRawY, 0.0, 1.0));
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
+
+        static bool IsWorldReliable(double x, double y) => !(double.IsNaN(x) || double.IsNaN(y) || (x == 0.0 && y == 0.0));
+        var worldReliable = IsWorldReliable(entry.WorldX, entry.WorldY);
+        int worldRow = -1, worldCol = -1;
+        bool isAdjacentRef = false;
+        if (worldReliable)
+        {
+            var idx = CoordinateTransformer.ComputeTileIndices(entry.WorldX, entry.WorldY);
+            worldRow = idx.TileRow;
+            worldCol = idx.TileCol;
+            isAdjacentRef = worldRow != tileRow || worldCol != tileCol;
+        }
 
         static string ClassifyType(AssetTimelineDetailedEntry e)
         {
@@ -173,6 +194,16 @@ public sealed class OverlayBuilder
             };
         }
 
+        // Determine type and apply permanent WMO-specific Y flip at generation time
+        var typeLabel = ClassifyType(entry);
+        if (typeLabel == "wmo")
+        {
+            pixelY = options.MinimapHeight - pixelY;
+        }
+
+        // Compute normalized world from tile+pixel for UI (center-origin ADT). Preserve raw too.
+        var (wx, wy) = CoordinateTransformer.ComputeWorldFromTilePixel(tileRow, tileCol, pixelX, pixelY, options.MinimapWidth, options.MinimapHeight);
+
         return new
         {
             uniqueId = entry.UniqueId,
@@ -189,13 +220,9 @@ public sealed class OverlayBuilder
             fileName = entry.FileName,
             fileStem = entry.FileStem,
             extension = entry.Extension,
-            type = ClassifyType(entry),
-            world = new
-            {
-                x = entry.WorldX,
-                y = entry.WorldY,
-                z = entry.WorldZ
-            },
+            type = typeLabel,
+            world = new { x = wx, y = wy, z = entry.WorldZ },
+            worldRaw = new { x = entry.WorldX, y = entry.WorldY, z = entry.WorldZ },
             local = new
             {
                 x = Math.Round(localX, 6, MidpointRounding.AwayFromZero),
@@ -205,7 +232,9 @@ public sealed class OverlayBuilder
             {
                 x = Math.Round(pixelX, 2, MidpointRounding.AwayFromZero),
                 y = Math.Round(pixelY, 2, MidpointRounding.AwayFromZero)
-            }
+            },
+            tileOfWorld = new { row = worldRow, col = worldCol },
+            isAdjacentRef
         };
     }
 }

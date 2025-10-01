@@ -106,7 +106,7 @@ function defaultConfig() {
         coordMode: 'wowtools',
         minimap: { width: 512, height: 512 },
         wmoSwapXY: false,
-        wmoFlipY: true,
+        wmoFlipY: false,
         swapPixelXY: false,
         flipPixelX: false,
         flipPixelY: false,

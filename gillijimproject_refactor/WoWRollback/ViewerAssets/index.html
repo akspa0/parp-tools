@@ -40,16 +40,10 @@
             <label style="display:block;"><input type="checkbox" id="showWmo" checked> WMO (orange)</label>
             <label style="display:block;"><input type="checkbox" id="showM2" checked> M2/MDX (cyan)</label>
             <label style="display:block;"><input type="checkbox" id="showOther" checked> Other (green)</label>
+            <label style="display:block; margin-top:6px;"><input type="checkbox" id="showAdjacentRefs" checked> Show adjacent refs</label>
         </div>
 
-        <div class="control-group">
-            <label style="display:block; margin-bottom:4px;">Pixel XY:</label>
-            <label style="display:block;"><input type="checkbox" id="swapPixelXY"> Swap XY (global)</label>
-            <label style="display:block;"><input type="checkbox" id="wmoSwapXY"> Swap XY for WMO only</label>
-            <label style="display:block;"><input type="checkbox" id="flipPixelX"> Flip X</label>
-            <label style="display:block;"><input type="checkbox" id="flipPixelY"> Flip Y</label>
-            <label style="display:block;"><input type="checkbox" id="rotate90"> Rotate 90°</label>
-        </div>
+        <!-- Pixel XY debug controls removed: flips/swaps now handled at generation time -->
 
         <div class="info-section">
             <strong>Last Click:</strong><br>
@@ -76,11 +70,16 @@
                 <span class="color-box" style="background: #4CAF50; width: 6px; height: 6px; border-radius: 50%;"></span>
                 <span>Other placement</span>
             </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #FF9800; opacity: 0.35; width: 10px; height: 10px; border-radius: 50%;"></span>
+                <span>Adjacent reference</span>
+            </div>
             <div class="legend-item" style="margin-top:6px;">
                 <span>Markers: </span>
                 <span id="markerShown">0</span>
                 <span>/</span>
                 <span id="markerTotal">0</span>
+                <span style="margin-left:6px; color:#9E9E9E;">(+<span id="markerAdj">0</span> adj)</span>
             </div>
         </div>
     </div>
