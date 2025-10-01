@@ -41,6 +41,38 @@
                     </div>
                 </section>
 
+                <section class="fit-control">
+                    <h3>Fit Controls</h3>
+                    <label>Axis:
+                        <select id="fitAxis">
+                            <option value="auto" selected>Auto</option>
+                            <option value="xy">XY</option>
+                            <option value="xz">XZ</option>
+                            <option value="zy">ZY</option>
+                        </select>
+                    </label>
+                    <div class="fit-row">
+                        <label><input type="checkbox" id="fitFlipX"> Flip X</label>
+                        <label><input type="checkbox" id="fitFlipY"> Flip Y</label>
+                    </div>
+                    <label>Rotate:
+                        <select id="fitRotate">
+                            <option value="0" selected>0°</option>
+                            <option value="90">90°</option>
+                            <option value="180">180°</option>
+                            <option value="270">270°</option>
+                        </select>
+                    </label>
+                    <div class="fit-row">
+                        <label><input type="checkbox" id="fitInvertY" checked> Invert Y (pixels)</label>
+                    </div>
+                    <div class="fit-row">
+                        <button id="fitAuto">Auto-Fit</button>
+                        <button id="fitReset">Reset</button>
+                    </div>
+                    <div id="fitDiagnostics" class="fit-diagnostics" style="font-size: 0.85em; color: #9E9E9E;"></div>
+                </section>
+
                 <section class="overlay-info">
                     <h3>Objects (<span id="objectCount">0</span>)</h3>
                     <div id="objectList" class="object-list"></div>

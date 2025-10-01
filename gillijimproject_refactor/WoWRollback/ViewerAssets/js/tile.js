@@ -2,12 +2,22 @@
 import { state } from './state.js';
 import { TileCanvas } from './tileCanvas.js';
 import { loadOverlay, loadDiff } from './overlayLoader.js';
+import { autoFit, computeLocalForTile, toPixels } from './fit.js';
 
 let currentMap, currentRow, currentCol, currentVersion;
 let tileCanvas;
 let overlayData = null;
 let diffData = null;
 let diffEnabled = false;
+
+// Interactive fit state (per tile)
+let fit = {
+    axis: 'auto',    // 'auto' | 'xy' | 'xz' | 'zy'
+    flipX: false,
+    flipY: false,
+    rotate: 0,       // 0|90|180|270
+    invertY: true
+};
 
 export async function init() {
     await state.loadIndex();
@@ -24,6 +34,86 @@ export async function init() {
         window.location.href = 'index.html';
         return;
     }
+
+function getActivePoints(objects) {
+    const pts = [];
+    for (const o of objects) {
+        if (!o || !o.world) continue;
+        pts.push({ world: { x: o.world.x, y: o.world.y, z: o.world.z }, diffType: o.diffType || null });
+    }
+    return pts;
+}
+
+function drawOnCanvas(objects) {
+    tileCanvas.draw();
+    const width = tileCanvas.canvas.width;
+    const height = tileCanvas.canvas.height;
+
+    // Auto-fit on demand
+    if (fit.axis === 'auto') {
+        doAutoFit(objects);
+    }
+
+    let inRange = 0, outRange = 0, edgeAccum = 0;
+    const display = [];
+    for (const o of objects) {
+        if (!o.world) continue;
+        const { inRange: ok, lx, ly } = computeLocalForTile(
+            o.world, fit.axis === 'auto' ? 'xy' : fit.axis, fit.flipX, fit.flipY, fit.rotate, currentRow, currentCol
+        );
+        if (ok) inRange++; else outRange++;
+        const px = toPixels(lx, ly, width, height, fit.invertY);
+        const ex = Math.min(Math.abs(lx), Math.abs(1 - lx));
+        const ey = Math.min(Math.abs(ly), Math.abs(1 - ly));
+        edgeAccum += 0.5 * (ex + ey);
+        display.push({ pixelX: px.x, pixelY: px.y, diffType: o.diffType || 'default' });
+    }
+
+    const colorMap = { default: '#4CAF50', added: '#4CAF50', removed: '#E53935', moved: '#FFB300', changed: '#8E24AA' };
+    tileCanvas.drawOverlay(display, colorMap);
+    const meanEdge = objects.length > 0 ? edgeAccum / objects.length : 0;
+    updateDiagnostics(display, inRange, outRange, meanEdge);
+}
+
+function doAutoFit(objects) {
+    const pts = getActivePoints(objects || []);
+    if (pts.length === 0) return;
+    const cfg = autoFit(pts, currentRow, currentCol, tileCanvas.canvas.width, tileCanvas.canvas.height);
+    fit.axis = cfg.axis; fit.flipX = cfg.flipX; fit.flipY = cfg.flipY; fit.rotate = cfg.rotate; fit.invertY = cfg.invertY;
+    // Reflect in UI
+    const fitAxis = document.getElementById('fitAxis');
+    const fitFlipX = document.getElementById('fitFlipX');
+    const fitFlipY = document.getElementById('fitFlipY');
+    const fitRotate = document.getElementById('fitRotate');
+    const fitInvertY = document.getElementById('fitInvertY');
+    if (fitAxis) fitAxis.value = fit.axis;
+    if (fitFlipX) fitFlipX.checked = fit.flipX;
+    if (fitFlipY) fitFlipY.checked = fit.flipY;
+    if (fitRotate) fitRotate.value = String(fit.rotate);
+    if (fitInvertY) fitInvertY.checked = fit.invertY;
+}
+
+function resetFit() {
+    fit = { axis: 'auto', flipX: false, flipY: false, rotate: 0, invertY: true };
+    const fitAxis = document.getElementById('fitAxis');
+    const fitFlipX = document.getElementById('fitFlipX');
+    const fitFlipY = document.getElementById('fitFlipY');
+    const fitRotate = document.getElementById('fitRotate');
+    const fitInvertY = document.getElementById('fitInvertY');
+    if (fitAxis) fitAxis.value = 'auto';
+    if (fitFlipX) fitFlipX.checked = false;
+    if (fitFlipY) fitFlipY.checked = false;
+    if (fitRotate) fitRotate.value = '0';
+    if (fitInvertY) fitInvertY.checked = true;
+    renderObjects();
+}
+
+function updateDiagnostics(displayPoints, inRange, outRange, meanEdge) {
+    const el = document.getElementById('fitDiagnostics');
+    if (!el) return;
+    const desc = `axis=${fit.axis} flipX=${fit.flipX} flipY=${fit.flipY} rot=${fit.rotate} invY=${fit.invertY}`;
+    el.innerHTML = `<div>${desc}</div><div>inRange: ${inRange}, outOfRange: ${outRange}, meanEdge: ${meanEdge.toFixed(3)}</div>`;
+}
 
     setupUI();
     tileCanvas = new TileCanvas('tileCanvas', state.config);
@@ -89,6 +179,23 @@ function setupUI() {
     diffComparison.addEventListener('change', async () => {
         if (diffEnabledCheckbox.checked) await loadDiffData();
     });
+
+    // Fit controls
+    const fitAxis = document.getElementById('fitAxis');
+    const fitFlipX = document.getElementById('fitFlipX');
+    const fitFlipY = document.getElementById('fitFlipY');
+    const fitRotate = document.getElementById('fitRotate');
+    const fitInvertY = document.getElementById('fitInvertY');
+    const fitAutoBtn = document.getElementById('fitAuto');
+    const fitResetBtn = document.getElementById('fitReset');
+
+    if (fitAxis) fitAxis.addEventListener('change', () => { fit.axis = fitAxis.value; renderObjects(); });
+    if (fitFlipX) fitFlipX.addEventListener('change', () => { fit.flipX = fitFlipX.checked; renderObjects(); });
+    if (fitFlipY) fitFlipY.addEventListener('change', () => { fit.flipY = fitFlipY.checked; renderObjects(); });
+    if (fitRotate) fitRotate.addEventListener('change', () => { fit.rotate = parseInt(fitRotate.value, 10) || 0; renderObjects(); });
+    if (fitInvertY) fitInvertY.addEventListener('change', () => { fit.invertY = fitInvertY.checked; renderObjects(); });
+    if (fitAutoBtn) fitAutoBtn.addEventListener('click', () => { doAutoFit(); renderObjects(); });
+    if (fitResetBtn) fitResetBtn.addEventListener('click', () => { resetFit(); });
 }
 
 async function loadTile() {
@@ -161,10 +268,15 @@ function renderObjects() {
 
     if (objects.length === 0) {
         objectList.innerHTML = '<p style="color: #9E9E9E;">No objects in this tile.</p>';
+        updateDiagnostics([], 0, 0, 0);
+        tileCanvas.draw();
         return;
     }
 
     objectList.innerHTML = objects.map(obj => createObjectItem(obj)).join('');
+
+    // Draw markers on canvas using current fit
+    drawOnCanvas(objects);
 }
 
 function createObjectItem(obj) {

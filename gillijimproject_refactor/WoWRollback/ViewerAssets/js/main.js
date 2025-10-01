@@ -275,8 +275,12 @@ async function updateObjectMarkers() {
     const tileCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
     console.log(`Loading objects for ${tileCount} tiles: r${minRow}-${maxRow}, c${minCol}-${maxCol}`);
     
+    const tiles = state.getTilesForMap(state.selectedMap);
     for (let row = minRow; row <= maxRow; row++) {
         for (let col = minCol; col <= maxCol; col++) {
+            // Only fetch overlays for tiles listed in index.json and available for the selected version
+            const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
+            if (!available) continue;
             try {
                 const overlayPath = state.getOverlayPath(state.selectedMap, row, col);
                 const data = await loadOverlay(overlayPath);

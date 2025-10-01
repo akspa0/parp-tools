@@ -30,9 +30,13 @@ export class State {
     async loadConfig() {
         try {
             const response = await fetch('config.json');
-            this.config = await response.json();
+            if (response.ok) {
+                this.config = await response.json();
+            } else {
+                this.config = defaultConfig();
+            }
         } catch (e) {
-            this.config = {};
+            this.config = defaultConfig();
         }
         return this.config;
     }
@@ -90,3 +94,12 @@ export class State {
 }
 
 export const state = new State();
+
+function defaultConfig() {
+    // Sensible defaults that match wow.tools expectations
+    return {
+        coordMode: 'wowtools',
+        minimap: { width: 512, height: 512 },
+        debugOverlayCorners: false
+    };
+}

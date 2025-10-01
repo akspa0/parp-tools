@@ -259,9 +259,13 @@ internal sealed class MinimapLocator
             var left = parts[0].Trim();
             var right = parts[1].Trim();
 
-            string MapSide(string value) => value.Contains("map", StringComparison.OrdinalIgnoreCase) && value.Contains(".blp", StringComparison.OrdinalIgnoreCase)
-                ? value
-                : string.Empty;
+            static bool HasMapStem(string value)
+                => value.Contains("map", StringComparison.OrdinalIgnoreCase) &&
+                   (value.EndsWith(".blp", StringComparison.OrdinalIgnoreCase) ||
+                    value.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                    value.EndsWith(".svg", StringComparison.OrdinalIgnoreCase));
+
+            string MapSide(string value) => HasMapStem(value) ? value : string.Empty;
 
             var mapCandidate = MapSide(left);
             var actualCandidate = mapCandidate.Length > 0 ? right : left;

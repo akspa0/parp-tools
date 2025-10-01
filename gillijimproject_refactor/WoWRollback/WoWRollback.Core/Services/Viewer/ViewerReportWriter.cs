@@ -106,17 +106,25 @@ public sealed class ViewerReportWriter
                     var versionMapMinimapDir = Path.Combine(versionMinimapRoot, safeMap);
                     Directory.CreateDirectory(versionMapMinimapDir);
 
-                    var hasTile = minimapLocator.TryGetTile(version, mapName, row, col, out var tileDescriptor);
                     var minimapFile = $"{mapName}_{col}_{row}.png";
                     var minimapPath = Path.Combine(versionMapMinimapDir, minimapFile);
 
-                    if (hasTile)
+                    try
                     {
-                        using var tileStream = tileDescriptor.Open();
-                        _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                        if (minimapLocator.TryGetTile(version, mapName, row, col, out var tileDescriptor))
+                        {
+                            using var tileStream = tileDescriptor.Open();
+                            _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                        }
+                        else
+                        {
+                            // No source tile found → emit placeholder so tile pages still work
+                            _minimapComposer.WritePlaceholderAsync(minimapPath, resolvedOptions).GetAwaiter().GetResult();
+                        }
                     }
-                    else
+                    catch
                     {
+                        // Any decode or IO failure → write placeholder and continue
                         _minimapComposer.WritePlaceholderAsync(minimapPath, resolvedOptions).GetAwaiter().GetResult();
                     }
                 }

@@ -4,7 +4,7 @@ namespace WoWRollback.Core.Services;
 
 /// <summary>
 /// Provides helpers to convert WoW world coordinates into tile-relative normalized or pixel positions.
-/// Formulas follow the viewer spec in <c>memory-bank/plans/viewer-diff-plan.md</c>.
+/// Formulas follow the viewer spec and wow.tools orientation.
 /// </summary>
 public static class CoordinateTransformer
 {
@@ -23,24 +23,23 @@ public static class CoordinateTransformer
     }
 
     /// <summary>
-    /// Computes normalized coordinates relative to the specified tile (0..1 range).
-    /// World coords are absolute. Tile covers a 533.33 yard square.
+    /// Computes normalized coordinates relative to the specified tile (0..1 range) using wow.tools mapping.
+    /// - Tile indices: row = floor(32 - worldY/533.33333), col = floor(32 - worldX/533.33333)
+    /// - Local coords within tile:
+    ///     localX = 1 - frac(32 - worldX/533.33333)  // flip X to match minimap texture orientation (west to the right in image)
+    ///     localY = frac(32 - worldY/533.33333)
+    /// </summary>
     public static (double LocalX, double LocalY) ComputeLocalCoordinates(double worldX, double worldY, int tileRow, int tileCol)
     {
-        // Calculate tile's world position (center of tile)
-        // Tile 32,32 is at world origin (0,0)
-        // Formula: worldPos = (32 - tileIndex) * 533.33333
-        var tileCenterX = (HalfTiles - tileCol) * TileSpanYards;
-        var tileCenterY = (HalfTiles - tileRow) * TileSpanYards;
+        // Compute continuous tile coordinates
+        var tx = HalfTiles - (worldX / TileSpanYards);
+        var ty = HalfTiles - (worldY / TileSpanYards);
 
-        // Calculate offset from tile center, then normalize to [0,1]
-        // Tile spans ±266.666 yards from center = 533.33 total
-        var offsetX = worldX - tileCenterX;
-        var offsetY = worldY - tileCenterY;
+        static double Frac(double v) => v - Math.Floor(v);
 
-        // Convert to [0,1] range: center is 0.5, edges are 0 and 1
-        var localX = 0.5 + (offsetX / TileSpanYards);
-        var localY = 0.5 + (offsetY / TileSpanYards);
+        // wow.tools orientation: X is flipped relative to world axis when rendered on minimap textures
+        var localX = 1.0 - Frac(tx);
+        var localY = Frac(ty);
 
         return (ClampUnit(localX), ClampUnit(localY));
     }
@@ -53,7 +52,9 @@ public static class CoordinateTransformer
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width), "Width must be positive.");
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
 
-        var px = ClampUnit(localX) * width;
+        // Flip X to align with minimap tile orientation; keep Y non-inverted (top-left origin)
+        var px = (1.0 - ClampUnit(localX)) * width;
+        // Use top-left origin without inversion so Y grows downward with localY
         var py = ClampUnit(localY) * height;
         return (px, py);
     }

@@ -69,7 +69,14 @@ public sealed class MinimapComposer
 
             if (image.Width != options.MinimapWidth || image.Height != options.MinimapHeight)
             {
-                image.Mutate(ctx => ctx.Resize(options.MinimapWidth, options.MinimapHeight));
+                // Preserve original pixel structure: nearest-neighbor scaling
+                image.Mutate(ctx =>
+                    ctx.Resize(new ResizeOptions
+                    {
+                        Size = new Size(options.MinimapWidth, options.MinimapHeight),
+                        Sampler = KnownResamplers.NearestNeighbor,
+                        Mode = ResizeMode.Stretch
+                    }));
             }
 
             var encoder = new PngEncoder
