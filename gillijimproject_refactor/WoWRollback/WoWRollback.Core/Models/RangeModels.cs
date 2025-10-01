@@ -27,7 +27,20 @@ public sealed record PlacementAsset(
     string FilePath,
     float WorldX,
     float WorldY,
-    float WorldZ
+    float WorldZ,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet,
+    string Folder,
+    string Category,
+    string Subcategory,
+    string FileName,
+    string FileStem,
+    string Extension
 );
 
 public sealed record AlphaAnalysisResult(IReadOnlyList<PlacementRange> Ranges, IReadOnlyList<PlacementAsset> Assets);
@@ -177,7 +190,14 @@ public sealed record AssetTimelineEntry(
     string AssetPath,
     string Folder,
     string Category,
-    string Subcategory
+    string Subcategory,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet
 );
 
 public sealed record DesignKitAssetEntry(
@@ -269,7 +289,14 @@ public sealed record UniqueIdAssetEntry(
     int MatchedRangeCount,
     float WorldX,
     float WorldY,
-    float WorldZ
+    float WorldZ,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet
 );
 
 public sealed record AssetTimelineDetailedEntry(
@@ -294,5 +321,12 @@ public sealed record AssetTimelineDetailedEntry(
     string Extension,
     float WorldX,
     float WorldY,
-    float WorldZ
+    float WorldZ,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet
 );

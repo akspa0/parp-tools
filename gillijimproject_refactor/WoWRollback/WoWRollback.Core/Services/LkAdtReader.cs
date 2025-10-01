@@ -16,6 +16,13 @@ public class LkAdtReader
         float WorldX,
         float WorldY,
         float WorldZ,
+        float RotX,
+        float RotY,
+        float RotZ,
+        float Scale,
+        ushort Flags,
+        ushort DoodadSet,
+        ushort NameSet,
         string AssetType // "M2" or "WMO"
     );
 
@@ -56,16 +63,30 @@ public class LkAdtReader
                 const float TILESIZE = 533.33333f;
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
                 
-                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);
-                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);
-                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);
+                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
+                float rotX = BitConverter.ToSingle(bytes, entryStart + 20);
+                float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
+                float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
+                ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 32);
+                ushort flags = BitConverter.ToUInt16(bytes, entryStart + 34);
                 
                 // Convert from map-corner-relative to world coordinates (centered at origin)
+                // WoW convention: Y is up (height). The horizontal plane is X/Z.
+                // World horizontal coordinates are measured from map center:
+                //   X_world = 32*TILESIZE - rawX
+                //   Z_world = 32*TILESIZE - rawZ
+                // Height stays as is: Y_world = rawY
                 float worldX = MAP_HALF_SIZE - rawX;
-                float worldY = MAP_HALF_SIZE - rawY;
-                float worldZ = rawZ; // Z is height, doesn't need conversion
+                float worldY = MAP_HALF_SIZE - rawZ; // north-south
+                float worldZ = rawY;                 // height
                 
-                placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ, "M2"));
+                // LK MDDF scale typically stored as ushort where 1024 == 1.0f
+                float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
+
+                placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ,
+                    rotX, rotY, rotZ, scale, flags, 0, 0, "M2"));
             }
         }
         catch (Exception ex)
@@ -112,16 +133,28 @@ public class LkAdtReader
                 const float TILESIZE = 533.33333f;
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
                 
-                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);
-                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);
-                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);
+                float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
+                float rotX = BitConverter.ToSingle(bytes, entryStart + 20);
+                float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
+                float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
+                // Bounding box at 32..56 (ignored here)
+                ushort flags = BitConverter.ToUInt16(bytes, entryStart + 56);
+                ushort doodadSet = BitConverter.ToUInt16(bytes, entryStart + 58);
+                ushort nameSet = BitConverter.ToUInt16(bytes, entryStart + 60);
+                ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 62);
                 
                 // Convert from map-corner-relative to world coordinates (centered at origin)
+                // WoW convention: Y is up (height). The horizontal plane is X/Z.
                 float worldX = MAP_HALF_SIZE - rawX;
-                float worldY = MAP_HALF_SIZE - rawY;
-                float worldZ = rawZ; // Z is height, doesn't need conversion
+                float worldY = MAP_HALF_SIZE - rawZ; // north-south
+                float worldZ = rawY;                 // height
                 
-                placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ, "WMO"));
+                float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
+
+                placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ,
+                    rotX, rotY, rotZ, scale, flags, doodadSet, nameSet, "WMO"));
             }
         }
         catch (Exception ex)

@@ -11,7 +11,9 @@ if (-not (Test-Path $comparisonsDir)) {
     exit 1
 }
 
-$comparisonDirs = Get-ChildItem $comparisonsDir -Directory | Where-Object { $_.Name -like "*_vs_*" }
+$comparisonDirs = Get-ChildItem $comparisonsDir -Directory |
+    Where-Object { $_.Name -like "*_vs_*" } |
+    Sort-Object LastWriteTime -Descending
 if ($comparisonDirs.Count -eq 0) {
     Write-Host "❌ No comparison directories found (need *_vs_* format)." -ForegroundColor Red
     exit 1

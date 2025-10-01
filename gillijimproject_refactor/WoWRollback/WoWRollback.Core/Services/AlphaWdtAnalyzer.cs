@@ -54,13 +54,27 @@ public static class AlphaWdtAnalyzer
                 float worldX = placement.WorldX;
                 float worldY = placement.WorldY;
                 float worldZ = placement.WorldZ;
+                float rotX = 0f, rotY = 0f, rotZ = 0f, scale = 1f;
+                ushort flags = 0, doodadSet = 0, nameSet = 0;
                 
                 if (uniqueId.HasValue && coordinateLookup.TryGetValue(uniqueId.Value, out var coords))
                 {
                     worldX = coords.X;
                     worldY = coords.Y;
                     worldZ = coords.Z;
+                    rotX = coords.RotX;
+                    rotY = coords.RotY;
+                    rotZ = coords.RotZ;
+                    scale = coords.Scale;
+                    flags = coords.Flags;
+                    doodadSet = coords.DoodadSet;
+                    nameSet = coords.NameSet;
                 }
+
+                var folder = ExtractFolder(placement.AssetPath, 2);
+                var category = ExtractCategory(placement.AssetPath);
+                var subcategory = ExtractSubcategory(placement.AssetPath);
+                var (fileName, fileStem, extension) = ExtractFileParts(placement.AssetPath);
 
                 assets.Add(new PlacementAsset(
                     placement.MapName,
@@ -72,7 +86,20 @@ public static class AlphaWdtAnalyzer
                     $"{placement.MapName}_{placement.TileX}_{placement.TileY}.adt",
                     worldX,
                     worldY,
-                    worldZ));
+                    worldZ,
+                    rotX,
+                    rotY,
+                    rotZ,
+                    scale,
+                    flags,
+                    doodadSet,
+                    nameSet,
+                    folder,
+                    category,
+                    subcategory,
+                    fileName,
+                    fileStem,
+                    extension));
             }
 
             // Extract placement ranges grouped by tile and type (unique IDs only)
@@ -119,12 +146,12 @@ public static class AlphaWdtAnalyzer
         return new AlphaAnalysisResult(ranges, assets);
     }
 
-    private static Dictionary<uint, (float X, float Y, float Z)> BuildCoordinateLookup(
+    private static Dictionary<uint, (float X, float Y, float Z, float RotX, float RotY, float RotZ, float Scale, ushort Flags, ushort DoodadSet, ushort NameSet)> BuildCoordinateLookup(
         string mapName,
         global::AlphaWdtAnalyzer.Core.AdtScanner.Result adtResult,
         string? convertedAdtDir)
     {
-        var lookup = new Dictionary<uint, (float, float, float)>();
+        var lookup = new Dictionary<uint, (float, float, float, float, float, float, float, ushort, ushort, ushort)>();
         
         if (string.IsNullOrEmpty(convertedAdtDir) || !Directory.Exists(convertedAdtDir))
             return lookup;
@@ -152,7 +179,10 @@ public static class AlphaWdtAnalyzer
                 var uid = unchecked((uint)placement.UniqueId);
                 if (!lookup.ContainsKey(uid))
                 {
-                    lookup[uid] = (placement.WorldX, placement.WorldY, placement.WorldZ);
+                    lookup[uid] = (
+                        placement.WorldX, placement.WorldY, placement.WorldZ,
+                        placement.RotX, placement.RotY, placement.RotZ,
+                        placement.Scale, placement.Flags, placement.DoodadSet, placement.NameSet);
                     coordsFound++;
                 }
             }
@@ -190,5 +220,45 @@ public static class AlphaWdtAnalyzer
         return normalized is "M2" or "MDX" or "MDXORM2"
             ? PlacementKind.M2
             : PlacementKind.WMO;
+    }
+
+    // Local helpers duplicated here to avoid cross-class coupling
+    private static string NormalizeAssetPath(string value) => value.Replace('\\', '/').Trim();
+
+    private static string ExtractFolder(string assetPath, int depth)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return "(root)";
+        var actualDepth = Math.Clamp(depth, 1, segments.Length);
+        return string.Join('/', segments.Take(actualDepth));
+    }
+
+    private static string ExtractCategory(string assetPath)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length >= 3) return segments[2];
+        if (segments.Length >= 2) return segments[1];
+        if (segments.Length >= 1) return segments[0];
+        return "(root)";
+    }
+
+    private static string ExtractSubcategory(string assetPath)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length >= 4) return segments[3];
+        if (segments.Length >= 3) return segments[2];
+        return "(none)";
+    }
+
+    private static (string FileName, string FileStem, string Extension) ExtractFileParts(string assetPath)
+    {
+        var normalized = NormalizeAssetPath(assetPath);
+        var fileName = Path.GetFileName(normalized);
+        var ext = Path.GetExtension(fileName);
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        return (fileName, stem, string.IsNullOrEmpty(ext) ? string.Empty : ext);
     }
 }

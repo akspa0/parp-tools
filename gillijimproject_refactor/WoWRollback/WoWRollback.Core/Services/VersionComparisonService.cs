@@ -294,7 +294,28 @@ public static class VersionComparisonService
                 var worldX = parts.Length > 7 ? ParseFloat(parts[7]) : 0f;
                 var worldY = parts.Length > 8 ? ParseFloat(parts[8]) : 0f;
                 var worldZ = parts.Length > 9 ? ParseFloat(parts[9]) : 0f;
-                assets.Add(new PlacementAsset(mapName, tileRow, tileCol, kind, uniqueId, assetPath, filePath, worldX, worldY, worldZ));
+                var rotX = parts.Length > 10 ? ParseFloat(parts[10]) : 0f;
+                var rotY = parts.Length > 11 ? ParseFloat(parts[11]) : 0f;
+                var rotZ = parts.Length > 12 ? ParseFloat(parts[12]) : 0f;
+                var scale = parts.Length > 13 ? ParseFloat(parts[13]) : 1f;
+                ushort flags = 0; if (parts.Length > 14) ushort.TryParse(parts[14].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out flags);
+                ushort doodadSet = 0; if (parts.Length > 15) ushort.TryParse(parts[15].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out doodadSet);
+                ushort nameSet = 0; if (parts.Length > 16) ushort.TryParse(parts[16].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out nameSet);
+
+                var folder = parts.Length > 17 ? parts[17].Trim() : ExtractFolder(assetPath, depth: 2);
+                var category = parts.Length > 18 ? parts[18].Trim() : ExtractCategory(assetPath);
+                var subcategory = parts.Length > 19 ? parts[19].Trim() : ExtractSubcategory(assetPath);
+                var fileName = parts.Length > 20 ? parts[20].Trim() : Path.GetFileName(assetPath);
+                var fileStem = parts.Length > 21 ? parts[21].Trim() : Path.GetFileNameWithoutExtension(assetPath);
+                var extension = parts.Length > 22 ? parts[22].Trim() : Path.GetExtension(assetPath);
+
+                assets.Add(new PlacementAsset(
+                    mapName, tileRow, tileCol, kind, uniqueId, assetPath, filePath,
+                    worldX, worldY, worldZ,
+                    rotX, rotY, rotZ, scale,
+                    flags, doodadSet, nameSet,
+                    folder, category, subcategory,
+                    fileName, fileStem, extension));
                 var key = (mapName, tileRow, tileCol, kind);
                 if (!lookup.TryGetValue(key, out var set))
                 {
@@ -583,7 +604,14 @@ public static class VersionComparisonService
                     asset.AssetPath,
                     ExtractFolder(asset.AssetPath, depth: 2),
                     ExtractCategory(asset.AssetPath),
-                    ExtractSubcategory(asset.AssetPath)));
+                    ExtractSubcategory(asset.AssetPath),
+                    asset.RotationX,
+                    asset.RotationY,
+                    asset.RotationZ,
+                    asset.Scale,
+                    asset.Flags,
+                    asset.DoodadSet,
+                    asset.NameSet));
             }
         }
         return entries
@@ -956,7 +984,14 @@ public static class VersionComparisonService
                     ext,
                     a.WorldX,
                     a.WorldY,
-                    a.WorldZ));
+                    a.WorldZ,
+                    a.RotationX,
+                    a.RotationY,
+                    a.RotationZ,
+                    a.Scale,
+                    a.Flags,
+                    a.DoodadSet,
+                    a.NameSet));
             }
         }
         return list
@@ -1019,7 +1054,14 @@ public static class VersionComparisonService
                     count,
                     a.WorldX,
                     a.WorldY,
-                    a.WorldZ));
+                    a.WorldZ,
+                    a.RotationX,
+                    a.RotationY,
+                    a.RotationZ,
+                    a.Scale,
+                    a.Flags,
+                    a.DoodadSet,
+                    a.NameSet));
             }
         }
         return list

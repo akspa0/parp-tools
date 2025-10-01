@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
@@ -9,6 +11,8 @@ namespace WoWRollback.Cli;
 
 internal static class Program
 {
+    private static readonly Dictionary<(string Version, string Map), string?> AlphaWdtCache = new(new TupleComparer());
+
     private static int Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help")
@@ -146,7 +150,12 @@ internal static class Program
     private static int RunCompareVersions(Dictionary<string, string> opts)
     {
         Require(opts, "versions");
-        var root = opts.GetValueOrDefault("root", opts.GetValueOrDefault("out", ""));
+        var rootCandidate = GetOption(opts, "root");
+        var outCandidate = GetOption(opts, "out");
+        var root = string.IsNullOrWhiteSpace(rootCandidate) ? (outCandidate ?? string.Empty) : rootCandidate!;
+        var outputRoot = string.IsNullOrWhiteSpace(root)
+            ? Path.Combine(Directory.GetCurrentDirectory(), "rollback_outputs")
+            : Path.GetFullPath(root);
 
         var versions = opts["versions"].Split(',', StringSplitOptions.RemoveEmptyEntries)
             .Select(s => s.Trim())
@@ -161,6 +170,8 @@ internal static class Program
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .ToList();
         }
+
+        EnsureComparisonPrerequisites(outputRoot, versions, maps, opts);
 
         Console.WriteLine($"[info] Comparing versions: {string.Join(", ", versions)}");
         if (!string.IsNullOrWhiteSpace(root)) Console.WriteLine($"[info] Root directory: {root}");
@@ -318,4 +329,191 @@ internal static class Program
         Console.WriteLine("  Singleton IDs and outliers are precious artifacts showing experiments and tests.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
     }
+
+    private static void EnsureComparisonPrerequisites(
+        string outputRoot,
+        IReadOnlyList<string> versions,
+        IReadOnlyList<string>? maps,
+        Dictionary<string, string> opts)
+    {
+        if (!Directory.Exists(outputRoot))
+        {
+            Directory.CreateDirectory(outputRoot);
+        }
+
+        if (maps is null || maps.Count == 0)
+        {
+            return;
+        }
+
+        var alphaRoot = GetOption(opts, "alpha-root");
+        var convertedAdtRoot = GetOption(opts, "converted-adt-root");
+
+        string? normalizedAlphaRoot = null;
+        if (!string.IsNullOrWhiteSpace(alphaRoot))
+        {
+            normalizedAlphaRoot = Path.GetFullPath(alphaRoot);
+            if (!Directory.Exists(normalizedAlphaRoot))
+            {
+                throw new DirectoryNotFoundException($"Alpha test data root not found: {normalizedAlphaRoot}");
+            }
+        }
+
+        string? normalizedConvertedRoot = null;
+        if (!string.IsNullOrWhiteSpace(convertedAdtRoot))
+        {
+            var candidate = Path.GetFullPath(convertedAdtRoot);
+            if (Directory.Exists(candidate))
+            {
+                normalizedConvertedRoot = candidate;
+            }
+            else
+            {
+                Console.WriteLine($"[warn] Converted ADT root not found: {candidate}. Coordinates will fall back to raw Alpha data.");
+            }
+        }
+
+        foreach (var version in versions)
+        {
+            foreach (var map in maps)
+            {
+                if (HasAlphaOutputs(outputRoot, version, map))
+                {
+                    continue;
+                }
+
+                if (normalizedAlphaRoot is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Required comparison data for version '{version}', map '{map}' is missing under '{outputRoot}'. " +
+                        "Supply --alpha-root so the CLI can auto-generate the placement ranges.");
+                }
+
+                var wdtPath = FindAlphaWdt(normalizedAlphaRoot, version, map);
+                if (wdtPath is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Could not locate Alpha WDT for version '{version}', map '{map}' beneath '{normalizedAlphaRoot}'.");
+                }
+
+                var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtPath)) ?? wdtPath);
+                var sessionDir = OutputSession.Create(outputRoot, map, buildTag);
+                var convertedDir = ResolveConvertedAdtDirectory(normalizedConvertedRoot, map);
+
+                Console.WriteLine($"[auto] Generating placement ranges for {version} / {map}");
+                Console.WriteLine($"[auto]  WDT: {wdtPath}");
+                if (!string.IsNullOrWhiteSpace(convertedDir))
+                {
+                    Console.WriteLine($"[auto]  Converted ADTs: {convertedDir}");
+                }
+
+                var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir);
+                RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
+            }
+        }
+    }
+
+    private static bool HasAlphaOutputs(string outputRoot, string version, string map)
+    {
+        var versionDirectory = Path.Combine(outputRoot, version);
+        if (!Directory.Exists(versionDirectory))
+        {
+            return false;
+        }
+
+        var mapDirectory = Path.Combine(versionDirectory, map);
+        if (!Directory.Exists(mapDirectory))
+        {
+            return false;
+        }
+
+        var idRanges = Path.Combine(mapDirectory, $"id_ranges_by_map_alpha_{map}.csv");
+        return File.Exists(idRanges);
+    }
+
+    private static string? FindAlphaWdt(string alphaRoot, string version, string map)
+    {
+        var key = (version, map);
+        if (AlphaWdtCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var matches = Directory.EnumerateFiles(alphaRoot, map + ".wdt", SearchOption.AllDirectories)
+                .Where(path => path.EndsWith(Path.DirectorySeparatorChar + map + ".wdt", StringComparison.OrdinalIgnoreCase) ||
+                               path.EndsWith(Path.AltDirectorySeparatorChar + map + ".wdt", StringComparison.OrdinalIgnoreCase))
+                .Where(path => path.IndexOf($"{Path.DirectorySeparatorChar}World{Path.DirectorySeparatorChar}Maps{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                               path.IndexOf($"{Path.AltDirectorySeparatorChar}World{Path.AltDirectorySeparatorChar}Maps{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(path => ScoreVersionMatch(path, version))
+                .ThenBy(path => path.Length)
+                .ToList();
+
+            var resolved = matches.FirstOrDefault();
+            AlphaWdtCache[key] = resolved;
+            return resolved;
+        }
+        catch
+        {
+            AlphaWdtCache[key] = null;
+            return null;
+        }
+    }
+
+    private static int ScoreVersionMatch(string path, string version)
+    {
+        if (path.IndexOf(version, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return 0;
+        }
+
+        var prefixLength = Math.Min(5, version.Length);
+        var prefix = version[..prefixLength];
+        if (path.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return 1;
+        }
+
+        var majorMinor = version.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (majorMinor.Length >= 2)
+        {
+            var partial = string.Join('.', majorMinor.Take(2));
+            if (path.IndexOf(partial, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return 2;
+            }
+        }
+
+        return 3;
+    }
+
+    private static string? ResolveConvertedAdtDirectory(string? convertedRoot, string map)
+    {
+        if (string.IsNullOrWhiteSpace(convertedRoot))
+        {
+            return null;
+        }
+
+        var candidate = Path.Combine(convertedRoot, map);
+        if (Directory.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        return null;
+    }
+
+    private sealed class TupleComparer : IEqualityComparer<(string Version, string Map)>
+    {
+        public bool Equals((string Version, string Map) x, (string Version, string Map) y) =>
+            string.Equals(x.Version, y.Version, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(x.Map, y.Map, StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode((string Version, string Map) obj) =>
+            HashCode.Combine(obj.Version.ToUpperInvariant(), obj.Map.ToUpperInvariant());
+    }
+
+    private static string? GetOption(Dictionary<string, string> opts, string key, string? fallback = null) =>
+        opts.TryGetValue(key, out var value) ? value : fallback;
 }

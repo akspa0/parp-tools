@@ -84,7 +84,7 @@ public static class RangeCsvWriter
     {
         var outPath = Path.Combine(sessionDir, $"assets_{map}.csv");
         using var sw = new StreamWriter(outPath, false);
-        sw.WriteLine("map,kind,unique_id,asset_path,tile_row,tile_col,file,world_x,world_y,world_z");
+        sw.WriteLine("map,kind,unique_id,asset_path,tile_row,tile_col,file,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,flags,doodad_set,name_set,folder,category,subcategory,file_name,file_stem,extension");
         foreach (var asset in assets
                      .OrderBy(a => a.Map)
                      .ThenBy(a => a.Kind)
@@ -105,7 +105,20 @@ public static class RangeCsvWriter
                 asset.FilePath.Replace('\\','/'),
                 asset.WorldX.ToString(CultureInfo.InvariantCulture),
                 asset.WorldY.ToString(CultureInfo.InvariantCulture),
-                asset.WorldZ.ToString(CultureInfo.InvariantCulture)
+                asset.WorldZ.ToString(CultureInfo.InvariantCulture),
+                asset.RotationX.ToString(CultureInfo.InvariantCulture),
+                asset.RotationY.ToString(CultureInfo.InvariantCulture),
+                asset.RotationZ.ToString(CultureInfo.InvariantCulture),
+                asset.Scale.ToString(CultureInfo.InvariantCulture),
+                asset.Flags.ToString(CultureInfo.InvariantCulture),
+                asset.DoodadSet.ToString(CultureInfo.InvariantCulture),
+                asset.NameSet.ToString(CultureInfo.InvariantCulture),
+                asset.Folder.Replace('\\','/'),
+                asset.Category,
+                asset.Subcategory,
+                asset.FileName,
+                asset.FileStem,
+                asset.Extension
             }));
         }
 

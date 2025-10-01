@@ -257,7 +257,9 @@ public sealed class ViewerReportWriter
             {
                 distance = options.DiffDistanceThreshold,
                 moveEpsilonRatio = options.MoveEpsilonRatio
-            }
+            },
+            coordMode = "wowtools",
+            debugOverlayCorners = false
         };
 
         var jsonOptions = new JsonSerializerOptions
