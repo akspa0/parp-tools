@@ -69,13 +69,23 @@ Key flags:
 - `--diff`: Explicit baseline/comparison pair for diff JSON (defaults to earliest→latest)
 
 Viewer output structure (`.../viewer/`):
-- `minimap/<Map>/tile_r<Row>_c<Col>.png`
-- `overlays/<Map>/tile_r<Row>_c<Col>.json`
+- `minimap/<Version>/<Map>/<Map>_<Col>_<Row>.png`
+- `overlays/<Version>/<Map>/<Variant>/tile_r<Row>_c<Col>.json`
 - `diffs/<Map>/tile_r<Row>_c<Col>.json`
 - `index.json`, `config.json`
-- *(planned)* Static HTML/JS bundle (copy your preferred viewer assets alongside these files)
+- Static viewer bundle (HTML/CSS/JS) copied from `ViewerAssets/`
 
-When minimap imagery is unavailable, the tool writes crosshair placeholders. Wire real data by opening the appropriate `Textures/Minimap/<Map>/mapXX_YY.blp` (or PNG) and passing the stream to `MinimapComposer`—future work will automate this lookup.
+Overlay variants:
+- `combined` – all placements for the selected version
+- `m2` – MDX/M2 doodads only
+- `wmo` – WMO placements only
+
+The viewer UI now exposes:
+- Version, map, and overlay dropdowns in `index.html`
+- Overlay selector in `tile.html`
+- Per-variant marker colors/radii
+
+Regeneration tip: `rebuild-and-regenerate.ps1` writes the new directory layout. Ensure no files under `rollback_outputs/comparisons/<comparison-key>/` are open before running, otherwise CSV locks will abort the CLI.
 
 ### dry-run
 Simulate rollback filtering using keep/drop configs without writing ADTs.
