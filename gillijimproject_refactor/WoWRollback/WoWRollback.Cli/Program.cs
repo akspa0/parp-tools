@@ -348,6 +348,7 @@ internal static class Program
 
         var alphaRoot = GetOption(opts, "alpha-root");
         var convertedAdtRoot = GetOption(opts, "converted-adt-root");
+        var convertedAdtCacheRoot = GetOption(opts, "converted-adt-cache");
 
         string? normalizedAlphaRoot = null;
         if (!string.IsNullOrWhiteSpace(alphaRoot))
@@ -370,6 +371,20 @@ internal static class Program
             else
             {
                 Console.WriteLine($"[warn] Converted ADT root not found: {candidate}. Coordinates will fall back to raw Alpha data.");
+            }
+        }
+
+        string? normalizedCacheRoot = null;
+        if (!string.IsNullOrWhiteSpace(convertedAdtCacheRoot))
+        {
+            var candidate = Path.GetFullPath(convertedAdtCacheRoot);
+            if (Directory.Exists(candidate))
+            {
+                normalizedCacheRoot = candidate;
+            }
+            else
+            {
+                Console.WriteLine($"[warn] Converted ADT cache not found: {candidate}. Rebuilding may be necessary.");
             }
         }
 
@@ -398,7 +413,18 @@ internal static class Program
 
                 var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtPath)) ?? wdtPath);
                 var sessionDir = OutputSession.Create(outputRoot, map, buildTag);
-                var convertedDir = ResolveConvertedAdtDirectory(normalizedConvertedRoot, map);
+                var convertedDir = ResolveConvertedAdtDirectory(normalizedConvertedRoot, version, map);
+                if (string.IsNullOrWhiteSpace(convertedDir) && normalizedCacheRoot is not null)
+                {
+                    foreach (var candidate in EnumerateCacheCandidates(normalizedCacheRoot, version, map))
+                    {
+                        if (Directory.Exists(candidate))
+                        {
+                            convertedDir = candidate;
+                            break;
+                        }
+                    }
+                }
 
                 Console.WriteLine($"[auto] Generating placement ranges for {version} / {map}");
                 Console.WriteLine($"[auto]  WDT: {wdtPath}");
@@ -488,17 +514,28 @@ internal static class Program
         return 3;
     }
 
-    private static string? ResolveConvertedAdtDirectory(string? convertedRoot, string map)
+    private static IEnumerable<string> EnumerateCacheCandidates(string root, string version, string map)
+    {
+        yield return Path.Combine(root, "World", "Maps", map, version);
+        yield return Path.Combine(root, "World", "Maps", map);
+        yield return Path.Combine(root, version, "World", "Maps", map);
+        yield return Path.Combine(root, version, map);
+        yield return Path.Combine(root, map);
+    }
+
+    private static string? ResolveConvertedAdtDirectory(string? convertedRoot, string version, string map)
     {
         if (string.IsNullOrWhiteSpace(convertedRoot))
         {
             return null;
         }
 
-        var candidate = Path.Combine(convertedRoot, map);
-        if (Directory.Exists(candidate))
+        foreach (var candidate in EnumerateCacheCandidates(convertedRoot, version, map))
         {
-            return candidate;
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
         }
 
         return null;
