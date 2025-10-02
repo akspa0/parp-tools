@@ -6,6 +6,9 @@ param(
     [string[]]$Maps = @("DeadminesInstance"),
     [string[]]$Versions = @("0.5.3.3368","0.5.5.3494"),
     [string]$AlphaRoot,
+    [string]$ConvertedAdtRoot,
+    [string]$CacheRoot = "cached_maps",
+    [switch]$RefreshCache,
     [switch]$Serve,
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$ExtraArgs
@@ -18,7 +21,7 @@ Write-Host "=== WoWRollback Rebuild & Regenerate ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Clean build
-Write-Host "[1/3] Building solution..." -ForegroundColor Yellow
+Write-Host "[1/4] Building solution..." -ForegroundColor Yellow
 dotnet build WoWRollback.sln --configuration Release
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
@@ -62,7 +65,123 @@ function Get-MapsFromAlphaRoot([string]$root) {
 }
 
 # Step 2: Regenerate comparison data
-Write-Host "[2/3] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
+Write-Host "[2/4] Preparing cached Alpha -> LK ADTs..." -ForegroundColor Yellow
+
+$cacheRootPath = Join-Path $PSScriptRoot $CacheRoot
+$communityListfile = Join-Path $PSScriptRoot "test_data/community-listfile-withcapitals.csv"
+$lkListfile = Join-Path $PSScriptRoot "test_data/World of Warcraft 3x.txt"
+$alphaToolProject = Join-Path $PSScriptRoot "..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli\AlphaWdtAnalyzer.Cli.csproj"
+
+if (-not (Test-Path $cacheRootPath)) {
+    New-Item -Path $cacheRootPath -ItemType Directory | Out-Null
+}
+
+function Get-WdtScore {
+    param(
+        [string]$Version,
+        [string]$Path
+    )
+    if ($Path -like "*${Version}*") { return 0 }
+    $prefix = $Version.Substring(0, [Math]::Min(5, $Version.Length))
+    if ($Path -like "*${prefix}*") { return 1 }
+    $parts = $Version.Split('.')
+    if ($parts.Length -ge 2) {
+        $majorMinor = "$($parts[0]).$($parts[1])"
+        if ($Path -like "*${majorMinor}*") { return 2 }
+    }
+    return 3
+}
+
+function Find-WdtPath {
+    param(
+        [string]$Root,
+        [string]$Version,
+        [string]$Map
+    )
+    if (-not (Test-Path $Root)) { return $null }
+    $candidates = Get-ChildItem -Path $Root -Recurse -File -Filter "$Map.wdt" -ErrorAction SilentlyContinue
+    if (-not $candidates) { return $null }
+    $sorted = $candidates |
+        Sort-Object @{Expression = { Get-WdtScore -Version $Version -Path $_.FullName }} , @{Expression = { $_.FullName.Length }}
+    return $sorted[0].FullName
+}
+
+function Ensure-CachedMap {
+    param(
+        [string]$Version,
+        [string]$Map
+    )
+
+    $versionRoot = Join-Path $cacheRootPath $Version
+    $mapRoot = Join-Path $versionRoot $Map
+    $adtsDir = Join-Path $mapRoot "adts"
+    $analysisDir = Join-Path $mapRoot "analysis"
+
+    $needsRefresh = $RefreshCache.IsPresent -or -not (Test-Path $adtsDir)
+    if (-not $needsRefresh) {
+        Write-Host "  [cache] Reusing $Version/$Map" -ForegroundColor DarkGray
+        return $mapRoot
+    }
+
+    if (Test-Path $mapRoot) {
+        Remove-Item $mapRoot -Recurse -Force
+    }
+    New-Item -Path $adtsDir -ItemType Directory -Force | Out-Null
+    New-Item -Path $analysisDir -ItemType Directory -Force | Out-Null
+
+    if (-not $AlphaRoot) {
+        throw "AlphaRoot must be provided to build cached maps"
+    }
+
+    $wdtPath = Find-WdtPath -Root $AlphaRoot -Version $Version -Map $Map
+    if (-not $wdtPath) {
+        throw "Unable to locate $Map.wdt beneath $AlphaRoot for version $Version"
+    }
+
+    if (-not (Test-Path $communityListfile)) {
+        throw "Missing community listfile at $communityListfile"
+    }
+    if (-not (Test-Path $lkListfile)) {
+        throw "Missing LK listfile at $lkListfile"
+    }
+    if (-not (Test-Path $alphaToolProject)) {
+        throw "AlphaWDTAnalysisTool project not found at $alphaToolProject"
+    }
+
+    Write-Host "  [cache] Building LK ADTs for $Version/$Map" -ForegroundColor Yellow
+    $toolArgs = @(
+        'run','--project',$alphaToolProject,'--configuration','Release','--',
+        '--input', $wdtPath,
+        '--listfile', $communityListfile,
+        '--lk-listfile', $lkListfile,
+        '--out', $analysisDir,
+        '--export-adt',
+        '--export-dir', $adtsDir,
+        '--no-web',
+        '--profile', 'modified',
+        '--no-fallbacks'
+    )
+
+    & dotnet @toolArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
+    }
+
+    return $mapRoot
+}
+
+$ensuredMaps = @{}
+foreach ($version in $Versions) {
+    foreach ($map in $Maps) {
+        $key = "$version::$map"
+        $ensuredMaps[$key] = Ensure-CachedMap -Version $version -Map $map
+    }
+}
+
+Write-Host "✓ Cached maps ready" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "[3/4] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
 $versionsArg = ($Versions -join ',')
 
 # Auto-discover maps if requested
@@ -93,6 +212,7 @@ Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
     '--viewer-report'
  )
  if ($AlphaRoot) { $cmd += @('--alpha-root', $AlphaRoot) }
+ if ($ConvertedAdtRoot) { $cmd += @('--converted-adt-root', $ConvertedAdtRoot) }
  if ($ExtraArgs) { $cmd += $ExtraArgs }
  # Capture dotnet output so we can parse the comparison directory path
  $dotnetOut = & dotnet @cmd 2>&1
@@ -106,7 +226,7 @@ Write-Host "✓ Data regenerated" -ForegroundColor Green
 Write-Host ""
 
 # Step 3: Locate the exact comparison directory from CLI output; fallback to latest with index.json
-Write-Host "[3/3] Locating viewer output..." -ForegroundColor Yellow
+Write-Host "[4/4] Locating viewer output..." -ForegroundColor Yellow
 
 $viewerPath = $null
 $match = $dotnetOut | Select-String -Pattern 'Outputs written to:\s*(.+)$' | Select-Object -Last 1
