@@ -21,10 +21,10 @@ public static class CsvReportWriter
         Directory.CreateDirectory(outDir);
         var path = Path.Combine(outDir, "placements.csv");
         using var sw = new StreamWriter(path);
-        sw.WriteLine("type,asset_path,map,tile_x,tile_y,unique_id");
+        sw.WriteLine("type,asset_path,map,tile_x,tile_y,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,flags,doodad_set,name_set");
         foreach (var p in placements)
         {
-            sw.WriteLine($"{p.Type},{Escape(p.AssetPath)},{Escape(p.MapName)},{p.TileX},{p.TileY},{p.UniqueId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty}");
+            sw.WriteLine($"{p.Type},{Escape(p.AssetPath)},{Escape(p.MapName)},{p.TileX},{p.TileY},{p.UniqueId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty},{Format(p.WorldX)},{Format(p.WorldY)},{Format(p.WorldZ)},{Format(p.RotationX)},{Format(p.RotationY)},{Format(p.RotationZ)},{Format(p.Scale)},{p.Flags},{p.DoodadSet},{p.NameSet}");
         }
     }
 
@@ -141,4 +141,6 @@ public static class CsvReportWriter
         }
         return s;
     }
+
+    private static string Format(float value) => value.ToString("0.######", CultureInfo.InvariantCulture);
 }

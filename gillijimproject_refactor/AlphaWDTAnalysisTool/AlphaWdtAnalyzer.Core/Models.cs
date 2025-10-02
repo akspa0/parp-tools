@@ -22,7 +22,14 @@ public sealed record PlacementRecord(
     int? UniqueId, // optional until we decode Alpha layout reliably
     float WorldX,
     float WorldY,
-    float WorldZ
+    float WorldZ,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet
 );
 
 public sealed class AnalysisIndex

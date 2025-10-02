@@ -53,16 +53,38 @@ public sealed class AdtScanner
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(mddf, start + 4); } catch { uniqueId = null; }
 
-                // Coordinates are not stored in Alpha 0.5.3 MDDF - use tile center as fallback
-                float worldX = 0.0f;
-                float worldY = 0.0f;
-                float worldZ = 0.0f;
+                float worldX = BitConverter.ToSingle(mddf, start + 8);
+                float worldZ = BitConverter.ToSingle(mddf, start + 12);
+                float worldY = BitConverter.ToSingle(mddf, start + 16);
+                float rotX = BitConverter.ToSingle(mddf, start + 20);
+                float rotY = BitConverter.ToSingle(mddf, start + 24);
+                float rotZ = BitConverter.ToSingle(mddf, start + 28);
+                ushort scaleRaw = BitConverter.ToUInt16(mddf, start + 32);
+                ushort flags = BitConverter.ToUInt16(mddf, start + 34);
+
+                float scale = scaleRaw > 0 ? scaleRaw / 1024.0f : 1.0f;
 
                 if (nameIndex >= 0 && nameIndex < mdnm.Count)
                 {
                     var p = mdnm[nameIndex];
                     result.M2Assets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.MdxOrM2, p, wdt.MapName, x, y, uniqueId, worldX, worldY, worldZ));
+                    result.Placements.Add(new PlacementRecord(
+                        AssetType.MdxOrM2,
+                        p,
+                        wdt.MapName,
+                        x,
+                        y,
+                        uniqueId,
+                        worldX,
+                        worldY,
+                        worldZ,
+                        rotX,
+                        rotY,
+                        rotZ,
+                        scale,
+                        flags,
+                        0,
+                        0));
                 }
             }
 
@@ -79,12 +101,36 @@ public sealed class AdtScanner
                 float worldX = BitConverter.ToSingle(modf, start + 8);
                 float worldZ = BitConverter.ToSingle(modf, start + 12);
                 float worldY = BitConverter.ToSingle(modf, start + 16);
+                float rotX = BitConverter.ToSingle(modf, start + 20);
+                float rotY = BitConverter.ToSingle(modf, start + 24);
+                float rotZ = BitConverter.ToSingle(modf, start + 28);
+                ushort flags = BitConverter.ToUInt16(modf, start + 56);
+                ushort doodadSet = BitConverter.ToUInt16(modf, start + 58);
+                ushort nameSet = BitConverter.ToUInt16(modf, start + 60);
+                ushort scaleRaw = BitConverter.ToUInt16(modf, start + 62);
+                float scale = scaleRaw > 0 ? scaleRaw / 1024.0f : 1.0f;
 
                 if (nameIndex >= 0 && nameIndex < monm.Count)
                 {
                     var p = monm[nameIndex];
                     result.WmoAssets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.Wmo, p, wdt.MapName, x, y, uniqueId, worldX, worldY, worldZ));
+                    result.Placements.Add(new PlacementRecord(
+                        AssetType.Wmo,
+                        p,
+                        wdt.MapName,
+                        x,
+                        y,
+                        uniqueId,
+                        worldX,
+                        worldY,
+                        worldZ,
+                        rotX,
+                        rotY,
+                        rotZ,
+                        scale,
+                        flags,
+                        doodadSet,
+                        nameSet));
                 }
             }
 
