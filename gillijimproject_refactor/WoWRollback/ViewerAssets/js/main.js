@@ -7,6 +7,12 @@ let map;
 let tileLayer; // no longer used, kept for minimal diff
 let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
+const overlayVariants = {
+    combined: { label: 'Combined', color: '#2196F3', radius: 3 },
+    m2: { label: 'Models (MDX/M2)', color: '#00E5FF', radius: 6 },
+    wmo: { label: 'WMOs', color: '#FF9800', radius: 5 }
+};
+
 let objectMarkers = L.layerGroup();
 let lastVersion = null;
 let showObjects = true;
@@ -70,6 +76,7 @@ function setupUI() {
     const mapSelect = document.getElementById('mapSelect');
     const showObjectsCheck = document.getElementById('showObjects');
     const layersSearch = document.getElementById('layersSearch');
+    const overlayVariantSelect = document.getElementById('overlayVariantSelect');
     
     // Sidebar toggle
     const sidebarToggle = document.getElementById('sidebarToggle');
@@ -102,6 +109,7 @@ function setupUI() {
 
     mapSelect.addEventListener('change', (e) => {
         state.setMap(e.target.value);
+        updateObjectMarkers();
     });
 
     showObjectsCheck.addEventListener('change', (e) => {
@@ -111,6 +119,7 @@ function setupUI() {
         } else {
             objectMarkers.remove();
         }
+        updateObjectMarkers();
     });
 
     // UniqueID range filter: supports "min-max" (e.g., 1000-2000)
@@ -122,10 +131,28 @@ function setupUI() {
         });
     }
 
+    if (overlayVariantSelect) {
+        overlayVariantSelect.innerHTML = '';
+        Object.entries(overlayVariants).forEach(([value, meta]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = meta.label;
+            if (value === state.overlayVariant) option.selected = true;
+            overlayVariantSelect.appendChild(option);
+        });
+        overlayVariantSelect.addEventListener('change', (e) => {
+            state.setOverlayVariant(e.target.value);
+        });
+    }
+
     renderComparisonInfo();
 }
 
 function onStateChange() {
+    const variantSelect = document.getElementById('overlayVariantSelect');
+    if (variantSelect && variantSelect.value !== state.overlayVariant) {
+        variantSelect.value = state.overlayVariant;
+    }
     // If version changed, clear caches and force rebuild of minimap overlays
     if (lastVersion !== state.selectedVersion) {
         lastVersion = state.selectedVersion;
@@ -289,13 +316,15 @@ async function updateObjectMarkers() {
     console.log(`Loading objects for ${tileCount} tiles: r${minRow}-${maxRow}, c${minCol}-${maxCol}`);
     
     const tiles = state.getTilesForMap(state.selectedMap);
+    const currentVariant = state.overlayVariant || 'combined';
+    const style = overlayVariants[currentVariant] ?? overlayVariants.combined;
     for (let row = minRow; row <= maxRow; row++) {
         for (let col = minCol; col <= maxCol; col++) {
             // Only fetch overlays for tiles listed in index.json and available for the selected version
             const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
             if (!available) continue;
             try {
-                const overlayPath = state.getOverlayPath(state.selectedMap, row, col);
+                const overlayPath = state.getOverlayPath(state.selectedMap, row, col, state.selectedVersion, currentVariant);
                 const data = await loadOverlay(overlayPath);
                 
                 const versionData = data.layers?.find(l => l.version === state.selectedVersion);
@@ -313,11 +342,11 @@ async function updateObjectMarkers() {
                     const { lat, lng } = pixelToLatLng(row, col, obj.pixel.x, obj.pixel.y, tileW, tileH);
                     
                     const marker = L.circleMarker([lat, lng], {
-                        radius: 3,
-                        fillColor: '#2196F3',
-                        color: '#fff',
+                        radius: currentVariant === 'combined' ? 3 : style.radius,
+                        fillColor: currentVariant === 'combined' ? '#2196F3' : style.color,
+                        color: '#000',
                         weight: 1,
-                        fillOpacity: 0.8
+                        fillOpacity: 0.85
                     }).bindPopup(`
                         <strong>${obj.fileName || 'Unknown'}</strong><br>
                         UID: ${obj.uniqueId || 'N/A'}<br>

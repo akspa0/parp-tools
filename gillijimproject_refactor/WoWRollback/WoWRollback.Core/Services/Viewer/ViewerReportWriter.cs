@@ -106,9 +106,7 @@ public sealed class ViewerReportWriter
         {
             var mapName = mapGroup.Name;
             var safeMap = Sanitize(mapName);
-            var mapOverlayDir = Path.Combine(overlaysRoot, safeMap);
             var mapDiffDir = Path.Combine(diffsRoot, safeMap);
-            Directory.CreateDirectory(mapOverlayDir);
             Directory.CreateDirectory(mapDiffDir);
 
             // Compute union of tiles from placements and minimap sources
@@ -154,10 +152,55 @@ public sealed class ViewerReportWriter
                     }
                 }
 
-                var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
-                // Always write overlay JSON, and include all versions (empty kinds when no objects)
-                var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, result.Versions, resolvedOptions);
-                File.WriteAllText(overlayPath, overlayJson);
+                foreach (var version in versionsForTile)
+                {
+                    var safeVersion = Sanitize(version);
+                    var versionRoot = Path.Combine(overlaysRoot, safeVersion);
+                    var mapOverlayDir = Path.Combine(versionRoot, safeMap);
+                    Directory.CreateDirectory(mapOverlayDir);
+
+                    var combinedDir = Path.Combine(mapOverlayDir, "combined");
+                    var modelsDir = Path.Combine(mapOverlayDir, "m2");
+                    var wmoDir = Path.Combine(mapOverlayDir, "wmo");
+                    Directory.CreateDirectory(combinedDir);
+                    Directory.CreateDirectory(modelsDir);
+                    Directory.CreateDirectory(wmoDir);
+
+                    entriesByVersion.TryGetValue(version, out var versionEntries);
+                    versionEntries ??= new List<AssetTimelineDetailedEntry>();
+
+                    var perVersion = _overlayBuilder.BuildOverlayJson(
+                        mapName,
+                        row,
+                        col,
+                        versionEntries,
+                        new[] { version },
+                        resolvedOptions);
+                    var combinedPath = Path.Combine(combinedDir, $"tile_r{row}_c{col}.json");
+                    File.WriteAllText(combinedPath, perVersion);
+
+                    var m2Json = _overlayBuilder.BuildOverlayJsonByKind(
+                        mapName,
+                        row,
+                        col,
+                        versionEntries,
+                        new[] { version },
+                        resolvedOptions,
+                        PlacementKind.M2);
+                    var m2Path = Path.Combine(modelsDir, $"tile_r{row}_c{col}.json");
+                    File.WriteAllText(m2Path, m2Json);
+
+                    var wmoJson = _overlayBuilder.BuildOverlayJsonByKind(
+                        mapName,
+                        row,
+                        col,
+                        versionEntries,
+                        new[] { version },
+                        resolvedOptions,
+                        PlacementKind.WMO);
+                    var wmoPath = Path.Combine(wmoDir, $"tile_r{row}_c{col}.json");
+                    File.WriteAllText(wmoPath, wmoJson);
+                }
 
                 if (effectiveDiffPair is { } pair &&
                     entriesByVersion.TryGetValue(pair.Baseline, out var baselineEntries) &&

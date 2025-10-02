@@ -22,8 +22,8 @@ export function computeTileFrac(px, py) {
 }
 
 export function computeLocalFromTileFrac(tx, ty, flipX, flipY) {
-    let lx = 1 - frac(tx); // WoW map naming is map_col_row; X increases to the WEST on map textures
-    let ly = frac(ty);
+    let lx = frac(tx);
+    let ly = 1 - frac(ty);
     if (flipX) lx = 1 - lx;
     if (flipY) ly = 1 - ly;
     return { lx, ly };

@@ -7,6 +7,7 @@ export class State {
         this.selectedMap = null;
         this.listeners = [];
         this.cacheBust = 0;
+        this.overlayVariant = 'combined';
     }
 
     async loadIndex() {
@@ -58,6 +59,11 @@ export class State {
         }
     }
 
+    setOverlayVariant(variant) {
+        this.overlayVariant = variant;
+        this.notify();
+    }
+
     getMapData(mapName) {
         return this.index.maps.find(m => m.map === mapName);
     }
@@ -79,8 +85,10 @@ export class State {
         return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.png?t=${t}`;
     }
 
-    getOverlayPath(mapName, row, col) {
-        return `overlays/${mapName}/tile_r${row}_c${col}.json`;
+    getOverlayPath(mapName, row, col, version, variant) {
+        const safeVersion = version || this.selectedVersion;
+        const safeVariant = variant || this.overlayVariant || 'combined';
+        return `overlays/${safeVersion}/${mapName}/${safeVariant}/tile_r${row}_c${col}.json`;
     }
 
     getDiffPath(mapName, row, col) {

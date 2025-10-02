@@ -5,6 +5,7 @@ import { loadOverlay, loadDiff, clearCache } from './overlayLoader.js';
 import { autoFit, computeLocalForTile, toPixels } from './fit.js';
 
 let currentMap, currentRow, currentCol, currentVersion;
+let currentVariant = 'combined';
 let tileCanvas;
 let overlayData = null;
 let diffData = null;
@@ -28,6 +29,7 @@ export async function init() {
     currentRow = parseInt(params.get('row'));
     currentCol = parseInt(params.get('col'));
     currentVersion = params.get('version') || state.selectedVersion;
+    currentVariant = params.get('overlay') || state.overlayVariant || 'combined';
 
     if (!currentMap || isNaN(currentRow) || isNaN(currentCol)) {
         alert('Invalid tile parameters');
@@ -137,6 +139,7 @@ function setupUI() {
         `${currentMap} - Tile ${currentRow}_${currentCol}`;
 
     const versionSelect = document.getElementById('versionSelect');
+    const overlaySelect = document.getElementById('overlayVariantSelect');
     state.index.versions.forEach(version => {
         const option = document.createElement('option');
         option.value = version;
@@ -150,6 +153,27 @@ function setupUI() {
         clearCache();
         await loadTile();
     });
+
+    if (overlaySelect) {
+        overlaySelect.innerHTML = '';
+        Object.entries({
+            combined: 'Combined',
+            m2: 'Models (MDX/M2)',
+            wmo: 'WMOs'
+        }).forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            if (value === currentVariant) option.selected = true;
+            overlaySelect.appendChild(option);
+        });
+        overlaySelect.addEventListener('change', async (e) => {
+            currentVariant = e.target.value;
+            state.setOverlayVariant(currentVariant);
+            await loadOverlayData();
+            renderObjects();
+        });
+    }
 
     // Diff controls
     const diffEnabledCheckbox = document.getElementById('diffEnabled');
@@ -235,7 +259,7 @@ async function loadTile() {
 }
 
 async function loadOverlayData() {
-    const overlayPath = state.getOverlayPath(currentMap, currentRow, currentCol);
+    const overlayPath = state.getOverlayPath(currentMap, currentRow, currentCol, currentVersion, currentVariant);
     try {
         overlayData = await loadOverlay(overlayPath);
     } catch (error) {

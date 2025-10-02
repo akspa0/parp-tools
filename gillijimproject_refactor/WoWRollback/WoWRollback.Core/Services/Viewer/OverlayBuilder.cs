@@ -79,54 +79,24 @@ public sealed class OverlayBuilder
             .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
             .ToList();
 
-        List<object> layers;
-
-        if (allVersions is null)
-        {
-            layers = filtered
-                .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
-                .Select(versionGroup => new
-                {
-                    version = versionGroup.Key,
-                    kinds = versionGroup
-                        .GroupBy(e => e.Kind)
-                        .Select(kindGroup => new
-                        {
-                            kind = kindGroup.Key.ToString(),
-                            points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
-                        })
-                        .ToList()
-                })
-                .OrderBy(layer => layer.version, StringComparer.OrdinalIgnoreCase)
-                .Cast<object>()
-                .ToList();
-        }
-        else
-        {
-            var byVersion = filtered
-                .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-
-            layers = allVersions
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
-                .Select(version => new
-                {
-                    version,
-                    kinds = (byVersion.TryGetValue(version, out var list)
-                            ? (IEnumerable<AssetTimelineDetailedEntry>)list
-                            : Array.Empty<AssetTimelineDetailedEntry>())
-                        .GroupBy(e => e.Kind)
-                        .Select(kindGroup => new
-                        {
-                            kind = kindGroup.Key.ToString(),
-                            points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
-                        })
-                        .ToList()
-                })
-                .Cast<object>()
-                .ToList();
-        }
+        var layers = (allVersions ?? filtered.Select(e => e.Version))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .Select(version => new
+            {
+                version,
+                kinds = filtered
+                    .Where(e => e.Version.Equals(version, StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(e => e.Kind)
+                    .Select(kindGroup => new
+                    {
+                        kind = kindGroup.Key.ToString(),
+                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                    })
+                    .ToList()
+            })
+            .Cast<object>()
+            .ToList();
 
         var payload = new
         {
