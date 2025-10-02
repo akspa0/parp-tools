@@ -28,47 +28,7 @@ public sealed class OverlayBuilder
         int tileCol,
         IEnumerable<AssetTimelineDetailedEntry> entries,
         ViewerOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(map);
-        ArgumentNullException.ThrowIfNull(entries);
-        options ??= ViewerOptions.CreateDefault();
-
-        var filtered = entries
-            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
-            .ToList();
-
-        var layers = filtered
-            .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
-            .Select(versionGroup => new
-            {
-                version = versionGroup.Key,
-                kinds = versionGroup
-                    .GroupBy(e => e.Kind)
-                    .Select(kindGroup => new
-                    {
-                        kind = kindGroup.Key.ToString(),
-                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
-                    })
-                    .ToList()
-            })
-            .OrderBy(layer => layer.version, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var payload = new
-        {
-            map,
-            tile = new { row = tileRow, col = tileCol },
-            minimap = new { width = options.MinimapWidth, height = options.MinimapHeight },
-            layers
-        };
-
-        return JsonSerializer.Serialize(payload, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
-        });
-    }
+        => BuildOverlayJsonInternal(map, tileRow, tileCol, entries, options, allVersions: null);
 
     /// <summary>
     /// Generates overlay JSON, forcing a layer entry for every version in <paramref name="allVersions"/>.
@@ -81,38 +41,92 @@ public sealed class OverlayBuilder
         IEnumerable<AssetTimelineDetailedEntry> entries,
         IEnumerable<string> allVersions,
         ViewerOptions options)
+        => BuildOverlayJsonInternal(map, tileRow, tileCol, entries, options, allVersions);
+
+    public string BuildOverlayJsonByKind(
+        string map,
+        int tileRow,
+        int tileCol,
+        IEnumerable<AssetTimelineDetailedEntry> entries,
+        IEnumerable<string> allVersions,
+        ViewerOptions options,
+        PlacementKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        return BuildOverlayJsonInternal(
+            map,
+            tileRow,
+            tileCol,
+            entries.Where(e => e.Kind == kind),
+            options,
+            allVersions);
+    }
+
+    private static string BuildOverlayJsonInternal(
+        string map,
+        int tileRow,
+        int tileCol,
+        IEnumerable<AssetTimelineDetailedEntry> entries,
+        ViewerOptions? options,
+        IEnumerable<string>? allVersions)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(entries);
-        ArgumentNullException.ThrowIfNull(allVersions);
+
         options ??= ViewerOptions.CreateDefault();
 
         var filtered = entries
             .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
             .ToList();
 
-        var byVersion = filtered
-            .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        List<object> layers;
 
-        var layers = allVersions
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
-            .Select(version => new
-            {
-                version,
-                kinds = (byVersion.TryGetValue(version, out var list)
-                        ? (IEnumerable<AssetTimelineDetailedEntry>)list
-                        : Array.Empty<AssetTimelineDetailedEntry>())
-                    .GroupBy(e => e.Kind)
-                    .Select(kindGroup => new
-                    {
-                        kind = kindGroup.Key.ToString(),
-                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
-                    })
-                    .ToList()
-            })
-            .ToList();
+        if (allVersions is null)
+        {
+            layers = filtered
+                .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+                .Select(versionGroup => new
+                {
+                    version = versionGroup.Key,
+                    kinds = versionGroup
+                        .GroupBy(e => e.Kind)
+                        .Select(kindGroup => new
+                        {
+                            kind = kindGroup.Key.ToString(),
+                            points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                        })
+                        .ToList()
+                })
+                .OrderBy(layer => layer.version, StringComparer.OrdinalIgnoreCase)
+                .Cast<object>()
+                .ToList();
+        }
+        else
+        {
+            var byVersion = filtered
+                .GroupBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            layers = allVersions
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                .Select(version => new
+                {
+                    version,
+                    kinds = (byVersion.TryGetValue(version, out var list)
+                            ? (IEnumerable<AssetTimelineDetailedEntry>)list
+                            : Array.Empty<AssetTimelineDetailedEntry>())
+                        .GroupBy(e => e.Kind)
+                        .Select(kindGroup => new
+                        {
+                            kind = kindGroup.Key.ToString(),
+                            points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                        })
+                        .ToList()
+                })
+                .Cast<object>()
+                .ToList();
+        }
 
         var payload = new
         {

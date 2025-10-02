@@ -37,9 +37,9 @@ public static class CoordinateTransformer
 
         static double Frac(double v) => v - Math.Floor(v);
 
-        // wow.tools orientation: X is flipped relative to world axis when rendered on minimap textures
-        var localX = 1.0 - Frac(tx);
-        var localY = Frac(ty);
+        // Flip both axes so (0,0) aligns with the south-west corner on minimap textures
+        var localX = Frac(tx);
+        var localY = 1.0 - Frac(ty);
 
         return (ClampUnit(localX), ClampUnit(localY));
     }
@@ -56,8 +56,7 @@ public static class CoordinateTransformer
         // Map normalized [0..1] into pixel index domain [0..W-1]/[0..H-1] to avoid crossing into adjacent tiles.
         var w1 = Math.Max(1, width - 1);
         var h1 = Math.Max(1, height - 1);
-        var px = (1.0 - ClampUnit(localX)) * w1;
-        // Use top-left origin without inversion so Y grows downward with localY
+        var px = ClampUnit(localX) * w1;
         var py = ClampUnit(localY) * h1;
         return (px, py);
     }
