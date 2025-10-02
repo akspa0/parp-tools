@@ -29,49 +29,74 @@ public class LkAdtReader
     /// <summary>
     /// Reads all MDDF (M2/MDX) placements from a LK ADT file.
     /// </summary>
-    public static List<PlacementData> ReadMddf(string adtPath)
+    public static List<PlacementData> ReadMddf(string adtPath) => ReadMddf(adtPath, out _);
+
+    /// <summary>
+    /// Reads all MDDF (M2/MDX) placements from a LK ADT file and reports the detected entry size.
+    /// Supports both LK (36-byte) and early 0.6.0 (32-byte) layouts.
+    /// </summary>
+    public static List<PlacementData> ReadMddf(string adtPath, out int entrySize)
     {
         var placements = new List<PlacementData>();
-        
+        entrySize = 0;
+
         if (!File.Exists(adtPath))
             return placements;
 
         try
         {
             var bytes = File.ReadAllBytes(adtPath);
-            
-            // Find FDDM chunk (MDDF reversed on disk)
-            var chunkStart = FindChunk(bytes, "FDDM");
+
+            // Find MDDF chunk (support forward and reversed on disk)
+            var chunkStart = FindChunkEither(bytes, "MDDF", "FDDM");
             if (chunkStart == -1)
+            {
+                Console.WriteLine($"[LkAdtReader] MDDF not found in {adtPath}");
                 return placements;
+            }
 
             // Read chunk size (little-endian, 4 bytes after FourCC)
             var chunkSize = BitConverter.ToInt32(bytes, chunkStart + 4);
             var dataStart = chunkStart + 8;
-            
-            // Parse MDDF entries (36 bytes each)
-            const int entrySize = 36;
-            for (int offset = 0; offset + entrySize <= chunkSize; offset += entrySize)
+            var available = Math.Max(0, Math.Min(chunkSize, bytes.Length - dataStart));
+
+            if (available <= 0)
+            {
+                return placements;
+            }
+
+            entrySize = DetermineEntrySize(available, 36, 32);
+            if (entrySize == 0)
+            {
+                Console.WriteLine($"[LkAdtReader] Unsupported MDDF entry size in {adtPath} (chunkSize={chunkSize}).");
+                return placements;
+            }
+
+            for (int offset = 0; offset + entrySize <= available; offset += entrySize)
             {
                 var entryStart = dataStart + offset;
-                
+                if (entryStart + entrySize > bytes.Length)
+                {
+                    break;
+                }
+
                 int nameIndex = BitConverter.ToInt32(bytes, entryStart + 0);
                 int uniqueId = BitConverter.ToInt32(bytes, entryStart + 4);
-                
+
                 // MDDF coordinates are relative to map corner, convert to world coords
                 // Formula from wowdev.wiki: posx = 32 * TILESIZE - mddf.position[0]
                 const float TILESIZE = 533.33333f;
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
-                
+
                 float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
                 float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
                 float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
                 float rotX = BitConverter.ToSingle(bytes, entryStart + 20);
                 float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
                 float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
-                ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 32);
-                ushort flags = BitConverter.ToUInt16(bytes, entryStart + 34);
-                
+                ushort scaleU = entrySize >= 34 ? BitConverter.ToUInt16(bytes, entryStart + 32) : (ushort)1024;
+                ushort flags = entrySize >= 36 ? BitConverter.ToUInt16(bytes, entryStart + 34) : (ushort)0;
+
                 // Convert from map-corner-relative to world coordinates (centered at origin)
                 // WoW convention: Y is up (height). The horizontal plane is X/Z.
                 // World horizontal coordinates are measured from map center:
@@ -81,7 +106,7 @@ public class LkAdtReader
                 float worldX = MAP_HALF_SIZE - rawX;
                 float worldY = MAP_HALF_SIZE - rawZ; // north-south
                 float worldZ = rawY;                 // height
-                
+
                 // LK MDDF scale typically stored as ushort where 1024 == 1.0f
                 float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
 
@@ -100,39 +125,64 @@ public class LkAdtReader
     /// <summary>
     /// Reads all MODF (WMO) placements from a LK ADT file.
     /// </summary>
-    public static List<PlacementData> ReadModf(string adtPath)
+    public static List<PlacementData> ReadModf(string adtPath) => ReadModf(adtPath, out _);
+
+    /// <summary>
+    /// Reads all MODF (WMO) placements and reports the detected entry size.
+    /// Supports both LK (64-byte) and early 0.6.0 (56-byte) layouts.
+    /// </summary>
+    public static List<PlacementData> ReadModf(string adtPath, out int entrySize)
     {
         var placements = new List<PlacementData>();
-        
+        entrySize = 0;
+
         if (!File.Exists(adtPath))
             return placements;
 
         try
         {
             var bytes = File.ReadAllBytes(adtPath);
-            
-            // Find FDOM chunk (MODF reversed on disk)
-            var chunkStart = FindChunk(bytes, "FDOM");
+
+            // Find MODF chunk (support forward and reversed on disk)
+            var chunkStart = FindChunkEither(bytes, "MODF", "FDOM");
             if (chunkStart == -1)
+            {
+                Console.WriteLine($"[LkAdtReader] MODF not found in {adtPath}");
                 return placements;
+            }
 
             // Read chunk size
             var chunkSize = BitConverter.ToInt32(bytes, chunkStart + 4);
             var dataStart = chunkStart + 8;
-            
-            // Parse MODF entries (64 bytes each)
-            const int entrySize = 64;
-            for (int offset = 0; offset + entrySize <= chunkSize; offset += entrySize)
+            var available = Math.Max(0, Math.Min(chunkSize, bytes.Length - dataStart));
+
+            if (available <= 0)
+            {
+                return placements;
+            }
+
+            entrySize = DetermineEntrySize(available, 64, 56);
+            if (entrySize == 0)
+            {
+                Console.WriteLine($"[LkAdtReader] Unsupported MODF entry size in {adtPath} (chunkSize={chunkSize}).");
+                return placements;
+            }
+
+            for (int offset = 0; offset + entrySize <= available; offset += entrySize)
             {
                 var entryStart = dataStart + offset;
-                
+                if (entryStart + entrySize > bytes.Length)
+                {
+                    break;
+                }
+
                 int nameIndex = BitConverter.ToInt32(bytes, entryStart + 0);
                 int uniqueId = BitConverter.ToInt32(bytes, entryStart + 4);
-                
+
                 // MODF coordinates are relative to map corner, convert to world coords
                 const float TILESIZE = 533.33333f;
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
-                
+
                 float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
                 float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
                 float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
@@ -140,17 +190,17 @@ public class LkAdtReader
                 float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
                 float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
                 // Bounding box at 32..56 (ignored here)
-                ushort flags = BitConverter.ToUInt16(bytes, entryStart + 56);
-                ushort doodadSet = BitConverter.ToUInt16(bytes, entryStart + 58);
-                ushort nameSet = BitConverter.ToUInt16(bytes, entryStart + 60);
-                ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 62);
-                
+                ushort flags = entrySize >= 58 ? BitConverter.ToUInt16(bytes, entryStart + 56) : (ushort)0;
+                ushort doodadSet = entrySize >= 60 ? BitConverter.ToUInt16(bytes, entryStart + 58) : (ushort)0;
+                ushort nameSet = entrySize >= 62 ? BitConverter.ToUInt16(bytes, entryStart + 60) : (ushort)0;
+                ushort scaleU = entrySize >= 64 ? BitConverter.ToUInt16(bytes, entryStart + 62) : (ushort)1024;
+
                 // Convert from map-corner-relative to world coordinates (centered at origin)
                 // WoW convention: Y is up (height). The horizontal plane is X/Z.
                 float worldX = MAP_HALF_SIZE - rawX;
                 float worldY = MAP_HALF_SIZE - rawZ; // north-south
                 float worldZ = rawY;                 // height
-                
+
                 float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
 
                 placements.Add(new PlacementData(nameIndex, uniqueId, worldX, worldY, worldZ,
@@ -179,10 +229,13 @@ public class LkAdtReader
         {
             var bytes = File.ReadAllBytes(adtPath);
             
-            // Find XDMM chunk (MMDX reversed)
-            var chunkStart = FindChunk(bytes, "XDMM");
+            // Find MMDX chunk (support forward and reversed)
+            var chunkStart = FindChunkEither(bytes, "MMDX", "XDMM");
             if (chunkStart == -1)
+            {
+                Console.WriteLine($"[LkAdtReader] MMDX not found in {adtPath}");
                 return names;
+            }
 
             var chunkSize = BitConverter.ToInt32(bytes, chunkStart + 4);
             var dataStart = chunkStart + 8;
@@ -196,6 +249,26 @@ public class LkAdtReader
         }
 
         return names;
+    }
+
+    private static int DetermineEntrySize(int availableBytes, params int[] candidates)
+    {
+        if (availableBytes <= 0)
+            return 0;
+
+        foreach (var size in candidates)
+        {
+            if (size > 0 && availableBytes % size == 0)
+                return size;
+        }
+
+        foreach (var size in candidates)
+        {
+            if (size > 0 && availableBytes >= size)
+                return size;
+        }
+
+        return 0;
     }
 
     /// <summary>
@@ -212,10 +285,13 @@ public class LkAdtReader
         {
             var bytes = File.ReadAllBytes(adtPath);
             
-            // Find OMWM chunk (MWMO reversed)
-            var chunkStart = FindChunk(bytes, "OMWM");
+            // Find MWMO chunk (support forward and reversed)
+            var chunkStart = FindChunkEither(bytes, "MWMO", "OMWM");
             if (chunkStart == -1)
+            {
+                Console.WriteLine($"[LkAdtReader] MWMO not found in {adtPath}");
                 return names;
+            }
 
             var chunkSize = BitConverter.ToInt32(bytes, chunkStart + 4);
             var dataStart = chunkStart + 8;
@@ -230,22 +306,22 @@ public class LkAdtReader
         return names;
     }
 
-    private static int FindChunk(byte[] bytes, string reversedFourCC)
+    private static int FindChunk(byte[] bytes, string fourCC)
     {
-        var pattern = System.Text.Encoding.ASCII.GetBytes(reversedFourCC);
-        
-        for (int i = 0; i < bytes.Length - 4; i++)
+        var pattern = System.Text.Encoding.ASCII.GetBytes(fourCC);
+        for (int i = 0; i <= bytes.Length - 4; i++)
         {
-            if (bytes[i] == pattern[0] &&
-                bytes[i + 1] == pattern[1] &&
-                bytes[i + 2] == pattern[2] &&
-                bytes[i + 3] == pattern[3])
-            {
+            if (bytes[i] == pattern[0] && bytes[i + 1] == pattern[1] && bytes[i + 2] == pattern[2] && bytes[i + 3] == pattern[3])
                 return i;
-            }
         }
-        
         return -1;
+    }
+
+    private static int FindChunkEither(byte[] bytes, string forwardFourCC, string reversedFourCC)
+    {
+        int pos = FindChunk(bytes, forwardFourCC);
+        if (pos != -1) return pos;
+        return FindChunk(bytes, reversedFourCC);
     }
 
     private static List<string> ParseStringTable(byte[] bytes, int start, int length)

@@ -44,6 +44,18 @@ function getActivePoints(objects) {
     return pts;
 }
 
+// Classify object type for coloring/sizing markers on the tile canvas
+function classifyType(obj) {
+    const t = (obj.type || '').toString().toLowerCase();
+    if (t === 'wmo' || t === 'm2' || t === 'mdx' || t === 'other') return t;
+
+    const extRaw = (obj.extension || obj.fileName || '').toString().toLowerCase();
+    const ext = extRaw.startsWith('.') ? extRaw.substring(1) : extRaw;
+    if (ext === 'wmo') return 'wmo';
+    if (ext === 'm2' || ext === 'mdx') return 'm2';
+    return 'other';
+}
+
 function drawOnCanvas(objects) {
     tileCanvas.draw();
     const width = tileCanvas.canvas.width;

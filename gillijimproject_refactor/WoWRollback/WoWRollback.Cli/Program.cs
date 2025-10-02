@@ -20,7 +20,7 @@ internal static class Program
             PrintHelp();
             return 0;
         }
-
+        
         var cmd = args[0].ToLowerInvariant();
         var opts = ParseArgs(args.Skip(1).ToArray());
 
@@ -34,6 +34,8 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-ranges": // Legacy alias for analyze-lk-adt
                     return RunAnalyzeLkAdt(opts);
+                case "analyze-adt-dump":
+                    return RunAnalyzeAdtDump(opts);
                 case "dry-run":
                     return RunDryRun(opts);
                 case "compare-versions":
@@ -55,8 +57,8 @@ internal static class Program
     {
         Require(opts, "wdt-file");
         var wdtFile = opts["wdt-file"];
-        var outRoot = opts.GetValueOrDefault("out", "");
-        var convertedAdtDir = opts.GetValueOrDefault("converted-adt-dir", null);
+        var outRoot = GetOption(opts, "out", "");
+        var convertedAdtDir = GetOption(opts, "converted-adt-dir", null);
         var mapName = Path.GetFileNameWithoutExtension(wdtFile);
 
         var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtFile)) ?? wdtFile);
@@ -285,6 +287,55 @@ internal static class Program
         return 0;
     }
 
+    private static int RunAnalyzeAdtDump(Dictionary<string, string> opts)
+    {
+        Require(opts, "adt");
+        var adtPath = opts["adt"];
+        var limit = TryParseInt(opts, "limit") ?? 10;
+        if (!File.Exists(adtPath))
+        {
+            Console.WriteLine($"ADT not found: {adtPath}");
+            return 2;
+        }
+
+        Console.WriteLine($"[dump] ADT: {adtPath}");
+        try
+        {
+            var m2Names = WoWRollback.Core.Services.LkAdtReader.ReadMmdx(adtPath);
+            var wmoNames = WoWRollback.Core.Services.LkAdtReader.ReadMwmo(adtPath);
+            var mddf = WoWRollback.Core.Services.LkAdtReader.ReadMddf(adtPath, out var mddfEntrySize);
+            var modf = WoWRollback.Core.Services.LkAdtReader.ReadModf(adtPath, out var modfEntrySize);
+
+            Console.WriteLine($"[dump] MMDX names: {m2Names.Count}, MWMO names: {wmoNames.Count}");
+            Console.WriteLine($"[dump] MDDF count: {mddf.Count}, MODF count: {modf.Count}");
+            if (mddfEntrySize > 0 || modfEntrySize > 0)
+            {
+                Console.WriteLine($"[dump] entry sizes: MDDF={mddfEntrySize} bytes, MODF={modfEntrySize} bytes");
+            }
+
+            Console.WriteLine("[dump] MDDF sample:");
+            foreach (var e in mddf.Take(Math.Max(0, limit)))
+            {
+                var name = (e.NameIndex >= 0 && e.NameIndex < m2Names.Count) ? m2Names[e.NameIndex] : "<bad-index>";
+                Console.WriteLine($"  uid={e.UniqueId} nameIndex={e.NameIndex} name={name} world=({e.WorldX:F2},{e.WorldY:F2},{e.WorldZ:F2}) rot=({e.RotX:F3},{e.RotY:F3},{e.RotZ:F3}) scale={e.Scale:F3} flags={e.Flags}");
+            }
+
+            Console.WriteLine("[dump] MODF sample:");
+            foreach (var e in modf.Take(Math.Max(0, limit)))
+            {
+                var name = (e.NameIndex >= 0 && e.NameIndex < wmoNames.Count) ? wmoNames[e.NameIndex] : "<bad-index>";
+                Console.WriteLine($"  uid={e.UniqueId} nameIndex={e.NameIndex} name={name} world=({e.WorldX:F2},{e.WorldY:F2},{e.WorldZ:F2}) rot=({e.RotX:F3},{e.RotY:F3},{e.RotZ:F3}) scale={e.Scale:F3} flags={e.Flags} doodadSet={e.DoodadSet} nameSet={e.NameSet}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[dump] Error: {ex.Message}");
+            return 1;
+        }
+    }
+
     private static void Require(Dictionary<string, string> opts, string key)
     {
         if (!opts.ContainsKey(key) || string.IsNullOrWhiteSpace(opts[key]))
@@ -318,6 +369,9 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  analyze-lk-adt    --map <name> --input-dir <dir> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from converted LK ADT files (preservation analysis)");
+        Console.WriteLine();
+        Console.WriteLine("  analyze-adt-dump  --adt <file> [--limit N]");
+        Console.WriteLine("    Dump MDDF/MODF counts and sample entries with world coords for auditing");
         Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
@@ -392,33 +446,56 @@ internal static class Program
                     continue;
                 }
 
+                // Prefer Alpha WDT path; fallback to LK ADTs when WDT not found or analysis fails
                 var wdtPath = FindAlphaWdt(normalizedAlphaRoot, version, map);
-                if (wdtPath is null)
-                {
-                    Console.WriteLine($"[skip] Could not locate Alpha WDT for version '{version}', map '{map}' under '{normalizedAlphaRoot}'.");
-                    continue;
-                }
-
-                var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtPath)) ?? wdtPath);
-                var sessionDir = OutputSession.Create(outputRoot, map, buildTag);
                 var convertedDir = ResolveConvertedAdtDirectory(normalizedConvertedRoot, map);
 
-                Console.WriteLine($"[auto] Generating placement ranges for {version} / {map}");
-                Console.WriteLine($"[auto]  WDT: {wdtPath}");
-                if (!string.IsNullOrWhiteSpace(convertedDir))
+                if (wdtPath is not null)
                 {
-                    Console.WriteLine($"[auto]  Converted ADTs: {convertedDir}");
+                    var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtPath)) ?? wdtPath);
+                    var sessionDir = OutputSession.Create(outputRoot, map, buildTag);
+
+                    Console.WriteLine($"[auto] Generating placement ranges for {version} / {map}");
+                    Console.WriteLine($"[auto]  WDT: {wdtPath}");
+                    if (!string.IsNullOrWhiteSpace(convertedDir))
+                    {
+                        Console.WriteLine($"[auto]  Converted ADTs: {convertedDir}");
+                    }
+
+                    try
+                    {
+                        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir);
+                        RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
+                        continue; // alpha succeeded
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[warn] Alpha WDT analysis failed for {version}/{map}: {ex.Message}");
+                        // Fall through to LK ADT extraction
+                    }
                 }
 
-                try
+                // Fallback: LK-style ADT extraction (0.6.0+)
+                var adtDir = convertedDir ?? FindAdtDirectory(normalizedAlphaRoot, version, map);
+                if (!string.IsNullOrWhiteSpace(adtDir) && Directory.Exists(adtDir))
                 {
-                    var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir);
-                    RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
+                    var buildTag = BuildTagResolver.ResolveForPath(adtDir);
+                    var sessionDir = OutputSession.Create(outputRoot, map, buildTag);
+                    Console.WriteLine($"[auto] Generating LK ADT placements for {version} / {map}");
+                    Console.WriteLine($"[auto]  ADTs: {adtDir}");
+                    try
+                    {
+                        var (ranges, assets) = LkAdtAssetExtractor.Extract(adtDir, map);
+                        RangeCsvWriter.WritePerMapCsv(sessionDir, $"lk_{map}", ranges, assets);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[skip] LK ADT extraction failed for {version}/{map}: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.WriteLine($"[skip] Analysis failed for {version}/{map}: {ex.Message}");
-                    // Continue with other maps/versions.
+                    Console.WriteLine($"[skip] Could not locate ADT directory for {version}/{map} under alpha-root or converted-adt-root.");
                 }
             }
         }
@@ -513,6 +590,24 @@ internal static class Program
         }
 
         return null;
+    }
+
+    private static string? FindAdtDirectory(string? searchRoot, string version, string map)
+    {
+        if (string.IsNullOrWhiteSpace(searchRoot) || !Directory.Exists(searchRoot)) return null;
+        try
+        {
+            // Prefer directories that contain files like <map>_row_col.adt
+            var candidates = Directory.EnumerateFiles(searchRoot, map + "_*.adt", SearchOption.AllDirectories)
+                .Where(p => Path.GetFileNameWithoutExtension(p).StartsWith(map + "_", StringComparison.OrdinalIgnoreCase))
+                .Select(Path.GetDirectoryName)
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(d => d!.Length)
+                .ToList();
+            return candidates.FirstOrDefault();
+        }
+        catch { return null; }
     }
 
     private sealed class TupleComparer : IEqualityComparer<(string Version, string Map)>

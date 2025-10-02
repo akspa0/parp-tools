@@ -419,21 +419,28 @@ async function updateObjectMarkers() {
                 let addedAdjacent = 0;
                 const cap = (state.config && typeof state.config.maxMarkers === 'number') ? state.config.maxMarkers : 5000;
                 outer: for (const obj of objects) {
-                    // Require both pixel and reliable world like the last working build
+                    // Render if pixel exists; use world only to correct corner or as fallback when pixel missing
                     let basePx = null, basePy = null;
                     const hasPixel = obj.pixel && Number.isFinite(obj.pixel.x) && Number.isFinite(obj.pixel.y);
                     const worldReliable = obj.world && Number.isFinite(obj.world.x) && Number.isFinite(obj.world.y) && !(obj.world.x === 0 && obj.world.y === 0);
                     const adjacentRef = !!obj.isAdjacentRef;
                     if (adjacentRef && !showAdjacentRefs) continue;
-                    if (!hasPixel || !worldReliable) continue;
 
-                    basePx = obj.pixel.x; basePy = obj.pixel.y;
-                    // If pixel looks like a placeholder corner, recompute from world
-                    if (isCorner(basePx, basePy, tileW, tileH)) {
+                    if (hasPixel) {
+                        basePx = obj.pixel.x; basePy = obj.pixel.y;
+                        if (worldReliable && isCorner(basePx, basePy, tileW, tileH)) {
+                            const r = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
+                            if (!r.inRange) continue;
+                            const p = toPixels(r.lx, r.ly, tileW, tileH, true);
+                            basePx = p.x; basePy = p.y;
+                        }
+                    } else if (worldReliable) {
                         const r = computeLocalForTile(obj.world, 'xy', false, false, 0, row, col);
                         if (!r.inRange) continue;
                         const p = toPixels(r.lx, r.ly, tileW, tileH, true);
                         basePx = p.x; basePy = p.y;
+                    } else {
+                        continue;
                     }
                     if (!passesUidFilter(obj.uniqueId)) continue;
                     const label = (obj.type && typeof obj.type === 'string') ? obj.type.toLowerCase() : classifyType(obj);
@@ -466,13 +473,14 @@ async function updateObjectMarkers() {
                         ${obj.world ? `World: (${Number(obj.world.x).toFixed(1)}, ${Number(obj.world.y).toFixed(1)}, ${Number(obj.world.z).toFixed(1)})` : 'World: N/A'}
                     `);
                     
-                    // De-duplicate by uniqueId across visible quilt (primaries only)
+                    // De-duplicate within type: allow same UID to appear once per label (wmo vs m2/mdx)
                     const uid = obj.uniqueId ?? undefined;
                     if (uid !== undefined && !adjacentRef) {
-                        if (displayedUIDs.has(uid)) {
+                        const deKey = `${uid}:${label}`;
+                        if (displayedUIDs.has(deKey)) {
                             continue;
                         }
-                        displayedUIDs.add(uid);
+                        displayedUIDs.add(deKey);
                     }
                     objectMarkers.addLayer(marker);
                     if (adjacentRef) { addedAdjacent++; } else { added++; }

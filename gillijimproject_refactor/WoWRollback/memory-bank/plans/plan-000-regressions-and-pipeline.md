@@ -49,3 +49,25 @@ Stabilize the current viewer before adding new layers. Fix marker correctness, e
 - Backend: ensure `effectiveExt` consistency; optionally integrate WebP.
 - Script: verify complete pipeline and document usage.
 - Tests: quick sanity checks on a couple of maps/versions.
+
+## Update — 2025-10-01
+
+### Findings
+- **[MDX/M2 regression]** Markers were suppressed by viewer de-duplication using only `uniqueId`. After splitting WMO vs M2 into different colors, a shared UID between WMO and M2 caused one to be dropped.
+- **[Corner ghosts]** Caused by clamping without checking tile membership; fixed by raw-local `[0,1)` gating before clamp.
+- **[Map directory drift]** Minimap folders sometimes use internal directory names; added Map.dbc resolver to normalize.
+
+### Changes Implemented
+- **Viewer (main.js)**: De-dup key now `uniqueId:type` so WMO and M2 can both render. Pixel-only rendering is allowed; world used to fix corner pixels or fallback.
+- **Overlay builder**: Skips out-of-tile placements using `ComputeLocalCoordinatesRaw` to eliminate corner ghosts; emits `world` (normalized) and `worldRaw`.
+- **WMO Y-flip**: Applied on server to remove front-end toggles.
+- **Map.dbc**: Added `MapDirectoryResolver` via wow.tools DBCD; generator now normalizes map names to canonical directories and writes `display` in `index.json`.
+
+### Next Steps
+- **Verify MDX/M2 restored**: Rebuild viewer and confirm cyan markers appear alongside WMO.
+- **Viewer UI (optional)**: Show `display` name in map dropdown while fetching by canonical `map`.
+- **0.6.0.3592**: Ensure included in `-Versions` and that its minimaps resolve via Map.dbc.
+- **Spot check overlays**: Confirm M2 points exist in `overlays/{map}/tile_rX_cY.json` for known tiles.
+
+### Acceptance (update)
+- MDX/M2 visible on target tiles; no corner ghosts; WMOs aligned; tiles load across versions with canonical directories.

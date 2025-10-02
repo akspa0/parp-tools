@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WoWRollback.Core.Models;
+using WoWRollback.Core.Services.Dbc;
 
 namespace WoWRollback.Core.Services.Viewer;
 
@@ -76,15 +77,27 @@ public sealed class ViewerReportWriter
         var entries = result.AssetTimelineDetailed;
         var comparer = StringComparer.OrdinalIgnoreCase;
         var minimapLocator = MinimapLocator.Build(result.RootDirectory, result.Versions);
+        var mapResolver = new MapDirectoryResolver(result.RootDirectory, result.Versions);
 
         // Collect map names from both placements and minimap sources
         var mapNames = new HashSet<string>(comparer);
-        foreach (var m in entries.Select(e => e.Map)) mapNames.Add(m);
+        var displayByCanonical = new Dictionary<string, string>(comparer);
+        foreach (var m in entries.Select(e => e.Map))
+        {
+            var canonical = mapResolver.Normalize(m);
+            mapNames.Add(canonical);
+            if (!displayByCanonical.ContainsKey(canonical)) displayByCanonical[canonical] = m;
+        }
         foreach (var v in result.Versions)
         {
             try
             {
-                foreach (var m in minimapLocator.EnumerateMaps(v)) mapNames.Add(m);
+                foreach (var m in minimapLocator.EnumerateMaps(v))
+                {
+                    var canonical = mapResolver.Normalize(m);
+                    mapNames.Add(canonical);
+                    if (!displayByCanonical.ContainsKey(canonical)) displayByCanonical[canonical] = canonical;
+                }
             }
             catch { /* ignore per-version lookup errors */ }
         }
@@ -94,10 +107,11 @@ public sealed class ViewerReportWriter
         foreach (var e in entries)
         {
             if (string.IsNullOrWhiteSpace(e.Map)) continue;
-            if (!entryTilesByMap.TryGetValue(e.Map, out var set))
+            var canonical = mapResolver.Normalize(e.Map);
+            if (!entryTilesByMap.TryGetValue(canonical, out var set))
             {
                 set = new HashSet<(int, int)>();
-                entryTilesByMap[e.Map] = set;
+                entryTilesByMap[canonical] = set;
             }
             int r = e.TileRow;
             int c = e.TileCol;
@@ -143,12 +157,17 @@ public sealed class ViewerReportWriter
 
         foreach (var mapGroup in maps)
         {
-            var mapName = mapGroup.Name;
+            var mapName = mapGroup.Name; // canonical directory name
             var safeMap = Sanitize(mapName);
             var mapOverlayDir = Path.Combine(overlaysRoot, safeMap);
             var mapDiffDir = Path.Combine(diffsRoot, safeMap);
             Directory.CreateDirectory(mapOverlayDir);
             Directory.CreateDirectory(mapDiffDir);
+
+            // Prepare entries filtered to this canonical map using resolver
+            var entriesForMap = entries
+                .Where(e => string.Equals(mapResolver.Normalize(e.Map), mapName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
             // Compute union of tiles from placements and minimap sources
             var tileSet = new HashSet<(int Row, int Col)>();
@@ -158,7 +177,9 @@ public sealed class ViewerReportWriter
             // Late fallback: if tile set is empty but we have entries for this map, derive from world coords
             if (tileSet.Count == 0)
             {
-                var fallbackEntries = entries.Where(e => string.Equals(e.Map, mapName, StringComparison.OrdinalIgnoreCase)).ToList();
+                var fallbackEntries = entries
+                    .Where(e => string.Equals(mapResolver.Normalize(e.Map), mapName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
                 Console.WriteLine($"[viewer] Map={mapName} initial tiles=0; fallbackEntries={fallbackEntries.Count}");
                 foreach (var e in fallbackEntries)
                 {
@@ -214,7 +235,7 @@ public sealed class ViewerReportWriter
 
                 var overlayPath = Path.Combine(mapOverlayDir, $"tile_r{row}_c{col}.json");
                 // Always write overlay JSON, and include all versions (empty kinds when no objects)
-                var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entries, result.Versions, resolvedOptions);
+                var overlayJson = _overlayBuilder.BuildOverlayJson(mapName, row, col, entriesForMap, result.Versions, resolvedOptions);
                 File.WriteAllText(overlayPath, overlayJson);
                 Console.WriteLine($"[overlay] {mapName} r{row} c{col} -> {Path.GetFileName(overlayPath)}");
 
@@ -222,7 +243,13 @@ public sealed class ViewerReportWriter
                     entriesByVersion.TryGetValue(pair.Baseline, out var baselineEntries) &&
                     entriesByVersion.TryGetValue(pair.Comparison, out var comparisonEntries))
                 {
-                    var diffJson = _diffBuilder.BuildDiffJson(mapName, row, col, baselineEntries, comparisonEntries, resolvedOptions);
+                    var baselineForMap = baselineEntries
+                        .Where(e => string.Equals(mapResolver.Normalize(e.Map), mapName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    var comparisonForMap = comparisonEntries
+                        .Where(e => string.Equals(mapResolver.Normalize(e.Map), mapName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    var diffJson = _diffBuilder.BuildDiffJson(mapName, row, col, baselineForMap, comparisonForMap, resolvedOptions);
                     var diffPath = Path.Combine(mapDiffDir, $"tile_r{row}_c{col}.json");
                     File.WriteAllText(diffPath, diffJson);
                 }
@@ -237,7 +264,7 @@ public sealed class ViewerReportWriter
             }
         }
 
-        WriteIndexJson(viewerRoot, result, mapTileCatalog, chosenDefaultVersion, effectiveDiffPair);
+        WriteIndexJson(viewerRoot, result, mapTileCatalog, displayByCanonical, chosenDefaultVersion, effectiveDiffPair);
         WriteConfigJson(viewerRoot, resolvedOptions, chosenDefaultVersion, effectiveDiffPair, effectiveExt);
         CopyViewerAssets(viewerRoot);
 
@@ -294,6 +321,7 @@ public sealed class ViewerReportWriter
         string viewerRoot,
         VersionComparisonResult result,
         Dictionary<string, List<TileDescriptor>> mapTiles,
+        Dictionary<string, string> displayByCanonical,
         string defaultVersion,
         (string Baseline, string Comparison)? diffPair)
     {
@@ -302,6 +330,7 @@ public sealed class ViewerReportWriter
             .Select(kvp => new
             {
                 map = kvp.Key,
+                display = displayByCanonical.TryGetValue(kvp.Key, out var disp) ? disp : kvp.Key,
                 tiles = kvp.Value
                     .OrderBy(t => t.Row)
                     .ThenBy(t => t.Col)

@@ -103,7 +103,8 @@ public sealed class OverlayDiffBuilder
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new JsonStringEnumConverter() },
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         });
     }
 
@@ -176,7 +177,13 @@ public sealed class OverlayDiffBuilder
 
     private static object BuildPointPayload(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
-        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
+        static double Sanitize(double value) => double.IsNaN(value) || double.IsInfinity(value) ? 0.0 : value;
+
+        var worldX = Sanitize(entry.WorldX);
+        var worldY = Sanitize(entry.WorldY);
+        var worldZ = Sanitize(entry.WorldZ);
+
+        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
 
         return new
@@ -197,12 +204,7 @@ public sealed class OverlayDiffBuilder
             fileName = entry.FileName,
             fileStem = entry.FileStem,
             extension = entry.Extension,
-            world = new
-            {
-                x = entry.WorldX,
-                y = entry.WorldY,
-                z = entry.WorldZ
-            },
+            world = new { x = worldX, y = worldY, z = worldZ },
             local = new
             {
                 x = Math.Round(localX, 6, MidpointRounding.AwayFromZero),

@@ -1,33 +1,70 @@
 #!/usr/bin/env pwsh
-# Rebuild WoWRollback with coordinate extraction and regenerate viewer data
+# Rebuild WoWRollback and invoke the consolidated regeneration script with viewer linting
 
 [CmdletBinding(PositionalBinding=$false)]
 param(
     [string[]]$Maps = @("DeadminesInstance"),
     [string[]]$Versions = @("0.5.3.3368","0.5.5.3494"),
-    [string]$AlphaRoot,
+    [Alias("AlphaRoot")][string]$TestDataRoot = "..\test_data",
+    [string]$OutputRoot = "rollback_outputs",
+    [string]$ConvertedAdtDir,
     [string]$ImageFormat = "webp",
     [int]$ImageQuality = 85,
     [switch]$Clean,
     [switch]$Serve,
-    [Parameter(ValueFromRemainingArguments=$true)]
-    [string[]]$ExtraArgs
+    [switch]$SkipViewerPrompt
 )
 
-# Ensure all relative paths resolve from this script's directory (WoWRollback/)
 Set-Location -Path $PSScriptRoot
 
 Write-Host "=== WoWRollback Rebuild & Regenerate ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Optional clean
 if ($Clean) {
-    Write-Host "[0/3] Cleaning previous outputs..." -ForegroundColor Yellow
-    if (Test-Path "rollback_outputs") { Remove-Item "rollback_outputs" -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-Host "[0/2] Cleaning previous outputs..." -ForegroundColor Yellow
+    if (Test-Path $OutputRoot) {
+        Remove-Item $OutputRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "✓ Clean complete" -ForegroundColor Green
+    Write-Host ""
 }
 
-# Step 1: Clean build
-Write-Host "[1/3] Building solution..." -ForegroundColor Yellow
+function Get-MapsFromTestData([string]$root) {
+    if (-not $root -or -not (Test-Path $root)) { return @() }
+    $results = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+
+    try {
+        $wdtFiles = Get-ChildItem -Path $root -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue
+        foreach ($f in $wdtFiles) {
+            $full = $f.FullName
+            if ($full -match '(?i)[\\/](World)[\\/]Maps[\\/]') {
+                [void]$results.Add($f.Directory.Name)
+            }
+        }
+
+        $minimapDirs = Get-ChildItem -Path $root -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Parent -and $_.Parent.Name -match '^(?i)Minimaps$' }
+        foreach ($d in $minimapDirs) {
+            [void]$results.Add($d.Name)
+        }
+    } catch {
+        Write-Host "Warning: failed to auto-discover maps under $root ($_ )" -ForegroundColor Yellow
+    }
+
+    return (@($results) | Sort-Object)
+}
+
+if ($Maps.Count -eq 1 -and $Maps[0].Equals('auto', [StringComparison]::OrdinalIgnoreCase)) {
+    $discoveredMaps = Get-MapsFromTestData -root $TestDataRoot
+    if ($discoveredMaps.Count -gt 0) {
+        Write-Host "Auto-discovered maps: $([string]::Join(', ', $discoveredMaps))" -ForegroundColor Gray
+        $Maps = $discoveredMaps
+    } else {
+        Write-Host "No maps discovered under $TestDataRoot; defaulting to Azeroth,Kalimdor" -ForegroundColor Yellow
+        $Maps = @('Azeroth','Kalimdor')
+    }
+}
+
+Write-Host "[1/2] Building solution..." -ForegroundColor Yellow
 dotnet build WoWRollback.sln --configuration Release
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
@@ -36,160 +73,51 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "✓ Build complete" -ForegroundColor Green
 Write-Host ""
 
-# Helper: Discover map names from AlphaRoot when -Maps auto
-function Get-MapsFromAlphaRoot([string]$root) {
-    if (-not $root -or -not (Test-Path $root)) { return @() }
-    $results = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-
-    # Find maps via World/Maps/*.wdt anywhere under the root
-    $wdtFiles = Get-ChildItem -Path $root -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue
-    foreach ($f in $wdtFiles) {
-        $full = $f.FullName
-        if ($full -match '(?i)[\\/](World)[\\/]Maps[\\/]') {
-            [void]$results.Add($f.Directory.Name)
-        }
-    }
-
-    # Also discover maps by presence of World/Minimaps/<Map>/ directories
-    $candidateDirs = Get-ChildItem -Path $root -Recurse -Directory -ErrorAction SilentlyContinue
-    foreach ($d in $candidateDirs) {
-        $parent = $d.Parent
-        if ($null -ne $parent -and $parent.Name -match '^(?i)Minimaps$') {
-            [void]$results.Add($d.Name)
-        }
-    }
-
-    # Ensure commonly useful maps are included (only adds if present elsewhere)
-    foreach ($m in @('PVPZone01','Shadowfang')) { [void]$results.Add($m) }
-
-    # Return sorted list safely
-    $list = @($results)
-    return ($list | Sort-Object)
+$regenScript = Join-Path $PSScriptRoot 'regenerate-with-coordinates.ps1'
+if (-not (Test-Path $regenScript)) {
+    Write-Host "Unable to locate regenerate-with-coordinates.ps1" -ForegroundColor Red
+    exit 1
 }
 
-# Step 2: Regenerate comparison data
-Write-Host "[2/3] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
-$versionsArg = ($Versions -join ',')
+$regenParams = @{}
+if ($ConvertedAdtDir) { $regenParams.ConvertedAdtDir = $ConvertedAdtDir }
+if ($Versions) { $regenParams.Versions = $Versions }
+if ($Maps) { $regenParams.Maps = $Maps }
+if ($TestDataRoot) { $regenParams.TestDataRoot = $TestDataRoot }
+if ($OutputRoot) { $regenParams.OutputRoot = $OutputRoot }
+if ($ImageFormat) { $regenParams.ImageFormat = $ImageFormat }
+$regenParams.ImageQuality = $ImageQuality
+if ($Serve -or $SkipViewerPrompt) { $regenParams.SkipViewerPrompt = $true }
 
-# Auto-discover maps if requested
-if ($Maps.Count -eq 1 -and $Maps[0].ToLower() -eq 'auto') {
-    if (-not $AlphaRoot) {
-        Write-Host "-Maps auto requires -AlphaRoot" -ForegroundColor Red
-        exit 1
-    }
-    $discovered = Get-MapsFromAlphaRoot -root $AlphaRoot
-    if (-not $discovered -or $discovered.Count -eq 0) {
-        Write-Host "No maps discovered under $AlphaRoot" -ForegroundColor Yellow
-        $Maps = @('Azeroth','Kalimdor','Kalidar','PVPZone01','Shadowfang')
-    } else {
-        $Maps = $discovered
-    }
-}
-
-$mapsArg = ($Maps -join ',')
-Write-Host ("Versions: {0}" -f $versionsArg) -ForegroundColor Gray
-Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
-Write-Host ("Image: {0} (q={1})" -f $ImageFormat, $ImageQuality) -ForegroundColor Gray
-
- # Build dotnet run command with optional alpha-root and any extra pass-through args
- $cmd = @(
-    'run','--project','WoWRollback.Cli','--configuration','Release','--',
-    'compare-versions',
-    '--versions', $versionsArg,
-    '--maps', $mapsArg,
-    '--viewer-report',
-    '--image-format', $ImageFormat,
-    '--image-quality', $ImageQuality
- )
- if ($AlphaRoot) { $cmd += @('--alpha-root', $AlphaRoot) }
- if ($ExtraArgs) { $cmd += $ExtraArgs }
- # Capture dotnet output so we can parse the comparison directory path
- $dotnetOut = & dotnet @cmd 2>&1
- $dotnetOut | ForEach-Object { Write-Host $_ }
-
+Write-Host "[2/2] Regenerating comparison data via regenerate-with-coordinates.ps1" -ForegroundColor Yellow
+& $regenScript @regenParams
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Comparison generation failed!" -ForegroundColor Red
+    Write-Host "Regeneration failed" -ForegroundColor Red
     exit 1
 }
-Write-Host "✓ Data regenerated" -ForegroundColor Green
+Write-Host "✓ Regeneration complete" -ForegroundColor Green
 Write-Host ""
-
-# Step 3: Locate the exact comparison directory from CLI output; fallback to latest with index.json
-Write-Host "[3/3] Locating viewer output..." -ForegroundColor Yellow
-
-$viewerPath = $null
-$match = $dotnetOut | Select-String -Pattern 'Outputs written to:\s*(.+)$' | Select-Object -Last 1
-if ($match) {
-    $candidate = $match.Matches[0].Groups[1].Value.Trim()
-    if (Test-Path $candidate) { $viewerPath = $candidate }
-}
-
-if (-not $viewerPath) {
-    $latestWithIndex = Get-ChildItem -Path "rollback_outputs\comparisons" -Directory | `
-        Sort-Object LastWriteTime -Descending | `
-        Where-Object { Test-Path (Join-Path $_.FullName 'viewer\index.json') } | `
-        Select-Object -First 1
-    if ($latestWithIndex) { $viewerPath = $latestWithIndex.FullName }
-}
-
-if (-not $viewerPath) {
-    Write-Host "Could not find comparison output!" -ForegroundColor Red
-    exit 1
-}
-
-$viewerDir = Join-Path $viewerPath "viewer"
-Write-Host "Viewer at: $viewerDir" -ForegroundColor Gray
-
-# Ensure viewer directory exists and contains the static assets
-if (-not (Test-Path $viewerDir)) {
-    New-Item -ItemType Directory -Path $viewerDir | Out-Null
-}
-
-# Copy ViewerAssets (index.html, tile.html, js, styles) into viewer output
-$assetsSrc = Join-Path $PSScriptRoot 'ViewerAssets'
-if (Test-Path $assetsSrc) {
-    Copy-Item -Path (Join-Path $assetsSrc '*') -Destination $viewerDir -Recurse -Force
-} else {
-    Write-Host "Warning: ViewerAssets directory not found at $assetsSrc" -ForegroundColor Yellow
-}
-
-# Check if viewer has data
-$indexJson = Join-Path $viewerDir "index.json"
-if (-not (Test-Path $indexJson)) {
-    Write-Host "index.json not found!" -ForegroundColor Red
-    exit 1
-}
-
-
-$overlayDir = Join-Path $viewerDir "overlays"
-$overlayCount = (Get-ChildItem -Path $overlayDir -Recurse -Filter "*.json" -ErrorAction SilentlyContinue | Measure-Object).Count
-Write-Host "✓ Viewer generated with $overlayCount overlay files" -ForegroundColor Green
-Write-Host ""
-
-# Step 4: Launch viewer
-Write-Host "=== Ready to View ===" -ForegroundColor Cyan
-Write-Host "" 
-Write-Host "To start the viewer:" -ForegroundColor White
-Write-Host "  cd \"$viewerDir\"" -ForegroundColor Yellow
-Write-Host "  python -m http.server 8080" -ForegroundColor Yellow
-Write-Host "" 
-Write-Host "Then open: http://localhost:8080/index.html" -ForegroundColor Green
-Write-Host "" 
 
 if ($Serve) {
-    Write-Host "Starting server on http://localhost:8080..." -ForegroundColor Cyan
-    Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
-    Write-Host "" 
-    Set-Location $viewerDir
-    python -m http.server 8080
-} else {
-    # Offer to start server interactively
-    $response = Read-Host "Start Python HTTP server now? (Y/n)"
-    if ($response -eq "" -or $response -eq "Y" -or $response -eq "y") {
-        Write-Host "Starting server on http://localhost:8080..." -ForegroundColor Cyan
-        Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
-        Write-Host "" 
+    $comparisonsRoot = Join-Path $OutputRoot 'comparisons'
+    if (-not (Test-Path $comparisonsRoot)) {
+        Write-Host "Viewer outputs not found under $comparisonsRoot; skipping server start" -ForegroundColor Yellow
+        return
+    }
+
+    $latestViewer = Get-ChildItem -Path $comparisonsRoot -Directory |
+        Sort-Object LastWriteTime -Descending |
+        Where-Object { Test-Path (Join-Path $_.FullName 'viewer\index.html') } |
+        Select-Object -First 1
+
+    if ($latestViewer) {
+        $viewerDir = Join-Path $latestViewer.FullName 'viewer'
+        Write-Host "Starting server on http://localhost:8080 from $viewerDir" -ForegroundColor Cyan
         Set-Location $viewerDir
         python -m http.server 8080
+    } else {
+        Write-Host "Viewer outputs not found; skipping server start" -ForegroundColor Yellow
     }
 }
+
+Write-Host "Viewer outputs are under $OutputRoot/comparisons" -ForegroundColor Cyan

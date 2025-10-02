@@ -58,7 +58,10 @@ public sealed class OverlayBuilder
                     .Select(kindGroup => new
                     {
                         kind = kindGroup.Key.ToString(),
-                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                        points = kindGroup
+                            .Select(e => BuildPoint(e, tileRow, tileCol, options))
+                            .Where(p => p is not null)
+                            .ToList()
                     })
                     .ToList()
             })
@@ -77,7 +80,8 @@ public sealed class OverlayBuilder
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new JsonStringEnumConverter() },
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         });
     }
 
@@ -127,7 +131,10 @@ public sealed class OverlayBuilder
                     .Select(kindGroup => new
                     {
                         kind = kindGroup.Key.ToString(),
-                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                        points = kindGroup
+                            .Select(e => BuildPoint(e, tileRow, tileCol, options))
+                            .Where(p => p is not null)
+                            .ToList()
                     })
                     .ToList()
             })
@@ -145,34 +152,38 @@ public sealed class OverlayBuilder
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            Converters = { new JsonStringEnumConverter() },
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         });
     }
 
     private static object BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
-        // Compute RAW local first to decide if the entry truly belongs to this tile
-        var (localRawX, localRawY) = CoordinateTransformer.ComputeLocalCoordinatesRaw(entry.WorldX, entry.WorldY, tileRow, tileCol);
-        var inRange = localRawX >= 0.0 && localRawX < 1.0 && localRawY >= 0.0 && localRawY < 1.0;
-        if (!inRange)
+        static double Sanitize(double value)
         {
-            // Skip out-of-range placements to prevent corner ghosts on empty tiles
-            return null!;
+            if (double.IsNaN(value) || double.IsInfinity(value)) return 0.0;
+            return value;
         }
 
+        var safeWorldX = Sanitize(entry.WorldX);
+        var safeWorldY = Sanitize(entry.WorldY);
+        var safeWorldZ = Sanitize(entry.WorldZ);
+
+        // Compute RAW local and clamp to [0,1]; do not drop outright to avoid losing MDX/M2 on early alphas
+        var (localRawX, localRawY) = CoordinateTransformer.ComputeLocalCoordinatesRaw(safeWorldX, safeWorldY, tileRow, tileCol);
         var (localX, localY) = (Math.Clamp(localRawX, 0.0, 1.0), Math.Clamp(localRawY, 0.0, 1.0));
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
 
         static bool IsWorldReliable(double x, double y) => !(double.IsNaN(x) || double.IsNaN(y) || (x == 0.0 && y == 0.0));
-        var worldReliable = IsWorldReliable(entry.WorldX, entry.WorldY);
+        var worldReliable = IsWorldReliable(safeWorldX, safeWorldY);
         int worldRow = -1, worldCol = -1;
-        bool isAdjacentRef = false;
+        bool isAdjacentRef = false; // disable adjacency marking until transforms validated
         if (worldReliable)
         {
-            var idx = CoordinateTransformer.ComputeTileIndices(entry.WorldX, entry.WorldY);
+            var idx = CoordinateTransformer.ComputeTileIndices(safeWorldX, safeWorldY);
             worldRow = idx.TileRow;
             worldCol = idx.TileCol;
-            isAdjacentRef = worldRow != tileRow || worldCol != tileCol;
+            // keep isAdjacentRef=false for now to avoid hiding WMOs when toggle is off
         }
 
         static string ClassifyType(AssetTimelineDetailedEntry e)
@@ -201,9 +212,6 @@ public sealed class OverlayBuilder
             pixelY = options.MinimapHeight - pixelY;
         }
 
-        // Compute normalized world from tile+pixel for UI (center-origin ADT). Preserve raw too.
-        var (wx, wy) = CoordinateTransformer.ComputeWorldFromTilePixel(tileRow, tileCol, pixelX, pixelY, options.MinimapWidth, options.MinimapHeight);
-
         return new
         {
             uniqueId = entry.UniqueId,
@@ -221,8 +229,8 @@ public sealed class OverlayBuilder
             fileStem = entry.FileStem,
             extension = entry.Extension,
             type = typeLabel,
-            world = new { x = wx, y = wy, z = entry.WorldZ },
-            worldRaw = new { x = entry.WorldX, y = entry.WorldY, z = entry.WorldZ },
+            // Use raw world coordinates from source (MDDF/MODF) for display
+            world = new { x = safeWorldX, y = safeWorldY, z = safeWorldZ },
             local = new
             {
                 x = Math.Round(localX, 6, MidpointRounding.AwayFromZero),
