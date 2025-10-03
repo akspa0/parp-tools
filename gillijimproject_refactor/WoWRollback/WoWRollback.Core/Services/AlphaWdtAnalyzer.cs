@@ -18,7 +18,7 @@ public static class AlphaWdtAnalyzer
     /// Analyzes an Alpha WDT file and extracts placement UniqueID ranges from all tiles.
     /// If convertedAdtDir is provided, uses converted LK ADT files for accurate world coordinates.
     /// </summary>
-    public static AlphaAnalysisResult AnalyzeAlphaWdt(string wdtPath, string? convertedAdtDir = null)
+    public static AlphaAnalysisResult AnalyzeAlphaWdt(string wdtPath, string? convertedAdtDir = null, bool preferRawCoordinates = false)
     {
         if (!File.Exists(wdtPath))
             throw new FileNotFoundException($"Alpha WDT file not found: {wdtPath}");
@@ -28,7 +28,7 @@ public static class AlphaWdtAnalyzer
         var assets = new List<PlacementAsset>();
 
         Console.WriteLine($"[info] Beginning archaeological excavation of {mapName}...");
-        if (convertedAdtDir != null)
+        if (!preferRawCoordinates && convertedAdtDir != null)
             Console.WriteLine($"[info] Using converted LK ADT files from: {convertedAdtDir}");
 
         try
@@ -41,7 +41,9 @@ public static class AlphaWdtAnalyzer
             var adtResult = adtScanner.Scan(wdtScanner);
 
             // Build coordinate lookup from converted LK ADT files if available
-            var coordinateLookup = BuildCoordinateLookup(mapName, adtResult, convertedAdtDir);
+            var coordinateLookup = preferRawCoordinates
+                ? new Dictionary<uint, (float X, float Y, float Z, float RotX, float RotY, float RotZ, float Scale, ushort Flags, ushort DoodadSet, ushort NameSet)>()
+                : BuildCoordinateLookup(mapName, adtResult, convertedAdtDir);
 
             foreach (var placement in adtResult.Placements)
             {
@@ -57,7 +59,7 @@ public static class AlphaWdtAnalyzer
                 float rotX = 0f, rotY = 0f, rotZ = 0f, scale = 1f;
                 ushort flags = 0, doodadSet = 0, nameSet = 0;
                 
-                if (uniqueId.HasValue && coordinateLookup.TryGetValue(uniqueId.Value, out var coords))
+                if (!preferRawCoordinates && uniqueId.HasValue && coordinateLookup.TryGetValue(uniqueId.Value, out var coords))
                 {
                     worldX = coords.X;
                     worldY = coords.Y;
