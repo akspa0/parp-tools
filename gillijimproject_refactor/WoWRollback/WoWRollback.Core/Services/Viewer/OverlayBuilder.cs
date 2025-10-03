@@ -91,7 +91,11 @@ public sealed class OverlayBuilder
                     .Select(kindGroup => new
                     {
                         kind = kindGroup.Key.ToString(),
-                        points = kindGroup.Select(e => BuildPoint(e, tileRow, tileCol, options)).ToList()
+                        points = kindGroup
+                            .Select(e => BuildPoint(e, tileRow, tileCol, options))
+                            .Where(p => p != null)
+                            .Cast<object>()
+                            .ToList()
                     })
                     .ToList()
             })
@@ -114,10 +118,26 @@ public sealed class OverlayBuilder
         });
     }
 
-    private static object BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
+    private static object? BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
+        // Trust source tile data - filter objects that don't belong to this tile
+        if (entry.TileRow != tileRow || entry.TileCol != tileCol)
+        {
+            return null;
+        }
+
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
+
+        // Safety validation: reject coordinates way outside tile bounds (wraparound detection)
+        const double safetyMargin = 50.0;
+        if (pixelX < -safetyMargin || pixelX > options.MinimapWidth + safetyMargin ||
+            pixelY < -safetyMargin || pixelY > options.MinimapHeight + safetyMargin)
+        {
+            // Coordinate calculated to be far outside this tile - likely wraparound
+            Console.WriteLine($"[OverlayBuilder] Filtered object UID {entry.UniqueId} at pixel ({pixelX:F1}, {pixelY:F1}) - outside tile {tileRow},{tileCol} bounds");
+            return null;
+        }
 
         return new
         {

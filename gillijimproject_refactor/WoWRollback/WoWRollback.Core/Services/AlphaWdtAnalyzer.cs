@@ -37,7 +37,6 @@ public static class AlphaWdtAnalyzer
             // Use the actual working AdtScanner from AlphaWDTAnalysisTool
             var adtScanner = new global::AlphaWdtAnalyzer.Core.AdtScanner();
             var adtResult = adtScanner.Scan(wdtScanner);
-
             foreach (var placement in adtResult.Placements)
             {
                 var placementKind = ResolvePlacementKind(placement.Type);
@@ -45,10 +44,15 @@ public static class AlphaWdtAnalyzer
                     ? unchecked((uint)placement.UniqueId.Value)
                     : null;
 
-                // Use raw Alpha coordinates unchanged
-                float worldX = placement.WorldX;
-                float worldY = placement.WorldY;
-                float worldZ = placement.WorldZ;
+                // Convert Alpha corner-relative coordinates to world-centered coordinates
+                // Alpha stores coordinates in 0 to ~34133 range (corner-relative)
+                // Convert to world-centered by subtracting half the map size
+                const float MAP_HALF_SIZE = 32.0f * 533.33333f; // 17066.66656
+                
+                // Simple conversion: worldCoord = rawCoord - MAP_HALF_SIZE
+                float worldX = placement.WorldX - MAP_HALF_SIZE;
+                float worldY = placement.WorldY - MAP_HALF_SIZE;
+                float worldZ = placement.WorldZ;  // Z (height) unchanged
                 float rotX = 0f, rotY = 0f, rotZ = 0f, scale = 1f;
                 ushort flags = 0, doodadSet = 0, nameSet = 0;
 
