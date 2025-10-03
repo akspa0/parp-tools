@@ -73,6 +73,9 @@ public static class AlphaWdtAnalyzer
                     nameSet = coords.NameSet;
                 }
 
+                // Alpha coordinates mirror horizontally relative to LK; flip X once during export.
+                worldX = -worldX;
+
                 var folder = ExtractFolder(placement.AssetPath, 2);
                 var category = ExtractCategory(placement.AssetPath);
                 var subcategory = ExtractSubcategory(placement.AssetPath);
