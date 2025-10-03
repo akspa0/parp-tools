@@ -8,9 +8,9 @@ let tileLayer; // no longer used, kept for minimal diff
 let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
 const overlayVariants = {
-    combined: { label: 'Combined', color: '#2196F3', radius: 3 },
-    m2: { label: 'Models (MDX/M2)', color: '#00E5FF', radius: 6 },
-    wmo: { label: 'WMOs', color: '#FF9800', radius: 5 }
+    combined: { label: 'All Objects (M2 + WMO)', color: '#2196F3', radius: 5 },
+    m2: { label: 'M2 Models Only', color: '#2196F3', radius: 8 },
+    wmo: { label: 'WMO Objects Only', color: '#FF9800', radius: 7 }
 };
 
 let objectMarkers = L.layerGroup();
@@ -55,7 +55,7 @@ function initializeMap() {
     map = L.map('map', {
         crs: L.CRS.Simple,
         minZoom: 0,
-        maxZoom: 8,
+        maxZoom: 12,  // Increased for 4x more zoom detail
         zoom: 2,
         zoomControl: true,
         zoomSnap: 0.1,
@@ -65,10 +65,23 @@ function initializeMap() {
     objectMarkers.addTo(map);
     minimapLayer.addTo(map);
     
+    // Re-render markers when zoom changes for dynamic scaling
+    map.on('zoomend', () => {
+        updateObjectMarkers();
+    });
+    
     // Set initial view to center
     // Start roughly center; for wow.tools mapping lat ≈ 31–32 is center too
     map.setView([32, 32], 2);
     console.log('Map initialized with WoW coordinate system (0,0 = NW)');
+}
+
+// Dynamic radius scaling based on zoom level
+function getScaledRadius(baseRadius) {
+    const zoom = map.getZoom();
+    // Scale from 0.7x at zoom 0 to 2.5x at zoom 12
+    const scale = 0.7 + (zoom / 12) * 1.8;
+    return Math.max(2, baseRadius * scale);
 }
 
 function setupUI() {
@@ -330,7 +343,13 @@ async function updateObjectMarkers() {
                 const versionData = data.layers?.find(l => l.version === state.selectedVersion);
                 if (!versionData || !versionData.kinds) continue;
 
-                const objects = versionData.kinds.flatMap(kind => kind.points || []);
+                const objects = versionData.kinds.flatMap(kind => {
+                    const label = typeof kind.kind === 'string' ? kind.kind : (kind.label ?? 'unknown');
+                    return (kind.points || []).map(point => ({
+                        ...point,
+                        __kind: label
+                    }));
+                });
                 const tileW = (data.minimap && data.minimap.width) ? data.minimap.width : 512;
                 const tileH = (data.minimap && data.minimap.height) ? data.minimap.height : 512;
                 
@@ -341,19 +360,59 @@ async function updateObjectMarkers() {
                     // Convert pixel coords to lat/lng using coordMode
                     const { lat, lng } = pixelToLatLng(row, col, obj.pixel.x, obj.pixel.y, tileW, tileH);
                     
-                    const marker = L.circleMarker([lat, lng], {
-                        radius: currentVariant === 'combined' ? 3 : style.radius,
-                        fillColor: currentVariant === 'combined' ? '#2196F3' : style.color,
-                        color: '#000',
-                        weight: 1,
-                        fillOpacity: 0.85
-                    }).bindPopup(`
+                    const isCombined = currentVariant === 'combined';
+                    const kindTag = (obj.__kind || '').toString().toLowerCase();
+                    const isWmo = kindTag.includes('wmo');
+
+                    const popupHtml = `
                         <strong>${obj.fileName || 'Unknown'}</strong><br>
                         UID: ${obj.uniqueId || 'N/A'}<br>
                         World: (${obj.world.x.toFixed(1)}, ${obj.world.y.toFixed(1)}, ${obj.world.z.toFixed(1)})
-                    `);
-                    
-                    objectMarkers.addLayer(marker);
+                    `;
+
+                    if (isCombined)
+                    {
+                        if (isWmo)
+                        {
+                            const baseSize = 0.002;
+                            const zoom = map.getZoom();
+                            const sizeScale = 0.7 + (zoom / 12) * 1.8;
+                            const squareHalf = baseSize * sizeScale;
+                            const bounds = [
+                                [lat - squareHalf, lng - squareHalf],
+                                [lat + squareHalf, lng + squareHalf]
+                            ];
+                            const square = L.rectangle(bounds, {
+                                color: '#000',
+                                weight: 1,
+                                fillColor: '#FF9800',
+                                fillOpacity: 0.85
+                            }).bindPopup(popupHtml);
+                            objectMarkers.addLayer(square);
+                        }
+                        else
+                        {
+                            const circle = L.circleMarker([lat, lng], {
+                                radius: getScaledRadius(4),
+                                fillColor: '#2196F3',
+                                color: '#000',
+                                weight: 1,
+                                fillOpacity: 0.9
+                            }).bindPopup(popupHtml);
+                            objectMarkers.addLayer(circle);
+                        }
+                    }
+                    else
+                    {
+                        const marker = L.circleMarker([lat, lng], {
+                            radius: getScaledRadius(style.radius),
+                            fillColor: style.color,
+                            color: '#000',
+                            weight: 1,
+                            fillOpacity: 0.85
+                        }).bindPopup(popupHtml);
+                        objectMarkers.addLayer(marker);
+                    }
                 });
 
                 // Debug: draw overlay corner markers if enabled in config
