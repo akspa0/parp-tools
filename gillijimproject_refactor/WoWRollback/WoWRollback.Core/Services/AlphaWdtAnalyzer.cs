@@ -45,7 +45,7 @@ public static class AlphaWdtAnalyzer
                     ? unchecked((uint)placement.UniqueId.Value)
                     : null;
 
-                // Use raw Alpha coordinates unchanged - no transforms
+                // Use raw Alpha coordinates unchanged
                 float worldX = placement.WorldX;
                 float worldY = placement.WorldY;
                 float worldZ = placement.WorldZ;

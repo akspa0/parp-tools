@@ -38,7 +38,7 @@ public static class CoordinateTransformer
         static double Frac(double v) => v - Math.Floor(v);
 
         // Flip both axes so (0,0) aligns with the south-west corner on minimap textures
-        var localX = Frac(tx);
+        var localX = 1.0 - Frac(tx);  // Flip X to fix horizontal mirroring
         var localY = 1.0 - Frac(ty);
 
         return (ClampUnit(localX), ClampUnit(localY));
