@@ -4,13 +4,23 @@ namespace WoWRollback.Core.Services;
 
 /// <summary>
 /// Provides helpers to convert WoW world coordinates into tile-relative normalized or pixel positions.
-/// Formulas follow the viewer spec and wow.tools orientation.
+/// Uses precise constants from ADT file format reference documentation.
+/// 
+/// Coordinate System (Right-handed, origin at map center):
+/// - Positive X-axis points NORTH, Positive Y-axis points WEST
+/// - NW corner (tile 0,0): (+17066.66656, +17066.66656)
+/// - Center (tiles 31/32 intersection): (0, 0)
+/// - SE corner (tile 63,63): (-17066.66656, -17066.66656)
+/// - Each tile: 533.33333 yards (exactly 1600 feet)
 /// </summary>
 public static class CoordinateTransformer
 {
+    // Precise WoW coordinate system constants (from ADT reference documentation)
     private const double TilesPerSide = 64.0;
-    private const double HalfTiles = TilesPerSide / 2.0; // 32
-    private const double TileSpanYards = 533.33333; // ADT tile span
+    private const double HalfTiles = TilesPerSide / 2.0; // 32.0
+    private const double TileSpanYards = 533.33333; // Exact: 1600 feet / 3 = 533.33333 yards
+    public const double MapHalfSize = HalfTiles * TileSpanYards; // 17066.66656 yards (±map boundaries)
+    public const double MapTotalSize = TilesPerSide * TileSpanYards; // 34133.33312 yards (full map width/height)
 
     /// <summary>
     /// Computes the ADT tile indices (row, col) for a world position.
@@ -23,11 +33,15 @@ public static class CoordinateTransformer
     }
 
     /// <summary>
-    /// Computes normalized coordinates relative to the specified tile (0..1 range) using wow.tools mapping.
-    /// - Tile indices: row = floor(32 - worldY/533.33333), col = floor(32 - worldX/533.33333)
-    /// - Local coords within tile:
-    ///     localX = 1 - frac(32 - worldX/533.33333)  // flip X to match minimap texture orientation (west to the right in image)
-    ///     localY = frac(32 - worldY/533.33333)
+    /// Computes normalized coordinates relative to the specified tile (0..1 range).
+    /// 
+    /// WoW coordinate system: +X=North, +Y=West, origin at map center
+    /// Tile 0,0 is NW corner (+17066, +17066)
+    /// Minimap texture: pixel (0,0) is NW corner (top-left), (width,height) is SE corner (bottom-right)
+    /// 
+    /// Within a tile:
+    /// - localX: 0.0 at tile's west edge, 1.0 at tile's east edge
+    /// - localY: 0.0 at tile's north edge, 1.0 at tile's south edge
     /// </summary>
     public static (double LocalX, double LocalY) ComputeLocalCoordinates(double worldX, double worldY, int tileRow, int tileCol)
     {
@@ -37,23 +51,24 @@ public static class CoordinateTransformer
 
         static double Frac(double v) => v - Math.Floor(v);
 
-        // Flip both axes so (0,0) aligns with the south-west corner on minimap textures
-        var localX = 1.0 - Frac(tx);  // Flip X to fix horizontal mirroring
-        var localY = 1.0 - Frac(ty);
+        // Extract fractional position within tile (no flipping needed - the tile index formula handles orientation)
+        var localX = Frac(tx);
+        var localY = Frac(ty);
 
         return (ClampUnit(localX), ClampUnit(localY));
     }
 
     /// <summary>
-    /// Converts normalized coordinates into pixel coordinates for a tile image.
+    /// Converts normalized tile coordinates into pixel coordinates for a minimap tile image.
+    /// Maps [0..1] range to [0..width-1] and [0..height-1] to avoid bleeding into adjacent tiles.
     /// </summary>
     public static (double PixelX, double PixelY) ToPixels(double localX, double localY, int width, int height)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width), "Width must be positive.");
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height), "Height must be positive.");
 
-        // Flip X to align with minimap tile orientation; keep Y non-inverted (top-left origin)
-        // Map normalized [0..1] into pixel index domain [0..W-1]/[0..H-1] to avoid crossing into adjacent tiles.
+        // Map normalized [0..1] to pixel coordinates [0..W-1] / [0..H-1]
+        // Subtract 1 to prevent coordinates at exactly 1.0 from landing on the next tile
         var w1 = Math.Max(1, width - 1);
         var h1 = Math.Max(1, height - 1);
         var px = ClampUnit(localX) * w1;

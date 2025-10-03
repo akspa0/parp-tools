@@ -45,13 +45,14 @@ public static class AlphaWdtAnalyzer
                     : null;
 
                 // Convert Alpha corner-relative coordinates to world-centered coordinates
-                // Alpha stores coordinates in 0 to ~34133 range (corner-relative)
-                // Convert to world-centered by subtracting half the map size
-                const float MAP_HALF_SIZE = 32.0f * 533.33333f; // 17066.66656
+                // Alpha stores coordinates in 0 to 34133.33312 range (corner-relative from NW)
+                // WoW coordinate system: NW corner (tile 0,0) = (+17066.66656, +17066.66656), Center = (0,0), SE = (-17066.66656, -17066.66656)
+                // Using precise double for coordinate calculations
+                const double MAP_HALF_SIZE = CoordinateTransformer.MapHalfSize; // 17066.66656
                 
-                // Simple conversion: worldCoord = rawCoord - MAP_HALF_SIZE
-                float worldX = placement.WorldX - MAP_HALF_SIZE;
-                float worldY = placement.WorldY - MAP_HALF_SIZE;
+                // Correct conversion: worldCoord = MAP_HALF_SIZE - rawCoord
+                float worldX = (float)(MAP_HALF_SIZE - placement.WorldX);
+                float worldY = (float)(MAP_HALF_SIZE - placement.WorldY);
                 float worldZ = placement.WorldZ;  // Z (height) unchanged
                 float rotX = 0f, rotY = 0f, rotZ = 0f, scale = 1f;
                 ushort flags = 0, doodadSet = 0, nameSet = 0;

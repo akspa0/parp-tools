@@ -123,19 +123,27 @@ public sealed class OverlayBuilder
         // Trust source tile data - filter objects that don't belong to this tile
         if (entry.TileRow != tileRow || entry.TileCol != tileCol)
         {
+            Console.WriteLine($"[OverlayBuilder] Skipped UID {entry.UniqueId}: tile mismatch (entry={entry.TileRow},{entry.TileCol} vs expected={tileRow},{tileCol})");
+            return null;
+        }
+
+        // Validate world coordinates match the tile before computing pixels
+        var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(entry.WorldX, entry.WorldY);
+        if (computedRow != tileRow || computedCol != tileCol)
+        {
+            Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId}: world coords ({entry.WorldX:F1}, {entry.WorldY:F1}) compute to tile ({computedRow},{computedCol}) but stored as ({tileRow},{tileCol})");
             return null;
         }
 
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
 
-        // Safety validation: reject coordinates way outside tile bounds (wraparound detection)
-        const double safetyMargin = 50.0;
+        // Final safety validation: reject coordinates outside reasonable tile bounds
+        const double safetyMargin = 25.0; // Tighter margin
         if (pixelX < -safetyMargin || pixelX > options.MinimapWidth + safetyMargin ||
             pixelY < -safetyMargin || pixelY > options.MinimapHeight + safetyMargin)
         {
-            // Coordinate calculated to be far outside this tile - likely wraparound
-            Console.WriteLine($"[OverlayBuilder] Filtered object UID {entry.UniqueId} at pixel ({pixelX:F1}, {pixelY:F1}) - outside tile {tileRow},{tileCol} bounds");
+            Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId}: pixel ({pixelX:F1}, {pixelY:F1}) outside tile {tileRow},{tileCol} bounds (world: {entry.WorldX:F1}, {entry.WorldY:F1})");
             return null;
         }
 
@@ -157,19 +165,22 @@ public sealed class OverlayBuilder
             extension = entry.Extension,
             world = new
             {
-                x = entry.WorldX,
-                y = entry.WorldY,
-                z = entry.WorldZ
+                // Preserve full precision for world coordinates
+                x = Math.Round(entry.WorldX, 6, MidpointRounding.AwayFromZero),
+                y = Math.Round(entry.WorldY, 6, MidpointRounding.AwayFromZero),
+                z = Math.Round(entry.WorldZ, 6, MidpointRounding.AwayFromZero)
             },
             local = new
             {
+                // 6 decimal places for normalized 0-1 coordinates
                 x = Math.Round(localX, 6, MidpointRounding.AwayFromZero),
                 y = Math.Round(localY, 6, MidpointRounding.AwayFromZero)
             },
             pixel = new
             {
-                x = Math.Round(pixelX, 2, MidpointRounding.AwayFromZero),
-                y = Math.Round(pixelY, 2, MidpointRounding.AwayFromZero)
+                // 3 decimal places for pixel coordinates
+                x = Math.Round(pixelX, 3, MidpointRounding.AwayFromZero),
+                y = Math.Round(pixelY, 3, MidpointRounding.AwayFromZero)
             }
         };
     }

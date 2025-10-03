@@ -84,6 +84,14 @@ function getScaledRadius(baseRadius) {
     return Math.max(2, baseRadius * scale);
 }
 
+// Dynamic WMO square size (in lat/lng units) - scales same as circles
+function getScaledSquareSize(baseSize) {
+    const zoom = map.getZoom();
+    // Same scaling as circles: 0.7x to 2.5x
+    const scale = 0.7 + (zoom / 12) * 1.8;
+    return baseSize * scale;
+}
+
 function setupUI() {
     const versionSelect = document.getElementById('versionSelect');
     const mapSelect = document.getElementById('mapSelect');
@@ -367,17 +375,15 @@ async function updateObjectMarkers() {
                     const popupHtml = `
                         <strong>${obj.fileName || 'Unknown'}</strong><br>
                         UID: ${obj.uniqueId || 'N/A'}<br>
-                        World: (${obj.world.x.toFixed(1)}, ${obj.world.y.toFixed(1)}, ${obj.world.z.toFixed(1)})
+                        World: (${obj.world.x.toFixed(3)}, ${obj.world.y.toFixed(3)}, ${obj.world.z.toFixed(2)})
                     `;
 
                     if (isCombined)
                     {
                         if (isWmo)
                         {
-                            const baseSize = 0.002;
-                            const zoom = map.getZoom();
-                            const sizeScale = 0.7 + (zoom / 12) * 1.8;
-                            const squareHalf = baseSize * sizeScale;
+                            // Larger base size and consistent scaling with M2 circles
+                            const squareHalf = getScaledSquareSize(0.006);
                             const bounds = [
                                 [lat - squareHalf, lng - squareHalf],
                                 [lat + squareHalf, lng + squareHalf]
@@ -450,9 +456,21 @@ function handleMapClick(e) {
     const row = Math.max(0, Math.min(63, Math.floor(lat)));
     const col = Math.max(0, Math.min(63, Math.floor(lng)));
     
-    // Update sidebar click info
+    // Update sidebar click info with world coordinates
+    // Convert Leaflet lat/lng to WoW world coordinates
+    // Leaflet: lat/lng are tile indices (0-63)
+    // WoW: tile 0,0 (NW) = (+17066.66656, +17066.66656), center = (0,0), tile 63,63 (SE) = (-17066.66656, -17066.66656)
+    // Precise constants from ADT reference documentation
+    const TILE_SIZE = 533.33333;  // Exact: 1600 feet / 3
+    const MAP_HALF_SIZE = 32.0 * TILE_SIZE;  // 17066.66656 yards
+    
+    // World coord = MAP_HALF_SIZE - (tileIndex * TILE_SIZE + inTileOffset)
+    // For tile center approximation: worldCoord ≈ MAP_HALF_SIZE - (tileIndex + 0.5) * TILE_SIZE
+    const worldX = MAP_HALF_SIZE - (lng + 0.5) * TILE_SIZE;
+    const worldY = MAP_HALF_SIZE - (lat + 0.5) * TILE_SIZE;
+    
     document.getElementById('clickedTile').textContent = `${row}_${col}`;
-    document.getElementById('clickedCoord').textContent = `Tile [${row},${col}] | Leaflet (${lat.toFixed(2)}, ${lng.toFixed(2)})`;
+    document.getElementById('clickedCoord').textContent = `Tile [${row},${col}] | World (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`;
     
     const tiles = state.getTilesForMap(state.selectedMap);
     const tile = tiles.find(t => t.row === row && t.col === col);
