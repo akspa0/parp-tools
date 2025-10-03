@@ -68,8 +68,25 @@ function Get-MapsFromAlphaRoot([string]$root) {
 Write-Host "[2/4] Preparing cached Alpha -> LK ADTs..." -ForegroundColor Yellow
 
 $cacheRootPath = Join-Path $PSScriptRoot $CacheRoot
-$communityListfile = Join-Path $PSScriptRoot "test_data/community-listfile-withcapitals.csv"
-$lkListfile = Join-Path $PSScriptRoot "test_data/World of Warcraft 3x.txt"
+
+function Resolve-FirstExistingPath {
+    param([string[]]$Candidates)
+    foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $full = Resolve-Path -Path $candidate -ErrorAction SilentlyContinue
+        if ($full) { return $full.Path }
+    }
+    return $null
+}
+
+$communityListfile = Resolve-FirstExistingPath @(
+    (Join-Path $PSScriptRoot "test_data/community-listfile-withcapitals.csv"),
+    (Join-Path $PSScriptRoot "../test_data/community-listfile-withcapitals.csv")
+)
+$lkListfile = Resolve-FirstExistingPath @(
+    (Join-Path $PSScriptRoot "test_data/World of Warcraft 3x.txt"),
+    (Join-Path $PSScriptRoot "../test_data/World of Warcraft 3x.txt")
+)
 $alphaToolProject = Join-Path $PSScriptRoot "..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli\AlphaWdtAnalyzer.Cli.csproj"
 
 if (-not (Test-Path $cacheRootPath)) {
@@ -113,11 +130,12 @@ function Ensure-CachedMap {
     )
 
     $versionRoot = Join-Path $cacheRootPath $Version
-    $mapRoot = Join-Path $versionRoot $Map
-    $adtsDir = Join-Path $mapRoot "adts"
-    $analysisDir = Join-Path $mapRoot "analysis"
+    $worldMapsRoot = Join-Path (Join-Path $versionRoot 'World') 'Maps'
+    $mapRoot = Join-Path $worldMapsRoot $Map
+    $analysisRoot = Join-Path (Join-Path $cacheRootPath 'analysis') $Version
+    $analysisDir = Join-Path $analysisRoot $Map
 
-    $needsRefresh = $RefreshCache.IsPresent -or -not (Test-Path $adtsDir)
+    $needsRefresh = $RefreshCache.IsPresent -or -not (Test-Path $mapRoot)
     if (-not $needsRefresh) {
         Write-Host "  [cache] Reusing $Version/$Map" -ForegroundColor DarkGray
         return $mapRoot
@@ -126,7 +144,14 @@ function Ensure-CachedMap {
     if (Test-Path $mapRoot) {
         Remove-Item $mapRoot -Recurse -Force
     }
-    New-Item -Path $adtsDir -ItemType Directory -Force | Out-Null
+    if (Test-Path $analysisDir) {
+        Remove-Item $analysisDir -Recurse -Force
+    }
+
+    New-Item -Path $versionRoot -ItemType Directory -Force | Out-Null
+    New-Item -Path $worldMapsRoot -ItemType Directory -Force | Out-Null
+    New-Item -Path $mapRoot -ItemType Directory -Force | Out-Null
+    New-Item -Path $analysisRoot -ItemType Directory -Force | Out-Null
     New-Item -Path $analysisDir -ItemType Directory -Force | Out-Null
 
     if (-not $AlphaRoot) {
@@ -149,6 +174,12 @@ function Ensure-CachedMap {
     }
 
     Write-Host "  [cache] Building LK ADTs for $Version/$Map" -ForegroundColor Yellow
+    $tempExportDir = Join-Path $cacheRootPath ("_awdt_tmp_" + ($Version -replace '[^0-9A-Za-z]', '_') + "_" + ($Map -replace '[^0-9A-Za-z]', '_'))
+    if (Test-Path $tempExportDir) {
+        Remove-Item $tempExportDir -Recurse -Force
+    }
+    New-Item -Path $tempExportDir -ItemType Directory -Force | Out-Null
+
     $toolArgs = @(
         'run','--project',$alphaToolProject,'--configuration','Release','--',
         '--input', $wdtPath,
@@ -156,7 +187,7 @@ function Ensure-CachedMap {
         '--lk-listfile', $lkListfile,
         '--out', $analysisDir,
         '--export-adt',
-        '--export-dir', $adtsDir,
+        '--export-dir', $tempExportDir,
         '--no-web',
         '--profile', 'modified',
         '--no-fallbacks'
@@ -166,6 +197,19 @@ function Ensure-CachedMap {
     if ($LASTEXITCODE -ne 0) {
         throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
     }
+
+    $sourceMapDir = Join-Path (Join-Path (Join-Path $tempExportDir 'World') 'Maps') $Map
+    if (-not (Test-Path $sourceMapDir)) {
+        throw "Expected converted ADTs at $sourceMapDir but none were produced"
+    }
+
+    if (Test-Path $mapRoot) {
+        Remove-Item $mapRoot -Recurse -Force
+    }
+    New-Item -Path $mapRoot -ItemType Directory -Force | Out-Null
+    Copy-Item -Path (Join-Path $sourceMapDir '*') -Destination $mapRoot -Recurse -Force
+
+    Remove-Item $tempExportDir -Recurse -Force
 
     return $mapRoot
 }
@@ -205,14 +249,15 @@ Write-Host ("Maps: {0}" -f $mapsArg) -ForegroundColor Gray
 
  # Build dotnet run command with optional alpha-root and any extra pass-through args
  $cmd = @(
-    'run','--project','WoWRollback.Cli','--configuration','Release','--',
-    'compare-versions',
-    '--versions', $versionsArg,
-    '--maps', $mapsArg,
-    '--viewer-report'
- )
- if ($AlphaRoot) { $cmd += @('--alpha-root', $AlphaRoot) }
- if ($ConvertedAdtRoot) { $cmd += @('--converted-adt-root', $ConvertedAdtRoot) }
+   'run','--project','WoWRollback.Cli','--configuration','Release','--',
+   'compare-versions',
+   '--versions', $versionsArg,
+   '--maps', $mapsArg,
+   '--viewer-report',
+   '--converted-adt-cache', $cacheRootPath
+)
+if ($AlphaRoot) { $cmd += @('--alpha-root', $AlphaRoot) }
+if ($ConvertedAdtRoot) { $cmd += @('--converted-adt-root', $ConvertedAdtRoot) }
  if ($ExtraArgs) { $cmd += $ExtraArgs }
  # Capture dotnet output so we can parse the comparison directory path
  $dotnetOut = & dotnet @cmd 2>&1
