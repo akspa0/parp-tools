@@ -56,17 +56,15 @@ internal static class Program
         Require(opts, "wdt-file");
         var wdtFile = opts["wdt-file"];
         var outRoot = opts.GetValueOrDefault("out", "");
-        var convertedAdtDir = opts.GetValueOrDefault("converted-adt-dir", null);
-        var preferRaw = opts.TryGetValue("prefer-raw", out var preferRawValue) &&
-            !string.Equals(preferRawValue, "false", StringComparison.OrdinalIgnoreCase);
         var mapName = Path.GetFileNameWithoutExtension(wdtFile);
 
         var buildTag = BuildTagResolver.ResolveForPath(Path.GetDirectoryName(Path.GetFullPath(wdtFile)) ?? wdtFile);
         var sessionDir = OutputSession.Create(outRoot, mapName, buildTag);
         Console.WriteLine($"[info] Archaeological analysis session: {sessionDir}");
         Console.WriteLine($"[info] Excavating Alpha WDT: {wdtFile}");
+        Console.WriteLine($"[info] Using raw Alpha coordinates (no transforms)");
 
-        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile, convertedAdtDir, preferRaw);
+        var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtFile);
         var csvResult = RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{mapName}", analysis.Ranges, analysis.Assets);
 
         Console.WriteLine($"[ok] Extracted {analysis.Ranges.Count} archaeological placement layers");
@@ -430,15 +428,9 @@ internal static class Program
 
                 Console.WriteLine($"[auto] Generating placement ranges for {version} / {map}");
                 Console.WriteLine($"[auto]  WDT: {wdtPath}");
-                if (!string.IsNullOrWhiteSpace(convertedDir))
-                {
-                    Console.WriteLine($"[auto]  Converted ADTs: {convertedDir}");
-                }
+                Console.WriteLine($"[auto]  Using raw Alpha coordinates (no transforms)");
 
-                var preferRawCoordinates = opts.TryGetValue("prefer-raw", out var preferRawOpt) &&
-                    !string.Equals(preferRawOpt, "false", StringComparison.OrdinalIgnoreCase);
-
-                var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath, convertedDir, preferRawCoordinates);
+                var analysis = WoWRollback.Core.Services.AlphaWdtAnalyzer.AnalyzeAlphaWdt(wdtPath);
                 RangeCsvWriter.WritePerMapCsv(sessionDir, $"alpha_{map}", analysis.Ranges, analysis.Assets);
             }
         }
