@@ -8,6 +8,22 @@ This directory contains comprehensive design documentation for the WoWRollback o
 
 ## Documents
 
+### 0. [PLAN_SUMMARY.md](PLAN_SUMMARY.md) 📋 **START HERE**
+
+**Purpose**: Executive summary of the complete MCNK & AreaID overlay plan
+
+**Contents**:
+- What changed (minimal → expanded scope)
+- Complete CSV schema (23 columns)
+- JSON structure for all 4 overlay types
+- Visualization design with color schemes
+- Implementation timeline (~21 hours)
+- Success criteria checklist
+
+**Read this first** for a quick overview of the expanded plan.
+
+---
+
 ### 1. [overlay-system-architecture.md](overlay-system-architecture.md)
 
 **Purpose**: Complete architectural overview of the 3-stage overlay pipeline
@@ -27,33 +43,101 @@ This directory contains comprehensive design documentation for the WoWRollback o
 
 ### 2. [mcnk-flags-overlay.md](mcnk-flags-overlay.md)
 
-**Purpose**: Complete implementation specification for MCNK terrain flags overlay
+**Purpose**: Original implementation specification for MCNK terrain flags (impassible + holes only)
 
 **Contents**:
 - ADT structure reference (MCNK chunk, flags, holes)
-- CSV schema design
+- CSV schema design (minimal: impassible + holes)
 - Extraction implementation (`McnkFlagsExtractor.cs`)
 - Transformation implementation (`McnkFlagsOverlayBuilder.cs`)
 - Visualization implementation (`terrainFlagsLayer.js`)
-- UI controls and styling
-- Testing checklist
 
-**Use this as a template** when implementing new overlay types.
+**Note**: This is the **minimal** implementation. See `mcnk-complete-overlay.md` for the **expanded** version.
+
+---
+
+### 2b. [mcnk-complete-overlay.md](mcnk-complete-overlay.md) ⭐
+
+**Purpose**: **Complete** MCNK terrain extraction including all flags, liquids, and AreaID
+
+**Contents**:
+- Complete MCNK structure (all 32 flag bits + metadata fields)
+- Expanded CSV schema (23 columns: all flags, liquids, holes, AreaID, positions)
+- Extraction implementation (`McnkTerrainExtractor.cs`)
+- Multi-category overlay builders (terrain properties, liquids, holes)
+- Visualization modules (4 separate layer types)
+- Complete UI control panel design
+- Color scheme definitions
+
+**Use this** for the actual implementation - it supersedes `mcnk-flags-overlay.md`.
+
+---
+
+### 2c. [areaid-overlay.md](areaid-overlay.md) ⭐
+
+**Purpose**: AreaID boundary detection and visualization
+
+**Contents**:
+- Alpha vs. LK AreaID encoding explanation
+- Boundary detection algorithm
+- Area name lookup from AreaTable.dbc
+- AreaID overlay JSON schema
+- Visualization with boundary lines and labels
+- AreaTable config generation
+- Integration with existing `areaid_verify_*.csv` data
+
+**Key Feature**: Visualizes zone boundaries as colored lines with area names.
+
+---
+
+### 2d. [mcsh-shadows-overlay.md](mcsh-shadows-overlay.md) ⭐ **NEW**
+
+**Purpose**: MCSH baked shadow map extraction and visualization
+
+**Contents**:
+- MCSH subchunk structure (64×64 bit shadow map per chunk)
+- Shadow bitmap extraction from MCSH data
+- Base64 encoding for CSV storage
+- Server-side shadow compositing (16×16 chunks → 1024×1024 PNG)
+- PNG data URL generation for viewer
+- Image overlay rendering with opacity control
+- Alternative client-side canvas rendering approach
+
+**Key Feature**: Composites 256 chunk shadow bitmaps into a single 1024×1024 grayscale PNG overlay per tile, rendered as semi-transparent image layer.
 
 ---
 
 ### 3. [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md)
 
-**Purpose**: Step-by-step implementation plan for MCNK flags overlay
+**Purpose**: Step-by-step implementation plan for **complete** MCNK & AreaID overlays
 
 **Contents**:
 - Phase breakdown (Design → Extraction → Transformation → Visualization → Testing)
-- Task lists with file-level detail
-- Code snippets and examples
+- Complete task lists with file-level detail
+- Code snippets for all 5 overlay types (including shadows)
+- Integration with VersionComparisonService
 - Success criteria
-- Timeline estimates
+- Timeline estimates (~25 hours total)
 
-**Follow this roadmap** when ready to implement the MCNK flags overlay.
+**Follow this roadmap** when ready to implement. Updated to reflect the expanded scope (all MCNK flags + AreaID boundaries + shadow maps).
+
+---
+
+### 4. [viewer-enhancements.md](viewer-enhancements.md) ⭐ **NEW**
+
+**Purpose**: UI/UX improvements and quality-of-life features for the viewer
+
+**Contents**:
+- **Statistics Panel**: Real-time asset counter showing visible objects (M2, WMO), tile counts, zoom level, coordinates
+- **Complete Map Processing**: Auto-discovery of all maps from Map.dbc, batch processing, minimap validation
+- Parallel processing support for faster extraction
+- Progress reporting and filtering options
+- Integration with WoWRollback for auto-discovery
+
+**Key Features**: 
+- Real-time viewport statistics with collapsible panel
+- Process all maps automatically instead of hardcoded subset
+- Batch extraction with progress tracking
 
 ---
 
@@ -63,7 +147,7 @@ This directory contains comprehensive design documentation for the WoWRollback o
 
 1. **Study existing implementation**
    - Read `overlay-system-architecture.md` for overall design
-   - Review `mcnk-flags-overlay.md` as a template
+   - Review `mcnk-complete-overlay.md` and `areaid-overlay.md` as comprehensive examples
    
 2. **Create design document**
    - Copy `mcnk-flags-overlay.md` as a template

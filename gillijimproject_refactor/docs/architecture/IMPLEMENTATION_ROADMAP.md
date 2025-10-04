@@ -1,8 +1,8 @@
-# Implementation Roadmap: MCNK Flags Overlay
+# Implementation Roadmap: Complete MCNK & AreaID Overlays
 
 ## Goal
 
-Add visualization of MCNK terrain flags (impassible areas and holes) to the WoWRollback viewer.
+Add comprehensive visualization of **all** MCNK terrain data and AreaID boundaries to the WoWRollback viewer.
 
 ---
 
@@ -12,49 +12,61 @@ Add visualization of MCNK terrain flags (impassible areas and holes) to the WoWR
 
 **Deliverables**:
 - [x] `overlay-system-architecture.md` - Overall system design
-- [x] `mcnk-flags-overlay.md` - Specific MCNK implementation design
+- [x] `mcnk-flags-overlay.md` - Original MCNK implementation design (impassible + holes)
+- [x] `mcnk-complete-overlay.md` - **Complete MCNK extraction (all flags + liquids + metadata)**
+- [x] `areaid-overlay.md` - **AreaID boundary visualization**
 - [x] This roadmap document
 
 ---
 
 ## Phase 2: Extraction (AlphaWDTAnalysisTool)
 
-**Goal**: Parse MCNK chunks and extract flags to CSV
+**Goal**: Parse MCNK chunks and extract **all** terrain data to CSV
 
 ### Tasks
 
-#### 2.1: Add MCNK Parser to AlphaWdtAnalyzer.Core
+#### 2.1: Add Complete MCNK Parser to AlphaWdtAnalyzer.Core
 
-**File**: `AlphaWdtAnalyzer.Core/McnkFlagsExtractor.cs` (NEW)
+**File**: `AlphaWdtAnalyzer.Core/McnkTerrainExtractor.cs` (NEW)
 
 ```csharp
-// New class to extract MCNK flags
-public sealed class McnkFlagsExtractor
+// Extract ALL MCNK data: flags, liquids, holes, AreaID, positions
+public sealed class McnkTerrainExtractor
 {
-    public static List<McnkFlagEntry> ExtractFlags(WdtAlphaScanner wdt) { ... }
+    public static List<McnkTerrainEntry> ExtractTerrain(WdtAlphaScanner wdt) { ... }
 }
 
-public record McnkFlagEntry(
+public record McnkTerrainEntry(
     string Map,
     int TileRow, int TileCol,
     int ChunkRow, int ChunkCol,
     string FlagsRaw,
-    bool Impassible,
-    bool HasHoles,
-    string HoleType,
-    string HoleBitmapHex,
-    int HoleCount
+    bool HasMcsh, bool Impassible,
+    bool LqRiver, bool LqOcean, bool LqMagma, bool LqSlime,
+    bool HasMccv, bool HighResHoles,
+    int AreaId, int NumLayers,
+    bool HasHoles, string HoleType, string HoleBitmapHex, int HoleCount,
+    float PositionX, float PositionY, float PositionZ
 );
 ```
+
+**Implementation Details**:
+- Parse flags at offset 0x00 (32 bits)
+- Extract ALL flag bits (impassible, liquids, shadows, vertex colors)
+- Read AreaID at offset 0x34
+- Read chunk position at offset 0x68 (3 floats)
+- Parse holes (low-res at 0x3C, high-res at 0x14 if flag set)
+- Read nLayers at offset 0x0C
 
 **Dependencies**:
 - Understand `AdtAlpha` class API
 - Locate MCNK chunk access method
-- Parse binary MCNK header structure
+- Reference `mcnk-complete-overlay.md` for complete structure
 
 **Verification**:
 - Unit test with known ADT file
-- Validate flags match expected values from hex dump
+- Validate all flags match expected values
+- Cross-check AreaID with existing `areaid_verify_*.csv` if available
 
 ---
 
@@ -64,34 +76,45 @@ public record McnkFlagEntry(
 
 Add new command-line option:
 ```csharp
---extract-mcnk-flags
+--extract-mcnk-terrain    // Extract complete MCNK terrain data
 ```
 
 Add CSV writer:
 ```csharp
-private static void WriteMcnkFlagsCsv(List<McnkFlagEntry> entries, string outputPath)
+private static void WriteMcnkTerrainCsv(List<McnkTerrainEntry> entries, string outputPath)
 {
     using var writer = new StreamWriter(outputPath);
-    writer.WriteLine("map,tile_row,tile_col,chunk_row,chunk_col,flags_raw,impassible,has_holes,hole_type,hole_bitmap_hex,hole_count");
+    
+    // Write header (23 columns)
+    writer.WriteLine("map,tile_row,tile_col,chunk_row,chunk_col," +
+                     "flags_raw,has_mcsh,impassible,lq_river,lq_ocean,lq_magma,lq_slime," +
+                     "has_mccv,high_res_holes,areaid,num_layers," +
+                     "has_holes,hole_type,hole_bitmap_hex,hole_count," +
+                     "position_x,position_y,position_z");
     
     foreach (var entry in entries)
     {
-        writer.WriteLine($"{entry.Map},{entry.TileRow},{entry.TileCol},{entry.ChunkRow},{entry.ChunkCol}," +
-                        $"{entry.FlagsRaw},{entry.Impassible},{entry.HasHoles},{entry.HoleType}," +
-                        $"{entry.HoleBitmapHex},{entry.HoleCount}");
+        writer.WriteLine($"{entry.Map},{entry.TileRow},{entry.TileCol}," +
+                        $"{entry.ChunkRow},{entry.ChunkCol}," +
+                        $"{entry.FlagsRaw},{entry.HasMcsh},{entry.Impassible}," +
+                        $"{entry.LqRiver},{entry.LqOcean},{entry.LqMagma},{entry.LqSlime}," +
+                        $"{entry.HasMccv},{entry.HighResHoles},{entry.AreaId},{entry.NumLayers}," +
+                        $"{entry.HasHoles},{entry.HoleType},{entry.HoleBitmapHex},{entry.HoleCount}," +
+                        $"{entry.PositionX},{entry.PositionY},{entry.PositionZ}");
     }
 }
 ```
 
 **Output Location**:
 ```
-<output-dir>/csv/<map>/<map>_mcnk_flags.csv
+<output-dir>/csv/<map>/<map>_mcnk_terrain.csv
 ```
 
 **Verification**:
-- Run extraction on test map
-- Verify CSV schema matches design
-- Spot-check values against known impassible areas
+- Run extraction on test map (e.g., Azeroth)
+- Verify CSV schema matches `mcnk-complete-overlay.md` design
+- Spot-check: impassible areas, liquid flags, AreaIDs
+- Confirm AreaID values match existing `areaid_verify_*.csv` data
 
 ---
 
@@ -101,26 +124,27 @@ private static void WriteMcnkFlagsCsv(List<McnkFlagEntry> entries, string output
 
 Add to "Features" section:
 ```markdown
-- MCNK chunk flag extraction (impassible terrain, holes)
+- Complete MCNK chunk extraction (all flags, liquids, holes, AreaID, positions)
 ```
 
 Add to "CLI Usage":
 ```markdown
---extract-mcnk-flags       Extract MCNK terrain flags to CSV
+--extract-mcnk-terrain     Extract complete MCNK terrain data to CSV
+                           (includes: impassible, liquids, holes, AreaID, vertex colors, positions)
 ```
 
 Add to "Output Layout":
 ```markdown
 csv/
   <Map>/
-    <Map>_mcnk_flags.csv   # Per-chunk terrain flags
+    <Map>_mcnk_terrain.csv # Complete per-chunk terrain data (23 columns)
 ```
 
 ---
 
 ## Phase 3: Transformation (WoWRollback.Core)
 
-**Goal**: Transform CSV data into viewer-ready overlay JSON
+**Goal**: Transform CSV data into viewer-ready overlay JSONs (multiple overlay types)
 
 ### Tasks
 
@@ -129,24 +153,23 @@ csv/
 **File**: `WoWRollback.Core/Models/McnkModels.cs` (NEW)
 
 ```csharp
-public record McnkFlagEntry(
+public record McnkTerrainEntry(
     string Map,
     int TileRow, int TileCol,
     int ChunkRow, int ChunkCol,
     string FlagsRaw,
-    bool Impassible,
-    bool HasHoles,
-    string HoleType,
-    string HoleBitmapHex,
-    int HoleCount
+    bool HasMcsh, bool Impassible,
+    bool LqRiver, bool LqOcean, bool LqMagma, bool LqSlime,
+    bool HasMccv, bool HighResHoles,
+    int AreaId, int NumLayers,
+    bool HasHoles, string HoleType, string HoleBitmapHex, int HoleCount,
+    float PositionX, float PositionY, float PositionZ
 );
 
-public record McnkFlagsSummary(
-    string Map,
-    int TileRow, int TileCol,
-    int ImpassibleCount,
-    int HoleCount,
-    IReadOnlyList<McnkFlagEntry> Entries
+public record AreaBoundary(
+    int FromArea, int ToArea,
+    int ChunkRow, int ChunkCol,
+    string Edge  // "north", "east", "south", "west"
 );
 ```
 
@@ -154,14 +177,14 @@ public record McnkFlagsSummary(
 
 #### 3.2: Add CSV Reader
 
-**File**: `WoWRollback.Core/Services/McnkFlagsCsvReader.cs` (NEW)
+**File**: `WoWRollback.Core/Services/McnkTerrainCsvReader.cs` (NEW)
 
 ```csharp
-public sealed class McnkFlagsCsvReader
+public sealed class McnkTerrainCsvReader
 {
-    public static List<McnkFlagEntry> ReadCsv(string filePath)
+    public static List<McnkTerrainEntry> ReadCsv(string filePath)
     {
-        var entries = new List<McnkFlagEntry>();
+        var entries = new List<McnkTerrainEntry>();
         
         using var reader = new StreamReader(filePath);
         reader.ReadLine(); // Skip header
@@ -170,18 +193,30 @@ public sealed class McnkFlagsCsvReader
         while ((line = reader.ReadLine()) != null)
         {
             var parts = line.Split(',');
-            entries.Add(new McnkFlagEntry(
+            entries.Add(new McnkTerrainEntry(
                 Map: parts[0],
                 TileRow: int.Parse(parts[1]),
                 TileCol: int.Parse(parts[2]),
                 ChunkRow: int.Parse(parts[3]),
                 ChunkCol: int.Parse(parts[4]),
                 FlagsRaw: parts[5],
-                Impassible: bool.Parse(parts[6]),
-                HasHoles: bool.Parse(parts[7]),
-                HoleType: parts[8],
-                HoleBitmapHex: parts[9],
-                HoleCount: int.Parse(parts[10])
+                HasMcsh: bool.Parse(parts[6]),
+                Impassible: bool.Parse(parts[7]),
+                LqRiver: bool.Parse(parts[8]),
+                LqOcean: bool.Parse(parts[9]),
+                LqMagma: bool.Parse(parts[10]),
+                LqSlime: bool.Parse(parts[11]),
+                HasMccv: bool.Parse(parts[12]),
+                HighResHoles: bool.Parse(parts[13]),
+                AreaId: int.Parse(parts[14]),
+                NumLayers: int.Parse(parts[15]),
+                HasHoles: bool.Parse(parts[16]),
+                HoleType: parts[17],
+                HoleBitmapHex: parts[18],
+                HoleCount: int.Parse(parts[19]),
+                PositionX: float.Parse(parts[20]),
+                PositionY: float.Parse(parts[21]),
+                PositionZ: float.Parse(parts[22])
             ));
         }
         
@@ -192,11 +227,21 @@ public sealed class McnkFlagsCsvReader
 
 ---
 
-#### 3.3: Add Overlay Builder
+#### 3.3: Add Overlay Builders
 
-**File**: `WoWRollback.Core/Services/Viewer/McnkFlagsOverlayBuilder.cs` (NEW)
+**Files** (NEW):
+- `WoWRollback.Core/Services/Viewer/TerrainPropertiesOverlayBuilder.cs`
+- `WoWRollback.Core/Services/Viewer/LiquidsOverlayBuilder.cs`
+- `WoWRollback.Core/Services/Viewer/HolesOverlayBuilder.cs`
+- `WoWRollback.Core/Services/Viewer/AreaIdOverlayBuilder.cs`
 
-See `mcnk-flags-overlay.md` for full implementation.
+See `mcnk-complete-overlay.md` and `areaid-overlay.md` for full implementations.
+
+**Key Responsibilities**:
+1. **TerrainPropertiesOverlayBuilder**: Group chunks by impassible, has_mcsh, has_mccv
+2. **LiquidsOverlayBuilder**: Group chunks by liquid type (river, ocean, magma, slime)
+3. **HolesOverlayBuilder**: Decode hole bitmaps and generate hole indices
+4. **AreaIdOverlayBuilder**: Detect boundaries between different AreaIDs, include area names
 
 ---
 
@@ -206,34 +251,56 @@ See `mcnk-flags-overlay.md` for full implementation.
 
 Add to comparison pipeline:
 ```csharp
-private static void BuildMcnkFlagsOverlays(
+private static void BuildMcnkTerrainOverlays(
     string outputDir,
     Dictionary<string, string> versionRoots,
-    IEnumerable<string> maps)
+    IEnumerable<string> maps,
+    Dictionary<int, AreaInfo> areaTable)
 {
     foreach (var map in maps)
     {
         foreach (var (version, root) in versionRoots)
         {
-            var csvPath = Path.Combine(root, "csv", map, $"{map}_mcnk_flags.csv");
+            var csvPath = Path.Combine(root, "csv", map, $"{map}_mcnk_terrain.csv");
             if (!File.Exists(csvPath)) continue;
             
-            var entries = McnkFlagsCsvReader.ReadCsv(csvPath);
+            var entries = McnkTerrainCsvReader.ReadCsv(csvPath);
             
             // Group by tile
             var byTile = entries.GroupBy(e => (e.TileRow, e.TileCol));
             
             foreach (var tileGroup in byTile)
             {
-                var json = McnkFlagsOverlayBuilder.BuildOverlayJson(
-                    map, tileGroup.Key.TileRow, tileGroup.Key.TileCol,
-                    tileGroup.ToList(), version);
+                var chunks = tileGroup.ToList();
+                
+                // Build all overlay types
+                var terrainProps = TerrainPropertiesOverlayBuilder.Build(chunks, version);
+                var liquids = LiquidsOverlayBuilder.Build(chunks, version);
+                var holes = HolesOverlayBuilder.Build(chunks, version);
+                var areaIds = AreaIdOverlayBuilder.Build(chunks, version, areaTable);
+                
+                // Combine into single JSON (or separate files per overlay type)
+                var combined = new {
+                    map,
+                    tile = new { row = tileGroup.Key.TileRow, col = tileGroup.Key.TileCol },
+                    chunk_size = 32,
+                    layers = new[] {
+                        new {
+                            version,
+                            terrain_properties = terrainProps,
+                            liquids,
+                            holes,
+                            area_ids = areaIds
+                        }
+                    }
+                };
                 
                 var outPath = Path.Combine(outputDir, "viewer", "overlays", version, map,
-                    "terrain_flags", $"tile_r{tileGroup.Key.TileRow}_c{tileGroup.Key.TileCol}.json");
+                    "terrain_complete", $"tile_r{tileGroup.Key.TileRow}_c{tileGroup.Key.TileCol}.json");
                 
                 Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
-                File.WriteAllText(outPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(outPath, JsonSerializer.Serialize(combined, 
+                    new JsonSerializerOptions { WriteIndented = true }));
             }
         }
     }
