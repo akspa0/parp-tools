@@ -5,6 +5,7 @@ import { TerrainPropertiesLayer } from './terrainPropertiesLayer.js';
 import { LiquidsLayer } from './liquidsLayer.js';
 import { HolesLayer } from './holesLayer.js';
 import { AreaIdLayer } from './areaIdLayer.js';
+import { ShadowMapLayer } from './shadowMapLayer.js';
 
 export class OverlayManager {
     constructor(map) {
@@ -15,7 +16,8 @@ export class OverlayManager {
             terrainProperties: new TerrainPropertiesLayer(map),
             liquids: new LiquidsLayer(map),
             holes: new HolesLayer(map),
-            areaIds: new AreaIdLayer(map)
+            areaIds: new AreaIdLayer(map),
+            shadowMaps: new ShadowMapLayer(map, null, null) // mapName/version set later
         };
 
         // Track loaded tile data
@@ -100,6 +102,11 @@ export class OverlayManager {
             
             // Render the tile
             this.renderTile(data, tileRow, tileCol);
+            
+            // Load shadow maps separately (they have their own JSON files)
+            if (this.layers.shadowMaps) {
+                await this.layers.shadowMaps.loadTile(tileRow, tileCol);
+            }
             
         } catch (error) {
             console.error(`Failed to load overlay ${overlayPath}:`, error);

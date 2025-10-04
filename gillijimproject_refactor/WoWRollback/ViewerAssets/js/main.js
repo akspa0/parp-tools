@@ -124,12 +124,9 @@ function setupUI() {
     const layersSearch = document.getElementById('layersSearch');
     const overlayVariantSelect = document.getElementById('overlayVariantSelect');
     
-    // Sidebar toggle
-    const sidebarToggle = document.getElementById('sidebarToggle');
+    // Sidebar is now permanently pinned (no toggle needed)
     const sidebar = document.getElementById('sidebar');
-    sidebarToggle.addEventListener('click', () => {
-        sidebar.classList.toggle('open');
-    });
+    sidebar.classList.add('open'); // Ensure sidebar is always visible
 
     // Populate version select
     state.index.versions.forEach(version => {
@@ -361,6 +358,30 @@ function setupTerrainOverlayControls() {
         areaLineOpacityValue.textContent = value.toFixed(1);
         if (overlayManager) {
             overlayManager.setLayerOpacity('areaIds', value);
+        }
+    });
+    
+    // Shadow Maps
+    const showShadowMaps = document.getElementById('showShadowMaps');
+    const shadowMapsOptions = document.getElementById('shadowMapsOptions');
+    const shadowOpacity = document.getElementById('shadowOpacity');
+    const shadowOpacityValue = document.getElementById('shadowOpacityValue');
+    
+    showShadowMaps.addEventListener('change', (e) => {
+        shadowMapsOptions.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked && overlayManager) {
+            overlayManager.showLayer('shadowMaps');
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        } else if (overlayManager) {
+            overlayManager.hideLayer('shadowMaps');
+        }
+    });
+    
+    shadowOpacity.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        shadowOpacityValue.textContent = value.toFixed(1);
+        if (overlayManager && overlayManager.layers.shadowMaps) {
+            overlayManager.layers.shadowMaps.setOpacity(value);
         }
     });
 }
@@ -742,18 +763,33 @@ function handleMapClick(e) {
     const tiles = state.getTilesForMap(state.selectedMap);
     const tile = tiles.find(t => t.row === row && t.col === col);
     
+    // Per-tile pages disabled for now
+    // TODO: Re-enable when implementing uniqueID timeline selector and patched ADT export
+    /*
     if (tile && state.isTileAvailable(state.selectedMap, row, col, state.selectedVersion)) {
         console.log(`Opening tile detail for [${row},${col}]`);
         openTileViewer(state.selectedMap, row, col);
     } else {
         console.log(`Tile [${row},${col}] not available for version ${state.selectedVersion}`);
     }
+    */
+    
+    // For now, just log the click
+    if (tile && state.isTileAvailable(state.selectedMap, row, col, state.selectedVersion)) {
+        console.log(`Clicked tile [${row},${col}] (tile detail page disabled)`);
+    } else {
+        console.log(`Tile [${row},${col}] not available for version ${state.selectedVersion}`);
+    }
 }
 
+// Per-tile viewer disabled for now
+// TODO: Re-enable when implementing uniqueID timeline selector and patched ADT export
+/*
 function openTileViewer(map, row, col) {
     const url = `tile.html?map=${encodeURIComponent(map)}&row=${row}&col=${col}&version=${encodeURIComponent(state.selectedVersion)}`;
     window.location.href = url;
 }
+*/
 
 // --- Mini-map overview (PiP) ---
 function setupOverview() {

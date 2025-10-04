@@ -5,24 +5,9 @@
     box-sizing: border-box;
 }
 
-/* Hamburger toggle button */
+/* Hamburger toggle button (hidden when sidebar is pinned) */
 .hamburger {
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    width: 36px;
-    height: 32px;
-    z-index: 1002;
-    background: #2a2a2a;
-    border: 2px solid #444;
-    border-radius: 4px;
-    padding: 6px 6px;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: center;
-    transition: all 0.2s ease-in-out;
+    display: none;
 }
 
 /* Mini-map overview canvas (picture-in-picture) */
@@ -50,11 +35,11 @@ body {
     color: #e0e0e0;
 }
 
-/* Map container takes full page */
+/* Map container takes full page minus sidebar */
 #map {
     position: absolute;
     top: 0;
-    left: 0;
+    left: 320px;
     right: 0;
     bottom: 0;
     z-index: 1;
@@ -77,35 +62,25 @@ body {
     gap: 8px;
 }
 
-.hamburger:hover {
-    background: #333;
-    border-color: #4CAF50;
-}
+/* Hamburger styles removed (sidebar permanently pinned) */
 
-.hamburger span {
-    width: 24px;
-    height: 3px;
-    background: #e0e0e0;
-    border-radius: 2px;
-    transition: all 0.3s;
-}
-
-/* Sidebar overlay */
+/* Sidebar (permanently pinned to left) */
 .sidebar {
-    position: absolute;
+    position: fixed;
     top: 0;
-    left: -320px;
-    width: 300px;
+    left: 0;
+    width: 320px;
     height: 100%;
-    background: rgba(42, 42, 42, 0.95);
+    background: rgba(42, 42, 42, 0.98);
     backdrop-filter: blur(10px);
     padding: 20px;
     z-index: 1000;
     overflow-y: auto;
-    transition: left 0.3s ease-in-out;
     border-right: 2px solid #444;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
 }
 
+/* Sidebar is always visible (no .open toggle needed) */
 .sidebar.open {
     left: 0;
 }
@@ -262,9 +237,9 @@ body {
     background: #555;
 }
 
-/* Leaflet controls positioning */
+/* Leaflet controls positioning (offset for pinned sidebar) */
 .leaflet-top.leaflet-left {
-    left: 60px; /* Move zoom controls right of hamburger */
+    left: 10px; /* Positioned within map area (sidebar is 320px wide) */
 }
 
 /* Persistent popup styling */
