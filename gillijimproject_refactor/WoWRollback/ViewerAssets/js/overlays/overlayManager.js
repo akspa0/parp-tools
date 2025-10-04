@@ -79,6 +79,13 @@ export class OverlayManager {
     async loadAndRenderTile(mapName, version, tileRow, tileCol) {
         const tileKey = `r${tileRow}_c${tileCol}`;
         
+        // Update shadow map layer context if needed
+        if (this.layers.shadowMaps && 
+            (this.layers.shadowMaps.mapName !== mapName || this.layers.shadowMaps.version !== version)) {
+            this.layers.shadowMaps.mapName = mapName;
+            this.layers.shadowMaps.version = version;
+        }
+        
         // Check if already loaded
         if (this.loadedTiles.has(tileKey)) {
             this.renderTile(this.loadedTiles.get(tileKey), tileRow, tileCol);
