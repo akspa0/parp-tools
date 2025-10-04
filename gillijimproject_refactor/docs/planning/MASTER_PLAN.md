@@ -137,10 +137,13 @@ Archive old tools and polish
 - [ ] Polish CLI (help text, colors)
 - [ ] Release notes
 
-### Phase 6: 3D Export & Visualization (Weeks 6-10) ⭐ NEW
-Consolidate ADTPrefabTool 3D export functionality
+### Phase 6: 3D Export & Visualization (Weeks 6-15) ⭐ NEW
+Consolidate ADTPrefabTool 3D export functionality + complete Alpha 3D asset support
 
-**See**: `docs/planning/PHASE_6_3D_EXPORT.md` for full details
+**See**: 
+- `docs/planning/PHASE_6_3D_EXPORT.md` - Core 3D export
+- `docs/planning/PHASE_6B_MDX_AND_TEXTURES.md` - MDX + texture baking
+- `docs/planning/PHASE_6C_WMO_SUPPORT.md` - WMOv14 support ⭐ NEW
 
 **Checklist**:
 - [ ] Migrate terrain mesh building from ADTPrefabTool
@@ -148,14 +151,24 @@ Consolidate ADTPrefabTool 3D export functionality
 - [ ] Multi-threaded tile export (parallel GLB generation)
 - [ ] Texture extraction and embedding
 - [ ] Prefab pattern mining (terrain pattern detection)
-- [ ] CLI commands (export-3d, mine-prefabs)
+- [ ] **Alpha MDX support** (fallback for M2 models)
+- [ ] **Texture baking** (alpha layers → final textures)
+- [ ] **FileDataID tracking** (asset manifest)
+- [ ] **High-res minimap generation** (2K/4K)
+- [ ] **WMOv14 support** (Alpha WMO → v17 conversion) ⭐ NEW
+- [ ] **WMO → GLB export** (with lightmap conversion) ⭐ NEW
+- [ ] CLI commands (export-3d, mine-prefabs, generate-minimap, convert-wmo)
 
 **Benefits**:
 - ✨ Export tiles as GLB (Unity, Unreal, Blender, web viewers)
-- ✨ Embedded textures (single-file assets)
+- ✨ Embedded baked textures (self-contained, no external files)
 - ✨ Pattern mining (recurring terrain analysis)
 - ✨ Multi-threaded (6-7x faster than ADTPrefabTool)
 - ✨ Modern PBR materials
+- ✨ Alpha MDX → M2 fallback (complete asset coverage)
+- ✨ High-res minimaps (better than Blizzard's!)
+- ✨ Complete asset tracking (FileDataIDs)
+- ✨ WMOv14 → v17 conversion (Alpha buildings that crash modern clients)
 
 ---
 
