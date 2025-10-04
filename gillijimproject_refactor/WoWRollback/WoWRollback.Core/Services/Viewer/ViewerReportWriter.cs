@@ -114,6 +114,9 @@ public sealed class ViewerReportWriter
             foreach (var t in mapGroup.EntryTiles) tileSet.Add(t);
             foreach (var t in mapGroup.MinimapTiles) tileSet.Add(t);
             var tiles = tileSet.OrderBy(t => t.Row).ThenBy(t => t.Col).ToList();
+            
+            // Generate terrain overlays once per map per version (outside tile loop)
+            var terrainOverlaysGenerated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var tileGroup in tiles)
             {
@@ -200,6 +203,14 @@ public sealed class ViewerReportWriter
                         PlacementKind.WMO);
                     var wmoPath = Path.Combine(wmoDir, $"tile_r{row}_c{col}.json");
                     File.WriteAllText(wmoPath, wmoJson);
+                    
+                    // Generate terrain overlays once per map per version
+                    var terrainKey = $"{version}_{mapName}";
+                    if (!terrainOverlaysGenerated.Contains(terrainKey))
+                    {
+                        GenerateTerrainOverlays(result.RootDirectory, version, mapName, versionRoot, safeMap);
+                        terrainOverlaysGenerated.Add(terrainKey);
+                    }
                 }
 
                 if (effectiveDiffPair is { } pair &&
@@ -397,6 +408,19 @@ public sealed class ViewerReportWriter
                     var fileName = Path.GetFileName(file);
                     File.Copy(file, Path.Combine(jsTarget, fileName), overwrite: true);
                 }
+                
+                // Copy overlays subdirectory
+                var overlaysSource = Path.Combine(jsSource, "overlays");
+                var overlaysTarget = Path.Combine(jsTarget, "overlays");
+                if (Directory.Exists(overlaysSource))
+                {
+                    Directory.CreateDirectory(overlaysTarget);
+                    foreach (var file in Directory.GetFiles(overlaysSource, "*.js"))
+                    {
+                        var fileName = Path.GetFileName(file);
+                        File.Copy(file, Path.Combine(overlaysTarget, fileName), overwrite: true);
+                    }
+                }
             }
         }
         catch
@@ -420,6 +444,58 @@ public sealed class ViewerReportWriter
         var chars = value.Select(c => invalid.Contains(c) ? '_' : c).ToArray();
         var sanitized = new string(chars).Trim();
         return string.IsNullOrWhiteSpace(sanitized) ? "unnamed" : sanitized;
+    }
+
+    private static void GenerateTerrainOverlays(
+        string rootDirectory,
+        string version,
+        string mapName,
+        string overlayVersionRoot,
+        string safeMapName)
+    {
+        // Look for MCNK terrain CSV in the output directory structure
+        // Path: rollback_outputs/{version}/csv/{map}/{map}_mcnk_terrain.csv
+        var csvMapDir = Path.Combine(rootDirectory, version, "csv", mapName);
+        var terrainCsvPath = Path.Combine(csvMapDir, $"{mapName}_mcnk_terrain.csv");
+        
+        if (!File.Exists(terrainCsvPath))
+        {
+            // CSV not found - terrain overlays were not extracted, skip silently
+            return;
+        }
+
+        try
+        {
+            // Load AreaTable lookup if available
+            // AreaTable CSVs should be in the version directory: rollback_outputs/{version}/AreaTable_*.csv
+            AreaTableLookup? areaLookup = null;
+            try
+            {
+                var versionDir = Path.Combine(rootDirectory, version);
+                areaLookup = AreaTableReader.LoadForVersion(versionDir);
+            }
+            catch
+            {
+                // AreaTable not available, terrain overlay will work without area names
+            }
+
+            // Generate terrain overlays
+            // csvMapDir parameter is the directory containing the terrain CSV
+            McnkTerrainOverlayBuilder.BuildOverlaysForMap(
+                mapName,
+                csvMapDir,
+                overlayVersionRoot,
+                version,
+                areaLookup
+            );
+            
+            Console.WriteLine($"[info] Generated terrain overlays for {mapName} ({version})");
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - terrain overlays are optional
+            Console.WriteLine($"[warn] Failed to generate terrain overlays for {mapName} ({version}): {ex.Message}");
+        }
     }
 
     private sealed record TileDescriptor(int Row, int Col, IReadOnlyList<string> Versions);

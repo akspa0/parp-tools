@@ -188,6 +188,7 @@ function Ensure-CachedMap {
         '--out', $analysisDir,
         '--export-adt',
         '--export-dir', $tempExportDir,
+        '--extract-mcnk-terrain',
         '--no-web',
         '--profile', 'modified',
         '--no-fallbacks'
@@ -210,6 +211,17 @@ function Ensure-CachedMap {
     Copy-Item -Path (Join-Path $sourceMapDir '*') -Destination $mapRoot -Recurse -Force
 
     Remove-Item $tempExportDir -Recurse -Force
+    
+    # Copy terrain CSVs to rollback_outputs for viewer generation
+    $rollbackOutputDir = Join-Path (Join-Path (Join-Path $PSScriptRoot 'rollback_outputs') $Version) ('csv\' + $Map)
+    if (-not (Test-Path $rollbackOutputDir)) {
+        New-Item -Path $rollbackOutputDir -ItemType Directory -Force | Out-Null
+    }
+    $terrainCsv = Join-Path (Join-Path $analysisDir 'csv') ($Map + '_mcnk_terrain.csv')
+    if (Test-Path $terrainCsv) {
+        Copy-Item -Path $terrainCsv -Destination $rollbackOutputDir -Force
+        Write-Host "  [cache] Copied terrain CSV to rollback_outputs" -ForegroundColor DarkGray
+    }
 
     return $mapRoot
 }

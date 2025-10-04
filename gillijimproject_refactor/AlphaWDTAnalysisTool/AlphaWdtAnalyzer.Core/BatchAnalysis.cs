@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using AlphaWdtAnalyzer.Core.Terrain;
 
 namespace AlphaWdtAnalyzer.Core;
 
@@ -15,6 +16,8 @@ public static class BatchAnalysis
         public int ClusterThreshold { get; init; } = 10;
         public int ClusterGap { get; init; } = 1000;
         public bool Web { get; init; } = false;
+        public bool ExtractMcnkTerrain { get; init; } = false;
+        public bool ExtractMcnkShadows { get; init; } = false;
     }
 
     public static void Run(Options opts)
@@ -60,6 +63,22 @@ public static class BatchAnalysis
                     byMap[wdt.MapName] = list;
                 }
                 list.AddRange(result.Placements);
+
+                // Extract MCNK terrain if requested
+                if (opts.ExtractMcnkTerrain)
+                {
+                    var terrainEntries = McnkTerrainExtractor.ExtractTerrain(wdt);
+                    var terrainCsvPath = Path.Combine(csvMapsRoot, wdt.MapName, $"{wdt.MapName}_mcnk_terrain.csv");
+                    McnkTerrainCsvWriter.WriteCsv(terrainEntries, terrainCsvPath);
+                }
+
+                // Extract MCNK shadows if requested
+                if (opts.ExtractMcnkShadows)
+                {
+                    var shadowEntries = McnkShadowExtractor.ExtractShadows(wdt);
+                    var shadowCsvPath = Path.Combine(csvMapsRoot, wdt.MapName, $"{wdt.MapName}_mcnk_shadows.csv");
+                    McnkShadowCsvWriter.WriteCsv(shadowEntries, shadowCsvPath);
+                }
             }
             catch (Exception ex)
             {

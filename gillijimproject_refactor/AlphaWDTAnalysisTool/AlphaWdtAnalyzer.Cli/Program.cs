@@ -58,8 +58,12 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("");
+        Console.WriteLine("New Terrain Extraction Flags:");
+        Console.WriteLine("  --extract-mcnk-terrain   Extract complete MCNK terrain data to CSV (all flags, liquids, holes, AreaID)");
+        Console.WriteLine("  --extract-mcnk-shadows   Extract MCSH shadow map bitmaps to CSV (64×64 bitmaps per chunk)");
         return 2;
     }
 
@@ -92,6 +96,7 @@ public static class Program
         string? dbdDir = null; string? dbctoolOutRoot = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
         string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
         bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
+        bool extractMcnkTerrain = false; bool extractMcnkShadows = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -233,6 +238,12 @@ public static class Program
                 case "--track-assets":
                     trackAssets = true;
                     break;
+                case "--extract-mcnk-terrain":
+                    extractMcnkTerrain = true;
+                    break;
+                case "--extract-mcnk-shadows":
+                    extractMcnkShadows = true;
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
@@ -312,7 +323,9 @@ public static class Program
                         OutDir = outDir!,
                         ClusterThreshold = clusterThreshold ?? 10,
                         ClusterGap = clusterGap ?? 1000,
-                        Web = web
+                        Web = web,
+                        ExtractMcnkTerrain = extractMcnkTerrain,
+                        ExtractMcnkShadows = extractMcnkShadows
                     });
 
                     if (exportAdt)
@@ -365,6 +378,8 @@ public static class Program
                         OutDir = outDir!,
                         ClusterThreshold = clusterThreshold ?? 10,
                         ClusterGap = clusterGap ?? 1000,
+                        ExtractMcnkTerrain = extractMcnkTerrain,
+                        ExtractMcnkShadows = extractMcnkShadows
                     });
 
                     if (web)

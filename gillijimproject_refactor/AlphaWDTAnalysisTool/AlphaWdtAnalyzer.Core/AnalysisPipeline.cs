@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using AlphaWdtAnalyzer.Core.Terrain;
 
 namespace AlphaWdtAnalyzer.Core;
 
@@ -18,6 +19,8 @@ public static class AnalysisPipeline
         public string? DbcDir { get; init; }
         public string? AreaAlphaPath { get; init; }
         public string? AreaLkPath { get; init; }
+        public bool ExtractMcnkTerrain { get; init; } = false;
+        public bool ExtractMcnkShadows { get; init; } = false;
     }
 
     public static void Run(Options opts)
@@ -83,6 +86,22 @@ public static class AnalysisPipeline
 
         // Optional DBC scanning and crosswalk have been removed from this pipeline.
         // They are performed (when needed) via the DBCD-backed export flow.
+
+        // Extract MCNK terrain data if requested
+        if (opts.ExtractMcnkTerrain)
+        {
+            var terrainEntries = McnkTerrainExtractor.ExtractTerrain(wdt);
+            var terrainCsvPath = Path.Combine(csvDir, wdt.MapName, $"{wdt.MapName}_mcnk_terrain.csv");
+            McnkTerrainCsvWriter.WriteCsv(terrainEntries, terrainCsvPath);
+        }
+
+        // Extract MCNK shadow maps if requested
+        if (opts.ExtractMcnkShadows)
+        {
+            var shadowEntries = McnkShadowExtractor.ExtractShadows(wdt);
+            var shadowCsvPath = Path.Combine(csvDir, wdt.MapName, $"{wdt.MapName}_mcnk_shadows.csv");
+            McnkShadowCsvWriter.WriteCsv(shadowEntries, shadowCsvPath);
+        }
 
         // Write index.json for web UI
         var idx = new AnalysisIndex
