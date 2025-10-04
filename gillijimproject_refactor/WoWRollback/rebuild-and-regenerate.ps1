@@ -31,37 +31,50 @@ Write-Host "✓ Build complete" -ForegroundColor Green
 Write-Host ""
 
 # Helper: Discover map names from AlphaRoot when -Maps auto
-function Get-MapsFromAlphaRoot([string]$root) {
+# Searches version-specific paths: test_data/<version>/tree/World/Maps/<MapName>/<MapName>.wdt
+function Get-MapsFromAlphaRoot([string]$root, [string[]]$versions) {
     if (-not $root -or -not (Test-Path $root)) { return @() }
     $results = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
-    $tryPaths = @(
-        Join-Path $root 'tree\World\Maps',
-        Join-Path $root 'tree\world\maps',
-        Join-Path $root 'World\Maps',
-        Join-Path $root 'world\maps'
-    )
-    foreach ($p in $tryPaths) {
-        if (Test-Path $p) {
-            Get-ChildItem -Path $p -Recurse -File -Filter '*.wdt' -ErrorAction SilentlyContinue |
-                ForEach-Object { [void]$results.Add($_.Directory.Name) }
+    
+    # Search version-specific paths
+    foreach ($ver in $versions) {
+        $versionPaths = @(
+            Join-Path $root "$ver\tree\World\Maps",
+            Join-Path $root "$ver\World\Maps",
+            Join-Path $root "0.5.3\tree\World\Maps",  # Fallback for common structure
+            Join-Path $root "tree\World\Maps"          # Legacy structure
+        )
+        
+        foreach ($p in $versionPaths) {
+            if (Test-Path $p) {
+                Get-ChildItem -Path $p -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    $mapName = $_.Name
+                    $wdtPath = Join-Path $_.FullName "$mapName.wdt"
+                    if (Test-Path $wdtPath) {
+                        [void]$results.Add($mapName)
+                    }
+                }
+            }
+        }
+        
+        # Also check Minimaps folder
+        $miniPaths = @(
+            Join-Path $root "$ver\tree\World\Minimaps",
+            Join-Path $root "$ver\World\Minimaps"
+        )
+        foreach ($mp in $miniPaths) {
+            if (Test-Path $mp) {
+                Get-ChildItem -Path $mp -Directory -ErrorAction SilentlyContinue |
+                    ForEach-Object { [void]$results.Add($_.Name) }
+            }
         }
     }
-    # Also consider pre-numbered minimaps folder structure
-    $miniPaths = @(
-        Join-Path $root 'tree\World\Minimaps',
-        Join-Path $root 'tree\world\minimaps',
-        Join-Path $root 'World\Minimaps',
-        Join-Path $root 'world\minimaps'
-    )
-    foreach ($mp in $miniPaths) {
-        if (Test-Path $mp) {
-            Get-ChildItem -Path $mp -Directory -ErrorAction SilentlyContinue |
-                ForEach-Object { [void]$results.Add($_.Name) }
-        }
+    
+    $discovered = $results.ToArray() | Sort-Object
+    if ($discovered.Count -gt 0) {
+        Write-Host "[auto-discovery] Found $($discovered.Count) maps: $($discovered -join ', ')" -ForegroundColor Cyan
     }
-    # Ensure commonly useful maps are included if present
-    foreach ($m in @('PVPZone01','Shadowfang')) { [void]$results.Add($m) }
-    return $results.ToArray() | Sort-Object
+    return $discovered
 }
 
 # Step 2: Regenerate comparison data
@@ -190,13 +203,24 @@ function Ensure-CachedMap {
         '--export-dir', $tempExportDir,
         '--extract-mcnk-terrain',
         '--no-web',
-        '--profile', 'modified',
+        '--profile', 'raw',
         '--no-fallbacks'
     )
 
+    Write-Host "  [debug] Running AlphaWdtAnalyzer with --extract-mcnk-terrain" -ForegroundColor Magenta
+    Write-Host "  [debug] Analysis output dir: $analysisDir" -ForegroundColor Magenta
     & dotnet @toolArgs
     if ($LASTEXITCODE -ne 0) {
         throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
+    }
+    
+    # Verify terrain CSV was created
+    $expectedTerrainCsv = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_terrain.csv')
+    if (Test-Path $expectedTerrainCsv) {
+        Write-Host "  [debug] ✓ Terrain CSV created: $expectedTerrainCsv" -ForegroundColor Green
+    } else {
+        Write-Host "  [warn] ✗ Terrain CSV NOT created at: $expectedTerrainCsv" -ForegroundColor Red
+        Write-Host "  [warn] Check AlphaWdtAnalyzer output above for errors" -ForegroundColor Yellow
     }
 
     $sourceMapDir = Join-Path (Join-Path (Join-Path $tempExportDir 'World') 'Maps') $Map
@@ -213,14 +237,47 @@ function Ensure-CachedMap {
     Remove-Item $tempExportDir -Recurse -Force
     
     # Copy terrain CSVs to rollback_outputs for viewer generation
-    $rollbackOutputDir = Join-Path (Join-Path (Join-Path $PSScriptRoot 'rollback_outputs') $Version) ('csv\' + $Map)
-    if (-not (Test-Path $rollbackOutputDir)) {
-        New-Item -Path $rollbackOutputDir -ItemType Directory -Force | Out-Null
+    $rollbackVersionRoot = Join-Path $PSScriptRoot ('rollback_outputs\' + $Version)
+    $rollbackMapCsvDir = Join-Path $rollbackVersionRoot ('csv\' + $Map)
+    if (-not (Test-Path $rollbackMapCsvDir)) {
+        New-Item -Path $rollbackMapCsvDir -ItemType Directory -Force | Out-Null
     }
-    $terrainCsv = Join-Path (Join-Path $analysisDir 'csv') ($Map + '_mcnk_terrain.csv')
+    
+    # Copy MCNK terrain CSV (AlphaWdtAnalyzer outputs to csv/MapName/MapName_mcnk_terrain.csv)
+    $terrainCsvDir = Join-Path (Join-Path $analysisDir 'csv') $Map
+    $terrainCsv = Join-Path $terrainCsvDir ($Map + '_mcnk_terrain.csv')
     if (Test-Path $terrainCsv) {
-        Copy-Item -Path $terrainCsv -Destination $rollbackOutputDir -Force
+        Copy-Item -Path $terrainCsv -Destination $rollbackMapCsvDir -Force
         Write-Host "  [cache] Copied terrain CSV to rollback_outputs" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  [warn] Terrain CSV not found at: $terrainCsv" -ForegroundColor Yellow
+    }
+    
+    # Copy AreaTable CSVs to version root (one per version, not per map)
+    # Look in DBCTool.V2 outputs for AreaTable dumps
+    $dbcToolOutputs = Join-Path $PSScriptRoot '..\DBCTool.V2\dbctool_outputs'
+    if (Test-Path $dbcToolOutputs) {
+        $latestSession = Get-ChildItem -Path $dbcToolOutputs -Directory | 
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latestSession) {
+            $areaTableAlpha = Join-Path $latestSession.FullName 'compare\v2\AreaTable_dump_0.5.5.csv'
+            $areaTableLk = Join-Path $latestSession.FullName 'compare\v2\AreaTable_dump_3.3.5.csv'
+            
+            if (Test-Path $areaTableAlpha) {
+                $destAlpha = Join-Path $rollbackVersionRoot 'AreaTable_Alpha.csv'
+                if (-not (Test-Path $destAlpha)) {
+                    Copy-Item -Path $areaTableAlpha -Destination $destAlpha -Force
+                    Write-Host "  [cache] Copied AreaTable_Alpha.csv" -ForegroundColor DarkGray
+                }
+            }
+            if (Test-Path $areaTableLk) {
+                $destLk = Join-Path $rollbackVersionRoot 'AreaTable_335.csv'
+                if (-not (Test-Path $destLk)) {
+                    Copy-Item -Path $areaTableLk -Destination $destLk -Force
+                    Write-Host "  [cache] Copied AreaTable_335.csv" -ForegroundColor DarkGray
+                }
+            }
+        }
     }
 
     return $mapRoot
@@ -246,10 +303,11 @@ if ($Maps.Count -eq 1 -and $Maps[0].ToLower() -eq 'auto') {
         Write-Host "-Maps auto requires -AlphaRoot" -ForegroundColor Red
         exit 1
     }
-    $discovered = Get-MapsFromAlphaRoot -root $AlphaRoot
+    $discovered = Get-MapsFromAlphaRoot -root $AlphaRoot -versions $Versions
     if (-not $discovered -or $discovered.Count -eq 0) {
         Write-Host "No maps discovered under $AlphaRoot" -ForegroundColor Yellow
-        $Maps = @('Azeroth','Kalimdor','Kalidar','PVPZone01','Shadowfang')
+        Write-Host "Defaulting to common maps" -ForegroundColor Gray
+        $Maps = @('Azeroth','Kalimdor','Kalidar','PVPZone01','Shadowfang','DeadminesInstance')
     } else {
         $Maps = $discovered
     }
