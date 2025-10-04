@@ -13,10 +13,19 @@ WoWRollback is a digital archaeology toolkit for exploring the evolution of Worl
 WoWRollback/
 ├── WoWRollback.Core/       # Core services and models
 ├── WoWRollback.Cli/        # Command-line entry point
+├── ViewerAssets/           # Static viewer (HTML/CSS/JS)
 ├── docs/                   # Design notes & plans
+│   └── architecture/       # System architecture documentation
 ├── memory-bank/            # Persistent project context
 └── rollback_outputs/       # Default output root (timestamped sessions & comparisons)
 ```
+
+## Architecture Documentation
+
+See `docs/architecture/` for detailed design documents:
+- **`overlay-system-architecture.md`** - Complete overlay pipeline design (ADT → CSV → JSON → Viewer)
+- **`mcnk-flags-overlay.md`** - MCNK terrain flags implementation (impassible areas, holes)
+- **`IMPLEMENTATION_ROADMAP.md`** - Step-by-step implementation guide for new overlays
 
 ## Building
 ```

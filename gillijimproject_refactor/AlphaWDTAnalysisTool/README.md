@@ -4,6 +4,13 @@ AlphaWDTAnalysisTool analyzes World of Warcraft Alpha WDT/ADT data and can expor
 
 This folder contains the tool and its CLI.
 
+## Architecture Documentation
+
+For system design and adding new data extraction features, see:
+- **`../docs/architecture/overlay-system-architecture.md`** - Complete data pipeline (ADT → CSV → Overlay)
+- **`../docs/architecture/mcnk-flags-overlay.md`** - Example: MCNK terrain flags extraction
+- **`../docs/architecture/IMPLEMENTATION_ROADMAP.md`** - Step-by-step implementation guide
+
 ---
 
 ## Features
