@@ -136,6 +136,86 @@ function Find-WdtPath {
     return $sorted[0].FullName
 }
 
+function Get-ExpectedTileCount {
+    param(
+        [string]$WdtPath
+    )
+    
+    if (-not (Test-Path $WdtPath)) { return 0 }
+    
+    try {
+        # Read WDT MAIN chunk to count tiles
+        # WDT structure: "MVER" (8) + version (4) + "MPHD" (8+36) + "MAIN" (8) + 64x64 entries
+        # Each MAIN entry is 8 bytes (flags + async_id), non-zero flags = tile exists
+        
+        $bytes = [System.IO.File]::ReadAllBytes($WdtPath)
+        
+        # Find MAIN chunk (search for "MAIN" signature)
+        $mainOffset = -1
+        for ($i = 0; $i -lt ($bytes.Length - 4); $i++) {
+            if ([System.Text.Encoding]::ASCII.GetString($bytes[$i..($i+3)]) -eq "MAIN") {
+                $mainOffset = $i
+                break
+            }
+        }
+        
+        if ($mainOffset -eq -1) {
+            Write-Host "  [debug] MAIN chunk not found in WDT, assuming empty" -ForegroundColor DarkGray
+            return 0
+        }
+        
+        # MAIN chunk: "MAIN" (4) + size (4) + entries
+        $chunkSize = [BitConverter]::ToUInt32($bytes, $mainOffset + 4)
+        $dataStart = $mainOffset + 8
+        
+        # Each entry is 8 bytes, 64×64 = 4096 entries
+        $tileCount = 0
+        for ($i = 0; $i -lt 4096; $i++) {
+            $entryOffset = $dataStart + ($i * 8)
+            if ($entryOffset + 4 -gt $bytes.Length) { break }
+            
+            # Read flags (first 4 bytes of entry)
+            $flags = [BitConverter]::ToUInt32($bytes, $entryOffset)
+            
+            # If flags != 0, tile exists
+            if ($flags -ne 0) {
+                $tileCount++
+            }
+        }
+        
+        return $tileCount
+    } catch {
+        Write-Host "  [warn] Failed to read WDT tile count: $_" -ForegroundColor Yellow
+        return 0
+    }
+}
+
+function Test-CacheComplete {
+    param(
+        [string]$MapRoot,
+        [int]$ExpectedTiles
+    )
+    
+    if (-not (Test-Path $MapRoot)) { return $false }
+    
+    # Count ADT files in cache
+    $adtFiles = Get-ChildItem -Path $MapRoot -Filter "*.adt" -File -ErrorAction SilentlyContinue
+    $actualCount = $adtFiles.Count
+    
+    if ($actualCount -eq 0) {
+        return $false
+    }
+    
+    # Allow some tolerance (WDT and WMO-only maps might have fewer)
+    # But if we're significantly short, it's incomplete
+    if ($ExpectedTiles -gt 0 -and $actualCount -lt $ExpectedTiles) {
+        Write-Host "  [warn] Cache incomplete: $actualCount/$ExpectedTiles tiles" -ForegroundColor Yellow
+        return $false
+    }
+    
+    return $true
+}
+
 function Ensure-CachedMap {
     param(
         [string]$Version,
@@ -148,9 +228,70 @@ function Ensure-CachedMap {
     $analysisRoot = Join-Path (Join-Path $cacheRootPath 'analysis') $Version
     $analysisDir = Join-Path $analysisRoot $Map
 
-    $needsRefresh = $RefreshCache.IsPresent -or -not (Test-Path $mapRoot)
+    # Find source WDT to check expected tile count
+    $sourceWdt = $null
+    $expectedTiles = 0
+    if ($AlphaRoot) {
+        $sourceWdt = Find-WdtPath -Root $AlphaRoot -Version $Version -Map $Map
+        if ($sourceWdt) {
+            $expectedTiles = Get-ExpectedTileCount -WdtPath $sourceWdt
+            if ($expectedTiles -gt 0) {
+                Write-Host "  [cache] Expected $expectedTiles tiles from WDT" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # Smart cache checking: verify all required outputs exist AND are complete
+    $lkAdtsExist = Test-Path $mapRoot
+    $terrainCsvPath = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_terrain.csv')
+    $shadowCsvPath = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_shadows.csv')
+    $analysisCsvsExist = (Test-Path $terrainCsvPath) -or (Test-Path $shadowCsvPath)
+    
+    # Check if cached ADTs are complete (all expected tiles present)
+    $cacheComplete = Test-CacheComplete -MapRoot $mapRoot -ExpectedTiles $expectedTiles
+    
+    # Determine if refresh is needed
+    if ($RefreshCache.IsPresent) {
+        Write-Host "  [cache] RefreshCache flag set, rebuilding $Version/$Map" -ForegroundColor Yellow
+        $needsRefresh = $true
+    } elseif (-not $lkAdtsExist) {
+        Write-Host "  [cache] LK ADTs missing for $Version/$Map, building..." -ForegroundColor Yellow
+        $needsRefresh = $true
+    } elseif (-not $cacheComplete) {
+        Write-Host "  [cache] LK ADT cache incomplete for $Version/$Map, rebuilding..." -ForegroundColor Yellow
+        $needsRefresh = $true
+    } elseif (-not $analysisCsvsExist) {
+        Write-Host "  [cache] Analysis CSVs missing for $Version/$Map, building..." -ForegroundColor Yellow
+        $needsRefresh = $true
+    } else {
+        $adtCount = (Get-ChildItem -Path $mapRoot -Filter "*.adt" -File -ErrorAction SilentlyContinue).Count
+        Write-Host "  [cache] ✓ Reusing cached data for $Version/$Map ($adtCount ADTs + CSVs)" -ForegroundColor Green
+        $needsRefresh = $false
+    }
+    
     if (-not $needsRefresh) {
-        Write-Host "  [cache] Reusing $Version/$Map" -ForegroundColor DarkGray
+        # Still need to copy CSVs to rollback_outputs if they're missing there
+        $rollbackVersionRoot = Join-Path $PSScriptRoot ('rollback_outputs\' + $Version)
+        $rollbackMapCsvDir = Join-Path $rollbackVersionRoot ('csv\' + $Map)
+        
+        if (-not (Test-Path $rollbackMapCsvDir)) {
+            New-Item -Path $rollbackMapCsvDir -ItemType Directory -Force | Out-Null
+        }
+        
+        # Copy terrain CSV if missing in rollback_outputs
+        $rollbackTerrainCsv = Join-Path $rollbackMapCsvDir ($Map + '_mcnk_terrain.csv')
+        if ((Test-Path $terrainCsvPath) -and -not (Test-Path $rollbackTerrainCsv)) {
+            Copy-Item -Path $terrainCsvPath -Destination $rollbackMapCsvDir -Force
+            Write-Host "  [cache] Copied cached terrain CSV to rollback_outputs" -ForegroundColor Cyan
+        }
+        
+        # Copy shadow CSV if missing in rollback_outputs
+        $rollbackShadowCsv = Join-Path $rollbackMapCsvDir ($Map + '_mcnk_shadows.csv')
+        if ((Test-Path $shadowCsvPath) -and -not (Test-Path $rollbackShadowCsv)) {
+            Copy-Item -Path $shadowCsvPath -Destination $rollbackMapCsvDir -Force
+            Write-Host "  [cache] Copied cached shadow CSV to rollback_outputs" -ForegroundColor Cyan
+        }
+        
         return $mapRoot
     }
 
@@ -202,12 +343,13 @@ function Ensure-CachedMap {
         '--export-adt',
         '--export-dir', $tempExportDir,
         '--extract-mcnk-terrain',
+        '--extract-mcnk-shadows',
         '--no-web',
         '--profile', 'raw',
         '--no-fallbacks'
     )
 
-    Write-Host "  [debug] Running AlphaWdtAnalyzer with --extract-mcnk-terrain" -ForegroundColor Magenta
+    Write-Host "  [debug] Running AlphaWdtAnalyzer with --extract-mcnk-terrain and --extract-mcnk-shadows" -ForegroundColor Magenta
     Write-Host "  [debug] Analysis output dir: $analysisDir" -ForegroundColor Magenta
     & dotnet @toolArgs
     if ($LASTEXITCODE -ne 0) {
@@ -248,9 +390,18 @@ function Ensure-CachedMap {
     $terrainCsv = Join-Path $terrainCsvDir ($Map + '_mcnk_terrain.csv')
     if (Test-Path $terrainCsv) {
         Copy-Item -Path $terrainCsv -Destination $rollbackMapCsvDir -Force
-        Write-Host "  [cache] Copied terrain CSV to rollback_outputs" -ForegroundColor DarkGray
+        Write-Host "  [cache] ✓ Copied terrain CSV to rollback_outputs" -ForegroundColor Green
     } else {
         Write-Host "  [warn] Terrain CSV not found at: $terrainCsv" -ForegroundColor Yellow
+    }
+    
+    # Copy MCNK shadow CSV
+    $shadowCsv = Join-Path $terrainCsvDir ($Map + '_mcnk_shadows.csv')
+    if (Test-Path $shadowCsv) {
+        Copy-Item -Path $shadowCsv -Destination $rollbackMapCsvDir -Force
+        Write-Host "  [cache] ✓ Copied shadow CSV to rollback_outputs" -ForegroundColor Green
+    } else {
+        Write-Host "  [debug] Shadow CSV not found (map may not have shadow data)" -ForegroundColor DarkGray
     }
     
     # Copy AreaTable CSVs to version root (one per version, not per map)
