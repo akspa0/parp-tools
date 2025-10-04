@@ -371,23 +371,8 @@ public static class Program
                         return 1;
                     }
 
-                    AnalysisPipeline.Run(new AnalysisPipeline.Options
-                    {
-                        WdtPath = wdt!,
-                        ListfilePath = listfile!,
-                        OutDir = outDir!,
-                        ClusterThreshold = clusterThreshold ?? 10,
-                        ClusterGap = clusterGap ?? 1000,
-                        ExtractMcnkTerrain = extractMcnkTerrain,
-                        ExtractMcnkShadows = extractMcnkShadows
-                    });
-
-                    if (web)
-                    {
-                        WebAssetsWriter.Write(outDir!);
-                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
-                    }
-
+                    // Export ADTs FIRST if requested (needed for LK AreaIDs in terrain extraction)
+                    string? lkAdtDirectory = null;
                     if (exportAdt)
                     {
                         AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
@@ -420,6 +405,39 @@ public static class Program
                             NoZoneFallback = noZoneFallback,
                             VizDir = vizDir,
                         });
+                        
+                        // Determine LK ADT directory from export
+                        var wdtScanner = new WdtAlphaScanner(wdt!);
+                        lkAdtDirectory = Path.Combine(exportDir!, "World", "Maps", wdtScanner.MapName);
+                        
+                        if (Directory.Exists(lkAdtDirectory))
+                        {
+                            Console.WriteLine($"[area] LK ADTs exported to: {lkAdtDirectory}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
+                            lkAdtDirectory = null;
+                        }
+                    }
+                    
+                    // Run analysis pipeline (after ADT export so we have LK AreaIDs)
+                    AnalysisPipeline.Run(new AnalysisPipeline.Options
+                    {
+                        WdtPath = wdt!,
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                        ExtractMcnkTerrain = extractMcnkTerrain,
+                        ExtractMcnkShadows = extractMcnkShadows,
+                        LkAdtDirectory = lkAdtDirectory  // Pass LK ADT directory for area name mapping
+                    });
+
+                    if (web)
+                    {
+                        WebAssetsWriter.Write(outDir!);
+                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
                     }
                 }
 

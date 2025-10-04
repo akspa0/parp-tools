@@ -119,22 +119,34 @@ public sealed class McnkShadowExtractor
         int mcshAbsoluteOffset = mcnkOffset + 128 + ChunkLettersAndSize + mcshOffset;
         fs.Seek(mcshAbsoluteOffset + ChunkLettersAndSize, SeekOrigin.Begin); // Skip "MCSH" + size
 
-        byte[] shadowData = new byte[mcshSize];
-        int bytesRead = fs.Read(shadowData, 0, mcshSize);
+        byte[] compressedShadow = new byte[mcshSize];
+        int bytesRead = fs.Read(compressedShadow, 0, mcshSize);
 
         if (bytesRead != mcshSize)
         {
             Console.WriteLine($"Warning: Expected {mcshSize} bytes for shadow map, got {bytesRead}");
         }
 
-        // Encode to base64
-        string base64 = Convert.ToBase64String(shadowData);
+        // Decode shadow map (512 bytes compressed → 4096 bytes uncompressed)
+        // Store as intensity digit string (4096 chars: '0' or '5')
+        string shadowDigits;
+        if (mcshSize == 512)
+        {
+            var uncompressedShadow = McshDecoder.DecodeWithEdgeFix(compressedShadow);
+            shadowDigits = McshDecoder.EncodeAsDigits(uncompressedShadow);
+        }
+        else
+        {
+            // Fallback for unexpected sizes (though should always be 512)
+            Console.WriteLine($"Warning: MCSH size is {mcshSize}, expected 512. Using all-lit fallback.");
+            shadowDigits = new string('5', 4096); // All lit
+        }
 
         return new McnkShadowEntry(
             mapName, tileY, tileX, chunkRow, chunkCol,
             HasShadow: true,
             ShadowSize: mcshSize,
-            ShadowBitmapBase64: base64
+            ShadowBitmapBase64: shadowDigits // Actually intensity digits now, not base64
         );
     }
 

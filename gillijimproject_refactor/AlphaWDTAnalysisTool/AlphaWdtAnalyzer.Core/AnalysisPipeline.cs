@@ -21,6 +21,11 @@ public static class AnalysisPipeline
         public string? AreaLkPath { get; init; }
         public bool ExtractMcnkTerrain { get; init; } = false;
         public bool ExtractMcnkShadows { get; init; } = false;
+        /// <summary>
+        /// Directory containing converted LK ADT files. When provided, terrain extraction
+        /// will use LK AreaIDs for proper 3.3.5 AreaTable.dbc compatibility.
+        /// </summary>
+        public string? LkAdtDirectory { get; init; }
     }
 
     public static void Run(Options opts)
@@ -90,7 +95,19 @@ public static class AnalysisPipeline
         // Extract MCNK terrain data if requested
         if (opts.ExtractMcnkTerrain)
         {
-            var terrainEntries = McnkTerrainExtractor.ExtractTerrain(wdt);
+            List<McnkTerrainEntry> terrainEntries;
+            
+            // Use LK AreaIDs if converted ADTs are available (for proper area name mapping)
+            if (!string.IsNullOrEmpty(opts.LkAdtDirectory) && Directory.Exists(opts.LkAdtDirectory))
+            {
+                terrainEntries = McnkTerrainExtractor.ExtractTerrainWithLkAreaIds(wdt, opts.LkAdtDirectory);
+            }
+            else
+            {
+                Console.WriteLine("[warn] No LK ADT directory provided, using Alpha AreaIDs (area names will show as 'Unknown')");
+                terrainEntries = McnkTerrainExtractor.ExtractTerrain(wdt);
+            }
+            
             var terrainCsvPath = Path.Combine(csvDir, wdt.MapName, $"{wdt.MapName}_mcnk_terrain.csv");
             McnkTerrainCsvWriter.WriteCsv(terrainEntries, terrainCsvPath);
         }

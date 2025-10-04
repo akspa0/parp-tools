@@ -463,6 +463,9 @@ public sealed class ViewerReportWriter
             // CSV not found - terrain overlays were not extracted, skip silently
             return;
         }
+        
+        // Generate shadow map overlays if available
+        McnkShadowOverlayBuilder.BuildOverlaysForMap(mapName, csvMapDir, overlayVersionRoot, version);
 
         try
         {

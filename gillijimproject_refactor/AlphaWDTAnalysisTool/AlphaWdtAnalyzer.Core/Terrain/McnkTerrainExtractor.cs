@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using GillijimProject.WowFiles.Alpha;
 using GillijimProject.WowFiles.LichKing;
 
@@ -13,7 +14,65 @@ namespace AlphaWdtAnalyzer.Core.Terrain;
 public sealed class McnkTerrainExtractor
 {
     /// <summary>
-    /// Extract complete terrain data from all MCNK chunks in the WDT
+    /// Extract complete terrain data with LK AreaIDs (for 3.3.5 AreaTable compatibility).
+    /// This method combines Alpha terrain data with converted LK ADT AreaIDs.
+    /// </summary>
+    /// <param name="wdt">Alpha WDT scanner</param>
+    /// <param name="lkAdtDirectory">Directory containing converted LK ADT files</param>
+    /// <returns>Terrain entries with LK AreaIDs that map to 3.3.5 AreaTable.dbc</returns>
+    public static List<McnkTerrainEntry> ExtractTerrainWithLkAreaIds(WdtAlphaScanner wdt, string lkAdtDirectory)
+    {
+        Console.WriteLine($"[McnkTerrainExtractor] Extracting terrain with LK AreaIDs from {wdt.MapName}");
+        
+        // Extract all terrain data from Alpha WDT (flags, liquids, holes, etc.)
+        var alphaEntries = ExtractTerrain(wdt);
+        
+        // Extract LK AreaIDs from converted ADTs
+        var lkAreaData = LkAdtAreaReader.ExtractAreaIds(lkAdtDirectory, wdt.MapName);
+        
+        if (lkAreaData.Count == 0)
+        {
+            Console.WriteLine($"[McnkTerrainExtractor:warn] No LK AreaIDs found, using Alpha AreaIDs (names will show as 'Unknown')");
+            return alphaEntries;
+        }
+        
+        // Create lookup dictionary for LK AreaIDs
+        var areaLookup = lkAreaData.ToDictionary(
+            a => (a.TileRow, a.TileCol, a.ChunkY, a.ChunkX),
+            a => a.AreaId
+        );
+        
+        // Replace Alpha AreaIDs with LK AreaIDs
+        var mergedEntries = new List<McnkTerrainEntry>();
+        int replaced = 0;
+        int notFound = 0;
+        
+        foreach (var entry in alphaEntries)
+        {
+            var key = (entry.TileRow, entry.TileCol, entry.ChunkRow, entry.ChunkCol);
+            
+            if (areaLookup.TryGetValue(key, out var lkAreaId))
+            {
+                // Replace with LK AreaID
+                mergedEntries.Add(entry with { AreaId = lkAreaId });
+                replaced++;
+            }
+            else
+            {
+                // Keep Alpha AreaID (shouldn't happen, but handle gracefully)
+                mergedEntries.Add(entry);
+                notFound++;
+            }
+        }
+        
+        Console.WriteLine($"[McnkTerrainExtractor] Replaced {replaced} AreaIDs with LK values, {notFound} not found in LK ADTs");
+        return mergedEntries;
+    }
+    
+    /// <summary>
+    /// Extract complete terrain data from all MCNK chunks in the WDT.
+    /// Uses Alpha AreaIDs (will show as "Unknown Area" in 3.3.5 AreaTable).
+    /// For proper area names, use ExtractTerrainWithLkAreaIds() instead.
     /// </summary>
     public static List<McnkTerrainEntry> ExtractTerrain(WdtAlphaScanner wdt)
     {
