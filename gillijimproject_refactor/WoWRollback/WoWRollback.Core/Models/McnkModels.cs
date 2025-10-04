@@ -73,11 +73,20 @@ public class AreaTableLookup
 
     public string GetName(int areaId, bool preferAlpha = true)
     {
+        if (!preferAlpha && lkAreas.TryGetValue(areaId, out var lkPreferred))
+        {
+            return lkPreferred;
+        }
+
         if (preferAlpha && alphaAreas.TryGetValue(areaId, out var alphaName))
+        {
             return alphaName;
+        }
 
         if (lkAreas.TryGetValue(areaId, out var lkName))
+        {
             return lkName;
+        }
 
         return $"Unknown Area {areaId}";
     }
@@ -88,6 +97,16 @@ public class AreaTableLookup
         var lkName = lkAreas.TryGetValue(areaId, out var l) ? l : null;
 
         return (alphaName, lkName);
+    }
+
+    public string? GetAlphaName(int areaId)
+    {
+        return alphaAreas.TryGetValue(areaId, out var name) ? name : null;
+    }
+
+    public string? GetLichKingName(int areaId)
+    {
+        return lkAreas.TryGetValue(areaId, out var name) ? name : null;
     }
 
     public IEnumerable<int> GetAllAreaIds()

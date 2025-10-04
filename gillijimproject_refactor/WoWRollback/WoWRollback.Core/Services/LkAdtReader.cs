@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace WoWRollback.Core.Services;
 
@@ -25,6 +26,78 @@ public class LkAdtReader
         ushort NameSet,
         string AssetType // "M2" or "WMO"
     );
+
+    public record McnkData(
+        int ChunkX,
+        int ChunkY,
+        int AreaId,
+        uint Flags,
+        float PositionX,
+        float PositionY,
+        float PositionZ,
+        bool HasMcsh,
+        bool HasMccv
+    );
+
+    /// <summary>
+    /// Reads MCNK chunk headers from a LK ADT file.
+    /// Returns metadata needed for terrain overlays (area IDs, flags, positions).
+    /// </summary>
+    public static List<McnkData> ReadMcnkChunks(string adtPath)
+    {
+        var chunks = new List<McnkData>();
+
+        if (!File.Exists(adtPath))
+            return chunks;
+
+        try
+        {
+            var bytes = File.ReadAllBytes(adtPath);
+
+            var searchPos = 0;
+            while (searchPos < bytes.Length)
+            {
+                var chunkStart = FindChunk(bytes, "KNCM", searchPos);
+                if (chunkStart == -1)
+                    break;
+
+                var chunkSize = BitConverter.ToInt32(bytes, chunkStart + 4);
+                var headerStart = chunkStart + 8;
+
+                uint flags = BitConverter.ToUInt32(bytes, headerStart + 0x00);
+                int indexX = (int)BitConverter.ToUInt32(bytes, headerStart + 0x04);
+                int indexY = (int)BitConverter.ToUInt32(bytes, headerStart + 0x08);
+                int areaId = BitConverter.ToInt32(bytes, headerStart + 0x34);
+
+                float posX = BitConverter.ToSingle(bytes, headerStart + 0x40);
+                float posY = BitConverter.ToSingle(bytes, headerStart + 0x44);
+                float posZ = BitConverter.ToSingle(bytes, headerStart + 0x48);
+
+                bool hasMcsh = HasSubChunk(bytes, chunkStart, chunkSize, "HSCM");
+                bool hasMccv = HasSubChunk(bytes, chunkStart, chunkSize, "VCCM");
+
+                chunks.Add(new McnkData(
+                    ChunkX: indexX,
+                    ChunkY: indexY,
+                    AreaId: areaId,
+                    Flags: flags,
+                    PositionX: posX,
+                    PositionY: posY,
+                    PositionZ: posZ,
+                    HasMcsh: hasMcsh,
+                    HasMccv: hasMccv
+                ));
+
+                searchPos = chunkStart + 8 + chunkSize;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[LkAdtReader] Error reading MCNK from {adtPath}: {ex.Message}");
+        }
+
+        return chunks;
+    }
 
     /// <summary>
     /// Reads all MDDF (M2/MDX) placements from a LK ADT file.
@@ -230,11 +303,30 @@ public class LkAdtReader
         return names;
     }
 
-    private static int FindChunk(byte[] bytes, string reversedFourCC)
+    private static bool HasSubChunk(byte[] bytes, int chunkStart, int chunkSize, string reversedFourCC)
     {
-        var pattern = System.Text.Encoding.ASCII.GetBytes(reversedFourCC);
-        
-        for (int i = 0; i < bytes.Length - 4; i++)
+        var end = chunkStart + 8 + chunkSize;
+        var pattern = Encoding.ASCII.GetBytes(reversedFourCC);
+
+        for (int i = chunkStart + 8; i <= end - 4 && i <= bytes.Length - 4; i++)
+        {
+            if (bytes[i] == pattern[0] &&
+                bytes[i + 1] == pattern[1] &&
+                bytes[i + 2] == pattern[2] &&
+                bytes[i + 3] == pattern[3])
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int FindChunk(byte[] bytes, string reversedFourCC, int startIndex = 0)
+    {
+        var pattern = Encoding.ASCII.GetBytes(reversedFourCC);
+
+        for (int i = startIndex; i < bytes.Length - 4; i++)
         {
             if (bytes[i] == pattern[0] &&
                 bytes[i + 1] == pattern[1] &&
@@ -244,7 +336,7 @@ public class LkAdtReader
                 return i;
             }
         }
-        
+
         return -1;
     }
 

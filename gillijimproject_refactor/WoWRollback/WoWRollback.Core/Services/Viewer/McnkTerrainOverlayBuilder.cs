@@ -18,18 +18,26 @@ public static class McnkTerrainOverlayBuilder
         string csvDir,
         string outputDir,
         string version,
-        AreaTableLookup? areaLookup = null)
+        AreaTableLookup? areaLookup = null,
+        string? cachedMapsDir = null)
     {
-        // Read terrain CSV
-        // csvDir is already pointing to the map directory: rollback_outputs/{version}/{map}/
-        var terrainCsvPath = Path.Combine(csvDir, $"{mapName}_mcnk_terrain.csv");
-        if (!File.Exists(terrainCsvPath))
+        List<McnkTerrainEntry> allChunks;
+
+        if (!string.IsNullOrWhiteSpace(cachedMapsDir) && Directory.Exists(cachedMapsDir))
         {
-            // CSV not found, skip silently (already checked by caller)
-            return;
+            allChunks = LkAdtTerrainReader.ReadFromLkAdts(cachedMapsDir, version, mapName);
+
+            if (allChunks.Count == 0)
+            {
+                Console.WriteLine($"[terrain] No LK ADT data for {mapName}, falling back to CSV");
+                allChunks = ReadCsvFallback(csvDir, mapName);
+            }
+        }
+        else
+        {
+            allChunks = ReadCsvFallback(csvDir, mapName);
         }
 
-        var allChunks = McnkTerrainCsvReader.ReadCsv(terrainCsvPath);
         if (allChunks.Count == 0)
         {
             Console.WriteLine($"No terrain data for {mapName}, skipping");
@@ -78,7 +86,6 @@ public static class McnkTerrainOverlayBuilder
             };
 
             // Write to JSON file
-            // outputDir is already version-specific: overlays/{version}/
             var overlayDir = Path.Combine(outputDir, mapName, "terrain_complete");
             Directory.CreateDirectory(overlayDir);
 
@@ -90,5 +97,16 @@ public static class McnkTerrainOverlayBuilder
         }
 
         Console.WriteLine($"Built {tileCount} terrain overlay tiles for {mapName} ({version})");
+    }
+
+    private static List<McnkTerrainEntry> ReadCsvFallback(string csvDir, string mapName)
+    {
+        var terrainCsvPath = Path.Combine(csvDir, $"{mapName}_mcnk_terrain.csv");
+        if (!File.Exists(terrainCsvPath))
+        {
+            return new List<McnkTerrainEntry>();
+        }
+
+        return McnkTerrainCsvReader.ReadCsv(terrainCsvPath);
     }
 }

@@ -1,16 +1,15 @@
 # Active Context
 
-- **Current Focus**: Stop cross-map leakage in Alpha (0.5.x) → LK (3.3.5) mapping, with emphasis on prototype maps such as Kalidar (`mapId=17`) defaulting to zero when no LK AreaTable entry exists. Stabilize DBCTool crosswalk CSVs so AlphaWDTAnalysisTool can rely exclusively on map-locked matches.
+- **Current Focus**: Improve WoWRollback viewer overlays for the Phase 0 time-travel feature. Priorities: resolve shadow-map overlay 404s, replace heavy JSON overlays with lightweight rasters (PNG with opacity) for map view, and retain detailed per-tile data for upcoming timeline workflows.
 - **Recent Changes**:
-  - Added `s_forceZeroMapIds` / `s_forceZeroMapNames` and an early exit in `AdtWotlkWriter.PatchMcnkAreaIdsOnDiskV2()` so Kalidar tiles always write `method=map_forced_zero`.
-  - Updated write logic to treat any unmatched candidate as `unmapped_zero`, preventing inherited LK IDs.
-  - Captured the forced-zero requirement in `docs/planning/003-areaid-regression-plan.md` and the memory bank project brief.
-  - Regenerated AlphaWDT outputs for Kalidar to validate that CSV `areaid_verify_*` rows now record `lk_areaid = -1` and on-disk `0`.
+  - Implemented MCNK-reader enhancements and added `LkAdtTerrainReader` so overlay builders can pull authoritative data from cached LK ADTs.
+  - Updated `rebuild-and-regenerate.ps1` to rerun AlphaWdtAnalyzer terrain/shadow extraction even when cached ADTs already exist, ensuring CSV parity.
+  - Identified viewer fetch mismatch for `shadow_map` tiles and confirmed JSON payload size (>2 MB) is a performance blocker for whole-map view.
 - **Next Steps**:
-  - Sweep other prototype or developer maps; extend the forced-zero tables as similar gaps are discovered.
-  - Re-run DBCTool crosswalk generation after zero-overrides to confirm LK IDs are absent for Kalidar in CSV outputs.
-  - Wire stricter validation into AlphaWDTAnalysisTool logging/tests to fail when a forced-zero map produces non-zero LK IDs.
-  - Once mapping is stable, resume the GillijimProject.Core refactor and public API design.
+  - Align viewer fetch paths with generated shadow overlay assets and add diagnostics to prevent silent 404s.
+  - Design and implement PNG-based overlay generation (shadow, terrain, liquids, holes) with opacity controls while keeping JSON detail for per-tile inspection.
+  - Update viewer overlay layers to consume rasters for map view and lazy-load JSON only when zooming to tiles (supporting Time Travel plan in `docs/planning/03_Rollback_TimeTravel_Feature.md`).
+  - After overlay refactor, circle back to remaining map-lock validation work (forced-zero tables, DBCTool sweeps) to keep mapping stable.
 - **Decisions**:
-  - Library-first architecture (CLI delegates to library) remains the end goal but its implementation is paused until mapping is deterministic.
-  - FourCC handling, exception strategy, and immutable domain guidance remain unchanged.
+  - Mapping safeguards stay in place but are background tasks while viewer performance work is active.
+  - Maintain library-first direction and existing coding standards (FourCC handling, immutable domains) during overlay refactor.

@@ -20,12 +20,18 @@ public static class AreaIdOverlayBuilder
 
         // Build chunk list with area names
         var areaChunks = chunks
-            .Select(c => new
+            .Select(c =>
             {
-                row = c.ChunkRow,
-                col = c.ChunkCol,
-                area_id = c.AreaId,
-                area_name = areaLookup.GetName(c.AreaId, preferAlpha: true)
+                var (alphaName, lkName) = areaLookup.GetBothNames(c.AreaId);
+                return new
+                {
+                    row = c.ChunkRow,
+                    col = c.ChunkCol,
+                    area_id = c.AreaId,
+                    area_name = areaLookup.GetName(c.AreaId, preferAlpha: false),
+                    alpha_name = alphaName,
+                    lk_name = lkName
+                };
             })
             .ToList();
 
@@ -42,9 +48,9 @@ public static class AreaIdOverlayBuilder
             {
                 boundaries.Add(new AreaBoundary(
                     FromArea: currentArea,
-                    FromName: areaLookup.GetName(currentArea, preferAlpha: true),
+                    FromName: areaLookup.GetName(currentArea, preferAlpha: false),
                     ToArea: northArea,
-                    ToName: areaLookup.GetName(northArea, preferAlpha: true),
+                    ToName: areaLookup.GetName(northArea, preferAlpha: false),
                     ChunkRow: row,
                     ChunkCol: col,
                     Edge: "north"
@@ -56,9 +62,9 @@ public static class AreaIdOverlayBuilder
             {
                 boundaries.Add(new AreaBoundary(
                     FromArea: currentArea,
-                    FromName: areaLookup.GetName(currentArea, preferAlpha: true),
+                    FromName: areaLookup.GetName(currentArea, preferAlpha: false),
                     ToArea: eastArea,
-                    ToName: areaLookup.GetName(eastArea, preferAlpha: true),
+                    ToName: areaLookup.GetName(eastArea, preferAlpha: false),
                     ChunkRow: row,
                     ChunkCol: col,
                     Edge: "east"
@@ -70,9 +76,9 @@ public static class AreaIdOverlayBuilder
             {
                 boundaries.Add(new AreaBoundary(
                     FromArea: currentArea,
-                    FromName: areaLookup.GetName(currentArea, preferAlpha: true),
+                    FromName: areaLookup.GetName(currentArea, preferAlpha: false),
                     ToArea: southArea,
-                    ToName: areaLookup.GetName(southArea, preferAlpha: true),
+                    ToName: areaLookup.GetName(southArea, preferAlpha: false),
                     ChunkRow: row,
                     ChunkCol: col,
                     Edge: "south"
@@ -84,9 +90,9 @@ public static class AreaIdOverlayBuilder
             {
                 boundaries.Add(new AreaBoundary(
                     FromArea: currentArea,
-                    FromName: areaLookup.GetName(currentArea, preferAlpha: true),
+                    FromName: areaLookup.GetName(currentArea, preferAlpha: false),
                     ToArea: westArea,
-                    ToName: areaLookup.GetName(westArea, preferAlpha: true),
+                    ToName: areaLookup.GetName(westArea, preferAlpha: false),
                     ChunkRow: row,
                     ChunkCol: col,
                     Edge: "west"
