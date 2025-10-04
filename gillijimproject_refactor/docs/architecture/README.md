@@ -141,6 +141,24 @@ This directory contains comprehensive design documentation for the WoWRollback o
 
 ---
 
+### 5. [data-storage-strategy.md](data-storage-strategy.md) 📊 **NEW**
+
+**Purpose**: Performance analysis and storage format decisions (CSV vs JSON vs SQLite)
+
+**Contents**:
+- Current architecture performance analysis
+- CSV vs JSON vs SQLite comparison matrix
+- File size estimates and benchmarks
+- When to use SQLite (and when not to)
+- Hybrid approach for future scaling
+- Optimization strategies without database complexity
+
+**Key Recommendation**: **Keep CSV → JSON pipeline** for current needs. Add SQLite only if search/analytics features are needed.
+
+**TL;DR**: Current approach is fast enough (~120ms to load 16 tiles), maintains simplicity, and supports debugging. SQLite would add complexity without solving a real performance problem.
+
+---
+
 ## Quick Start Guide
 
 ### Adding a New Overlay Type
