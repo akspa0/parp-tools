@@ -138,52 +138,22 @@ function Find-WdtPath {
 
 function Get-ExpectedTileCount {
     param(
-        [string]$WdtPath
+        [string]$WdtPath,
+        [string]$AlphaToolProject
     )
     
     if (-not (Test-Path $WdtPath)) { return 0 }
     
     try {
-        # Read WDT MAIN chunk to count tiles
-        # WDT structure: "MVER" (8) + version (4) + "MPHD" (8+36) + "MAIN" (8) + 64x64 entries
-        # Each MAIN entry is 8 bytes (flags + async_id), non-zero flags = tile exists
+        # Use AlphaWdtAnalyzer to read tile count (works for both Alpha and LK WDTs)
+        $count = & dotnet run --project $AlphaToolProject --configuration Release -- --count-tiles --input $WdtPath 2>$null
         
-        $bytes = [System.IO.File]::ReadAllBytes($WdtPath)
-        
-        # Find MAIN chunk (search for "MAIN" signature)
-        $mainOffset = -1
-        for ($i = 0; $i -lt ($bytes.Length - 4); $i++) {
-            if ([System.Text.Encoding]::ASCII.GetString($bytes[$i..($i+3)]) -eq "MAIN") {
-                $mainOffset = $i
-                break
-            }
+        if ($LASTEXITCODE -eq 0 -and $count -match '^\d+$') {
+            return [int]$count
         }
         
-        if ($mainOffset -eq -1) {
-            Write-Host "  [debug] MAIN chunk not found in WDT, assuming empty" -ForegroundColor DarkGray
-            return 0
-        }
-        
-        # MAIN chunk: "MAIN" (4) + size (4) + entries
-        $chunkSize = [BitConverter]::ToUInt32($bytes, $mainOffset + 4)
-        $dataStart = $mainOffset + 8
-        
-        # Each entry is 8 bytes, 64×64 = 4096 entries
-        $tileCount = 0
-        for ($i = 0; $i -lt 4096; $i++) {
-            $entryOffset = $dataStart + ($i * 8)
-            if ($entryOffset + 4 -gt $bytes.Length) { break }
-            
-            # Read flags (first 4 bytes of entry)
-            $flags = [BitConverter]::ToUInt32($bytes, $entryOffset)
-            
-            # If flags != 0, tile exists
-            if ($flags -ne 0) {
-                $tileCount++
-            }
-        }
-        
-        return $tileCount
+        Write-Host "  [debug] Could not read tile count from WDT, assuming no validation needed" -ForegroundColor DarkGray
+        return 0
     } catch {
         Write-Host "  [warn] Failed to read WDT tile count: $_" -ForegroundColor Yellow
         return 0
@@ -234,7 +204,7 @@ function Ensure-CachedMap {
     if ($AlphaRoot) {
         $sourceWdt = Find-WdtPath -Root $AlphaRoot -Version $Version -Map $Map
         if ($sourceWdt) {
-            $expectedTiles = Get-ExpectedTileCount -WdtPath $sourceWdt
+            $expectedTiles = Get-ExpectedTileCount -WdtPath $sourceWdt -AlphaToolProject $alphaToolProject
             if ($expectedTiles -gt 0) {
                 Write-Host "  [cache] Expected $expectedTiles tiles from WDT" -ForegroundColor DarkGray
             }

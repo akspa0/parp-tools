@@ -60,10 +60,12 @@ public static class Program
         Console.WriteLine("Usage:");
         Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
         Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Count tiles: AlphaWdtAnalyzer --count-tiles --input <path/to/map.wdt>");
         Console.WriteLine("");
         Console.WriteLine("New Terrain Extraction Flags:");
         Console.WriteLine("  --extract-mcnk-terrain   Extract complete MCNK terrain data to CSV (all flags, liquids, holes, AreaID)");
         Console.WriteLine("  --extract-mcnk-shadows   Extract MCSH shadow map bitmaps to CSV (64×64 bitmaps per chunk)");
+        Console.WriteLine("  --count-tiles            Print number of ADT tiles and exit (for cache validation)");
         return 2;
     }
 
@@ -97,6 +99,7 @@ public static class Program
         string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
         bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
         bool extractMcnkTerrain = false; bool extractMcnkShadows = false;
+        bool countTiles = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -244,9 +247,39 @@ public static class Program
                 case "--extract-mcnk-shadows":
                     extractMcnkShadows = true;
                     break;
+                case "--count-tiles":
+                    countTiles = true;
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
+            }
+        }
+
+        // Quick tile count mode (for cache validation in rebuild scripts)
+        if (countTiles)
+        {
+            if (string.IsNullOrWhiteSpace(wdt))
+            {
+                Console.Error.WriteLine("--count-tiles requires --input <path/to/map.wdt>");
+                return 1;
+            }
+            if (!File.Exists(wdt))
+            {
+                Console.Error.WriteLine($"WDT not found: {wdt}");
+                return 1;
+            }
+
+            try
+            {
+                var scanner = new WdtAlphaScanner(wdt);
+                Console.WriteLine(scanner.AdtNumbers.Count);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error reading WDT: {ex.Message}");
+                return 1;
             }
         }
 
