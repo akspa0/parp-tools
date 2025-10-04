@@ -137,6 +137,26 @@ Archive old tools and polish
 - [ ] Polish CLI (help text, colors)
 - [ ] Release notes
 
+### Phase 6: 3D Export & Visualization (Weeks 6-10) ⭐ NEW
+Consolidate ADTPrefabTool 3D export functionality
+
+**See**: `docs/planning/PHASE_6_3D_EXPORT.md` for full details
+
+**Checklist**:
+- [ ] Migrate terrain mesh building from ADTPrefabTool
+- [ ] Implement GLB/glTF export (SharpGLTF.Toolkit)
+- [ ] Multi-threaded tile export (parallel GLB generation)
+- [ ] Texture extraction and embedding
+- [ ] Prefab pattern mining (terrain pattern detection)
+- [ ] CLI commands (export-3d, mine-prefabs)
+
+**Benefits**:
+- ✨ Export tiles as GLB (Unity, Unreal, Blender, web viewers)
+- ✨ Embedded textures (single-file assets)
+- ✨ Pattern mining (recurring terrain analysis)
+- ✨ Multi-threaded (6-7x faster than ADTPrefabTool)
+- ✨ Modern PBR materials
+
 ---
 
 ## 🔑 Key Implementation Details

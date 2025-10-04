@@ -156,23 +156,32 @@ dotnet run --project WoWRollback.Cli -- compare-versions \
 
 ### Phase 4: Testing (Week 4)
 - [ ] Unit tests (90%+ coverage)
-- [ ] Integration tests
 - [ ] Performance benchmarks
 - [ ] In-game testing
 - [ ] Memory profiling
 
 ### Phase 5: Cleanup (Week 5)
-- [ ] Archive old tools
+- [ ] Archive AlphaWDTAnalysisTool
+- [ ] Archive DBCTool.V2
 - [ ] Update documentation
 - [ ] Polish CLI
 - [ ] Release notes
+
+### Phase 6: 3D Export & Visualization (Weeks 6-10) ⭐ NEW
+- [ ] Migrate ADTPrefabTool terrain export
+- [ ] Implement TerrainMeshBuilder
+- [ ] Add GLB/glTF export (SharpGLTF)
+- [ ] Multi-threaded tile export
+- [ ] Texture extraction and embedding
+- [ ] Prefab pattern mining
+- [ ] CLI integration (export-3d, mine-prefabs)
 
 ---
 
 ## 🚨 Important Notes
 
 ### Don't Break These
-- Existing viewer functionality (works well!)
+{{ ... }}
 - LK ADT reading (WoWRollback.Core/Formats/Lk/)
 - Shadow map overlay feature (just implemented)
 - Terrain overlay feature (working)
