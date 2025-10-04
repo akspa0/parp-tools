@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using WoWRollback.Core.Models;
 
 namespace WoWRollback.Core.Services;
@@ -22,22 +23,31 @@ public static class AreaTableReader
         }
 
         using var reader = new StreamReader(csvPath);
-        reader.ReadLine(); // Skip header
+        var header = reader.ReadLine(); // Read header: row_key,id,parent,continentId,name
+        if (string.IsNullOrEmpty(header)) return areas;
 
         string? line;
         while ((line = reader.ReadLine()) != null)
         {
-            // Split on first comma only (area names may contain commas)
-            var commaIndex = line.IndexOf(',');
-            if (commaIndex < 0) continue;
+            if (string.IsNullOrWhiteSpace(line)) continue;
 
-            var idPart = line.Substring(0, commaIndex);
-            var namePart = line.Substring(commaIndex + 1);
+            // CSV format: row_key,id,parent,continentId,name
+            // Example: 1,249,589824,0,Dreadmaul Rock
+            var parts = line.Split(',');
+            if (parts.Length < 5) continue;
 
-            if (int.TryParse(idPart, out int id))
+            // Column 1 is the actual ID (column 0 is row_key)
+            if (!int.TryParse(parts[1], out int id)) continue;
+
+            // Column 4 is the name (may contain commas, so join the rest)
+            string name = parts.Length > 5 
+                ? string.Join(",", parts.Skip(4)) 
+                : parts[4];
+            
+            name = name.Trim().Trim('"');
+            
+            if (!string.IsNullOrEmpty(name))
             {
-                // Remove CSV quotes if present
-                string name = namePart.Trim('"');
                 areas[id] = name;
             }
         }
