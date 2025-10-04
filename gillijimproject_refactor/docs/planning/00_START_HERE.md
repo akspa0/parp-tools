@@ -1,15 +1,33 @@
-# WoWRollback Implementation Order 🗺️
+# 🚀 START HERE - WoWRollback Implementation Order
 
-**Priority-ordered implementation plan for WoWRollback project.**
+**Read this first! Priority-ordered plan for WoWRollback project.**
+
+> **Note**: All planning documents are now organized by priority (see `README.md`)
 
 ---
 
 ## 📋 Phase Priorities
 
-### ✅ **FIRST: Fix AreaTable Source** (1-2 days)
-**Document**: `FIX_AREATABLE_SOURCE.md`
+### 🚨 **FIRST: Fix Missing Terrain Overlays** (1 day)
+**Document**: `01_CRITICAL_Missing_Terrain_Overlays.md`
 
-**Why First**: 
+**Why First**:
+- CRITICAL: Blocks viewer for most maps
+- Shadow maps don't work
+- Only Azeroth/Kalimdor have overlays
+
+**Tasks**:
+- Investigate why CSVs missing for instances
+- Add logging to overlay generation
+- Fix shadow map generation
+- Test on DeadminesInstance
+
+---
+
+### ✅ **SECOND: Fix AreaTable Source** (1-2 days)
+**Document**: `02_CRITICAL_AreaTable_Fix.md`
+
+**Why Second**:
 - Critical bug (reading from wrong source)
 - Prerequisite for Phase 0
 - Quick win
@@ -23,7 +41,7 @@
 ---
 
 ### 🎯 **Phase 0: WoWRollback Core Feature** (4 weeks) ⏮️
-**Document**: `PHASE_0_ROLLBACK_FEATURE.md`
+**Document**: `03_Rollback_TimeTravel_Feature.md`
 
 **Why Before Consolidation**:
 - ✅ This IS the namesake feature
@@ -41,7 +59,7 @@
 ---
 
 ### 🔧 **Phases 1-5: Tool Consolidation** (5 weeks)
-**Document**: `MASTER_PLAN.md`
+**Document**: `04_Tool_Consolidation.md`
 
 **Goals**:
 - Merge 3 tools → 1 unified tool
@@ -58,7 +76,7 @@
 ---
 
 ### 🎨 **Phase 6: 3D Export & Visualization** (10-15 weeks)
-**Documents**:
+**Documents** (in `future/` folder):
 - `PHASE_6_3D_EXPORT.md` (terrain)
 - `PHASE_6B_MDX_AND_TEXTURES.md` (MDX + textures)
 - `PHASE_6C_WMO_SUPPORT.md` (WMOv14)
@@ -74,12 +92,12 @@
 
 ## 🎯 What to Work On Next
 
-### Today: Fix AreaTable Source
+### Today: Fix Missing Terrain Overlays
 ```
-See: FIX_AREATABLE_SOURCE.md
-Add ReadMcnkChunks() to LkAdtReader.cs
-Create LkAdtTerrainReader.cs
-Test on Dun Morogh
+See: 01_CRITICAL_Missing_Terrain_Overlays.md
+Investigate CSV generation
+Add logging to overlay builders
+Test on DeadminesInstance
 ```
 
 ### This Week: Phase 0 - Rollback Feature
@@ -112,11 +130,12 @@ GLB export for modern tools
 
 | Phase | Duration | Priority | Status |
 |-------|----------|----------|--------|
-| **Fix AreaTable** | 1-2 days | 🔥 CRITICAL | ⏳ Next |
+| **Fix Terrain Overlays** | 1 day | 🚨 **CRITICAL** | ⏳ Next |
+| **Fix AreaTable** | 1-2 days | 🔥 CRITICAL | ⏳ Planned |
 | **Phase 0** | 4 weeks | 🎯 HIGH | ⏳ Planned |
 | **Phases 1-5** | 5 weeks | ⚡ MEDIUM | 📋 Planned |
 | **Phase 6** | 10-15 weeks | 💎 NICE-TO-HAVE | 📋 Planned |
-| **Total** | ~20 weeks | | |
+| **Total** | ~21 weeks | | |
 
 ---
 
@@ -125,12 +144,12 @@ GLB export for modern tools
 ```
 I'm working on the WoWRollback project. 
 
-Next task: Fix AreaTable source (see docs/planning/FIX_AREATABLE_SOURCE.md)
+Next task: Fix missing terrain overlays (see docs/planning/01_CRITICAL_Missing_Terrain_Overlays.md)
 
-Problem: Currently reading area IDs from CSV (Alpha WDT data).
-Solution: Read directly from cached LK ADT files.
+Problem: Only Azeroth/Kalimdor have terrain overlays; instances missing.
+Problem: Shadow maps don't work.
 
-Starting with: Add ReadMcnkChunks() method to LkAdtReader.cs
+Starting with: Investigate why CSVs aren't generated for all maps.
 ```
 
 ---
