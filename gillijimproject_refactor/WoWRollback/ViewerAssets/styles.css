@@ -267,6 +267,31 @@ body {
     left: 60px; /* Move zoom controls right of hamburger */
 }
 
+/* Persistent popup styling */
+.persistent-popup .leaflet-popup-content-wrapper {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.6);
+}
+
+.persistent-popup .leaflet-popup-tip {
+    background: #2a2a2a;
+    border: 1px solid #444;
+}
+
+.persistent-popup .leaflet-popup-close-button {
+    color: #e0e0e0 !important;
+    font-size: 20px;
+    padding: 4px 8px;
+}
+
+.persistent-popup .leaflet-popup-close-button:hover {
+    color: #4CAF50 !important;
+    background: rgba(76, 175, 80, 0.1);
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .sidebar {

@@ -15,9 +15,12 @@ const overlayVariants = {
 
 let objectMarkers = L.layerGroup();
 let lastVersion = null;
+let lastMap = null;
 let showObjects = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
+let currentPopup = null; // Track persistent popup
+let pendingOverlayLoad = null; // Debounce token
 // Drag state for overview PiP
 let dragging = false;
 let dragStart = null;
@@ -68,6 +71,13 @@ function initializeMap() {
     // Re-render markers when zoom changes for dynamic scaling
     map.on('zoomend', () => {
         updateObjectMarkers();
+    });
+    
+    // Track popup close events
+    map.on('popupclose', (e) => {
+        if (currentPopup === e.popup) {
+            currentPopup = null;
+        }
     });
     
     // Set initial view to center
@@ -174,15 +184,34 @@ function onStateChange() {
     if (variantSelect && variantSelect.value !== state.overlayVariant) {
         variantSelect.value = state.overlayVariant;
     }
-    // If version changed, clear caches and force rebuild of minimap overlays
-    if (lastVersion !== state.selectedVersion) {
+    
+    // Clear cache and tiles if version OR map changed
+    const versionChanged = lastVersion !== state.selectedVersion;
+    const mapChanged = lastMap !== state.selectedMap;
+    
+    if (versionChanged || mapChanged) {
+        console.log(`State change detected - version: ${versionChanged}, map: ${mapChanged}`);
         lastVersion = state.selectedVersion;
+        lastMap = state.selectedMap;
         clearCache();
-        // Remove all existing minimap image overlays so URLs (with version) are refreshed
+        
+        // Remove all existing minimap image overlays to force refresh
         for (const [, overlay] of minimapImages.entries()) {
             minimapLayer.removeLayer(overlay);
         }
         minimapImages.clear();
+        
+        // Close any open popup
+        if (currentPopup) {
+            map.closePopup(currentPopup);
+            currentPopup = null;
+        }
+        
+        // Cancel any pending overlay loads
+        if (pendingOverlayLoad) {
+            clearTimeout(pendingOverlayLoad);
+            pendingOverlayLoad = null;
+        }
     }
 
     updateTileLayer();
@@ -271,11 +300,28 @@ function refreshMinimapTiles() {
         }
     }
 
-    // Remove no-longer-needed overlays
+    // Aggressively remove tiles >2 tiles outside viewport to reduce memory usage
+    const unloadPadding = 2;
     for (const [key, overlay] of minimapImages.entries()) {
         if (!needed.has(key)) {
-            minimapLayer.removeLayer(overlay);
-            minimapImages.delete(key);
+            // Extract row/col from key "r{row}_c{col}"
+            const match = key.match(/r(\d+)_c(\d+)/);
+            if (match) {
+                const tileRow = parseInt(match[1]);
+                const tileCol = parseInt(match[2]);
+                const rowDist = Math.min(Math.abs(tileRow - minRow), Math.abs(tileRow - maxRow));
+                const colDist = Math.min(Math.abs(tileCol - minCol), Math.abs(tileCol - maxCol));
+                
+                // Unload if >2 tiles away from viewport
+                if (rowDist > unloadPadding || colDist > unloadPadding) {
+                    minimapLayer.removeLayer(overlay);
+                    minimapImages.delete(key);
+                }
+            } else {
+                // Invalid key format, remove it
+                minimapLayer.removeLayer(overlay);
+                minimapImages.delete(key);
+            }
         }
     }
 }
@@ -310,6 +356,20 @@ function addTileLabel(tileElement, coords) {
 }
 
 async function updateObjectMarkers() {
+    // Cancel any pending load
+    if (pendingOverlayLoad) {
+        clearTimeout(pendingOverlayLoad);
+        pendingOverlayLoad = null;
+    }
+    
+    // Debounce: wait 500ms before loading overlays
+    pendingOverlayLoad = setTimeout(async () => {
+        pendingOverlayLoad = null;
+        await performObjectMarkerUpdate();
+    }, 500);
+}
+
+async function performObjectMarkerUpdate() {
     objectMarkers.clearLayers();
     
     if (!showObjects) return;
@@ -373,10 +433,25 @@ async function updateObjectMarkers() {
                     const isWmo = kindTag.includes('wmo');
 
                     const popupHtml = `
-                        <strong>${obj.fileName || 'Unknown'}</strong><br>
-                        UID: ${obj.uniqueId || 'N/A'}<br>
-                        World: (${obj.world.x.toFixed(3)}, ${obj.world.y.toFixed(3)}, ${obj.world.z.toFixed(2)})
+                        <div style="min-width: 280px; padding: 6px;">
+                            <strong style="font-size: 14px;">${obj.fileName || 'Unknown'}</strong><br>
+                            <div style="margin-top: 8px; font-size: 12px;">
+                                <strong>UID:</strong> ${obj.uniqueId || 'N/A'}<br>
+                                <strong>World X:</strong> ${obj.world.x.toFixed(3)}<br>
+                                <strong>World Y:</strong> ${obj.world.y.toFixed(3)}<br>
+                                <strong>World Z:</strong> ${obj.world.z.toFixed(2)}<br>
+                                ${obj.assetPath ? `<strong>Path:</strong> ${obj.assetPath}<br>` : ''}
+                            </div>
+                        </div>
                     `;
+
+                    const popupOptions = {
+                        maxWidth: 350,
+                        closeButton: true,
+                        autoClose: false,  // Don't auto-close on map click
+                        closeOnClick: false,  // Don't close when clicking map
+                        className: 'persistent-popup'
+                    };
 
                     if (isCombined)
                     {
@@ -393,7 +468,9 @@ async function updateObjectMarkers() {
                                 weight: 1,
                                 fillColor: '#FF9800',
                                 fillOpacity: 0.85
-                            }).bindPopup(popupHtml);
+                            });
+                            square.bindPopup(popupHtml, popupOptions);
+                            square.on('click', () => { currentPopup = square.getPopup(); });
                             objectMarkers.addLayer(square);
                         }
                         else
@@ -404,7 +481,9 @@ async function updateObjectMarkers() {
                                 color: '#000',
                                 weight: 1,
                                 fillOpacity: 0.9
-                            }).bindPopup(popupHtml);
+                            });
+                            circle.bindPopup(popupHtml, popupOptions);
+                            circle.on('click', () => { currentPopup = circle.getPopup(); });
                             objectMarkers.addLayer(circle);
                         }
                     }
@@ -416,7 +495,9 @@ async function updateObjectMarkers() {
                             color: '#000',
                             weight: 1,
                             fillOpacity: 0.85
-                        }).bindPopup(popupHtml);
+                        });
+                        marker.bindPopup(popupHtml, popupOptions);
+                        marker.on('click', () => { currentPopup = marker.getPopup(); });
                         objectMarkers.addLayer(marker);
                     }
                 });

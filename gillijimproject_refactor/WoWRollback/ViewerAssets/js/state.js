@@ -5,6 +5,8 @@ export class State {
         this.config = null;
         this.selectedVersion = null;
         this.selectedMap = null;
+        this.lastVersion = null;
+        this.lastMap = null;
         this.listeners = [];
         this.cacheBust = 0;
         this.overlayVariant = 'combined';
@@ -45,6 +47,7 @@ export class State {
 
     setVersion(version) {
         if (this.index.versions.includes(version)) {
+            this.lastVersion = this.selectedVersion;
             this.selectedVersion = version;
             this.cacheBust = Date.now();
             this.notify();
@@ -54,7 +57,9 @@ export class State {
     setMap(map) {
         const mapExists = this.index.maps.some(m => m.map === map);
         if (mapExists) {
+            this.lastMap = this.selectedMap;
             this.selectedMap = map;
+            this.cacheBust = Date.now();
             this.notify();
         }
     }

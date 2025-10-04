@@ -1,40 +1,34 @@
-// Loader for overlay and diff JSON data (with cache-busting)
+// Loader for overlay and diff JSON data (smart caching - cleared on version/map change)
 const cache = new Map();
 
-function withBust(url) {
-    const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}t=${Date.now()}`;
-}
-
 export async function loadOverlay(path) {
-    const busted = withBust(path);
-    if (cache.has(busted)) {
-        return cache.get(busted);
+    // Use path as-is for caching - cache busting handled at state level
+    if (cache.has(path)) {
+        return cache.get(path);
     }
 
-    const response = await fetch(busted, { cache: 'no-store' });
+    const response = await fetch(path, { cache: 'no-store' });
     if (!response.ok) {
         throw new Error(`Failed to load overlay: ${path}`);
     }
 
     const data = await response.json();
-    cache.set(busted, data);
+    cache.set(path, data);
     return data;
 }
 
 export async function loadDiff(path) {
-    const busted = withBust(path);
-    if (cache.has(busted)) {
-        return cache.get(busted);
+    if (cache.has(path)) {
+        return cache.get(path);
     }
 
-    const response = await fetch(busted, { cache: 'no-store' });
+    const response = await fetch(path, { cache: 'no-store' });
     if (!response.ok) {
         throw new Error(`Failed to load diff: ${path}`);
     }
 
     const data = await response.json();
-    cache.set(busted, data);
+    cache.set(path, data);
     return data;
 }
 
