@@ -120,15 +120,24 @@ dotnet run --project WoWRollback.Cli -- compare-versions \
   --versions 0.5.3.3368 \
   --maps Azeroth \
   --threads 8 \
-  --viewer-report \
-  --serve
+  --viewer-report
 ```
 
 ---
 
-## 📊 Progress Tracker
+## 📋 Progress Tracker
 
-### Phase 1: Format Readers (Week 1)
+### Phase 0: WoWRollback Core Feature ⏮️ **PRIORITY - START HERE!**
+- [ ] UniqueID analysis implementation
+- [ ] Layer detection algorithm
+- [ ] CSV export (per-map analysis)
+- [ ] Viewer timeline slider UI
+- [ ] Asset filtering (global mode)
+- [ ] Asset filtering (per-tile mode)
+- [ ] Export filtered LK ADTs
+- [ ] In-game testing (3.3.5 client)
+
+### Phase 1: Core Format Readers (Week 1)
 - [ ] WdtAlphaReader.cs
 - [ ] AdtAlphaReader.cs
 - [ ] AdtAlphaConverter.cs

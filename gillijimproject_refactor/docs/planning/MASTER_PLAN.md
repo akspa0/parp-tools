@@ -17,20 +17,45 @@
 
 ### Target State
 - **1 unified tool**: WoWRollback with all functionality
-- **Simple command**: Single CLI command
 - **Performance**: 7-8 minutes (6.5x faster!)
 - **CPU usage**: 60-80% (multi-threaded)
 
 ---
 
-## 🎯 Implementation Phases
+##  Implementation Phases
 
-### Phase 1: Format Readers (Week 1)
+### Phase 0: WoWRollback Core Feature
+Implement the namesake feature BEFORE consolidation
+
+**See**: `docs/planning/PHASE_0_ROLLBACK_FEATURE.md`
+
+**Goal**: Time-travel visualization via chronological uniqueID filtering
+
+**Timeline**: 4 weeks
+
+**Checklist**:
+- [ ] UniqueID analysis (generate CSV reports per map)
+- [ ] Layer detection algorithm (identify work sessions)
+- [ ] Viewer timeline slider UI
+- [ ] Asset filtering (global + per-tile modes)
+- [ ] Export filtered LK ADTs
+- [ ] In-game validation (filtered ADTs work in 3.3.5)
+
+**Why First?**:
+- Proves the core concept
+- Demonstrates unique value proposition
+- Can be demoed immediately
+- Informs consolidation architecture
+
+---
+
+### Phase 1: Core Format Readers (Week 1)
 Migrate file format reading into WoWRollback.Core
 
 **New Files**:
 ```
 WoWRollback.Core/Formats/
+{{ ... }}
 ├── Alpha/
 │   ├── WdtAlphaReader.cs        ← Read Alpha WDT
 │   ├── AdtAlphaReader.cs        ← Read Alpha ADT
