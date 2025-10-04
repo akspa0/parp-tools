@@ -2,6 +2,7 @@
 import { state } from './state.js';
 import { clearCache } from './overlayLoader.js';
 import { loadOverlay } from './overlayLoader.js';
+import { OverlayManager } from './overlays/overlayManager.js';
 
 let map;
 let tileLayer; // no longer used, kept for minimal diff
@@ -21,6 +22,7 @@ let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
 let currentPopup = null; // Track persistent popup
 let pendingOverlayLoad = null; // Debounce token
+let overlayManager = null; // Terrain overlay manager
 // Drag state for overview PiP
 let dragging = false;
 let dragStart = null;
@@ -68,9 +70,22 @@ function initializeMap() {
     objectMarkers.addTo(map);
     minimapLayer.addTo(map);
     
+    // Initialize overlay manager
+    overlayManager = new OverlayManager(map);
+    
     // Re-render markers when zoom changes for dynamic scaling
     map.on('zoomend', () => {
         updateObjectMarkers();
+        if (overlayManager) {
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        }
+    });
+    
+    // Load overlays when map moves
+    map.on('moveend', () => {
+        if (overlayManager) {
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        }
     });
     
     // Track popup close events
@@ -177,6 +192,177 @@ function setupUI() {
     }
 
     renderComparisonInfo();
+    
+    // Setup terrain overlay controls
+    setupTerrainOverlayControls();
+}
+
+function setupTerrainOverlayControls() {
+    // Terrain Properties
+    const showTerrainProperties = document.getElementById('showTerrainProperties');
+    const terrainPropertiesOptions = document.getElementById('terrainPropertiesOptions');
+    const showImpassible = document.getElementById('showImpassible');
+    const showVertexColored = document.getElementById('showVertexColored');
+    const showMultiLayer = document.getElementById('showMultiLayer');
+    const terrainOpacity = document.getElementById('terrainOpacity');
+    const terrainOpacityValue = document.getElementById('terrainOpacityValue');
+    
+    showTerrainProperties.addEventListener('change', (e) => {
+        terrainPropertiesOptions.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked && overlayManager) {
+            overlayManager.showLayer('terrainProperties');
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        } else if (overlayManager) {
+            overlayManager.hideLayer('terrainProperties');
+        }
+    });
+    
+    showImpassible.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('terrainProperties', 'showImpassible', e.target.checked);
+        }
+    });
+    
+    showVertexColored.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('terrainProperties', 'showVertexColored', e.target.checked);
+        }
+    });
+    
+    showMultiLayer.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('terrainProperties', 'showMultiLayer', e.target.checked);
+        }
+    });
+    
+    terrainOpacity.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        terrainOpacityValue.textContent = value.toFixed(1);
+        if (overlayManager) {
+            overlayManager.setLayerOpacity('terrainProperties', value);
+        }
+    });
+    
+    // Liquids
+    const showLiquids = document.getElementById('showLiquids');
+    const liquidsOptions = document.getElementById('liquidsOptions');
+    const showRiver = document.getElementById('showRiver');
+    const showOcean = document.getElementById('showOcean');
+    const showMagma = document.getElementById('showMagma');
+    const showSlime = document.getElementById('showSlime');
+    const liquidsOpacity = document.getElementById('liquidsOpacity');
+    const liquidsOpacityValue = document.getElementById('liquidsOpacityValue');
+    
+    showLiquids.addEventListener('change', (e) => {
+        liquidsOptions.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked && overlayManager) {
+            overlayManager.showLayer('liquids');
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        } else if (overlayManager) {
+            overlayManager.hideLayer('liquids');
+        }
+    });
+    
+    showRiver.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('liquids', 'showRiver', e.target.checked);
+        }
+    });
+    
+    showOcean.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('liquids', 'showOcean', e.target.checked);
+        }
+    });
+    
+    showMagma.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('liquids', 'showMagma', e.target.checked);
+        }
+    });
+    
+    showSlime.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('liquids', 'showSlime', e.target.checked);
+        }
+    });
+    
+    liquidsOpacity.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        liquidsOpacityValue.textContent = value.toFixed(1);
+        if (overlayManager) {
+            overlayManager.setLayerOpacity('liquids', value);
+        }
+    });
+    
+    // Holes
+    const showHoles = document.getElementById('showHoles');
+    const holesOptions = document.getElementById('holesOptions');
+    const holesOpacity = document.getElementById('holesOpacity');
+    const holesOpacityValue = document.getElementById('holesOpacityValue');
+    
+    showHoles.addEventListener('change', (e) => {
+        holesOptions.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked && overlayManager) {
+            overlayManager.showLayer('holes');
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        } else if (overlayManager) {
+            overlayManager.hideLayer('holes');
+        }
+    });
+    
+    holesOpacity.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        holesOpacityValue.textContent = value.toFixed(1);
+        if (overlayManager) {
+            overlayManager.setLayerOpacity('holes', value);
+        }
+    });
+    
+    // AreaID
+    const showAreaIds = document.getElementById('showAreaIds');
+    const areaIdsOptions = document.getElementById('areaIdsOptions');
+    const showBoundaries = document.getElementById('showBoundaries');
+    const showAreaLabels = document.getElementById('showAreaLabels');
+    const showAreaFill = document.getElementById('showAreaFill');
+    const areaLineOpacity = document.getElementById('areaLineOpacity');
+    const areaLineOpacityValue = document.getElementById('areaLineOpacityValue');
+    
+    showAreaIds.addEventListener('change', (e) => {
+        areaIdsOptions.style.display = e.target.checked ? 'block' : 'none';
+        if (e.target.checked && overlayManager) {
+            overlayManager.showLayer('areaIds');
+            overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
+        } else if (overlayManager) {
+            overlayManager.hideLayer('areaIds');
+        }
+    });
+    
+    showBoundaries.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('areaIds', 'showBoundaries', e.target.checked);
+        }
+    });
+    
+    showAreaLabels.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('areaIds', 'showLabels', e.target.checked);
+        }
+    });
+    
+    showAreaFill.addEventListener('change', (e) => {
+        if (overlayManager) {
+            overlayManager.setLayerOption('areaIds', 'showFill', e.target.checked);
+        }
+    });
+    
+    areaLineOpacity.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        areaLineOpacityValue.textContent = value.toFixed(1);
+        if (overlayManager) {
+            overlayManager.setLayerOpacity('areaIds', value);
+        }
+    });
 }
 
 function onStateChange() {

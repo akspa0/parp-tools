@@ -292,6 +292,75 @@ body {
     background: rgba(76, 175, 80, 0.1);
 }
 
+/* Terrain Overlay Controls */
+.overlay-group {
+    margin-bottom: 12px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.overlay-group > label {
+    display: block;
+    font-weight: bold;
+    color: #e0e0e0;
+    cursor: pointer;
+    margin-bottom: 4px;
+}
+
+.overlay-group > label:hover {
+    color: #4CAF50;
+}
+
+.overlay-options {
+    margin-top: 8px;
+}
+
+.overlay-options.indent {
+    margin-left: 20px;
+}
+
+.overlay-options label {
+    display: block;
+    color: #ccc;
+    font-size: 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    font-weight: normal;
+}
+
+.overlay-options label:hover {
+    color: #fff;
+}
+
+.overlay-options input[type="checkbox"] {
+    margin-right: 6px;
+}
+
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.opacity-control input[type="range"] {
+    flex: 1;
+    margin: 0;
+}
+
+.opacity-control span {
+    min-width: 30px;
+    text-align: right;
+    font-size: 11px;
+    color: #4CAF50;
+}
+
+/* Area label styling for AreaID overlay */
+.area-label {
+    pointer-events: none;
+    z-index: 600;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .sidebar {

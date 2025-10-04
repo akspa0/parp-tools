@@ -40,6 +40,73 @@
             </label>
         </div>
         
+        <!-- Terrain Overlays Section -->
+        <div class="info-section">
+            <h3>Terrain Overlays</h3>
+            
+            <!-- Terrain Properties -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showTerrainProperties"> Terrain Properties
+                </label>
+                <div class="overlay-options indent" id="terrainPropertiesOptions" style="display: none;">
+                    <label title="Chunks marked as impassable (collision flag set)"><input type="checkbox" id="showImpassible" checked> Impassible</label>
+                    <label title="Chunks using vertex colors (MCCV - colored lighting per vertex)"><input type="checkbox" id="showVertexColored" checked> Vertex Colored</label>
+                    <label title="Chunks using multiple texture layers (blended terrain)"><input type="checkbox" id="showMultiLayer" checked> Multi-Layer</label>
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="terrainOpacity" min="0" max="1" step="0.1" value="0.4">
+                        <span id="terrainOpacityValue">0.4</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Liquids -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showLiquids"> Liquids
+                </label>
+                <div class="overlay-options indent" id="liquidsOptions" style="display: none;">
+                    <label><input type="checkbox" id="showRiver" checked> Rivers</label>
+                    <label><input type="checkbox" id="showOcean" checked> Oceans</label>
+                    <label><input type="checkbox" id="showMagma" checked> Magma</label>
+                    <label><input type="checkbox" id="showSlime" checked> Slime</label>
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="liquidsOpacity" min="0" max="1" step="0.1" value="0.5">
+                        <span id="liquidsOpacityValue">0.5</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Holes -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showHoles"> Terrain Holes
+                </label>
+                <div class="overlay-options indent" id="holesOptions" style="display: none;">
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="holesOpacity" min="0" max="1" step="0.1" value="0.7">
+                        <span id="holesOpacityValue">0.7</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- AreaID -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showAreaIds"> Area Boundaries
+                </label>
+                <div class="overlay-options indent" id="areaIdsOptions" style="display: none;">
+                    <label><input type="checkbox" id="showBoundaries" checked> Boundary Lines</label>
+                    <label><input type="checkbox" id="showAreaLabels" checked> Area Labels</label>
+                    <label><input type="checkbox" id="showAreaFill"> Color Fill</label>
+                    <label class="opacity-control">
+                        Line Opacity: <input type="range" id="areaLineOpacity" min="0" max="1" step="0.1" value="0.8">
+                        <span id="areaLineOpacityValue">0.8</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+        
         <div class="info-section">
             <strong>Last Click:</strong><br>
             Tile: <span id="clickedTile">Click a tile</span><br>
