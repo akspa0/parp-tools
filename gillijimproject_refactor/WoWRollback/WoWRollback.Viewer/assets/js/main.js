@@ -77,10 +77,19 @@ function initializeMap() {
     
     // Initialize sedimentary layers manager (CSV-based)
     sedimentaryLayers = new SedimentaryLayersManagerCSV(map, state);
+    window.sedimentaryLayers = sedimentaryLayers; // Expose for debugging
+    console.log('[main] Sedimentary Layers initialized:', sedimentaryLayers);
     
     // Re-render markers when zoom changes for dynamic scaling
     map.on('zoomend', () => {
-        updateObjectMarkers();
+        // Don't reload markers on zoom - just rescale them
+        objectMarkers.eachLayer(layer => {
+            if (layer instanceof L.CircleMarker && layer.setRadius) {
+                const radius = getScaledRadius(layer._baseRadius || 5);
+                layer.setRadius(radius);
+            }
+        });
+        
         if (overlayManager) {
             overlayManager.loadVisibleOverlays(state.selectedMap, state.selectedVersion);
         }
@@ -691,6 +700,8 @@ async function performObjectMarkerUpdate() {
                             // Register with sedimentary layers
                             if (sedimentaryLayers) {
                                 sedimentaryLayers.registerMarker(square, obj.uniqueId || 0, row, col);
+                            } else {
+                                console.warn('[main] Square created but sedimentaryLayers not ready, UID:', obj.uniqueId);
                             }
                         }
                         else
@@ -702,6 +713,7 @@ async function performObjectMarkerUpdate() {
                                 weight: 1,
                                 fillOpacity: 0.9
                             });
+                            circle._baseRadius = 4;
                             circle.bindPopup(popupHtml, popupOptions);
                             circle.on('click', () => { 
                                 currentPopup = circle.getPopup();
@@ -724,6 +736,7 @@ async function performObjectMarkerUpdate() {
                             weight: 1,
                             fillOpacity: 0.85
                         });
+                        marker._baseRadius = style.radius;
                         marker.bindPopup(popupHtml, popupOptions);
                         marker.on('click', () => { 
                             currentPopup = marker.getPopup();

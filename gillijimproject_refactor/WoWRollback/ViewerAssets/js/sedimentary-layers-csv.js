@@ -17,6 +17,8 @@ export class SedimentaryLayersManagerCSV {
         this.mode = 'dim'; // 'dim', 'hide', or 'show'
         this.currentTileOnly = false; // Filter to current tile
         this.isInitialized = false;
+        this.isFiltering = false; // Prevent recursive filtering
+        this.filterTimeout = null; // Debounce timer
         
         this.initUI();
     }
@@ -166,8 +168,8 @@ export class SedimentaryLayersManagerCSV {
                 return;
             }
             
-            // Build CSV path (adjust to match your structure)
-            const csvPath = `../cached_maps/analysis/${version}/${mapName}/csv/id_ranges_by_map.csv`;
+            // Build CSV path - CSVs are copied into viewer directory by rebuild script
+            const csvPath = `cached_maps/analysis/${version}/${mapName}/csv/id_ranges_by_map.csv`;
             
             console.log('[SedimentaryLayersCSV] Loading from:', csvPath);
             
@@ -279,11 +281,22 @@ export class SedimentaryLayersManagerCSV {
         const summary = document.createElement('div');
         summary.style.cssText = 'padding: 8px; background: #333; font-size: 11px; text-align: center;';
         const totalCount = this.ranges.reduce((sum, r) => sum + r.count, 0);
-        summary.textContent = `Total: ${totalCount.toLocaleString()} objects`;
+        summary.innerHTML = `
+            <div>Total: ${totalCount.toLocaleString()} objects</div>
+            <button id="applyFilterBtn" style="margin-top: 8px; padding: 6px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Apply Filter Now
+            </button>
+        `;
         listContainer.appendChild(summary);
         
         // Apply filters immediately
         this.applyFilters();
+        
+        // Manual filter button
+        document.getElementById('applyFilterBtn').addEventListener('click', () => {
+            console.log('[SedimentaryLayersCSV] Manual filter triggered');
+            this.applyFilters();
+        });
     }
     
     handleManualSearch(query) {
@@ -318,15 +331,40 @@ export class SedimentaryLayersManagerCSV {
         marker.options.uniqueId = uniqueId;
         marker.options.tileRow = tileRow;
         marker.options.tileCol = tileCol;
+        
+        // Debug: log first few registrations
+        if (this.uniqueIdToMarkers.size <= 5) {
+            console.log(`[SedimentaryLayersCSV] Registered marker UID=${uniqueId} tile=${tileRow},${tileCol}`);
+        }
     }
     
     applyFilters() {
-        if (this.ranges.length === 0) {
-            // No ranges loaded, show all
+        // Debounce to avoid excessive calls
+        clearTimeout(this.filterTimeout);
+        this.filterTimeout = setTimeout(() => this._applyFiltersNow(), 100);
+    }
+    
+    _applyFiltersNow() {
+        // Prevent recursive filtering
+        if (this.isFiltering) {
+            console.log('[SedimentaryLayersCSV] Already filtering, skipping...');
             return;
         }
         
+        if (this.ranges.length === 0) {
+            // No ranges loaded, show all
+            console.log('[SedimentaryLayersCSV] No ranges loaded, skipping filter');
+            return;
+        }
+        
+        this.isFiltering = true;
+        
         const enabledRanges = this.ranges.filter(r => r.enabled);
+        console.log(`[SedimentaryLayersCSV] Filtering with ${enabledRanges.length}/${this.ranges.length} enabled ranges`);
+        console.log(`[SedimentaryLayersCSV] Registered markers: ${this.uniqueIdToMarkers.size} UniqueIDs, total markers: ${Array.from(this.uniqueIdToMarkers.values()).reduce((sum, arr) => sum + arr.length, 0)}`);
+        
+        let hiddenCount = 0;
+        let shownCount = 0;
         
         for (const [uniqueId, markers] of this.uniqueIdToMarkers.entries()) {
             const inEnabledRange = enabledRanges.some(r => uniqueId >= r.min && uniqueId <= r.max);
@@ -346,24 +384,45 @@ export class SedimentaryLayersManagerCSV {
                 }
                 
                 this.applyMarkerVisibility(marker, shouldShow);
+                
+                if (shouldShow) {
+                    shownCount++;
+                } else {
+                    hiddenCount++;
+                }
             }
         }
+        
+        console.log(`[SedimentaryLayersCSV] Filter applied: ${shownCount} shown, ${hiddenCount} hidden/dimmed`);
+        
+        // Reset filtering flag
+        this.isFiltering = false;
     }
     
     applyMarkerVisibility(marker, shouldShow) {
+        // Use setStyle for CircleMarker/Rectangle (Path objects)
         if (this.mode === 'hide' || this.mode === 'show') {
             if (shouldShow) {
-                marker.setOpacity(1);
+                marker.setStyle({ fillOpacity: marker._originalOpacity || 0.85, opacity: 1 });
                 if (marker.options) marker.options.interactive = true;
             } else {
-                marker.setOpacity(0);
+                // Store original opacity first time
+                if (!marker._originalOpacity) {
+                    marker._originalOpacity = marker.options.fillOpacity || 0.85;
+                }
+                marker.setStyle({ fillOpacity: 0, opacity: 0 });
                 if (marker.options) marker.options.interactive = false;
             }
         } else if (this.mode === 'dim') {
             if (shouldShow) {
-                marker.setOpacity(1);
+                marker.setStyle({ fillOpacity: marker._originalOpacity || 0.85, opacity: 1 });
+                if (marker.options) marker.options.interactive = true;
             } else {
-                marker.setOpacity(0.1);
+                if (!marker._originalOpacity) {
+                    marker._originalOpacity = marker.options.fillOpacity || 0.85;
+                }
+                marker.setStyle({ fillOpacity: 0.2, opacity: 0.3 });
+                if (marker.options) marker.options.interactive = false;
             }
         }
     }
