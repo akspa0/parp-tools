@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sedimentary Layers Test</title>
+</head>
+<body>
+    <h1>Test Sedimentary Layers</h1>
+    <p>Open browser console (F12) and run these commands to test:</p>
+    <pre>
+// Check if sedimentaryLayers exists
+console.log('sedimentaryLayers:', window.sedimentaryLayers);
+
+// Check registered markers count
+if (window.sedimentaryLayers) {
+    console.log('Registered UIDs:', window.sedimentaryLayers.uniqueIdToMarkers.size);
+    console.log('Total markers:', Array.from(window.sedimentaryLayers.uniqueIdToMarkers.values()).reduce((sum, arr) => sum + arr.length, 0));
+}
+
+// Check ranges loaded
+if (window.sedimentaryLayers) {
+    console.log('Ranges loaded:', window.sedimentaryLayers.ranges.length);
+    console.log('First range:', window.sedimentaryLayers.ranges[0]);
+}
+
+// Manually trigger filter
+if (window.sedimentaryLayers) {
+    window.sedimentaryLayers.applyFilters();
+}
+    </pre>
+    
+    <h2>Expected Output:</h2>
+    <ul>
+        <li><strong>sedimentaryLayers</strong>: should be an object, not undefined</li>
+        <li><strong>Registered UIDs</strong>: should be > 0 after markers load</li>
+        <li><strong>Ranges loaded</strong>: should match number of ranges in CSV after clicking "Load UniqueID Ranges"</li>
+        <li><strong>applyFilters()</strong>: should show filter logs in console</li>
+    </ul>
+</body>
+</html>

@@ -164,6 +164,9 @@ export class SedimentaryLayersManagerCSV {
             const currentMap = this.state.selectedMap;
             const currentVersion = this.state.selectedVersion;
             
+            // Debug logging
+            console.log(`[SedimentaryLayersCSV] Poll: current=${currentMap}/${currentVersion}, last=${this.lastLoadedMap}/${this.lastLoadedVersion}, ranges=${this.ranges.length}`);
+            
             if (currentMap && currentVersion && 
                 (currentMap !== this.lastLoadedMap || currentVersion !== this.lastLoadedVersion)) {
                 
@@ -172,6 +175,8 @@ export class SedimentaryLayersManagerCSV {
                 // Auto-reload if ranges were previously loaded
                 if (this.ranges.length > 0) {
                     this.loadCSVRanges();
+                } else {
+                    console.log('[SedimentaryLayersCSV] No ranges loaded yet, skipping auto-reload');
                 }
             }
         }, 1000); // Check every second
@@ -247,10 +252,20 @@ export class SedimentaryLayersManagerCSV {
         const listContainer = document.getElementById('layersList');
         listContainer.innerHTML = '';
         
-        // Add bulk selection buttons
-        const bulkButtons = document.createElement('div');
-        bulkButtons.style.cssText = 'padding: 8px; background: #2a2a2a; display: flex; gap: 8px; justify-content: center;';
-        bulkButtons.innerHTML = `
+        // Add control buttons (reload + bulk selection)
+        const controlButtons = document.createElement('div');
+        controlButtons.style.cssText = 'padding: 8px; background: #2a2a2a; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;';
+        controlButtons.innerHTML = `
+            <button id="reloadRangesBtn" style="
+                padding: 4px 12px;
+                background: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: bold;
+            ">🔄 Reload Ranges</button>
             <button id="selectAllBtn" style="
                 padding: 4px 12px;
                 background: #4CAF50;
@@ -270,9 +285,14 @@ export class SedimentaryLayersManagerCSV {
                 font-size: 11px;
             ">Deselect All</button>
         `;
-        listContainer.appendChild(bulkButtons);
+        listContainer.appendChild(controlButtons);
         
-        // Add event listeners for bulk buttons
+        // Add event listeners for control buttons
+        document.getElementById('reloadRangesBtn').addEventListener('click', () => {
+            console.log('[SedimentaryLayersCSV] Manual reload triggered');
+            this.loadCSVRanges();
+        });
+        
         document.getElementById('selectAllBtn').addEventListener('click', () => {
             this.ranges.forEach(r => r.enabled = true);
             this.renderRangeCheckboxes();
