@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WoW Rollback Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Sidebar (permanently pinned to left) -->
+    <div id="sidebar" class="sidebar">
+        <h2>WoW Version Comparison</h2>
+        <div id="comparisonInfo" class="info-section"></div>
+        
+        <div class="control-group">
+            <label for="versionSelect">Version:</label>
+            <select id="versionSelect"></select>
+        </div>
+        
+        <div class="control-group">
+            <label for="mapSelect">Map:</label>
+            <select id="mapSelect"></select>
+        </div>
+        
+        <div class="control-group">
+            <label for="overlayVariantSelect">Overlay:</label>
+            <select id="overlayVariantSelect"></select>
+        </div>
+        
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="showObjects" checked> Show Objects
+            </label>
+        </div>
+        
+        <!-- Terrain Overlays Section -->
+        <div class="info-section">
+            <h3>Terrain Overlays</h3>
+            
+            <!-- Terrain Properties -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showTerrainProperties"> Terrain Properties
+                </label>
+                <div class="overlay-options indent" id="terrainPropertiesOptions" style="display: none;">
+                    <label title="Chunks marked as impassable (collision flag set)"><input type="checkbox" id="showImpassible" checked> Impassible</label>
+                    <label title="Chunks using vertex colors (MCCV - colored lighting per vertex)"><input type="checkbox" id="showVertexColored" checked> Vertex Colored</label>
+                    <label title="Chunks using multiple texture layers (blended terrain)"><input type="checkbox" id="showMultiLayer" checked> Multi-Layer</label>
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="terrainOpacity" min="0" max="1" step="0.1" value="0.4">
+                        <span id="terrainOpacityValue">0.4</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Liquids -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showLiquids"> Liquids
+                </label>
+                <div class="overlay-options indent" id="liquidsOptions" style="display: none;">
+                    <label><input type="checkbox" id="showRiver" checked> Rivers</label>
+                    <label><input type="checkbox" id="showOcean" checked> Oceans</label>
+                    <label><input type="checkbox" id="showMagma" checked> Magma</label>
+                    <label><input type="checkbox" id="showSlime" checked> Slime</label>
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="liquidsOpacity" min="0" max="1" step="0.1" value="0.5">
+                        <span id="liquidsOpacityValue">0.5</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Holes -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showHoles"> Terrain Holes
+                </label>
+                <div class="overlay-options indent" id="holesOptions" style="display: none;">
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="holesOpacity" min="0" max="1" step="0.1" value="0.7">
+                        <span id="holesOpacityValue">0.7</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- AreaID -->
+            <div class="overlay-group">
+                <label>
+                    <input type="checkbox" id="showAreaIds"> Area Boundaries
+                </label>
+                <div class="overlay-options indent" id="areaIdsOptions" style="display: none;">
+                    <label><input type="checkbox" id="showBoundaries" checked> Boundary Lines</label>
+                    <label><input type="checkbox" id="showAreaLabels" checked> Area Labels</label>
+                    <label><input type="checkbox" id="showAreaFill"> Color Fill</label>
+                    <label class="opacity-control">
+                        Line Opacity: <input type="range" id="areaLineOpacity" min="0" max="1" step="0.1" value="0.8">
+                        <span id="areaLineOpacityValue">0.8</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Shadow Maps -->
+            <div class="overlay-group">
+                <label title="Baked terrain shadows from MCSH data">
+                    <input type="checkbox" id="showShadowMaps"> Shadow Maps
+                </label>
+                <div class="overlay-options indent" id="shadowMapsOptions" style="display: none;">
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="shadowOpacity" min="0" max="1" step="0.1" value="0.5">
+                        <span id="shadowOpacityValue">0.5</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <strong>Last Click:</strong><br>
+            Tile: <span id="clickedTile">Click a tile</span><br>
+            Coord: <span id="clickedCoord">-</span>
+            <h3>Legend</h3>
+            <div class="legend-item">
+                <span class="color-box" style="background: #4CAF50;"></span>
+                <span>Available in selected version</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #9E9E9E;"></span>
+                <span>Not available in selected version</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #2196F3; width: 8px; height: 8px; border-radius: 50%;"></span>
+                <span>M2 Models (MDX)</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box" style="background: #FF9800; width: 8px; height: 8px;"></span>
+                <span>WMO Objects</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full-page Leaflet map -->
+    <div id="map"></div>
+    
+    <!-- Mini-map overview (picture-in-picture) -->
+    <canvas id="overviewCanvas" class="overview-canvas"></canvas>
+    
+    <!-- Sedimentary Layers Panel -->
+    <div id="layersPanel" class="layers-panel">
+        <div class="layers-header">
+            <h3>Sedimentary Layers</h3>
+            <button id="layersPanelToggle" class="panel-toggle">−</button>
+        </div>
+        <div class="layers-content">
+            <div class="layers-filter">
+                <input type="text" id="layersSearch" placeholder="Filter by UniqueID range...">
+            </div>
+            <div id="layersList" class="layers-list">
+                <!--Layers will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module">
+        import { init } from './js/main.js';
+        init();
+    </script>
+</body>
+</html>

@@ -234,6 +234,10 @@ public sealed class ViewerReportWriter
 
         WriteIndexJson(viewerRoot, result, mapTileCatalog, chosenDefaultVersion, effectiveDiffPair);
         WriteConfigJson(viewerRoot, resolvedOptions, chosenDefaultVersion, effectiveDiffPair);
+        
+        // Phase 2: Generate overlay manifests for each version/map
+        GenerateOverlayManifests(overlaysRoot, result, mapTileCatalog);
+        
         CopyViewerAssets(viewerRoot);
 
         return viewerRoot;
@@ -498,6 +502,50 @@ public sealed class ViewerReportWriter
         {
             // Log but don't fail - terrain overlays are optional
             Console.WriteLine($"[warn] Failed to generate terrain overlays for {mapName} ({version}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Phase 2: Generates overlay_manifest.json for each version/map combination.
+    /// </summary>
+    private static void GenerateOverlayManifests(
+        string overlaysRoot,
+        VersionComparisonResult result,
+        Dictionary<string, List<TileDescriptor>> mapTileCatalog)
+    {
+        var manifestBuilder = new OverlayManifestBuilder();
+
+        foreach (var (mapName, tiles) in mapTileCatalog)
+        {
+            var safeMap = Sanitize(mapName);
+            var tileCoordsForMap = tiles.Select(t => (t.Row, t.Col)).Distinct().ToList();
+
+            foreach (var version in result.Versions)
+            {
+                var safeVersion = Sanitize(version);
+                var versionRoot = Path.Combine(overlaysRoot, safeVersion);
+                var mapOverlayDir = Path.Combine(versionRoot, safeMap);
+
+                // Check if terrain/shadow data exists
+                var terrainDir = Path.Combine(mapOverlayDir, "terrain_complete");
+                var shadowDir = Path.Combine(mapOverlayDir, "shadow_map");
+                var hasTerrainData = Directory.Exists(terrainDir) && Directory.GetFiles(terrainDir, "*.json").Length > 0;
+                var hasShadowData = Directory.Exists(shadowDir) && Directory.GetFiles(shadowDir, "*.json").Length > 0;
+
+                // Generate manifest
+                var manifestJson = manifestBuilder.BuildManifest(
+                    version,
+                    mapName,
+                    tileCoordsForMap,
+                    mapOverlayDir,
+                    hasTerrainData,
+                    hasShadowData);
+
+                var manifestPath = Path.Combine(mapOverlayDir, "overlay_manifest.json");
+                File.WriteAllText(manifestPath, manifestJson);
+
+                Console.WriteLine($"[Phase 2] Generated overlay_manifest.json for {mapName} ({version})");
+            }
         }
     }
 

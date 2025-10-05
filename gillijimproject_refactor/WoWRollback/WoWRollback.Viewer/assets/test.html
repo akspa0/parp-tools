@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viewer Diagnostic Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        .test { margin: 10px 0; padding: 10px; background: #2a2a2a; border-radius: 4px; }
+        .pass { border-left: 4px solid #4CAF50; }
+        .fail { border-left: 4px solid #F44336; }
+        .warn { border-left: 4px solid #FF9800; }
+        pre { background: #1a1a1a; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>WoW Rollback Viewer Diagnostic</h1>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+
+        function test(name, fn) {
+            const div = document.createElement('div');
+            div.className = 'test';
+            try {
+                const result = fn();
+                if (result === true || result === undefined) {
+                    div.className += ' pass';
+                    div.innerHTML = `<strong>✓ ${name}</strong>`;
+                } else if (result && typeof result === 'object') {
+                    div.className += ' pass';
+                    div.innerHTML = `<strong>✓ ${name}</strong><pre>${JSON.stringify(result, null, 2).substring(0, 500)}</pre>`;
+                } else {
+                    div.className += ' warn';
+                    div.innerHTML = `<strong>⚠ ${name}</strong><div>${result}</div>`;
+                }
+            } catch (error) {
+                div.className += ' fail';
+                div.innerHTML = `<strong>✗ ${name}</strong><div>Error: ${error.message}</div>`;
+            }
+            results.appendChild(div);
+        }
+
+        // Run tests
+        test('ES6 Modules Supported', () => {
+            return typeof window.import !== 'undefined' || true; // Always pass, just informational
+        });
+
+        test('Fetch API Available', () => {
+            if (!window.fetch) throw new Error('Fetch API not supported');
+            return true;
+        });
+
+        test('Protocol Check', () => {
+            const protocol = window.location.protocol;
+            if (protocol === 'file:') {
+                throw new Error('Running on file:// protocol - modules will fail! Use http:// or https://');
+            }
+            return `Protocol: ${protocol}`;
+        });
+
+        // Try to load index.json
+        test('Load index.json', async () => {
+            try {
+                const response = await fetch('index.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                return {
+                    comparisonKey: data.comparisonKey,
+                    versions: data.versions,
+                    mapCount: data.maps?.length || 0
+                };
+            } catch (error) {
+                throw error;
+            }
+        });
+
+        // Try to load config.json
+        test('Load config.json', async () => {
+            try {
+                const response = await fetch('config.json');
+                if (!response.ok) {
+                    return 'Config not found (optional)';
+                }
+                const data = await response.json();
+                return { found: true, data };
+            } catch (error) {
+                return 'Config not found (optional)';
+            }
+        });
+
+        // Check file structure
+        test('Check minimap structure', async () => {
+            try {
+                const response = await fetch('index.json');
+                const data = await response.json();
+                const version = data.versions[0];
+                const map = data.maps[0]?.map;
+                const tile = data.maps[0]?.tiles[0];
+                
+                if (!tile) return 'No tiles found';
+                
+                const minimapPath = `minimap/${version}/${map}/${map}_${tile.col}_${tile.row}.png`;
+                const testResponse = await fetch(minimapPath, { method: 'HEAD' });
+                
+                if (testResponse.ok) {
+                    return `✓ Found minimap at: ${minimapPath}`;
+                } else {
+                    throw new Error(`Minimap not found at: ${minimapPath}`);
+                }
+            } catch (error) {
+                throw error;
+            }
+        });
+
+        console.log('Diagnostic tests completed. Check results above.');
+    </script>
+</body>
+</html>

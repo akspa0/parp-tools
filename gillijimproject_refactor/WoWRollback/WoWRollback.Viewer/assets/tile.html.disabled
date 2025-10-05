@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tile Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="tile-view">
+    <div class="tile-container">
+        <header>
+            <h1 id="tileTitle">Tile Viewer</h1>
+            <a href="index.html" class="back-link">← Back to Grid</a>
+        </header>
+
+        <div class="tile-content">
+            <div class="canvas-container">
+                <div class="toolbar" style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+                    <button id="zoomIn">+</button>
+                    <button id="zoomOut">−</button>
+                    <button id="zoomReset">Reset</button>
+                    <span style="color:#9E9E9E; font-size:0.9em;">Zoom: <span id="zoomLevel">1.00x</span></span>
+                </div>
+                <canvas id="tileCanvas"></canvas>
+                <div id="canvasOverlay" class="canvas-overlay"></div>
+            </div>
+
+            <aside class="sidebar">
+                <section class="version-control">
+                    <h3>Version</h3>
+                    <select id="versionSelect"></select>
+                </section>
+
+                <section class="overlay-control">
+                    <h3>Overlay</h3>
+                    <select id="overlayVariantSelect"></select>
+                </section>
+
+                <section class="diff-control">
+                    <h3>Diff Mode</h3>
+                    <label>
+                        <input type="checkbox" id="diffEnabled">
+                        Enable Diff
+                    </label>
+                    <div id="diffOptions" class="diff-options" style="display: none;">
+                        <label>Baseline:
+                            <select id="diffBaseline"></select>
+                        </label>
+                        <label>Comparison:
+                            <select id="diffComparison"></select>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="fit-control">
+                    <h3>Fit Controls</h3>
+                    <label>Axis:
+                        <select id="fitAxis">
+                            <option value="auto" selected>Auto</option>
+                            <option value="xy">XY</option>
+                            <option value="xz">XZ</option>
+                            <option value="zy">ZY</option>
+                        </select>
+                    </label>
+                    <div class="fit-row">
+                        <label><input type="checkbox" id="fitFlipX"> Flip X</label>
+                        <label><input type="checkbox" id="fitFlipY"> Flip Y</label>
+                    </div>
+                    <label>Rotate:
+                        <select id="fitRotate">
+                            <option value="0" selected>0°</option>
+                            <option value="90">90°</option>
+                            <option value="180">180°</option>
+                            <option value="270">270°</option>
+                        </select>
+                    </label>
+                    <div class="fit-row">
+                        <label><input type="checkbox" id="fitInvertY" checked> Invert Y (pixels)</label>
+                    </div>
+                    <div class="fit-row">
+                        <button id="fitAuto">Auto-Fit</button>
+                        <button id="fitReset">Reset</button>
+                    </div>
+                    <div id="fitDiagnostics" class="fit-diagnostics" style="font-size: 0.85em; color: #9E9E9E;"></div>
+                </section>
+
+                <section class="overlay-info">
+                    <h3>Objects (<span id="objectCount">0</span>)</h3>
+                    <div id="objectList" class="object-list"></div>
+                </section>
+
+                <section class="diff-legend" style="display: none;">
+                    <h3>Diff Legend</h3>
+                    <div class="legend-item">
+                        <span class="diff-marker added"></span>
+                        <span>Added</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="diff-marker removed"></span>
+                        <span>Removed</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="diff-marker moved"></span>
+                        <span>Moved</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="diff-marker changed"></span>
+                        <span>Changed</span>
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </div>
+
+    <script type="module">
+        import { init } from './js/tile.js';
+        init();
+    </script>
+</body>
+</html>

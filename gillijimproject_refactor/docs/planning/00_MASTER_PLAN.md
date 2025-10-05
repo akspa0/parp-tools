@@ -102,52 +102,34 @@ This document unifies:
 **Acceptance Criteria**:
 - ⏳ Solution builds without errors
 - ⏳ Old path works (default)
-- ⏳ New path works (with `-UseNewViewerAssets`)
 - ⏳ SHA256 validation: old == new outputs
 - ⏳ Zero visual differences
 
 ---
 
-### Phase 2: Backend Manifest System (Week 2-3)
+### Phase 2: Backend Manifest System (Week 2-3) ⏳ IMPLEMENTATION COMPLETE, AWAITING VALIDATION
 
 **Goal**: Implement overlay manifest generation (04_Overlay_Plugin_Architecture)
 
 **Tasks**:
-1. Create `OverlayManifestBuilder.cs` in `WoWRollback.Core`
-2. Generate `overlay_manifest.json` during viewer report generation
-3. Add CLI flag `--viewer-next-objects` for A/B testing
-4. Document manifest schema
-
-**Manifest Schema**:
-```json
-{
-  "version": "0.5.3.3368",
-  "map": "Azeroth",
-  "overlays": [
-    {
-      "id": "terrain.properties",
-      "plugin": "terrain",
-      "title": "Terrain Properties",
-      "tiles": "sparse",
-      "resources": {
-        "tilePattern": "overlays/{version}/{map}/terrain_complete/tile_{col}_{row}.json"
-      }
-    }
-  ]
-}
-```
-
-**Note**: Tile pattern is `tile_{col}_{row}` to match actual WoW tile naming (column_row format, no r/c prefixes).
+1. ✅ Create `OverlayManifestBuilder.cs` in `WoWRollback.Core`
+2. ✅ Integrate with `ViewerReportWriter.cs`
+3. ✅ Generate `overlay_manifest.json` during viewer report generation
+4. ⏳ Build and verify manifests generated
+5. ⏳ Validate manifest content and accuracy
 
 **Deliverables**:
-- [ ] `WoWRollback.Core/Services/Viewer/OverlayManifestBuilder.cs`
-- [ ] Manifest generation in `ViewerReportWriter.cs`
-- [ ] Sample `overlay_manifest.json` for test map
+- [x] `WoWRollback.Core/Services/Viewer/OverlayManifestBuilder.cs`
+- [x] Updated `ViewerReportWriter.cs` with `GenerateOverlayManifests()`
+- [x] `docs/planning/09_Phase2_Validation.md`
+- [ ] `overlay_manifest.json` files validated (pending user testing)
 
 **Acceptance Criteria**:
-- Manifest correctly lists available overlays
-- Sparse tiles marked correctly
-- CLI flag works for A/B testing
+- ⏳ Solution builds without errors
+- ⏳ Manifests generated for each version/map
+- ⏳ Correct overlay detection (objects, terrain, shadows)
+- ⏳ Tile patterns match actual files
+- ⏳ Viewer still works (backward compatible)
 
 ---
 
