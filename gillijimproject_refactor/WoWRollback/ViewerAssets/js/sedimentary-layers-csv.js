@@ -149,6 +149,32 @@ export class SedimentaryLayersManagerCSV {
         
         const btn = document.getElementById('loadRangesBtn');
         btn.addEventListener('click', () => this.loadCSVRanges());
+        
+        // Auto-reload CSV when map changes
+        this.lastLoadedMap = null;
+        this.lastLoadedVersion = null;
+        
+        // Watch for map/version changes
+        this.checkForMapChange();
+    }
+    
+    checkForMapChange() {
+        // Poll for map changes (since state doesn't have events)
+        setInterval(() => {
+            const currentMap = this.state.selectedMap;
+            const currentVersion = this.state.selectedVersion;
+            
+            if (currentMap && currentVersion && 
+                (currentMap !== this.lastLoadedMap || currentVersion !== this.lastLoadedVersion)) {
+                
+                console.log(`[SedimentaryLayersCSV] Map changed to ${currentMap} (${currentVersion}), reloading CSV...`);
+                
+                // Auto-reload if ranges were previously loaded
+                if (this.ranges.length > 0) {
+                    this.loadCSVRanges();
+                }
+            }
+        }, 1000); // Check every second
     }
     
     async loadCSVRanges() {
@@ -182,7 +208,11 @@ export class SedimentaryLayersManagerCSV {
             this.parseCSV(csvText);
             this.renderRangeCheckboxes();
             
-            statusDiv.textContent = `Loaded ${this.ranges.length} ranges`;
+            // Track what was loaded
+            this.lastLoadedMap = mapName;
+            this.lastLoadedVersion = version;
+            
+            statusDiv.textContent = `Loaded ${this.ranges.length} ranges for ${mapName}`;
             
         } catch (err) {
             console.error('[SedimentaryLayersCSV] Load failed:', err);
@@ -216,6 +246,42 @@ export class SedimentaryLayersManagerCSV {
     renderRangeCheckboxes() {
         const listContainer = document.getElementById('layersList');
         listContainer.innerHTML = '';
+        
+        // Add bulk selection buttons
+        const bulkButtons = document.createElement('div');
+        bulkButtons.style.cssText = 'padding: 8px; background: #2a2a2a; display: flex; gap: 8px; justify-content: center;';
+        bulkButtons.innerHTML = `
+            <button id="selectAllBtn" style="
+                padding: 4px 12px;
+                background: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+            ">Select All</button>
+            <button id="deselectAllBtn" style="
+                padding: 4px 12px;
+                background: #f44336;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 11px;
+            ">Deselect All</button>
+        `;
+        listContainer.appendChild(bulkButtons);
+        
+        // Add event listeners for bulk buttons
+        document.getElementById('selectAllBtn').addEventListener('click', () => {
+            this.ranges.forEach(r => r.enabled = true);
+            this.renderRangeCheckboxes();
+        });
+        
+        document.getElementById('deselectAllBtn').addEventListener('click', () => {
+            this.ranges.forEach(r => r.enabled = false);
+            this.renderRangeCheckboxes();
+        });
         
         const header = document.createElement('div');
         header.style.cssText = 'padding: 8px; background: #333; font-weight: bold; font-size: 12px; display: flex; justify-content: space-between;';
@@ -332,10 +398,36 @@ export class SedimentaryLayersManagerCSV {
         marker.options.tileRow = tileRow;
         marker.options.tileCol = tileCol;
         
+        // Auto-apply current filter to newly registered marker
+        if (this.ranges.length > 0) {
+            this.applyFilterToSingleMarker(marker, uniqueId);
+        }
+        
         // Debug: log first few registrations
         if (this.uniqueIdToMarkers.size <= 5) {
             console.log(`[SedimentaryLayersCSV] Registered marker UID=${uniqueId} tile=${tileRow},${tileCol}`);
         }
+    }
+    
+    applyFilterToSingleMarker(marker, uniqueId) {
+        // Apply current filter state to a single marker immediately
+        const enabledRanges = this.ranges.filter(r => r.enabled);
+        const inEnabledRange = enabledRanges.some(r => uniqueId >= r.min && uniqueId <= r.max);
+        
+        let shouldShow = inEnabledRange;
+        
+        // Apply tile filter if enabled
+        if (this.currentTileOnly && shouldShow) {
+            const bounds = this.map.getBounds();
+            const center = this.map.getCenter();
+            const tileRow = Math.floor(center.lat);
+            const tileCol = Math.floor(center.lng);
+            
+            shouldShow = marker.options.tileRow === tileRow && 
+                         marker.options.tileCol === tileCol;
+        }
+        
+        this.applyMarkerVisibility(marker, shouldShow);
     }
     
     applyFilters() {
