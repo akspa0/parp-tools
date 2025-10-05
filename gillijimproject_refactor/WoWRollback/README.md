@@ -39,6 +39,7 @@ Open http://localhost:8080 and:
 - **Toggle terrain overlays** - Impassible areas (red), liquids (blue/green/orange), multi-layer terrain (blue), vertex colors (green)
 - **View area boundaries** - Real area names from AreaTable.dbc with adjustable opacity
 - **Compare versions** - Switch between 0.5.3, 0.5.5, etc. and see object additions/removals
+- **Filter by UniqueID ranges** 🆕 - Load CSV ranges and check/uncheck to isolate specific object groups
 - **Filter overlays** - Sub-options for each overlay type (rivers, oceans, magma, slime)
 - **Pan and zoom** - Explore the entire continent with Leaflet map controls
 
@@ -250,6 +251,38 @@ Reports counts of placements that would be removed per tile and overall.
 - **YAML reports**: Optional per-tile YAML summaries
 - **LK ADT conversion**: Convert Alpha ADTs to Wrath format
 
+### UniqueID Range Filtering (New!)
+The viewer now includes powerful CSV-based filtering to isolate specific object ranges:
+
+**Features:**
+- **Load UniqueID Ranges**: Pre-generated CSV files (`id_ranges_by_map.csv`) automatically cluster objects into 10K-sized ranges
+- **Interactive Checkboxes**: Check/uncheck ranges to show/hide groups of objects
+- **Multiple Modes**:
+  - **Show Only** (default): Only checked ranges are visible
+  - **Dim**: Unchecked ranges are dimmed (20% opacity)
+  - **Hide**: Unchecked ranges are completely hidden
+- **Bulk Operations**: "Select All" and "Deselect All" buttons for quick toggling
+- **Auto-Reload**: When switching maps or versions, click "🔄 Reload Ranges" to load the corresponding CSV
+- **Auto-Filter**: Newly loaded objects (from map panning) automatically inherit current filter state
+- **Performance**: Debounced filtering prevents lag during rapid checkbox changes
+
+**Usage:**
+1. Open viewer and select a map
+2. Click "Load UniqueID Ranges" in the Sedimentary Layers panel
+3. Check/uncheck ranges to filter objects
+4. Switch maps → click "🔄 Reload Ranges" to load new ranges
+5. Use mode dropdown to change visibility behavior
+
+**CSV Format:**
+```csv
+MinUniqueID,MaxUniqueID,Count
+4531,5788,371
+7694,104304,69039
+...
+```
+
+Generated automatically by `rebuild-and-regenerate.ps1` in `cached_maps/analysis/{version}/{map}/csv/`.
+
 ## Default Behavior
 
 ### Coordinate System
@@ -263,7 +296,8 @@ Reports counts of placements that would be removed per tile and overall.
 - No need to manually list maps unless you want specific ones
 
 ## Future Enhancements
-- UniqueID timeline selector for per-tile filtering
+- ~~UniqueID timeline selector for per-tile filtering~~ ✅ **Implemented!** CSV-based range filtering now available
+- Per-tile filtering (currently works map-wide, could be refined to specific tiles)
 - Patched ADT export (write modified ADTs with selected object ranges)
 - Automated minimap sourcing via CASC/file lookup
 - Rollback APPLY command that rewrites ADTs using keep/drop configurations
