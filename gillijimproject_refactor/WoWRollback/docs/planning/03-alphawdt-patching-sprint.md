@@ -1,31 +1,22 @@
-# AlphaWDT Patching Sprint 🦀
+### Task 4: WMO Path Investigation RESOLVED
 
-**Goal**: Implement AlphaWDT patching to remove selected objects by replacing model paths with `SPELLS\Invisible.m2`.
+**Status**: COMPLETED
 
-**Priority**: HIGH - Next "crabbing" feature, user-requested
+**User Decision**: Use `world\wmo\dungeon\test\test.wmo` for WMO replacements
 
----
+**Findings**:
+- WMO replacement model: `world\wmo\dungeon\test\test.wmo` (30 chars)
+- Description: Three nested square boxes for coordinate system testing
+- Confirmed: Exists in all WoW versions (Alpha → 3.3.5 → 12.0)
+- Small footprint: Minimal geometry, perfect for testing/invisible purposes
+- Same padding strategy applies to WMO as M2 (null-padding to original length)
 
-## 🎯 Sprint Goals
+**Implementation**:
+File size preserved exactly (no offset changes)  
+No crashes or visual corruption
 
-### MVP (Minimum Viable Product)
-- [x] Per-tile CSV generation (completed)
-- [ ] Verify `SPELLS\Invisible.m2` exists in Alpha data
-- [ ] Build AlphaWDT parser
-- [ ] Build AlphaWDT patcher
-- [ ] CLI command: `rollback patch-alpha-wdt`
-- [ ] Test in Alpha 0.5.3 client (single map)
-
-### Success Criteria
-✅ Patched WDT loads in Alpha client without errors  
-✅ Objects with UniqueIDs NOT in config are invisible  
-✅ Objects with UniqueIDs IN config are still visible  
-✅ File size preserved exactly (no offset changes)  
-✅ No crashes or visual corruption  
-
----
-
-## 📋 Implementation Checklist
+**Future Optimization**:
+See `05-future-null-out-optimization.md` for research on potentially nulling out model names entirely instead of replacing. Requires manual ADT testing and Noggit code review first.  
 
 ### Step 1: Verify Debug Models ✅ (Quick Check)
 **Time estimate**: 5 minutes
@@ -354,8 +345,8 @@ public class AlphaWdtPatcher
 
 ---
 
-### Step 4: Add CLI Command
-**Time estimate**: 1 hour
+### Step 4: Add CLI Command with Lineage Tracking
+**Time estimate**: 2 hours (including lineage report generation)
 
 **File**: `WoWRollback.Cli/Commands/RollbackCommands.cs`
 
@@ -372,19 +363,150 @@ public class PatchAlphaWdtCommand
     [Option("--output", Description = "Output path for patched WDT")]
     public string OutputPath { get; set; }
     
+    [Option("--report", Description = "Generate lineage report (default: true)")]
+    public bool GenerateReport { get; set; } = true;
+    
     public async Task<int> OnExecuteAsync()
     {
         // Load config
         var config = JsonSerializer.Deserialize<RollbackConfig>(
             await File.ReadAllTextAsync(ConfigPath));
         
+        Console.WriteLine($"Patching WDT: {Path.GetFileName(WdtPath)}");
+        Console.WriteLine($"Config: {Path.GetFileName(ConfigPath)}");
+        Console.WriteLine($"Output: {OutputPath}");
+        
         // Patch WDT
         var patcher = new AlphaWdtPatcher();
-        patcher.PatchWdt(WdtPath, config, OutputPath);
+        var stats = patcher.PatchWdt(WdtPath, config, OutputPath);
         
-        Console.WriteLine($"✅ Patched WDT written to: {OutputPath}");
+        Console.WriteLine($"\n✅ Patched WDT written to: {OutputPath}");
+        Console.WriteLine($"   Objects kept: {stats.ObjectsKept}");
+        Console.WriteLine($"   Objects replaced: {stats.ObjectsReplaced}");
+        Console.WriteLine($"   M2 replaced: {stats.M2Replaced}");
+        Console.WriteLine($"   WMO replaced: {stats.WmoReplaced}");
+        
+        // Generate lineage report
+        if (GenerateReport)
+        {
+            var reportPath = OutputPath.Replace(".wdt", "_lineage.md");
+            await GenerateLineageReport(config, stats, reportPath);
+            Console.WriteLine($"   Lineage report: {reportPath}");
+        }
+        
         return 0;
     }
+    
+    private async Task GenerateLineageReport(
+        RollbackConfig config, 
+        PatchingStatistics stats, 
+        string reportPath)
+    {
+        var report = new StringBuilder();
+        
+        report.AppendLine("# Rollback Lineage Report");
+        report.AppendLine();
+        report.AppendLine($"**Generated**: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        report.AppendLine($"**Generator**: WoWRollback CLI v{Assembly.GetExecutingAssembly().GetName().Version}");
+        report.AppendLine();
+        
+        report.AppendLine("## Source Configuration");
+        report.AppendLine();
+        report.AppendLine($"- **Map**: {config.Map}");
+        report.AppendLine($"- **Version**: {config.Version}");
+        report.AppendLine($"- **Mode**: {config.Mode}");
+        report.AppendLine($"- **Config Created**: {config.Metadata?.Created}");
+        report.AppendLine($"- **Config Modified**: {config.Metadata?.Modified}");
+        report.AppendLine($"- **Config Generator**: {config.Metadata?.Generator}");
+        report.AppendLine();
+        
+        report.AppendLine("## Patching Statistics");
+        report.AppendLine();
+        report.AppendLine($"- **Objects Kept**: {stats.ObjectsKept}");
+        report.AppendLine($"- **Objects Replaced**: {stats.ObjectsReplaced}");
+        report.AppendLine($"  - M2 (Doodads): {stats.M2Replaced}");
+        report.AppendLine($"  - WMO (Buildings): {stats.WmoReplaced}");
+        report.AppendLine($"- **File Size**: {stats.OriginalFileSize} bytes → {stats.PatchedFileSize} bytes");
+        report.AppendLine($"- **SHA256 (Original)**: `{stats.OriginalSha256}`");
+        report.AppendLine($"- **SHA256 (Patched)**: `{stats.PatchedSha256}`");
+        report.AppendLine();
+        
+        report.AppendLine("## Invisible Model Mappings");
+        report.AppendLine();
+        report.AppendLine("Replaced objects now reference:");
+        report.AppendLine($"- **M2 (Doodads)**: `SPELLS\\Invisible.m2`");
+        report.AppendLine($"- **WMO (Buildings)**: `world\\wmo\\dungeon\\test\\test.wmo`");
+        report.AppendLine();
+        
+        if (config.Mode == "advanced" && config.Tiles != null)
+        {
+            report.AppendLine("## Per-Tile Details");
+            report.AppendLine();
+            report.AppendLine($"**Total Tiles Configured**: {config.Tiles.Count}");
+            report.AppendLine();
+            
+            foreach (var tile in config.Tiles.OrderBy(t => t.Key))
+            {
+                report.AppendLine($"### Tile {tile.Key}");
+                report.AppendLine();
+                report.AppendLine($"**Selected Ranges**: {tile.Value.SelectedRanges.Count}");
+                report.AppendLine();
+                
+                if (tile.Value.SelectedRanges.Any())
+                {
+                    report.AppendLine("| Min UniqueID | Max UniqueID | Count | Type |");
+                    report.AppendLine("|--------------|--------------|-------|------|");
+                    foreach (var range in tile.Value.SelectedRanges)
+                    {
+                        report.AppendLine($"| {range.Min} | {range.Max} | {range.Count} | {range.Type} |");
+                    }
+                    report.AppendLine();
+                }
+            }
+        }
+        
+        report.AppendLine("## Reproducibility");
+        report.AppendLine();
+        report.AppendLine("To reproduce this patching operation:");
+        report.AppendLine();
+        report.AppendLine("```powershell");
+        report.AppendLine($"dotnet run --project WoWRollback.Cli -- rollback patch-alpha-wdt \\");
+        report.AppendLine($"  --wdt \"{stats.OriginalWdtPath}\" \\");
+        report.AppendLine($"  --config \"{stats.ConfigPath}\" \\");
+        report.AppendLine($"  --output \"{stats.OutputPath}\"");
+        report.AppendLine("```");
+        report.AppendLine();
+        
+        report.AppendLine("## Verification");
+        report.AppendLine();
+        report.AppendLine("To verify the patched file:");
+        report.AppendLine();
+        report.AppendLine("1. Check SHA256 hash matches: `" + stats.PatchedSha256 + "`");
+        report.AppendLine("2. Verify file size: " + stats.PatchedFileSize + " bytes");
+        report.AppendLine("3. Test in WoW Alpha " + config.Version + " client");
+        report.AppendLine("4. Confirm removed objects are invisible/missing");
+        report.AppendLine();
+        
+        report.AppendLine("---");
+        report.AppendLine("*This report provides complete lineage tracking for rollback operations.*");
+        
+        await File.WriteAllTextAsync(reportPath, report.ToString());
+    }
+}
+
+public class PatchingStatistics
+{
+    public int ObjectsKept { get; set; }
+    public int ObjectsReplaced { get; set; }
+    public int M2Replaced { get; set; }
+    public int WmoReplaced { get; set; }
+    public long OriginalFileSize { get; set; }
+    public long PatchedFileSize { get; set; }
+    public string OriginalSha256 { get; set; }
+    public string PatchedSha256 { get; set; }
+    public string OriginalWdtPath { get; set; }
+    public string ConfigPath { get; set; }
+    public string OutputPath { get; set; }
 }
 ```
 

@@ -406,6 +406,8 @@ public static class Program
 
                     // Export ADTs FIRST if requested (needed for LK AreaIDs in terrain extraction)
                     string? lkAdtDirectory = null;
+                    var wdtScanner = new WdtAlphaScanner(wdt!);
+                    
                     if (exportAdt)
                     {
                         AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
@@ -438,20 +440,20 @@ public static class Program
                             NoZoneFallback = noZoneFallback,
                             VizDir = vizDir,
                         });
-                        
-                        // Determine LK ADT directory from export
-                        var wdtScanner = new WdtAlphaScanner(wdt!);
-                        lkAdtDirectory = Path.Combine(exportDir!, "World", "Maps", wdtScanner.MapName);
-                        
-                        if (Directory.Exists(lkAdtDirectory))
-                        {
-                            Console.WriteLine($"[area] LK ADTs exported to: {lkAdtDirectory}");
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
-                            lkAdtDirectory = null;
-                        }
+                    }
+                    
+                    // Determine LK ADT directory (check even if we didn't export, they might already exist)
+                    lkAdtDirectory = Path.Combine(exportDir!, "World", "Maps", wdtScanner.MapName);
+                    
+                    if (Directory.Exists(lkAdtDirectory))
+                    {
+                        Console.WriteLine($"[area] Using LK ADTs from: {lkAdtDirectory}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
+                        Console.WriteLine($"[area:warn] Area names will show as 'Unknown' (using Alpha AreaIDs)");
+                        lkAdtDirectory = null;
                     }
                     
                     // Run analysis pipeline (after ADT export so we have LK AreaIDs)

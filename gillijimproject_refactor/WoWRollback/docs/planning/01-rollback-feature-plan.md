@@ -16,7 +16,7 @@ The Rollback feature is the core vision of WoWRollback: enabling surgical remova
 
 ---
 
-## 🎯 Phase 1: Per-Tile CSV Generation
+## 🎯 Phase 1: Per-Tile CSV Generation ⭐ **IN PROGRESS**
 
 ### Current State
 - ✅ Map-wide CSV generation exists (`id_ranges_by_map.csv`)
@@ -24,67 +24,155 @@ The Rollback feature is the core vision of WoWRollback: enabling surgical remova
 - ❌ No per-tile CSV generation
 
 ### Requirements
-Generate `id_ranges_by_tile.csv` for each tile containing:
+
+**Two modes of operation:**
+
+1. **Simple Mode (Global)** - ✅ **ALREADY IMPLEMENTED**
+   - Uses map-wide ranges: `id_ranges_by_map.csv`
+   - Single selection applies to entire map
+   - Quick and easy for users
+
+2. **Advanced Mode (Per-Tile)** - 🔨 **NEED TO IMPLEMENT**
+   - Uses per-tile ranges: `id_ranges_by_tile.csv`
+   - Granular control per 64x64 tile grid
+   - For power users who want surgical precision
+
+### Per-Tile CSV Format
+Generate `id_ranges_by_tile.csv` for each tile:
 ```csv
-TileRow,TileCol,MinUniqueID,MaxUniqueID,Count
-39,37,4531,5788,371
-39,37,7694,14693,1245
-39,38,14694,24693,892
+TileRow,TileCol,MinUniqueID,MaxUniqueID,Count,ModelType
+39,37,4531,5788,371,M2
+39,37,7694,14693,1245,M2
+39,38,14694,24693,892,WMO
 ...
 ```
 
+**Additional column:** `ModelType` (M2 or WMO) to determine which invisible model to use
+
 ### Implementation Steps
+
 1. **Update `WoWRollback.Core/Services/Analysis/UniqueIdRangeCsvWriter.cs`**
-   - Add `WritePerTileRangesCsv()` method
-   - Group placements by tile first, then cluster within each tile
+   ```csharp
+   public void WritePerTileRangesCsv(
+       List<Placement> placements, 
+       string outputPath)
+   {
+       // Group by tile (row, col)
+       var byTile = placements
+           .GroupBy(p => (p.TileRow, p.TileCol))
+           .OrderBy(g => g.Key.TileRow)
+           .ThenBy(g => g.Key.TileCol);
+       
+       foreach (var tile in byTile)
+       {
+           // Cluster within each tile (10K ranges)
+           var ranges = ClusterIntoRanges(tile.ToList(), 10000);
+           
+           // Write to CSV with tile coordinates
+           foreach (var range in ranges)
+           {
+               csv.WriteLine($"{tile.Key.TileRow},{tile.Key.TileCol}," +
+                           $"{range.Min},{range.Max},{range.Count}," +
+                           $"{range.ModelType}");
+           }
+       }
+   }
+   ```
+
+2. **Integrate into Pipeline**
+   - Call from `rebuild-and-regenerate.ps1` during cache generation
    - Output to `cached_maps/analysis/{version}/{map}/csv/id_ranges_by_tile.csv`
+   - Log generation with checkmarks
 
-2. **Update `rebuild-and-regenerate.ps1`**
-   - Call per-tile CSV generation after map-wide generation
-   - Log output with checkmarks
-
-3. **Test Coverage**
-   - Verify per-tile ranges don't overlap across tiles
-   - Confirm all UniqueIDs are accounted for
-   - Check edge cases (empty tiles, single-object tiles)
+3. **Copy to Viewer**
+   - Copy per-tile CSVs to viewer output directory
+   - Enable tile.html to load them
 
 ### Success Criteria
 - [ ] Per-tile CSVs generated for all maps
 - [ ] CSV format validated and parseable
 - [ ] Total object count matches map-wide CSV
+- [ ] Tile coordinates (0-63) valid range
+- [ ] ModelType (M2/WMO) correctly identified
 
 ---
 
-## 🎯 Phase 2: Tile Selection UI (tile.html)
+## 🎯 Phase 2: Tile Selection UI (tile.html) ⭐ **NEXT PRIORITY**
 
 ### Current State
 - ✅ `tile.html` exists but is disabled
 - ✅ Basic tile grid visualization infrastructure
 - ❌ No per-tile range selection UI
 - ❌ No integration with map viewer
+- ❌ No selection persistence
 
 ### Requirements
-1. **Tile Grid View**
-   - Display 64x64 grid representing ADT tiles
-   - Color tiles by object density (heatmap)
-   - Click tile to open range selection modal
 
-2. **Per-Tile Range Selection**
-   - Load `id_ranges_by_tile.csv` for selected tile
-   - Checkbox list of ranges (similar to current Sedimentary Layers)
-   - Show object count per range
-   - Select All / Deselect All buttons
+**Two-Mode System:**
 
-3. **Visual Feedback**
-   - Selected tiles highlighted in green
-   - Partially selected tiles (some ranges unchecked) in yellow
-   - Unselected tiles in red
-   - Update map view in real-time
+1. **Simple Mode** (index.html)
+   - ✅ Already implemented
+   - Uses map-wide ranges from `id_ranges_by_map.csv`
+   - Quick checkbox selection
+   - One config for entire map
 
-4. **Integration with Main Viewer**
-   - Open tile.html via button in main viewer
-   - Share state between tile.html and index.html
-   - Apply tile selections to map markers
+2. **Advanced Mode** (tile.html) - 🔨 **NEED TO IMPLEMENT**
+   - Per-tile granular control
+   - 64x64 tile grid interface
+   - Click tile → load its specific ranges
+   - Save selections per-tile, per-map, per-version
+
+### UI Components
+
+#### 1. Tile Grid View
+- **64x64 grid** representing ADT tiles (0-63 each axis)
+- **Color coding**:
+  - 🟢 Green: All ranges selected (keep all objects)
+  - 🟡 Yellow: Partial selection (some ranges unchecked)
+  - 🔴 Red: No ranges selected (remove all objects)
+  - ⚫ Gray: Empty tile (no objects)
+- **Hover tooltip**: Show tile coordinates + object count
+- **Click tile**: Open range selection modal
+
+#### 2. Per-Tile Range Selection Modal
+- Load `id_ranges_by_tile.csv` filtered by tile coordinates
+- Checkbox list (like current Sedimentary Layers)
+- Show: UniqueID range, object count, model type (M2/WMO)
+- **Buttons**:
+  - Select All / Deselect All
+  - Apply (save and update grid colors)
+  - Cancel (discard changes)
+
+#### 3. Selection Persistence
+Store selections in browser localStorage:
+```json
+{
+  "map": "Azeroth",
+  "version": "0.5.3.3368",
+  "mode": "advanced",  // or "simple"
+  "tiles": {
+    "39_37": {
+      "selectedRanges": [
+        {"min": 4531, "max": 5788, "type": "M2"},
+        {"min": 7694, "max": 14693, "type": "M2"}
+      ]
+    },
+    "39_38": { ... }
+  }
+}
+```
+
+#### 4. Export Configuration Page
+- **New page**: `export.html`
+- Display current selections (simple or advanced mode)
+- Show summary statistics:
+  - Total objects to keep
+  - Total objects to remove
+  - Affected tiles count
+- **Export buttons**:
+  - Download JSON config
+  - Generate patched WDT (future)
+  - Generate patched ADTs (future)
 
 ### Implementation Steps
 1. **Reactivate tile.html**
@@ -177,15 +265,18 @@ Replace unwanted model paths with existing invisible debug models from WoW data.
 ### Available Debug Models
 **These exist across all WoW versions (Alpha 0.5.3 → 3.3.5 → Current 12.0 beta):**
 
-1. **`SPELLS\Invisible.m2`** (19 chars)
-   - Used as invisible server-side script anchor
-   - Confirmed invisible in-game
-   - **Preferred option** - shorter path
+1. **M2 Models (Doodads):**
+   - **`SPELLS\Invisible.m2`** (19 chars) - ✅ **PREFERRED**
+     - Used as invisible server-side script anchor
+     - Confirmed invisible in-game
+     - Shortest path option
 
-2. **`SPELLS\ErrorCube.m2`** (20 chars)
-   - Debug visualization cube
-   - Visible in-game (may not be ideal)
-   - Fallback option
+2. **WMO Models (World Objects):**
+   - **`world\wmo\dungeon\test\test.wmo`** (30 chars) - ✅ **PREFERRED**
+     - Three nested square boxes for coordinate system testing
+     - Small footprint, minimal geometry
+     - Perfect for invisible/testing purposes
+     - **User confirmed as best option**
 
 ### Path Length Strategy
 **Key Decision**: `SPELLS\Invisible.m2` = 19 characters
