@@ -58,22 +58,23 @@ Provide a durable, reusable overlay system that:
         "title": "Terrain Properties",
         "tiles": "sparse",  // none, partial, complete
         "resources": {
-          "tilePattern": "overlays/{version}/{map}/terrain_complete/tile_r{row}_c{col}.json"
+          "tilePattern": "overlays/{version}/{map}/terrain_complete/tile_{col}_{row}.json"
         }
+        // Note: tile pattern is col_row (not row_col) to match WoW tile naming
       },
       {
         "id": "objects.combined",
         "plugin": "objects",
         "subtype": "combined",
         "resources": {
-          "tilePattern": "overlays/{version}/{map}/combined/tile_r{row}_c{col}.json"
+          "tilePattern": "overlays/{version}/{map}/combined/tile_{col}_{row}.json"
         }
       },
       {
         "id": "shadow.overview",
         "plugin": "shadow",
         "resources": {
-          "metadataPattern": "overlays/{version}/{map}/shadow_map/tile_r{row}_c{col}.json",
+          "metadataPattern": "overlays/{version}/{map}/shadow_map/tile_{col}_{row}.json",
           "imagePattern": "overlays/{version}/{map}/shadow_map/{filename}"
         }
       }

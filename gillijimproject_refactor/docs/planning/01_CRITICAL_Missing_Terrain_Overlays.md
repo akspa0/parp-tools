@@ -239,9 +239,9 @@ rollback_outputs/0.5.3.3368/
         └── 0.5.3.3368/
             └── DeadminesInstance/
                 ├── terrain_complete/
-                │   └── tile_r18_c32.json         ✅
+                │   └── tile_32_18.json         ✅
                 └── shadow_maps/
-                    └── shadow_r18_c32.json       ✅
+                    └── shadow_32_18.json       ✅
 ```
 
 ---

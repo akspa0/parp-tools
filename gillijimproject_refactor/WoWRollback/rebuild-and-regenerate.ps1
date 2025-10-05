@@ -10,6 +10,7 @@ param(
     [string]$CacheRoot = "cached_maps",
     [switch]$RefreshCache,
     [switch]$Serve,
+    [switch]$UseNewViewerAssets,  # Phase 1: Use WoWRollback.Viewer project assets
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$ExtraArgs
 )
@@ -493,11 +494,22 @@ if (-not (Test-Path $viewerDir)) {
 }
 
 # Copy ViewerAssets (index.html, tile.html, js, styles) into viewer output
-$assetsSrc = Join-Path $PSScriptRoot 'ViewerAssets'
+# Phase 1: Feature flag to use WoWRollback.Viewer project assets
+if ($UseNewViewerAssets) {
+    $assetsSrc = Join-Path $PSScriptRoot 'WoWRollback.Viewer\bin\Release\net9.0\assets'
+    Write-Host "[PHASE 1] Using WoWRollback.Viewer assets from: $assetsSrc" -ForegroundColor Magenta
+} else {
+    $assetsSrc = Join-Path $PSScriptRoot 'ViewerAssets'
+}
+
 if (Test-Path $assetsSrc) {
     Copy-Item -Path (Join-Path $assetsSrc '*') -Destination $viewerDir -Recurse -Force
+    Write-Host "✓ Copied viewer assets from: $assetsSrc" -ForegroundColor Gray
 } else {
-    Write-Host "Warning: ViewerAssets directory not found at $assetsSrc" -ForegroundColor Yellow
+    Write-Host "Warning: Viewer assets directory not found at $assetsSrc" -ForegroundColor Yellow
+    if ($UseNewViewerAssets) {
+        Write-Host "Hint: Make sure WoWRollback.Viewer project has been built." -ForegroundColor Yellow
+    }
 }
 
 # Check if viewer has data
