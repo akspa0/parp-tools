@@ -14,7 +14,7 @@ export class SedimentaryLayersManagerCSV {
         this.uniqueIdToMarkers = new Map(); // UniqueID -> [markers]
         this.tileToMarkers = new Map(); // "row_col" -> [markers]
         this.ranges = []; // Loaded from CSV: [{min, max, count, enabled}]
-        this.mode = 'dim'; // 'dim', 'hide', or 'show'
+        this.mode = 'show'; // 'dim', 'hide', or 'show' - default to 'show' (show only checked)
         this.currentTileOnly = false; // Filter to current tile
         this.isInitialized = false;
         this.isFiltering = false; // Prevent recursive filtering
@@ -89,7 +89,7 @@ export class SedimentaryLayersManagerCSV {
         select.innerHTML = `
             <option value="dim">Dim</option>
             <option value="hide">Hide</option>
-            <option value="show">Show Only</option>
+            <option value="show" selected>Show Only</option>
         `;
         
         select.addEventListener('change', (e) => {
@@ -183,19 +183,26 @@ export class SedimentaryLayersManagerCSV {
     }
     
     async loadCSVRanges() {
+        console.log('[SedimentaryLayersCSV] loadCSVRanges() called');
+        
         const statusDiv = document.getElementById('loadStatus');
         const btn = document.getElementById('loadRangesBtn');
         
         try {
-            statusDiv.textContent = 'Loading...';
-            btn.disabled = true;
+            if (statusDiv) statusDiv.textContent = 'Loading...';
+            if (btn) btn.disabled = true;
             
             // Get current version and map from state
             const version = this.state.selectedVersion;
             const mapName = this.state.selectedMap;
             
+            console.log('[SedimentaryLayersCSV] Loading CSV for:', mapName, version);
+            
             if (!version || !mapName) {
-                statusDiv.textContent = 'Error: No map selected';
+                const msg = 'Error: No map selected';
+                console.error('[SedimentaryLayersCSV]', msg);
+                if (statusDiv) statusDiv.textContent = msg;
+                if (btn) btn.disabled = false;
                 return;
             }
             
@@ -217,12 +224,13 @@ export class SedimentaryLayersManagerCSV {
             this.lastLoadedMap = mapName;
             this.lastLoadedVersion = version;
             
-            statusDiv.textContent = `Loaded ${this.ranges.length} ranges for ${mapName}`;
+            if (statusDiv) statusDiv.textContent = `Loaded ${this.ranges.length} ranges for ${mapName}`;
+            console.log('[SedimentaryLayersCSV] Successfully loaded', this.ranges.length, 'ranges');
             
         } catch (err) {
             console.error('[SedimentaryLayersCSV] Load failed:', err);
-            statusDiv.textContent = `Error: ${err.message}`;
-            btn.disabled = false;
+            if (statusDiv) statusDiv.textContent = `Error: ${err.message}`;
+            if (btn) btn.disabled = false;
         }
     }
     
@@ -288,10 +296,17 @@ export class SedimentaryLayersManagerCSV {
         listContainer.appendChild(controlButtons);
         
         // Add event listeners for control buttons
-        document.getElementById('reloadRangesBtn').addEventListener('click', () => {
-            console.log('[SedimentaryLayersCSV] Manual reload triggered');
-            this.loadCSVRanges();
-        });
+        const reloadBtn = document.getElementById('reloadRangesBtn');
+        if (reloadBtn) {
+            reloadBtn.addEventListener('click', () => {
+                console.log('[SedimentaryLayersCSV] 🔄 Reload Ranges button clicked!');
+                console.log('[SedimentaryLayersCSV] Current state:', this.state.selectedMap, this.state.selectedVersion);
+                this.loadCSVRanges();
+            });
+            console.log('[SedimentaryLayersCSV] Reload button event listener attached');
+        } else {
+            console.error('[SedimentaryLayersCSV] Reload button not found!');
+        }
         
         document.getElementById('selectAllBtn').addEventListener('click', () => {
             this.ranges.forEach(r => r.enabled = true);
