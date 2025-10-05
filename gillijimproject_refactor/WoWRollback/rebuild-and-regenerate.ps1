@@ -19,10 +19,13 @@ param(
 Set-Location -Path $PSScriptRoot
 
 Write-Host "=== WoWRollback Rebuild & Regenerate ===" -ForegroundColor Cyan
+Write-Host "    Automatic pipeline: DBCTool → AlphaWdtAnalyzer → Viewer generation" -ForegroundColor DarkGray
 Write-Host ""
 
+# Step 0: Auto-run DBCTool.V2 if needed (handled later after path resolution)
+
 # Step 1: Clean build
-Write-Host "[1/4] Building solution..." -ForegroundColor Yellow
+Write-Host "[1/5] Building solution..." -ForegroundColor Yellow
 dotnet build WoWRollback.sln --configuration Release
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
@@ -79,7 +82,7 @@ function Get-MapsFromAlphaRoot([string]$root, [string[]]$versions) {
 }
 
 # Step 2: Regenerate comparison data
-Write-Host "[2/4] Preparing cached Alpha -> LK ADTs..." -ForegroundColor Yellow
+Write-Host "[2/5] Preparing cached Alpha -> LK ADTs..." -ForegroundColor Yellow
 
 $cacheRootPath = Join-Path $PSScriptRoot $CacheRoot
 
@@ -102,6 +105,82 @@ $lkListfile = Resolve-FirstExistingPath @(
     (Join-Path $PSScriptRoot "../test_data/World of Warcraft 3x.txt")
 )
 $alphaToolProject = Join-Path $PSScriptRoot "..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli\AlphaWdtAnalyzer.Cli.csproj"
+
+# DBCTool paths for AreaTable crosswalk mappings
+$dbcToolProject = Join-Path $PSScriptRoot '..\DBCTool.V2\DbcTool.Cli\DbcTool.Cli.csproj'
+$dbcToolOutputs = Join-Path $PSScriptRoot '..\DBCTool.V2\dbctool_outputs'
+$dbctoolPatchDir = $null
+$dbctoolLkDir = Resolve-FirstExistingPath @(
+    (Join-Path $PSScriptRoot "..\test_data\3.3.5\tree\DBFilesClient"),
+    (Join-Path $PSScriptRoot "test_data\3.3.5\tree\DBFilesClient")
+)
+
+# Helper function to run DBCTool.V2 automatically
+function Invoke-DBCTool {
+    Write-Host "[auto] Running DBCTool.V2 to generate AreaTable crosswalks..." -ForegroundColor Cyan
+    
+    if (-not (Test-Path $dbcToolProject)) {
+        Write-Host "[auto] ✗ DBCTool.V2 project not found at: $dbcToolProject" -ForegroundColor Red
+        return $false
+    }
+    
+    # Run DBCTool with default settings
+    $dbcArgs = @('run', '--project', $dbcToolProject, '--configuration', 'Release')
+    
+    Write-Host "[auto] Executing: dotnet run --project DbcTool.Cli.csproj" -ForegroundColor Yellow
+    & dotnet @dbcArgs
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[auto] ✓ DBCTool.V2 completed successfully" -ForegroundColor Green
+        return $true
+    } else {
+        Write-Host "[auto] ✗ DBCTool.V2 failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Find latest DBCTool session for AreaTable crosswalks
+function Get-LatestDBCToolSession {
+    if (-not (Test-Path $dbcToolOutputs)) {
+        return $null
+    }
+    
+    $latestSession = Get-ChildItem -Path $dbcToolOutputs -Directory | 
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    
+    if ($latestSession) {
+        $compareV2Dir = Join-Path $latestSession.FullName 'compare\v2'
+        if (Test-Path $compareV2Dir) {
+            return $compareV2Dir
+        }
+    }
+    
+    return $null
+}
+
+$dbctoolPatchDir = Get-LatestDBCToolSession
+
+# Auto-run DBCTool if crosswalks are missing
+if (-not $dbctoolPatchDir) {
+    Write-Host "[auto] AreaTable crosswalks not found, running DBCTool.V2 automatically..." -ForegroundColor Yellow
+    
+    if (Invoke-DBCTool) {
+        # Try to find session again after running DBCTool
+        Start-Sleep -Seconds 1
+        $dbctoolPatchDir = Get-LatestDBCToolSession
+        
+        if ($dbctoolPatchDir) {
+            Write-Host "[auto] ✓ DBCTool AreaTable crosswalks generated: $dbctoolPatchDir" -ForegroundColor Green
+        } else {
+            Write-Host "[auto] ✗ DBCTool ran but crosswalks still not found!" -ForegroundColor Red
+            Write-Host "[warn] Continuing without AreaTable mappings - AreaNames will be incorrect!" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "[warn] DBCTool failed - continuing without AreaTable mappings" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[auto] ✓ Found existing DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
+}
 
 if (-not (Test-Path $cacheRootPath)) {
     New-Item -Path $cacheRootPath -ItemType Directory | Out-Null
@@ -319,8 +398,26 @@ function Ensure-CachedMap {
         '--profile', 'raw',
         '--no-fallbacks'
     )
+    
+    # Add DBCTool AreaTable crosswalk parameters if available
+    if ($dbctoolPatchDir -and (Test-Path $dbctoolPatchDir)) {
+        $toolArgs += '--dbctool-patch-dir'
+        $toolArgs += $dbctoolPatchDir
+        Write-Host "  [debug] ✓ Using DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
+    } else {
+        Write-Host "  [warn] ✗ DBCTool AreaTable crosswalks NOT found - AreaIDs will NOT be mapped!" -ForegroundColor Red
+        Write-Host "  [warn] Run DBCTool.V2 first to generate AreaTable mappings" -ForegroundColor Yellow
+    }
+    
+    if ($dbctoolLkDir -and (Test-Path $dbctoolLkDir)) {
+        $toolArgs += '--dbctool-lk-dir'
+        $toolArgs += $dbctoolLkDir
+        Write-Host "  [debug] ✓ Using LK DBC directory: $dbctoolLkDir" -ForegroundColor Green
+    } else {
+        Write-Host "  [warn] ✗ LK DBC directory NOT found: $dbctoolLkDir" -ForegroundColor Yellow
+    }
 
-    Write-Host "  [debug] Running AlphaWdtAnalyzer with --extract-mcnk-terrain and --extract-mcnk-shadows" -ForegroundColor Magenta
+    Write-Host "  [debug] Running AlphaWdtAnalyzer with AreaTable crosswalk support" -ForegroundColor Magenta
     Write-Host "  [debug] Analysis output dir: $analysisDir" -ForegroundColor Magenta
     & dotnet @toolArgs
     if ($LASTEXITCODE -ne 0) {
@@ -416,7 +513,7 @@ foreach ($version in $Versions) {
 Write-Host "✓ Cached maps ready" -ForegroundColor Green
 Write-Host ""
 
-Write-Host "[3/4] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
+Write-Host "[3/5] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
 $versionsArg = ($Versions -join ',')
 
 # Auto-discover maps if requested
@@ -462,8 +559,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "✓ Data regenerated" -ForegroundColor Green
 Write-Host ""
 
-# Step 3: Locate the exact comparison directory from CLI output; fallback to latest with index.json
-Write-Host "[4/4] Locating viewer output..." -ForegroundColor Yellow
+# Step 4: Locate the exact comparison directory from CLI output; fallback to latest with index.json
+Write-Host "[4/5] Locating viewer output..." -ForegroundColor Yellow
 
 $viewerPath = $null
 $match = $dotnetOut | Select-String -Pattern 'Outputs written to:\s*(.+)$' | Select-Object -Last 1
@@ -512,6 +609,23 @@ if (Test-Path $assetsSrc) {
     }
 }
 
+# Copy CSV data for sedimentary layers (UniqueID filtering)
+Write-Host "Copying CSV data for UniqueID filtering..." -ForegroundColor Cyan
+foreach ($ver in $Versions) {
+    foreach ($mapName in $Maps) {
+        $csvSource = Join-Path $PSScriptRoot "cached_maps\analysis\$ver\$mapName\csv"
+        if (Test-Path $csvSource) {
+            $csvDest = Join-Path $viewerDir "cached_maps\analysis\$ver\$mapName\csv"
+            if (-not (Test-Path $csvDest)) {
+                New-Item -Path $csvDest -ItemType Directory -Force | Out-Null
+            }
+            Copy-Item -Path (Join-Path $csvSource "id_ranges_by_map.csv") -Destination $csvDest -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path (Join-Path $csvSource "unique_ids_all.csv") -Destination $csvDest -Force -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Copied CSVs for $ver/$mapName" -ForegroundColor DarkGray
+        }
+    }
+}
+
 # Check if viewer has data
 $indexJson = Join-Path $viewerDir "index.json"
 if (-not (Test-Path $indexJson)) {
@@ -526,8 +640,11 @@ Write-Host "✓ Viewer generated with $overlayCount overlay files" -ForegroundCo
 Write-Host ""
 
 # Step 4: Launch viewer
-Write-Host "=== Ready to View ===" -ForegroundColor Cyan
+Write-Host "Viewer output: $viewerDir" -ForegroundColor Cyan
 Write-Host "" 
+
+# Step 5: Start server
+Write-Host "[5/5] Server options..." -ForegroundColor Yellow
 Write-Host "To start the viewer:" -ForegroundColor White
 Write-Host "  cd \"$viewerDir\"" -ForegroundColor Yellow
 Write-Host "  python -m http.server 8080" -ForegroundColor Yellow
@@ -536,7 +653,7 @@ Write-Host "Then open: http://localhost:8080/index.html" -ForegroundColor Green
 Write-Host "" 
 
 if ($Serve) {
-    Write-Host "Starting server on http://localhost:8080..." -ForegroundColor Cyan
+    Write-Host "[5/5] Starting server on http://localhost:8080..." -ForegroundColor Cyan
     Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
     Write-Host "" 
     Set-Location $viewerDir
