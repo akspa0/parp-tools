@@ -3,6 +3,7 @@ import { state } from './state.js';
 import { clearCache } from './overlayLoader.js';
 import { loadOverlay } from './overlayLoader.js';
 import { OverlayManager } from './overlays/overlayManager.js';
+import { SedimentaryLayersManagerCSV } from './sedimentary-layers-csv.js';
 
 let map;
 let tileLayer; // no longer used, kept for minimal diff
@@ -23,6 +24,7 @@ let uidFilter = null; // { min: number, max: number } or null
 let currentPopup = null; // Track persistent popup
 let pendingOverlayLoad = null; // Debounce token
 let overlayManager = null; // Terrain overlay manager
+let sedimentaryLayers = null; // UniqueID filter manager (CSV-based)
 // Drag state for overview PiP
 let dragging = false;
 let dragStart = null;
@@ -72,6 +74,9 @@ function initializeMap() {
     
     // Initialize overlay manager
     overlayManager = new OverlayManager(map);
+    
+    // Initialize sedimentary layers manager (CSV-based)
+    sedimentaryLayers = new SedimentaryLayersManagerCSV(map, state);
     
     // Re-render markers when zoom changes for dynamic scaling
     map.on('zoomend', () => {
@@ -677,8 +682,16 @@ async function performObjectMarkerUpdate() {
                                 fillOpacity: 0.85
                             });
                             square.bindPopup(popupHtml, popupOptions);
-                            square.on('click', () => { currentPopup = square.getPopup(); });
+                            square.on('click', () => { 
+                                currentPopup = square.getPopup();
+                                bringPopupToFront(square.getPopup());
+                            });
                             objectMarkers.addLayer(square);
+                            
+                            // Register with sedimentary layers
+                            if (sedimentaryLayers) {
+                                sedimentaryLayers.registerMarker(square, obj.uniqueId || 0, row, col);
+                            }
                         }
                         else
                         {
@@ -690,8 +703,16 @@ async function performObjectMarkerUpdate() {
                                 fillOpacity: 0.9
                             });
                             circle.bindPopup(popupHtml, popupOptions);
-                            circle.on('click', () => { currentPopup = circle.getPopup(); });
+                            circle.on('click', () => { 
+                                currentPopup = circle.getPopup();
+                                bringPopupToFront(circle.getPopup());
+                            });
                             objectMarkers.addLayer(circle);
+                            
+                            // Register with sedimentary layers
+                            if (sedimentaryLayers) {
+                                sedimentaryLayers.registerMarker(circle, obj.uniqueId || 0, row, col);
+                            }
                         }
                     }
                     else
@@ -704,8 +725,16 @@ async function performObjectMarkerUpdate() {
                             fillOpacity: 0.85
                         });
                         marker.bindPopup(popupHtml, popupOptions);
-                        marker.on('click', () => { currentPopup = marker.getPopup(); });
+                        marker.on('click', () => { 
+                            currentPopup = marker.getPopup();
+                            bringPopupToFront(marker.getPopup());
+                        });
                         objectMarkers.addLayer(marker);
+                        
+                        // Register with sedimentary layers
+                        if (sedimentaryLayers) {
+                            sedimentaryLayers.registerMarker(marker, obj.uniqueId || 0, row, col);
+                        }
                     }
                 });
 
