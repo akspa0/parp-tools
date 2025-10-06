@@ -118,9 +118,21 @@ public static class AdtExportPipeline
         }
 
         var wdt = new WdtAlphaScanner(opts.SingleWdtPath!);
+        
+        // Load MapIdResolver from DBCTool.V2 maps.json (if available)
+        MapIdResolver? mapIdResolver = null;
+        string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, opts.SingleWdtPath, null);
+        if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+        {
+            mapIdResolver = MapIdResolver.LoadFromDbcToolOutput(opts.DbctoolOutRoot!, aliasUsed);
+            if (mapIdResolver != null && opts.Verbose)
+            {
+                Console.WriteLine($"[MapIdResolver] Loaded {mapIdResolver.Version} with {mapIdResolver.GetAllDirectories().Count()} maps");
+            }
+        }
+        
         // Load DBCTool.V2 patch mapping (prefer stable out root -> <alias>/compare/v2)
         DbcPatchMapping? patchMap = null;
-        string aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, opts.SingleWdtPath, null);
         string patchDirUsed = string.Empty;
         if (!string.IsNullOrWhiteSpace(opts.DbctoolPatchFile) || !string.IsNullOrWhiteSpace(opts.DbctoolPatchDir))
         {
@@ -223,7 +235,7 @@ public static class AdtExportPipeline
                 Console.WriteLine($"[Tile] {wdt.MapName} {x},{y} ({n}/{totalTiles})");
             var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
             var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
-            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, mapIdResolver, opts.DbctoolLkDir, opts.Verbose);
             if (opts.Verbose)
                 Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
 
@@ -433,9 +445,7 @@ public static class AdtExportPipeline
             var alpha = new AdtAlpha(wdt.WdtPath, offset, adtNum);
             var alphaAreaIds = (IReadOnlyList<int>)alpha.GetAlphaMcnkAreaIds();
 
-            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, opts.DbctoolLkDir, opts.Verbose);
-            if (opts.Verbose)
-                Console.WriteLine($"[MapId] {wdt.MapName} -> {currentMapId}");
+            int currentMapId = ResolveMapIdFromDbc(wdt.MapName, mapIdResolver, opts.DbctoolLkDir, opts.Verbose);
 
                     var ctx = new AdtWotlkWriter.WriteContext
                     {
@@ -497,8 +507,24 @@ public static class AdtExportPipeline
         }
     }
 
-    private static int ResolveMapIdFromDbc(string mapName, string? lkDir, bool verbose)
+    private static int ResolveMapIdFromDbc(string mapName, MapIdResolver? resolver, string? lkDir, bool verbose)
     {
+        // Try MapIdResolver first (uses source version Map.dbc metadata from maps.json)
+        if (resolver != null)
+        {
+            var mapId = resolver.GetMapIdByDirectory(mapName);
+            if (mapId.HasValue)
+            {
+                if (verbose) Console.WriteLine($"[MapId] Resolved '{mapName}' -> {mapId.Value} from {resolver.Version} maps.json");
+                return mapId.Value;
+            }
+            else if (verbose)
+            {
+                Console.WriteLine($"[MapId] WARN: '{mapName}' not found in {resolver.Version} maps.json");
+            }
+        }
+
+        // Fallback to reading LK Map.dbc directly (legacy behavior)
         try
         {
             if (!string.IsNullOrWhiteSpace(lkDir))
@@ -506,6 +532,7 @@ public static class AdtExportPipeline
                 var mapDbc = Path.Combine(lkDir!, "Map.dbc");
                 if (File.Exists(mapDbc))
                 {
+                    if (verbose) Console.WriteLine($"[MapId] Falling back to LK Map.dbc for '{mapName}'");
                     return ReadMapDbcIdByDirectory(mapDbc, mapName);
                 }
                 else if (verbose)

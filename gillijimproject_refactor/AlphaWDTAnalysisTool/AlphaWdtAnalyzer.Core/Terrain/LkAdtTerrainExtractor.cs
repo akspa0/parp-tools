@@ -63,7 +63,7 @@ public static class LkAdtTerrainExtractor
             // Find MHDR chunk
             ms.Position = 0;
             var mverMagic = br.ReadUInt32();
-            if (mverMagic != 0x4D564552) // "MVER" (little-endian)
+            if (mverMagic != 0x4D564552 && mverMagic != 0x5245564D) // "MVER" or "REVM" (little/big endian)
             {
                 throw new InvalidDataException($"Invalid ADT magic: 0x{mverMagic:X8}");
             }
@@ -72,61 +72,88 @@ public static class LkAdtTerrainExtractor
             var version = br.ReadUInt32();
             
             var mhdrMagic = br.ReadUInt32();
-            if (mhdrMagic != 0x4D484452) // "MHDR"
+            if (mhdrMagic != 0x4D484452 && mhdrMagic != 0x5244484D) // "MHDR" or "RDHM"
             {
                 throw new InvalidDataException($"No MHDR found: 0x{mhdrMagic:X8}");
             }
             
             var mhdrSize = br.ReadUInt32();
-            var mcnkOffset = br.ReadUInt32();
+            var mhdrDataStart = ms.Position;
             
-            if (mcnkOffset == 0)
+            // MHDR contains offsets to various chunks
+            // Offset 0: Usually 0 or MCIN offset
+            // Offset 4: MTEX offset (or MCIN if offset 0 is 0)
+            var offset0 = br.ReadUInt32();
+            var offset1 = br.ReadUInt32();
+            
+            // Find MCIN chunk (chunk index table)
+            long mhdrStart = 12;
+            long mcinOffset = offset0 != 0 ? (mhdrStart + 8 + offset0) : (mhdrStart + 8 + offset1);
+            
+            ms.Position = mcinOffset;
+            var mcinMagic = br.ReadUInt32();
+            if (mcinMagic != 0x4D43494E && mcinMagic != 0x4E49434D) // "MCIN" or "NICM"
             {
-                Console.WriteLine($"[LkTerrainExtractor:warn] No MCNK in {Path.GetFileName(adtPath)}");
+                Console.WriteLine($"[LkTerrainExtractor:warn] No MCIN in {Path.GetFileName(adtPath)} (found 0x{mcinMagic:X8} at {mcinOffset})");
                 return results;
             }
             
-            // Jump to MCNK chunks
-            ms.Position = mcnkOffset;
+            var mcinSize = br.ReadUInt32();
             
-            // Read 16×16 MCNK chunks
+            // Read MCIN entries (256 entries, each 16 bytes: offset + size + flags + asyncId)
+            var mcnkOffsets = new List<uint>();
+            for (int i = 0; i < 256; i++)
+            {
+                var chunkOffset = br.ReadUInt32();
+                var chunkSize = br.ReadUInt32();
+                var chunkFlags = br.ReadUInt32();
+                var chunkAsyncId = br.ReadUInt32();
+                
+                mcnkOffsets.Add(chunkOffset);
+            }
+            
+            // Read each MCNK chunk using offsets from MCIN
             for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
             {
                 try
                 {
-                    long chunkStart = ms.Position;
+                    var chunkOffset = mcnkOffsets[chunkIdx];
+                    if (chunkOffset == 0) continue; // Empty chunk
+                    
+                    ms.Position = chunkOffset;
                     var mcnkMagic = br.ReadUInt32();
                     
-                    if (mcnkMagic != 0x4D434E4B) // "MCNK"
+                    if (mcnkMagic != 0x4D434E4B && mcnkMagic != 0x4B4E434D) // "MCNK" or "KNCM"
                     {
-                        // Skip this chunk, likely empty/missing
+                        // Skip this chunk
                         continue;
                     }
                     
                     var chunkSize = br.ReadUInt32();
                     var chunkDataStart = ms.Position;
                     
-                    // Read MCNK header (128 bytes total in LK)
-                    var flags = br.ReadUInt32();
-                    var indexX = br.ReadUInt32();
-                    var indexY = br.ReadUInt32();
-                    var nLayers = br.ReadUInt32();
-                    var nDoodadRefs = br.ReadUInt32();
+                    // Read MCNK header (LK WotLK structure)
+                    // ChunkDataStart is at +8 from chunk start (after magic+size)
+                    var flags = br.ReadUInt32();          // +0x00
+                    var indexX = br.ReadUInt32();         // +0x04
+                    var indexY = br.ReadUInt32();         // +0x08
+                    var nLayers = br.ReadUInt32();        // +0x0C
+                    var nDoodadRefs = br.ReadUInt32();    // +0x10
                     
-                    // Skip 8 offsets (32 bytes)
+                    // Skip 8 offsets (32 bytes) - +0x14 to +0x34
                     ms.Position += 32;
                     
-                    // AreaID at offset 56 in MCNK header
+                    // AreaID at +0x38 (56 decimal) from chunkDataStart
                     var areaId = br.ReadUInt32();
                     
-                    // Skip to position fields (offset 68)
-                    ms.Position = chunkDataStart + 68;
-                    var nMapObjRefs = br.ReadUInt32();
-                    var holes = br.ReadUInt16();
-                    var unk = br.ReadUInt16();
+                    var nMapObjRefs = br.ReadUInt32();    // +0x3C (60)
+                    var holes = br.ReadUInt16();          // +0x40 (64)
+                    var unk = br.ReadUInt16();            // +0x42 (66)
                     
-                    // Skip to position (offset 80)
-                    ms.Position = chunkDataStart + 80;
+                    // Skip to position fields (from +0x44 to +0x68 = 36 bytes)
+                    ms.Position += 36;
+                    
+                    // Position at +0x68 (104 decimal) from chunkDataStart  
                     var posX = br.ReadSingle();
                     var posY = br.ReadSingle();
                     var posZ = br.ReadSingle();

@@ -79,45 +79,66 @@ public static class LkAdtAreaReader
         }
         
         var mhdrSize = br.ReadUInt32();
-        var mcnkOffset = br.ReadUInt32(); // Offset to MCNK chunks
+        var offset0 = br.ReadUInt32();
+        var offset1 = br.ReadUInt32();
         
-        if (mcnkOffset == 0)
+        // Find MCIN chunk (chunk index table)
+        long mhdrStart = 12;
+        long mcinOffset = offset0 != 0 ? (mhdrStart + 8 + offset0) : (mhdrStart + 8 + offset1);
+        
+        fs.Position = mcinOffset;
+        var mcinMagic = br.ReadUInt32();
+        if (mcinMagic != 0x4D43494E && mcinMagic != 0x4E49434D) // "MCIN" or "NICM"
         {
-            Console.WriteLine($"[area:warn] No MCNK offset in {Path.GetFileName(adtPath)}");
+            Console.WriteLine($"[area:warn] No MCIN in {Path.GetFileName(adtPath)} (found 0x{mcinMagic:X8})");
             return results;
         }
         
-        // Jump to MCNK chunks
-        fs.Position = mcnkOffset;
+        var mcinSize = br.ReadUInt32();
         
-        // Read 16×16 MCNK chunks
-        for (int chunkY = 0; chunkY < 16; chunkY++)
+        // Read MCIN entries (256 entries, each 16 bytes)
+        var mcnkOffsets = new List<uint>();
+        for (int i = 0; i < 256; i++)
         {
-            for (int chunkX = 0; chunkX < 16; chunkX++)
+            var chunkOffset = br.ReadUInt32();
+            br.ReadUInt32(); // size
+            br.ReadUInt32(); // flags
+            br.ReadUInt32(); // asyncId
+            mcnkOffsets.Add(chunkOffset);
+        }
+        
+        // Read AreaID from each MCNK chunk
+        for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
+        {
+            int chunkY = chunkIdx / 16;
+            int chunkX = chunkIdx % 16;
+            
+            try
             {
-                try
+                var chunkOffset = mcnkOffsets[chunkIdx];
+                if (chunkOffset == 0) continue; // Empty chunk
+                
+                fs.Position = chunkOffset;
+                var mcnkMagic = br.ReadUInt32();
+                if (mcnkMagic != 0x4D434E4B && mcnkMagic != 0x4B4E434D) // "MCNK" or "KNCM"
                 {
-                    var mcnkMagic = br.ReadUInt32();
-                    if (mcnkMagic != 0x4D434E4B && mcnkMagic != 0x4B4E434D) // "MCNK" or reversed
-                    {
-                        Console.WriteLine($"[area:warn] Expected MCNK at chunk ({chunkY},{chunkX}), got 0x{mcnkMagic:X8}");
-                        continue;
-                    }
-                    
-                    var chunkSize = br.ReadUInt32();
-                    var chunkStart = fs.Position;
-                    
-                    // Read MCNK header fields
-                    var flags = br.ReadUInt32();
-                    var indexX = br.ReadUInt32();
-                    var indexY = br.ReadUInt32();
-                    var nLayers = br.ReadUInt32();
-                    var nDoodadRefs = br.ReadUInt32();
-                    
-                    // Skip offsets (8 × uint32)
-                    fs.Position += 32;
-                    
-                    var areaid = br.ReadUInt32(); // AreaID at offset 56 in MCNK
+                    continue;
+                }
+                
+                var chunkSize = br.ReadUInt32();
+                var chunkStart = fs.Position;
+                
+                // Read MCNK header fields
+                var flags = br.ReadUInt32();
+                var indexX = br.ReadUInt32();
+                var indexY = br.ReadUInt32();
+                var nLayers = br.ReadUInt32();
+                var nDoodadRefs = br.ReadUInt32();
+                
+                // Skip offsets (8 × uint32 = 32 bytes)
+                fs.Position += 32;
+                
+                var areaid = br.ReadUInt32(); // AreaID at offset 56 from chunkStart
                     
                     results.Add(new ChunkAreaInfo(
                         mapName,
@@ -128,13 +149,11 @@ public static class LkAdtAreaReader
                         (int)areaid
                     ));
                     
-                    // Skip to next MCNK chunk
-                    fs.Position = chunkStart + chunkSize;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[area:warn] Error reading chunk ({chunkY},{chunkX}): {ex.Message}");
-                }
+                // Note: No need to skip to next chunk since we're using MCIN offsets
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[area:warn] Error reading chunk ({chunkY},{chunkX}): {ex.Message}");
             }
         }
 

@@ -58,7 +58,7 @@ public static class LkAdtShadowExtractor
             // Find MHDR chunk
             ms.Position = 0;
             var mverMagic = br.ReadUInt32();
-            if (mverMagic != 0x4D564552) // "MVER"
+            if (mverMagic != 0x4D564552 && mverMagic != 0x5245564D) // "MVER" or "REVM" (little/big endian)
             {
                 throw new InvalidDataException($"Invalid ADT magic: 0x{mverMagic:X8}");
             }
@@ -67,24 +67,41 @@ public static class LkAdtShadowExtractor
             br.ReadUInt32(); // version
             
             var mhdrMagic = br.ReadUInt32();
-            if (mhdrMagic != 0x4D484452) // "MHDR"
+            if (mhdrMagic != 0x4D484452 && mhdrMagic != 0x5244484D) // "MHDR" or "RDHM"
             {
                 throw new InvalidDataException($"No MHDR found: 0x{mhdrMagic:X8}");
             }
             
             br.ReadUInt32(); // mhdrSize
-            var mcnkOffset = br.ReadUInt32();
+            var offset0 = br.ReadUInt32();
+            var offset1 = br.ReadUInt32();
             
-            if (mcnkOffset == 0)
+            // Find MCIN chunk
+            long mhdrStart = 12;
+            long mcinOffset = offset0 != 0 ? (mhdrStart + 8 + offset0) : (mhdrStart + 8 + offset1);
+            
+            ms.Position = mcinOffset;
+            var mcinMagic = br.ReadUInt32();
+            if (mcinMagic != 0x4D43494E && mcinMagic != 0x4E49434D) // "MCIN" or "NICM"
             {
-                Console.WriteLine($"[LkShadowExtractor:warn] No MCNK in {Path.GetFileName(adtPath)}");
+                Console.WriteLine($"[LkShadowExtractor:warn] No MCIN in {Path.GetFileName(adtPath)}");
                 return results;
             }
             
-            // Jump to MCNK chunks
-            ms.Position = mcnkOffset;
+            var mcinSize = br.ReadUInt32();
             
-            // Read 16×16 MCNK chunks
+            // Read MCIN entries
+            var mcnkOffsets = new List<uint>();
+            for (int i = 0; i < 256; i++)
+            {
+                var chunkOffset = br.ReadUInt32();
+                br.ReadUInt32(); // size
+                br.ReadUInt32(); // flags
+                br.ReadUInt32(); // asyncId
+                mcnkOffsets.Add(chunkOffset);
+            }
+            
+            // Read each MCNK chunk
             for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
             {
                 int chunkRow = chunkIdx / 16;
@@ -92,11 +109,25 @@ public static class LkAdtShadowExtractor
                 
                 try
                 {
+                    var chunkOffset = mcnkOffsets[chunkIdx];
+                    if (chunkOffset == 0)
+                    {
+                        // Empty chunk - add placeholder
+                        results.Add(new McnkShadowEntry(
+                            mapName, tileRow, tileCol, chunkRow, chunkCol,
+                            HasShadow: false,
+                            ShadowSize: 0,
+                            ShadowBitmapBase64: string.Empty
+                        ));
+                        continue;
+                    }
+                    
+                    ms.Position = chunkOffset;
                     var mcnkMagic = br.ReadUInt32();
                     
-                    if (mcnkMagic != 0x4D434E4B) // "MCNK"
+                    if (mcnkMagic != 0x4D434E4B && mcnkMagic != 0x4B4E434D) // "MCNK" or "KNCM"
                     {
-                        // Missing chunk - add empty entry
+                        // Invalid chunk - add placeholder
                         results.Add(new McnkShadowEntry(
                             mapName, tileRow, tileCol, chunkRow, chunkCol,
                             HasShadow: false,

@@ -316,9 +316,8 @@ public static class Program
             
             try
             {
-                using var teeScope = !string.IsNullOrWhiteSpace(outDir) 
-                    ? ConsoleTee.Start(Path.Combine(outDir, $"awdt_lk_{mapName}.log")) 
-                    : null;
+                // Note: No log file created here - the calling script handles logging
+                // This avoids file lock issues when the script redirects output via Tee-Object
                 
                 Directory.CreateDirectory(outDir);
                 

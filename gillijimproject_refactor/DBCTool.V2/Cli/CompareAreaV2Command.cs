@@ -1439,6 +1439,25 @@ internal sealed class CompareAreaV2Command
             File.WriteAllText(Path.Combine(compareV2Dir, $"zone_missing_in_target_map_{srcAlias}_to_335.csv"), diag.ToString(), new UTF8Encoding(true));
         }
 
+        // Generate Map.dbc metadata for source version
+        try
+        {
+            var mapMetadata = Core.MapDbcReader.ReadMapDbc(
+                srcDir!,
+                dbdDir,
+                CanonicalizeBuild(srcAlias),
+                srcAlias,
+                locale
+            );
+            var mapsJsonPath = Path.Combine(outAliasRoot, "maps.json");
+            Core.MapDbcReader.WriteMapMetadata(mapMetadata, mapsJsonPath);
+            Console.WriteLine($"[V2] Wrote Map.dbc metadata ({mapMetadata.Maps.Count} maps) to {mapsJsonPath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[V2] WARN: Failed to generate Map.dbc metadata: {ex.Message}");
+        }
+
         Console.WriteLine("[V2] Wrote mapping/unmatched/patch CSVs under compare/v2/ and audit CSVs under compare/.");
         return 0;
     }

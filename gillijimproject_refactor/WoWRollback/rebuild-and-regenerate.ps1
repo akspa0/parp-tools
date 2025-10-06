@@ -168,9 +168,9 @@ $lkListfile = Resolve-FirstExistingPath @(
 )
 $alphaToolProject = Join-Path $PSScriptRoot "..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli\AlphaWdtAnalyzer.Cli.csproj"
 
-# DBCTool paths for AreaTable crosswalk mappings
+# DBCTool paths for AreaTable crosswalk mappings (definitive source of truth)
 $dbcToolProject = Join-Path $PSScriptRoot '..\DBCTool.V2\DbcTool.Cli\DbcTool.Cli.csproj'
-$dbcToolOutputs = Join-Path $PSScriptRoot '..\DBCTool.V2\dbctool_outputs'
+$dbcToolOutputRoot = Join-Path $PSScriptRoot '..\dbctool_out'
 $dbctoolPatchDir = $null
 $dbctoolLkDir = Resolve-FirstExistingPath @(
     (Join-Path $PSScriptRoot "..\test_data\3.3.5\tree\DBFilesClient"),
@@ -201,48 +201,28 @@ function Invoke-DBCTool {
     }
 }
 
-# Find latest DBCTool session for AreaTable crosswalks
-function Get-LatestDBCToolSession {
-    if (-not (Test-Path $dbcToolOutputs)) {
+# Get DBCTool crosswalk directory for a specific version (from definitive dbctool_out folder)
+function Get-DBCToolCrosswalkDir {
+    param([string]$Version)
+    
+    if (-not (Test-Path $dbcToolOutputRoot)) {
         return $null
     }
     
-    $latestSession = Get-ChildItem -Path $dbcToolOutputs -Directory | 
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    # Extract base version (e.g., "0.5.3.3368" -> "0.5.3")
+    $baseVersion = if ($Version -match '^(\d+\.\d+\.\d+)') { $matches[1] } else { $Version }
     
-    if ($latestSession) {
-        $compareV2Dir = Join-Path $latestSession.FullName 'compare\v2'
-        if (Test-Path $compareV2Dir) {
-            return $compareV2Dir
-        }
+    $compareV2Dir = Join-Path $dbcToolOutputRoot "$baseVersion\compare\v2"
+    
+    if (Test-Path $compareV2Dir) {
+        return $compareV2Dir
     }
     
     return $null
 }
 
-$dbctoolPatchDir = Get-LatestDBCToolSession
-
-# Auto-run DBCTool if crosswalks are missing
-if (-not $dbctoolPatchDir) {
-    Write-Host "[auto] AreaTable crosswalks not found, running DBCTool.V2 automatically..." -ForegroundColor Yellow
-    
-    if (Invoke-DBCTool) {
-        # Try to find session again after running DBCTool
-        Start-Sleep -Seconds 1
-        $dbctoolPatchDir = Get-LatestDBCToolSession
-        
-        if ($dbctoolPatchDir) {
-            Write-Host "[auto] ✓ DBCTool AreaTable crosswalks generated: $dbctoolPatchDir" -ForegroundColor Green
-        } else {
-            Write-Host "[auto] ✗ DBCTool ran but crosswalks still not found!" -ForegroundColor Red
-            Write-Host "[warn] Continuing without AreaTable mappings - AreaNames will be incorrect!" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "[warn] DBCTool failed - continuing without AreaTable mappings" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "[auto] ✓ Found existing DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
-}
+# Note: $dbctoolPatchDir will be set per-version in the cache preparation loop
+# using Get-DBCToolCrosswalkDir to point to the definitive dbctool_out/{version}/compare/v2 folders
 
 if (-not (Test-Path $cacheRootPath)) {
     New-Item -Path $cacheRootPath -ItemType Directory | Out-Null
@@ -512,6 +492,9 @@ function Ensure-CachedMap {
     }
     New-Item -Path $tempExportDir -ItemType Directory -Force | Out-Null
 
+    # Get version-specific DBCTool crosswalks from definitive dbctool_out folder
+    $dbctoolPatchDir = Get-DBCToolCrosswalkDir -Version $Version
+    
     $toolArgs = @(
         'run','--project',$alphaToolProject,'--configuration','Release','--',
         '--input', $wdtPath,
@@ -553,6 +536,12 @@ function Ensure-CachedMap {
         Write-Log "    [awdt] $_" -Color Gray
     }
     if ($LASTEXITCODE -ne 0) {
+        # Check if this is a WMO-only map (common failure pattern)
+        $logContent = Get-Content $awdtLog -Raw -ErrorAction SilentlyContinue
+        if ($logContent -match "Attempted to read past the end of the stream" -or $expectedTiles -eq 0) {
+            Write-Log "  [warn] Skipping $Version/$Map - appears to be WMO-only (no ADT tiles)" -Color Yellow
+            return $false
+        }
         Write-Log "  [ERROR] AlphaWdtAnalyzer conversion failed! See: $awdtLog" -Color Red
         throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
     }
