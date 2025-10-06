@@ -410,6 +410,17 @@ public static class AdtExportPipeline
                     continue;
                 }
 
+                // Load MapIdResolver from DBCTool.V2 maps.json (if available)
+                MapIdResolver? mapIdResolver = null;
+                if (!string.IsNullOrWhiteSpace(opts.DbctoolOutRoot))
+                {
+                    mapIdResolver = MapIdResolver.LoadFromDbcToolOutput(opts.DbctoolOutRoot!, aliasUsed);
+                    if (mapIdResolver != null && opts.Verbose)
+                    {
+                        Console.WriteLine($"[MapIdResolver] Loaded {mapIdResolver.Version} with {mapIdResolver.GetAllDirectories().Count()} maps");
+                    }
+                }
+
                 var adtScanner = new AdtScanner();
                 var result = adtScanner.Scan(wdt);
 
