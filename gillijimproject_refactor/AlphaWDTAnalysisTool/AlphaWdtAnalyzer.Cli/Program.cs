@@ -443,15 +443,29 @@ public static class Program
                     }
                     
                     // Determine LK ADT directory (check even if we didn't export, they might already exist)
-                    lkAdtDirectory = Path.Combine(exportDir!, "World", "Maps", wdtScanner.MapName);
+                    // Try outDir first (for CSV-only extraction from cache), then exportDir
+                    string? lkAdtSearchRoot = !string.IsNullOrWhiteSpace(outDir) ? outDir 
+                                             : !string.IsNullOrWhiteSpace(exportDir) ? exportDir 
+                                             : null;
                     
-                    if (Directory.Exists(lkAdtDirectory))
+                    if (!string.IsNullOrWhiteSpace(lkAdtSearchRoot))
                     {
-                        Console.WriteLine($"[area] Using LK ADTs from: {lkAdtDirectory}");
+                        lkAdtDirectory = Path.Combine(lkAdtSearchRoot, "World", "Maps", wdtScanner.MapName);
+                        
+                        if (Directory.Exists(lkAdtDirectory))
+                        {
+                            Console.WriteLine($"[area] Found existing LK ADTs at: {lkAdtDirectory}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
+                            Console.WriteLine($"[area:warn] Area names will show as 'Unknown' (using Alpha AreaIDs)");
+                            lkAdtDirectory = null;
+                        }
                     }
                     else
                     {
-                        Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
+                        Console.WriteLine($"[area:warn] No --out or --export-dir specified, cannot search for LK ADTs");
                         Console.WriteLine($"[area:warn] Area names will show as 'Unknown' (using Alpha AreaIDs)");
                         lkAdtDirectory = null;
                     }
