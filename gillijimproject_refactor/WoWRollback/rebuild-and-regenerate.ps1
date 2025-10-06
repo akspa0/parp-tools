@@ -20,21 +20,80 @@ param(
 # Ensure all relative paths resolve from this script's directory (WoWRollback/)
 Set-Location -Path $PSScriptRoot
 
-Write-Host "=== WoWRollback Rebuild & Regenerate ===" -ForegroundColor Cyan
-Write-Host "    Automatic pipeline: DBCTool → AlphaWdtAnalyzer → Viewer generation" -ForegroundColor DarkGray
-Write-Host ""
+# === LOGGING INFRASTRUCTURE ===
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$logRootDir = Join-Path $PSScriptRoot "logs\session_$timestamp"
+New-Item -Path $logRootDir -ItemType Directory -Force | Out-Null
+
+$script:currentStage = "init"
+$script:currentLogFile = Join-Path $logRootDir "00_init.log"
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Color = "White",
+        [switch]$NoNewline
+    )
+    
+    $timePrefix = "[$(Get-Date -Format 'HH:mm:ss')]"
+    $fullMessage = "$timePrefix $Message"
+    
+    # Write to console
+    if ($NoNewline) {
+        Write-Host $Message -ForegroundColor $Color -NoNewline
+    } else {
+        Write-Host $Message -ForegroundColor $Color
+    }
+    
+    # Write to current log file (strip ANSI color codes)
+    if ($script:currentLogFile) {
+        Add-Content -Path $script:currentLogFile -Value $fullMessage -Encoding UTF8
+    }
+}
+
+function Set-LogStage {
+    param([string]$StageName, [int]$StageNumber)
+    $script:currentStage = $StageName
+    $logFileName = "{0:D2}_{1}.log" -f $StageNumber, $StageName
+    $script:currentLogFile = Join-Path $logRootDir $logFileName
+    Write-Log "=== STAGE: $StageName ===" -Color Cyan
+}
+
+function Invoke-LoggedCommand {
+    param(
+        [string]$Description,
+        [scriptblock]$Command
+    )
+    
+    Write-Log "[exec] $Description" -Color Yellow
+    $output = & $Command 2>&1
+    $output | ForEach-Object { 
+        Write-Log "  $_" -Color Gray
+    }
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Log "[exec] FAILED with exit code $LASTEXITCODE" -Color Red
+        throw "Command failed: $Description"
+    }
+    
+    return $output
+}
+
+Write-Log "=== WoWRollback Rebuild & Regenerate ===" -Color Cyan
+Write-Log "    Automatic pipeline: DBCTool → AlphaWdtAnalyzer → Viewer generation" -Color DarkGray
+Write-Log "    Log directory: $logRootDir" -Color DarkGray
+Write-Log ""
 
 # Step 0: Auto-run DBCTool.V2 if needed (handled later after path resolution)
 
 # Step 1: Clean build
-Write-Host "[1/5] Building solution..." -ForegroundColor Yellow
-dotnet build WoWRollback.sln --configuration Release
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Build failed!" -ForegroundColor Red
-    exit 1
+Set-LogStage -StageName "build" -StageNumber 1
+Write-Log "[1/5] Building solution..." -Color Yellow
+$buildOutput = Invoke-LoggedCommand -Description "dotnet build" -Command {
+    dotnet build WoWRollback.sln --configuration Release 2>&1
 }
-Write-Host "✓ Build complete" -ForegroundColor Green
-Write-Host ""
+Write-Log "✓ Build complete" -Color Green
+Write-Log ""
 
 # Helper: Discover map names from AlphaRoot when -Maps auto
 # Searches version-specific paths: test_data/<version>/tree/World/Maps/<MapName>/<MapName>.wdt
@@ -84,7 +143,8 @@ function Get-MapsFromAlphaRoot([string]$root, [string[]]$versions) {
 }
 
 # Step 2: Regenerate comparison data
-Write-Host "[2/5] Preparing cached Alpha -> LK ADTs..." -ForegroundColor Yellow
+Set-LogStage -StageName "cache_preparation" -StageNumber 2
+Write-Log "[2/5] Preparing cached Alpha -> LK ADTs..." -Color Yellow
 
 $cacheRootPath = Join-Path $PSScriptRoot $CacheRoot
 
@@ -369,52 +429,31 @@ function Ensure-CachedMap {
                 throw "AlphaRoot must be provided for CSV extraction"
             }
             
-            $wdtPath = Find-WdtPath -Root $AlphaRoot -Version $Version -Map $Map
-            if (-not $wdtPath) {
-                throw "Unable to locate $Map.wdt beneath $AlphaRoot for version $Version"
-            }
-            
-            if (-not (Test-Path $communityListfile)) {
-                throw "Missing community listfile at $communityListfile"
-            }
-            if (-not (Test-Path $lkListfile)) {
-                throw "Missing LK listfile at $lkListfile"
-            }
             if (-not (Test-Path $alphaToolProject)) {
                 throw "AlphaWDTAnalysisTool project not found at $alphaToolProject"
             }
             
-            # Run AlphaWDTAnalyzer for CSV extraction ONLY (no ADT conversion)
-            # Point --out to parent of cached LK ADTs so tool finds them at <out>/World/Maps/<Map>/
+            # NEW: Use LK ADT extraction mode (no Alpha WDT needed!)
+            # This reads LK ADTs directly and extracts CSVs
             $toolArgs = @(
                 'run','--project',$alphaToolProject,'--configuration','Release','--',
-                '--input', $wdtPath,
-                '--listfile', $communityListfile,
-                '--lk-listfile', $lkListfile,
-                '--out', $versionRoot,  # Point to cache root where LK ADTs are
+                '--extract-lk-adts', $mapRoot,  # Point directly to LK ADT directory
+                '--map', $Map,
+                '--out', $versionRoot,
                 '--extract-mcnk-terrain',
-                '--extract-mcnk-shadows',
-                '--no-web',
-                '--profile', 'raw',
-                '--no-fallbacks'
+                '--extract-mcnk-shadows'
             )
             
-            # Add DBCTool AreaTable crosswalk parameters if available
-            if ($dbctoolPatchDir -and (Test-Path $dbctoolPatchDir)) {
-                $toolArgs += '--dbctool-patch-dir'
-                $toolArgs += $dbctoolPatchDir
-                Write-Host "  [debug] ✓ Using DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
+            Write-Log "  [debug] Running CSV extraction from cached LK ADTs (direct mode)" -Color Magenta
+            Write-Log "  [debug] LK ADT directory: $mapRoot" -Color DarkGray
+            $csvExtractLog = Join-Path $logRootDir "awdt_csv_${Version}_${Map}.log"
+            Write-Log "  [debug] AlphaWDTAnalyzer output: $csvExtractLog" -Color DarkGray
+            & dotnet @toolArgs 2>&1 | Tee-Object -FilePath $csvExtractLog | ForEach-Object {
+                Write-Log "    [awdt] $_" -Color Gray
             }
-            
-            if ($dbctoolLkDir -and (Test-Path $dbctoolLkDir)) {
-                $toolArgs += '--dbctool-lk-dir'
-                $toolArgs += $dbctoolLkDir
-            }
-            
-            Write-Host "  [debug] Running CSV extraction from cached LK ADTs" -ForegroundColor Magenta
-            & dotnet @toolArgs
             if ($LASTEXITCODE -ne 0) {
-                throw "AlphaWdtAnalyzer CSV extraction failed for $Version/$Map"
+                Write-Log "  [ERROR] AlphaWdtAnalyzer LK extraction failed! See: $csvExtractLog" -Color Red
+                throw "AlphaWdtAnalyzer LK extraction failed for $Version/$Map"
             }
             
             # Copy newly extracted CSVs to rollback_outputs
@@ -506,10 +545,15 @@ function Ensure-CachedMap {
         Write-Host "  [warn] ✗ LK DBC directory NOT found: $dbctoolLkDir" -ForegroundColor Yellow
     }
 
-    Write-Host "  [debug] Running AlphaWdtAnalyzer with AreaTable crosswalk support" -ForegroundColor Magenta
-    Write-Host "  [debug] Analysis output dir: $analysisDir" -ForegroundColor Magenta
-    & dotnet @toolArgs
+    Write-Log "  [debug] Running AlphaWdtAnalyzer with AreaTable crosswalk support" -Color Magenta
+    Write-Log "  [debug] Analysis output dir: $analysisDir" -Color Magenta
+    $awdtLog = Join-Path $logRootDir "awdt_full_${Version}_${Map}.log"
+    Write-Log "  [debug] AlphaWDTAnalyzer full output: $awdtLog" -Color DarkGray
+    & dotnet @toolArgs 2>&1 | Tee-Object -FilePath $awdtLog | ForEach-Object {
+        Write-Log "    [awdt] $_" -Color Gray
+    }
     if ($LASTEXITCODE -ne 0) {
+        Write-Log "  [ERROR] AlphaWdtAnalyzer conversion failed! See: $awdtLog" -Color Red
         throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
     }
     
@@ -615,7 +659,8 @@ if ($RefreshOverlays.IsPresent) {
     Write-Host ""
 }
 
-Write-Host "[3/5] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
+Set-LogStage -StageName "comparison_generation" -StageNumber 3
+Write-Log "[3/5] Regenerating comparison data (this may take several minutes)..." -Color Yellow
 $versionsArg = ($Versions -join ',')
 
 # Auto-discover maps if requested
@@ -662,7 +707,8 @@ Write-Host "✓ Data regenerated" -ForegroundColor Green
 Write-Host ""
 
 # Step 4: Locate the exact comparison directory from CLI output; fallback to latest with index.json
-Write-Host "[4/5] Locating viewer output..." -ForegroundColor Yellow
+Set-LogStage -StageName "viewer_setup" -StageNumber 4
+Write-Log "[4/5] Locating viewer output..." -Color Yellow
 
 $viewerPath = $null
 $match = $dotnetOut | Select-String -Pattern 'Outputs written to:\s*(.+)$' | Select-Object -Last 1
@@ -746,7 +792,8 @@ Write-Host "Viewer output: $viewerDir" -ForegroundColor Cyan
 Write-Host "" 
 
 # Step 5: Start server
-Write-Host "[5/5] Server options..." -ForegroundColor Yellow
+Set-LogStage -StageName "server" -StageNumber 5
+Write-Log "[5/5] Server options..." -Color Yellow
 Write-Host "To start the viewer:" -ForegroundColor White
 Write-Host "  cd \"$viewerDir\"" -ForegroundColor Yellow
 Write-Host "  python -m http.server 8080" -ForegroundColor Yellow
@@ -754,19 +801,62 @@ Write-Host ""
 Write-Host "Then open: http://localhost:8080/index.html" -ForegroundColor Green
 Write-Host "" 
 
+# === FINAL SUMMARY ===
+$summaryFile = Join-Path $logRootDir "_SUMMARY.txt"
+$endTime = Get-Date
+$duration = $endTime - (Get-Date $timestamp)
+
+$summaryContent = @"
+===============================================
+WoWRollback Rebuild & Regenerate - SUMMARY
+===============================================
+Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+Duration: $($duration.ToString())
+Log Directory: $logRootDir
+
+Maps Processed: $($Maps -join ', ')
+Versions: $($Versions -join ', ')
+Refresh Flags: $(if ($RefreshCache) {'RefreshCache '})$(if ($RefreshAnalysis) {'RefreshAnalysis '})$(if ($RefreshOverlays) {'RefreshOverlays'})
+
+Viewer Output: $viewerDir
+Overlay Files Generated: $overlayCount
+
+Key Logs:
+  - Build: $(Join-Path $logRootDir '01_build.log')
+  - Cache Prep: $(Join-Path $logRootDir '02_cache_preparation.log')
+  - Comparison: $(Join-Path $logRootDir '03_comparison_generation.log')
+  - Viewer Setup: $(Join-Path $logRootDir '04_viewer_setup.log')
+  - AlphaWDT Logs: $(Join-Path $logRootDir 'awdt_*.log')
+
+To view logs:
+  cd "$logRootDir"
+  Get-ChildItem *.log | Sort-Object Name
+
+===============================================
+"@
+
+Set-Content -Path $summaryFile -Value $summaryContent -Encoding UTF8
+Write-Log "" 
+Write-Log "=== PIPELINE COMPLETE ===" -Color Green
+Write-Log "Duration: $($duration.ToString())" -Color Cyan
+Write-Log "Overlay files: $overlayCount" -Color Cyan
+Write-Log "Logs saved to: $logRootDir" -Color Cyan
+Write-Log "Summary: $summaryFile" -Color Cyan
+Write-Log ""
+
 if ($Serve) {
-    Write-Host "[5/5] Starting server on http://localhost:8080..." -ForegroundColor Cyan
-    Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
-    Write-Host "" 
+    Write-Log "[5/5] Starting server on http://localhost:8080..." -Color Cyan
+    Write-Log "Press Ctrl+C to stop the server" -Color Gray
+    Write-Log "" 
     Set-Location $viewerDir
     python -m http.server 8080
 } else {
     # Offer to start server interactively
     $response = Read-Host "Start Python HTTP server now? (Y/n)"
     if ($response -eq "" -or $response -eq "Y" -or $response -eq "y") {
-        Write-Host "Starting server on http://localhost:8080..." -ForegroundColor Cyan
-        Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
-        Write-Host "" 
+        Write-Log "Starting server on http://localhost:8080..." -Color Cyan
+        Write-Log "Press Ctrl+C to stop the server" -Color Gray
+        Write-Log "" 
         Set-Location $viewerDir
         python -m http.server 8080
     }

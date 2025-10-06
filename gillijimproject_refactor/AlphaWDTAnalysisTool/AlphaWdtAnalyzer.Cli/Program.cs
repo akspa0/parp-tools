@@ -61,11 +61,14 @@ public static class Program
         Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
         Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
         Console.WriteLine("  Count tiles: AlphaWdtAnalyzer --count-tiles --input <path/to/map.wdt>");
+        Console.WriteLine("  LK Extract:  AlphaWdtAnalyzer --extract-lk-adts <lk_adt_dir> --map <map_name> --out <output_dir> [--extract-mcnk-terrain] [--extract-mcnk-shadows]");
         Console.WriteLine("");
         Console.WriteLine("New Terrain Extraction Flags:");
         Console.WriteLine("  --extract-mcnk-terrain   Extract complete MCNK terrain data to CSV (all flags, liquids, holes, AreaID)");
         Console.WriteLine("  --extract-mcnk-shadows   Extract MCSH shadow map bitmaps to CSV (64×64 bitmaps per chunk)");
         Console.WriteLine("  --count-tiles            Print number of ADT tiles and exit (for cache validation)");
+        Console.WriteLine("  --extract-lk-adts <dir>  Extract CSVs directly from LK ADT directory (no Alpha WDT needed)");
+        Console.WriteLine("  --map <name>             Map name for LK extraction (required with --extract-lk-adts)");
         return 2;
     }
 
@@ -100,6 +103,8 @@ public static class Program
         bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
         bool extractMcnkTerrain = false; bool extractMcnkShadows = false;
         bool countTiles = false;
+        string? extractLkAdtsDir = null;
+        string? mapName = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -250,6 +255,14 @@ public static class Program
                 case "--count-tiles":
                     countTiles = true;
                     break;
+                case "--extract-lk-adts":
+                    if (i + 1 >= args.Length) return Usage();
+                    extractLkAdtsDir = args[++i];
+                    break;
+                case "--map":
+                    if (i + 1 >= args.Length) return Usage();
+                    mapName = args[++i];
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
@@ -279,6 +292,69 @@ public static class Program
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error reading WDT: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // LK ADT extraction mode (no Alpha WDT needed!)
+        if (!string.IsNullOrWhiteSpace(extractLkAdtsDir))
+        {
+            if (string.IsNullOrWhiteSpace(mapName))
+            {
+                Console.Error.WriteLine("--extract-lk-adts requires --map <map_name>");
+                return Usage();
+            }
+            if (string.IsNullOrWhiteSpace(outDir))
+            {
+                Console.Error.WriteLine("--extract-lk-adts requires --out <output_dir>");
+                return Usage();
+            }
+            
+            Console.WriteLine($"[LK Extraction] Extracting CSVs from LK ADTs: {extractLkAdtsDir}");
+            Console.WriteLine($"[LK Extraction] Map: {mapName}");
+            Console.WriteLine($"[LK Extraction] Output: {outDir}");
+            
+            try
+            {
+                using var teeScope = !string.IsNullOrWhiteSpace(outDir) 
+                    ? ConsoleTee.Start(Path.Combine(outDir, $"awdt_lk_{mapName}.log")) 
+                    : null;
+                
+                Directory.CreateDirectory(outDir);
+                
+                // Extract terrain if requested
+                if (extractMcnkTerrain)
+                {
+                    Console.WriteLine($"[LK Extraction] Extracting terrain data...");
+                    var terrain = AlphaWdtAnalyzer.Core.Terrain.LkAdtTerrainExtractor.ExtractFromLkAdts(extractLkAdtsDir, mapName);
+                    
+                    var terrainCsvDir = Path.Combine(outDir, "csv", mapName);
+                    Directory.CreateDirectory(terrainCsvDir);
+                    var terrainCsvPath = Path.Combine(terrainCsvDir, $"{mapName}_mcnk_terrain.csv");
+                    AlphaWdtAnalyzer.Core.Terrain.McnkTerrainCsvWriter.WriteCsv(terrain, terrainCsvPath);
+                    Console.WriteLine($"[LK Extraction] ✓ Terrain CSV: {terrainCsvPath}");
+                }
+                
+                // Extract shadows if requested
+                if (extractMcnkShadows)
+                {
+                    Console.WriteLine($"[LK Extraction] Extracting shadow data...");
+                    var shadows = AlphaWdtAnalyzer.Core.Terrain.LkAdtShadowExtractor.ExtractFromLkAdts(extractLkAdtsDir, mapName);
+                    
+                    var shadowCsvDir = Path.Combine(outDir, "csv", mapName);
+                    Directory.CreateDirectory(shadowCsvDir);
+                    var shadowCsvPath = Path.Combine(shadowCsvDir, $"{mapName}_mcnk_shadows.csv");
+                    AlphaWdtAnalyzer.Core.Terrain.McnkShadowCsvWriter.WriteCsv(shadows, shadowCsvPath);
+                    Console.WriteLine($"[LK Extraction] ✓ Shadow CSV: {shadowCsvPath}");
+                }
+                
+                Console.WriteLine($"[LK Extraction] Complete! CSVs written to: {outDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[LK Extraction] Error: {ex.Message}");
+                Console.Error.WriteLine($"[LK Extraction] Stack trace: {ex.StackTrace}");
                 return 1;
             }
         }
