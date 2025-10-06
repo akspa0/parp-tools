@@ -8,7 +8,9 @@ param(
     [string]$AlphaRoot,
     [string]$ConvertedAdtRoot,
     [string]$CacheRoot = "cached_maps",
-    [switch]$RefreshCache,
+    [switch]$RefreshCache,        # Force full rebuild: delete ADTs + CSVs, regenerate everything
+    [switch]$RefreshAnalysis,     # Delete only CSVs, regenerate from existing LK ADTs
+    [switch]$RefreshOverlays,     # Delete viewer overlays, regenerate from existing CSVs
     [switch]$Serve,
     [switch]$UseNewViewerAssets,  # Phase 1: Use WoWRollback.Viewer project assets
     [Parameter(ValueFromRemainingArguments=$true)]
@@ -300,6 +302,13 @@ function Ensure-CachedMap {
     # Check if cached ADTs are complete (all expected tiles present)
     $cacheComplete = Test-CacheComplete -MapRoot $mapRoot -ExpectedTiles $expectedTiles
     
+    # Handle RefreshAnalysis: delete CSVs but keep LK ADTs
+    if ($RefreshAnalysis.IsPresent -and (Test-Path $analysisDir)) {
+        Write-Host "  [cache] RefreshAnalysis flag set, deleting CSVs for $Version/$Map" -ForegroundColor Yellow
+        Remove-Item $analysisDir -Recurse -Force -ErrorAction SilentlyContinue
+        $analysisCsvsExist = $false
+    }
+    
     # Determine if refresh is needed
     if ($RefreshCache.IsPresent) {
         Write-Host "  [cache] RefreshCache flag set, rebuilding $Version/$Map" -ForegroundColor Yellow
@@ -311,12 +320,22 @@ function Ensure-CachedMap {
         Write-Host "  [cache] LK ADT cache incomplete for $Version/$Map, rebuilding..." -ForegroundColor Yellow
         $needsRefresh = $true
     } elseif (-not $analysisCsvsExist) {
-        Write-Host "  [cache] Analysis CSVs missing for $Version/$Map, building..." -ForegroundColor Yellow
-        $needsRefresh = $true
+        # CSVs missing - check if we can do CSV-only extraction (LK ADTs exist)
+        if ($lkAdtsExist -and $cacheComplete) {
+            Write-Host "  [cache] Analysis CSVs missing but LK ADTs exist for $Version/$Map" -ForegroundColor Yellow
+            Write-Host "  [cache] Will extract CSVs from existing LK ADTs (fast path)" -ForegroundColor Cyan
+            $needsRefresh = $false
+            $needsCsvExtraction = $true
+        } else {
+            Write-Host "  [cache] Analysis CSVs missing for $Version/$Map, building..." -ForegroundColor Yellow
+            $needsRefresh = $true
+            $needsCsvExtraction = $false
+        }
     } else {
         $adtCount = (Get-ChildItem -Path $mapRoot -Filter "*.adt" -File -ErrorAction SilentlyContinue).Count
         Write-Host "  [cache] ✓ Reusing cached data for $Version/$Map ($adtCount ADTs + CSVs)" -ForegroundColor Green
         $needsRefresh = $false
+        $needsCsvExtraction = $false
     }
     
     if (-not $needsRefresh) {
@@ -340,6 +359,76 @@ function Ensure-CachedMap {
         if ((Test-Path $shadowCsvPath) -and -not (Test-Path $rollbackShadowCsv)) {
             Copy-Item -Path $shadowCsvPath -Destination $rollbackMapCsvDir -Force
             Write-Host "  [cache] Copied cached shadow CSV to rollback_outputs" -ForegroundColor Cyan
+        }
+        
+        # Handle CSV-only extraction (RefreshAnalysis with existing LK ADTs)
+        if ($needsCsvExtraction) {
+            Write-Host "  [cache] Extracting CSVs from existing LK ADTs..." -ForegroundColor Cyan
+            
+            if (-not $AlphaRoot) {
+                throw "AlphaRoot must be provided for CSV extraction"
+            }
+            
+            $wdtPath = Find-WdtPath -Root $AlphaRoot -Version $Version -Map $Map
+            if (-not $wdtPath) {
+                throw "Unable to locate $Map.wdt beneath $AlphaRoot for version $Version"
+            }
+            
+            if (-not (Test-Path $communityListfile)) {
+                throw "Missing community listfile at $communityListfile"
+            }
+            if (-not (Test-Path $lkListfile)) {
+                throw "Missing LK listfile at $lkListfile"
+            }
+            if (-not (Test-Path $alphaToolProject)) {
+                throw "AlphaWDTAnalysisTool project not found at $alphaToolProject"
+            }
+            
+            # Run AlphaWDTAnalyzer for CSV extraction ONLY (no ADT conversion)
+            # Point --out to parent of cached LK ADTs so tool finds them at <out>/World/Maps/<Map>/
+            $toolArgs = @(
+                'run','--project',$alphaToolProject,'--configuration','Release','--',
+                '--input', $wdtPath,
+                '--listfile', $communityListfile,
+                '--lk-listfile', $lkListfile,
+                '--out', $versionRoot,  # Point to cache root where LK ADTs are
+                '--extract-mcnk-terrain',
+                '--extract-mcnk-shadows',
+                '--no-web',
+                '--profile', 'raw',
+                '--no-fallbacks'
+            )
+            
+            # Add DBCTool AreaTable crosswalk parameters if available
+            if ($dbctoolPatchDir -and (Test-Path $dbctoolPatchDir)) {
+                $toolArgs += '--dbctool-patch-dir'
+                $toolArgs += $dbctoolPatchDir
+                Write-Host "  [debug] ✓ Using DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
+            }
+            
+            if ($dbctoolLkDir -and (Test-Path $dbctoolLkDir)) {
+                $toolArgs += '--dbctool-lk-dir'
+                $toolArgs += $dbctoolLkDir
+            }
+            
+            Write-Host "  [debug] Running CSV extraction from cached LK ADTs" -ForegroundColor Magenta
+            & dotnet @toolArgs
+            if ($LASTEXITCODE -ne 0) {
+                throw "AlphaWdtAnalyzer CSV extraction failed for $Version/$Map"
+            }
+            
+            # Copy newly extracted CSVs to rollback_outputs
+            $extractedTerrainCsv = Join-Path $versionRoot "csv\$Map\${Map}_mcnk_terrain.csv"
+            if (Test-Path $extractedTerrainCsv) {
+                Copy-Item -Path $extractedTerrainCsv -Destination $rollbackMapCsvDir -Force
+                Write-Host "  [cache] ✓ Copied extracted terrain CSV to rollback_outputs" -ForegroundColor Green
+            }
+            
+            $extractedShadowCsv = Join-Path $versionRoot "csv\$Map\${Map}_mcnk_shadows.csv"
+            if (Test-Path $extractedShadowCsv) {
+                Copy-Item -Path $extractedShadowCsv -Destination $rollbackMapCsvDir -Force
+                Write-Host "  [cache] ✓ Copied extracted shadow CSV to rollback_outputs" -ForegroundColor Green
+            }
         }
         
         return $mapRoot
@@ -389,7 +478,7 @@ function Ensure-CachedMap {
         '--input', $wdtPath,
         '--listfile', $communityListfile,
         '--lk-listfile', $lkListfile,
-        '--out', $analysisDir,
+        '--out', $tempExportDir,
         '--export-adt',
         '--export-dir', $tempExportDir,
         '--extract-mcnk-terrain',
@@ -425,7 +514,7 @@ function Ensure-CachedMap {
     }
     
     # Verify terrain CSV was created
-    $expectedTerrainCsv = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_terrain.csv')
+   $expectedTerrainCsv = Join-Path $tempExportDir "csv\$Map\${Map}_mcnk_terrain.csv"
     if (Test-Path $expectedTerrainCsv) {
         Write-Host "  [debug] ✓ Terrain CSV created: $expectedTerrainCsv" -ForegroundColor Green
     } else {
@@ -443,9 +532,7 @@ function Ensure-CachedMap {
     }
     New-Item -Path $mapRoot -ItemType Directory -Force | Out-Null
     Copy-Item -Path (Join-Path $sourceMapDir '*') -Destination $mapRoot -Recurse -Force
-
-    Remove-Item $tempExportDir -Recurse -Force
-    
+   
     # Copy terrain CSVs to rollback_outputs for viewer generation
     $rollbackVersionRoot = Join-Path $PSScriptRoot ('rollback_outputs\' + $Version)
     $rollbackMapCsvDir = Join-Path $rollbackVersionRoot ('csv\' + $Map)
@@ -454,8 +541,8 @@ function Ensure-CachedMap {
     }
     
     # Copy MCNK terrain CSV (AlphaWdtAnalyzer outputs to csv/MapName/MapName_mcnk_terrain.csv)
-    $terrainCsvDir = Join-Path (Join-Path $analysisDir 'csv') $Map
-    $terrainCsv = Join-Path $terrainCsvDir ($Map + '_mcnk_terrain.csv')
+    $terrainCsvDir = Join-Path $tempExportDir "csv\$Map"
+    $terrainCsv = Join-Path $terrainCsvDir "${Map}_mcnk_terrain.csv"
     if (Test-Path $terrainCsv) {
         Copy-Item -Path $terrainCsv -Destination $rollbackMapCsvDir -Force
         Write-Host "  [cache] ✓ Copied terrain CSV to rollback_outputs" -ForegroundColor Green
@@ -471,7 +558,7 @@ function Ensure-CachedMap {
     } else {
         Write-Host "  [debug] Shadow CSV not found (map may not have shadow data)" -ForegroundColor DarkGray
     }
-    
+    Remove-Item $tempExportDir -Recurse -Force
     # Copy AreaTable CSVs to version root (one per version, not per map)
     # Look in DBCTool.V2 outputs for AreaTable dumps
     $dbcToolOutputs = Join-Path $PSScriptRoot '..\DBCTool.V2\dbctool_outputs'
@@ -584,6 +671,16 @@ if (-not $viewerPath) {
 
 $viewerDir = Join-Path $viewerPath "viewer"
 Write-Host "Viewer at: $viewerDir" -ForegroundColor Gray
+
+# Handle RefreshOverlays: delete existing overlay JSONs
+if ($RefreshOverlays.IsPresent) {
+    $overlayDir = Join-Path $viewerDir "overlays"
+    if (Test-Path $overlayDir) {
+        Write-Host "[refresh] Deleting existing viewer overlays..." -ForegroundColor Yellow
+        Remove-Item $overlayDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "[refresh] ✓ Old overlays deleted, will regenerate" -ForegroundColor Green
+    }
+}
 
 # Ensure viewer directory exists and contains the static assets
 if (-not (Test-Path $viewerDir)) {
