@@ -600,6 +600,21 @@ foreach ($version in $Versions) {
 Write-Host "✓ Cached maps ready" -ForegroundColor Green
 Write-Host ""
 
+# Handle RefreshOverlays: delete old overlays BEFORE regenerating
+if ($RefreshOverlays.IsPresent) {
+    Write-Host "[refresh] Deleting old viewer overlays before regeneration..." -ForegroundColor Yellow
+    $existingComparisons = Get-ChildItem -Path "rollback_outputs\comparisons" -Directory -ErrorAction SilentlyContinue
+    foreach ($comp in $existingComparisons) {
+        $overlayDir = Join-Path $comp.FullName "viewer\overlays"
+        if (Test-Path $overlayDir) {
+            Remove-Item $overlayDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "  [refresh] Deleted overlays in $($comp.Name)" -ForegroundColor Gray
+        }
+    }
+    Write-Host "[refresh] ✓ Old overlays deleted, will regenerate fresh" -ForegroundColor Green
+    Write-Host ""
+}
+
 Write-Host "[3/5] Regenerating comparison data (this may take several minutes)..." -ForegroundColor Yellow
 $versionsArg = ($Versions -join ',')
 
@@ -671,16 +686,6 @@ if (-not $viewerPath) {
 
 $viewerDir = Join-Path $viewerPath "viewer"
 Write-Host "Viewer at: $viewerDir" -ForegroundColor Gray
-
-# Handle RefreshOverlays: delete existing overlay JSONs
-if ($RefreshOverlays.IsPresent) {
-    $overlayDir = Join-Path $viewerDir "overlays"
-    if (Test-Path $overlayDir) {
-        Write-Host "[refresh] Deleting existing viewer overlays..." -ForegroundColor Yellow
-        Remove-Item $overlayDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "[refresh] ✓ Old overlays deleted, will regenerate" -ForegroundColor Green
-    }
-}
 
 # Ensure viewer directory exists and contains the static assets
 if (-not (Test-Path $viewerDir)) {
