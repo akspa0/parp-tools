@@ -20,10 +20,30 @@ param(
 # Ensure all relative paths resolve from this script's directory (WoWRollback/)
 Set-Location -Path $PSScriptRoot
 
-# === LOGGING INFRASTRUCTURE ===
+# === SIMPLE, FLAT OUTPUT STRUCTURE ===
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$logRootDir = Join-Path $PSScriptRoot "logs\session_$timestamp"
-New-Item -Path $logRootDir -ItemType Directory -Force | Out-Null
+
+# Flat, cacheable structure (NO session folders for data)
+$parpOutputRoot = Join-Path $PSScriptRoot "..\parp_out"
+
+# Stage outputs (reusable, no timestamps)
+$dbcCacheDir = Join-Path $parpOutputRoot "dbcs"           # DBC dumps by version
+$crosswalkDir = Join-Path $parpOutputRoot "crosswalks"    # DBCTool outputs
+$adtCacheDir = Join-Path $parpOutputRoot "adts"           # Converted ADTs
+$analysisCacheDir = Join-Path $parpOutputRoot "analysis"  # CSVs
+$viewerOutputDir = Join-Path $parpOutputRoot "viewer"     # Latest viewer
+
+# Logs get timestamps (everything else is cacheable)
+$logsDir = Join-Path $parpOutputRoot "logs\session_$timestamp"
+$logRootDir = $logsDir
+
+# Create base directories
+New-Item -Path $dbcCacheDir -ItemType Directory -Force | Out-Null
+New-Item -Path $crosswalkDir -ItemType Directory -Force | Out-Null
+New-Item -Path $adtCacheDir -ItemType Directory -Force | Out-Null
+New-Item -Path $analysisCacheDir -ItemType Directory -Force | Out-Null
+New-Item -Path $viewerOutputDir -ItemType Directory -Force | Out-Null
+New-Item -Path $logsDir -ItemType Directory -Force | Out-Null
 
 $script:currentStage = "init"
 $script:currentLogFile = Join-Path $logRootDir "00_init.log"
@@ -146,7 +166,8 @@ function Get-MapsFromAlphaRoot([string]$root, [string[]]$versions) {
 Set-LogStage -StageName "cache_preparation" -StageNumber 2
 Write-Log "[2/5] Preparing cached Alpha -> LK ADTs..." -Color Yellow
 
-$cacheRootPath = Join-Path $PSScriptRoot $CacheRoot
+# ADT cache in flat structure
+$cacheRootPath = $adtCacheDir
 
 function Resolve-FirstExistingPath {
     param([string[]]$Candidates)
@@ -169,8 +190,8 @@ $lkListfile = Resolve-FirstExistingPath @(
 $alphaToolProject = Join-Path $PSScriptRoot "..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Cli\AlphaWdtAnalyzer.Cli.csproj"
 
 # DBCTool paths for AreaTable crosswalk mappings (definitive source of truth)
-$dbcToolProject = Join-Path $PSScriptRoot '..\DBCTool.V2\DbcTool.Cli\DbcTool.Cli.csproj'
-$dbcToolOutputRoot = Join-Path $PSScriptRoot '..\dbctool_out'
+$dbcToolProject = Join-Path $PSScriptRoot '..\DBCTool.V2\DBCTool.V2.csproj'
+$dbcToolOutputRoot = $crosswalkDir  # Flat crosswalks directory
 $dbctoolPatchDir = $null
 $dbctoolLkDir = Resolve-FirstExistingPath @(
     (Join-Path $PSScriptRoot "..\test_data\3.3.5\tree\DBFilesClient"),
@@ -186,33 +207,114 @@ function Invoke-DBCTool {
         return $false
     }
     
-    # Run DBCTool with default settings
-    $dbcArgs = @('run', '--project', $dbcToolProject, '--configuration', 'Release')
+    # Find DBC input directories
+    $srcDbcDir = Resolve-FirstExistingPath @(
+        (Join-Path $PSScriptRoot "..\test_data\0.5.3\tree\DBFilesClient"),
+        (Join-Path $PSScriptRoot "test_data\0.5.3\tree\DBFilesClient")
+    )
+    $tgtDbcDir = $dbctoolLkDir  # Already resolved above
     
-    Write-Host "[auto] Executing: dotnet run --project DbcTool.Cli.csproj" -ForegroundColor Yellow
-    & dotnet @dbcArgs
+    if (-not $srcDbcDir -or -not (Test-Path $srcDbcDir)) {
+        Write-Host "[auto] ✗ Source DBC directory (0.5.3) not found" -ForegroundColor Red
+        return $false
+    }
+    
+    if (-not $tgtDbcDir -or -not (Test-Path $tgtDbcDir)) {
+        Write-Host "[auto] ✗ Target DBC directory (3.3.5) not found" -ForegroundColor Red
+        return $false
+    }
+    
+    # Find DBD definitions (WoWDBDefs)
+    $dbdDir = Resolve-FirstExistingPath @(
+        (Join-Path $PSScriptRoot "..\lib\WoWDBDefs\definitions"),
+        (Join-Path $PSScriptRoot "lib\WoWDBDefs\definitions")
+    )
+    
+    if (-not $dbdDir -or -not (Test-Path $dbdDir)) {
+        Write-Host "[auto] ✗ WoWDBDefs directory not found" -ForegroundColor Red
+        Write-Host "[auto]    Expected: lib/WoWDBDefs/definitions" -ForegroundColor Yellow
+        return $false
+    }
+    
+    # Step 1: Dump DBCs to CSV first (required for compare to work)
+    Write-Host "[auto] Step 1: Dumping DBCs to CSV..." -ForegroundColor Cyan
+    $dumpArgs = @(
+        'run', '--project', $dbcToolProject, '--configuration', 'Release', '--',
+        '--out-root', $dbcCacheDir,
+        '--dbd-dir', $dbdDir,
+        '--input', "0.5.3=$srcDbcDir",
+        '--input', "3.3.5=$tgtDbcDir",
+        '--dump-area'
+    )
+    
+    $dbcDumpLog = Join-Path $logRootDir "dbctool_dump.log"
+    Write-Host "[auto] Dumping 0.5.3 and 3.3.5 AreaTable to CSV..." -ForegroundColor Yellow
+    $dumpOutput = & dotnet @dumpArgs 2>&1 | Tee-Object -FilePath $dbcDumpLog
+    $dumpOutput | ForEach-Object { Write-Host "  [dump] $_" -ForegroundColor DarkGray }
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[auto] ✗ DBC dump failed!" -ForegroundColor Red
+        return $false
+    }
+    
+    # Step 2: Run comparison to generate crosswalks
+    Write-Host "[auto] Step 2: Generating AreaTable crosswalks..." -ForegroundColor Cyan
+    $compareArgs = @(
+        'run', '--project', $dbcToolProject, '--configuration', 'Release', '--',
+        '--out-root', $crosswalkDir,
+        '--dbd-dir', $dbdDir,
+        '--input', "0.5.3=$srcDbcDir",
+        '--input', "3.3.5=$tgtDbcDir",
+        '--compare-area-v2'
+    )
+    
+    $dbcToolLog = Join-Path $logRootDir "dbctool_compare.log"
+    Write-Host "[auto] Comparing AreaTables to generate crosswalks..." -ForegroundColor Yellow
+    $output = & dotnet @compareArgs 2>&1 | Tee-Object -FilePath $dbcToolLog
+    $output | ForEach-Object { Write-Host "  [compare] $_" -ForegroundColor Gray }
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[auto] ✓ DBCTool.V2 completed successfully" -ForegroundColor Green
-        return $true
+        # DBCTool ignores --out-root and writes to ./dbctool_out relative to CWD
+        # So check where it actually wrote the files
+        $actualDbcOut = Join-Path $PSScriptRoot "dbctool_out"
+        $mapsJson = Join-Path $actualDbcOut "0.5.3\maps.json"
+        $crosswalkV2 = Join-Path $actualDbcOut "0.5.3\compare\v2"
+        
+        if ((Test-Path $mapsJson) -and (Test-Path $crosswalkV2)) {
+            Write-Host "[auto] ✓ DBCTool.V2 completed successfully" -ForegroundColor Green
+            Write-Host "[auto] ✓ Outputs: $actualDbcOut" -ForegroundColor Green
+            
+            # Update the global variable to point where files actually are
+            $script:dbcToolOutputRoot = $actualDbcOut
+            $script:crosswalkDir = $actualDbcOut
+            
+            return $true
+        } else {
+            Write-Host "[auto] ✗ DBCTool.V2 exited cleanly but produced incomplete output!" -ForegroundColor Red
+            Write-Host "[auto] ✗ maps.json: $(if (Test-Path $mapsJson) {'✓'} else {'✗'})" -ForegroundColor Yellow
+            Write-Host "[auto] ✗ crosswalks: $(if (Test-Path $crosswalkV2) {'✓'} else {'✗'})" -ForegroundColor Yellow
+            Write-Host "[auto]    Check logs: $dbcDumpLog, $dbcToolLog" -ForegroundColor Yellow
+            return $false
+        }
     } else {
-        Write-Host "[auto] ✗ DBCTool.V2 failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+        Write-Host "[auto] ✗ DBCTool.V2 compare failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+        Write-Host "[auto]    Check log: $dbcToolLog" -ForegroundColor Yellow
         return $false
     }
 }
 
-# Get DBCTool crosswalk directory for a specific version (from definitive dbctool_out folder)
+# Get DBCTool crosswalk directory for a specific version
 function Get-DBCToolCrosswalkDir {
     param([string]$Version)
     
-    if (-not (Test-Path $dbcToolOutputRoot)) {
+    if (-not (Test-Path $crosswalkDir)) {
         return $null
     }
     
     # Extract base version (e.g., "0.5.3.3368" -> "0.5.3")
     $baseVersion = if ($Version -match '^(\d+\.\d+\.\d+)') { $matches[1] } else { $Version }
     
-    $compareV2Dir = Join-Path $dbcToolOutputRoot "$baseVersion\compare\v2"
+    $compareV2Dir = Join-Path $crosswalkDir "$baseVersion\compare\v2"
     
     if (Test-Path $compareV2Dir) {
         return $compareV2Dir
@@ -223,6 +325,33 @@ function Get-DBCToolCrosswalkDir {
 
 # Note: $dbctoolPatchDir will be set per-version in the cache preparation loop
 # using Get-DBCToolCrosswalkDir to point to the definitive dbctool_out/{version}/compare/v2 folders
+
+# Step 0: Auto-run DBCTool.V2 to generate AreaTable crosswalks if needed
+Set-LogStage -StageName "dbctool_init" -StageNumber 0
+
+# Check if we have the required outputs (maps.json and crosswalks)
+# DBCTool writes to ./dbctool_out relative to CWD, not --out-root
+$actualDbcToolOut = Join-Path $PSScriptRoot "dbctool_out"
+$mapsJsonPath = Join-Path $actualDbcToolOut "0.5.3\maps.json"
+$crosswalkPath = Join-Path $actualDbcToolOut "0.5.3\compare\v2"
+
+$needsDbcTool = (-not (Test-Path $mapsJsonPath)) -or (-not (Test-Path $crosswalkPath))
+
+# If they exist, update variables to point to actual location
+if (-not $needsDbcTool) {
+    $crosswalkDir = $actualDbcToolOut
+}
+
+if ($needsDbcTool) {
+    Write-Log "[auto] DBCTool outputs missing or incomplete, running DBCTool.V2..." -Color Yellow
+    $dbcToolSuccess = Invoke-DBCTool
+    if (-not $dbcToolSuccess) {
+        Write-Log "[ERROR] DBCTool.V2 failed - AreaID mapping will not work!" -Color Red
+    }
+} else {
+    Write-Log "[auto] ✓ DBCTool outputs found: $mapsJsonPath" -Color Green
+    Write-Log "[auto] ✓ Crosswalks found: $crosswalkPath" -Color Green
+}
 
 if (-not (Test-Path $cacheRootPath)) {
     New-Item -Path $cacheRootPath -ItemType Directory | Out-Null
@@ -317,8 +446,8 @@ function Ensure-CachedMap {
     $versionRoot = Join-Path $cacheRootPath $Version
     $worldMapsRoot = Join-Path (Join-Path $versionRoot 'World') 'Maps'
     $mapRoot = Join-Path $worldMapsRoot $Map
-    $analysisRoot = Join-Path (Join-Path $cacheRootPath 'analysis') $Version
-    $analysisDir = Join-Path $analysisRoot $Map
+    # Analysis CSVs in flat structure
+    $mapAnalysisDir = Join-Path $analysisCacheDir "$Version\$Map"
 
     # Find source WDT to check expected tile count
     $sourceWdt = $null
@@ -335,17 +464,17 @@ function Ensure-CachedMap {
 
     # Smart cache checking: verify all required outputs exist AND are complete
     $lkAdtsExist = Test-Path $mapRoot
-    $terrainCsvPath = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_terrain.csv')
-    $shadowCsvPath = Join-Path (Join-Path (Join-Path $analysisDir 'csv') $Map) ($Map + '_mcnk_shadows.csv')
+    $terrainCsvPath = Join-Path (Join-Path (Join-Path $mapAnalysisDir 'csv') $Map) ($Map + '_mcnk_terrain.csv')
+    $shadowCsvPath = Join-Path (Join-Path (Join-Path $mapAnalysisDir 'csv') $Map) ($Map + '_mcnk_shadows.csv')
     $analysisCsvsExist = (Test-Path $terrainCsvPath) -or (Test-Path $shadowCsvPath)
     
     # Check if cached ADTs are complete (all expected tiles present)
     $cacheComplete = Test-CacheComplete -MapRoot $mapRoot -ExpectedTiles $expectedTiles
     
     # Handle RefreshAnalysis: delete CSVs but keep LK ADTs
-    if ($RefreshAnalysis.IsPresent -and (Test-Path $analysisDir)) {
+    if ($RefreshAnalysis.IsPresent -and (Test-Path $mapAnalysisDir)) {
         Write-Host "  [cache] RefreshAnalysis flag set, deleting CSVs for $Version/$Map" -ForegroundColor Yellow
-        Remove-Item $analysisDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $mapAnalysisDir -Recurse -Force -ErrorAction SilentlyContinue
         $analysisCsvsExist = $false
     }
     
@@ -403,7 +532,7 @@ function Ensure-CachedMap {
         
         # Handle CSV-only extraction (RefreshAnalysis with existing LK ADTs)
         if ($needsCsvExtraction) {
-            Write-Host "  [cache] Extracting CSVs from existing LK ADTs..." -ForegroundColor Cyan
+            Write-Host "  [cache] Re-extracting CSVs from Alpha WDT (ensures AreaID patching)..." -ForegroundColor Cyan
             
             if (-not $AlphaRoot) {
                 throw "AlphaRoot must be provided for CSV extraction"
@@ -413,27 +542,38 @@ function Ensure-CachedMap {
                 throw "AlphaWDTAnalysisTool project not found at $alphaToolProject"
             }
             
-            # NEW: Use LK ADT extraction mode (no Alpha WDT needed!)
-            # This reads LK ADTs directly and extracts CSVs
+            # IMPORTANT: Always go through Alpha WDT pipeline to ensure AreaID patching
+            # Even when ADTs are cached, we extract CSVs from Alpha → LK conversion
+            # This guarantees DBCTool crosswalks are applied correctly
+            $alphaWdtPath = Join-Path $AlphaRoot "$Version\World\Maps\$Map\$Map.wdt"
+            if (-not (Test-Path $alphaWdtPath)) {
+                Write-Log "  [ERROR] Alpha WDT not found: $alphaWdtPath" -Color Red
+                throw "Alpha WDT required for CSV extraction: $alphaWdtPath"
+            }
+            
             $toolArgs = @(
                 'run','--project',$alphaToolProject,'--configuration','Release','--',
-                '--extract-lk-adts', $mapRoot,  # Point directly to LK ADT directory
-                '--map', $Map,
+                '--input', $alphaWdtPath,
+                '--listfile', $communityListfile,
                 '--out', $versionRoot,
                 '--extract-mcnk-terrain',
-                '--extract-mcnk-shadows'
+                '--extract-mcnk-shadows',
+                '--export-adt',
+                '--export-dir', $cacheRoot,
+                '--dbctool-out-root', $dbcToolOutputRoot,
+                '--verbose'
             )
             
-            Write-Log "  [debug] Running CSV extraction from cached LK ADTs (direct mode)" -Color Magenta
-            Write-Log "  [debug] LK ADT directory: $mapRoot" -Color DarkGray
+            Write-Log "  [debug] Running Alpha WDT → LK ADT pipeline (with AreaID patching)" -Color Magenta
+            Write-Log "  [debug] Alpha WDT: $alphaWdtPath" -Color DarkGray
             $csvExtractLog = Join-Path $logRootDir "awdt_csv_${Version}_${Map}.log"
             Write-Log "  [debug] AlphaWDTAnalyzer output: $csvExtractLog" -Color DarkGray
             & dotnet @toolArgs 2>&1 | Tee-Object -FilePath $csvExtractLog | ForEach-Object {
                 Write-Log "    [awdt] $_" -Color Gray
             }
             if ($LASTEXITCODE -ne 0) {
-                Write-Log "  [ERROR] AlphaWdtAnalyzer LK extraction failed! See: $csvExtractLog" -Color Red
-                throw "AlphaWdtAnalyzer LK extraction failed for $Version/$Map"
+                Write-Log "  [ERROR] AlphaWdtAnalyzer conversion failed! See: $csvExtractLog" -Color Red
+                throw "AlphaWdtAnalyzer conversion failed for $Version/$Map"
             }
             
             # Copy newly extracted CSVs to rollback_outputs
@@ -456,15 +596,14 @@ function Ensure-CachedMap {
     if (Test-Path $mapRoot) {
         Remove-Item $mapRoot -Recurse -Force
     }
-    if (Test-Path $analysisDir) {
-        Remove-Item $analysisDir -Recurse -Force
+    if (Test-Path $mapAnalysisDir) {
+        Remove-Item $mapAnalysisDir -Recurse -Force
     }
 
     New-Item -Path $versionRoot -ItemType Directory -Force | Out-Null
     New-Item -Path $worldMapsRoot -ItemType Directory -Force | Out-Null
     New-Item -Path $mapRoot -ItemType Directory -Force | Out-Null
-    New-Item -Path $analysisRoot -ItemType Directory -Force | Out-Null
-    New-Item -Path $analysisDir -ItemType Directory -Force | Out-Null
+    New-Item -Path $mapAnalysisDir -ItemType Directory -Force | Out-Null
 
     if (-not $AlphaRoot) {
         throw "AlphaRoot must be provided to build cached maps"
@@ -511,6 +650,12 @@ function Ensure-CachedMap {
     )
     
     # Add DBCTool AreaTable crosswalk parameters if available
+    if (Test-Path $dbcToolOutputRoot) {
+        $toolArgs += '--dbctool-out-root'
+        $toolArgs += $dbcToolOutputRoot
+        Write-Host "  [debug] ✓ Using DBCTool output root: $dbcToolOutputRoot" -ForegroundColor Green
+    }
+    
     if ($dbctoolPatchDir -and (Test-Path $dbctoolPatchDir)) {
         $toolArgs += '--dbctool-patch-dir'
         $toolArgs += $dbctoolPatchDir
@@ -529,7 +674,7 @@ function Ensure-CachedMap {
     }
 
     Write-Log "  [debug] Running AlphaWdtAnalyzer with AreaTable crosswalk support" -Color Magenta
-    Write-Log "  [debug] Analysis output dir: $analysisDir" -Color Magenta
+    Write-Log "  [debug] Analysis output dir: $mapAnalysisDir" -Color Magenta
     $awdtLog = Join-Path $logRootDir "awdt_full_${Version}_${Map}.log"
     Write-Log "  [debug] AlphaWDTAnalyzer full output: $awdtLog" -Color DarkGray
     & dotnet @toolArgs 2>&1 | Tee-Object -FilePath $awdtLog | ForEach-Object {
@@ -565,6 +710,15 @@ function Ensure-CachedMap {
     }
     New-Item -Path $mapRoot -ItemType Directory -Force | Out-Null
     Copy-Item -Path (Join-Path $sourceMapDir '*') -Destination $mapRoot -Recurse -Force
+   
+    # Copy CSVs from temp export to analysis directory (for viewer overlay generation)
+    $tempCsvDir = Join-Path $tempExportDir "csv\$Map"
+    $analysisCsvDir = Join-Path $mapAnalysisDir "csv\$Map"
+    if (Test-Path $tempCsvDir) {
+        New-Item -Path $analysisCsvDir -ItemType Directory -Force | Out-Null
+        Copy-Item -Path (Join-Path $tempCsvDir '*') -Destination $analysisCsvDir -Force
+        Write-Host "  [debug] ✓ Copied CSVs to analysis directory: $analysisCsvDir" -ForegroundColor Green
+    }
    
     # Copy terrain CSVs to rollback_outputs for viewer generation
     $rollbackVersionRoot = Join-Path $PSScriptRoot ('rollback_outputs\' + $Version)
@@ -825,12 +979,34 @@ To view logs:
 "@
 
 Set-Content -Path $summaryFile -Value $summaryContent -Encoding UTF8
+
+# Create session manifest JSON for programmatic validation
+$manifestPath = Join-Path $sessionDir "session_manifest.json"
+$manifest = @{
+    session_id = $timestamp
+    session_dir = $sessionDir
+    maps_processed = $Maps
+    versions_processed = $Versions
+    stages = @{
+        dbctool = @{ output_dir = $dbctoolDir }
+        adt_export = @{ output_dir = $adtExportDir }
+        analysis = @{ output_dir = $analysisDir }
+        viewer = @{ output_dir = $viewerDir }
+    }
+    logs_dir = $logsDir
+    overlay_count = $overlayCount
+    timestamp = (Get-Date).ToString("o")
+} | ConvertTo-Json -Depth 5
+
+Set-Content -Path $manifestPath -Value $manifest -Encoding UTF8
+
 Write-Log "" 
 Write-Log "=== PIPELINE COMPLETE ===" -Color Green
 Write-Log "Duration: $($duration.ToString())" -Color Cyan
+Write-Log "Session: $sessionDir" -Color Cyan
 Write-Log "Overlay files: $overlayCount" -Color Cyan
-Write-Log "Logs saved to: $logRootDir" -Color Cyan
-Write-Log "Summary: $summaryFile" -Color Cyan
+Write-Log "Logs: $logsDir" -Color Cyan
+Write-Log "Manifest: $manifestPath" -Color Cyan
 Write-Log ""
 
 if ($Serve) {
