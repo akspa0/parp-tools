@@ -63,6 +63,22 @@ internal sealed class PipelineOrchestrator
         }
         Console.WriteLine();
 
+        // Stage 3: Analysis
+        ConsoleLogger.Info("Running analysis stage...");
+        var analysisRunner = new AnalysisStageRunner();
+        var analysisResult = analysisRunner.Run(session, adtResults);
+        if (analysisResult.Success)
+        {
+            var totalOverlays = analysisResult.PerVersion.Sum(v => v.Result.OverlayCount);
+            ConsoleLogger.Success($"Analysis complete: {totalOverlays} overlays generated");
+        }
+        else
+        {
+            ConsoleLogger.Warn($"Analysis stage had issues: {analysisResult.ErrorMessage}");
+        }
+        Console.WriteLine();
+
+        // Stage 4: Viewer
         ConsoleLogger.Info("Generating viewer...");
         var viewerRunner = new ViewerStageRunner();
         var viewerResult = viewerRunner.Run(session, adtResults);
@@ -83,6 +99,7 @@ internal sealed class PipelineOrchestrator
             session,
             dbcResult,
             adtResults,
+            analysisResult,
             viewerResult);
         manifestWriter.Write(session, pipelineResult);
         ConsoleLogger.Success($"Manifest written: {session.ManifestPath}");
@@ -110,4 +127,5 @@ internal sealed record PipelineRunResult(
     SessionContext Session,
     DbcStageResult Dbc,
     IReadOnlyList<AdtStageResult> AdtResults,
+    AnalysisStageResult Analysis,
     ViewerStageResult Viewer);

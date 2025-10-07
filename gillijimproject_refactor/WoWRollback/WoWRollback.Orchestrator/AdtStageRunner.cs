@@ -53,12 +53,18 @@ internal sealed class AdtStageRunner
 
         // Create AdtOrchestrator and conversion options
         var orchestrator = new AdtOrchestrator();
+        
+        // CRITICAL: Match the path structure DbcStageRunner uses
+        // DbcOrchestrator creates: 02_crosswalks/{version}/{alias}/compare/v2/
+        // So we need to point to: 02_crosswalks/{version}/{alias}/compare/v2/
+        var crosswalkPatchDir = Path.Combine(session.Paths.CrosswalkDir, version, alias, "compare", "v2");
+        
         var conversionOptions = new ConversionOptions
         {
             CommunityListfilePath = TryLocateCommunityListfile(options.AlphaRoot),
             LkListfilePath = TryLocateLkListfile(options.AlphaRoot),
             DbdDir = options.DbdDirectory,
-            CrosswalkDir = Path.Combine(session.Paths.CrosswalkDir, version, "compare"),
+            CrosswalkDir = crosswalkPatchDir,
             LkDbcDir = ResolveLkDbcDirectory(options),
             ConvertToMh2o = true,
             AssetFuzzy = true,

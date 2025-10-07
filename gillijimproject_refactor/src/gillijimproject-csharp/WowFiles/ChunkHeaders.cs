@@ -42,6 +42,7 @@ public static class ChunkHeaders
 /// [PORT] C# port of McnkHeader from ChunkHeaders.h
 /// Header structure for Lich King MCNK chunks
 /// </summary>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
 public struct McnkHeader
 {
     public int Flags;

@@ -15,7 +15,7 @@ using static DBCTool.V2.IO.DbdcHelper;
 
 namespace DBCTool.V2.Cli;
 
-internal sealed class CompareAreaV2Command
+public sealed class CompareAreaV2Command
 {
     public int Run(string dbdDir, string outBase, string localeStr, List<(string build, string dir)> inputs, bool chainVia060)
     {

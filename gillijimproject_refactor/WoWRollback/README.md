@@ -1,304 +1,454 @@
-# WoWRollback
+# WoWRollback - Unified Alpha Map Conversion Pipeline
 
-Visual comparison toolkit for World of Warcraft Alpha map evolution.
+**Digital archaeology toolkit** for World of Warcraft Alpha map content - converts Alpha WDTs to Lich King ADTs with AreaID patching, generates comparison data, and produces an interactive web viewer.
 
-## 🚀 Quick Start (5 Minutes)
+---
+
+## 🚀 Quick Start
 
 ### 1. Organize Your Data
+
+Your data should follow the **standard input layout** (see [DBCTool.V2/docs/input-data-prep.md](../DBCTool.V2/docs/input-data-prep.md)):
+
 ```
 test_data/
 ├── 0.5.3/
 │   └── tree/
-│       └── World/
-│           ├── Maps/
-│           │   ├── Azeroth/Azeroth.wdt
-│           │   ├── Kalimdor/Kalimdor.wdt
-│           │   └── ...
-│           └── Minimaps/
-│               ├── Azeroth/
-│               └── Kalimdor/
-└── 0.5.5/
-    └── (same structure)
+│       ├── DBFilesClient/           # Alpha DBCs
+│       │   ├── AreaTable.dbc
+│       │   └── Map.dbc
+│       └── World/Maps/
+│           ├── Shadowfang/Shadowfang.wdt
+│           ├── Azeroth/Azeroth.wdt
+│           └── Kalimdor/Kalimdor.wdt
+├── 0.5.5/
+│   └── tree/ (same structure)
+└── 3.3.5/
+    └── tree/
+        └── DBFilesClient/           # LK DBCs (target)
+            ├── AreaTable.dbc
+            └── Map.dbc
 ```
 
-### 2. Generate Viewer (One Command!)
+### 2. Run the Pipeline (One Command!)
+
 ```powershell
 cd WoWRollback
-.\rebuild-and-regenerate.ps1 -AlphaRoot ..\test_data\ -Serve
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Shadowfang \
+  --versions 0.5.3 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient
 ```
 
-That's it! The script will:
-- ✅ **Auto-discover** all maps from test_data (no manual list needed!)
-- ✅ **Extract terrain data** - MCNK flags, liquids, holes, AreaIDs, multi-layer terrain
-- ✅ **Convert to LK format** - Using raw coordinates (matches original client)
-- ✅ **Generate overlays** - Terrain properties, area boundaries, object placements
-- ✅ **Start web server** at http://localhost:8080
-
-### 3. Explore in Browser
-Open http://localhost:8080 and:
-- **Toggle terrain overlays** - Impassible areas (red), liquids (blue/green/orange), multi-layer terrain (blue), vertex colors (green)
-- **View area boundaries** - Real area names from AreaTable.dbc with adjustable opacity
-- **Compare versions** - Switch between 0.5.3, 0.5.5, etc. and see object additions/removals
-- **Filter by UniqueID ranges** 🆕 - Load CSV ranges and check/uncheck to isolate specific object groups
-- **Filter overlays** - Sub-options for each overlay type (rivers, oceans, magma, slime)
-- **Pan and zoom** - Explore the entire continent with Leaflet map controls
-
-## Common Workflows
-
-### Generate Specific Maps
+**With viewer server:**
 ```powershell
-.\rebuild-and-regenerate.ps1 `
-  -Maps @("Azeroth","Kalimdor") `
-  -Versions @("0.5.3.3368") `
-  -AlphaRoot ..\test_data\
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Shadowfang \
+  --versions 0.5.3 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --serve --port 8080
 ```
 
-### Compare Two Versions
-```powershell
-.\rebuild-and-regenerate.ps1 `
-  -Versions @("0.5.3.3368","0.5.5.3494") `
-  -AlphaRoot ..\test_data\ `
-  -Serve
+### 3. What Happens
+
+The unified orchestrator runs **4 stages sequentially**:
+
+```
+[1/4] DBC Stage
+  ✓ Dumps AreaTable CSVs from Alpha and LK DBCs
+  ✓ Generates area hierarchy crosswalks (v2 + v3)
+  ✓ Creates maps.json metadata
+
+[2/4] ADT Conversion Stage
+  ✓ Scans Alpha WDT for tile references
+  ✓ Converts Alpha ADTs → LK format
+  ✓ Patches AreaIDs using crosswalk mappings
+  ✓ Applies asset fuzzy-matching and fallbacks
+
+[3/4] Analysis Stage (Coming Soon)
+  ✓ Extracts UniqueID distributions (time-travel CSVs)
+  ✓ Generates MCNK terrain metadata CSVs
+  ✓ Creates per-tile overlay JSONs
+  ✓ Builds overlay manifest for viewer plugins
+
+[4/4] Viewer Stage
+  ✓ Copies static viewer assets (HTML/JS/CSS)
+  ✓ Generates index.json and config.json
+  ✓ Prepares overlay metadata
 ```
 
-### Refresh Cached Data (Force Re-Extract)
-```powershell
-.\rebuild-and-regenerate.ps1 `
-  -RefreshCache `
-  -AlphaRoot ..\test_data\
+### 4. Explore Results
+
+**Output Structure:**
+```
+parp_out/session_20251007_012032/
+├── 01_dbcs/                    # DBC dumps
+│   └── 0.5.3/raw/
+│       ├── AreaTable_0_5_3.csv
+│       └── AreaTable_3_3_5.csv
+├── 02_crosswalks/              # Area mappings
+│   └── 0.5.3/0.5.3/
+│       ├── compare/v2/         # V2 crosswalks
+│       └── compare/v3/         # V3 hierarchy
+├── 03_adts/                    # Converted LK ADTs
+│   └── 0.5.3/
+│       └── World/Maps/Shadowfang/
+│           ├── Shadowfang_25_30.adt
+│           └── ...
+├── 04_analysis/                # Analysis outputs (future)
+│   └── 0.5.3/
+│       ├── uniqueids/          # Time-travel CSVs
+│       └── terrain/            # MCNK metadata
+├── 05_viewer/                  # Web viewer
+│   ├── index.html
+│   ├── js/
+│   ├── styles.css
+│   └── overlays/
+│       └── metadata.json
+├── logs/                       # Per-stage logs
+└── manifest.json               # Session metadata
 ```
 
-### Process Instance Maps
-```powershell
-.\rebuild-and-regenerate.ps1 `
-  -Maps @("DeadminesInstance","Shadowfang","StormwindJail") `
-  -Versions @("0.5.3.3368") `
-  -AlphaRoot ..\test_data\ `
-  -Serve
-```
+**Open the viewer:**
+- Without `--serve`: Use any web server: `python -m http.server 8080 --directory parp_out/session_*/05_viewer`
+- With `--serve`: Automatically starts at `http://localhost:8080`
 
-## Overview
-WoWRollback is a digital archaeology toolkit for exploring the evolution of World of Warcraft map content. It ingests Alpha-era WDT/ADT exports alongside converted Wrath (LK) ADTs, catalogs placement `UniqueID` ranges, compares versions, and optionally produces rollback-ready assets and a portable viewer for visual analysis.
+---
 
-## Prerequisites
-- .NET SDK 9.0 (64-bit)
-- Real WoW Alpha/LK data exports produced by `AlphaWDTAnalysisTool` (or equivalent) using the same directory layout described below
-- Optional: CASC or filesystem access to minimap BLP/PNG tiles for richer viewer imagery
+## 🏗️ Architecture
 
-## Project Layout
+### Modular Design
+
+WoWRollback follows a **clean modular architecture** with separation of concerns:
+
 ```
 WoWRollback/
-├── WoWRollback.Core/       # Core services and models
-├── WoWRollback.Cli/        # Command-line entry point
-├── ViewerAssets/           # Static viewer (HTML/CSS/JS)
-├── docs/                   # Design notes & plans
-│   └── architecture/       # System architecture documentation
-├── memory-bank/            # Persistent project context
-└── rollback_outputs/       # Default output root (timestamped sessions & comparisons)
+├── WoWRollback.Core/           # Shared utilities
+│   ├── IO/FileHelpers.cs       # Directory operations
+│   ├── Logging/ConsoleLogger.cs# Structured logging
+│   └── Models/                 # Session metadata
+│
+├── WoWRollback.DbcModule/      # DBC operations (wraps DBCTool.V2)
+│   ├── DbcOrchestrator.cs      # Main API
+│   └── Models.cs               # Result types
+│
+├── WoWRollback.AdtModule/      # ADT conversion (wraps AlphaWdtAnalyzer.Core)
+│   ├── AdtOrchestrator.cs      # Main API
+│   └── Models.cs               # Result types
+│
+├── WoWRollback.AnalysisModule/ # Analysis & overlays (in progress)
+│   ├── AnalysisOrchestrator.cs # Main API
+│   ├── UniqueIdAnalyzer.cs     # Time-travel CSVs
+│   ├── TerrainCsvGenerator.cs  # MCNK metadata
+│   └── OverlayGenerator.cs     # Per-tile JSONs
+│
+├── WoWRollback.ViewerModule/   # Web viewer server
+│   └── ViewerServer.cs         # HttpListener-based server
+│
+├── WoWRollback.Orchestrator/   # Pipeline coordination
+│   ├── Program.cs              # CLI entry point
+│   ├── PipelineOrchestrator.cs # Main pipeline
+│   ├── DbcStageRunner.cs       # DBC stage
+│   ├── AdtStageRunner.cs       # ADT stage
+│   ├── AnalysisStageRunner.cs  # Analysis stage (future)
+│   └── ViewerStageRunner.cs    # Viewer stage
+│
+├── WoWRollback.Viewer/         # Static viewer assets
+│   └── assets/                 # HTML/JS/CSS
+│
+├── docs/                       # Documentation
+│   ├── planning/               # Implementation plans
+│   └── refactor/               # Refactor strategy docs
+│
+└── memory-bank/                # Project context & history
 ```
 
-## Architecture Documentation
+### Benefits
 
-See `docs/architecture/` for detailed design documents:
-- **`overlay-system-architecture.md`** - Complete overlay pipeline design (ADT → CSV → JSON → Viewer)
-- **`mcnk-flags-overlay.md`** - MCNK terrain flags implementation (impassible areas, holes)
-- **`IMPLEMENTATION_ROADMAP.md`** - Step-by-step implementation guide for new overlays
+- ✅ **No shell execution** - All tools called as library APIs
+- ✅ **Typed interfaces** - Structured results instead of exit codes  
+- ✅ **Clean separation** - Each module has a single responsibility
+- ✅ **Easy testing** - Modules can be tested independently
+- ✅ **Cross-platform** - Works on Windows, Linux, macOS
 
-## Building
+---
+
+## Prerequisites
+
+- **.NET SDK 9.0** (64-bit)
+- **Alpha WoW data** - Extracted WDT/ADT/DBC files in standard layout
+- **LK 3.3.5 DBCs** - AreaTable.dbc, Map.dbc for crosswalk generation
+- Optional: **WoWDBDefs** - For DBC schema definitions (auto-resolved)
+
+---
+
+## 📖 CLI Reference
+
+### Orchestrator Command (Primary)
+
+**Single unified command** that runs the full pipeline:
+
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Shadowfang,Azeroth \
+  --versions 0.5.3,0.5.5 \
+  --alpha-root ../test_data \
+  --lk-dbc-dir ../test_data/3.3.5/tree/DBFilesClient \
+  --serve --port 8080
 ```
-dotnet build WoWRollback/WoWRollback.sln
+
+**Required Arguments:**
+- `--maps` - Comma-separated map names (e.g., `Shadowfang,Azeroth`)
+- `--versions` - Comma-separated Alpha version folders (e.g., `0.5.3,0.5.5`)
+- `--alpha-root` - Path to Alpha data root
+- `--lk-dbc-dir` - Path to LK 3.3.5 DBC directory
+
+**Optional Arguments:**
+- `--serve` - Start web server after generation
+- `--port` - Web server port (default: 8080)
+- `--verbose` - Enable detailed logging
+- `--output-dir` - Custom output directory (default: `parp_out`)
+- `--dbd-dir` - Custom WoWDBDefs directory
+
+**Examples:**
+
+```powershell
+# Single map, with viewer
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Shadowfang \
+  --versions 0.5.3 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --serve
+
+# Multiple maps, no viewer
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Azeroth,Kalimdor \
+  --versions 0.5.3,0.5.5 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient
+
+# Verbose output
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Shadowfang \
+  --versions 0.5.3 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --verbose
 ```
-All commands below assume execution from the repository root via `dotnet run --project WoWRollback/WoWRollback.Cli`.
 
-## Command Reference
+---
 
-### analyze-alpha-wdt
-Extract Alpha placement ranges from a single WDT.
+## 🔧 Building
+
+```powershell
+cd WoWRollback
+dotnet build WoWRollback.sln
 ```
-dotnet run --project WoWRollback/WoWRollback.Cli -- \
-  analyze-alpha-wdt \
-  --wdt-file path/to/AlphaMap.wdt \
-  --out rollback_outputs
+
+**Run Tests:**
+```powershell
+dotnet test
 ```
-Outputs land in `rollback_outputs/session_*/<map>/alpha_<map>_ranges.csv` plus supporting ledgers/timelines when available.
 
-### analyze-lk-adt
-Analyze converted LK ADTs for a specific map.
+---
+
+## 📂 Output Structure
+
+Each run creates a **timestamped session directory**:
+
 ```
-dotnet run --project WoWRollback/WoWRollback.Cli -- \
-  analyze-lk-adt \
-  --map Arathi \
-  --input-dir path/to/lk/adts \
-  --out rollback_outputs
+parp_out/
+└── session_20251007_012032/
+    ├── manifest.json           # Session metadata
+    ├── logs/
+    │   ├── dbc_stage.log
+    │   ├── adt_stage.log
+    │   ├── analysis_stage.log
+    │   └── viewer_stage.log
+    │
+    ├── 01_dbcs/                # DBC Stage outputs
+    │   └── {version}/
+    │       └── raw/
+    │           ├── AreaTable_{version}.csv
+    │           └── AreaTable_3_3_5.csv
+    │
+    ├── 02_crosswalks/          # Area mappings
+    │   └── {version}/{alias}/
+    │       ├── maps.json
+    │       └── compare/
+    │           ├── v2/         # V2 crosswalks
+    │           │   ├── Area_patch_{alias}_to_335.csv
+    │           │   ├── Area_mapping_{alias}_to_335.csv
+    │           │   └── Area_unmatched_{alias}.csv
+    │           └── v3/         # V3 hierarchy (future)
+    │
+    ├── 03_adts/                # Converted LK ADTs
+    │   └── {version}/
+    │       ├── World/Maps/{map}/
+    │       │   ├── {map}_{x}_{y}.adt
+    │       │   └── ...
+    │       └── csv/maps/{map}/
+    │           ├── terrain.csv
+    │           └── shadow.csv
+    │
+    ├── 04_analysis/            # Analysis outputs (coming soon)
+    │   └── {version}/
+    │       ├── uniqueids/      # Time-travel CSVs
+    │       │   ├── {map}_uniqueID_analysis.csv
+    │       │   └── {map}_layers.json
+    │       └── terrain/        # MCNK metadata
+    │           └── {map}_mcnk_terrain.csv
+    │
+    └── 05_viewer/              # Web viewer
+        ├── index.html
+        ├── js/
+        ├── styles.css
+        ├── overlays/
+        │   ├── {version}/{map}/
+        │   │   ├── terrain_complete/
+        │   │   ├── objects_combined/
+        │   │   └── shadow_map/
+        │   └── metadata.json
+        └── config/
+            └── maps.json
 ```
-Generates `lk_<map>_ranges.csv` and related summaries under the session directory.
 
-### compare-versions
-Compare multiple version roots (e.g., Alpha vs LK) and emit CSV/YAML summaries, optional viewer artifacts.
-```
-dotnet run --project WoWRollback/WoWRollback.Cli -- \
-  compare-versions \
-  --versions alpha_053,lk_335 \
-  --root rollback_inputs \
-  --maps Arathi,DunMorogh \
-  --yaml-report \
-  --viewer-report \
-  --default-version 0.5.3 \
-  --diff alpha_053,lk_335
-```
-Key flags:
-- `--versions`: Comma-separated list of version folder names under `--root`
-- `--maps`: Optional comma-separated map filter
-- `--yaml-report`: Emit per-tile YAML summaries (`.../comparisons/<key>/yaml/`)
-- `--viewer-report`: Produce minimaps, overlays, diffs, and static viewer config under `.../comparisons/<key>/viewer/`
-- `--default-version`: Preferred default layer in the viewer (falls back to earliest version)
-- `--diff`: Explicit baseline/comparison pair for diff JSON (defaults to earliest→latest)
+---
 
-Viewer output structure (`.../viewer/`):
-- `minimap/<Version>/<Map>/<Map>_<Col>_<Row>.png`
-- `overlays/<Version>/<Map>/<Variant>/tile_r<Row>_c<Col>.json`
-- `diffs/<Map>/tile_r<Row>_c<Col>.json`
-- `index.json`, `config.json`
-- Static viewer bundle (HTML/CSS/JS) copied from `ViewerAssets/`
+## 🐛 Troubleshooting
 
-Overlay variants:
-- `combined` – all placements for the selected version
-- `m2` – MDX/M2 doodads only
-- `wmo` – WMO placements only
+### Pipeline Issues
 
-The viewer UI now exposes:
-- Version, map, and overlay dropdowns in `index.html`
-- Overlay selector in `tile.html`
-- Per-variant marker colors/radii
+**"No AreaIDs patched"**
+- Check that crosswalk CSVs exist in `02_crosswalks/{version}/{alias}/compare/v2/`
+- Verify path structure matches: `02_crosswalks/0.5.3/0.5.3/compare/v2/Area_patch_0_5_3_to_335.csv`
+- Enable `--verbose` to see detailed crosswalk resolution logs
 
-Regeneration tip: `rebuild-and-regenerate.ps1` writes the new directory layout. Ensure no files under `rollback_outputs/comparisons/<comparison-key>/` are open before running, otherwise CSV locks will abort the CLI.
+**"WDT not found"**
+- Verify WDT exists at: `{alpha-root}/{version}/tree/World/Maps/{map}/{map}.wdt`
+- Check map name capitalization matches exactly (case-sensitive)
+- Ensure WDT is valid Alpha format (not LK)
 
-### dry-run
-Simulate rollback filtering using keep/drop configs without writing ADTs.
-```
-dotnet run --project WoWRollback/WoWRollback.Cli -- \
-  dry-run \
-  --map Arathi \
-  --input-dir path/to/lk/adts \
-  --config configs/arathi_keep_ranges.json \
-  --out rollback_outputs
-```
-Reports counts of placements that would be removed per tile and overall.
-
-## Typical Workflow
-1. Run `analyze-alpha-wdt` for each Alpha map of interest.
-2. Run `analyze-lk-adt` for the converted LK outputs of the same maps.
-3. Populate `rollback_inputs/<version>/<map>/...` with the session CSVs or preprocessed data.
-4. Call `compare-versions --viewer-report` to generate comparison CSVs, YAML (optional), and viewer assets.
-5. Open the viewer bundle (once static assets are in place) to inspect sediment layers, diffs, and annotations.
-6. Iterate with `dry-run` (and future rollback commands) to plan selective removals.
-
-## Outputs & Layout
-- Sessions: `rollback_outputs/session_YYYYMMDD_HHmmss/`
-- Comparisons: `rollback_outputs/comparisons/<comparisonKey>/`
-  - `csv/`: Core range, timeline, design kit reports
-  - `yaml/`: Optional per-tile YAML when `--yaml-report` is used
-  - `viewer/`: Viewer JSON/PNG assets when `--viewer-report` is used
-
-## Troubleshooting
+**"DBC directory not found"**
+- LK DBC directory should contain `AreaTable.dbc` and `Map.dbc`
+- Path format: `{lk-dbc-dir}/AreaTable.dbc`
+- Verify DBCs are LK 3.3.5 format
 
 ### Build Issues
-- **ImageSharp vulnerability warnings**: The build references `SixLabors.ImageSharp 2.1.9` via `Warcraft.NET`. These are known issues. The warnings can be safely ignored in controlled environments, or upgrade when upstream packages allow.
-- **"Project file does not exist"**: Make sure you're in the `WoWRollback/` directory when running commands.
 
-### Data Issues
-- **Missing minimaps**: Ensure source data contains BLP/PNG tiles at `test_data/{version}/tree/World/Minimaps/{map}/`. The viewer will show placeholder crosshairs if minimaps are missing.
-- **"Unable to locate {Map}.wdt"**: Check that WDT files exist at `test_data/{version}/tree/World/Maps/{Map}/{Map}.wdt`.
-- **Empty viewer output**: If `AssetTimelineDetailed` is empty, confirm AlphaRoot contains valid WDT/ADT files.
+**ImageSharp vulnerability warnings**
+- Dependency from `Warcraft.NET` library
+- Safe to ignore in controlled environments
+- Will be resolved when upstream updates
 
-### Terrain Overlay Issues
-- **"Terrain CSV not found"**: The script will log `[warn] ✗ Terrain CSV NOT created`. Check AlphaWdtAnalyzer output for errors.
-- **404 errors for terrain_complete files**: This means terrain CSVs weren't extracted. Look for the green checkmark: `[debug] ✓ Terrain CSV created`.
-- **No colored chunks in viewer**: Enable "Terrain Properties" overlay in the sidebar. If still nothing, check browser console for 404 errors.
+**Project reference errors**
+- Ensure you're in the `WoWRollback/` root directory
+- Run `dotnet restore` before building
+- Check all project references exist
 
-### Area Boundary Issues
-- **"Unknown Area 1234" instead of names**: AreaTable CSVs must be in `rollback_outputs/{version}/`. Run DBCTool.V2 to extract AreaTable.dbc first.
-- **Area boundaries don't disappear**: Fixed in latest version. Make sure you have the updated `areaIdLayer.js`.
+### Viewer Issues
+
+**Overlays missing in viewer**
+- ✅ **Analysis stage not implemented yet** - Coming soon!
+- Per-tile overlay JSONs will be generated in Stage 3
+- Currently only `metadata.json` is created
+
+**Viewer won't start**
+- Check if port 8080 is already in use
+- Use `--port 8081` to specify alternative port
+- Ensure firewall allows local HTTP server
+
+**404 errors in browser console**
+- Normal for missing overlay tiles (sparse coverage)
+- Check `05_viewer/overlays/metadata.json` for available overlays
+- Verify viewer assets copied correctly
 
 ### Performance
-- **Slow generation**: Large maps (Azeroth, Kalimdor) can take 5-10 minutes. Use smaller maps like DeadminesInstance for testing.
-- **Cached maps reused**: Delete `cached_maps/` directory or use `-RefreshCache` flag to force re-extraction.
 
-### Server Issues
-- **Port 8080 already in use**: Another process is using the port. Stop it or change the port in the Python server command.
-- **Browser shows blank page**: Make sure the script finished completely. Check for `Serving viewer at http://localhost:8080` message.
+**Large maps take time**
+- Shadowfang: ~30 seconds (25 tiles)
+- Azeroth: ~5-10 minutes (128 tiles)
+- Kalimdor: ~8-15 minutes (140 tiles)
+- Use `--maps Shadowfang` for quick testing
 
-## Features
+---
 
-### Terrain Overlays
-- **Terrain Properties**: Impassible areas, vertex-colored chunks, multi-layer terrain
-- **Liquids**: Rivers, oceans, magma, slime with distinct colors
-- **Holes**: Terrain holes (caves, tunnels)
-- **Area Boundaries**: Zone/subzone boundaries with real names from AreaTable.dbc
+## ✨ Features
 
-### Object Overlays
-- **Combined**: All M2 and WMO placements
-- **M2 Only**: Just M2 model placements
-- **WMO Only**: Just WMO object placements
+### Current (v0.5)
 
-### Comparison Features
-- **Version switching**: Compare multiple Alpha versions side-by-side
-- **Diff visualization**: See object additions/removals between versions
-- **UniqueID tracking**: Track object ID ranges across versions
+#### DBC Processing
+- ✅ **AreaTable extraction** - Dumps Alpha + LK AreaTable.dbc to CSV
+- ✅ **Area hierarchy crosswalks** - V2 zone/subzone matching with confidence scores
+- ✅ **Map metadata** - Generates maps.json with continent/instance info
 
-### Data Export
-- **CSV exports**: All comparison data exported to CSV for analysis
-- **YAML reports**: Optional per-tile YAML summaries
-- **LK ADT conversion**: Convert Alpha ADTs to Wrath format
+#### ADT Conversion
+- ✅ **Alpha → LK format** - Full ADT conversion with chunk patching
+- ✅ **AreaID remapping** - Patches MCNK AreaIDs using crosswalk mappings
+- ✅ **Asset fuzzy-matching** - Resolves missing textures/models via listfile
+- ✅ **Terrain extraction** - MCNK flags, liquids, holes exported to CSV
+- ✅ **Shadow map export** - Shadow data exported to CSV
 
-### UniqueID Range Filtering (New!)
-The viewer now includes powerful CSV-based filtering to isolate specific object ranges:
+#### Web Viewer
+- ✅ **Interactive map viewer** - Leaflet-based tile viewer
+- ✅ **Version switching** - Compare multiple Alpha versions
+- ✅ **Static file serving** - Built-in HTTP server
 
-**Features:**
-- **Load UniqueID Ranges**: Pre-generated CSV files (`id_ranges_by_map.csv`) automatically cluster objects into 10K-sized ranges
-- **Interactive Checkboxes**: Check/uncheck ranges to show/hide groups of objects
-- **Multiple Modes**:
-  - **Show Only** (default): Only checked ranges are visible
-  - **Dim**: Unchecked ranges are dimmed (20% opacity)
-  - **Hide**: Unchecked ranges are completely hidden
-- **Bulk Operations**: "Select All" and "Deselect All" buttons for quick toggling
-- **Auto-Reload**: When switching maps or versions, click "🔄 Reload Ranges" to load the corresponding CSV
-- **Auto-Filter**: Newly loaded objects (from map panning) automatically inherit current filter state
-- **Performance**: Debounced filtering prevents lag during rapid checkbox changes
+### Coming Soon (v0.6 - Analysis Stage)
 
-**Usage:**
-1. Open viewer and select a map
-2. Click "Load UniqueID Ranges" in the Sedimentary Layers panel
-3. Check/uncheck ranges to filter objects
-4. Switch maps → click "🔄 Reload Ranges" to load new ranges
-5. Use mode dropdown to change visibility behavior
+#### UniqueID Analysis (Phase 0: Time-Travel)
+- ⏳ **UniqueID distribution CSVs** - Track object ID ranges per tile
+- ⏳ **Layer detection** - Identify distinct "work sessions" by ID gaps
+- ⏳ **Time-travel filtering** - Timeline slider to show/hide object layers
+- ⏳ **JSON layer metadata** - Export detected layers for viewer
 
-**CSV Format:**
-```csv
-MinUniqueID,MaxUniqueID,Count
-4531,5788,371
-7694,104304,69039
-...
-```
+#### Per-Tile Overlays (Plugin Architecture)
+- ⏳ **Terrain overlays** - MCNK properties, liquids, holes per tile
+- ⏳ **Object overlays** - M2/WMO placements with UniqueIDs
+- ⏳ **Shadow overlays** - Shadow map visualization
+- ⏳ **Overlay manifest** - Plugin system coordination
 
-Generated automatically by `rebuild-and-regenerate.ps1` in `cached_maps/analysis/{version}/{map}/csv/`.
+#### MCNK Metadata
+- ⏳ **Terrain CSVs** - Complete MCNK data per tile
+- ⏳ **Property analysis** - Flags, layers, holes statistics
+- ⏳ **AreaID validation** - Verify patched values
 
-## Default Behavior
+### Future Enhancements (Phase 1+)
 
-### Coordinate System
-- **Raw coordinates** are the default (matches original WoW client)
-- No transformations applied to placement data
-- Easier debugging and comparison with wow.tools
+- 🔮 **Diff visualization** - Show object additions/removals between versions
+- 🔮 **Multi-map comparison** - Side-by-side map views
+- 🔮 **ADT grid overlay** - wow.tools-style tile grid with labels
+- 🔮 **Heatmap overlays** - Object density, change magnitude
+- 🔮 **Export filtered ADTs** - Write modified ADTs with selected ranges
+- 🔮 **Alpha backporting** - LK → Alpha format conversion
 
-### Auto-Discovery
-- Script automatically finds all maps in `test_data/`
-- Searches version-specific paths: `{version}/tree/World/Maps/`
-- No need to manually list maps unless you want specific ones
+---
 
-## Future Enhancements
-- ~~UniqueID timeline selector for per-tile filtering~~ ✅ **Implemented!** CSV-based range filtering now available
-- Per-tile filtering (currently works map-wide, could be refined to specific tiles)
-- Patched ADT export (write modified ADTs with selected object ranges)
-- Automated minimap sourcing via CASC/file lookup
-- Rollback APPLY command that rewrites ADTs using keep/drop configurations
-- Integration tests on real data fixtures
+## 📚 Documentation
+
+### Planning Documents
+- **`docs/planning/03_Rollback_TimeTravel_Feature.md`** - Phase 0 time-travel design
+- **`docs/planning/04_Overlay_Plugin_Architecture.md`** - Viewer plugin system
+- **`docs/planning/04_Architecture_Changes.md`** - Before/after architecture comparison
+- **`docs/planning/05_AnalysisModule_Implementation.md`** - Analysis stage specification
+
+### Architecture Docs
+- **`docs/architecture/overlay-system-architecture.md`** - Complete overlay pipeline
+- **`docs/architecture/mcnk-flags-overlay.md`** - MCNK terrain implementation
+
+---
+
+## 🤝 Related Projects
+
+- **[DBCTool.V2](../DBCTool.V2/)** - DBC extraction and area matching engine
+- **[AlphaWdtAnalyzer.Core](../AlphaWDTAnalysisTool/AlphaWdtAnalyzer.Core/)** - Alpha WDT/ADT format library
+- **[wow.tools](https://wow.tools/)** - WoW file formats and listfiles
+
+---
+
+## 📄 License
+
+See LICENSE file in repository root.

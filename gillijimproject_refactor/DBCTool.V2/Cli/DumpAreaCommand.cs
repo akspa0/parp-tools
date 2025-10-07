@@ -5,7 +5,7 @@ using static DBCTool.V2.IO.DbdcHelper;
 
 namespace DBCTool.V2.Cli;
 
-internal sealed class DumpAreaCommand
+public sealed class DumpAreaCommand
 {
     public int Run(string dbdDir, string outBase, string localeStr, List<(string build, string dir)> inputs)
     {
