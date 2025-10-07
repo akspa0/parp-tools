@@ -650,19 +650,19 @@ function Ensure-CachedMap {
     )
     
     # Add DBCTool AreaTable crosswalk parameters if available
-    if (Test-Path $dbcToolOutputRoot) {
+    # Use $crosswalkDir which points to where files actually are
+    if (Test-Path $crosswalkDir) {
         $toolArgs += '--dbctool-out-root'
-        $toolArgs += $dbcToolOutputRoot
-        Write-Host "  [debug] ✓ Using DBCTool output root: $dbcToolOutputRoot" -ForegroundColor Green
+        $toolArgs += $crosswalkDir
+        Write-Host "  [debug] ✓ Using DBCTool output root: $crosswalkDir" -ForegroundColor Green
     }
     
     if ($dbctoolPatchDir -and (Test-Path $dbctoolPatchDir)) {
         $toolArgs += '--dbctool-patch-dir'
         $toolArgs += $dbctoolPatchDir
-        Write-Host "  [debug] ✓ Using DBCTool AreaTable crosswalks: $dbctoolPatchDir" -ForegroundColor Green
+        Write-Host "  [debug] ✓ Using DBCTool patch directory: $dbctoolPatchDir" -ForegroundColor Green
     } else {
-        Write-Host "  [warn] ✗ DBCTool AreaTable crosswalks NOT found - AreaIDs will NOT be mapped!" -ForegroundColor Red
-        Write-Host "  [warn] Run DBCTool.V2 first to generate AreaTable mappings" -ForegroundColor Yellow
+        Write-Host "  [debug] No explicit patch directory, will auto-discover from --dbctool-out-root" -ForegroundColor DarkGray
     }
     
     if ($dbctoolLkDir -and (Test-Path $dbctoolLkDir)) {

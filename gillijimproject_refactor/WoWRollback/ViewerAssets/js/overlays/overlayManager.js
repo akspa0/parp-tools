@@ -38,6 +38,7 @@ export class OverlayManager {
 
     hideLayer(layerName) {
         if (this.layers[layerName]) {
+            this.layers[layerName].clear();
             this.layers[layerName].hide();
         }
     }
@@ -45,6 +46,12 @@ export class OverlayManager {
     // Clear all layers
     clearAll() {
         Object.values(this.layers).forEach(layer => layer.clear());
+    }
+
+    // Clear all data (use when switching maps)
+    clearAllData() {
+        this.clearAll();
+        this.loadedTiles.clear();
     }
 
     // Load overlays for visible tiles (debounced)

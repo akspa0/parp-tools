@@ -433,6 +433,11 @@ function onStateChange() {
             clearTimeout(pendingOverlayLoad);
             pendingOverlayLoad = null;
         }
+        
+        // Clear overlay data when switching maps
+        if (overlayManager) {
+            overlayManager.clearAllData();
+        }
     }
 
     updateTileLayer();
