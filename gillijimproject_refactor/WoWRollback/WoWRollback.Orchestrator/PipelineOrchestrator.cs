@@ -1,4 +1,6 @@
 using System;
+using System.Linq;
+using WoWRollback.Core.Logging;
 
 namespace WoWRollback.Orchestrator;
 
@@ -11,17 +13,70 @@ internal sealed class PipelineOrchestrator
             throw new ArgumentNullException(nameof(options));
         }
 
+        ConsoleLogger.Info("Creating session...");
         var session = SessionManager.CreateSession(options);
+        ConsoleLogger.Success($"Session created: {session.SessionId}");
+        ConsoleLogger.Info($"Output directory: {session.Root}");
+        Console.WriteLine();
 
+        ConsoleLogger.Info("Running DBC stage...");
         var dbcRunner = new DbcStageRunner();
         var dbcResult = dbcRunner.Run(session);
+        if (dbcResult.Success)
+        {
+            ConsoleLogger.Success($"DBC stage complete: {dbcResult.Versions.Count} version(s) processed");
+        }
+        else
+        {
+            ConsoleLogger.Error("DBC stage failed");
+            foreach (var v in dbcResult.Versions)
+            {
+                if (v.Error != null)
+                {
+                    ConsoleLogger.Error($"  {v.SourceVersion}: {v.Error}");
+                }
+            }
+        }
+        Console.WriteLine();
 
+        ConsoleLogger.Info("Running ADT conversion stage...");
         var adtRunner = new AdtStageRunner();
         var adtResults = adtRunner.Run(session);
+        var adtSuccessCount = adtResults.Count(r => r.Success);
+        if (adtSuccessCount == adtResults.Count)
+        {
+            ConsoleLogger.Success($"ADT stage complete: {adtResults.Count} map(s) converted");
+        }
+        else
+        {
+            ConsoleLogger.Warn($"ADT stage partial: {adtSuccessCount}/{adtResults.Count} succeeded");
+            foreach (var r in adtResults.Where(r => !r.Success))
+            {
+                ConsoleLogger.Error($"  {r.Map} ({r.Version}): {r.Error}");
+            }
+        }
+        
+        // Show ADT statistics
+        foreach (var r in adtResults.Where(r => r.Success))
+        {
+            ConsoleLogger.Info($"  {r.Map} ({r.Version}): {r.TilesProcessed} tiles, {r.AreaIdsPatched} area IDs patched");
+        }
+        Console.WriteLine();
 
+        ConsoleLogger.Info("Generating viewer...");
         var viewerRunner = new ViewerStageRunner();
         var viewerResult = viewerRunner.Run(session, adtResults);
+        if (viewerResult.Success)
+        {
+            ConsoleLogger.Success($"Viewer generated: {viewerResult.ViewerDirectory}");
+        }
+        else
+        {
+            ConsoleLogger.Error($"Viewer generation failed: {viewerResult.Notes}");
+        }
+        Console.WriteLine();
 
+        ConsoleLogger.Info("Writing manifest...");
         var manifestWriter = new ManifestWriter();
         var pipelineResult = new PipelineRunResult(
             dbcResult.Success && viewerResult.Success && AllSucceeded(adtResults),
@@ -30,6 +85,8 @@ internal sealed class PipelineOrchestrator
             adtResults,
             viewerResult);
         manifestWriter.Write(session, pipelineResult);
+        ConsoleLogger.Success($"Manifest written: {session.ManifestPath}");
+        Console.WriteLine();
 
         return pipelineResult;
     }

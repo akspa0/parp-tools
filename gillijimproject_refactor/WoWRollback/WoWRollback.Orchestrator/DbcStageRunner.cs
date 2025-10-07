@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using DBCTool.V2.Cli;
+using WoWRollback.DbcModule;
 
 namespace WoWRollback.Orchestrator;
 
@@ -25,11 +25,8 @@ internal sealed class DbcStageRunner
             throw new InvalidOperationException("Lich King DBC directory could not be resolved. Provide --lk-dbc-dir or ensure default path exists.");
         }
 
-        var workRoot = Path.Combine(session.Root, "work");
-        Directory.CreateDirectory(workRoot);
-
-        var dumpCommand = new DumpAreaCommand();
-        var compareCommand = new CompareAreaV2Command();
+        // Create DbcOrchestrator for library API calls
+        var orchestrator = new DbcOrchestrator(dbdDir, locale);
 
         var perVersion = new List<DbcVersionResult>();
         var overallSuccess = true;
@@ -40,9 +37,13 @@ internal sealed class DbcStageRunner
             var build = ResolveBuildIdentifier(alias);
             var sourceDir = ResolveSourceDbcDirectory(options.AlphaRoot, version);
 
-            var sharedDbcDir = Path.Combine(session.SharedDbcRoot, alias, build, "DBC");
-            var sharedCrosswalkAliasRoot = Path.Combine(session.SharedCrosswalkRoot, alias);
-            var sharedCrosswalkVersionRoot = Path.Combine(sharedCrosswalkAliasRoot, build);
+            var dbcVersionDir = Path.Combine(session.Paths.DbcDir, version);
+            var crosswalkVersionDir = Path.Combine(session.Paths.CrosswalkDir, version);
+            
+            // Match DBCTool expected structure
+            var sharedDbcDir = Path.Combine(dbcVersionDir, "raw");
+            var sharedCrosswalkAliasRoot = crosswalkVersionDir;
+            var sharedCrosswalkVersionRoot = crosswalkVersionDir;
             var sharedCrosswalkCompareRoot = Path.Combine(sharedCrosswalkVersionRoot, "compare");
             var sharedCrosswalkV2Dir = Path.Combine(sharedCrosswalkCompareRoot, "v2");
 
@@ -75,73 +76,56 @@ internal sealed class DbcStageRunner
             var mapsJsonPath = Path.Combine(sharedCrosswalkAliasRoot, "maps.json");
             var hasCachedCrosswalk = Directory.Exists(sharedCrosswalkV2Dir) && File.Exists(mapsJsonPath);
 
-            int dumpExit;
-            int compareExit;
+            bool success = true;
             string? error = null;
 
             if (hasCachedDbc && hasCachedCrosswalk)
             {
-                dumpExit = 0;
-                compareExit = 0;
+                // Use cached results
             }
             else
             {
-                var tempRoot = Path.Combine(workRoot, $"{alias}_{build}_{Guid.NewGuid():N}");
-                var tempDbcRoot = Path.Combine(tempRoot, "dbc");
-                var tempCrosswalkRoot = Path.Combine(tempRoot, "crosswalk");
-                Directory.CreateDirectory(tempDbcRoot);
-                Directory.CreateDirectory(tempCrosswalkRoot);
+                // Call DbcOrchestrator API methods
+                var dumpResult = orchestrator.DumpAreaTables(
+                    srcAlias: alias,
+                    srcDbcDir: sourceDir,
+                    tgtDbcDir: lkDbcDir,
+                    outDir: dbcVersionDir);
 
-                dumpExit = dumpCommand.Run(
-                    dbdDir: dbdDir,
-                    outBase: tempDbcRoot,
-                    localeStr: locale,
-                    inputs: inputs);
-
-                compareExit = compareCommand.Run(
-                    dbdDir: dbdDir,
-                    outBase: tempCrosswalkRoot,
-                    localeStr: locale,
-                    inputs: inputs,
-                    chainVia060: false);
-
-                if (dumpExit == 0)
+                if (!dumpResult.Success)
                 {
-                    var rawSource = Path.Combine(tempDbcRoot, alias, "raw");
-                    CopyDirectory(rawSource, sharedDbcDir, overwrite: true);
+                    success = false;
+                    error = dumpResult.ErrorMessage ?? "DBC dump failed";
                 }
-
-                if (compareExit == 0)
+                else
                 {
-                    var tempAliasRoot = Path.Combine(tempCrosswalkRoot, alias);
-                    var compareSource = Path.Combine(tempAliasRoot, "compare");
-                    var auditSource = Path.Combine(tempAliasRoot, "audit");
-                    CopyDirectory(compareSource, sharedCrosswalkCompareRoot, overwrite: true);
-                    CopyDirectory(auditSource, Path.Combine(sharedCrosswalkVersionRoot, "audit"), overwrite: true);
-
-                    var mapsSource = Path.Combine(tempAliasRoot, "maps.json");
-                    if (File.Exists(mapsSource))
+                    // DumpAreaTables writes to dbcVersionDir/alias/raw/
+                    // We want files in dbcVersionDir/raw/ directly
+                    var rawSource = Path.Combine(dbcVersionDir, alias, "raw");
+                    if (Directory.Exists(rawSource))
                     {
-                        File.Copy(mapsSource, mapsJsonPath, overwrite: true);
-                        File.Copy(mapsSource, Path.Combine(sharedCrosswalkVersionRoot, "maps.json"), overwrite: true);
+                        foreach (var file in Directory.EnumerateFiles(rawSource, "*.csv"))
+                        {
+                            var fileName = Path.GetFileName(file);
+                            File.Copy(file, Path.Combine(sharedDbcDir, fileName), overwrite: true);
+                        }
                     }
                 }
 
-                try
+                if (success)
                 {
-                    if (Directory.Exists(tempRoot))
-                    {
-                        Directory.Delete(tempRoot, recursive: true);
-                    }
-                }
-                catch
-                {
-                    // Best-effort cleanup; ignore failures.
-                }
+                    var crosswalkResult = orchestrator.GenerateCrosswalks(
+                        srcAlias: alias,
+                        srcDbcDir: sourceDir,
+                        tgtDbcDir: lkDbcDir,
+                        outDir: crosswalkVersionDir,
+                        chainVia060: false);
 
-                if (dumpExit != 0 || compareExit != 0)
-                {
-                    error = "DBCTool execution reported a non-zero exit code.";
+                    if (!crosswalkResult.Success)
+                    {
+                        success = false;
+                        error = crosswalkResult.ErrorMessage ?? "Crosswalk generation failed";
+                    }
                 }
             }
 
@@ -156,8 +140,8 @@ internal sealed class DbcStageRunner
                 SourceDirectory: sourceDir,
                 DbcOutputDirectory: sharedDbcDir,
                 CrosswalkOutputDirectory: sharedCrosswalkV2Dir,
-                DumpExitCode: hasCachedDbc && hasCachedCrosswalk ? 0 : dumpExit,
-                CompareExitCode: hasCachedDbc && hasCachedCrosswalk ? 0 : compareExit,
+                DumpExitCode: success ? 0 : 1,
+                CompareExitCode: success ? 0 : 1,
                 Error: error));
         }
 
@@ -219,39 +203,6 @@ internal sealed class DbcStageRunner
         };
     }
 
-    private static void CopyDirectory(string sourceDir, string destinationDir, bool overwrite)
-    {
-        if (!Directory.Exists(sourceDir))
-        {
-            return;
-        }
-
-        if (Directory.Exists(destinationDir) && overwrite)
-        {
-            Directory.Delete(destinationDir, recursive: true);
-        }
-
-        Directory.CreateDirectory(destinationDir);
-
-        foreach (var directory in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relativeDir = Path.GetRelativePath(sourceDir, directory);
-            var targetDir = Path.Combine(destinationDir, relativeDir);
-            Directory.CreateDirectory(targetDir);
-        }
-
-        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceDir, file);
-            var targetPath = Path.Combine(destinationDir, relative);
-            var targetDirectory = Path.GetDirectoryName(targetPath);
-            if (!string.IsNullOrEmpty(targetDirectory))
-            {
-                Directory.CreateDirectory(targetDirectory);
-            }
-            File.Copy(file, targetPath, overwrite: true);
-        }
-    }
 }
 
 internal sealed record DbcStageResult(

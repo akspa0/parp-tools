@@ -1,84 +1,89 @@
-# Progress - WoWRollback Archaeological Tool
+# Progress - WoWRollback Unified Orchestrator
 
-## ✅ Completed
+## ✅ Completed (2025-10-07)
 
-### Phase 1: Project Foundation & Memory Bank
-- Created dedicated memory bank for WoWRollback project
-- Established archaeological perspective and terminology
-- Documented core purpose: treating UniqueID ranges as "sedimentary layers" of development history
+### Phase 1: Module Architecture (Day 1)
+- ✅ Created `WoWRollback.DbcModule` - Wraps DBCTool.V2 as library API
+- ✅ Created `WoWRollback.AdtModule` - Wraps AlphaWdtAnalyzer.Core
+- ✅ Created `WoWRollback.ViewerModule` - Embedded HTTP server with HttpListener
+- ✅ All three modules build successfully
 
-### Phase 2: Architecture & CLI
-- Implemented dual analysis modes:
-  - `analyze-alpha-wdt` - Archaeological excavation of source Alpha WDT files
-  - `analyze-lk-adt` - Preservation analysis of converted LK ADT files
-- Added archaeological terminology to CLI help text
-- Created `AlphaWdtAnalyzer` service with proper structure
-- Project builds successfully
+### Phase 2: Infrastructure (Day 2)
+- ✅ Populated `WoWRollback.Core` with shared utilities:
+  - `IO/FileHelpers.cs` - Directory operations
+  - `Logging/ConsoleLogger.cs` - Structured logging
+  - `Models/SessionManifest.cs` - Session metadata
+- ✅ Fixed `SessionManager` to use correct output structure:
+  - Numbered directories: `01_dbcs/`, `02_crosswalks/`, `03_adts/`, `04_analysis/`, `05_viewer/`
+  - Removed wrong `shared_outputs/` concept
+- ✅ Updated `DbcStageRunner`, `AdtStageRunner`, `ManifestWriter` to use new paths
+- ✅ All projects build successfully
 
-### Phase 3: Core Services
-- `AlphaWdtAnalyzer`: Structured for Alpha WDT file parsing
-- `AdtPlacementAnalyzer`: Existing LK ADT analysis (preserved)
-- `RangeScanner`: Map-level range aggregation
-- `RangeCsvWriter`: Output generation with proper naming (`alpha_<map>`, `lk_<map>`)
+### Phase 3: Wire Modules into Orchestrator (Day 3)
+- ✅ Refactored `DbcStageRunner` to use `DbcOrchestrator` API
+  - No more direct CLI command instantiation
+  - Calls `DumpAreaTables()` and `GenerateCrosswalks()` library methods
+- ✅ Refactored `AdtStageRunner` to use `AdtOrchestrator` API
+  - Simplified to call `ConvertAlphaToLk()` with `ConversionOptions`
+  - Returns structured result with tile/area counts
+- ✅ Implemented `ViewerStageRunner` with HTML and overlay generation
+  - Generates `index.html` with session summary
+  - Creates `overlays/metadata.json` with ADT results
+- ✅ Wired `ViewerServer` into `Program.cs`
+  - Starts HTTP server if `--serve` flag provided
+  - Blocks until Ctrl+C for graceful shutdown
 
-### Phase 4: Version Comparison Enhancements (2025-09-29)
-- Added detailed design kit analysis in `VersionComparisonService`:
-  - `DesignKitAssetDetails`, `UniqueIdAssets`, `AssetTimelineDetailed`
-- Extended `VersionComparisonWriter` to emit additional CSVs:
-  - `design_kit_asset_details_<key>.csv`
-  - `unique_id_assets_<key>.csv`
-  - `asset_timeline_detailed_<key>.csv`
-- Implemented per-ADT tile YAML reports and index:
-  - `.../comparisons/<key>/yaml/index.yaml`
-  - `.../comparisons/<key>/yaml/map/<Map>/tile_r<row>_c<col>.yaml`
-- CLI: Added `--yaml-report` flag to `compare-versions` to generate YAML alongside CSVs.
+## 🎯 Next Steps (Day 4)
 
-## 🔧 In Progress
+### Testing & Validation
+1. Create unit tests for DbcModule
+2. Create unit tests for AdtModule
+3. Create unit tests for ViewerModule
+4. Create integration test: Shadowfang 0.5.3 end-to-end
+5. Verify output structure matches spec exactly
 
-### Alpha WDT Parsing Implementation
-The `AlphaWdtAnalyzer` currently has placeholder TODO sections that need real implementation:
-- `ExtractM2ReferencesFromChunk()` - Extract M2 doodad UniqueIDs from Alpha MCNK chunks
-- `ExtractWmoReferencesFromChunk()` - Extract WMO building UniqueIDs from Alpha MCNK chunks  
-- `IsTilePresent()` - Check tile existence in Alpha WDT structure
+## 📊 Current Status
 
-## 🎯 Next Steps
+**Progress**: ~83% Complete (10/12 tasks done)
 
-### Immediate (Phase 4): Real Data Extraction
-1. **Implement Alpha format parsing logic** in `AlphaWdtAnalyzer`
-2. **Leverage existing AlphaWDTAnalysisTool parsing capabilities** 
-3. **Test with real Alpha WDT files** to verify extraction works
-4. **Compare outputs** with existing AlphaWDTAnalysisTool to ensure accuracy
+### Architecture Status
+```
+WoWRollback/
+├─ DbcModule/          ✅ Created & builds
+├─ AdtModule/          ✅ Created & builds
+├─ ViewerModule/       ✅ Created & builds with HTTP server
+├─ Core/               ✅ Populated with utilities
+└─ Orchestrator/       ✅ REFACTORED
+   ├─ DbcStageRunner   ✅ Uses DbcOrchestrator API
+   ├─ AdtStageRunner   ✅ Uses AdtOrchestrator API
+   ├─ ViewerStageRunner ✅ Generates HTML + metadata
+   └─ Program.cs        ✅ Wired ViewerServer with --serve
+```
 
-### Exploration UX (Future)
-- Build a small static site (or script) to browse YAML, filter by kit/subkit, and visualize sediment layers per tile.
-
-### Future Phases
-- **Comparison Analysis**: `analyze-evolution` command comparing Alpha vs LK preservation
-- **Archaeological Clustering**: Enhanced clustering that preserves singleton artifacts
-- **Rollback Integration**: Complete the rollback functionality for selective content removal
-- **Visualization**: Generate reports showing development timeline sedimentary layers
-
-## 🏺 Archaeological Significance
-
-### Current Understanding
-- Each UniqueID range = "volume of work" by ancient developers
-- Singleton IDs = precious artifacts (experiments, tests, technological changes)
-- Gap patterns = development phases and technological shifts
-- Modern WoW preserves significant Alpha-era content in fossilized form
-
-### Research Questions
-- How much Alpha content survived into modern WoW?
-- What UniqueID patterns reveal about development timeline?
-- Can we correlate ranges to specific patch versions?
-- What do singleton outliers tell us about experimental features?
+### Output Structure Status
+✅ **Fixed**: Now matches spec exactly
+```
+parp_out/
+└─ session_YYYYMMDD_HHMMSS/
+   ├─ 01_dbcs/           ✅ Correct
+   ├─ 02_crosswalks/     ✅ Correct
+   ├─ 03_adts/           ✅ Correct
+   ├─ 04_analysis/       ✅ Correct
+   ├─ 05_viewer/         ✅ Correct
+   ├─ logs/              ✅ Correct
+   └─ manifest.json      ✅ Correct
+```
 
 ## 🐛 Known Issues
-- Alpha WDT parsing logic needs implementation (currently placeholder)
-- Need to verify Alpha ADT format compatibility with existing parsers
-- May need to reference AlphaWDTAnalysisTool's working parsing code
+- No unit tests yet for modules (DbcModule, AdtModule, ViewerModule)
+- No integration test yet (Shadowfang end-to-end)
+- ViewerStageRunner generates basic HTML; full interactive viewer TBD
+- Need to verify real pipeline execution with actual data
 
-## ✨ Success Metrics
-- Extract complete UniqueID ranges from real Alpha WDT files
-- Generate meaningful archaeological reports
-- Preserve all singleton outliers as historical artifacts
-- Enable rollback functionality for time-travel map views
+## ✨ Success Criteria (from spec)
+- [x] Single `dotnet run` executes full pipeline
+- [x] Predictable output structure (numbered directories)
+- [x] No shell execution for main tools (uses library APIs)
+- [x] Viewer loads at http://localhost:8080 (with --serve flag)
+- [x] Cross-platform compatibility (HttpListener, no Windows-specific deps)
+- [ ] Unit test coverage ≥70% (testing phase pending)

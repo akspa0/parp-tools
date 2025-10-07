@@ -14,35 +14,35 @@ internal static class SessionManager
 
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var outputRoot = Path.GetFullPath(options.OutputRoot);
-        var sharedRoot = Path.Combine(outputRoot, "shared_outputs");
-        var sharedDbcRoot = Path.Combine(sharedRoot, "dbc");
-        var sharedCrosswalkRoot = Path.Combine(sharedRoot, "crosswalks");
-
         var sessionRoot = Path.Combine(outputRoot, $"session_{timestamp}");
-        var sessionAdtDir = Path.Combine(sessionRoot, "adt");
-        var sessionAnalysisDir = Path.Combine(sessionRoot, "analysis");
-        var sessionViewerDir = Path.Combine(sessionRoot, "viewer");
-        var sessionLogsDir = Path.Combine(sessionRoot, "logs");
-        var sessionManifest = Path.Combine(sessionRoot, "manifest.json");
 
-        Directory.CreateDirectory(sharedRoot);
-        Directory.CreateDirectory(sharedDbcRoot);
-        Directory.CreateDirectory(sharedCrosswalkRoot);
+        // Per spec: numbered directories inside session (01_, 02_, etc)
+        var dbcDir = Path.Combine(sessionRoot, "01_dbcs");
+        var crosswalkDir = Path.Combine(sessionRoot, "02_crosswalks");
+        var adtDir = Path.Combine(sessionRoot, "03_adts");
+        var analysisDir = Path.Combine(sessionRoot, "04_analysis");
+        var viewerDir = Path.Combine(sessionRoot, "05_viewer");
+        var logsDir = Path.Combine(sessionRoot, "logs");
+        var manifestPath = Path.Combine(sessionRoot, "manifest.json");
+
+        // Create all directories
         Directory.CreateDirectory(sessionRoot);
-        Directory.CreateDirectory(sessionAdtDir);
-        Directory.CreateDirectory(sessionAnalysisDir);
-        Directory.CreateDirectory(sessionViewerDir);
-        Directory.CreateDirectory(sessionLogsDir);
+        Directory.CreateDirectory(dbcDir);
+        Directory.CreateDirectory(crosswalkDir);
+        Directory.CreateDirectory(adtDir);
+        Directory.CreateDirectory(analysisDir);
+        Directory.CreateDirectory(viewerDir);
+        Directory.CreateDirectory(logsDir);
 
         var paths = new SessionPaths(
             Root: sessionRoot,
-            SharedDbcRoot: sharedDbcRoot,
-            SharedCrosswalkRoot: sharedCrosswalkRoot,
-            AdtDir: sessionAdtDir,
-            AnalysisDir: sessionAnalysisDir,
-            ViewerDir: sessionViewerDir,
-            LogsDir: sessionLogsDir,
-            ManifestPath: sessionManifest);
+            DbcDir: dbcDir,
+            CrosswalkDir: crosswalkDir,
+            AdtDir: adtDir,
+            AnalysisDir: analysisDir,
+            ViewerDir: viewerDir,
+            LogsDir: logsDir,
+            ManifestPath: manifestPath);
 
         return new SessionContext(timestamp, paths, options);
     }
@@ -55,14 +55,12 @@ internal sealed record SessionContext(
 {
     public string Root => Paths.Root;
     public string ManifestPath => Paths.ManifestPath;
-    public string SharedDbcRoot => Paths.SharedDbcRoot;
-    public string SharedCrosswalkRoot => Paths.SharedCrosswalkRoot;
 }
 
 internal sealed record SessionPaths(
     string Root,
-    string SharedDbcRoot,
-    string SharedCrosswalkRoot,
+    string DbcDir,
+    string CrosswalkDir,
     string AdtDir,
     string AnalysisDir,
     string ViewerDir,

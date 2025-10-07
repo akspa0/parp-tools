@@ -43,14 +43,14 @@ internal sealed class ManifestWriter
             {
                 Success = result.Dbc.Success,
                 Versions = MapDbcVersions(result.Dbc.Versions),
-                SharedRoot = session.SharedDbcRoot,
-                SharedCrosswalkRoot = session.SharedCrosswalkRoot,
+                SharedRoot = session.Paths.DbcDir,
+                SharedCrosswalkRoot = session.Paths.CrosswalkDir,
             },
             Adt = new ManifestAdtModel
             {
                 Results = MapAdtResults(result.AdtResults),
-                SharedDbcRoot = session.SharedDbcRoot,
-                SharedCrosswalkRoot = session.SharedCrosswalkRoot,
+                SharedDbcRoot = session.Paths.DbcDir,
+                SharedCrosswalkRoot = session.Paths.CrosswalkDir,
             },
             Viewer = new ManifestViewerModel
             {

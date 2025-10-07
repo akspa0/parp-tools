@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using AlphaWdtAnalyzer.Core.Export;
+using WoWRollback.AdtModule;
 
 namespace WoWRollback.Orchestrator;
 
@@ -50,44 +50,32 @@ internal sealed class AdtStageRunner
         Directory.CreateDirectory(exportDir);
 
         var alias = DbcStageRunner.DeriveAlias(version);
-        var build = DbcStageRunner.ResolveBuildIdentifier(alias);
 
-        var pipelineOptions = new AdtExportPipeline.Options
+        // Create AdtOrchestrator and conversion options
+        var orchestrator = new AdtOrchestrator();
+        var conversionOptions = new ConversionOptions
         {
-            SingleWdtPath = wdtPath,
             CommunityListfilePath = TryLocateCommunityListfile(options.AlphaRoot),
             LkListfilePath = TryLocateLkListfile(options.AlphaRoot),
-            ExportDir = exportDir,
-            FallbackTileset = "Tileset\\Generic\\Checkers.blp",
-            FallbackNonTilesetBlp = "Dungeons\\Textures\\temp\\64.blp",
-            FallbackWmo = "wmo\\Dungeon\\test\\missingwmo.wmo",
-            FallbackM2 = "World\\Scale\\HumanMaleScale.mdx",
+            DbdDir = options.DbdDirectory,
+            CrosswalkDir = Path.Combine(session.Paths.CrosswalkDir, version, "compare"),
+            LkDbcDir = ResolveLkDbcDirectory(options),
             ConvertToMh2o = true,
             AssetFuzzy = true,
             UseFallbacks = true,
             EnableFixups = true,
-            RemapPath = null,
-            Verbose = false,
-            TrackAssets = false,
-            DbdDir = options.DbdDirectory,
-            DbctoolOutRoot = session.SharedCrosswalkRoot,
-            DbctoolSrcAlias = alias,
-            DbctoolSrcDir = Path.Combine(options.AlphaRoot, version, "tree", "DBFilesClient"),
-            DbctoolLkDir = ResolveLkDbcDirectory(options),
-            DbctoolPatchDir = Path.Combine(session.SharedCrosswalkRoot, alias, build, "compare"),
-            DbctoolPatchFile = null,
-            VizSvg = false,
-            VizHtml = false,
-            VizDir = null,
-            PatchOnly = false,
-            NoZoneFallback = false,
+            Verbose = options.Verbose,
         };
 
-        try
-        {
-            AdtExportPipeline.ExportSingle(pipelineOptions);
-        }
-        catch (Exception ex)
+        // Call AdtOrchestrator API
+        var result = orchestrator.ConvertAlphaToLk(
+            wdtPath: wdtPath,
+            exportDir: exportDir,
+            mapName: map,
+            srcAlias: alias,
+            opts: conversionOptions);
+
+        if (!result.Success)
         {
             return new AdtStageResult(
                 Map: map,
@@ -96,19 +84,16 @@ internal sealed class AdtStageRunner
                 TilesProcessed: 0,
                 AreaIdsPatched: 0,
                 AdtOutputDirectory: exportDir,
-                Error: ex.Message);
+                Error: result.ErrorMessage);
         }
-
-        var tilesProcessed = CountGeneratedTiles(exportDir, map);
-        var areaIdsPatched = CountPatchedAreaIds(exportDir, map);
 
         return new AdtStageResult(
             Map: map,
             Version: version,
             Success: true,
-            TilesProcessed: tilesProcessed,
-            AreaIdsPatched: areaIdsPatched,
-            AdtOutputDirectory: exportDir,
+            TilesProcessed: result.TilesProcessed,
+            AreaIdsPatched: result.AreaIdsPatched,
+            AdtOutputDirectory: result.AdtOutputDirectory,
             Error: null);
     }
 
@@ -135,34 +120,6 @@ internal sealed class AdtStageRunner
         return Directory.Exists(candidate) ? candidate : null;
     }
 
-    private static int CountGeneratedTiles(string exportDir, string map)
-    {
-        var mapDir = Path.Combine(exportDir, "World", "Maps", map);
-        if (!Directory.Exists(mapDir))
-        {
-            return 0;
-        }
-
-        return Directory.EnumerateFiles(mapDir, "*.adt", SearchOption.TopDirectoryOnly).Count();
-    }
-
-    private static int CountPatchedAreaIds(string exportDir, string map)
-    {
-        var csvDir = Path.Combine(exportDir, "csv", "maps", map);
-        if (!Directory.Exists(csvDir))
-        {
-            return 0;
-        }
-
-        var areaPatchPath = Path.Combine(csvDir, "area_patch_crosswalk.csv");
-        if (!File.Exists(areaPatchPath))
-        {
-            return 0;
-        }
-
-        var lines = File.ReadAllLines(areaPatchPath);
-        return Math.Max(0, lines.Length - 1);
-    }
 }
 
 internal sealed record AdtStageResult(
