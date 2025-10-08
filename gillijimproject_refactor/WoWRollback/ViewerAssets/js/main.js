@@ -787,8 +787,8 @@ function handleMapClick(e) {
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     
-    // Clamp to 0-63 range
-    const row = Math.max(0, Math.min(63, Math.floor(lat)));
+    // Convert lat/lng to row/col using coordinate system
+    const row = Math.max(0, Math.min(63, Math.floor(latToRow(lat))));
     const col = Math.max(0, Math.min(63, Math.floor(lng)));
     
     // Update sidebar click info with world coordinates
@@ -801,8 +801,8 @@ function handleMapClick(e) {
     
     // World coord = MAP_HALF_SIZE - (tileIndex * TILE_SIZE + inTileOffset)
     // For tile center approximation: worldCoord ≈ MAP_HALF_SIZE - (tileIndex + 0.5) * TILE_SIZE
-    const worldX = MAP_HALF_SIZE - (lng + 0.5) * TILE_SIZE;
-    const worldY = MAP_HALF_SIZE - (lat + 0.5) * TILE_SIZE;
+    const worldX = MAP_HALF_SIZE - (col + 0.5) * TILE_SIZE;
+    const worldY = MAP_HALF_SIZE - (row + 0.5) * TILE_SIZE;
     
     document.getElementById('clickedTile').textContent = `${row}_${col}`;
     document.getElementById('clickedCoord').textContent = `Tile [${row},${col}] | World (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`;

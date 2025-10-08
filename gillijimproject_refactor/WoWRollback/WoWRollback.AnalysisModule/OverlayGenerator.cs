@@ -29,8 +29,30 @@ public sealed class OverlayGenerator
     {
         try
         {
+            Console.WriteLine($"[OverlayGen] Generating overlays for {mapName} ({version})");
+            Console.WriteLine($"[OverlayGen] Placements count: {analysisIndex?.Placements?.Count ?? 0}");
+            
+            if (analysisIndex == null)
+            {
+                Console.WriteLine($"[OverlayGen] ERROR: analysisIndex is null!");
+                return new OverlayGenerationResult(
+                    0, 0, 0, 0,
+                    Success: false,
+                    ErrorMessage: $"Analysis index is null for {mapName}");
+            }
+            
+            if (analysisIndex.Placements == null)
+            {
+                Console.WriteLine($"[OverlayGen] ERROR: Placements property is null!");
+                return new OverlayGenerationResult(
+                    0, 0, 0, 0,
+                    Success: false,
+                    ErrorMessage: $"Placements is null in analysis index for {mapName}");
+            }
+            
             if (analysisIndex.Placements.Count == 0)
             {
+                Console.WriteLine($"[OverlayGen] WARNING: No placements found");
                 return new OverlayGenerationResult(
                     0, 0, 0, 0,
                     Success: false,
@@ -74,6 +96,9 @@ public sealed class OverlayGenerator
                 objectOverlays++;
             }
 
+            Console.WriteLine($"[OverlayGen] SUCCESS: Generated {objectOverlays} overlay files for {mapName}");
+            Console.WriteLine($"[OverlayGen] Output directory: {objectsDir}");
+
             return new OverlayGenerationResult(
                 TilesProcessed: tileGroups.Count(),
                 TerrainOverlays: 0,
@@ -83,6 +108,8 @@ public sealed class OverlayGenerator
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[OverlayGen] EXCEPTION: {ex.Message}");
+            Console.WriteLine($"[OverlayGen] Stack trace: {ex.StackTrace}");
             return new OverlayGenerationResult(
                 0, 0, 0, 0,
                 Success: false,

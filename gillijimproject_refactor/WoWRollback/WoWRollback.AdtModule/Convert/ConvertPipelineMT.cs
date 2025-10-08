@@ -191,15 +191,23 @@ internal static class ConvertPipelineMT
             Console.WriteLine($"[Fixups] {wdt.MapName} {x},{y}: fuzzy={fuzzy} capacity={capacity} overflow={overflow}");
         });
 
-        // Merge per-tile fixups
+        // Merge per-tile fixups and delete individual tile files
         try
         {
             var mergedPath = Path.Combine(logDir, "asset_fixups.csv");
             using var writer = new StreamWriter(mergedPath, append: false);
             writer.WriteLine("type,original,resolved,method,map,tile_x,tile_y");
-            foreach (var file in Directory.EnumerateFiles(logDir, "asset_fixups_*.csv", SearchOption.TopDirectoryOnly))
+            
+            var tileFiles = Directory.EnumerateFiles(logDir, "asset_fixups_*.csv", SearchOption.TopDirectoryOnly).ToList();
+            foreach (var file in tileFiles)
             {
                 foreach (var line in File.ReadLines(file).Skip(1)) { writer.WriteLine(line); }
+            }
+            
+            // Delete per-tile fixup files to reduce clutter
+            foreach (var file in tileFiles)
+            {
+                try { File.Delete(file); } catch { }
             }
         }
         catch { }

@@ -455,7 +455,7 @@ export class SedimentaryLayersManagerCSV {
         if (this.currentTileOnly && shouldShow) {
             const bounds = this.map.getBounds();
             const center = this.map.getCenter();
-            const tileRow = Math.floor(center.lat);
+            const tileRow = Math.floor(window.latToRow ? window.latToRow(center.lat) : center.lat);
             const tileCol = Math.floor(center.lng);
             
             shouldShow = marker.options.tileRow === tileRow && 
@@ -503,7 +503,7 @@ export class SedimentaryLayersManagerCSV {
                 if (this.currentTileOnly && shouldShow) {
                     const bounds = this.map.getBounds();
                     const center = this.map.getCenter();
-                    const tileRow = Math.floor(center.lat);
+                    const tileRow = Math.floor(window.latToRow ? window.latToRow(center.lat) : center.lat);
                     const tileCol = Math.floor(center.lng);
                     
                     shouldShow = marker.options.tileRow === tileRow && 

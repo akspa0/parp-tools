@@ -112,21 +112,28 @@ public sealed class MinimapLocator
 
         var allEntries = new List<MinimapEntry>();
 
-        foreach (var trsPath in GetCandidateTrsFiles(minimapRoot))
+        var trsFiles = GetCandidateTrsFiles(minimapRoot).ToList();
+        Console.WriteLine($"[MinimapLoc] Version {versionKey}: Found {trsFiles.Count} TRS files");
+        
+        foreach (var trsPath in trsFiles)
         {
             try
             {
-                allEntries.AddRange(ParseTrsFile(trsPath, minimapRoot));
+                var trsEntries = ParseTrsFile(trsPath, minimapRoot).ToList();
+                Console.WriteLine($"[MinimapLoc] Parsed {trsEntries.Count} entries from {Path.GetFileName(trsPath)}");
+                allEntries.AddRange(trsEntries);
             }
-            catch
+            catch (Exception ex)
             {
-                // ignore malformed TRS and continue
+                Console.WriteLine($"[MinimapLoc] Failed to parse {Path.GetFileName(trsPath)}: {ex.Message}");
             }
         }
 
         if (allEntries.Count == 0)
         {
+            Console.WriteLine($"[MinimapLoc] No TRS entries, falling back to directory scan");
             allEntries.AddRange(ScanMinimapDirectory(minimapRoot));
+            Console.WriteLine($"[MinimapLoc] Found {allEntries.Count} entries from directory scan");
         }
 
         // Ensure version entry exists
