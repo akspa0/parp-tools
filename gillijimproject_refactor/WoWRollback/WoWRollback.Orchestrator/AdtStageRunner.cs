@@ -13,7 +13,6 @@ internal sealed class AdtStageRunner
         {
             throw new ArgumentNullException(nameof(session));
         }
-
         var results = new List<AdtStageResult>();
 
         foreach (var map in session.Options.Maps)
@@ -26,6 +25,31 @@ internal sealed class AdtStageRunner
         }
 
         return results;
+    }
+
+    private static string? ResolveCommunityListfile(PipelineOptions options)
+    {
+        // CLI override
+        if (!string.IsNullOrWhiteSpace(options.CommunityListfile) && File.Exists(options.CommunityListfile))
+        {
+            return options.CommunityListfile;
+        }
+        // Try defaults under alpha root
+        return TryLocateCommunityListfile(options.AlphaRoot);
+    }
+
+    private static string? ResolveLkListfile(PipelineOptions options)
+    {
+        // CLI override
+        if (!string.IsNullOrWhiteSpace(options.LkListfile) && File.Exists(options.LkListfile))
+        {
+            return options.LkListfile;
+        }
+        // Common alternate name under alpha root
+        var alt = Path.Combine(options.AlphaRoot, "World of Warcraft 3x.txt");
+        if (File.Exists(alt)) return alt;
+        // Fallback to previous heuristic
+        return TryLocateLkListfile(options.AlphaRoot);
     }
 
     private static AdtStageResult RunExport(SessionContext session, string version, string map)
@@ -59,10 +83,14 @@ internal sealed class AdtStageRunner
         // So we need to point to: 02_crosswalks/{version}/{alias}/compare/v2/
         var crosswalkPatchDir = Path.Combine(session.Paths.CrosswalkDir, version, alias, "compare", "v2");
         
+        // Resolve listfiles with CLI overrides and robust fallbacks
+        var communityListfile = ResolveCommunityListfile(options);
+        var lkListfile = ResolveLkListfile(options);
+
         var conversionOptions = new ConversionOptions
         {
-            CommunityListfilePath = TryLocateCommunityListfile(options.AlphaRoot),
-            LkListfilePath = TryLocateLkListfile(options.AlphaRoot),
+            CommunityListfilePath = communityListfile,
+            LkListfilePath = lkListfile,
             DbdDir = options.DbdDirectory,
             CrosswalkDir = crosswalkPatchDir,
             LkDbcDir = ResolveLkDbcDirectory(options),
@@ -105,8 +133,13 @@ internal sealed class AdtStageRunner
 
     private static string? TryLocateCommunityListfile(string alphaRoot)
     {
+        // Legacy default name
         var candidate = Path.Combine(alphaRoot, "listfile.csv");
-        return File.Exists(candidate) ? candidate : null;
+        if (File.Exists(candidate)) return candidate;
+        // Common alternate provided by project
+        var alt = Path.Combine(alphaRoot, "community-listfile-withcapitals.csv");
+        if (File.Exists(alt)) return alt;
+        return null;
     }
 
     private static string? TryLocateLkListfile(string alphaRoot)

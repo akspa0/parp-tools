@@ -6,6 +6,7 @@ namespace WoWRollback.AnalysisModule;
 public sealed record AnalysisResult(
     IReadOnlyList<string> UniqueIdCsvs,
     IReadOnlyList<string> TerrainCsvs,
+    IReadOnlyList<string> PlacementCsvs,
     int OverlayCount,
     string? ManifestPath,
     bool Success,

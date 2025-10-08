@@ -95,6 +95,8 @@ internal static class PipelineOptionsParser
             : DefaultDbdRelative;
 
         parsed.TryGetValue("lk-dbc-dir", out var lkDbcDir);
+        parsed.TryGetValue("community-listfile", out var communityListfile);
+        parsed.TryGetValue("lk-listfile", out var lkListfile);
 
         var port = DefaultPort;
         if (parsed.TryGetValue("port", out var portValue) && !string.IsNullOrWhiteSpace(portValue))
@@ -113,6 +115,8 @@ internal static class PipelineOptionsParser
             OutputRoot: outputRoot,
             DbdDirectory: dbdDir,
             LkDbcDirectory: lkDbcDir,
+            CommunityListfile: communityListfile,
+            LkListfile: lkListfile,
             Serve: flags.Contains("serve"),
             Port: port,
             Verbose: flags.Contains("verbose"));

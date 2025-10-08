@@ -9,6 +9,8 @@ internal sealed record PipelineOptions(
     string OutputRoot,
     string? DbdDirectory,
     string? LkDbcDirectory,
+    string? CommunityListfile,
+    string? LkListfile,
     bool Serve,
     int Port,
     bool Verbose)

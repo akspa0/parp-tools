@@ -1,4 +1,6 @@
+using AlphaWdtAnalyzer.Core;
 using AlphaWdtAnalyzer.Core.Export;
+using WoWRollback.AdtModule.Convert;
 
 namespace WoWRollback.AdtModule;
 
@@ -46,54 +48,101 @@ public sealed class AdtOrchestrator
             // Create output directory
             Directory.CreateDirectory(exportDir);
 
-            // Build pipeline options from our cleaner API
-            var pipelineOptions = new AdtExportPipeline.Options
+            // Execute native multithreaded conversion pipeline (faster per-tile with safe fixup logging)
+            ConvertPipelineMT.Run(new ConvertPipelineMT.Options
             {
-                SingleWdtPath = wdtPath,
+                WdtPath = wdtPath,
+                ExportDir = exportDir,
                 CommunityListfilePath = opts.CommunityListfilePath,
                 LkListfilePath = opts.LkListfilePath,
-                ExportDir = exportDir,
-                FallbackTileset = opts.FallbackTileset,
-                FallbackNonTilesetBlp = opts.FallbackNonTilesetBlp,
-                FallbackWmo = opts.FallbackWmo,
-                FallbackM2 = opts.FallbackM2,
+                DbdDir = opts.DbdDir,
+                DbctoolOutRoot = opts.CrosswalkDir,
+                DbctoolSrcAlias = srcAlias,
+                DbctoolSrcDir = null,
+                DbctoolLkDir = opts.LkDbcDir,
+                DbctoolPatchDir = opts.CrosswalkDir,
+                DbctoolPatchFile = null,
                 ConvertToMh2o = opts.ConvertToMh2o,
                 AssetFuzzy = opts.AssetFuzzy,
                 UseFallbacks = opts.UseFallbacks,
                 EnableFixups = opts.EnableFixups,
-                RemapPath = null,
-                Verbose = opts.Verbose,
                 TrackAssets = false,
-                DbdDir = opts.DbdDir,
-                DbctoolOutRoot = opts.CrosswalkDir,
-                DbctoolSrcAlias = srcAlias,
-                DbctoolSrcDir = null, // Will be resolved by pipeline if needed
-                DbctoolLkDir = opts.LkDbcDir,
-                DbctoolPatchDir = opts.CrosswalkDir,
-                DbctoolPatchFile = null,
-                VizSvg = false,
-                VizHtml = false,
-                VizDir = null,
-                PatchOnly = false,
-                NoZoneFallback = false,
-            };
-
-            // Execute conversion
-            AdtExportPipeline.ExportSingle(pipelineOptions);
+                Verbose = opts.Verbose,
+                FallbackTileset = opts.FallbackTileset,
+                FallbackNonTilesetBlp = opts.FallbackNonTilesetBlp,
+                FallbackWmo = opts.FallbackWmo,
+                FallbackM2 = opts.FallbackM2,
+                MaxDegreeOfParallelism = 0 // auto
+            });
 
             // Count results
             var tilesProcessed = CountGeneratedTiles(exportDir, mapName);
             var areaIdsPatched = CountPatchedAreaIds(exportDir, mapName);
 
-            // Compute CSV paths
-            var csvDir = Path.Combine(exportDir, "csv", "maps", mapName);
-            var terrainCsvPath = Path.Combine(csvDir, "terrain.csv");
-            var shadowCsvPath = Path.Combine(csvDir, "shadow.csv");
+            // Run analysis pipeline to generate terrain/shadow CSVs
+            var lkAdtDir = Path.Combine(exportDir, "World", "Maps", mapName);
+            var analysisDir = Path.Combine(exportDir, "analysis");
+
+            // Prefer LK listfile; fall back to community listfile if needed
+            string? listfileForAnalysis = null;
+            if (!string.IsNullOrWhiteSpace(opts.LkListfilePath) && File.Exists(opts.LkListfilePath))
+            {
+                listfileForAnalysis = opts.LkListfilePath;
+            }
+            else if (!string.IsNullOrWhiteSpace(opts.CommunityListfilePath) && File.Exists(opts.CommunityListfilePath))
+            {
+                listfileForAnalysis = opts.CommunityListfilePath;
+            }
+
+            if (!string.IsNullOrWhiteSpace(listfileForAnalysis))
+            {
+                var analysisOptions = new AnalysisPipeline.Options
+                {
+                    WdtPath = wdtPath,
+                    ListfilePath = listfileForAnalysis!,
+                    OutDir = analysisDir,
+                    ExtractMcnkTerrain = true,
+                    ExtractMcnkShadows = true,
+                    LkAdtDirectory = lkAdtDir,
+                    ClusterThreshold = 10,
+                    ClusterGap = 1000
+                };
+
+                try
+                {
+                    AnalysisPipeline.Run(analysisOptions);
+                }
+                catch (Exception ex)
+                {
+                    if (opts.Verbose)
+                    {
+                        Console.Error.WriteLine($"[WARN] Analysis pipeline failed: {ex.Message}");
+                    }
+                }
+            }
+
+            // Compute CSV paths (AnalysisPipeline generates them at analysis/csv/{mapName}/)
+            var csvDir = Path.Combine(analysisDir, "csv", mapName);
+            var terrainCsvPath = Path.Combine(csvDir, $"{mapName}_mcnk_terrain.csv");
+            var shadowCsvPath = Path.Combine(csvDir, $"{mapName}_mcnk_shadows.csv");
+
+            // Copy CSVs to expected location for backward compat
+            var targetCsvDir = Path.Combine(exportDir, "csv", "maps", mapName);
+            Directory.CreateDirectory(targetCsvDir);
+            
+            if (File.Exists(terrainCsvPath))
+            {
+                File.Copy(terrainCsvPath, Path.Combine(targetCsvDir, "terrain.csv"), overwrite: true);
+            }
+            if (File.Exists(shadowCsvPath))
+            {
+                File.Copy(shadowCsvPath, Path.Combine(targetCsvDir, "shadow.csv"), overwrite: true);
+            }
 
             return new AdtConversionResult(
                 AdtOutputDirectory: exportDir,
-                TerrainCsvPath: File.Exists(terrainCsvPath) ? terrainCsvPath : null,
-                ShadowCsvPath: File.Exists(shadowCsvPath) ? shadowCsvPath : null,
+                TerrainCsvPath: File.Exists(terrainCsvPath) ? Path.Combine(targetCsvDir, "terrain.csv") : null,
+                ShadowCsvPath: File.Exists(shadowCsvPath) ? Path.Combine(targetCsvDir, "shadow.csv") : null,
                 TilesProcessed: tilesProcessed,
                 AreaIdsPatched: areaIdsPatched,
                 Success: true);

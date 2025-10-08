@@ -56,12 +56,16 @@ public static class AnalysisPipeline
             .Select(p => p.UniqueId!.Value);
         var clusters = UniqueIdClusterer.FindClusters(ids, opts.ClusterThreshold, opts.ClusterGap);
 
-        // Write CSVs
-        CsvReportWriter.WriteAssetsByType(csvDir, adt.WmoAssets, adt.M2Assets, adt.BlpAssets);
-        CsvReportWriter.WritePlacements(csvDir, adt.Placements);
-        CsvReportWriter.WriteMissing(csvDir, missingWmo, missingM2, missingBlp);
-        CsvReportWriter.WriteIdRanges(csvDir, clusters);
-        CsvReportWriter.WriteUniqueIds(csvDir, adt.Placements);
+        // Per-map CSV directory to avoid cross-map overwrites
+        var mapCsvDir = Path.Combine(csvDir, wdt.MapName);
+        Directory.CreateDirectory(mapCsvDir);
+
+        // Write per-map CSVs
+        CsvReportWriter.WriteAssetsByType(mapCsvDir, adt.WmoAssets, adt.M2Assets, adt.BlpAssets);
+        CsvReportWriter.WritePlacements(mapCsvDir, adt.Placements);
+        CsvReportWriter.WriteMissing(mapCsvDir, missingWmo, missingM2, missingBlp);
+        CsvReportWriter.WriteIdRanges(mapCsvDir, clusters);
+        CsvReportWriter.WriteUniqueIds(mapCsvDir, adt.Placements);
 
         // Per-map ID clusters and range summaries
         var perMapClusters = new List<(string MapName, UniqueIdClusterer.Cluster Cluster)>();
@@ -82,6 +86,7 @@ public static class AnalysisPipeline
                 perMapSummaries.Add((g.Key, minId, maxId, count));
             }
         }
+        // By-map/global summaries in csv root include the map column
         CsvReportWriter.WriteIdRangesByMap(csvDir, perMapClusters);
         CsvReportWriter.WriteIdRangeSummaryByMap(csvDir, perMapSummaries);
         if (ids.Any())
@@ -134,7 +139,10 @@ public static class AnalysisPipeline
             MissingBlp = missingBlp.OrderBy(x => x).ToList(),
         };
 
-        var idxPath = Path.Combine(opts.OutDir, "index.json");
+        // Write per-map index.json to avoid overwrites across maps
+        var mapOutDir = Path.Combine(opts.OutDir, wdt.MapName);
+        Directory.CreateDirectory(mapOutDir);
+        var idxPath = Path.Combine(mapOutDir, "index.json");
         var json = JsonSerializer.Serialize(idx, new JsonSerializerOptions{ WriteIndented = true });
         File.WriteAllText(idxPath, json);
     }

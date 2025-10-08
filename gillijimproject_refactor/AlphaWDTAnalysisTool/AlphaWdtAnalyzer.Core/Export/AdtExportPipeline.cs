@@ -94,21 +94,20 @@ public static class AdtExportPipeline
         var mapName = Path.GetFileNameWithoutExtension(opts.SingleWdtPath!);
         var logDir = Path.Combine(opts.ExportDir, "csv", "maps", mapName);
         Directory.CreateDirectory(logDir);
-        using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
         var inventory = new AssetInventory(opts.AssetRoots?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!));
+        using var fixupLogger = new FixupLogger(Path.Combine(logDir, "asset_fixups.csv"));
         var fixup = new AssetFixupPolicy(
-            resolver,
-            opts.FallbackTileset,
-            opts.FallbackNonTilesetBlp,
-            opts.FallbackWmo,
-            opts.FallbackM2,
-            opts.AssetFuzzy,
-            opts.UseFallbacks,
-            opts.EnableFixups,
-            fixupLogger,
-            inventory,
-            opts.LogExact);
-
+        resolver,
+        opts.FallbackTileset,
+        opts.FallbackNonTilesetBlp,
+        opts.FallbackWmo,
+        opts.FallbackM2,
+        opts.AssetFuzzy,
+        opts.UseFallbacks,
+        opts.EnableFixups,
+        fixupLogger,
+        inventory,
+        opts.LogExact);
         var areaMapper = AreaIdMapper.TryCreate(null, null, null, opts.RemapPath);
         AreaIdMapperV2? areaMapperV2 = null;
         if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
