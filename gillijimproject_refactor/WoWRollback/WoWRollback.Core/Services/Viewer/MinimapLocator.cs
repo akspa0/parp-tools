@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace WoWRollback.Core.Services.Viewer;
 
-internal sealed class MinimapLocator
+public sealed class MinimapLocator
 {
     // Version -> Map -> (Row, Col) -> Tile
     private readonly Dictionary<string, Dictionary<string, Dictionary<(int Row, int Col), MinimapTile>>> _versionMapTiles;
@@ -439,7 +439,7 @@ internal sealed class MinimapLocator
             yield return kv;
     }
 
-    internal readonly record struct MinimapTile(string SourcePath, int TileX, int TileY, string Version, bool IsAlternate)
+    public readonly record struct MinimapTile(string SourcePath, int TileX, int TileY, string Version, bool IsAlternate)
     {
         public Stream Open() => File.OpenRead(SourcePath);
 

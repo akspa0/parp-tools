@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using WoWRollback.Core.Logging;
 using WoWRollback.DbcModule;
 
 namespace WoWRollback.Orchestrator;
@@ -85,29 +87,47 @@ internal sealed class DbcStageRunner
             }
             else
             {
-                // Call DbcOrchestrator API methods
-                var dumpResult = orchestrator.DumpAreaTables(
-                    srcAlias: alias,
-                    srcDbcDir: sourceDir,
-                    tgtDbcDir: lkDbcDir,
-                    outDir: dbcVersionDir);
+                // Step 1: Dump ALL DBCs to JSON (comprehensive exploratory dump)
+                var jsonDumpDir = Path.Combine(dbcVersionDir, "json");
+                var dumpAllResult = orchestrator.DumpAllDbcs(alias, sourceDir, jsonDumpDir);
 
-                if (!dumpResult.Success)
+                if (!dumpAllResult.Success)
                 {
                     success = false;
-                    error = dumpResult.ErrorMessage ?? "DBC dump failed";
+                    error = dumpAllResult.ErrorMessage ?? "Comprehensive DBC dump failed";
                 }
                 else
                 {
-                    // DumpAreaTables writes to dbcVersionDir/alias/raw/
-                    // We want files in dbcVersionDir/raw/ directly
-                    var rawSource = Path.Combine(dbcVersionDir, alias, "raw");
-                    if (Directory.Exists(rawSource))
+                    ConsoleLogger.Success($"  ✓ Dumped {dumpAllResult.DumpedFiles.Count} DBCs to JSON");
+                    if (dumpAllResult.ErrorMessage != null)
                     {
-                        foreach (var file in Directory.EnumerateFiles(rawSource, "*.csv"))
+                        ConsoleLogger.Warn($"    {dumpAllResult.ErrorMessage}");
+                    }
+                    
+                    // Step 2: Legacy - Also dump AreaTable to CSV for crosswalk compatibility
+                    var dumpResult = orchestrator.DumpAreaTables(
+                        srcAlias: alias,
+                        srcDbcDir: sourceDir,
+                        tgtDbcDir: lkDbcDir,
+                        outDir: dbcVersionDir);
+
+                    if (!dumpResult.Success)
+                    {
+                        success = false;
+                        error = dumpResult.ErrorMessage ?? "AreaTable CSV dump failed";
+                    }
+                    else
+                    {
+                        // DumpAreaTables writes to dbcVersionDir/alias/raw/
+                        // We want files in dbcVersionDir/raw/ directly
+                        var rawSource = Path.Combine(dbcVersionDir, alias, "raw");
+                        if (Directory.Exists(rawSource))
                         {
-                            var fileName = Path.GetFileName(file);
-                            File.Copy(file, Path.Combine(sharedDbcDir, fileName), overwrite: true);
+                            foreach (var file in Directory.EnumerateFiles(rawSource, "*.csv"))
+                            {
+                                var fileName = Path.GetFileName(file);
+                                File.Copy(file, Path.Combine(sharedDbcDir, fileName), overwrite: true);
+                            }
                         }
                     }
                 }

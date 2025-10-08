@@ -194,4 +194,39 @@ public sealed class DbcOrchestrator
                 ErrorMessage: $"Crosswalk generation failed: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Dumps ALL DBC files to JSON for comprehensive data access.
+    /// Enables exploration of all available data without needing to re-decode.
+    /// </summary>
+    /// <param name="buildVersion">Build version string (e.g., "0.5.3")</param>
+    /// <param name="sourceDbcDir">Directory containing .dbc files</param>
+    /// <param name="outputDir">Output directory for JSON files</param>
+    /// <returns>Result containing list of dumped files</returns>
+    public DumpAllDbcsResult DumpAllDbcs(
+        string buildVersion,
+        string sourceDbcDir,
+        string outputDir)
+    {
+        // Convert version alias to canonical build format (e.g., "0.5.3" → "0.5.3.3368")
+        var canonicalBuild = CanonicalizeBuild(buildVersion);
+        
+        var dumper = new UniversalDbcDumper(_dbdDir, _locale);
+        return dumper.DumpAll(canonicalBuild, sourceDbcDir, outputDir);
+    }
+
+    /// <summary>
+    /// Converts version alias to canonical DBCD build format.
+    /// </summary>
+    private static string CanonicalizeBuild(string alias)
+    {
+        return alias switch
+        {
+            "0.5.3" => "0.5.3.3368",
+            "0.5.5" => "0.5.5.3494",
+            "0.6.0" => "0.6.0.3592",
+            "3.3.5" => "3.3.5.12340",
+            _ => alias
+        };
+    }
 }
