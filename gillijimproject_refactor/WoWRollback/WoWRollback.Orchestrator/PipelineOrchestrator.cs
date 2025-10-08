@@ -63,6 +63,9 @@ internal sealed class PipelineOrchestrator
         }
         Console.WriteLine();
 
+        NoggitProjectWriter.Write(session, adtResults);
+        Console.WriteLine();
+
         // Stage 3: Analysis
         ConsoleLogger.Info("Running analysis stage...");
         var analysisRunner = new AnalysisStageRunner();

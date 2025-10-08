@@ -11,6 +11,9 @@ internal sealed record PipelineOptions(
     string? LkDbcDirectory,
     string? CommunityListfile,
     string? LkListfile,
+    string? NoggitClientPath,
+    bool RunVerifier,
+    string? AreaOverrideDirectory,
     bool Serve,
     int Port,
     bool Verbose)

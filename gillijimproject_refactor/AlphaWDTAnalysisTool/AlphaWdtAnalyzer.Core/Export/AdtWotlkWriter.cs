@@ -39,33 +39,45 @@ public static class AdtWotlkWriter
         public required int TileY { get; init; }
         public required IEnumerable<PlacementRecord> Placements { get; init; }
         public required AssetFixupPolicy Fixup { get; init; }
-        public bool ConvertToMh2o { get; init; }
+        public required bool ConvertToMh2o { get; init; }
         public AreaIdMapper? AreaMapper { get; init; }
         public AreaIdMapperV2? AreaMapperV2 { get; init; }
-        public IReadOnlyList<int>? AlphaAreaIds { get; init; }
         public DbcPatchMapping? PatchMapping { get; init; }
+        public IReadOnlyList<int>? AlphaAreaIds { get; init; }
         public required string WdtPath { get; init; }
         public required int AdtNumber { get; init; }
         public required int AdtOffset { get; init; }
         public required IReadOnlyList<string> MdnmFiles { get; init; }
         public required IReadOnlyList<string> MonmFiles { get; init; }
-        public bool Verbose { get; init; } = false;
-        public bool TrackAssets { get; init; } = false;
+        public bool Verbose { get; init; }
+        public bool TrackAssets { get; init; }
         public int? CurrentMapId { get; init; }
-        // Visualization
-        public bool VizSvg { get; init; } = false;
+        public bool VizSvg { get; init; }
         public string? VizDir { get; init; }
         public string? LkDbcDir { get; init; }
-        public bool VizHtml { get; init; } = false;
-        public bool PatchOnly { get; init; } = false;
-        public bool NoZoneFallback { get; init; } = false;
+        public bool VizHtml { get; init; }
+        public bool PatchOnly { get; init; }
+        public bool NoZoneFallback { get; init; }
+        public string? VersionAlias { get; init; }
+        public IReadOnlyDictionary<int, int>? AreaOverrides { get; init; }
     }
 
-    private static string BeautifyToken(string token)
+    private static string BeautifyToken(string value)
     {
-        var cleaned = (token ?? string.Empty).Replace('_', ' ').Replace('-', ' ').Trim();
-        if (cleaned.Length == 0) return string.Empty;
-        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(cleaned);
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+        var cleaned = value.Trim().Replace('_', ' ').Replace('-', ' ');
+        var parts = cleaned
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part =>
+            {
+                if (part.Length == 0) return string.Empty;
+                if (part.Length == 1) return part.ToUpperInvariant();
+                return char.ToUpperInvariant(part[0]) + part.Substring(1).ToLowerInvariant();
+            })
+            .Where(part => part.Length > 0);
+
+        return string.Join(" ", parts);
     }
 
     private static string FormatChain(string? chain)

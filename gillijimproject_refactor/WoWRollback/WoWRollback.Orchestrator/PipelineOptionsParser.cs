@@ -37,7 +37,9 @@ internal static class PipelineOptionsParser
 
             var key = token.Substring(2);
             if (string.Equals(key, "serve", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(key, "verbose", StringComparison.OrdinalIgnoreCase))
+                string.Equals(key, "verbose", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "verify", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "run-verifier", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(key);
                 continue;
@@ -97,6 +99,16 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("lk-dbc-dir", out var lkDbcDir);
         parsed.TryGetValue("community-listfile", out var communityListfile);
         parsed.TryGetValue("lk-listfile", out var lkListfile);
+        parsed.TryGetValue("noggit-client-path", out var noggitClientPath);
+        parsed.TryGetValue("area-overrides", out var areaOverrides);
+        if (noggitClientPath != null && string.IsNullOrWhiteSpace(noggitClientPath))
+        {
+            noggitClientPath = null;
+        }
+        if (areaOverrides != null && string.IsNullOrWhiteSpace(areaOverrides))
+        {
+            areaOverrides = null;
+        }
 
         var port = DefaultPort;
         if (parsed.TryGetValue("port", out var portValue) && !string.IsNullOrWhiteSpace(portValue))
@@ -117,6 +129,9 @@ internal static class PipelineOptionsParser
             LkDbcDirectory: lkDbcDir,
             CommunityListfile: communityListfile,
             LkListfile: lkListfile,
+            NoggitClientPath: noggitClientPath,
+            RunVerifier: flags.Contains("verify") || flags.Contains("run-verifier"),
+            AreaOverrideDirectory: areaOverrides,
             Serve: flags.Contains("serve"),
             Port: port,
             Verbose: flags.Contains("verbose"));
