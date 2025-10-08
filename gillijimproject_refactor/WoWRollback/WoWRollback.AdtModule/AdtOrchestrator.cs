@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Linq;
 using AlphaWdtAnalyzer.Core;
 using AlphaWdtAnalyzer.Core.Export;
 using WoWRollback.AdtModule.Convert;
@@ -26,16 +29,19 @@ public sealed class AdtOrchestrator
         string srcAlias,
         ConversionOptions opts)
     {
+        if (opts is null)
+            throw new ArgumentNullException(nameof(opts));
+        if (string.IsNullOrWhiteSpace(wdtPath))
+            throw new ArgumentException("WDT path is required", nameof(wdtPath));
+        if (string.IsNullOrWhiteSpace(exportDir))
+            throw new ArgumentException("Export directory is required", nameof(exportDir));
+        if (string.IsNullOrWhiteSpace(mapName))
+            throw new ArgumentException("Map name is required", nameof(mapName));
+
         try
         {
-            if (string.IsNullOrWhiteSpace(wdtPath))
-                throw new ArgumentException("WDT path is required", nameof(wdtPath));
-            if (string.IsNullOrWhiteSpace(exportDir))
-                throw new ArgumentException("Export directory is required", nameof(exportDir));
-            if (string.IsNullOrWhiteSpace(mapName))
-                throw new ArgumentException("Map name is required", nameof(mapName));
-
             if (!File.Exists(wdtPath))
+            {
                 return new AdtConversionResult(
                     AdtOutputDirectory: exportDir,
                     TerrainCsvPath: null,
@@ -44,6 +50,7 @@ public sealed class AdtOrchestrator
                     AreaIdsPatched: 0,
                     Success: false,
                     ErrorMessage: $"WDT file not found: {wdtPath}");
+            }
 
             // Create output directory
             Directory.CreateDirectory(exportDir);
@@ -66,13 +73,15 @@ public sealed class AdtOrchestrator
                 AssetFuzzy = opts.AssetFuzzy,
                 UseFallbacks = opts.UseFallbacks,
                 EnableFixups = opts.EnableFixups,
-                TrackAssets = false,
+                TrackAssets = opts.TrackAssets,
                 Verbose = opts.Verbose,
                 FallbackTileset = opts.FallbackTileset,
                 FallbackNonTilesetBlp = opts.FallbackNonTilesetBlp,
                 FallbackWmo = opts.FallbackWmo,
                 FallbackM2 = opts.FallbackM2,
-                MaxDegreeOfParallelism = 0 // auto
+                MaxDegreeOfParallelism = 0,
+                VersionAlias = opts.VersionAlias ?? srcAlias,
+                AreaOverrides = opts.AreaOverrides
             });
 
             // Count results
@@ -129,7 +138,7 @@ public sealed class AdtOrchestrator
             // Copy CSVs to expected location for backward compat
             var targetCsvDir = Path.Combine(exportDir, "csv", "maps", mapName);
             Directory.CreateDirectory(targetCsvDir);
-            
+
             if (File.Exists(terrainCsvPath))
             {
                 File.Copy(terrainCsvPath, Path.Combine(targetCsvDir, "terrain.csv"), overwrite: true);

@@ -38,6 +38,8 @@ internal static class ConvertPipelineMT
         public string FallbackWmo { get; init; } = "wmo\\Dungeon\\test\\missingwmo.wmo";
         public string FallbackM2 { get; init; } = "World\\Scale\\HumanMaleScale.mdx";
         public int MaxDegreeOfParallelism { get; init; } = 0;
+        public string? VersionAlias { get; init; }
+        public IReadOnlyDictionary<int, int>? AreaOverrides { get; init; }
     }
 
     public static void Run(Options opts)
@@ -53,7 +55,8 @@ internal static class ConvertPipelineMT
 
         var areaMapper = AreaIdMapper.TryCreate(null, null, null, null);
         AreaIdMapperV2? areaMapperV2 = null;
-        var aliasUsed = ResolveSrcAlias(opts.DbctoolSrcAlias, opts.WdtPath, null);
+        var aliasHint = opts.VersionAlias ?? opts.DbctoolSrcAlias;
+        var aliasUsed = ResolveSrcAlias(aliasHint, opts.WdtPath, null);
         if (!string.IsNullOrWhiteSpace(opts.DbdDir) && !string.IsNullOrWhiteSpace(opts.DbctoolSrcDir) && !string.IsNullOrWhiteSpace(opts.DbctoolLkDir))
         {
             areaMapperV2 = AreaIdMapperV2.TryCreate(opts.DbdDir!, aliasUsed, opts.DbctoolSrcDir!, opts.DbctoolLkDir!);
@@ -178,6 +181,8 @@ internal static class ConvertPipelineMT
                 VizHtml = false,
                 PatchOnly = false,
                 NoZoneFallback = false,
+                VersionAlias = opts.VersionAlias ?? aliasUsed,
+                AreaOverrides = opts.AreaOverrides,
             };
 
             tileLogger.BeginTile(wdt.MapName, x, y);

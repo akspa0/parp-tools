@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using WoWRollback.Core.Services.Config;
 
 namespace WoWRollback.Orchestrator;
 
@@ -44,14 +45,17 @@ internal static class SessionManager
             LogsDir: logsDir,
             ManifestPath: manifestPath);
 
-        return new SessionContext(timestamp, paths, options);
+        var overrideResolver = AreaOverrideLoader.LoadFromDirectory(options.AreaOverrideDirectory);
+
+        return new SessionContext(timestamp, paths, options, overrideResolver);
     }
 }
 
 internal sealed record SessionContext(
     string SessionId,
     SessionPaths Paths,
-    PipelineOptions Options)
+    PipelineOptions Options,
+    AreaOverrideLoader.AreaOverrideResolver? OverrideResolver)
 {
     public string Root => Paths.Root;
     public string ManifestPath => Paths.ManifestPath;

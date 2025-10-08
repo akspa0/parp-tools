@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace WoWRollback.AdtModule;
 
 /// <summary>
@@ -31,11 +33,14 @@ public sealed record ConversionOptions
     public string? DbdDir { get; init; }
     public string? CrosswalkDir { get; init; }
     public string? LkDbcDir { get; init; }
-    
+    public string? VersionAlias { get; init; }
+    public IReadOnlyDictionary<int, int>? AreaOverrides { get; init; }
+
     public bool ConvertToMh2o { get; init; } = true;
     public bool AssetFuzzy { get; init; } = true;
     public bool UseFallbacks { get; init; } = true;
     public bool EnableFixups { get; init; } = true;
+    public bool TrackAssets { get; init; }
     public bool Verbose { get; init; }
     
     public string FallbackTileset { get; init; } = "Tileset\\Generic\\Checkers.blp";

@@ -75,6 +75,9 @@ internal sealed class AdtStageRunner
 
         var alias = DbcStageRunner.DeriveAlias(version);
 
+        // Load override resolver once per session (lazy)
+        var overrideResolver = session.OverrideResolver;
+
         // Create AdtOrchestrator and conversion options
         var orchestrator = new AdtOrchestrator();
         
@@ -94,6 +97,8 @@ internal sealed class AdtStageRunner
             DbdDir = options.DbdDirectory,
             CrosswalkDir = crosswalkPatchDir,
             LkDbcDir = ResolveLkDbcDirectory(options),
+            VersionAlias = alias,
+            AreaOverrides = overrideResolver?.GetOverrides(map, version, alias),
             ConvertToMh2o = true,
             AssetFuzzy = true,
             UseFallbacks = true,

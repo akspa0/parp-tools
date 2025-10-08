@@ -10,6 +10,7 @@ internal static class PipelineOptionsParser
 {
     private const string DefaultOutputRoot = "parp_out";
     private static readonly string DefaultDbdRelative = Path.Combine("..", "lib", "WoWDBDefs", "definitions");
+    private const string DefaultNoggitClientPath = "H:/WoWDev/modernwow";
     private const int DefaultPort = 8080;
 
     public static bool TryParse(string[] args, out PipelineOptions? options, out string? error)
@@ -99,12 +100,11 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("lk-dbc-dir", out var lkDbcDir);
         parsed.TryGetValue("community-listfile", out var communityListfile);
         parsed.TryGetValue("lk-listfile", out var lkListfile);
-        parsed.TryGetValue("noggit-client-path", out var noggitClientPath);
+        parsed.TryGetValue("noggit-client-path", out var noggitClientPathRaw);
         parsed.TryGetValue("area-overrides", out var areaOverrides);
-        if (noggitClientPath != null && string.IsNullOrWhiteSpace(noggitClientPath))
-        {
-            noggitClientPath = null;
-        }
+        var noggitClientPath = !string.IsNullOrWhiteSpace(noggitClientPathRaw)
+            ? noggitClientPathRaw
+            : DefaultNoggitClientPath;
         if (areaOverrides != null && string.IsNullOrWhiteSpace(areaOverrides))
         {
             areaOverrides = null;

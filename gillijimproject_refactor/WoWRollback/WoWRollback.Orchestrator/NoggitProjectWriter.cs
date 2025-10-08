@@ -42,7 +42,7 @@ internal static class NoggitProjectWriter
 
         var clientPath = !string.IsNullOrWhiteSpace(session.Options.NoggitClientPath)
             ? session.Options.NoggitClientPath!
-            : "<set this in cli!>";
+            : "H:/WoWDev/modernwow";
 
         var options = new JsonSerializerOptions
         {
@@ -65,7 +65,7 @@ internal static class NoggitProjectWriter
                     ProjectName: session.SessionId));
 
             var json = JsonSerializer.Serialize(payload, options);
-            var outputPath = Path.Combine(versionDir, "project.noggitproject");
+            var outputPath = Path.Combine(versionDir, "project.noggitproj");
             File.WriteAllText(outputPath, json);
         }
     }
