@@ -1,27 +1,24 @@
 import { OverlayPlugin } from '../core/OverlayPlugin.js';
-
 /**
  * GridPlugin - Displays ADT tile grid overlay
  * Simple plugin with no data loading - just draws grid lines
  */
 export class GridPlugin extends OverlayPlugin {
-    constructor(map, coordSystem) {
+    constructor(map, coordSystem, options = {}) {
         super('grid', 'ADT Grid', map, coordSystem);
         
+        this.gridColor = options.gridColor || '#00FF00';
+        this.gridWeight = options.gridWeight || 1;
+        this.showTileLabels = options.showTileLabels || false; // Default false - labels are for debugging only
+        this.opacity = options.opacity || 1.0;
+        this.zIndex = options.zIndex || 400;
+        
+        this.layers = [];
         this.gridLayer = null;
-        this.showTileLabels = true;
-        this.gridColor = '#555555';
-        this.gridWeight = 0.5;
     }
     
     async onLoad(version, mapName) {
-        // No data to load - grid is purely visual
         console.log('[GridPlugin] Loaded');
-    }
-    
-    onEnable() {
-        super.onEnable();
-        this.renderGrid();
     }
     
     onShow() {

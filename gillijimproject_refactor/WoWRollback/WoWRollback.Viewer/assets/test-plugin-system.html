@@ -474,67 +474,63 @@
             console.log('✓ Cleared tile simulation');
         };
         
-        // Load real minimap tiles from the session output
+        // Load real minimap tiles from the minimap directory
         window.loadRealTiles = function() {
-            console.log('=== Loading Real Kalimdor Tiles ===');
+            console.log('=== Loading All Minimap Tiles ===');
             
             // Clear any existing simulation
             clearSimulation();
             
-            // Base path to the minimap tiles
-            const basePath = '../../../parp_out/session_20251008_203750/05_viewer/minimap/0.5.3/Kalimdor';
-            
-            // Load a sample of tiles to test alignment
-            // Format: Kalimdor_{col}_{row}.png
-            const testTiles = [
-                // Center area
-                { row: 31, col: 31 },
-                { row: 31, col: 32 },
-                { row: 32, col: 31 },
-                { row: 32, col: 32 },
-                // Some nearby tiles
-                { row: 30, col: 30 },
-                { row: 30, col: 33 },
-                { row: 33, col: 30 },
-                { row: 33, col: 33 },
-                // A few more for context
-                { row: 25, col: 35 },
-                { row: 27, col: 32 },
-                { row: 28, col: 40 }
-            ];
+            // Base path to the minimap tiles (relative to test page)
+            const basePath = 'minimap/0.5.3/Azeroth';
             
             let loaded = 0;
-            testTiles.forEach(tile => {
-                const url = `${basePath}/Kalimdor_${tile.col}_${tile.row}.png`;
-                const bounds = coordSystem.tileBounds(tile.row, tile.col);
-                
-                const overlay = L.imageOverlay(url, bounds, {
-                    opacity: 1.0,
-                    interactive: true,
-                    errorOverlayUrl: null  // Don't show error image
-                });
-                
-                overlay.on('load', () => {
-                    loaded++;
-                    console.log(`  ✓ Loaded tile (${tile.row}, ${tile.col}) from ${url}`);
-                    if (loaded === testTiles.length) {
-                        console.log(`✓ All ${testTiles.length} tiles loaded successfully`);
-                        updateStatus(`✓ Loaded ${testTiles.length} real tiles`, 'success');
-                    }
-                });
-                
-                overlay.on('error', () => {
-                    console.log(`  ✗ Failed to load tile (${tile.row}, ${tile.col}) from ${url}`);
-                });
-                
-                overlay.addTo(map);
-                simulatedTiles.push(overlay);
-                
-                console.log(`  Tile (${tile.row},${tile.col}): bounds = [[${bounds[0][0]}, ${bounds[0][1]}], [${bounds[1][0]}, ${bounds[1][1]}]]`);
-            });
+            let failed = 0;
+            const totalTiles = 64 * 64;
             
-            console.log(`Attempting to load ${testTiles.length} tiles...`);
-            updateStatus(`Loading ${testTiles.length} real tiles...`, 'info');
+            // Load all 64x64 tiles
+            for (let row = 0; row < 64; row++) {
+                for (let col = 0; col < 64; col++) {
+                    const url = `${basePath}/Azeroth_${col}_${row}.webp`;
+                    const bounds = coordSystem.tileBounds(row, col);
+                    
+                    const overlay = L.imageOverlay(url, bounds, {
+                        opacity: 1.0,
+                        interactive: false,
+                        errorOverlayUrl: null
+                    });
+                    
+                    overlay.on('load', () => {
+                        loaded++;
+                        if ((loaded + failed) % 100 === 0 || loaded + failed === totalTiles) {
+                            console.log(`  Progress: ${loaded} loaded, ${failed} failed (${loaded + failed}/${totalTiles})`);
+                            updateStatus(`Loading tiles: ${loaded}/${totalTiles} (${failed} failed)`, 'info');
+                        }
+                        if (loaded + failed === totalTiles) {
+                            console.log(`✓ Finished loading: ${loaded}/${totalTiles} tiles successfully`);
+                            updateStatus(`✓ Loaded ${loaded}/${totalTiles} tiles`, loaded > 0 ? 'success' : 'error');
+                        }
+                    });
+                    
+                    overlay.on('error', () => {
+                        failed++;
+                        if ((loaded + failed) % 100 === 0 || loaded + failed === totalTiles) {
+                            console.log(`  Progress: ${loaded} loaded, ${failed} failed (${loaded + failed}/${totalTiles})`);
+                            updateStatus(`Loading tiles: ${loaded}/${totalTiles} (${failed} failed)`, 'info');
+                        }
+                        if (loaded + failed === totalTiles) {
+                            console.log(`✓ Finished loading: ${loaded}/${totalTiles} tiles (${failed} failed)`);
+                            updateStatus(`Loaded ${loaded}/${totalTiles} tiles (${failed} failed)`, loaded > 0 ? 'warning' : 'error');
+                        }
+                    });
+                    
+                    overlay.addTo(map);
+                    simulatedTiles.push(overlay);
+                }
+            }
+            
+            console.log(`Attempting to load ${totalTiles} tiles from ${basePath}...`);
+            updateStatus(`Loading ${totalTiles} tiles...`, 'info');
         };
         
         // Debug helper: check what's at a specific grid position
