@@ -4,11 +4,17 @@ const cache = new Map();
 export async function loadOverlay(path) {
     // Use path as-is for caching - cache busting handled at state level
     if (cache.has(path)) {
-        return cache.get(path);
+        const cached = cache.get(path);
+        if (cached === null) {
+            throw new Error(`Overlay not found (cached 404): ${path}`);
+        }
+        return cached;
     }
 
     const response = await fetch(path, { cache: 'no-store' });
     if (!response.ok) {
+        // Cache the 404 to prevent repeated requests
+        cache.set(path, null);
         throw new Error(`Failed to load overlay: ${path}`);
     }
 

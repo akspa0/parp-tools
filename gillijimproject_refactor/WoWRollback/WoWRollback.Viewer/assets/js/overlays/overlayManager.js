@@ -38,6 +38,7 @@ export class OverlayManager {
 
     hideLayer(layerName) {
         if (this.layers[layerName]) {
+            this.layers[layerName].clear();
             this.layers[layerName].hide();
         }
     }
@@ -45,6 +46,12 @@ export class OverlayManager {
     // Clear all layers
     clearAll() {
         Object.values(this.layers).forEach(layer => layer.clear());
+    }
+
+    // Clear all data (use when switching maps)
+    clearAllData() {
+        this.clearAll();
+        this.loadedTiles.clear();
     }
 
     // Load overlays for visible tiles (debounced)
@@ -86,7 +93,10 @@ export class OverlayManager {
         
         // Check if already loaded
         if (this.loadedTiles.has(tileKey)) {
-            this.renderTile(this.loadedTiles.get(tileKey), tileRow, tileCol);
+            const cached = this.loadedTiles.get(tileKey);
+            if (cached !== null) {
+                this.renderTile(cached, tileRow, tileCol);
+            }
             return;
         }
 
@@ -96,7 +106,8 @@ export class OverlayManager {
         try {
             const response = await fetch(overlayPath);
             if (!response.ok) {
-                console.warn(`Overlay not found: ${overlayPath}`);
+                // Cache the failure to prevent repeated 404s
+                this.loadedTiles.set(tileKey, null);
                 return;
             }
 

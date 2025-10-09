@@ -167,9 +167,7 @@ body {
 }
 
 /* Leaflet tile customization */
-.leaflet-tile {
-    border: 1px solid #444 !important;
-}
+/* Grid now drawn as SVG overlay instead of CSS borders */
 
 .leaflet-container {
     background: #1a1a1a !important;

@@ -58,7 +58,7 @@ export async function init() {
 }
 
 function initializeMap() {
-    // Use Leaflet CRS.Simple without custom flip; do all flips in our math to match wow.tools
+    // Use standard CRS.Simple - tiles are positioned directly by row/col
     map = L.map('map', {
         crs: L.CRS.Simple,
         minZoom: 0,
@@ -71,6 +71,9 @@ function initializeMap() {
 
     objectMarkers.addTo(map);
     minimapLayer.addTo(map);
+    
+    // Grid disabled - was masking tiles
+    // TODO: Fix grid coordinate system to match tile positions
     
     // Initialize overlay manager
     overlayManager = new OverlayManager(map);
@@ -433,6 +436,11 @@ function onStateChange() {
             clearTimeout(pendingOverlayLoad);
             pendingOverlayLoad = null;
         }
+        
+        // Clear overlay data when switching maps
+        if (overlayManager) {
+            overlayManager.clearAllData();
+        }
     }
 
     updateTileLayer();
@@ -782,8 +790,8 @@ function handleMapClick(e) {
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     
-    // Clamp to 0-63 range
-    const row = Math.max(0, Math.min(63, Math.floor(lat)));
+    // Convert lat/lng to row/col using coordinate system
+    const row = Math.max(0, Math.min(63, Math.floor(latToRow(lat))));
     const col = Math.max(0, Math.min(63, Math.floor(lng)));
     
     // Update sidebar click info with world coordinates
@@ -796,8 +804,8 @@ function handleMapClick(e) {
     
     // World coord = MAP_HALF_SIZE - (tileIndex * TILE_SIZE + inTileOffset)
     // For tile center approximation: worldCoord ≈ MAP_HALF_SIZE - (tileIndex + 0.5) * TILE_SIZE
-    const worldX = MAP_HALF_SIZE - (lng + 0.5) * TILE_SIZE;
-    const worldY = MAP_HALF_SIZE - (lat + 0.5) * TILE_SIZE;
+    const worldX = MAP_HALF_SIZE - (col + 0.5) * TILE_SIZE;
+    const worldY = MAP_HALF_SIZE - (row + 0.5) * TILE_SIZE;
     
     document.getElementById('clickedTile').textContent = `${row}_${col}`;
     document.getElementById('clickedCoord').textContent = `Tile [${row},${col}] | World (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`;
@@ -976,6 +984,50 @@ function drawOverview() {
         }
     }
     function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+}
+
+// --- ADT Grid Overlay ---
+function addGridOverlay() {
+    // Simple ADT grid - 64x64 tiles only
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    svg.setAttribute('viewBox', '0 0 64 64');
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    
+    // Draw ADT tile boundaries only
+    for (let i = 0; i <= 64; i++) {
+        // Vertical lines
+        const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        vLine.setAttribute('x1', i);
+        vLine.setAttribute('y1', 0);
+        vLine.setAttribute('x2', i);
+        vLine.setAttribute('y2', 64);
+        vLine.setAttribute('stroke', '#555');
+        vLine.setAttribute('stroke-width', '0.05');
+        svg.appendChild(vLine);
+        
+        // Horizontal lines
+        const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        hLine.setAttribute('x1', 0);
+        hLine.setAttribute('y1', i);
+        hLine.setAttribute('x2', 64);
+        hLine.setAttribute('y2', i);
+        hLine.setAttribute('stroke', '#555');
+        hLine.setAttribute('stroke-width', '0.05');
+        svg.appendChild(hLine);
+    }
+    
+    // Add SVG as Leaflet overlay
+    const bounds = [[0, 0], [64, 64]];
+    const svgOverlay = L.svgOverlay(svg, bounds, {
+        opacity: 0.8,
+        interactive: false,
+        pane: 'overlayPane'
+    });
+    svgOverlay.addTo(map);
+    
+    console.log('[Grid] Added ADT grid overlay (64x64)');
 }
 
 // --- Mapping helpers ---
