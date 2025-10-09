@@ -4,14 +4,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using BLPSharp;
 using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
 namespace WoWRollback.Core.Services.Viewer;
 
 /// <summary>
-/// Generates per-tile minimap PNGs from source imagery (BLP or pre-rendered raster).
+/// Generates per-tile minimap WebP images from source imagery (BLP or pre-rendered raster).
 /// </summary>
 public sealed class MinimapComposer
 {
@@ -19,7 +19,7 @@ public sealed class MinimapComposer
     /// Composes a minimap image for a tile and writes it to <paramref name="destinationPath"/>.
     /// </summary>
     /// <param name="source">Stream containing BLP or PNG data.</param>
-    /// <param name="destinationPath">Destination PNG path.</param>
+    /// <param name="destinationPath">Destination WebP path.</param>
     /// <param name="options">Viewer output options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task ComposeAsync(
@@ -79,13 +79,14 @@ public sealed class MinimapComposer
                     }));
             }
 
-            var encoder = new PngEncoder
+            var encoder = new WebpEncoder
             {
-                ColorType = PngColorType.RgbWithAlpha
+                Quality = 85, // Good balance between quality and file size
+                Method = WebpEncodingMethod.BestQuality
             };
 
             await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+            await image.SaveAsWebpAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -140,12 +141,13 @@ public sealed class MinimapComposer
             }
         });
 
-        var encoder = new PngEncoder
+        var encoder = new WebpEncoder
         {
-            ColorType = PngColorType.RgbWithAlpha
+            Quality = 85,
+            Method = WebpEncodingMethod.BestQuality
         };
 
         await using var fileStream = File.Open(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await image.SaveAsPngAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
+        await image.SaveAsWebpAsync(fileStream, encoder, cancellationToken).ConfigureAwait(false);
     }
 }

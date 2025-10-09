@@ -450,7 +450,7 @@ public sealed class MinimapLocator
     {
         public Stream Open() => File.OpenRead(SourcePath);
 
-        public string BuildFileName(string mapName) => $"{mapName}_{TileX}_{TileY}{(IsAlternate ? "__alt" : string.Empty)}.png";
+        public string BuildFileName(string mapName) => $"{mapName}_{TileX}_{TileY}{(IsAlternate ? "__alt" : string.Empty)}.webp";
     }
 
     private string? ResolveSharedMinimapRoot(string versionKey)

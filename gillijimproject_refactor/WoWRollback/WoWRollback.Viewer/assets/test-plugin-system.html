@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plugin System Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        #sidebar {
+            width: 300px;
+            background: #2a2a2a;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        #map {
+            flex: 1;
+            background: #0a0a0a;
+        }
+        
+        h1 {
+            margin: 0 0 20px 0;
+            font-size: 20px;
+            color: #4CAF50;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        
+        input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background: #45a049;
+        }
+        
+        .status {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        
+        .status.success {
+            border-left: 3px solid #4CAF50;
+        }
+        
+        .status.error {
+            border-left: 3px solid #F44336;
+        }
+        
+        .info {
+            background: #1e3a5f;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        
+        pre {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="sidebar">
+            <h1>🧪 Plugin System Test</h1>
+            
+            <div id="status" class="status">
+                Initializing...
+            </div>
+            
+            <div class="info">
+                <strong>Test Objectives:</strong><br>
+                ✓ CoordinateSystem loads<br>
+                ✓ PluginManager initializes<br>
+                ✓ GridPlugin registers<br>
+                ✓ Grid displays correctly<br>
+                ✓ Plugin toggle works
+            </div>
+            
+            <div class="info">
+                <strong>Tile Numbering:</strong><br>
+                • Grid: 64×64 (0-63)<br>
+                • Row 0 = North (top)<br>
+                • Row 63 = South (bottom)<br>
+                • Col 0 = West (left)<br>
+                • Col 63 = East (right)<br>
+                • Center: Tile (32,32)
+            </div>
+            
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="gridToggle" checked> Show ADT Grid
+                </label>
+            </div>
+            
+            <button onclick="runCoordinateTests()">Run Coordinate Tests</button>
+            <button onclick="testPluginLifecycle()">Test Plugin Lifecycle</button>
+            <button onclick="logPluginState()">Log Plugin State</button>
+            <button onclick="simulateTiles()">Simulate Tile Images</button>
+            <button onclick="loadRealTiles()">Load Real Kalimdor Tiles</button>
+            <button onclick="clearSimulation()">Clear Simulation</button>
+            
+            <div id="testResults"></div>
+        </div>
+        
+        <div id="map"></div>
+        
+        <!-- Mini-map overview (picture-in-picture) -->
+        <canvas id="overviewCanvas" style="position: absolute; bottom: 20px; right: 20px; width: 200px; height: 200px; background: rgba(0,0,0,0.8); border: 2px solid #4CAF50; border-radius: 4px; cursor: crosshair;"></canvas>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module">
+        import { CoordinateSystem } from './js/core/CoordinateSystem.js';
+        import { PluginManager } from './js/core/PluginManager.js';
+        import { GridPlugin } from './js/plugins/GridPlugin.js';
+        import { runTests } from './js/tests/CoordinateSystem.test.js';
+        
+        let map;
+        let coordSystem;
+        let pluginManager;
+        let gridPlugin;
+        
+        // Initialize
+        async function init() {
+            try {
+                updateStatus('Initializing coordinate system...', 'info');
+                
+                // Create coordinate system
+                coordSystem = new CoordinateSystem({ coordMode: 'wowtools' });
+                console.log('[Test] CoordinateSystem created:', coordSystem);
+                
+                // Create Leaflet map
+                updateStatus('Creating Leaflet map...', 'info');
+                map = L.map('map', {
+                    crs: L.CRS.Simple,
+                    minZoom: 0,
+                    maxZoom: 12,
+                    zoom: 2
+                });
+                map.setView([32, 32], 2);
+                console.log('[Test] Leaflet map created');
+                
+                // Create plugin manager
+                updateStatus('Creating plugin manager...', 'info');
+                pluginManager = new PluginManager(map, coordSystem);
+                console.log('[Test] PluginManager created');
+                
+                // Create and register grid plugin
+                updateStatus('Registering GridPlugin...', 'info');
+                gridPlugin = new GridPlugin(map, coordSystem);
+                pluginManager.register(gridPlugin);
+                console.log('[Test] GridPlugin registered');
+                
+                // Enable and show grid
+                updateStatus('Enabling grid...', 'info');
+                gridPlugin.onEnable();
+                gridPlugin.onShow();
+                console.log('[Test] GridPlugin enabled and shown');
+                
+                // Setup UI
+                setupUI();
+                
+                // Setup overview canvas
+                setupOverview();
+                
+                updateStatus('✅ Plugin system initialized successfully!', 'success');
+                
+                // Make available globally for testing
+                window.map = map;
+                window.coordSystem = coordSystem;
+                window.pluginManager = pluginManager;
+                window.gridPlugin = gridPlugin;
+                
+            } catch (error) {
+                console.error('[Test] Initialization failed:', error);
+                updateStatus('❌ Initialization failed: ' + error.message, 'error');
+            }
+        }
+        
+        function setupUI() {
+            const gridToggle = document.getElementById('gridToggle');
+            gridToggle.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    gridPlugin.onEnable();
+                    gridPlugin.onShow();
+                    console.log('[Test] Grid enabled');
+                } else {
+                    gridPlugin.onHide();
+                    gridPlugin.onDisable();
+                    console.log('[Test] Grid disabled');
+                }
+            });
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = 'status ' + type;
+        }
+        
+        function setupOverview() {
+            const canvas = document.getElementById('overviewCanvas');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            canvas.width = 200;
+            canvas.height = 200;
+            
+            function drawOverview() {
+                ctx.clearRect(0, 0, 200, 200);
+                
+                // Draw 64x64 grid
+                ctx.strokeStyle = '#4CAF50';
+                ctx.lineWidth = 1;
+                
+                const cellSize = 200 / 64;
+                for (let i = 0; i <= 64; i++) {
+                    const pos = i * cellSize;
+                    // Vertical lines
+                    ctx.beginPath();
+                    ctx.moveTo(pos, 0);
+                    ctx.lineTo(pos, 200);
+                    ctx.stroke();
+                    // Horizontal lines
+                    ctx.beginPath();
+                    ctx.moveTo(0, pos);
+                    ctx.lineTo(200, pos);
+                    ctx.stroke();
+                }
+                
+                // Draw viewport indicator
+                const bounds = map.getBounds();
+                // Note: Leaflet Y increases downward, but we want row 0 at top
+                const minRow = Math.max(0, Math.min(63, Math.floor(bounds.getSouth())));
+                const maxRow = Math.max(0, Math.min(64, Math.ceil(bounds.getNorth())));
+                const minCol = Math.max(0, Math.min(63, Math.floor(bounds.getWest())));
+                const maxCol = Math.max(0, Math.min(64, Math.ceil(bounds.getEast())));
+                
+                ctx.fillStyle = 'rgba(255, 213, 79, 0.3)';
+                ctx.fillRect(
+                    minCol * cellSize,
+                    minRow * cellSize,
+                    (maxCol - minCol) * cellSize,
+                    (maxRow - minRow) * cellSize
+                );
+                
+                ctx.strokeStyle = '#FFD54F';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    minCol * cellSize,
+                    minRow * cellSize,
+                    (maxCol - minCol) * cellSize,
+                    (maxRow - minRow) * cellSize
+                );
+            }
+            
+            // Update on map move
+            map.on('moveend zoomend', drawOverview);
+            drawOverview();
+            
+            // Click to center
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const col = Math.floor((x / 200) * 64);
+                const row = Math.floor((y / 200) * 64);
+                map.setView([row + 0.5, col + 0.5], map.getZoom());
+            });
+        }
+        
+        // Test functions (exposed globally)
+        window.runCoordinateTests = function() {
+            console.log('=== Running Coordinate System Tests ===');
+            const results = runTests();
+            
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = `
+                <div class="status ${results.failed === 0 ? 'success' : 'error'}">
+                    <strong>Test Results:</strong><br>
+                    ✓ Passed: ${results.passed}<br>
+                    ${results.failed > 0 ? `✗ Failed: ${results.failed}<br>` : ''}
+                    Total: ${results.passed + results.failed}<br>
+                    <br>
+                    <em>Check browser console for detailed test output</em>
+                </div>
+            `;
+        };
+        
+        window.testPluginLifecycle = function() {
+            console.log('=== Testing Plugin Lifecycle ===');
+            
+            console.log('1. Disabling plugin...');
+            gridPlugin.onDisable();
+            
+            setTimeout(() => {
+                console.log('2. Enabling plugin...');
+                gridPlugin.onEnable();
+                
+                setTimeout(() => {
+                    console.log('3. Hiding plugin...');
+                    gridPlugin.onHide();
+                    
+                    setTimeout(() => {
+                        console.log('4. Showing plugin...');
+                        gridPlugin.onShow();
+                        
+                        console.log('✓ Lifecycle test complete');
+                        updateStatus('✓ Plugin lifecycle test passed', 'success');
+                    }, 500);
+                }, 500);
+            }, 500);
+        };
+        
+        window.logPluginState = function() {
+            console.log('=== Plugin State ===');
+            console.log('Plugin ID:', gridPlugin.id);
+            console.log('Plugin Name:', gridPlugin.name);
+            console.log('Enabled:', gridPlugin.enabled);
+            console.log('Visible:', gridPlugin.visible);
+            console.log('Opacity:', gridPlugin.opacity);
+            console.log('Z-Index:', gridPlugin.zIndex);
+            console.log('Layers:', gridPlugin.layers.length);
+            console.log('Config:', gridPlugin.getConfig());
+            
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = `
+                <div class="status success">
+                    <strong>Plugin State:</strong><br>
+                    <pre>${JSON.stringify(gridPlugin.getConfig(), null, 2)}</pre>
+                </div>
+            `;
+        };
+        
+        // Tile simulation
+        let simulatedTiles = [];
+        
+        window.simulateTiles = function() {
+            console.log('=== Simulating Tile Images ===');
+            
+            // Clear any existing simulation
+            clearSimulation();
+            
+            // Create test tiles in a pattern to verify orientation
+            // IMPORTANT: Leaflet row 0 = top, but we want WoW-style where row 0 = North
+            // So we need to flip: WoW row 0 (North) → Leaflet row 0 (top) ✓
+            const testPatterns = [
+                // Corner tiles - using Leaflet coordinates directly
+                { row: 0, col: 0, color: '#FF0000', label: '0,0 (NW)' },      // Top-left
+                { row: 0, col: 63, color: '#00FF00', label: '0,63 (NE)' },    // Top-right
+                { row: 63, col: 0, color: '#0000FF', label: '63,0 (SW)' },    // Bottom-left
+                { row: 63, col: 63, color: '#FFFF00', label: '63,63 (SE)' },  // Bottom-right
+                
+                // Center tiles
+                { row: 31, col: 31, color: '#FF00FF', label: '31,31' },
+                { row: 31, col: 32, color: '#00FFFF', label: '31,32' },
+                { row: 32, col: 31, color: '#FFA500', label: '32,31' },
+                { row: 32, col: 32, color: '#800080', label: '32,32 (CENTER)' },
+                
+                // Test row (horizontal line at row 20)
+                { row: 20, col: 20, color: '#FFB6C1', label: '20,20' },
+                { row: 20, col: 30, color: '#FFB6C1', label: '20,30' },
+                { row: 20, col: 40, color: '#FFB6C1', label: '20,40' },
+                
+                // Test column (vertical line at col 40)
+                { row: 25, col: 40, color: '#90EE90', label: '25,40' },
+                { row: 35, col: 40, color: '#90EE90', label: '35,40' },
+                { row: 45, col: 40, color: '#90EE90', label: '45,40' }
+            ];
+            
+            testPatterns.forEach(pattern => {
+                // Create SVG for this tile
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+                svg.setAttribute('viewBox', '0 0 100 100');
+                
+                // Background
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('width', '100');
+                rect.setAttribute('height', '100');
+                rect.setAttribute('fill', pattern.color);
+                rect.setAttribute('opacity', '0.6');
+                svg.appendChild(rect);
+                
+                // Border
+                const border = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                border.setAttribute('width', '98');
+                border.setAttribute('height', '98');
+                border.setAttribute('x', '1');
+                border.setAttribute('y', '1');
+                border.setAttribute('fill', 'none');
+                border.setAttribute('stroke', '#000');
+                border.setAttribute('stroke-width', '2');
+                svg.appendChild(border);
+                
+                // Label
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', '50');
+                text.setAttribute('y', '50');
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setAttribute('font-size', '12');
+                text.setAttribute('font-weight', 'bold');
+                text.setAttribute('fill', '#000');
+                text.textContent = pattern.label;
+                svg.appendChild(text);
+                
+                // Create Leaflet overlay
+                const bounds = coordSystem.tileBounds(pattern.row, pattern.col);
+                const overlay = L.svgOverlay(svg, bounds, {
+                    opacity: 1.0,
+                    interactive: true
+                });
+                
+                overlay.addTo(map);
+                simulatedTiles.push(overlay);
+                
+                // Get the actual pixel position to verify
+                const center = map.latLngToLayerPoint([pattern.row + 0.5, pattern.col + 0.5]);
+                console.log(`  Tile ${pattern.label}:`);
+                console.log(`    Requested: row=${pattern.row}, col=${pattern.col}`);
+                console.log(`    Bounds: [[${bounds[0][0]}, ${bounds[0][1]}], [${bounds[1][0]}, ${bounds[1][1]}]]`);
+                console.log(`    Center pixel: (${center.x}, ${center.y})`);
+            });
+            
+            console.log(`✓ Simulated ${testPatterns.length} tiles`);
+            updateStatus(`✓ Simulated ${testPatterns.length} test tiles`, 'success');
+        };
+        
+        window.clearSimulation = function() {
+            simulatedTiles.forEach(tile => tile.remove());
+            simulatedTiles = [];
+            console.log('✓ Cleared tile simulation');
+        };
+        
+        // Load real minimap tiles from the session output
+        window.loadRealTiles = function() {
+            console.log('=== Loading Real Kalimdor Tiles ===');
+            
+            // Clear any existing simulation
+            clearSimulation();
+            
+            // Base path to the minimap tiles
+            const basePath = '../../../parp_out/session_20251008_203750/05_viewer/minimap/0.5.3/Kalimdor';
+            
+            // Load a sample of tiles to test alignment
+            // Format: Kalimdor_{col}_{row}.png
+            const testTiles = [
+                // Center area
+                { row: 31, col: 31 },
+                { row: 31, col: 32 },
+                { row: 32, col: 31 },
+                { row: 32, col: 32 },
+                // Some nearby tiles
+                { row: 30, col: 30 },
+                { row: 30, col: 33 },
+                { row: 33, col: 30 },
+                { row: 33, col: 33 },
+                // A few more for context
+                { row: 25, col: 35 },
+                { row: 27, col: 32 },
+                { row: 28, col: 40 }
+            ];
+            
+            let loaded = 0;
+            testTiles.forEach(tile => {
+                const url = `${basePath}/Kalimdor_${tile.col}_${tile.row}.png`;
+                const bounds = coordSystem.tileBounds(tile.row, tile.col);
+                
+                const overlay = L.imageOverlay(url, bounds, {
+                    opacity: 1.0,
+                    interactive: true,
+                    errorOverlayUrl: null  // Don't show error image
+                });
+                
+                overlay.on('load', () => {
+                    loaded++;
+                    console.log(`  ✓ Loaded tile (${tile.row}, ${tile.col}) from ${url}`);
+                    if (loaded === testTiles.length) {
+                        console.log(`✓ All ${testTiles.length} tiles loaded successfully`);
+                        updateStatus(`✓ Loaded ${testTiles.length} real tiles`, 'success');
+                    }
+                });
+                
+                overlay.on('error', () => {
+                    console.log(`  ✗ Failed to load tile (${tile.row}, ${tile.col}) from ${url}`);
+                });
+                
+                overlay.addTo(map);
+                simulatedTiles.push(overlay);
+                
+                console.log(`  Tile (${tile.row},${tile.col}): bounds = [[${bounds[0][0]}, ${bounds[0][1]}], [${bounds[1][0]}, ${bounds[1][1]}]]`);
+            });
+            
+            console.log(`Attempting to load ${testTiles.length} tiles...`);
+            updateStatus(`Loading ${testTiles.length} real tiles...`, 'info');
+        };
+        
+        // Debug helper: check what's at a specific grid position
+        window.checkGridPosition = function(row, col) {
+            console.log(`=== Checking Grid Position (${row}, ${col}) ===`);
+            const bounds = coordSystem.tileBounds(row, col);
+            console.log(`  tileBounds: [[${bounds[0][0]}, ${bounds[0][1]}], [${bounds[1][0]}, ${bounds[1][1]}]]`);
+            
+            const center = map.latLngToLayerPoint([row + 0.5, col + 0.5]);
+            console.log(`  Center pixel: (${center.x}, ${center.y})`);
+            
+            const latLng = coordSystem.tileToLatLng(row, col);
+            console.log(`  tileToLatLng: (${latLng.lat}, ${latLng.lng})`);
+            
+            console.log(`  Expected grid label: ${row}_${col}`);
+        };
+        
+        // Auto-init
+        init();
+    </script>
+</body>
+</html>
