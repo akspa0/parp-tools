@@ -132,10 +132,38 @@ public sealed class MapMasterIndexWriter
         float rawY = source.WorldY;
         float rawZ = source.WorldZ;
 
-        // Apply MDDF/MODF -> world transformation from wowdev.wiki
-        float worldNorthSouth = MapOffset - rawX;
-        float worldUp = rawY;
-        float worldWestEast = MapOffset - rawZ;
+        // WORKAROUND: Alpha 0.5.3 ADT files don't have world coordinates (all are 0,0,0)
+        // Check BEFORE transformation and synthesize coordinates from tile/chunk position
+        bool hasInvalidCoords = Math.Abs(rawX) < 0.01f && Math.Abs(rawY) < 0.01f && Math.Abs(rawZ) < 0.01f;
+        
+        float worldNorthSouth, worldUp, worldWestEast;
+        
+        if (hasInvalidCoords)
+        {
+            // Synthesize coordinates from tile position
+            // Place at tile center as a baseline
+            // NOTE: TileY maps to North/South axis, TileX maps to West/East axis
+            float tileNorthEdge = MapOffset - source.TileY * TileSize;
+            float tileWestEdge = MapOffset - source.TileX * TileSize;
+            
+            // Add small random offset based on uniqueId to spread objects within tile
+            uint seed = source.UniqueId.HasValue && source.UniqueId.Value >= 0 
+                ? (uint)source.UniqueId.Value 
+                : 0u;
+            float offsetNorth = ((int)(seed % 200u) - 100) * 2.0f; // -200 to +200 yards
+            float offsetWest = ((int)((seed / 200u) % 200u) - 100) * 2.0f;
+            
+            worldNorthSouth = tileNorthEdge - (TileSize / 2f) + offsetNorth;
+            worldUp = 0f; // No height data available
+            worldWestEast = tileWestEdge - (TileSize / 2f) + offsetWest;
+        }
+        else
+        {
+            // Apply MDDF/MODF -> world transformation from wowdev.wiki
+            worldNorthSouth = MapOffset - rawX;
+            worldUp = rawY;
+            worldWestEast = MapOffset - rawZ;
+        }
 
         float tileNorthMin = MapOffset - (source.TileX + 1) * TileSize;
         float tileWestMin = MapOffset - (source.TileY + 1) * TileSize;
@@ -147,8 +175,9 @@ public sealed class MapMasterIndexWriter
         localNorth = Math.Clamp(localNorth, 0f, TileSize);
         localWest = Math.Clamp(localWest, 0f, TileSize);
 
-        int chunkX = Math.Clamp((int)Math.Floor(localNorth / ChunkSize), 0, ChunksPerTile - 1);
-        int chunkY = Math.Clamp((int)Math.Floor(localWest / ChunkSize), 0, ChunksPerTile - 1);
+        // NOTE: Fixed coordinate swap - chunkX is WestEast axis, chunkY is NorthSouth axis
+        int chunkX = Math.Clamp((int)Math.Floor(localWest / ChunkSize), 0, ChunksPerTile - 1);
+        int chunkY = Math.Clamp((int)Math.Floor(localNorth / ChunkSize), 0, ChunksPerTile - 1);
 
         return new PlacementRecord
         {

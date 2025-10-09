@@ -44,9 +44,10 @@ export class TileLabelsPlugin extends OverlayPlugin {
         for (let row = 0; row < 64; row++) {
             for (let col = 0; col < 64; col++) {
                 const bounds = this.coordSystem.tileBounds(row, col);
-                const center = [
-                    (bounds[0][0] + bounds[1][0]) / 2,
-                    (bounds[0][1] + bounds[1][1]) / 2
+                // Anchor label at upper-left corner (max lat, min lng)
+                const upperLeft = [
+                    bounds[1][0], // maxLat (north/top)
+                    bounds[0][1]  // minLng (west/left)
                 ];
                 
                 // Create div marker for the label
@@ -75,13 +76,13 @@ export class TileLabelsPlugin extends OverlayPlugin {
                     this.onTileClick(row, col);
                 });
                 
-                // Create Leaflet marker
-                const marker = L.marker(center, {
+                // Create Leaflet marker anchored at upper-left corner
+                const marker = L.marker(upperLeft, {
                     icon: L.divIcon({
                         html: labelDiv.outerHTML,
                         className: 'tile-label-icon',
                         iconSize: null,
-                        iconAnchor: [0, 0]
+                        iconAnchor: [0, 0] // Top-left anchor point
                     }),
                     interactive: true
                 });

@@ -7,7 +7,8 @@ export class OverlayPlugin {
         this.id = id;
         this.name = name;
         this.map = map;
-        this.coords = coordSystem;
+        this.coords = coordSystem; // Short alias
+        this.coordSystem = coordSystem; // Full name for clarity
         
         this.enabled = false;
         this.visible = false;

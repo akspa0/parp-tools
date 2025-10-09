@@ -80,6 +80,40 @@ export class CoordinateSystem {
         ];
     }
     
+    /**
+     * Convert WoW world coordinates to Leaflet lat/lng
+     * WoW: X-axis=North↔South (positive=North), Y-axis=West↔East (positive=West)
+     * worldX = worldWest (WoW Y-axis)
+     * worldY = worldNorth (WoW X-axis)
+     * Formula from WoWDev: tileIndex = floor((32 - (coordinate / 533.33333)))
+     */
+    worldToLatLng(worldX, worldY) {
+        // Calculate which tile the coordinates fall in
+        const wowTileX = Math.floor(32 - (worldY / this.TILE_SIZE)); // North-South tile index
+        const wowTileY = Math.floor(32 - (worldX / this.TILE_SIZE)); // West-East tile index
+        
+        // Calculate the north/west edge coordinates of this tile
+        const tileNorthEdge = (32 - wowTileX) * this.TILE_SIZE;
+        const tileWestEdge = (32 - wowTileY) * this.TILE_SIZE;
+        
+        // Calculate offset from tile edges (in yards)
+        const offsetFromNorth = tileNorthEdge - worldY;
+        const offsetFromWest = tileWestEdge - worldX;
+        
+        // Convert to fraction (0-1 within tile)
+        const fractionY = offsetFromNorth / this.TILE_SIZE;
+        const fractionX = offsetFromWest / this.TILE_SIZE;
+        
+        // Leaflet coordinate with Y-flip: row 0 = top (North)
+        const row = 63 - wowTileX;
+        const col = wowTileY;
+        
+        return {
+            lat: row + fractionY,
+            lng: col + fractionX
+        };
+    }
+    
     // Elevation visualization helpers
     normalizeElevation(z) {
         // Normalize Z to 0-1 range for visualization

@@ -1,0 +1,57 @@
+{
+  "version": "0.5.3",
+  "map": "Azeroth",
+  "tile": { "row": 32, "col": 32 },
+  "placements": [
+    {
+      "uniqueId": 10001,
+      "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Trees\\ElwynnTree01.m2",
+      "worldX": -8950.5,
+      "worldY": -132.2,
+      "worldZ": 85.3,
+      "rotation": [0, 0, 0],
+      "scale": 1.0,
+      "flags": 0
+    },
+    {
+      "uniqueId": 10002,
+      "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Trees\\ElwynnTree02.m2",
+      "worldX": -8920.8,
+      "worldY": -145.7,
+      "worldZ": 87.1,
+      "rotation": [0, 45, 0],
+      "scale": 1.2,
+      "flags": 0
+    },
+    {
+      "uniqueId": 10003,
+      "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Bushes\\ElwynnBush01.m2",
+      "worldX": -8935.2,
+      "worldY": -128.9,
+      "worldZ": 84.5,
+      "rotation": [0, 90, 0],
+      "scale": 0.8,
+      "flags": 0
+    },
+    {
+      "uniqueId": 10004,
+      "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Rocks\\ElwynnRock01.m2",
+      "worldX": -8965.0,
+      "worldY": -150.0,
+      "worldZ": 90.0,
+      "rotation": [0, 180, 0],
+      "scale": 1.5,
+      "flags": 0
+    },
+    {
+      "uniqueId": 10005,
+      "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Flowers\\ElwynnFlower01.m2",
+      "worldX": -8940.0,
+      "worldY": -140.0,
+      "worldZ": 86.0,
+      "rotation": [0, 0, 0],
+      "scale": 1.0,
+      "flags": 0
+    }
+  ]
+}

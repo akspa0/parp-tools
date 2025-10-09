@@ -5,9 +5,10 @@ import { OverlayPlugin } from '../core/OverlayPlugin.js';
  * Loads data from JSON and renders as square markers
  */
 export class WMOPlugin extends OverlayPlugin {
-    constructor(map, coordSystem) {
+    constructor(map, coordSystem, dataAdapter = null) {
         super('wmo', 'WMO Objects', map, coordSystem);
         
+        this.dataAdapter = dataAdapter;
         this.color = '#FF9800';
         this.baseSize = 0.006; // Size in lat/lng units
         this.data = null;
@@ -37,26 +38,30 @@ export class WMOPlugin extends OverlayPlugin {
     
     async loadTileData(row, col) {
         try {
-            // TODO: Replace with actual data path from state
-            // For now, this is a placeholder
-            console.log(`[WMOPlugin] Loading tile ${row}_${col}`);
+            let placements = [];
             
-            // Example data structure:
-            // {
-            //   "placements": [
-            //     {
-            //       "uniqueId": 54321,
-            //       "modelPath": "World\\Azeroth\\Buildings\\HumanFarm\\HumanFarm.wmo",
-            //       "worldX": 2345.67,
-            //       "worldY": -1234.56,
-            //       "worldZ": 56.78,
-            //       "flags": 0
-            //     }
-            //   ]
-            // }
+            // Use DataAdapter if available
+            if (this.dataAdapter && this.dataAdapter.masterIndex) {
+                const tilePlacements = this.dataAdapter.getTilePlacements(col, row, 'WMO');
+                placements = tilePlacements.map(p => this.dataAdapter.convertPlacement(p));
+                console.log(`[WMOPlugin] Loaded ${placements.length} WMO objects for tile ${row}_${col} from DataAdapter`);
+            } else {
+                // Fall back to loading from JSON files
+                try {
+                    const response = await fetch(`overlays/0.5.3/Azeroth/wmo_placements_${row}_${col}.json`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        placements = data.placements || [];
+                        console.log(`[WMOPlugin] Loaded ${placements.length} WMO objects for tile ${row}_${col} from JSON`);
+                    }
+                } catch (fetchError) {
+                    // Silently fail for missing tile data
+                }
+            }
             
-            // For testing, we'll just log that we tried to load
-            // Real implementation will fetch JSON and call renderPlacements()
+            if (placements.length > 0) {
+                this.renderPlacements(placements, row, col);
+            }
             
         } catch (error) {
             console.warn(`[WMOPlugin] Failed to load tile ${row}_${col}:`, error);
@@ -65,9 +70,8 @@ export class WMOPlugin extends OverlayPlugin {
     
     renderPlacements(placements, row, col) {
         placements.forEach(placement => {
-            // Convert world coordinates to lat/lng
-            const tile = this.coords.worldToTile(placement.worldX, placement.worldY);
-            const latLng = this.coords.tileToLatLng(tile.row, tile.col);
+            // Convert world coordinates to lat/lng using precise positioning
+            const latLng = this.coordSystem.worldToLatLng(placement.worldX, placement.worldY);
             
             // Use elevation for visual cues
             const elevationColor = this.coords.getElevationColor(placement.worldZ, this.color);
@@ -141,11 +145,17 @@ export class WMOPlugin extends OverlayPlugin {
     
     setColor(color) {
         this.color = color;
-        // TODO: Update existing markers
+        if (this.visible) {
+            this.onHide();
+            this.onShow();
+        }
     }
     
     setBaseSize(size) {
         this.baseSize = size;
-        // TODO: Update existing markers
+        if (this.visible) {
+            this.onHide();
+            this.onShow();
+        }
     }
 }

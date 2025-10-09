@@ -1,0 +1,40 @@
+{
+  "version": "0.5.3",
+  "map": "Azeroth",
+  "tile": { "row": 32, "col": 32 },
+  "placements": [
+    {
+      "uniqueId": 20001,
+      "modelPath": "World\\Azeroth\\Buildings\\HumanFarm\\HumanFarm.wmo",
+      "worldX": -8925.0,
+      "worldY": -155.0,
+      "worldZ": 88.0,
+      "rotation": [0, 0, 0],
+      "scale": 1.0,
+      "flags": 0,
+      "doodadSet": 0
+    },
+    {
+      "uniqueId": 20002,
+      "modelPath": "World\\Azeroth\\Buildings\\Stormwind\\StormwindGate.wmo",
+      "worldX": -8955.0,
+      "worldY": -135.0,
+      "worldZ": 92.0,
+      "rotation": [0, 90, 0],
+      "scale": 1.0,
+      "flags": 0,
+      "doodadSet": 0
+    },
+    {
+      "uniqueId": 20003,
+      "modelPath": "World\\Azeroth\\Buildings\\HumanBlacksmith\\HumanBlacksmith.wmo",
+      "worldX": -8945.0,
+      "worldY": -148.0,
+      "worldZ": 89.5,
+      "rotation": [0, 45, 0],
+      "scale": 1.0,
+      "flags": 0,
+      "doodadSet": 0
+    }
+  ]
+}

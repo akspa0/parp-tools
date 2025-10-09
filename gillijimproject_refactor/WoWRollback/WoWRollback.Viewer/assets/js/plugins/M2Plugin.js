@@ -1,22 +1,28 @@
 import { OverlayPlugin } from '../core/OverlayPlugin.js';
 
 /**
- * M2Plugin - Displays M2 doodad placements
- * Loads data from JSON and renders as circle markers
+ * M2Plugin - Displays M2 (doodad) object placements
+ * Loads placement data from JSON and renders markers on the map
  */
 export class M2Plugin extends OverlayPlugin {
-    constructor(map, coordSystem) {
-        super('m2', 'M2 Doodads', map, coordSystem);
+    constructor(map, coordSystem, dataAdapter = null, options = {}) {
+        super('m2', 'M2 Objects', map, coordSystem);
         
-        this.color = '#2196F3';
-        this.baseRadius = 5;
-        this.data = null;
+        this.dataAdapter = dataAdapter;
+        this.color = options.color || '#FF00FF';
+        this.baseRadius = options.baseRadius || 4;
+        this.showLabels = options.showLabels !== false;
+        this.opacity = options.opacity || 0.8;
+        this.zIndex = options.zIndex || 600;
+        this.clusterRadius = options.clusterRadius || 50;
+        
+        this.placements = new Map(); // tile -> placements
         this.loadedTiles = new Set();
     }
     
     async onLoad(version, mapName) {
-        // M2 data will be loaded per-tile on demand
-        console.log(`[M2Plugin] Ready to load data for ${mapName} (${version})`);
+        console.log(`[M2Plugin] Ready to load M2 placements for ${mapName} v${version}`);
+        // M2 data will be loaded per-tile on demand via loadVisibleData
     }
     
     async loadVisibleData(bounds, zoom) {
@@ -37,45 +43,43 @@ export class M2Plugin extends OverlayPlugin {
     
     async loadTileData(row, col) {
         try {
-            // TODO: Replace with actual data path from state
-            // For now, this is a placeholder
-            console.log(`[M2Plugin] Loading tile ${row}_${col}`);
+            let placements = [];
             
-            // Example data structure:
-            // {
-            //   "placements": [
-            //     {
-            //       "uniqueId": 12345,
-            //       "modelPath": "World\\Azeroth\\Elwynn\\PassiveObjects\\Trees\\ElwynnTree01.m2",
-            //       "worldX": 1234.56,
-            //       "worldY": -789.12,
-            //       "worldZ": 42.34,
-            //       "flags": 0
-            //     }
-            //   ]
-            // }
+            // Use DataAdapter if available
+            if (this.dataAdapter && this.dataAdapter.masterIndex) {
+                const tilePlacements = this.dataAdapter.getTilePlacements(col, row, 'M2');
+                placements = tilePlacements.map(p => this.dataAdapter.convertPlacement(p));
+                console.log(`[M2Plugin] Loaded ${placements.length} M2 objects for tile ${row}_${col} from DataAdapter`);
+            } else {
+                // Fall back to loading from JSON files
+                try {
+                    const response = await fetch(`overlays/0.5.3/Azeroth/m2_placements_${row}_${col}.json`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        placements = data.placements || [];
+                        console.log(`[M2Plugin] Loaded ${placements.length} M2 objects for tile ${row}_${col} from JSON`);
+                    }
+                } catch (fetchError) {
+                    // Silently fail for missing tile data
+                }
+            }
             
-            // For testing, we'll just log that we tried to load
-            // Real implementation will fetch JSON and call renderPlacements()
+            if (placements.length > 0) {
+                this.renderPlacements(placements, row, col);
+            }
             
         } catch (error) {
-            console.warn(`[M2Plugin] Failed to load tile ${row}_${col}:`, error);
         }
     }
     
     renderPlacements(placements, row, col) {
         placements.forEach(placement => {
-            // Convert world coordinates to lat/lng
-            const tile = this.coords.worldToTile(placement.worldX, placement.worldY);
-            const latLng = this.coords.tileToLatLng(tile.row, tile.col);
-            
-            // Adjust for position within tile (if we have pixel coords)
-            // For now, use tile center
+            // Convert world coordinates to lat/lng using precise positioning
+            const latLng = this.coordSystem.worldToLatLng(placement.worldX, placement.worldY);
             
             // Use elevation for visual cues
             const elevationColor = this.coords.getElevationColor(placement.worldZ, this.color);
             const elevationRadius = this.coords.getElevationRadius(placement.worldZ, this.baseRadius);
-            
             const marker = L.circleMarker([latLng.lat, latLng.lng], {
                 radius: elevationRadius,
                 color: '#000',
@@ -132,11 +136,17 @@ export class M2Plugin extends OverlayPlugin {
     
     setColor(color) {
         this.color = color;
-        // TODO: Update existing markers
+        if (this.visible) {
+            this.onHide();
+            this.onShow();
+        }
     }
     
     setBaseRadius(radius) {
         this.baseRadius = radius;
-        // TODO: Update existing markers
+        if (this.visible) {
+            this.onHide();
+            this.onShow();
+        }
     }
 }

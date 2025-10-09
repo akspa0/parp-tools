@@ -127,15 +127,46 @@
                 • Center: Tile (32,32)
             </div>
             
+            <div class="info">
+                <strong>⚠️ Requirements:</strong><br>
+                • Run via web server (not file://)<br>
+                • Click "Simulate Tile Images" or "Load Real Kalimdor Tiles" for background map
+            </div>
+            
+            <div id="dataStatus" class="info" style="background: #444; border-left: 3px solid #ff9800;">
+                <strong>Data Status:</strong> <span id="dataStatusText">Checking...</span>
+            </div>
+            
+            <div class="info">
+                <strong>Plugin Controls:</strong>
+            </div>
+            
             <div class="control-group">
                 <label>
                     <input type="checkbox" id="gridToggle" checked> Show ADT Grid
+                </label>
+                <label>
+                    <input type="checkbox" id="chunkGridToggle"> Show Chunk Grid (16×16)
+                </label>
+                <label>
+                    <input type="checkbox" id="densityToggle"> Show Density Heatmap
+                </label>
+                <label>
+                    <input type="checkbox" id="tileLabelsToggle"> Show Tile Labels
+                </label>
+                <label>
+                    <input type="checkbox" id="m2Toggle"> Show M2 Objects
+                </label>
+                <label>
+                    <input type="checkbox" id="wmoToggle"> Show WMO Objects
                 </label>
             </div>
             
             <button onclick="runCoordinateTests()">Run Coordinate Tests</button>
             <button onclick="testPluginLifecycle()">Test Plugin Lifecycle</button>
             <button onclick="logPluginState()">Log Plugin State</button>
+            <button onclick="showDataStats()">Show Data Statistics</button>
+            <button onclick="findHighDensityClusters()">Find High Density Clusters</button>
             <button onclick="simulateTiles()">Simulate Tile Images</button>
             <button onclick="loadRealTiles()">Load Real Kalimdor Tiles</button>
             <button onclick="clearSimulation()">Clear Simulation</button>
@@ -151,15 +182,29 @@
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script type="module">
-        import { CoordinateSystem } from './js/core/CoordinateSystem.js';
-        import { PluginManager } from './js/core/PluginManager.js';
-        import { GridPlugin } from './js/plugins/GridPlugin.js';
-        import { runTests } from './js/tests/CoordinateSystem.test.js';
+        // Cache-busting version parameter (change this to force reload)
+        const v = '20250109_0314';
+        import { CoordinateSystem } from './js/core/CoordinateSystem.js?v=20250109_0314';
+        import { PluginManager } from './js/core/PluginManager.js?v=20250109_0314';
+        import { DataAdapter } from './js/core/DataAdapter.js?v=20250109_0314';
+        import { GridPlugin } from './js/plugins/GridPlugin.js?v=20250109_0230';
+        import { ChunkGridPlugin } from './js/plugins/ChunkGridPlugin.js?v=20250109_0230';
+        import { TileLabelsPlugin } from './js/plugins/TileLabelsPlugin.js?v=20250109_0230';
+        import { M2Plugin } from './js/plugins/M2Plugin.js?v=20250109_0230';
+        import { WMOPlugin } from './js/plugins/WMOPlugin.js?v=20250109_0230';
+        import { DensityHeatmapPlugin } from './js/plugins/DensityHeatmapPlugin.js?v=20250109_0230';
+        import { runTests } from './js/tests/CoordinateSystem.test.js?v=20250109_0230';
         
         let map;
         let coordSystem;
         let pluginManager;
+        let dataAdapter;
         let gridPlugin;
+        let chunkGridPlugin;
+        let tileLabelsPlugin;
+        let m2Plugin;
+        let wmoPlugin;
+        let densityPlugin;
         
         // Initialize
         async function init() {
@@ -181,18 +226,73 @@
                 map.setView([32, 32], 2);
                 console.log('[Test] Leaflet map created');
                 
+                // Create custom pane for minimap tiles (lower z-index so overlays appear on top)
+                map.createPane('tilesPane');
+                map.getPane('tilesPane').style.zIndex = 100; // Below overlays (400+)
+                console.log('[Test] Created tilesPane with z-index 100');
+                
                 // Create plugin manager
                 updateStatus('Creating plugin manager...', 'info');
                 pluginManager = new PluginManager(map, coordSystem);
                 console.log('[Test] PluginManager created');
                 
-                // Create and register grid plugin
-                updateStatus('Registering GridPlugin...', 'info');
+                // Load real data from pipeline output
+                updateStatus('Loading real data...', 'info');
+                dataAdapter = new DataAdapter();
+                // Server running from session_YYYYMMDD_HHMMSS/, absolute path from server root
+                const dataPath = '/04_analysis';
+                // Change map here to match what you processed (Kalidar, Shadowfang, DeadminesInstance)
+                const mapName = 'Kalidar';
+                console.log('[Test] Attempting to load data from:', dataPath);
+                console.log('[Test] Full URLs will be:');
+                console.log(`  - ${dataPath}/0.5.3/master/${mapName}_master_index.json`);
+                console.log(`  - ${dataPath}/0.5.3/master/${mapName}_id_ranges_by_tile.json`);
+                
+                const dataLoaded = await dataAdapter.loadMap('0.5.3', mapName, dataPath);
+                const dataStatusEl = document.getElementById('dataStatusText');
+                if (dataLoaded) {
+                    const stats = dataAdapter.getStatistics();
+                    console.log('[Test] ✅ DataAdapter loaded:', stats);
+                    updateStatus(`✅ Loaded ${stats.totalObjects.toLocaleString()} objects (${stats.totalM2} M2, ${stats.totalWMO} WMO)`, 'success');
+                    dataStatusEl.textContent = `✅ ${stats.totalObjects.toLocaleString()} objects loaded (${stats.totalM2} M2, ${stats.totalWMO} WMO)`;
+                    dataStatusEl.parentElement.style.borderLeftColor = '#4CAF50';
+                } else {
+                    console.error('[Test] ❌ DataAdapter failed to load');
+                    console.error('[Test] Check browser console for fetch errors');
+                    console.error('[Test] Make sure you are running a local web server (not file://)');
+                    updateStatus('❌ Data load failed - check console', 'error');
+                    dataStatusEl.textContent = '❌ Failed to load data - plugins will not display objects';
+                    dataStatusEl.parentElement.style.borderLeftColor = '#f44336';
+                }
+                
+                // Create and register plugins
+                updateStatus('Registering plugins...', 'info');
+                
                 gridPlugin = new GridPlugin(map, coordSystem);
                 pluginManager.register(gridPlugin);
                 console.log('[Test] GridPlugin registered');
                 
-                // Enable and show grid
+                chunkGridPlugin = new ChunkGridPlugin(map, coordSystem);
+                pluginManager.register(chunkGridPlugin);
+                console.log('[Test] ChunkGridPlugin registered');
+                
+                tileLabelsPlugin = new TileLabelsPlugin(map, coordSystem);
+                pluginManager.register(tileLabelsPlugin);
+                console.log('[Test] TileLabelsPlugin registered');
+                
+                m2Plugin = new M2Plugin(map, coordSystem, dataAdapter);
+                pluginManager.register(m2Plugin);
+                console.log('[Test] M2Plugin registered');
+                
+                wmoPlugin = new WMOPlugin(map, coordSystem, dataAdapter);
+                pluginManager.register(wmoPlugin);
+                console.log('[Test] WMOPlugin registered');
+                
+                densityPlugin = new DensityHeatmapPlugin(map, coordSystem, dataAdapter);
+                pluginManager.register(densityPlugin);
+                console.log('[Test] DensityHeatmapPlugin registered');
+                
+                // Enable and show grid by default
                 updateStatus('Enabling grid...', 'info');
                 gridPlugin.onEnable();
                 gridPlugin.onShow();
@@ -210,7 +310,13 @@
                 window.map = map;
                 window.coordSystem = coordSystem;
                 window.pluginManager = pluginManager;
+                window.dataAdapter = dataAdapter;
                 window.gridPlugin = gridPlugin;
+                window.chunkGridPlugin = chunkGridPlugin;
+                window.tileLabelsPlugin = tileLabelsPlugin;
+                window.m2Plugin = m2Plugin;
+                window.wmoPlugin = wmoPlugin;
+                window.densityPlugin = densityPlugin;
                 
             } catch (error) {
                 console.error('[Test] Initialization failed:', error);
@@ -219,6 +325,7 @@
         }
         
         function setupUI() {
+            // Grid toggle
             const gridToggle = document.getElementById('gridToggle');
             gridToggle.addEventListener('change', (e) => {
                 if (e.target.checked) {
@@ -229,6 +336,111 @@
                     gridPlugin.onHide();
                     gridPlugin.onDisable();
                     console.log('[Test] Grid disabled');
+                }
+            });
+            
+            // Chunk grid toggle
+            const chunkGridToggle = document.getElementById('chunkGridToggle');
+            chunkGridToggle?.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    chunkGridPlugin.onEnable();
+                    chunkGridPlugin.onShow();
+                    // Trigger initial load
+                    const bounds = map.getBounds();
+                    const zoom = map.getZoom();
+                    chunkGridPlugin.loadVisibleData(bounds, zoom);
+                    console.log('[Test] Chunk grid enabled');
+                } else {
+                    chunkGridPlugin.onHide();
+                    chunkGridPlugin.onDisable();
+                    console.log('[Test] Chunk grid disabled');
+                }
+            });
+            
+            // Density heatmap toggle
+            const densityToggle = document.getElementById('densityToggle');
+            densityToggle?.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    densityPlugin.onEnable();
+                    densityPlugin.onShow();
+                    // Trigger initial load
+                    const bounds = map.getBounds();
+                    const zoom = map.getZoom();
+                    densityPlugin.loadVisibleData(bounds, zoom);
+                    console.log('[Test] Density heatmap enabled');
+                } else {
+                    densityPlugin.onHide();
+                    densityPlugin.onDisable();
+                    console.log('[Test] Density heatmap disabled');
+                }
+            });
+            
+            // Tile labels toggle
+            const tileLabelsToggle = document.getElementById('tileLabelsToggle');
+            tileLabelsToggle?.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    tileLabelsPlugin.onEnable();
+                    tileLabelsPlugin.onShow();
+                    console.log('[Test] Tile labels enabled');
+                } else {
+                    tileLabelsPlugin.onHide();
+                    tileLabelsPlugin.onDisable();
+                    console.log('[Test] Tile labels disabled');
+                }
+            });
+            
+            // M2 objects toggle
+            const m2Toggle = document.getElementById('m2Toggle');
+            m2Toggle?.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    m2Plugin.onEnable();
+                    m2Plugin.onShow();
+                    // Trigger initial load
+                    const bounds = map.getBounds();
+                    const zoom = map.getZoom();
+                    m2Plugin.loadVisibleData(bounds, zoom);
+                    console.log('[Test] M2 objects enabled');
+                } else {
+                    m2Plugin.onHide();
+                    m2Plugin.onDisable();
+                    console.log('[Test] M2 objects disabled');
+                }
+            });
+            
+            // WMO objects toggle
+            const wmoToggle = document.getElementById('wmoToggle');
+            wmoToggle?.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    wmoPlugin.onEnable();
+                    wmoPlugin.onShow();
+                    // Trigger initial load
+                    const bounds = map.getBounds();
+                    const zoom = map.getZoom();
+                    wmoPlugin.loadVisibleData(bounds, zoom);
+                    console.log('[Test] WMO objects enabled');
+                } else {
+                    wmoPlugin.onHide();
+                    wmoPlugin.onDisable();
+                    console.log('[Test] WMO objects disabled');
+                }
+            });
+            
+            // Setup viewport change listener for lazy loading
+            map.on('moveend zoomend', () => {
+                const bounds = map.getBounds();
+                const zoom = map.getZoom();
+                
+                if (chunkGridPlugin.enabled && chunkGridPlugin.visible) {
+                    chunkGridPlugin.loadVisibleData(bounds, zoom);
+                }
+                if (densityPlugin.enabled && densityPlugin.visible) {
+                    densityPlugin.loadVisibleData(bounds, zoom);
+                }
+                if (m2Plugin.enabled && m2Plugin.visible) {
+                    m2Plugin.loadVisibleData(bounds, zoom);
+                }
+                if (wmoPlugin.enabled && wmoPlugin.visible) {
+                    wmoPlugin.loadVisibleData(bounds, zoom);
                 }
             });
         }
@@ -446,11 +658,12 @@
                 text.textContent = pattern.label;
                 svg.appendChild(text);
                 
-                // Create Leaflet overlay
+                // Create Leaflet overlay - put in tilesPane so it appears BEHIND grid/objects
                 const bounds = coordSystem.tileBounds(pattern.row, pattern.col);
                 const overlay = L.svgOverlay(svg, bounds, {
                     opacity: 1.0,
-                    interactive: true
+                    interactive: true,
+                    pane: 'tilesPane' // Use custom pane with z-index 100
                 });
                 
                 overlay.addTo(map);
@@ -481,8 +694,9 @@
             // Clear any existing simulation
             clearSimulation();
             
-            // Base path to the minimap tiles (relative to test page)
-            const basePath = 'minimap/0.5.3/Azeroth';
+            // Base path to the minimap tiles (absolute from server root at session_YYYYMMDD_HHMMSS/)
+            // Change 'Kalidar' to match the map you're loading (Kalidar, Shadowfang, DeadminesInstance)
+            const basePath = '/05_viewer/minimap/0.5.3/Kalidar';
             
             let loaded = 0;
             let failed = 0;
@@ -491,13 +705,15 @@
             // Load all 64x64 tiles
             for (let row = 0; row < 64; row++) {
                 for (let col = 0; col < 64; col++) {
-                    const url = `${basePath}/Azeroth_${col}_${row}.webp`;
+                    const mapName = 'Kalidar'; // Change to match basePath
+                    const url = `${basePath}/${mapName}_${col}_${row}.webp`;
                     const bounds = coordSystem.tileBounds(row, col);
                     
                     const overlay = L.imageOverlay(url, bounds, {
                         opacity: 1.0,
                         interactive: false,
-                        errorOverlayUrl: null
+                        errorOverlayUrl: null,
+                        pane: 'tilesPane' // Use custom pane with z-index 100
                     });
                     
                     overlay.on('load', () => {
@@ -546,6 +762,80 @@
             console.log(`  tileToLatLng: (${latLng.lat}, ${latLng.lng})`);
             
             console.log(`  Expected grid label: ${row}_${col}`);
+        };
+        
+        // Data analysis functions
+        window.showDataStats = function() {
+            if (!dataAdapter || !dataAdapter.masterIndex) {
+                updateStatus('❌ No data loaded', 'error');
+                return;
+            }
+            
+            const stats = dataAdapter.getStatistics();
+            console.log('=== Data Statistics ===');
+            console.log('Map:', stats.map);
+            console.log('Version:', stats.version);
+            console.log('Generated:', stats.generatedAt);
+            console.log('Total Objects:', stats.totalObjects.toLocaleString());
+            console.log('  M2 Objects:', stats.totalM2.toLocaleString());
+            console.log('  WMO Objects:', stats.totalWMO.toLocaleString());
+            console.log('Total Tiles:', stats.totalTiles);
+            console.log('Tiles with Data:', stats.tilesWithData);
+            
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = `
+                <div class="status success">
+                    <strong>Data Statistics:</strong><br>
+                    <strong>${stats.totalObjects.toLocaleString()} Total Objects</strong><br>
+                    ${stats.totalM2.toLocaleString()} M2 Objects<br>
+                    ${stats.totalWMO.toLocaleString()} WMO Objects<br>
+                    <br>
+                    ${stats.tilesWithData} tiles with data<br>
+                    Generated: ${new Date(stats.generatedAt).toLocaleString()}<br>
+                </div>
+            `;
+        };
+        
+        window.findHighDensityClusters = function() {
+            if (!dataAdapter || !dataAdapter.idRanges) {
+                updateStatus('❌ No ID ranges data loaded', 'error');
+                return;
+            }
+            
+            console.log('=== Finding High Density Clusters ===');
+            const clusters = dataAdapter.getHighDensityChunks(10);
+            console.log(`Found ${clusters.length} high-density chunks (≥10 objects)`);
+            
+            clusters.slice(0, 10).forEach((cluster, i) => {
+                console.log(`${i + 1}. Tile ${cluster.tileX}_${cluster.tileY}, Chunk ${cluster.chunkX},${cluster.chunkY}: ${cluster.count} objects`);
+                cluster.kinds.forEach(kind => {
+                    console.log(`   - ${kind.kind}: ${kind.count}`);
+                });
+            });
+            
+            const prefabs = dataAdapter.analyzePrefabClusters(5);
+            console.log(`\nPotential prefab clusters (mixed types): ${prefabs.length}`);
+            prefabs.slice(0, 5).forEach((p, i) => {
+                console.log(`${i + 1}. Tile ${p.tileX}_${p.tileY}, Chunk ${p.chunkX},${p.chunkY}: ${p.totalCount} objects`);
+                p.composition.forEach(c => {
+                    console.log(`   - ${c.kind}: ${c.count}`);
+                });
+            });
+            
+            const resultsDiv = document.getElementById('testResults');
+            resultsDiv.innerHTML = `
+                <div class="status success">
+                    <strong>High Density Analysis:</strong><br>
+                    ${clusters.length} chunks with ≥10 objects<br>
+                    ${prefabs.length} potential prefab clusters<br>
+                    <br>
+                    Top hotspot: Tile ${clusters[0]?.tileX}_${clusters[0]?.tileY}<br>
+                    Chunk ${clusters[0]?.chunkX},${clusters[0]?.chunkY}<br>
+                    <strong>${clusters[0]?.count} objects</strong><br>
+                    <br>
+                    <em>See console for full list</em>
+                </div>
+            `;
         };
         
         // Auto-init
