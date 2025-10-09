@@ -14,7 +14,7 @@ namespace WoWRollback.Orchestrator;
 
 internal sealed class ViewerStageRunner
 {
-    private const string ViewerAssetsSourcePath = "ViewerAssets";
+    private const string ViewerAssetsSourcePath = "WoWRollback.Viewer/assets";
 
     public ViewerStageResult Run(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
     {
