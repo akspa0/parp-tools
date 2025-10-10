@@ -441,6 +441,103 @@ parp_out/
 
 ---
 
+## 🗺️ 2D Viewer Pack Workflow (New)
+
+### Build a viewer pack from minimaps
+
+The CLI can build a static pack for a slim 2D viewer. It accepts either TRS-mapped BLPs or direct PNG tiles.
+
+```powershell
+# Build a pack from a session root and a Minimap folder
+dotnet run --project WoWRollback.Cli -- `
+  viewer-pack build `
+  --session-root ..\test_data\development `
+  --minimap-root ..\test_data\development\World\Textures\Minimap `
+  --out ..\viewer_pack\dev `
+  --label dev
+```
+
+Supported minimap inputs under the Minimap directory:
+
+- Per-map subfolder with classic stems:
+  - `Minimap/<MapName>/mapXX_YY.(blp|png)`
+- Flat files with map prefix:
+  - `Minimap/<MapName>_XX_YY.(blp|png)`
+
+The pack contains:
+
+```
+viewer_pack/<label>/
+├── index.json                   # maps list and defaults
+├── tiles/<map>/<x>_<y>.webp     # web-optimized tiles
+└── overlays/<map>/manifest.json # overlay registry (per map)
+```
+
+### Serve the pack
+
+```powershell
+dotnet run --project WoWRollback.Cli -- viewer-serve --pack ..\viewer_pack\dev
+# Open http://localhost:5000
+```
+
+### Viewer controls (sidebar)
+
+- **Map**: select a map from the pack (`index.json`).
+- **Reset**: re-center and reset zoom.
+- **Grid**: toggle world-aligned quilt grid (64×64 tiles) with 16×16 chunk lines per tile.
+- **Layers**: dynamic overlay list from `/data/overlays/<map>/manifest.json`.
+  - Planned layers: `wmo`, `m2` (placements), `areas`, `ranges`, etc.
+  - Layer visibility persists per session (future).
+
+### Overlays (schema and coordinates)
+
+Manifests live per map at `/data/overlays/<map>/manifest.json` and declare tile-based layers:
+
+```jsonc
+{
+  "layers": [
+    { "id": "wmo", "title": "WMO", "tilePattern": "wmo/{x}_{y}.json", "coord": "tile-512" },
+    { "id": "m2",  "title": "M2",  "tilePattern": "m2/{x}_{y}.json",  "coord": "tile-512" }
+  ]
+}
+```
+
+Each tile JSON contains features in the tile’s pixel space (512×512 recommended) for perfect alignment across zoom levels:
+
+```jsonc
+{ "features": [
+  { "type": "point", "id": 123, "name": "model.m2", "xy": [256, 256] },
+  { "type": "polygon", "id": 33, "name": "Region", "points": [[10,10],[500,10],[500,500]] }
+]}
+```
+
+Coordinate systems:
+
+- The viewer’s world space is tile-indexed (0..64 in x/y).
+- Per-tile overlay coordinates use the tile’s pixel space (`tile-512`).
+- For WoW-world overlays, convert to tile index + tile-local pixel during pack build:
+  - `tileX = floor((worldX - mapMinX) / tileWorldSpan)`
+  - `tileY = floor((worldY - mapMinY) / tileWorldSpan)`
+  - `px = frac * 512`, `py = frac * 512` (account for WoW Y axis if needed)
+
+### Roadmap (overlays)
+
+- Add WMO/M2 placement exporters in `viewer-pack build` that:
+  - Read placements from analysis/exports
+  - Transform to per-tile JSON in `tile-512` coords
+  - Emit `overlays/<map>/manifest.json` with `wmo` and `m2` layers
+- Implement client plugins to lazy-load and render points with batching.
+
+### Troubleshooting (viewer pack)
+
+- Tiles not emitted:
+  - Ensure `--minimap-root` points to a folder containing either `mapXX_YY.(blp|png)` inside per-map folders or `<Map>_XX_YY.(blp|png)` in the root.
+  - If using TRS, ensure hashed BLPs referenced by `md5translate.trs` exist on disk.
+- Blank viewer:
+  - Check `/data/index.json` lists at least one map.
+  - Verify `/data/tiles/<map>/0_0.webp` loads.
+
+
 ## 🤝 Related Projects
 
 - **[DBCTool.V2](../DBCTool.V2/)** - DBC extraction and area matching engine
