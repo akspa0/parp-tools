@@ -6,6 +6,17 @@ using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Config;
 using WoWRollback.Core.Services.Viewer;
+using WoWRollback.WDLtoGLB;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.FileProviders;
+using WoWFormatLib.FileReaders;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace WoWRollback.Cli;
 
@@ -34,6 +45,10 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-ranges": // Legacy alias for analyze-lk-adt
                     return RunAnalyzeLkAdt(opts);
+                case "wdl-to-glb":
+                    return RunWdlToGlb(opts);
+                case "viewer-serve":
+                    return RunViewerServe(opts);
                 case "dry-run":
                     return RunDryRun(opts);
                 case "compare-versions":
@@ -83,6 +98,53 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static int RunWdlToGlb(Dictionary<string, string> opts)
+    {
+        Require(opts, "map");
+        Require(opts, "wdl");
+        Require(opts, "out-glb");
+
+        var mapName = opts["map"]; 
+        var wdlPath = opts["wdl"]; 
+        var outGlb = opts["out-glb"]; 
+
+        var textureOverride = GetOption(opts, "texture");
+        var invertX = string.Equals(GetOption(opts, "invert-x"), "true", StringComparison.OrdinalIgnoreCase);
+        var scale = TryParseDouble(opts, "scale") ?? 1.0;
+        var minimapFolder = GetOption(opts, "minimap-folder");
+        var minimapRoot = GetOption(opts, "minimap-root");
+        var trsPath = GetOption(opts, "trs");
+        var perTileFlag = string.Equals(GetOption(opts, "per-tile"), "true", StringComparison.OrdinalIgnoreCase);
+
+        var options = new WdlToGlbOptions
+        {
+            MapName = mapName,
+            TextureOverridePath = textureOverride,
+            MinimapFolder = minimapFolder,
+            MinimapRoot = minimapRoot,
+            TrsPath = trsPath,
+            InvertX = invertX,
+            Scale = (float)scale,
+            SRGB = true,
+            AnisotropyHint = null
+        };
+
+        Console.WriteLine($"[info] Converting WDL → GLB: map={mapName}");
+        Console.WriteLine($"[info]  WDL:  {wdlPath}");
+        if (!string.IsNullOrWhiteSpace(textureOverride)) Console.WriteLine($"[info]  Texture override: {textureOverride}");
+        if (!string.IsNullOrWhiteSpace(minimapFolder)) Console.WriteLine($"[info]  Minimap folder: {minimapFolder}");
+        if (!string.IsNullOrWhiteSpace(minimapRoot)) Console.WriteLine($"[info]  Minimap root: {minimapRoot}");
+        if (!string.IsNullOrWhiteSpace(trsPath)) Console.WriteLine($"[info]  TRS: {trsPath}");
+        Console.WriteLine($"[info]  Out:  {outGlb}");
+
+        var code = WdlToGlbConverter.Convert(mapName, wdlPath, outGlb, options);
+        if (code == 0)
+        {
+            Console.WriteLine("[ok] WDLtoGLB completed.");
+        }
+        return code;
     }
 
     private static bool ShouldGenerateViewer(Dictionary<string, string> opts)
@@ -315,6 +377,13 @@ internal static class Program
         Console.WriteLine("  analyze-lk-adt    --map <name> --input-dir <dir> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from converted LK ADT files (preservation analysis)");
         Console.WriteLine();
+        Console.WriteLine("  wdl-to-glb        --map <name> --wdl <file> --out-glb <file> [--texture <image>] [--invert-x] [--scale <float>] [--minimap-folder <dir>] [--minimap-root <dir>] [--trs <file>] [--per-tile]");
+        Console.WriteLine("    Export GLB terrain from WDL. --texture bakes a single image for merged output.");
+        Console.WriteLine("    Per-tile textures prefer md5translate under --minimap-root (auto-detects md5translate.trs/txt). Fallback to --minimap-folder name index.");
+        Console.WriteLine();
+        Console.WriteLine("  viewer-serve      --minimap-root <dir> [--map <name>]");
+        Console.WriteLine("    Start the 2D viewer HTTP server using TRS-backed minimap tiles. Open /api/index to see discovered maps.");
+        Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
         Console.WriteLine();
@@ -328,6 +397,180 @@ internal static class Program
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
         Console.WriteLine("  Singleton IDs and outliers are precious artifacts showing experiments and tests.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
+    }
+
+    // --- 2D Viewer Host ---
+    private static int RunViewerServe(Dictionary<string, string> opts)
+    {
+        // Resolve configuration
+        var cwd = Directory.GetCurrentDirectory();
+        var configPath = Path.Combine(cwd, "viewer.config.json");
+        var cfg = new ViewerHostConfig();
+        if (File.Exists(configPath))
+        {
+            try { cfg = JsonSerializer.Deserialize<ViewerHostConfig>(File.ReadAllText(configPath)) ?? new ViewerHostConfig(); }
+            catch { /* ignore */ }
+        }
+        var minimapRoot = GetOption(opts, "minimap-root", cfg.MinimapRoot);
+        if (string.IsNullOrWhiteSpace(minimapRoot) || !Directory.Exists(minimapRoot))
+        {
+            Console.Error.WriteLine("[error] --minimap-root is required and must exist (contains md5translate.trs).\nTip: put it in viewer.config.json to avoid retyping.");
+            return 2;
+        }
+        var preferredMap = GetOption(opts, "map", cfg.DefaultMap);
+
+        // Build TRS index
+        var trsIndex = TryBuildTrsIndex(minimapRoot!, cfg.TrsPath);
+        if (trsIndex is null || trsIndex.Count == 0)
+        {
+            Console.WriteLine("[warn] No TRS entries found. /api/minimap requests will 404.");
+        }
+
+        // Compute map list and default
+        string[] mapNames = trsIndex == null ? Array.Empty<string>() : trsIndex.Keys.Select(k => k.map).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToArray();
+        string? defaultMap = preferredMap;
+        if (string.IsNullOrWhiteSpace(defaultMap) || !mapNames.Contains(defaultMap, StringComparer.OrdinalIgnoreCase))
+        {
+            defaultMap = mapNames.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(preferredMap) && defaultMap != null && !string.Equals(preferredMap, defaultMap, StringComparison.OrdinalIgnoreCase))
+                Console.WriteLine($"[warn] Requested --map '{preferredMap}' not found in TRS. Using '{defaultMap}'.");
+        }
+
+        // Build web app
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://localhost:5000");
+        var app = builder.Build();
+
+        // Status
+        app.MapGet("/api/health", () => Results.Ok(new { ok = true }));
+
+        // Index
+        app.MapGet("/api/index", () =>
+        {
+            var maps = mapNames.Select(n => new { name = n, width = 64, height = 64 }).ToArray();
+            return Results.Json(new { version = cfg.VersionLabel ?? "dev", defaultMap, maps });
+        });
+
+        // Minimap tile
+        var cache = new System.Collections.Concurrent.ConcurrentDictionary<(string map,int x,int y), byte[]>();
+        app.MapGet("/api/minimap/{map}/{x:int}/{y:int}.png", (string map, int x, int y) =>
+        {
+            if (trsIndex == null) return Results.NotFound();
+            var key = (map.ToLowerInvariant(), x, y);
+            if (!trsIndex.TryGetValue(key, out var blpPath) || !File.Exists(blpPath)) return Results.NotFound();
+            if (!cache.TryGetValue(key, out var bytes))
+            {
+                try
+                {
+                    var reader = new BLPReader();
+                    reader.LoadBLP(blpPath);
+                    using var ms = new MemoryStream();
+                    reader.bmp.Save(ms, new PngEncoder());
+                    bytes = ms.ToArray();
+                    cache[key] = bytes;
+                }
+                catch { return Results.StatusCode(500); }
+            }
+            return Results.File(bytes, "image/png");
+        });
+
+        // Debug
+        app.MapGet("/api/debug/trs/{map}/{x:int}/{y:int}", (string map, int x, int y) =>
+        {
+            if (trsIndex == null) return Results.Json(new { found = false, path = (string?)null });
+            var key = (map.ToLowerInvariant(), x, y);
+            if (trsIndex.TryGetValue(key, out var p))
+            {
+                return Results.Json(new { found = true, path = (string?)p });
+            }
+            else
+            {
+                return Results.Json(new { found = false, path = (string?)null });
+            }
+        });
+
+        // Static files: reuse MapHost/wwwroot for now
+        var staticRoot = FindStaticRoot();
+        if (Directory.Exists(staticRoot))
+        {
+            Console.WriteLine($"[info] Serving static UI from: {staticRoot}");
+            app.UseDefaultFiles(new DefaultFilesOptions
+            {
+                FileProvider = new PhysicalFileProvider(staticRoot)
+            });
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new PhysicalFileProvider(staticRoot)
+            });
+        }
+        else
+        {
+            Console.WriteLine($"[warn] Static root not found: {staticRoot}");
+        }
+
+        Console.WriteLine("[ok] Viewer server running on http://localhost:5000");
+        Console.WriteLine("[info] Maps: " + (mapNames.Length == 0 ? "<none>" : string.Join(", ", mapNames)));
+        app.Run();
+        return 0;
+    }
+
+    private static string FindStaticRoot()
+    {
+        // bin/Debug/net9.0 -> up 4 levels to WoWRollback folder
+        var baseDir = AppContext.BaseDirectory; // .../WoWRollback.Cli/bin/Debug/net9.0/
+        var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
+        var mapHostRoot = Path.Combine(repoRoot, "WoWRollback.MapHost", "wwwroot");
+        return mapHostRoot;
+    }
+
+    private static Dictionary<(string map,int x,int y), string>? TryBuildTrsIndex(string minimapRoot, string? trsPath)
+    {
+        if (string.IsNullOrWhiteSpace(minimapRoot) || !Directory.Exists(minimapRoot)) return null;
+        string? trs = trsPath;
+        if (string.IsNullOrWhiteSpace(trs))
+        {
+            var p1 = Path.Combine(minimapRoot, "md5translate.trs");
+            var p2 = Path.Combine(minimapRoot, "md5translate.txt");
+            trs = File.Exists(p1) ? p1 : (File.Exists(p2) ? p2 : null);
+        }
+        if (string.IsNullOrWhiteSpace(trs) || !File.Exists(trs)) return null;
+
+        var dict = new Dictionary<(string,int,int), string>();
+        var baseDir = Path.GetDirectoryName(trs)!;
+        string? currentMap = null;
+        foreach (var raw in File.ReadAllLines(trs))
+        {
+            var line = raw.Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+            if (line.StartsWith("dir:", StringComparison.OrdinalIgnoreCase))
+            {
+                currentMap = line.Substring(4).Trim();
+                continue;
+            }
+            if (currentMap == null) continue;
+            var parts = line.Split('\t');
+            if (parts.Length != 2) continue;
+            string a = parts[0].Trim();
+            string b = parts[1].Trim();
+            string mapSide = (a.Contains("map") && a.Contains(".blp", StringComparison.OrdinalIgnoreCase)) ? a : b;
+            string actual = mapSide == a ? b : a;
+
+            var stem = Path.GetFileNameWithoutExtension(mapSide);
+            if (!stem.StartsWith("map", StringComparison.OrdinalIgnoreCase)) continue;
+            var xy = stem.Substring(3).Split('_');
+            if (xy.Length != 2 || !int.TryParse(xy[0], out var tx) || !int.TryParse(xy[1], out var ty)) continue;
+            var fullPath = Path.Combine(baseDir, actual.Replace('/', Path.DirectorySeparatorChar));
+            dict[(currentMap.ToLowerInvariant(), tx, ty)] = fullPath;
+        }
+        return dict;
+    }
+
+    private sealed class ViewerHostConfig
+    {
+        public string? MinimapRoot { get; set; }
+        public string? TrsPath { get; set; }
+        public string? DefaultMap { get; set; }
+        public string? VersionLabel { get; set; }
     }
 
     private static void EnsureComparisonPrerequisites(

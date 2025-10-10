@@ -7,5 +7,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.WDLtoGLB\WoWRollback.WDLtoGLB.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\WoWFormatLib\WoWFormatLib\WoWFormatLib.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 </Project>

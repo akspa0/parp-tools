@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WoW Rollback GLB Viewer</title>
+  <style>
+    html, body { height: 100%; margin: 0; background:#111; color:#eee; font-family: system-ui, sans-serif; }
+    #toolbar { position: fixed; top: 0; left: 0; right: 0; background: #1b1b1b; border-bottom: 1px solid #333; padding: 8px 12px; display: flex; gap: 12px; align-items: center; z-index: 10; }
+    #toolbar label { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+    #dropHint { position: fixed; top: 48px; left: 12px; color: #aaa; font-size: 13px; z-index: 5; }
+    #viewport { position: absolute; top: 48px; left: 0; right: 0; bottom: 0; overflow: hidden; }
+    #fileInput { color:#ddd; }
+    a { color: #9ad; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <input id="fileInput" type="file" multiple accept=".glb,.gltf,model/gltf+json,model/gltf-binary" />
+    <label><input id="chkDouble" type="checkbox" /> Double-sided</label>
+    <label><input id="chkWire" type="checkbox" /> Wireframe</label>
+    <label><input id="chkGrid" type="checkbox" checked /> Grid</label>
+    <label><input id="chkAxes" type="checkbox" /> Axes</label>
+    <label><input id="chkRot90" type="checkbox" /> Rotate +90° Y</label>
+    <label><input id="chkInvertZ" type="checkbox" /> Invert Z</label>
+    <button id="btnTop" type="button">Top view</button>
+    <button id="btnThreeQ" type="button">3/4 view</button>
+    <button id="btnResetView" type="button">Reset view</button>
+    <label>Scale 1/
+      <input id="scaleRange" type="range" min="1" max="4096" value="64" style="vertical-align:middle; width:180px;" />
+      <input id="scaleNum" type="number" min="1" max="4096" step="1" value="64" style="width:70px;" />
+    </label>
+    <button id="scaleReset" type="button">Reset</button>
+    <span style="margin-left:auto; font-size:12px; color:#aaa">Tip: drag & drop GLB(s) here</span>
+  </div>
+  <div id="dropHint">Drop one merged GLB or multiple per-tile GLBs.</div>
+  <div id="viewport"></div>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="./js/glb-viewer.js"></script>
+</body>
+</html>

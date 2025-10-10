@@ -74,17 +74,18 @@ export class M2Plugin extends OverlayPlugin {
     
     renderPlacements(placements, row, col) {
         placements.forEach(placement => {
-            // Convert world coordinates to lat/lng using precise positioning
-            const latLng = this.coordSystem.worldToLatLng(placement.worldX, placement.worldY);
+            // Use pixel coordinates (0-512 within tile) to calculate position
+            // This matches the POC viewer approach
+            const pixelX = placement.pixelX || 256; // Default to center if missing
+            const pixelY = placement.pixelY || 256;
+            const lat = row + (pixelY / 512);
+            const lng = col + (pixelX / 512);
             
-            // Use elevation for visual cues
-            const elevationColor = this.coords.getElevationColor(placement.worldZ, this.color);
-            const elevationRadius = this.coords.getElevationRadius(placement.worldZ, this.baseRadius);
-            const marker = L.circleMarker([latLng.lat, latLng.lng], {
-                radius: elevationRadius,
+            const marker = L.circleMarker([lat, lng], {
+                radius: 4,
                 color: '#000',
                 weight: 1,
-                fillColor: elevationColor,
+                fillColor: '#2196F3', // Blue like POC viewer
                 fillOpacity: 0.8
             });
             

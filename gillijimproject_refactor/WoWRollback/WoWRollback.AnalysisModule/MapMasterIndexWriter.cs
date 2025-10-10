@@ -179,6 +179,11 @@ public sealed class MapMasterIndexWriter
         int chunkX = Math.Clamp((int)Math.Floor(localWest / ChunkSize), 0, ChunksPerTile - 1);
         int chunkY = Math.Clamp((int)Math.Floor(localNorth / ChunkSize), 0, ChunksPerTile - 1);
 
+        // Calculate pixel coordinates for minimap (0-512 range, matching minimap tile size)
+        const float MinimapTileSize = 512f;
+        float pixelX = (localWest / TileSize) * MinimapTileSize;
+        float pixelY = (localNorth / TileSize) * MinimapTileSize;
+
         return new PlacementRecord
         {
             Kind = source.Type.ToString(),
@@ -194,6 +199,8 @@ public sealed class MapMasterIndexWriter
             WorldUp = worldUp,
             TileOffsetNorth = localNorth,
             TileOffsetWest = localWest,
+            PixelX = pixelX,
+            PixelY = pixelY,
             ChunkX = chunkX,
             ChunkY = chunkY,
             RotationX = source.RotationX,
@@ -237,6 +244,8 @@ public sealed class MapMasterIndexWriter
         public float WorldUp { get; init; }
         public float TileOffsetNorth { get; init; }
         public float TileOffsetWest { get; init; }
+        public float PixelX { get; init; }
+        public float PixelY { get; init; }
         public int ChunkX { get; init; }
         public int ChunkY { get; init; }
         public float RotationX { get; init; }
