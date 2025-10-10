@@ -47,6 +47,8 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "wdl-to-glb":
                     return RunWdlToGlb(opts);
+                case "viewer-pack":
+                    return RunViewerPack(opts);
                 case "viewer-serve":
                     return RunViewerServe(opts);
                 case "dry-run":
@@ -381,8 +383,11 @@ internal static class Program
         Console.WriteLine("    Export GLB terrain from WDL. --texture bakes a single image for merged output.");
         Console.WriteLine("    Per-tile textures prefer md5translate under --minimap-root (auto-detects md5translate.trs/txt). Fallback to --minimap-folder name index.");
         Console.WriteLine();
-        Console.WriteLine("  viewer-serve      --minimap-root <dir> [--map <name>]");
-        Console.WriteLine("    Start the 2D viewer HTTP server using TRS-backed minimap tiles. Open /api/index to see discovered maps.");
+        Console.WriteLine("  viewer-pack build --session-root <dir> --minimap-root <dir> --out <dir> [--maps m1,m2] [--label <text>]");
+        Console.WriteLine("    Build a self-contained 'viewer-pack' from harvested data and TRS tiles (PNG). No parsing at view time.");
+        Console.WriteLine();
+        Console.WriteLine("  viewer-serve      --pack <dir>");
+        Console.WriteLine("    Serve the 2D viewer UI and a prebuilt viewer-pack at /data. Open / to use the viewer.");
         Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
@@ -402,95 +407,21 @@ internal static class Program
     // --- 2D Viewer Host ---
     private static int RunViewerServe(Dictionary<string, string> opts)
     {
-        // Resolve configuration
-        var cwd = Directory.GetCurrentDirectory();
-        var configPath = Path.Combine(cwd, "viewer.config.json");
-        var cfg = new ViewerHostConfig();
-        if (File.Exists(configPath))
+        // Require viewer-pack path
+        var packRootOpt = GetOption(opts, "pack");
+        if (string.IsNullOrWhiteSpace(packRootOpt) || !Directory.Exists(packRootOpt))
         {
-            try { cfg = JsonSerializer.Deserialize<ViewerHostConfig>(File.ReadAllText(configPath)) ?? new ViewerHostConfig(); }
-            catch { /* ignore */ }
-        }
-        var minimapRoot = GetOption(opts, "minimap-root", cfg.MinimapRoot);
-        if (string.IsNullOrWhiteSpace(minimapRoot) || !Directory.Exists(minimapRoot))
-        {
-            Console.Error.WriteLine("[error] --minimap-root is required and must exist (contains md5translate.trs).\nTip: put it in viewer.config.json to avoid retyping.");
+            Console.Error.WriteLine("[error] --pack <dir> is required and must point to a built viewer-pack (contains index.json, tiles/).");
             return 2;
         }
-        var preferredMap = GetOption(opts, "map", cfg.DefaultMap);
+        var packRoot = Path.GetFullPath(packRootOpt!);
 
-        // Build TRS index
-        var trsIndex = TryBuildTrsIndex(minimapRoot!, cfg.TrsPath);
-        if (trsIndex is null || trsIndex.Count == 0)
-        {
-            Console.WriteLine("[warn] No TRS entries found. /api/minimap requests will 404.");
-        }
-
-        // Compute map list and default
-        string[] mapNames = trsIndex == null ? Array.Empty<string>() : trsIndex.Keys.Select(k => k.map).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s).ToArray();
-        string? defaultMap = preferredMap;
-        if (string.IsNullOrWhiteSpace(defaultMap) || !mapNames.Contains(defaultMap, StringComparer.OrdinalIgnoreCase))
-        {
-            defaultMap = mapNames.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(preferredMap) && defaultMap != null && !string.Equals(preferredMap, defaultMap, StringComparison.OrdinalIgnoreCase))
-                Console.WriteLine($"[warn] Requested --map '{preferredMap}' not found in TRS. Using '{defaultMap}'.");
-        }
-
-        // Build web app
+        // Build web app (static UI + static pack mounted at /data)
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://localhost:5000");
         var app = builder.Build();
-
-        // Status
-        app.MapGet("/api/health", () => Results.Ok(new { ok = true }));
-
-        // Index
-        app.MapGet("/api/index", () =>
-        {
-            var maps = mapNames.Select(n => new { name = n, width = 64, height = 64 }).ToArray();
-            return Results.Json(new { version = cfg.VersionLabel ?? "dev", defaultMap, maps });
-        });
-
-        // Minimap tile
-        var cache = new System.Collections.Concurrent.ConcurrentDictionary<(string map,int x,int y), byte[]>();
-        app.MapGet("/api/minimap/{map}/{x:int}/{y:int}.png", (string map, int x, int y) =>
-        {
-            if (trsIndex == null) return Results.NotFound();
-            var key = (map.ToLowerInvariant(), x, y);
-            if (!trsIndex.TryGetValue(key, out var blpPath) || !File.Exists(blpPath)) return Results.NotFound();
-            if (!cache.TryGetValue(key, out var bytes))
-            {
-                try
-                {
-                    var reader = new BLPReader();
-                    reader.LoadBLP(blpPath);
-                    using var ms = new MemoryStream();
-                    reader.bmp.Save(ms, new PngEncoder());
-                    bytes = ms.ToArray();
-                    cache[key] = bytes;
-                }
-                catch { return Results.StatusCode(500); }
-            }
-            return Results.File(bytes, "image/png");
-        });
-
-        // Debug
-        app.MapGet("/api/debug/trs/{map}/{x:int}/{y:int}", (string map, int x, int y) =>
-        {
-            if (trsIndex == null) return Results.Json(new { found = false, path = (string?)null });
-            var key = (map.ToLowerInvariant(), x, y);
-            if (trsIndex.TryGetValue(key, out var p))
-            {
-                return Results.Json(new { found = true, path = (string?)p });
-            }
-            else
-            {
-                return Results.Json(new { found = false, path = (string?)null });
-            }
-        });
-
-        // Static files: reuse MapHost/wwwroot for now
-        var staticRoot = FindStaticRoot();
+        // Static files: serve UI from assets2d and pack under /data
+        var staticRoot = FindAssets2DRoot();
         if (Directory.Exists(staticRoot))
         {
             Console.WriteLine($"[info] Serving static UI from: {staticRoot}");
@@ -508,19 +439,33 @@ internal static class Program
             Console.WriteLine($"[warn] Static root not found: {staticRoot}");
         }
 
+        if (Directory.Exists(packRoot))
+        {
+            Console.WriteLine($"[info] Serving viewer-pack from: {packRoot} at /data");
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new PhysicalFileProvider(packRoot),
+                RequestPath = "/data"
+            });
+        }
+        else
+        {
+            Console.WriteLine($"[error] Pack directory not found: {packRoot}");
+            return 2;
+        }
+
         Console.WriteLine("[ok] Viewer server running on http://localhost:5000");
-        Console.WriteLine("[info] Maps: " + (mapNames.Length == 0 ? "<none>" : string.Join(", ", mapNames)));
         app.Run();
         return 0;
     }
 
-    private static string FindStaticRoot()
+    private static string FindAssets2DRoot()
     {
         // bin/Debug/net9.0 -> up 4 levels to WoWRollback folder
         var baseDir = AppContext.BaseDirectory; // .../WoWRollback.Cli/bin/Debug/net9.0/
         var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
-        var mapHostRoot = Path.Combine(repoRoot, "WoWRollback.MapHost", "wwwroot");
-        return mapHostRoot;
+        var assets2d = Path.Combine(repoRoot, "WoWRollback.Viewer", "assets2d");
+        return assets2d;
     }
 
     private static Dictionary<(string map,int x,int y), string>? TryBuildTrsIndex(string minimapRoot, string? trsPath)
@@ -571,6 +516,130 @@ internal static class Program
         public string? TrsPath { get; set; }
         public string? DefaultMap { get; set; }
         public string? VersionLabel { get; set; }
+    }
+
+    // --- Build a viewer-pack from harvested data + TRS tiles ---
+    private static int RunViewerPack(Dictionary<string, string> opts)
+    {
+
+        Require(opts, "session-root");
+        Require(opts, "minimap-root");
+        Require(opts, "out");
+
+        var sessionRoot = Path.GetFullPath(opts["session-root"]);
+        var minimapRoot = Path.GetFullPath(opts["minimap-root"]);
+        var outRoot = Path.GetFullPath(opts["out"]);
+        var label = GetOption(opts, "label", "dev");
+        var mapsFilter = opts.TryGetValue("maps", out var m) && !string.IsNullOrWhiteSpace(m)
+            ? m.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        if (!Directory.Exists(sessionRoot)) throw new DirectoryNotFoundException(sessionRoot);
+        if (!Directory.Exists(minimapRoot)) throw new DirectoryNotFoundException(minimapRoot);
+        Directory.CreateDirectory(outRoot);
+
+        // Build versions from session-root and use existing MinimapLocator to resolve TRS and files
+        static bool ContainsMinimapIndicators(string dir)
+        {
+            try
+            {
+                if (Directory.Exists(Path.Combine(dir, "tree"))) return true;
+                if (Directory.EnumerateFiles(dir, "md5translate.*", SearchOption.AllDirectories).Any()) return true;
+                var candidates = new[]
+                {
+                    Path.Combine(dir, "tree", "World", "Textures", "Minimap"),
+                    Path.Combine(dir, "tree", "world", "textures", "minimap"),
+                    Path.Combine(dir, "World", "Textures", "Minimap"),
+                    Path.Combine(dir, "world", "textures", "minimap"),
+                    Path.Combine(dir, "Textures", "Minimap"),
+                    Path.Combine(dir, "textures", "minimap")
+                };
+                return candidates.Any(Directory.Exists);
+            }
+            catch { return false; }
+        }
+
+        var versions = new List<string>();
+        string rootBase;
+        if (ContainsMinimapIndicators(sessionRoot))
+        {
+            // sessionRoot itself is a version directory
+            rootBase = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(sessionRoot)) ?? sessionRoot;
+            versions.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(sessionRoot)) ?? "dev");
+        }
+        else
+        {
+            rootBase = sessionRoot;
+            foreach (var sub in Directory.EnumerateDirectories(sessionRoot, "*", SearchOption.TopDirectoryOnly))
+            {
+                if (ContainsMinimapIndicators(sub))
+                {
+                    var name = Path.GetFileName(sub);
+                    if (!string.IsNullOrWhiteSpace(name)) versions.Add(name);
+                }
+            }
+        }
+
+        if (versions.Count == 0)
+        {
+            Console.Error.WriteLine("[error] No version directories with minimap data found under session-root.");
+            return 2;
+        }
+
+        var locator = MinimapLocator.Build(rootBase, versions);
+
+        // Collect maps across versions
+        var allMaps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ver in versions)
+        {
+            foreach (var mname in locator.EnumerateMaps(ver)) allMaps.Add(mname);
+        }
+        var maps = allMaps.OrderBy(s => s).ToList();
+        if (mapsFilter is not null) maps = maps.Where(mn => mapsFilter.Contains(mn)).ToList();
+        var defaultMap = maps.FirstOrDefault() ?? "";
+
+        // Write tiles using locator streams → WebP tiles at out/tiles/<map>/<x>_<y>.webp
+        int written = 0;
+        var composer = new MinimapComposer();
+        foreach (var ver in versions)
+        {
+            foreach (var map in maps)
+            {
+                var mapDir = Path.Combine(outRoot, "tiles", map);
+                Directory.CreateDirectory(mapDir);
+                foreach (var (row, col) in locator.EnumerateTiles(ver, map))
+                {
+                    if (!locator.TryGetTile(ver, map, row, col, out var tile)) continue;
+                    var x = col; var y = row;
+                    var dst = Path.Combine(mapDir, $"{x}_{y}.webp");
+                    if (File.Exists(dst)) { written++; continue; }
+                    try
+                    {
+                        using var fsSrc = tile.Open();
+                        // Synchronously compose to keep method non-async
+                        System.Threading.Tasks.Task.Run(async () => await composer.ComposeAsync(fsSrc, dst, ViewerOptions.CreateDefault())).Wait();
+                        written++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[warn] Failed tile {map} {x}_{y}: {ex.Message}");
+                    }
+                }
+                // Minimal overlays scaffold
+                var overlaysDir = Path.Combine(outRoot, "overlays", map);
+                Directory.CreateDirectory(overlaysDir);
+                var manifestPath = Path.Combine(overlaysDir, "manifest.json");
+                File.WriteAllText(manifestPath, JsonSerializer.Serialize(new { layers = Array.Empty<object>() }));
+            }
+        }
+
+        // index.json
+        var indexPath = Path.Combine(outRoot, "index.json");
+        var indexObj = new { version = label, defaultMap, maps = maps.Select(n => new { name = n, size = 64 }).ToArray() };
+        File.WriteAllText(indexPath, JsonSerializer.Serialize(indexObj));
+
+        Console.WriteLine($"[ok] Viewer-pack written to: {outRoot} (tiles: {written}, maps: {maps.Count})");
+        return 0;
     }
 
     private static void EnsureComparisonPrerequisites(

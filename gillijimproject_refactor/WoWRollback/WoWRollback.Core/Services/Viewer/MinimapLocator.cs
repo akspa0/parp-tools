@@ -316,19 +316,48 @@ public sealed class MinimapLocator
         var entries = new List<MinimapEntry>();
         try
         {
+            // 1) Flat root files like "Azeroth_27_46.png" or BLP
+            foreach (var file in Directory.EnumerateFiles(minimapRoot, "*.*", SearchOption.TopDirectoryOnly))
+            {
+                var ext = Path.GetExtension(file);
+                if (!ext.Equals(".png", StringComparison.OrdinalIgnoreCase) &&
+                    !ext.Equals(".blp", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var stem = Path.GetFileNameWithoutExtension(file);
+                if (TryParseMapPrefixCoords(stem, out var mapNameFromStem, out var tileX, out var tileY))
+                {
+                    var relative = Path.GetRelativePath(minimapRoot, file);
+                    entries.Add(new MinimapEntry(mapNameFromStem, tileY, tileX, file, relative));
+                }
+                else if (TryParseMapStem(stem, out tileX, out tileY))
+                {
+                    // No explicit map name in filename; skip because we cannot infer map reliably from flat root
+                }
+            }
+
+            // 2) Per-map subfolders: <MapName>/mapX_Y.(png|blp) or <MapName>/<MapName>_X_Y.png
             foreach (var mapDir in Directory.EnumerateDirectories(minimapRoot))
             {
                 var mapName = Path.GetFileName(mapDir);
-                foreach (var blp in Directory.EnumerateFiles(mapDir, "*.blp", SearchOption.TopDirectoryOnly))
+                foreach (var file in Directory.EnumerateFiles(mapDir, "*.*", SearchOption.TopDirectoryOnly))
                 {
-                    var stem = Path.GetFileNameWithoutExtension(blp);
-                    if (!stem.StartsWith("map", StringComparison.OrdinalIgnoreCase)) continue;
-                    var coords = stem.Substring(3).Split('_');
-                    if (coords.Length != 2) continue;
-                    if (!int.TryParse(coords[0], out var tileX)) continue;
-                    if (!int.TryParse(coords[1], out var tileY)) continue;
-                    var relative = Path.GetRelativePath(minimapRoot, blp);
-                    entries.Add(new MinimapEntry(mapName, tileY, tileX, blp, relative));
+                    var ext = Path.GetExtension(file);
+                    if (!ext.Equals(".png", StringComparison.OrdinalIgnoreCase) &&
+                        !ext.Equals(".blp", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var stem = Path.GetFileNameWithoutExtension(file);
+                    int tileX, tileY;
+                    if (TryParseMapStem(stem, out tileX, out tileY))
+                    {
+                        var relative = Path.GetRelativePath(minimapRoot, file);
+                        entries.Add(new MinimapEntry(mapName, tileY, tileX, file, relative));
+                    }
+                    else if (TryParseMapPrefixCoords(stem, out var mapNameFromStem, out tileX, out tileY))
+                    {
+                        var relative = Path.GetRelativePath(minimapRoot, file);
+                        // Prefer folder name as authoritative map name
+                        entries.Add(new MinimapEntry(mapName, tileY, tileX, file, relative));
+                    }
                 }
             }
         }
@@ -338,6 +367,28 @@ public sealed class MinimapLocator
         }
 
         return entries;
+    }
+
+    private static bool TryParseMapStem(string stem, out int tileX, out int tileY)
+    {
+        tileX = 0; tileY = 0;
+        if (!stem.StartsWith("map", StringComparison.OrdinalIgnoreCase) || stem.Length <= 3) return false;
+        var rest = stem.Substring(3);
+        var parts = rest.Split('_');
+        if (parts.Length != 2) return false;
+        return int.TryParse(parts[0], out tileX) && int.TryParse(parts[1], out tileY);
+    }
+
+    private static bool TryParseMapPrefixCoords(string stem, out string mapName, out int tileX, out int tileY)
+    {
+        mapName = string.Empty; tileX = 0; tileY = 0;
+        // Expect something like <MapName>_XX_YY
+        var us = stem.Split('_');
+        if (us.Length < 3) return false;
+        if (!int.TryParse(us[^2], out tileX)) return false;
+        if (!int.TryParse(us[^1], out tileY)) return false;
+        mapName = string.Join('_', us, 0, us.Length - 2);
+        return mapName.Length > 0;
     }
 
     private static string? DetectTestDataRoot(string rootDirectory)
