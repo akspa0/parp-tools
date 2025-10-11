@@ -23,7 +23,8 @@ internal sealed record PipelineOptions(
     string? ViewerAssetsPath = null,
     string? MpqRoot = null,
     IReadOnlyList<string>? MpqLocales = null,
-    bool MpqOnly = false)
+    bool MpqOnly = false,
+    string? AdtOverlayRoot = null)
 {
     public bool HasLkDbcDirectory => !string.IsNullOrWhiteSpace(LkDbcDirectory);
 }

@@ -55,7 +55,8 @@ internal sealed class AdtStageRunner
     private static AdtStageResult RunExport(SessionContext session, string version, string map)
     {
         var options = session.Options;
-        var sourceAlphaDir = Path.Combine(options.AlphaRoot, version);
+        var baseRoot = options.AdtRoot ?? options.AlphaRoot;
+        var sourceAlphaDir = Path.Combine(baseRoot, version);
         var wdtPath = Path.Combine(sourceAlphaDir, "tree", "World", "Maps", map, map + ".wdt");
 
         if (!File.Exists(wdtPath))

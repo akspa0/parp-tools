@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.IO;
 using WoWRollback.Core.Logging;
 
 namespace WoWRollback.Orchestrator;
@@ -40,6 +41,24 @@ internal sealed class PipelineOrchestrator
         Console.WriteLine();
 
         ConsoleLogger.Info("Running ADT conversion stage...");
+        if (!string.IsNullOrWhiteSpace(options.AdtOverlayRoot))
+        {
+            ConsoleLogger.Info($"Materializing ADT overlay: {options.AdtOverlayRoot}");
+            try
+            {
+                LooseAdtMaterializer.Materialize(
+                    session,
+                    options.AdtOverlayRoot!,
+                    options.AdtRoot ?? options.AlphaRoot,
+                    options.Versions,
+                    options.Maps);
+                ConsoleLogger.Success("ADT overlay materialization completed");
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.Warn($"ADT overlay materialization encountered issues: {ex.Message}");
+            }
+        }
         var adtRunner = new AdtStageRunner();
         var adtResults = adtRunner.Run(session);
         var adtSuccessCount = adtResults.Count(r => r.Success);
@@ -122,6 +141,23 @@ internal sealed class PipelineOrchestrator
         }
 
         return true;
+    }
+
+    private static string? ResolveCommunityListfile(PipelineOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.CommunityListfile) && File.Exists(options.CommunityListfile)) return options.CommunityListfile;
+        var c1 = Path.Combine(options.AlphaRoot, "listfile.csv");
+        if (File.Exists(c1)) return c1;
+        var c2 = Path.Combine(options.AlphaRoot, "community-listfile-withcapitals.csv");
+        if (File.Exists(c2)) return c2;
+        return null;
+    }
+
+    private static string? ResolveLkListfile(PipelineOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.LkListfile) && File.Exists(options.LkListfile)) return options.LkListfile;
+        var c1 = Path.Combine(options.AlphaRoot, "lk_listfile.txt");
+        return File.Exists(c1) ? c1 : null;
     }
 }
 

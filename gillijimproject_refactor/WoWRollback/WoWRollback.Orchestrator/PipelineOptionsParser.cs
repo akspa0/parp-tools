@@ -109,6 +109,7 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("area-overrides", out var areaOverrides);
         parsed.TryGetValue("mpq-root", out var mpqRoot);
         parsed.TryGetValue("mpq-locales", out var mpqLocalesRaw);
+        parsed.TryGetValue("adt-overlay-root", out var adtOverlayRoot);
         var noggitClientPath = !string.IsNullOrWhiteSpace(noggitClientPathRaw)
             ? noggitClientPathRaw
             : DefaultNoggitClientPath;
@@ -148,7 +149,8 @@ internal static class PipelineOptionsParser
             ViewerAssetsPath: viewerAssetsPath,
             MpqRoot: mpqRoot,
             MpqLocales: ParseLocales(mpqLocalesRaw),
-            MpqOnly: flags.Contains("mpq-only"));
+            MpqOnly: flags.Contains("mpq-only"),
+            AdtOverlayRoot: adtOverlayRoot);
 
         return true;
     }
