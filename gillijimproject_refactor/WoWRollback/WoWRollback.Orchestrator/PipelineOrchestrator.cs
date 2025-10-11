@@ -81,9 +81,9 @@ internal sealed class PipelineOrchestrator
         }
         Console.WriteLine();
 
-        // Stage 4: Viewer
+        // Stage 4: Viewer (self-contained)
         ConsoleLogger.Info("Generating viewer...");
-        var viewerRunner = new ViewerStageRunner();
+        var viewerRunner = new ViewerBuildStageRunner();
         var viewerResult = viewerRunner.Run(session, adtResults);
         if (viewerResult.Success)
         {

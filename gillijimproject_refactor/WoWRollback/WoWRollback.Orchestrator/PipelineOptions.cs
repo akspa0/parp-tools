@@ -16,7 +16,14 @@ internal sealed record PipelineOptions(
     string? AreaOverrideDirectory,
     bool Serve,
     int Port,
-    bool Verbose)
+    bool Verbose,
+    string? MinimapRoot = null,
+    string? AdtRoot = null,
+    string? ViewerLabel = null,
+    string? ViewerAssetsPath = null,
+    string? MpqRoot = null,
+    IReadOnlyList<string>? MpqLocales = null,
+    bool MpqOnly = false)
 {
     public bool HasLkDbcDirectory => !string.IsNullOrWhiteSpace(LkDbcDirectory);
 }

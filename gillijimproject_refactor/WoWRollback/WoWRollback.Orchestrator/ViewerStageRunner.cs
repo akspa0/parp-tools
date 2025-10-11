@@ -14,7 +14,7 @@ namespace WoWRollback.Orchestrator;
 
 internal sealed class ViewerStageRunner
 {
-    private const string ViewerAssetsSourcePath = "WoWRollback.Viewer/assets";
+    private const string ViewerAssetsSourcePath = "WoWRollback.Viewer/assets2d";
 
     public ViewerStageResult Run(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
     {
@@ -27,23 +27,43 @@ internal sealed class ViewerStageRunner
         {
             Directory.CreateDirectory(session.Paths.ViewerDir);
 
-            // Copy existing viewer assets (index.html, JS, CSS, etc.)
-            CopyViewerAssets(session);
+            // Build a slim viewer pack directly (tiles + minimal overlays scaffolds + index.json)
+            var packOut = session.Paths.ViewerDir; // pack root contains index.json and tiles/
+            var versions = session.Options.Versions;
+            var mapSet = new HashSet<string>(adtResults.Where(r => r.Success).Select(r => r.Map), StringComparer.OrdinalIgnoreCase);
 
-            // Generate minimap PNG tiles from ADT files
-            var minimapCount = GenerateMinimapTiles(session, adtResults);
+            var builder = new ViewerPackBuilder();
+            var result = builder.Build(
+                sessionRoot: session.Options.AlphaRoot,
+                minimapRoot: session.Options.MinimapRoot ?? session.Options.AlphaRoot,
+                outRoot: packOut,
+                versionsFilter: versions,
+                mapsFilter: mapSet,
+                label: session.Options.ViewerLabel ?? (versions.FirstOrDefault() ?? "dev"));
 
-            // Generate viewer data files (index.json, config.json)
-            GenerateViewerDataFiles(session, adtResults);
+            // Auto-harvest overlays from converted ADT outputs (no external adt-root needed)
+            var inputs = new List<(string Version, string Map, string MapDir)>();
+            foreach (var r in adtResults.Where(r => r.Success))
+            {
+                var mapDir = Path.Combine(session.Paths.AdtDir, r.Version, "World", "Maps", r.Map);
+                if (Directory.Exists(mapDir)) inputs.Add((r.Version, r.Map, mapDir));
+            }
 
-            // Generate overlay metadata
+            var overlaysRoot = Path.Combine(packOut, "data", "overlays");
+            var builder2 = new ViewerPackBuilder();
+            builder2.HarvestFromConvertedAdts(inputs, session.Options.CommunityListfile, session.Options.LkListfile, overlaysRoot);
+
+            // Ensure the UI assets (index.html, js, css) are present at the pack root for the server
+            TryCopyViewerAssetsTo(packOut);
+
+            // Optional: basic overlays metadata for bookkeeping
             var overlayCount = GenerateOverlayMetadata(session, adtResults);
 
             return new ViewerStageResult(
                 Success: true,
-                ViewerDirectory: session.Paths.ViewerDir,
+                ViewerDirectory: packOut,
                 OverlayCount: overlayCount,
-                Notes: $"Generated {minimapCount} minimap tiles and {overlayCount} overlay(s)");
+                Notes: $"viewer-pack: tiles={result.TilesWritten}, maps={result.MapsWritten}, defaultMap={result.DefaultMap}");
         }
         catch (Exception ex)
         {
@@ -55,151 +75,14 @@ internal sealed class ViewerStageRunner
         }
     }
 
-    private static void CopyViewerAssets(SessionContext session)
-    {
-        var sourceDir = Path.GetFullPath(ViewerAssetsSourcePath);
-        
-        if (!Directory.Exists(sourceDir))
-        {
-            throw new DirectoryNotFoundException($"Viewer assets not found at: {sourceDir}");
-        }
-
-        // Copy all viewer assets to session viewer directory
-        FileHelpers.CopyDirectory(sourceDir, session.Paths.ViewerDir, overwrite: true);
-    }
+    // Legacy viewer assets copy removed for slim 2D viewer (UI is served separately by viewer-serve)
 
     private static void GenerateViewerDataFiles(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
     {
-        // Load actual tile data from analysis indices
-        var mapTiles = new Dictionary<string, List<TileInfo>>();
-        
-        foreach (var result in adtResults.Where(r => r.Success))
-        {
-            var analysisIndexPath = Path.Combine(
-                session.Paths.AdtDir, 
-                result.Version, 
-                "analysis", 
-                result.Map,
-                "index.json");
-                
-            if (File.Exists(analysisIndexPath))
-            {
-                try
-                {
-                    var indexJson = File.ReadAllText(analysisIndexPath);
-                    var analysisIndex = JsonSerializer.Deserialize<AnalysisIndex>(indexJson);
-                    
-                    if (analysisIndex != null)
-                    {
-                        if (!mapTiles.ContainsKey(result.Map))
-                        {
-                            mapTiles[result.Map] = new List<TileInfo>();
-                        }
-                        
-                        foreach (var tile in analysisIndex.Tiles)
-                        {
-                            mapTiles[result.Map].Add(new TileInfo
-                            {
-                                Row = tile.X,
-                                Col = tile.Y,
-                                Versions = new[] { result.Version }
-                            });
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ConsoleLogger.Warn($"  ⚠ Failed to load analysis index for {result.Map}: {ex.Message}");
-                }
-            }
-        }
-        
-        // Generate index.json in viewer-expected format
-        var indexData = new
-        {
-            comparisonKey = session.Options.Versions.FirstOrDefault() ?? "0.5.3",
-            versions = session.Options.Versions.ToArray(),
-            maps = session.Options.Maps.Select(mapName => new
-            {
-                map = mapName,  // Viewer expects "map" property, not "name"
-                tiles = mapTiles.ContainsKey(mapName) ? mapTiles[mapName].ToArray() : Array.Empty<TileInfo>()
-            }).ToArray()
-        };
-
-        var indexPath = Path.Combine(session.Paths.ViewerDir, "index.json");
-        File.WriteAllText(indexPath, JsonSerializer.Serialize(indexData, new JsonSerializerOptions { WriteIndented = true }));
-
-        // Generate config.json - viewer configuration
-        var configData = new
-        {
-            default_version = session.Options.Versions.FirstOrDefault() ?? "0.5.3",
-            default_map = session.Options.Maps.FirstOrDefault() ?? "Kalimdor",
-            coordMode = "wowtools",  // CRITICAL: Enable Y-axis inversion for proper tile layout
-            tile_size = 512,
-            minimap = new
-            {
-                width = 512,
-                height = 512
-            },
-            debugOverlayCorners = false,
-            diff_thresholds = new
-            {
-                proximity = 10.0,
-                moved_epsilon = 0.005
-            }
-        };
-
-        var configPath = Path.Combine(session.Paths.ViewerDir, "config.json");
-        File.WriteAllText(configPath, JsonSerializer.Serialize(configData, new JsonSerializerOptions { WriteIndented = true }));
+        // No-op: index.json is written by ViewerPackBuilder at pack root
     }
 
-    private static int GenerateMinimapTiles(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
-    {
-        // Build MinimapLocator to find existing minimap BLP files in source data
-        var locator = WoWRollback.Core.Services.Viewer.MinimapLocator.Build(
-            session.Options.AlphaRoot,
-            session.Options.Versions.ToList());
-
-        var composer = new MinimapComposer();
-        var options = ViewerOptions.CreateDefault();
-        int totalTiles = 0;
-
-        foreach (var result in adtResults.Where(r => r.Success))
-        {
-            var minimapOutDir = Path.Combine(session.Paths.ViewerDir, "minimap", result.Version, result.Map);
-            Directory.CreateDirectory(minimapOutDir);
-
-            // Enumerate actual minimap tiles from source data
-            var tiles = locator.EnumerateTiles(result.Version, result.Map).ToList();
-            
-            foreach (var (row, col) in tiles)
-            {
-                if (locator.TryGetTile(result.Version, result.Map, row, col, out var tile))
-                {
-                    var fileName = tile.BuildFileName(result.Map);
-                    var pngPath = Path.Combine(minimapOutDir, fileName);
-
-                    try
-                    {
-                        using var stream = tile.Open();
-                        Task.Run(async () => await composer.ComposeAsync(stream, pngPath, options)).Wait();
-                        totalTiles++;
-                    }
-                    catch (Exception ex)
-                    {
-                        ConsoleLogger.Warn($"  ⚠ Failed to generate minimap for {result.Map} tile [{row},{col}]: {ex.Message}");
-                    }
-                }
-            }
-
-            if (tiles.Count > 0)
-            {
-                ConsoleLogger.Success($"  ✓ Generated {tiles.Count} minimap tiles for {result.Map}");
-            }
-        }
-
-        return totalTiles;
-    }
+    // Minimap tiles are composed by ViewerPackBuilder; legacy generator removed
 
     private static int GenerateOverlayMetadata(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
     {
@@ -226,6 +109,81 @@ internal sealed class ViewerStageRunner
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, options));
 
         return 1; // metadata.json counts as 1 overlay
+    }
+
+    private static void TryCopyViewerAssetsTo(string destinationRoot)
+    {
+        try
+        {
+            var candidates = new List<string>();
+            // 1) From current working directory when running `dotnet run` inside WoWRollback
+            var cwd = Directory.GetCurrentDirectory();
+            var cand1 = Path.Combine(cwd, "WoWRollback.Viewer", "assets2d");
+            candidates.Add(cand1);
+            // 2) From bin path back to repo structure: Orchestrator/bin/Debug/netX -> up 4 -> WoWRollback
+            var baseDir = AppContext.BaseDirectory;
+            var repoRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", ".."));
+            var cand2 = Path.Combine(repoRoot, "WoWRollback", "WoWRollback.Viewer", "assets2d");
+            candidates.Add(cand2);
+            // 3) Parent of CWD (solution root) -> WoWRollback/WoWRollback.Viewer/assets2d
+            var parent = Directory.GetParent(cwd)?.FullName;
+            if (!string.IsNullOrEmpty(parent))
+            {
+                var cand3 = Path.Combine(parent, "WoWRollback", "WoWRollback.Viewer", "assets2d");
+                candidates.Add(cand3);
+            }
+
+            ConsoleLogger.Info($"Viewer assets copy: candidates:\n  - {string.Join("\n  - ", candidates)}");
+
+            string? src = candidates.FirstOrDefault(Directory.Exists);
+            if (src is null)
+            {
+                ConsoleLogger.Warn("Viewer assets not found; UI will 404. Ensure WoWRollback.Viewer/assets2d exists.");
+                // Write a minimal fallback index.html to avoid 404 and provide guidance
+                var fallback = "<!doctype html><html><head><meta charset=\"utf-8\"><title>WoWRollback Viewer</title></head>" +
+                               "<body style=\"font-family:system-ui,Arial,sans-serif;padding:20px;color:#eee;background:#121212\">" +
+                               "<h2>Viewer UI assets not found</h2>" +
+                               "<p>The server is running, but index.html and JS were not copied to the viewer pack.</p>" +
+                               "<p>Expected source: WoWRollback/WoWRollback.Viewer/assets2d</p>" +
+                               "<p>Please ensure the assets exist and re-run. Data endpoints like <code>/data/index.json</code> should still work.</p>" +
+                               "</body></html>";
+                Directory.CreateDirectory(destinationRoot);
+                File.WriteAllText(Path.Combine(destinationRoot, "index.html"), fallback);
+                return;
+            }
+
+            CopyDirectoryRecursive(src, destinationRoot);
+
+            var indexHtml = Path.Combine(destinationRoot, "index.html");
+            if (File.Exists(indexHtml))
+            {
+                ConsoleLogger.Success($"Viewer UI copied: {indexHtml}");
+            }
+            else
+            {
+                ConsoleLogger.Warn($"Viewer UI copy attempted from '{src}' but index.html not found at destination.");
+            }
+        }
+        catch
+        {
+            // Non-fatal; server will 404 if UI missing
+        }
+    }
+
+    private static void CopyDirectoryRecursive(string sourceDir, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.TopDirectoryOnly))
+        {
+            var dst = Path.Combine(destinationDir, Path.GetFileName(file));
+            File.Copy(file, dst, overwrite: true);
+        }
+        foreach (var dir in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(dir);
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            CopyDirectoryRecursive(dir, Path.Combine(destinationDir, name));
+        }
     }
 }
 

@@ -142,7 +142,17 @@ public sealed class ViewerServer : IDisposable
                 return;
             }
 
-            var filePath = Path.Combine(_viewerDir!, relativePath);
+            // Remap /data/* to the viewer data root
+            string filePath;
+            if (relativePath.StartsWith("data/", StringComparison.OrdinalIgnoreCase))
+            {
+                var dataRel = relativePath.Substring("data/".Length);
+                filePath = Path.Combine(_viewerDir!, "data", dataRel);
+            }
+            else
+            {
+                filePath = Path.Combine(_viewerDir!, relativePath);
+            }
 
             if (!File.Exists(filePath))
             {

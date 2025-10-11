@@ -102,6 +102,7 @@ static void PrintUsage(string? error)
     Console.WriteLine("  --output <path>          Output root directory (default: ./parp_out)");
     Console.WriteLine("  --dbd-dir <path>         WoWDBDefs directory (default: ../lib/WoWDBDefs/definitions)");
     Console.WriteLine("  --lk-dbc-dir <path>      Lich King DBC directory (optional)");
+    Console.WriteLine("  --viewer-assets <path>   Explicit path to viewer UI assets (assets2d). If not set, auto-detect is used");
     Console.WriteLine("  --noggit-client-path <path>  Optional Noggit client path to embed in project files");
     Console.WriteLine("  --serve                  Start viewer server after pipeline");
     Console.WriteLine("  --port <number>          Viewer server port (default: 8080)");

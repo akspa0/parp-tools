@@ -35,7 +35,8 @@ internal sealed class AnalysisStageRunner
             {
                 GenerateUniqueIdCsvs = true,
                 GenerateTerrainCsvs = true,
-                GenerateOverlays = true,
+                // Disable legacy overlays under 05_viewer/overlays to avoid confusion; viewer consumes data/overlays only.
+                GenerateOverlays = false,
                 GenerateManifest = true,
                 UniqueIdGapThreshold = 100,
                 Verbose = session.Options.Verbose

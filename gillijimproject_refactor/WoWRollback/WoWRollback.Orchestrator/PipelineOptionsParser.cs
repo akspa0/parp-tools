@@ -40,7 +40,8 @@ internal static class PipelineOptionsParser
             if (string.Equals(key, "serve", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(key, "verbose", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(key, "verify", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(key, "run-verifier", StringComparison.OrdinalIgnoreCase))
+                string.Equals(key, "run-verifier", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "mpq-only", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(key);
                 continue;
@@ -100,8 +101,14 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("lk-dbc-dir", out var lkDbcDir);
         parsed.TryGetValue("community-listfile", out var communityListfile);
         parsed.TryGetValue("lk-listfile", out var lkListfile);
+        parsed.TryGetValue("minimap-root", out var minimapRoot);
+        parsed.TryGetValue("adt-root", out var adtRoot);
+        parsed.TryGetValue("viewer-label", out var viewerLabel);
+        parsed.TryGetValue("viewer-assets", out var viewerAssetsPath);
         parsed.TryGetValue("noggit-client-path", out var noggitClientPathRaw);
         parsed.TryGetValue("area-overrides", out var areaOverrides);
+        parsed.TryGetValue("mpq-root", out var mpqRoot);
+        parsed.TryGetValue("mpq-locales", out var mpqLocalesRaw);
         var noggitClientPath = !string.IsNullOrWhiteSpace(noggitClientPathRaw)
             ? noggitClientPathRaw
             : DefaultNoggitClientPath;
@@ -134,7 +141,14 @@ internal static class PipelineOptionsParser
             AreaOverrideDirectory: areaOverrides,
             Serve: flags.Contains("serve"),
             Port: port,
-            Verbose: flags.Contains("verbose"));
+            Verbose: flags.Contains("verbose"),
+            MinimapRoot: minimapRoot,
+            AdtRoot: adtRoot,
+            ViewerLabel: viewerLabel,
+            ViewerAssetsPath: viewerAssetsPath,
+            MpqRoot: mpqRoot,
+            MpqLocales: ParseLocales(mpqLocalesRaw),
+            MpqOnly: flags.Contains("mpq-only"));
 
         return true;
     }
@@ -147,5 +161,15 @@ internal static class PipelineOptionsParser
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private static IReadOnlyList<string> ParseLocales(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            // Default fallback order includes enUS and common locales
+            return new[] { "enUS", "enGB", "deDE", "frFR", "koKR", "zhCN", "zhTW", "ruRU", "esES", "esMX", "ptBR", "itIT" };
+        }
+        return SplitList(value);
     }
 }

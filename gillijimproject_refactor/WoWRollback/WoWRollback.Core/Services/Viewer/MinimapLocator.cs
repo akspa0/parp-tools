@@ -17,6 +17,30 @@ public sealed class MinimapLocator
         _testDataRoot = testDataRoot;
     }
 
+    private void LoadVersionFromProvider(string versionKey, IMinimapProvider provider)
+    {
+        // Ensure version entry exists
+        if (!_versionMapTiles.TryGetValue(versionKey, out var mapTiles))
+        {
+            mapTiles = new Dictionary<string, Dictionary<(int, int), MinimapTile>>(StringComparer.OrdinalIgnoreCase);
+            _versionMapTiles[versionKey] = mapTiles;
+        }
+
+        foreach (var (Map, X, Y, Open) in provider.Enumerate())
+        {
+            if (!mapTiles.TryGetValue(Map, out var tiles))
+            {
+                tiles = new Dictionary<(int, int), MinimapTile>();
+                mapTiles[Map] = tiles;
+            }
+            var key = (Y, X); // Row=Y, Col=X
+            if (!tiles.ContainsKey(key))
+            {
+                tiles[key] = new MinimapTile(SourcePath: null, TileX: X, TileY: Y, Version: versionKey, IsAlternate: false, StreamFactory: Open);
+            }
+        }
+    }
+
     public static MinimapLocator Build(string rootDirectory, IReadOnlyList<string> versions)
     {
         var comparer = StringComparer.OrdinalIgnoreCase;
@@ -35,6 +59,45 @@ public sealed class MinimapLocator
             try
             {
                 locator.LoadVersion(versionKey, versionDirectory);
+            }
+            catch
+            {
+                // Ignore individual version failures; viewer can fall back to placeholders.
+            }
+        }
+
+        return locator;
+    }
+
+    /// <summary>
+    /// Build a locator, optionally using a provider factory per version (e.g., MPQ provider).
+    /// If a provider is returned for a version, entries are sourced from it; otherwise filesystem discovery is used.
+    /// </summary>
+    public static MinimapLocator Build(string rootDirectory, IReadOnlyList<string> versions, Func<string, IMinimapProvider?>? providerFactory)
+    {
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var versionMapTiles = new Dictionary<string, Dictionary<string, Dictionary<(int, int), MinimapTile>>>(comparer);
+        var testDataRoot = DetectTestDataRoot(rootDirectory);
+
+        if (string.IsNullOrWhiteSpace(rootDirectory) || versions.Count == 0)
+            return new MinimapLocator(versionMapTiles, testDataRoot);
+
+        var versionDirectories = ResolveVersionDirectories(rootDirectory, versions);
+        var locator = new MinimapLocator(versionMapTiles, testDataRoot);
+
+        foreach (var (versionKey, versionDirectory) in versionDirectories.OrderBy(kvp => kvp.Key, comparer))
+        {
+            try
+            {
+                var provider = providerFactory?.Invoke(versionKey);
+                if (provider is not null)
+                {
+                    locator.LoadVersionFromProvider(versionKey, provider);
+                }
+                else
+                {
+                    locator.LoadVersion(versionKey, versionDirectory);
+                }
             }
             catch
             {
@@ -497,9 +560,9 @@ public sealed class MinimapLocator
             yield return kv;
     }
 
-    public readonly record struct MinimapTile(string SourcePath, int TileX, int TileY, string Version, bool IsAlternate)
+    public readonly record struct MinimapTile(string? SourcePath, int TileX, int TileY, string Version, bool IsAlternate, Func<Stream>? StreamFactory = null)
     {
-        public Stream Open() => File.OpenRead(SourcePath);
+        public Stream Open() => StreamFactory is not null ? StreamFactory() : File.OpenRead(SourcePath!);
 
         public string BuildFileName(string mapName) => $"{mapName}_{TileX}_{TileY}{(IsAlternate ? "__alt" : string.Empty)}.webp";
     }
