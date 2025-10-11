@@ -117,6 +117,81 @@ parp_out/session_20251007_012032/
 
 ---
 
+## 🧩 Supplying MPQ Root and Loose Assets
+
+### MPQ-backed minimaps (old command line)
+
+This example matches the legacy invocation and serves the viewer.
+
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- `
+  --maps development `
+  --versions 3.3.5 `
+  --alpha-root ..\test_data `
+  --mpq-root J:\wowDev\modernwow `
+  --mpq-locales enUS `
+  --viewer-label 335 `
+  --serve `
+  --viewer-assets ".\WoWRollback.Viewer\assets2d"
+```
+
+Notes:
+- **StormLib.dll** is auto-copied from the bundled WoWTools.Minimaps during `scripts/setup-build.ps1`.
+- MPQ minimap enumeration is enabled automatically when you also supply listfiles (recommended):
+
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- `
+  --maps development `
+  --versions 3.3.5 `
+  --alpha-root ..\test_data `
+  --mpq-root J:\wowDev\modernwow `
+  --mpq-locales enUS `
+  --community-listfile "J:\path\to\community-listfile.txt" `
+  --lk-listfile "J:\path\to\lk-listfile.txt" `
+  --viewer-label 335 `
+  --serve `
+  --viewer-assets ".\WoWRollback.Viewer\assets2d"
+```
+
+### Loose ADTs overlay (no MPQ patching)
+
+Prefer a folder of loose ADTs/WDTs over the base filesystem. The orchestrator materializes a merged view in `03_adts/` before conversion.
+
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- `
+  --maps development `
+  --versions 3.3.5 `
+  --alpha-root ..\test_data `
+  --adt-overlay-root J:\my_loose_maps `
+  --viewer-label 335 `
+  --serve `
+  --viewer-assets ".\WoWRollback.Viewer\assets2d"
+```
+
+Tips:
+- Use `--adt-root <path>` if your base ADTs live outside `--alpha-root`.
+- Overlay files are copied first; missing tiles are filled from the base.
+
+### Loose minimap tiles (filesystem directory)
+
+Point the viewer pack at a minimap directory instead of MPQs.
+
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- `
+  --maps development `
+  --versions 3.3.5 `
+  --alpha-root ..\test_data `
+  --minimap-root J:\my_loose_minimaps `
+  --viewer-label 335 `
+  --serve `
+  --viewer-assets ".\WoWRollback.Viewer\assets2d"
+```
+
+Note:
+- To prefer the directory, omit `--community-listfile`/`--lk-listfile`. If listfiles are provided, MPQ minimap enumeration takes precedence.
+
+---
+
 ## 🏗️ Architecture
 
 ### Modular Design
