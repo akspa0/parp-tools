@@ -65,7 +65,7 @@ function Get-MSBuildPath {
   return $null
 }
 
-function Ensure-Repo([string]$url, [string]$path, [string]$branch = $null) {
+function Ensure-Repo([string]$url, [string]$path, [string]$branch = $null, [switch]$Recurse) {
   if (Test-Path $path) {
     Write-Info "Updating repo: $path"
     & $git -C $path fetch --all --prune
@@ -76,19 +76,55 @@ function Ensure-Repo([string]$url, [string]$path, [string]$branch = $null) {
   } else {
     Write-Info "Cloning $url -> $path"
     New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
-    & $git clone $url $path
+    if ($Recurse) { & $git clone --recurse-submodules $url $path } else { & $git clone $url $path }
     if ($branch) { try { & $git -C $path checkout $branch } catch { Write-Warn "Could not checkout $branch; using default." } }
+  }
+}
+
+# Ensure git submodules are initialized and up-to-date (recursive)
+function Ensure-Submodules([string]$path) {
+  if (Test-Path $path) {
+    Write-Info "Syncing submodules: $path"
+    try {
+      & $git -C $path submodule sync --recursive | Write-Host
+      & $git -C $path submodule update --init --recursive | Write-Host
+    } catch {
+      Write-Warn "Submodule sync/update failed for $path: $($_.Exception.Message)"
+    }
   }
 }
 
 # Repos to ensure
 $lib = Join-Path $RepoRoot 'lib'
-$nextLibs = Join-Path $RepoRoot 'next' | Join-Path -ChildPath 'libs'
+$next = Join-Path $RepoRoot 'next'
+$nextLibs = Join-Path $next 'libs'
 
 Ensure-Repo 'https://github.com/ladislav-zezula/StormLib' (Join-Path $lib 'StormLib')
 Ensure-Repo 'https://github.com/ModernWoWTools/Warcraft.NET/' (Join-Path $lib 'Warcraft.NET')
 Ensure-Repo 'https://github.com/wowdev/WoWDBDefs.git' (Join-Path $lib 'WoWDBDefs')
-Ensure-Repo 'https://github.com/Marlamin/wow.tools.local' (Join-Path $nextLibs 'wow.tools.local')
+${wowLocalLib} = Join-Path $lib 'wow.tools.local'
+Write-Info "Ensuring wow.tools.local at: ${wowLocalLib}"
+Ensure-Repo 'https://github.com/Marlamin/wow.tools.local' ${wowLocalLib} -Recurse
+if (Test-Path ${wowLocalLib}) {
+  Write-Ok "wow.tools.local present: ${wowLocalLib}"
+  Ensure-Submodules ${wowLocalLib}
+} else {
+  Write-Err "wow.tools.local not found at expected path: ${wowLocalLib}. Retrying clone..."
+  Ensure-Repo 'https://github.com/Marlamin/wow.tools.local' ${wowLocalLib} -Recurse
+  if (Test-Path ${wowLocalLib}) {
+    Write-Ok "wow.tools.local cloned on retry: ${wowLocalLib}"
+    Ensure-Submodules ${wowLocalLib}
+  } else {
+    Write-Err "Failed to obtain wow.tools.local. Please check network or permissions."
+  }
+}
+
+# Back-compat: if legacy location exists under next\libs, sync submodules too
+${wowLocalLegacy} = Join-Path $nextLibs 'wow.tools.local'
+if (Test-Path ${wowLocalLegacy}) {
+  Write-Warn "Legacy wow.tools.local detected at: ${wowLocalLegacy} (preferring ${wowLocalLib})"
+  Ensure-Submodules ${wowLocalLegacy}
+}
 
 # Build/deploy native StormLib via CMake + VS2022 when possible (dotnet-first: do not hard-require toolchains)
 $stormlibSrc = Join-Path $lib 'StormLib'
