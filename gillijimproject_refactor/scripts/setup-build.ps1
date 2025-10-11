@@ -4,6 +4,8 @@ param(
   [string]$MpqRoot,
   [string]$MpqLocales = "enUS,enGB,deDE,frFR,koKR,zhCN,zhTW,ruRU,esES,esMX,ptBR,itIT",
   [switch]$SkipNative,
+  [switch]$EnableNative,
+  [string]$StormLibPrebuilt,
   [switch]$RestoreOnly,
   [switch]$NoPrompt,
   [switch]$Verbose
@@ -31,6 +33,20 @@ function Ensure-Exe([string]$exe) {
 
 $git = Ensure-Exe 'git'
 $dotnet = Ensure-Exe 'dotnet'
+
+# Try to locate CMake (PATH or VS2022 bundled copy)
+function Get-CMakePath {
+  $cm = Get-Command cmake -ErrorAction SilentlyContinue
+  if ($cm) { return $cm.Path }
+  $vsCmakeCandidates = @(
+    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe",
+    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Professional\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe",
+    "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
+  )
+  $cand = $vsCmakeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($cand) { return $cand }
+  return $null
+}
 
 # vswhere (for MSBuild)
 function Get-MSBuildPath {
@@ -74,32 +90,73 @@ Ensure-Repo 'https://github.com/ModernWoWTools/Warcraft.NET/' (Join-Path $lib 'W
 Ensure-Repo 'https://github.com/wowdev/WoWDBDefs.git' (Join-Path $lib 'WoWDBDefs')
 Ensure-Repo 'https://github.com/Marlamin/wow.tools.local' (Join-Path $nextLibs 'wow.tools.local')
 
-# Build native StormLib
-$stormlibSln = Join-Path $lib 'StormLib' | Join-Path -ChildPath 'StormLib.sln'
+# Build/deploy native StormLib via CMake + VS2022 when possible (dotnet-first: do not hard-require toolchains)
+$stormlibSrc = Join-Path $lib 'StormLib'
+$stormlibSln = Join-Path $stormlibSrc 'StormLib.sln'
+$buildDir = Join-Path $stormlibSrc 'build\vs2022'
 $nativeOut = Join-Path $RepoRoot 'WoWRollback' | Join-Path -ChildPath 'WoWRollback.Mpq' | Join-Path -ChildPath 'runtimes\win-x64\native'
 New-Item -ItemType Directory -Force -Path $nativeOut | Out-Null
 
-if (-not $SkipNative) {
-  $msbuild = Get-MSBuildPath
-  if (-not $msbuild) { throw 'MSBuild not found. Install Visual Studio Build Tools or ensure msbuild.exe is on PATH.' }
-  if (-not (Test-Path $stormlibSln)) { throw "StormLib solution not found: $stormlibSln" }
+# 1) Prebuilt override
+if ($StormLibPrebuilt) {
+  if (Test-Path $StormLibPrebuilt) {
+    Copy-Item -Force $StormLibPrebuilt (Join-Path $nativeOut 'StormLib.dll')
+    Write-Ok "StormLib.dll deployed from prebuilt -> $nativeOut"
+  } else {
+    Write-Warn "StormLibPrebuilt not found: $StormLibPrebuilt"
+  }
+}
 
-  Write-Info "Building StormLib (x64|$Config) via $msbuild"
-  & $msbuild $stormlibSln /m /p:Configuration=$Config /p:Platform=x64 | Write-Host
+# 2) If already present, nothing else to do
+if (Test-Path (Join-Path $nativeOut 'StormLib.dll')) {
+  Write-Info "StormLib.dll already present in runtimes; skipping native steps."
+}
+elseif (-not $SkipNative) {
+  # Prefer CMake + VS2022 when available
+  $cmake = Get-CMakePath
+  if ($cmake) {
+    Write-Info "Configuring StormLib with CMake (VS2022, x64)"
+    New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+    & $cmake -S $stormlibSrc -B $buildDir -G "Visual Studio 17 2022" -A x64 | Write-Host
+    Write-Info "Building StormLib_dll via CMake"
+    & $cmake --build $buildDir --config $Config --target StormLib_dll -- /m | Write-Host
+  } else {
+    Write-Warn "CMake not found; skipping CMake generation."
+  }
 
-  # Candidate outputs
+  # Try copying from likely CMake/MSBuild output folders
   $candidates = @(
+    (Join-Path $buildDir "bin\StormLib_dll\x64" | Join-Path -ChildPath "$Config\StormLib.dll"),
+    (Join-Path $buildDir "$Config" | Join-Path -ChildPath 'StormLib.dll'),
     (Join-Path $lib 'StormLib\bin\StormLib_dll\x64' | Join-Path -ChildPath "$Config\StormLib.dll"),
     (Join-Path $lib 'StormLib\bin\x64' | Join-Path -ChildPath "$Config\StormLib.dll"),
     (Join-Path $lib 'StormLib\StormLib\bin\x64' | Join-Path -ChildPath "$Config\StormLib.dll"),
     (Join-Path $lib 'StormLib\build\x64' | Join-Path -ChildPath "$Config\StormLib.dll")
   )
-
   $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if (-not $found) { Write-Warn "StormLib.dll not found after build. Candidates: `n  - $($candidates -join "`n  - ")" }
-  else {
+  if ($found) {
     Copy-Item -Force $found (Join-Path $nativeOut 'StormLib.dll')
     Write-Ok "StormLib.dll deployed -> $nativeOut"
+  } elseif ($EnableNative) {
+    # As a last resort, allow MSBuild path if explicitly requested
+    $msbuild = Get-MSBuildPath
+    if (-not $msbuild) {
+      Write-Warn "MSBuild not found; cannot run fallback native build. Provide -StormLibPrebuilt or install VS Build Tools."
+    } elseif (-not (Test-Path $stormlibSln)) {
+      Write-Warn "StormLib solution not found: $stormlibSln"
+    } else {
+      Write-Info "Building StormLib (x64|$Config) via MSBuild fallback"
+      & $msbuild $stormlibSln /m /p:Configuration=$Config /p:Platform=x64 | Write-Host
+      $foundAfter = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+      if ($foundAfter) {
+        Copy-Item -Force $foundAfter (Join-Path $nativeOut 'StormLib.dll')
+        Write-Ok "StormLib.dll deployed -> $nativeOut"
+      } else {
+        Write-Warn "StormLib.dll not found after fallback build. Candidates: `n  - $($candidates -join "`n  - ")"
+      }
+    }
+  } else {
+    Write-Info "Native build not enabled and no DLL found. Supply -StormLibPrebuilt or install CMake/VS2022 to build."
   }
 }
 
