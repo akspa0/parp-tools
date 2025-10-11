@@ -102,6 +102,14 @@ $nextLibs = Join-Path $next 'libs'
 Ensure-Repo 'https://github.com/ladislav-zezula/StormLib' (Join-Path $lib 'StormLib')
 Ensure-Repo 'https://github.com/ModernWoWTools/Warcraft.NET/' (Join-Path $lib 'Warcraft.NET')
 Ensure-Repo 'https://github.com/wowdev/WoWDBDefs.git' (Join-Path $lib 'WoWDBDefs')
+Ensure-Repo 'https://github.com/vpenades/SharpGLTF' (Join-Path $lib 'SharpGLTF')
+
+# Verify SharpGLTF csproj paths used by WDLtoGLB
+$sharpCore = Join-Path $lib 'SharpGLTF\src\SharpGLTF.Core\SharpGLTF.Core.csproj'
+$sharpToolkit = Join-Path $lib 'SharpGLTF\src\SharpGLTF.Toolkit\SharpGLTF.Toolkit.csproj'
+if ((-not (Test-Path $sharpCore)) -or (-not (Test-Path $sharpToolkit))) {
+  Write-Warn ("SharpGLTF project files not found at expected paths:\n  - {0}\n  - {1}\nIf build fails, consider cleaning and recloning SharpGLTF, or switch to NuGet for SharpGLTF.Toolkit." -f $sharpCore, $sharpToolkit)
+}
 ${wowLocalLib} = Join-Path $lib 'wow.tools.local'
 Write-Info "Ensuring wow.tools.local at: ${wowLocalLib}"
 Ensure-Repo 'https://github.com/Marlamin/wow.tools.local' ${wowLocalLib} -Recurse
