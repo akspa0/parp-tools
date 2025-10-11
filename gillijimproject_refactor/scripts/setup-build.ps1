@@ -89,7 +89,7 @@ function Ensure-Submodules([string]$path) {
       & $git -C $path submodule sync --recursive | Write-Host
       & $git -C $path submodule update --init --recursive | Write-Host
     } catch {
-      Write-Warn "Submodule sync/update failed for $path: $($_.Exception.Message)"
+      Write-Warn ("Submodule sync/update failed for {0}: {1}" -f $path, $_.Exception.Message)
     }
   }
 }
