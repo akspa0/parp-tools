@@ -130,6 +130,13 @@ function initializeMap() {
     // At zoom 4, only ~16-25 tiles will be loaded initially instead of all 2252
     map.setView([4, 4], 4);  // Slightly offset from 0,0 to show border
     console.log('Map initialized with WoW coordinate system (0,0 = NW), starting at top-left');
+    
+    // Trigger initial overlay load after map is settled
+    setTimeout(() => {
+        if (document.getElementById('showClusters')?.checked) {
+            loadAndRenderClusters();
+        }
+    }, 500);
 }
 
 // Dynamic radius scaling based on zoom level
@@ -335,15 +342,54 @@ async function loadAndRenderClusters() {
                     });
                     circle._baseRadius = baseRadius; // Store for zoom rescaling
                     
-                    circle.bindPopup(`
-                        <div style="padding: 6px;">
-                            <strong>Cluster #${cluster.clusterId}</strong><br>
-                            <strong>Objects:</strong> ${cluster.objectCount}<br>
-                            ${cluster.isStamp ? '<strong style="color: #FF6B6B;">⭐ Placement Stamp</strong><br>' : ''}
-                            <strong>Position:</strong> ${cluster.centroid.x.toFixed(1)}, ${cluster.centroid.y.toFixed(1)}, ${cluster.centroid.z.toFixed(1)}<br>
-                            <strong>Tile:</strong> ${row}_${col}
+                    // Build detailed popup
+                    const bounds = cluster.bounds;
+                    const size = {
+                        x: (bounds.maxX - bounds.minX).toFixed(1),
+                        y: (bounds.maxY - bounds.minY).toFixed(1),
+                        z: (bounds.maxZ - bounds.minZ).toFixed(1)
+                    };
+                    
+                    const popupHtml = `
+                        <div style="min-width: 280px; padding: 8px; font-size: 12px;">
+                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">
+                                Cluster #${cluster.clusterId}
+                                ${cluster.isStamp ? ' <span style="color: #FF6B6B;">⭐ Stamp</span>' : ''}
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin-bottom: 8px;">
+                                <strong>Objects:</strong><span>${cluster.objectCount}</span>
+                                <strong>Radius:</strong><span>${cluster.radius.toFixed(1)}m</span>
+                                <strong>Consecutive:</strong><span>${cluster.hasConsecutiveIds ? 'Yes' : 'No'}</span>
+                                <strong>Tile:</strong><span>${row}_${col}</span>
+                            </div>
+                            
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+                                <strong>Centroid:</strong><br>
+                                <div style="margin-left: 8px; font-family: monospace; font-size: 11px;">
+                                    X: ${cluster.centroid.x.toFixed(2)}<br>
+                                    Y: ${cluster.centroid.y.toFixed(2)}<br>
+                                    Z: ${cluster.centroid.z.toFixed(2)}
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+                                <strong>Bounding Box:</strong><br>
+                                <div style="margin-left: 8px; font-family: monospace; font-size: 11px;">
+                                    Size: ${size.x} × ${size.y} × ${size.z}m<br>
+                                    Min: (${bounds.minX.toFixed(1)}, ${bounds.minY.toFixed(1)}, ${bounds.minZ.toFixed(1)})<br>
+                                    Max: (${bounds.maxX.toFixed(1)}, ${bounds.maxY.toFixed(1)}, ${bounds.maxZ.toFixed(1)})
+                                </div>
+                            </div>
+                            
+                            ${!cluster.objects ? '<div style="margin-top: 8px; padding: 4px; background: #f0f0f0; font-size: 10px; color: #666;">⚠️ Object details require backend export</div>' : ''}
                         </div>
-                    `);
+                    `;
+                    
+                    circle.bindPopup(popupHtml, {
+                        maxWidth: 350,
+                        closeButton: true
+                    });
                     
                     circle.addTo(layerGroup);
                 });

@@ -84,26 +84,24 @@ export class OverlayManager {
     async loadAndRenderTile(mapName, version, tileRow, tileCol) {
         const tileKey = `r${tileRow}_c${tileCol}`;
         
-        // Shadow maps disabled - needs reimplementation
-        // if (this.layers.shadowMaps && 
-        //     (this.layers.shadowMaps.mapName !== mapName || this.layers.shadowMaps.version !== version)) {
-        //     this.layers.shadowMaps.mapName = mapName;
-        //     this.layers.shadowMaps.version = version;
-        // }
-        
         // Check if already loaded
         if (this.loadedTiles.has(tileKey)) {
             this.renderTile(this.loadedTiles.get(tileKey), tileRow, tileCol);
             return;
         }
 
-        // Load overlay JSON
-        const overlayPath = `overlays/${version}/${mapName}/terrain_complete/tile_${tileKey}.json`;
+        // Load overlay JSON - use consistent tile_{col}_{row} format
+        const overlayPath = `overlays/${version}/${mapName}/terrain_complete/tile_${tileCol}_${tileRow}.json`;
         
         try {
             const response = await fetch(overlayPath);
             if (!response.ok) {
-                // Silently skip - terrain data is sparse, most tiles won't have overlays
+                // Log first few failures for debugging
+                if (!this._warnedMissingData) {
+                    console.warn(`[OverlayManager] Terrain data not found: ${overlayPath}`);
+                    console.warn('[OverlayManager] Terrain overlays require MCNK data export from analysis tool');
+                    this._warnedMissingData = true;
+                }
                 return;
             }
 
@@ -115,14 +113,13 @@ export class OverlayManager {
             // Render the tile
             this.renderTile(data, tileRow, tileCol);
             
-            // Shadow maps disabled - needs reimplementation
-            // if (this.layers.shadowMaps) {
-            //     await this.layers.shadowMaps.loadTile(tileRow, tileCol);
-            // }
+            console.log(`[OverlayManager] Loaded terrain overlay for tile ${tileRow}_${tileCol}`);
             
         } catch (error) {
-            // Silently skip - terrain data is sparse, most tiles won't have overlays
-            // Uncomment for debugging: console.error(`Failed to load overlay ${overlayPath}:`, error);
+            if (!this._warnedError) {
+                console.error(`[OverlayManager] Failed to load overlay ${overlayPath}:`, error);
+                this._warnedError = true;
+            }
         }
     }
 
@@ -168,31 +165,34 @@ export class OverlayManager {
     getVisibleTiles(bounds) {
         const tiles = [];
         
-        const latS = bounds.getSouth();
-        const latN = bounds.getNorth();
-        const west = bounds.getWest();
-        const east = bounds.getEast();
+        // Use WoW coordinate transformation if needed
+        let minRow, maxRow, minCol, maxCol;
+        
+        if (this.isWowTools()) {
+            // Convert Leaflet bounds to ADT tile coordinates (Y-axis inversion)
+            minRow = Math.max(0, Math.floor(63 - bounds.getNorth()) - 1);
+            maxRow = Math.min(63, Math.ceil(63 - bounds.getSouth()) + 1);
+        } else {
+            minRow = Math.max(0, Math.floor(bounds.getSouth()) - 1);
+            maxRow = Math.min(63, Math.ceil(bounds.getNorth()) + 1);
+        }
+        
+        minCol = Math.max(0, Math.floor(bounds.getWest()) - 1);
+        maxCol = Math.min(63, Math.ceil(bounds.getEast()) + 1);
 
-        // Convert to tile coordinates
-        const rowNorth = this.latToRow(latN);
-        const rowSouth = this.latToRow(latS);
-        const minRow = Math.floor(Math.min(rowNorth, rowSouth));
-        const maxRow = Math.ceil(Math.max(rowNorth, rowSouth));
-        const minCol = Math.floor(west);
-        const maxCol = Math.ceil(east);
-
-        // Clamp to valid range (0-63)
-        for (let r = Math.max(0, minRow); r <= Math.min(63, maxRow); r++) {
-            for (let c = Math.max(0, minCol); c <= Math.min(63, maxCol); c++) {
+        // Generate visible tiles
+        for (let r = minRow; r <= maxRow; r++) {
+            for (let c = minCol; c <= maxCol; c++) {
                 tiles.push({ row: r, col: c });
             }
         }
 
         return tiles;
     }
-
-    latToRow(lat) {
-        return 63 - lat;
+    
+    isWowTools() {
+        // Check if using WoW coordinate system
+        return window.state && window.state.config && window.state.config.coordMode === 'wowtools';
     }
 
     cleanupDistantTiles(visibleTiles) {

@@ -15,6 +15,16 @@ namespace WoWRollback.AnalysisModule;
 /// </summary>
 public sealed class AnalysisViewerAdapter
 {
+    private static StreamWriter? _logWriter;
+    
+    private static void Log(string message)
+    {
+        var msg = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
+        Console.WriteLine(msg);
+        _logWriter?.WriteLine(msg);
+        _logWriter?.Flush();
+    }
+    
     public string GenerateViewer(
         string placementsCsvPath,
         string mapName,
@@ -23,6 +33,11 @@ public sealed class AnalysisViewerAdapter
     {
         try
         {
+            // Setup logging
+            var logPath = Path.Combine(outputDir, "analysis_debug.log");
+            _logWriter = new StreamWriter(logPath, append: false);
+            Log($"=== Analysis started for map '{mapName}' ===");
+            
             // Create synthetic version for analysis
             const string syntheticVersion = "analysis";
             
@@ -35,40 +50,45 @@ public sealed class AnalysisViewerAdapter
             // Load placements from CSV
             var placements = LoadPlacementsFromCsv(placementsCsvPath, mapName);
             
-            Console.WriteLine($"[AnalysisViewerAdapter] Loaded {placements.Count} placements");
+            Log($"Loaded {placements.Count} placements from CSV");
             
             if (placements.Count == 0)
             {
-                Console.WriteLine("[AnalysisViewerAdapter] No placements found in CSV");
+                Log("No placements found in CSV");
                 return string.Empty;
             }
 
-            // Debug: Show tile distribution
+            // Debug: Show tile distribution IMMEDIATELY after CSV load
             var tileGroups = placements.GroupBy(p => (p.TileRow, p.TileCol)).OrderBy(g => g.Key.TileRow).ThenBy(g => g.Key.TileCol).ToList();
-            Console.WriteLine($"[AnalysisViewerAdapter] Placements span {tileGroups.Count} tiles");
+            Log($"AFTER CSV LOAD: Placements span {tileGroups.Count} tiles");
+            
+            // Count entries with (0,0) vs others
+            var tile00Count = placements.Count(p => p.TileRow == 0 && p.TileCol == 0);
+            var otherTilesCount = placements.Count - tile00Count;
+            Log($"AFTER CSV LOAD: Tile (0,0)={tile00Count}, Other tiles={otherTilesCount}");
             if (tileGroups.Count > 0 && tileGroups.Count <= 10)
             {
                 foreach (var tg in tileGroups)
                 {
                     var m2Count = tg.Count(p => p.Kind == PlacementKind.M2);
                     var wmoCount = tg.Count(p => p.Kind == PlacementKind.WMO);
-                    Console.WriteLine($"[AnalysisViewerAdapter]   Tile (row={tg.Key.TileRow}, col={tg.Key.TileCol}): {tg.Count()} objects (M2={m2Count}, WMO={wmoCount})");
+                    Log($"  Tile (row={tg.Key.TileRow}, col={tg.Key.TileCol}): {tg.Count()} objects (M2={m2Count}, WMO={wmoCount})");
                 }
             }
             else if (tileGroups.Count > 0)
             {
                 var first = tileGroups[0];
                 var last = tileGroups[^1];
-                Console.WriteLine($"[AnalysisViewerAdapter]   First tile: (row={first.Key.TileRow}, col={first.Key.TileCol}) with {first.Count()} objects");
-                Console.WriteLine($"[AnalysisViewerAdapter]   Last tile: (row={last.Key.TileRow}, col={last.Key.TileCol}) with {last.Count()} objects");
+                Log($"  First tile: (row={first.Key.TileRow}, col={first.Key.TileCol}) with {first.Count()} objects");
+                Log($"  Last tile: (row={last.Key.TileRow}, col={last.Key.TileCol}) with {last.Count()} objects");
             }
             
             // Debug: Show sample entries
             var sampleEntry = placements.FirstOrDefault();
             if (sampleEntry != null)
             {
-                Console.WriteLine($"[AnalysisViewerAdapter] Sample entry: Map={sampleEntry.Map}, TileRow={sampleEntry.TileRow}, TileCol={sampleEntry.TileCol}, Version={sampleEntry.Version}, Kind={sampleEntry.Kind}");
-                Console.WriteLine($"[AnalysisViewerAdapter] Sample coords: World=({sampleEntry.WorldX:F1}, {sampleEntry.WorldY:F1}, {sampleEntry.WorldZ:F1}), Path={sampleEntry.AssetPath}");
+                Log($"Sample entry: Map={sampleEntry.Map}, TileRow={sampleEntry.TileRow}, TileCol={sampleEntry.TileCol}, Version={sampleEntry.Version}, Kind={sampleEntry.Kind}");
+                Log($"Sample coords: World=({sampleEntry.WorldX:F1}, {sampleEntry.WorldY:F1}, {sampleEntry.WorldZ:F1}), Path={sampleEntry.AssetPath}");
             }
             
             // CRITICAL: Add entries for ALL minimap tiles, even if they have no placements
@@ -110,9 +130,14 @@ public sealed class AnalysisViewerAdapter
                     }
                 }
                 
-                Console.WriteLine($"[AnalysisViewerAdapter] Total placements after minimap tiles: {placements.Count}");
+                Log($"Total placements after minimap tiles: {placements.Count}");
             }
 
+            // FINAL CHECK: Verify data right before passing to ViewerReportWriter
+            var finalTile00Count = placements.Count(p => p.TileRow == 0 && p.TileCol == 0);
+            var finalOtherTilesCount = placements.Count - finalTile00Count;
+            Log($"BEFORE ViewerReportWriter: Tile (0,0)={finalTile00Count}, Other tiles={finalOtherTilesCount}");
+            
             // Convert to VersionComparisonResult format
             var result = new VersionComparisonResult(
                 RootDirectory: outputDir,
@@ -178,12 +203,18 @@ public sealed class AnalysisViewerAdapter
                 }
             }
 
+            Log("=== Analysis completed successfully ===");
+            _logWriter?.Close();
+            _logWriter = null;
+            
             return viewerRoot;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AnalysisViewerAdapter] Critical error generating viewer: {ex.Message}");
-            Console.WriteLine($"[AnalysisViewerAdapter] Stack trace: {ex.StackTrace}");
+            Log($"CRITICAL ERROR: {ex.Message}");
+            Log($"Stack trace: {ex.StackTrace}");
+            _logWriter?.Close();
+            _logWriter = null;
             return string.Empty;
         }
     }
@@ -236,7 +267,7 @@ public sealed class AnalysisViewerAdapter
                     ? PlacementKind.M2
                     : PlacementKind.WMO;
 
-                entries.Add(new AssetTimelineDetailedEntry(
+                var entry = new AssetTimelineDetailedEntry(
                     Version: "analysis",
                     Map: mapName,
                     TileRow: tileY,  // tile_y → TileRow (Y is vertical/row)
@@ -266,7 +297,15 @@ public sealed class AnalysisViewerAdapter
                     Flags: 0,
                     DoodadSet: 0,
                     NameSet: 0
-                ));
+                );
+                
+                entries.Add(entry);
+                
+                // Debug: Log first few entries AND some from different tiles
+                if (parsedCount < 5 || (parsedCount % 1000 == 0 && parsedCount < 10000))
+                {
+                    Log($"CSV Entry {parsedCount}: Map={entry.Map}, TileRow={entry.TileRow}, TileCol={entry.TileCol}, WorldX={entry.WorldX:F1}, WorldZ={entry.WorldZ:F1}, UID={entry.UniqueId}");
+                }
                 
                 parsedCount++;
             }

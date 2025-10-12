@@ -48,21 +48,38 @@ public sealed class AdtPlacementsExtractor
             }
 
             var csv = new StringBuilder();
-            csv.AppendLine("map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set");
+            csv.AppendLine("map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set,source_file");
 
             int m2Count = 0;
             int wmoCount = 0;
             int tilesProcessed = 0;
+            int tile00Count = 0;
+
+            Console.WriteLine($"[AdtPlacementsExtractor] Processing {tiles.Count} tiles...");
 
             foreach (var (tileX, tileY, format) in tiles)
             {
                 try
                 {
+                    var sourceFile = format == AdtFormatDetector.AdtFormat.Cataclysm
+                        ? $"{mapName}_{tileX}_{tileY}_obj0.adt"
+                        : $"{mapName}_{tileX}_{tileY}.adt";
+                    
                     var placements = ExtractTilePlacements(mapDirectory, mapName, tileX, tileY, format);
+                    
+                    if (tileX == 0 && tileY == 0)
+                    {
+                        Console.WriteLine($"[AdtPlacementsExtractor] Tile (0,0): Found {placements.Count} placements in {sourceFile}");
+                        tile00Count = placements.Count;
+                    }
+                    else if (placements.Count > 0 && tilesProcessed < 5)
+                    {
+                        Console.WriteLine($"[AdtPlacementsExtractor] Tile ({tileX},{tileY}): Found {placements.Count} placements in {sourceFile}");
+                    }
                     
                     foreach (var p in placements)
                     {
-                        csv.AppendLine(FormatPlacementCsv(p));
+                        csv.AppendLine(FormatPlacementCsv(p, sourceFile));
                         
                         if (p.Type == "M2")
                             m2Count++;
@@ -71,13 +88,20 @@ public sealed class AdtPlacementsExtractor
                     }
 
                     tilesProcessed++;
+                    
+                    if (tilesProcessed % 10 == 0)
+                    {
+                        Console.WriteLine($"[AdtPlacementsExtractor] Progress: {tilesProcessed}/{tiles.Count} tiles, {m2Count + wmoCount} placements");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[AdtPlacementsExtractor] Warning: Failed to process tile {tileX}_{tileY}: {ex.Message}");
+                    Console.WriteLine($"[AdtPlacementsExtractor] Warning: Failed to process tile ({tileX},{tileY}): {ex.Message}");
                     // Continue processing other tiles
                 }
             }
+            
+            Console.WriteLine($"[AdtPlacementsExtractor] Summary: Tile (0,0) had {tile00Count} placements, Total tiles={tilesProcessed}");
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputCsvPath)!);
             File.WriteAllText(outputCsvPath, csv.ToString());
@@ -293,7 +317,7 @@ public sealed class AdtPlacementsExtractor
         return lookup;
     }
 
-    private static string FormatPlacementCsv(PlacementRecord p)
+    private static string FormatPlacementCsv(PlacementRecord p, string sourceFile)
     {
         return string.Join(",",
             Csv(p.Map),
@@ -310,7 +334,8 @@ public sealed class AdtPlacementsExtractor
             p.RotZ.ToString("F6", CultureInfo.InvariantCulture),
             p.Scale.ToString(CultureInfo.InvariantCulture),
             p.DoodadSet?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-            p.NameSet?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
+            p.NameSet?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            Csv(sourceFile));
     }
 
     private static string Csv(string value)

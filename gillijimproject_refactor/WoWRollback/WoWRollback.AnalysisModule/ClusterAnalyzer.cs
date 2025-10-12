@@ -175,7 +175,8 @@ public sealed class ClusterAnalyzer
                 {
                     clusterId = c.ClusterId,
                     objectCount = c.ObjectCount,
-                    centroid = new { x = c.CentroidX, y = c.CentroidY, z = c.CentroidZ },
+                    // FIX: CSV has world_y=altitude, world_z=Y-coord. Swap for correct display
+                    centroid = new { x = c.CentroidX, y = c.CentroidZ, z = c.CentroidY },
                     boundingRadius = c.BoundingRadius,
                     uniqueIdRange = new { min = c.UniqueIdMin, max = c.UniqueIdMax },
                     uniqueIds = c.UniqueIds,
@@ -204,7 +205,8 @@ public sealed class ClusterAnalyzer
                 {
                     clusterId = i.ClusterId,
                     objectCount = i.ObjectCount,
-                    centroid = new { x = i.CentroidX, y = i.CentroidY, z = i.CentroidZ },
+                    // FIX: CSV has world_y=altitude, world_z=Y-coord. Swap for correct display
+                    centroid = new { x = i.CentroidX, y = i.CentroidZ, z = i.CentroidY },
                     boundingRadius = i.BoundingRadius,
                     uniqueIdRange = new { min = i.UniqueIdMin, max = i.UniqueIdMax }
                 }).ToList()

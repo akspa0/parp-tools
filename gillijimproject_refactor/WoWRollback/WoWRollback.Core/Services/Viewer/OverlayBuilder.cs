@@ -78,24 +78,39 @@ public sealed class OverlayBuilder
         var entriesList = entries.ToList();
         Console.WriteLine($"[OverlayBuilder] BuildOverlay for {map} tile ({tileRow},{tileCol}): Received {entriesList.Count} total entries");
 
+        // COORDINATE-BASED FILTERING: Use object coordinates to determine tile membership
+        // This ensures objects appear on the correct tile regardless of entry.TileRow/TileCol
         var filtered = entriesList
-            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
+            .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase))
+            .Select(e => new { Entry = e, TileIndices = ComputeTileFromCoordinates(e) })
+            .Where(x => x.TileIndices.Row == tileRow && x.TileIndices.Col == tileCol)
+            .Select(x => x.Entry)
             .ToList();
         
-        Console.WriteLine($"[OverlayBuilder] After filter: {filtered.Count} entries for tile ({tileRow},{tileCol})");
+        Console.WriteLine($"[OverlayBuilder] After tile-based filter: {filtered.Count} entries for tile ({tileRow},{tileCol})");
         
         if (filtered.Count == 0 && entriesList.Count > 0)
         {
-            // Debug: Show what we're NOT matching
+            // Debug: Show sample and what tiles we have
             var sample = entriesList.FirstOrDefault();
             if (sample != null)
             {
-                Console.WriteLine($"[OverlayBuilder] Sample entry: Map='{sample.Map}', TileRow={sample.TileRow}, TileCol={sample.TileCol}");
-                Console.WriteLine($"[OverlayBuilder] Looking for: Map='{map}', TileRow={tileRow}, TileCol={tileCol}");
+                Console.WriteLine($"[OverlayBuilder] Sample entry: Map='{sample.Map}', TileRow={sample.TileRow}, TileCol={sample.TileCol}, WorldX={sample.WorldX:F1}, WorldZ={sample.WorldZ:F1}");
+                Console.WriteLine($"[OverlayBuilder] Looking for tile: ({tileRow},{tileCol})");
+                
+                // Show distribution of tiles in the input
+                var tileDistribution = entriesList
+                    .GroupBy(e => (e.TileRow, e.TileCol))
+                    .OrderBy(g => g.Key.TileRow)
+                    .ThenBy(g => g.Key.TileCol)
+                    .Take(10)
+                    .Select(g => $"({g.Key.TileRow},{g.Key.TileCol}):{g.Count()}")
+                    .ToList();
+                Console.WriteLine($"[OverlayBuilder] Tile distribution (first 10): {string.Join(", ", tileDistribution)}");
             }
         }
 
-        // Deduplicate by UniqueID before building overlays
+        // Deduplicate by UniqueID (in case same object appears with slightly different coords)
         var deduplicated = DeduplicateByUniqueId(filtered, tileRow, tileCol);
 
         var layers = (allVersions ?? deduplicated.Select(e => e.Version))
@@ -137,87 +152,38 @@ public sealed class OverlayBuilder
         });
     }
 
+    /// <summary>
+    /// Returns which tile an entry belongs to.
+    /// Uses the tile coordinates from the CSV (which tile the ADT file was from).
+    /// </summary>
+    private static (int Row, int Col) ComputeTileFromCoordinates(AssetTimelineDetailedEntry entry)
+    {
+        // IMPORTANT: entry.WorldX/WorldZ are TILE-LOCAL coordinates (0-533 range)
+        // They come from ADT MDDF/MODF Position fields which are relative to the tile
+        // The CSV already tells us which tile via entry.TileRow/TileCol
+        // So just use those directly!
+        return (entry.TileRow, entry.TileCol);
+    }
+
     private static object? BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
-        // Filter dummy marker entries used only for tile indexing
+        // Filter dummy marker entries
         if (entry.UniqueId == 0 && entry.AssetPath == "_dummy_tile_marker")
         {
             return null;
         }
         
-        // Trust source tile data - filter objects that don't belong to this tile
-        if (entry.TileRow != tileRow || entry.TileCol != tileCol)
-        {
-            Console.WriteLine($"[OverlayBuilder] Skipped UID {entry.UniqueId}: tile mismatch (entry={entry.TileRow},{entry.TileCol} vs expected={tileRow},{tileCol})");
-            return null;
-        }
-        
-        // CRITICAL: Cross-tile duplicate detection
-        // Objects spanning tile boundaries appear in multiple ADT files for culling
-        // Strategy: Keep ONE instance - prefer the tile where coordinates place it
-        // If coordinates are wrong (common in alpha data), keep it on ANY tile to avoid data loss
+        // At this point, entry is already filtered to this tile by ComputeTileFromCoordinates
+        // Just compute rendering position
         
         const double TILESIZE = 533.33333;
         const double MAP_CENTER = 32.0 * TILESIZE;
         
-        // Transform placement coordinates to world coordinates
-        double worldX = MAP_CENTER - entry.WorldX;  // placement X → worldX (col axis)
-        double worldY = MAP_CENTER - entry.WorldZ;  // placement Z → worldY (row axis)
+        double worldX = MAP_CENTER - entry.WorldX;
+        double worldY = MAP_CENTER - entry.WorldZ;
         
-        // Compute which tile these coords SHOULD place object on
-        var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
-        
-        // Check if coordinates match this tile (within small tolerance for boundary objects)
-        bool coordsMatchTile = (computedRow == tileRow && computedCol == tileCol);
-        
-        // Check if this is likely a duplicate by being on an adjacent tile
-        int rowDiff = Math.Abs(computedRow - tileRow);
-        int colDiff = Math.Abs(computedCol - tileCol);
-        bool isAdjacentTile = (rowDiff <= 1 && colDiff <= 1) && !coordsMatchTile;
-        
-        // KEEP if: coordinates place it here OR it's far from computed tile (bad data - keep anyway)
-        // FILTER if: on adjacent tile and coords place it elsewhere (clear duplicate)
-        if (isAdjacentTile)
-        {
-            // This is a clear cross-tile duplicate - skip it
-            // Primary instance (on correct tile) will be rendered
-            return null;
-        }
-        
-        // Keep this instance - either coords match or we don't have better info
-        // This ensures at least ONE instance renders even if coords are wrong
-
-        // DISABLED: World coordinates in ADT files often don't match the tile filename
-        // This is a data integrity issue in the source files, not our code
-        // For loose ADT analysis, we trust the tile filename over the world coordinates
-        /*
-        var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(entry.WorldX, entry.WorldY);
-        if (computedRow != tileRow || computedCol != tileCol)
-        {
-            Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId}: world coords ({entry.WorldX:F1}, {entry.WorldY:F1}) compute to tile ({computedRow},{computedCol}) but stored as ({tileRow},{tileCol})");
-            return null;
-        }
-        */
-
-        // Transform MDDF/MODF placement coordinates to world coordinates
-        // worldX and worldY are already computed above for duplicate detection - reuse them
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
-        
-        // DISABLED: Bounds validation - ADT placement coordinates are unreliable
-        // Many objects legitimately span tile boundaries or have coordinate mismatches
-        // Since we already filter by entry.TileRow/TileCol, trust the tile assignment
-        /*
-        if (localX < -0.1 || localX > 1.1 || localY < -0.1 || localY > 1.1)
-        {
-            if (entry.UniqueId % 500 == 0) // Log occasionally
-            {
-                Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId} from tile ({tileRow},{tileCol}): " +
-                    $"computed position ({localX:F3}, {localY:F3}) outside tile bounds");
-            }
-            return null;
-        }
-        */
 
         return new
         {

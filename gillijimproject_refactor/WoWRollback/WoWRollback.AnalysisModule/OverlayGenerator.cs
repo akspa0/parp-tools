@@ -232,31 +232,48 @@ public sealed class OverlayGenerator
     {
         try
         {
-            var terrainCsv = Path.Combine(adtOutputDir, "csv", "maps", mapName, "terrain.csv");
+            // FIX: Use correct path where AdtTerrainExtractor writes the CSV
+            var terrainCsv = Path.Combine(adtOutputDir, $"{mapName}_terrain.csv");
             if (!File.Exists(terrainCsv))
             {
+                Console.WriteLine($"[OverlayGenerator] Terrain CSV not found at: {terrainCsv}");
                 return new OverlayGenerationResult(0, 0, 0, 0, Success: false, ErrorMessage: $"Missing terrain.csv at {terrainCsv}");
             }
+            
+            Console.WriteLine($"[OverlayGenerator] Found terrain CSV: {terrainCsv}");
 
             var overlaysRoot = Path.Combine(viewerDir, "overlays", version, mapName);
             var terrainDir = Path.Combine(overlaysRoot, "terrain_complete");
             Directory.CreateDirectory(terrainDir);
 
-            // group rows by tile (tile_row, tile_col)
-            var groups = new Dictionary<(int row, int col), List<string[]>>();
+            // Group rows by tile (tileX, tileY)
+            // CSV format: MapName,TileX,TileY,ChunkX,ChunkY,AreaId,Flags,TextureLayers,HasLiquids,HasHoles,IsImpassible
+            var groups = new Dictionary<(int tileX, int tileY), List<string[]>>();
             using (var reader = new StreamReader(terrainCsv))
             {
                 string? line;
                 // header
                 line = reader.ReadLine();
+                Console.WriteLine($"[OverlayGenerator] Terrain CSV header: {line}");
+                
+                int lineCount = 0;
                 while ((line = reader.ReadLine()) != null)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
+                    lineCount++;
+                    
                     var parts = SplitCsv(line);
-                    if (parts.Length < 23) continue;
-                    if (!int.TryParse(parts[1], out var tileRow)) continue;
-                    if (!int.TryParse(parts[2], out var tileCol)) continue;
-                    var key = (tileRow, tileCol);
+                    // Expected: MapName,TileX,TileY,ChunkX,ChunkY,AreaId,Flags,TextureLayers,HasLiquids,HasHoles,IsImpassible (11 columns)
+                    if (parts.Length < 11)
+                    {
+                        Console.WriteLine($"[OverlayGenerator] Skipping line {lineCount}: insufficient columns ({parts.Length})");
+                        continue;
+                    }
+                    
+                    if (!int.TryParse(parts[1], out var tileX)) continue;  // TileX
+                    if (!int.TryParse(parts[2], out var tileY)) continue;  // TileY
+                    
+                    var key = (tileX, tileY);
                     if (!groups.TryGetValue(key, out var list))
                     {
                         list = new List<string[]>();
@@ -264,21 +281,27 @@ public sealed class OverlayGenerator
                     }
                     list.Add(parts);
                 }
+                
+                Console.WriteLine($"[OverlayGenerator] Parsed {lineCount} CSV lines into {groups.Count} tile groups");
             }
 
             int written = 0;
             foreach (var kvp in groups)
             {
-                var (tileRow, tileCol) = kvp.Key; // row = Y, col = X
+                var (tileX, tileY) = kvp.Key;
                 var rows = kvp.Value;
 
-                // Aggregate properties
-                bool hasLiquids = rows.Any(r => ParseBool(r[8]) || ParseBool(r[9]) || ParseBool(r[10]) || ParseBool(r[11]));
-                bool hasHoles = rows.Any(r => ParseBool(r[16]));
-                int maxLayers = rows.Select(r => ParseInt(r[15])).DefaultIfEmpty(0).Max();
-                // Choose representative areaId as mode
+                // Aggregate MCNK chunk properties for this tile
+                // CSV indices: 0=MapName, 1=TileX, 2=TileY, 3=ChunkX, 4=ChunkY, 
+                //              5=AreaId, 6=Flags, 7=TextureLayers, 8=HasLiquids, 9=HasHoles, 10=IsImpassible
+                bool hasLiquids = rows.Any(r => ParseBool(r[8]));  // HasLiquids
+                bool hasHoles = rows.Any(r => ParseBool(r[9]));    // HasHoles
+                bool hasImpassible = rows.Any(r => ParseBool(r[10])); // IsImpassible
+                int maxLayers = rows.Select(r => ParseInt(r[7])).DefaultIfEmpty(0).Max(); // TextureLayers
+                
+                // Choose most common areaId
                 var areaId = rows
-                    .Select(r => ParseInt(r[14]))
+                    .Select(r => ParseInt(r[5]))  // AreaId
                     .GroupBy(x => x)
                     .OrderByDescending(g => g.Count())
                     .ThenBy(g => g.Key)
@@ -287,22 +310,25 @@ public sealed class OverlayGenerator
 
                 var overlay = new
                 {
-                    tileX = tileCol,
-                    tileY = tileRow,
+                    tileX = tileX,
+                    tileY = tileY,
                     areaId = areaId,
                     properties = new
                     {
                         hasLiquids = hasLiquids,
                         hasHoles = hasHoles,
+                        hasImpassible = hasImpassible,
                         layers = maxLayers
                     }
                 };
 
-                var jsonPath = Path.Combine(terrainDir, $"tile_{tileCol}_{tileRow}.json");
+                var jsonPath = Path.Combine(terrainDir, $"tile_{tileX}_{tileY}.json");
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 File.WriteAllText(jsonPath, JsonSerializer.Serialize(overlay, options));
                 written++;
             }
+            
+            Console.WriteLine($"[OverlayGenerator] Generated {written} terrain overlay JSON files");
 
             return new OverlayGenerationResult(
                 TilesProcessed: groups.Count,
