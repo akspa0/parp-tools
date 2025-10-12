@@ -331,19 +331,19 @@ internal static class Program
             Console.WriteLine($"[ok] Summary CSV: {clusterResult.SummaryCsvPath}");
         }
 
-        // Step 4: Generate standalone viewer
+        // Step 4: Generate viewer using existing infrastructure
         Console.WriteLine("\n=== Step 4: Generating viewer ===");
-        var viewerGenerator = new SimpleViewerGenerator();
-        var viewerResult = viewerGenerator.Generate(outDir, mapName);
+        var viewerAdapter = new AnalysisViewerAdapter();
+        var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapResult.MinimapDir);
 
-        if (viewerResult.Success)
+        if (!string.IsNullOrEmpty(viewerRoot))
         {
-            Console.WriteLine($"[ok] Viewer generated: {viewerResult.ViewerPath}");
-            Console.WriteLine($"[info] Open: {Path.Combine(viewerResult.ViewerPath!, "index.html")}");
+            Console.WriteLine($"[ok] Viewer generated: {viewerRoot}");
+            Console.WriteLine($"[info] Open: {Path.Combine(viewerRoot, "index.html")}");
         }
         else
         {
-            Console.WriteLine($"[warn] Viewer generation failed: {viewerResult.ErrorMessage}");
+            Console.WriteLine($"[warn] Viewer generation skipped (no placements)");
         }
 
         Console.WriteLine("\n=== Analysis Complete ===");

@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="BLPSharp" Version="0.1.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,399 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using WoWRollback.Core.Models;
+using WoWRollback.Core.Services.Viewer;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Webp;
+
+namespace WoWRollback.AnalysisModule;
+
+/// <summary>
+/// Adapts single-map analysis results to work with the existing ViewerReportWriter.
+/// Creates a synthetic "version" for standalone map analysis.
+/// </summary>
+public sealed class AnalysisViewerAdapter
+{
+    public string GenerateViewer(
+        string placementsCsvPath,
+        string mapName,
+        string outputDir,
+        string? minimapDir = null)
+    {
+        try
+        {
+            // Create synthetic version for analysis
+            const string syntheticVersion = "analysis";
+            
+            // Setup minimap structure if provided
+            if (!string.IsNullOrEmpty(minimapDir) && Directory.Exists(minimapDir))
+            {
+                SetupMinimaps(minimapDir, mapName, outputDir, syntheticVersion);
+            }
+            
+            // Load placements from CSV
+            var placements = LoadPlacementsFromCsv(placementsCsvPath, mapName);
+            
+            Console.WriteLine($"[AnalysisViewerAdapter] Loaded {placements.Count} placements");
+            
+            if (placements.Count == 0)
+            {
+                Console.WriteLine("[AnalysisViewerAdapter] No placements found in CSV");
+                return string.Empty;
+            }
+
+            // Debug: Show tile distribution
+            var tileGroups = placements.GroupBy(p => (p.TileRow, p.TileCol)).OrderBy(g => g.Key.TileRow).ThenBy(g => g.Key.TileCol).ToList();
+            Console.WriteLine($"[AnalysisViewerAdapter] Placements span {tileGroups.Count} tiles");
+            if (tileGroups.Count > 0 && tileGroups.Count <= 10)
+            {
+                foreach (var tg in tileGroups)
+                {
+                    var m2Count = tg.Count(p => p.Kind == PlacementKind.M2);
+                    var wmoCount = tg.Count(p => p.Kind == PlacementKind.WMO);
+                    Console.WriteLine($"[AnalysisViewerAdapter]   Tile (row={tg.Key.TileRow}, col={tg.Key.TileCol}): {tg.Count()} objects (M2={m2Count}, WMO={wmoCount})");
+                }
+            }
+            else if (tileGroups.Count > 0)
+            {
+                var first = tileGroups[0];
+                var last = tileGroups[^1];
+                Console.WriteLine($"[AnalysisViewerAdapter]   First tile: (row={first.Key.TileRow}, col={first.Key.TileCol}) with {first.Count()} objects");
+                Console.WriteLine($"[AnalysisViewerAdapter]   Last tile: (row={last.Key.TileRow}, col={last.Key.TileCol}) with {last.Count()} objects");
+            }
+            
+            // Debug: Show sample entries
+            var sampleEntry = placements.FirstOrDefault();
+            if (sampleEntry != null)
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Sample entry: Map={sampleEntry.Map}, TileRow={sampleEntry.TileRow}, TileCol={sampleEntry.TileCol}, Version={sampleEntry.Version}, Kind={sampleEntry.Kind}");
+                Console.WriteLine($"[AnalysisViewerAdapter] Sample coords: World=({sampleEntry.WorldX:F1}, {sampleEntry.WorldY:F1}, {sampleEntry.WorldZ:F1}), Path={sampleEntry.AssetPath}");
+            }
+
+            // Convert to VersionComparisonResult format
+            var result = new VersionComparisonResult(
+                RootDirectory: outputDir,
+                ComparisonKey: $"{mapName}_analysis",
+                Versions: new[] { syntheticVersion },
+                RangeEntries: Array.Empty<VersionRangeEntry>(),
+                MapSummaries: Array.Empty<MapVersionSummary>(),
+                Overlaps: Array.Empty<RangeOverlapEntry>(),
+                AssetFirstSeen: Array.Empty<AssetFirstSeenEntry>(),
+                AssetFolderSummaries: Array.Empty<AssetFolderSummary>(),
+                AssetFolderTimeline: Array.Empty<AssetFolderTimelineEntry>(),
+                AssetTimeline: Array.Empty<AssetTimelineEntry>(),
+                DesignKitAssets: Array.Empty<DesignKitAssetEntry>(),
+                DesignKitRanges: Array.Empty<DesignKitRangeEntry>(),
+                DesignKitSummaries: Array.Empty<DesignKitSummaryEntry>(),
+                DesignKitTimeline: Array.Empty<DesignKitTimelineEntry>(),
+                DesignKitAssetDetails: Array.Empty<DesignKitAssetDetailEntry>(),
+                UniqueIdAssets: Array.Empty<UniqueIdAssetEntry>(),
+                AssetTimelineDetailed: placements,
+                Warnings: Array.Empty<string>()
+            );
+
+            // Generate viewer using existing infrastructure
+            var viewerWriter = new ViewerReportWriter();
+            var viewerOptions = new ViewerOptions(
+                DefaultVersion: syntheticVersion,
+                DiffPair: null,
+                MinimapWidth: 256,
+                MinimapHeight: 256,
+                DiffDistanceThreshold: 10.0,
+                MoveEpsilonRatio: 0.1
+            );
+
+            var viewerRoot = viewerWriter.Generate(
+                outputDir,
+                result,
+                viewerOptions,
+                diffPair: null
+            );
+
+            Console.WriteLine($"[AnalysisViewerAdapter] Viewer root generated: {viewerRoot}");
+
+            // Copy pre-existing PNG minimaps directly to viewer output
+            // This is optional - viewer can work without minimaps
+            if (!string.IsNullOrEmpty(minimapDir) && !string.IsNullOrEmpty(viewerRoot) && Directory.Exists(minimapDir))
+            {
+                try
+                {
+                    CopyMinimapsToViewer(minimapDir, viewerRoot, mapName, syntheticVersion);
+                }
+                catch (Exception minimapEx)
+                {
+                    Console.WriteLine($"[AnalysisViewerAdapter] Minimap conversion failed (viewer will work without them): {minimapEx.Message}");
+                }
+            }
+
+            return viewerRoot;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Critical error generating viewer: {ex.Message}");
+            Console.WriteLine($"[AnalysisViewerAdapter] Stack trace: {ex.StackTrace}");
+            return string.Empty;
+        }
+    }
+
+    private List<AssetTimelineDetailedEntry> LoadPlacementsFromCsv(string csvPath, string mapName)
+    {
+        var entries = new List<AssetTimelineDetailedEntry>();
+
+        if (!File.Exists(csvPath))
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] CSV file not found: {csvPath}");
+            return entries;
+        }
+
+        using var reader = new StreamReader(csvPath);
+        string? header = reader.ReadLine(); // Skip header
+        Console.WriteLine($"[AnalysisViewerAdapter] CSV header: {header}");
+
+        int lineNumber = 1;
+        int parsedCount = 0;
+        int errorCount = 0;
+
+        while (reader.ReadLine() is { } line)
+        {
+            lineNumber++;
+            
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            var fields = SplitCsvLine(line);
+            if (fields.Length < 9)
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Line {lineNumber}: Not enough fields ({fields.Length})");
+                continue;
+            }
+
+            try
+            {
+                // CSV format: map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,...
+                var tileX = int.Parse(fields[1]);
+                var tileY = int.Parse(fields[2]);
+                var type = fields[3];
+                var assetPath = fields[4];
+                var uniqueId = int.Parse(fields[5]);
+                var worldX = float.Parse(fields[6]);
+                var worldY = float.Parse(fields[7]);
+                var worldZ = float.Parse(fields[8]);
+
+                var kind = type.Equals("M2", StringComparison.OrdinalIgnoreCase)
+                    ? PlacementKind.M2
+                    : PlacementKind.WMO;
+
+                entries.Add(new AssetTimelineDetailedEntry(
+                    Version: "analysis",
+                    Map: mapName,
+                    TileRow: tileX,  // tile_x → TileRow (matches OverlayGenerator)
+                    TileCol: tileY,  // tile_y → TileCol (matches OverlayGenerator)
+                    Kind: kind,
+                    UniqueId: (uint)uniqueId,
+                    AssetPath: assetPath,
+                    Folder: "",
+                    Category: "",
+                    Subcategory: "",
+                    DesignKit: "",
+                    SourceRule: "",
+                    KitRoot: "",
+                    SubkitPath: "",
+                    SubkitTop: "",
+                    SubkitDepth: 0,
+                    FileName: Path.GetFileName(assetPath),
+                    FileStem: Path.GetFileNameWithoutExtension(assetPath),
+                    Extension: Path.GetExtension(assetPath),
+                    WorldX: worldX,
+                    WorldY: worldY,
+                    WorldZ: worldZ,
+                    RotationX: 0f,  // TODO: Parse if available
+                    RotationY: 0f,
+                    RotationZ: 0f,
+                    Scale: 1f,
+                    Flags: 0,
+                    DoodadSet: 0,
+                    NameSet: 0
+                ));
+                
+                parsedCount++;
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                if (errorCount <= 5) // Only log first 5 errors
+                {
+                    Console.WriteLine($"[AnalysisViewerAdapter] Line {lineNumber} parse error: {ex.Message}");
+                }
+                continue;
+            }
+        }
+
+        Console.WriteLine($"[AnalysisViewerAdapter] Parsed {parsedCount} entries, {errorCount} errors");
+        return entries;
+    }
+
+    private string[] SplitCsvLine(string line)
+    {
+        var result = new List<string>();
+        bool inQuotes = false;
+        var current = new System.Text.StringBuilder();
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+            if (inQuotes)
+            {
+                if (c == '"')
+                {
+                    if (i + 1 < line.Length && line[i + 1] == '"')
+                    {
+                        current.Append('"');
+                        i++;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            else
+            {
+                if (c == ',')
+                {
+                    result.Add(current.ToString());
+                    current.Clear();
+                }
+                else if (c == '"')
+                {
+                    inQuotes = true;
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+        }
+
+        result.Add(current.ToString());
+        return result.ToArray();
+    }
+
+    private void SetupMinimaps(string minimapSourceDir, string mapName, string outputDir, string version)
+    {
+        try
+        {
+            // Create minimap structure expected by MinimapLocator:
+            // {outputDir}/{version}/World/Textures/Minimap/{mapName}/
+            var minimapDestDir = Path.Combine(outputDir, version, "World", "Textures", "Minimap", mapName);
+            Directory.CreateDirectory(minimapDestDir);
+
+            // Copy all PNG files
+            var pngFiles = Directory.GetFiles(minimapSourceDir, "*.png", SearchOption.TopDirectoryOnly);
+            Console.WriteLine($"[AnalysisViewerAdapter] Copying {pngFiles.Length} minimap files to {minimapDestDir}");
+
+            foreach (var sourceFile in pngFiles)
+            {
+                var destFile = Path.Combine(minimapDestDir, Path.GetFileName(sourceFile));
+                File.Copy(sourceFile, destFile, overwrite: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to setup minimaps: {ex.Message}");
+        }
+    }
+
+    private void CopyMinimapsToViewer(string minimapSourceDir, string viewerRoot, string mapName, string version)
+    {
+        try
+        {
+            // Viewer structure: {viewerRoot}/minimap/{version}/{mapName}/
+            var mapNameSafe = mapName.Replace(" ", "_").Replace("/", "_").Replace("\\", "_");
+            var viewerMinimapDir = Path.Combine(viewerRoot, "minimap", version, mapNameSafe);
+            Directory.CreateDirectory(viewerMinimapDir);
+
+            // Check if WebP files already exist
+            var existingWebpFiles = Directory.GetFiles(viewerMinimapDir, "*.webp", SearchOption.TopDirectoryOnly);
+            var pngFiles = Directory.GetFiles(minimapSourceDir, "*.png", SearchOption.TopDirectoryOnly);
+
+            if (existingWebpFiles.Length > 0 && existingWebpFiles.Length >= pngFiles.Length)
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Found {existingWebpFiles.Length} existing WebP tiles, skipping conversion");
+                return;
+            }
+
+            // Convert PNGs to WebP for massive memory savings
+            Console.WriteLine($"[AnalysisViewerAdapter] Converting {pngFiles.Length} PNGs to WebP: {viewerMinimapDir}");
+
+            var webpEncoder = new WebpEncoder
+            {
+                Quality = 85,  // Good balance of quality vs size
+                FileFormat = WebpFileFormatType.Lossy,
+                Method = WebpEncodingMethod.BestQuality
+            };
+
+            int converted = 0;
+            int skipped = 0;
+            long totalSavedBytes = 0;
+
+            foreach (var sourceFile in pngFiles)
+            {
+                try
+                {
+                    var sourceFileInfo = new FileInfo(sourceFile);
+                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(sourceFile);
+                    var destFile = Path.Combine(viewerMinimapDir, fileNameWithoutExt + ".webp");
+
+                    // Skip if WebP already exists and is newer than source
+                    if (File.Exists(destFile))
+                    {
+                        var destInfo = new FileInfo(destFile);
+                        if (destInfo.LastWriteTimeUtc >= sourceFileInfo.LastWriteTimeUtc)
+                        {
+                            skipped++;
+                            continue;
+                        }
+                    }
+
+                    using (var image = Image.Load(sourceFile))
+                    {
+                        image.SaveAsWebp(destFile, webpEncoder);
+                    }
+
+                    var destFileInfo = new FileInfo(destFile);
+                    totalSavedBytes += sourceFileInfo.Length - destFileInfo.Length;
+                    converted++;
+
+                    if ((converted + skipped) % 10 == 0)
+                    {
+                        Console.WriteLine($"[AnalysisViewerAdapter] Progress: {converted} converted, {skipped} skipped, {converted + skipped}/{pngFiles.Length}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[AnalysisViewerAdapter] Failed to convert {Path.GetFileName(sourceFile)}: {ex.Message}");
+                }
+            }
+
+            var savedMB = totalSavedBytes / (1024.0 * 1024.0);
+            if (converted > 0)
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Converted {converted} tiles to WebP, skipped {skipped} existing, saved {savedMB:F1} MB");
+            }
+            else
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] All {skipped} tiles already converted to WebP");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to process minimaps: {ex.Message}");
+        }
+    }
+}

@@ -116,10 +116,30 @@ public sealed class MinimapHandler
             Console.WriteLine($"[MinimapHandler] Resolving minimaps from: {absoluteMapDir}");
 
             // Navigate from World\Maps\{mapName}\ to World\
-            var mapsDir = Path.GetDirectoryName(absoluteMapDir);  // Maps
-            Console.WriteLine($"[MinimapHandler] Maps directory: {mapsDir}");
+            // Input: .../test_data/development/World/Maps/development/
+            // We need to find the "World" directory by walking up the tree
             
-            var worldDir = Path.GetDirectoryName(mapsDir);        // World
+            string? worldDir = null;
+            var currentDir = absoluteMapDir;
+            
+            // Walk up directory tree looking for "World"
+            for (int i = 0; i < 5; i++)  // Max 5 levels up
+            {
+                var dirName = Path.GetFileName(currentDir);
+                Console.WriteLine($"[MinimapHandler] Checking level {i}: {currentDir} (name: {dirName})");
+                
+                if (dirName?.Equals("World", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    worldDir = currentDir;
+                    break;
+                }
+                
+                var parent = Path.GetDirectoryName(currentDir);
+                if (string.IsNullOrEmpty(parent) || parent == currentDir)
+                    break;
+                    
+                currentDir = parent;
+            }
             
             if (string.IsNullOrEmpty(worldDir))
             {
