@@ -412,9 +412,8 @@ public sealed class AnalysisViewerAdapter
 
             // Generate cluster overlay JSONs
             // Target: {viewerRoot}/overlays/{version}/{mapName}/clusters/tile_{col}_{row}.json
-            var overlaysRoot = Path.Combine(viewerRoot, "overlays", version, mapName);
-            var clusterDir = Path.Combine(overlaysRoot, "clusters");
-            Directory.CreateDirectory(clusterDir);
+            // ClusterOverlayBuilder adds {mapName}/clusters itself, so pass version root only
+            var overlaysVersionRoot = Path.Combine(viewerRoot, "overlays", version);
 
             var options = new ViewerOptions(
                 DefaultVersion: version,
@@ -425,7 +424,7 @@ public sealed class AnalysisViewerAdapter
                 MoveEpsilonRatio: 0.1
             );
 
-            ClusterOverlayBuilder.BuildClusterOverlays(clusterJsonPath, mapName, overlaysRoot, options);
+            ClusterOverlayBuilder.BuildClusterOverlays(clusterJsonPath, mapName, overlaysVersionRoot, options);
             Console.WriteLine($"[AnalysisViewerAdapter] Generated cluster overlays");
         }
         catch (Exception ex)
@@ -490,7 +489,7 @@ public sealed class AnalysisViewerAdapter
         }
 
         // Generate ranges per tile (detect gaps)
-        var output = new List<string> { "map,min,max,count" };
+        var allRanges = new List<(string tileName, uint min, uint max, int count)>();
         
         foreach (var ((row, col), ids) in byTile.OrderBy(kvp => kvp.Key))
         {
@@ -498,7 +497,6 @@ public sealed class AnalysisViewerAdapter
             if (sorted.Count == 0) continue;
 
             // Detect gaps > 1000 to create separate ranges
-            var ranges = new List<(uint min, uint max, int count)>();
             uint rangeStart = sorted[0];
             uint rangeEnd = sorted[0];
             int rangeCount = 1;
@@ -507,7 +505,7 @@ public sealed class AnalysisViewerAdapter
             {
                 if (sorted[i] - rangeEnd > 1000) // Gap detected
                 {
-                    ranges.Add((rangeStart, rangeEnd, rangeCount));
+                    allRanges.Add(($"{mapName}_({row}_{col})", rangeStart, rangeEnd, rangeCount));
                     rangeStart = sorted[i];
                     rangeEnd = sorted[i];
                     rangeCount = 1;
@@ -518,13 +516,17 @@ public sealed class AnalysisViewerAdapter
                     rangeCount++;
                 }
             }
-            ranges.Add((rangeStart, rangeEnd, rangeCount));
+            allRanges.Add(($"{mapName}_({row}_{col})", rangeStart, rangeEnd, rangeCount));
+        }
 
-            // Write ranges for this tile
-            foreach (var (min, max, count) in ranges)
-            {
-                output.Add($"{mapName}_({row}_{col}),{min},{max},{count}");
-            }
+        // Sort all ranges by min UniqueID (smallest to largest)
+        var sortedRanges = allRanges.OrderBy(r => r.min).ToList();
+        
+        // Build output CSV
+        var output = new List<string> { "map,min,max,count" };
+        foreach (var (tileName, min, max, count) in sortedRanges)
+        {
+            output.Add($"{tileName},{min},{max},{count}");
         }
 
         return output;

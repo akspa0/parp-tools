@@ -9,6 +9,7 @@ let map;
 let tileLayer; // no longer used, kept for minimal diff
 let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
+window.minimapImages = minimapImages; // Expose for sedimentary layers to update opacity
 const overlayVariants = {
     combined: { label: 'All Objects (M2 + WMO)', color: '#2196F3', radius: 5 },
     m2: { label: 'M2 Models Only', color: '#2196F3', radius: 8 },
