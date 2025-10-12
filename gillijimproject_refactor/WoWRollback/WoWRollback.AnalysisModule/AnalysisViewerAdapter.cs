@@ -154,6 +154,9 @@ public sealed class AnalysisViewerAdapter
             );
 
             Console.WriteLine($"[AnalysisViewerAdapter] Viewer root generated: {viewerRoot}");
+            
+            // Copy UniqueID analysis CSV to expected location for "Load UniqueID Ranges" feature
+            CopyUniqueIdCsvToViewer(outputDir, viewerRoot, mapName, syntheticVersion, placementsCsvPath);
 
             // Copy pre-existing PNG minimaps directly to viewer output
             // This is optional - viewer can work without minimaps
@@ -348,6 +351,34 @@ public sealed class AnalysisViewerAdapter
         catch (Exception ex)
         {
             Console.WriteLine($"[AnalysisViewerAdapter] Failed to setup minimaps: {ex.Message}");
+        }
+    }
+
+    private void CopyUniqueIdCsvToViewer(string outputDir, string viewerRoot, string mapName, string version, string placementsCsvPath)
+    {
+        try
+        {
+            // Viewer expects: cached_maps/analysis/{version}/{mapName}/csv/id_ranges_by_map.csv
+            var csvDestDir = Path.Combine(viewerRoot, "cached_maps", "analysis", version, mapName, "csv");
+            Directory.CreateDirectory(csvDestDir);
+            
+            // Look for the UniqueID analysis CSV generated during analysis
+            var uniqueIdCsvPath = Path.Combine(outputDir, $"{mapName}_uniqueID_analysis.csv");
+            
+            if (File.Exists(uniqueIdCsvPath))
+            {
+                var destPath = Path.Combine(csvDestDir, "id_ranges_by_map.csv");
+                File.Copy(uniqueIdCsvPath, destPath, overwrite: true);
+                Console.WriteLine($"[AnalysisViewerAdapter] Copied UniqueID ranges CSV to viewer: {destPath}");
+            }
+            else
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] UniqueID CSV not found: {uniqueIdCsvPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to copy UniqueID CSV: {ex.Message}");
         }
     }
 

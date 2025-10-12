@@ -298,6 +298,21 @@ internal static class Program
             Console.WriteLine($"[warn] Minimap processing failed: {minimapResult.ErrorMessage}");
         }
 
+        // Step 1.75: Extract terrain data (MCNK chunks) for terrain overlays
+        Console.WriteLine("\n=== Extracting terrain data (MCNK chunks) ===");
+        var terrainExtractor = new AdtTerrainExtractor();
+        var terrainResult = terrainExtractor.ExtractTerrainForMap(mapDir, mapName, outDir);
+        
+        if (!terrainResult.Success)
+        {
+            Console.WriteLine($"[warn] Terrain extraction failed - terrain overlays will not be available");
+        }
+        else
+        {
+            Console.WriteLine($"[ok] Extracted {terrainResult.ChunksExtracted} MCNK chunks from {terrainResult.TilesProcessed} tiles");
+            Console.WriteLine($"[ok] Terrain CSV: {terrainResult.CsvPath}");
+        }
+
         // Step 2: Analyze UniqueIDs and detect layers
         Console.WriteLine("\n=== Step 2: Analyzing UniqueIDs and detecting layers ===");
         var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);

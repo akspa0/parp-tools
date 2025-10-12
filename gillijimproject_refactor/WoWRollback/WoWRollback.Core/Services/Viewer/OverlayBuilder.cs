@@ -136,10 +136,39 @@ public sealed class OverlayBuilder
 
     private static object? BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
     {
+        // Filter dummy marker entries used only for tile indexing
+        if (entry.UniqueId == 0 && entry.AssetPath == "_dummy_tile_marker")
+        {
+            return null;
+        }
+        
         // Trust source tile data - filter objects that don't belong to this tile
         if (entry.TileRow != tileRow || entry.TileCol != tileCol)
         {
             Console.WriteLine($"[OverlayBuilder] Skipped UID {entry.UniqueId}: tile mismatch (entry={entry.TileRow},{entry.TileCol} vs expected={tileRow},{tileCol})");
+            return null;
+        }
+        
+        // CRITICAL: Detect cross-tile duplicates
+        // Objects that span tile boundaries are duplicated in ADT files for culling/LOD
+        // Only show them on their "primary" tile (where coordinates actually place them)
+        const double TILESIZE = 533.33333;
+        const double MAP_CENTER = 32.0 * TILESIZE;
+        
+        // Transform placement coordinates to world coordinates (same as used for rendering)
+        double worldX = MAP_CENTER - entry.WorldX;  // placement X → worldX (col axis)
+        double worldY = MAP_CENTER - entry.WorldZ;  // placement Z → worldY (row axis)
+        
+        // Use CoordinateTransformer to compute which tile these world coords belong to
+        var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
+        
+        // If coordinates place object on different tile, this is a cross-tile duplicate
+        bool isCrossTileDuplicate = (computedRow != tileRow || computedCol != tileCol);
+        
+        // TODO: Future enhancement - include cross-tile duplicates with special flag for UI toggle
+        // For now, completely filter them out to avoid duplicate rendering
+        if (isCrossTileDuplicate)
+        {
             return null;
         }
 
@@ -156,23 +185,24 @@ public sealed class OverlayBuilder
         */
 
         // Transform MDDF/MODF placement coordinates to world coordinates
-        // Per ADT spec: worldX = 32*TILESIZE - placementZ, worldY = 32*TILESIZE - placementX
-        // Placement system: X = West←East, Z = North←South  
-        // World system: X = North←South, Y = West←East
-        // BUT CoordinateTransformer uses: worldX affects col, worldY affects row
-        // So we need to SWAP them!
-        
-        const double TILESIZE = 533.33333;
-        const double MAP_CENTER = 32.0 * TILESIZE; // 17066.66656
-        
-        // entry.WorldX = placement X, entry.WorldZ = placement Z
-        // CoordinateTransformer expects: worldX=col axis (west-east), worldY=row axis (north-south)
-        // So swap the mapping:
-        double worldX = MAP_CENTER - entry.WorldX;  // placement X → worldX (col/horizontal)
-        double worldY = MAP_CENTER - entry.WorldZ;  // placement Z → worldY (row/vertical)
-        
+        // worldX and worldY are already computed above for duplicate detection - reuse them
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
+        
+        // DISABLED: Bounds validation - ADT placement coordinates are unreliable
+        // Many objects legitimately span tile boundaries or have coordinate mismatches
+        // Since we already filter by entry.TileRow/TileCol, trust the tile assignment
+        /*
+        if (localX < -0.1 || localX > 1.1 || localY < -0.1 || localY > 1.1)
+        {
+            if (entry.UniqueId % 500 == 0) // Log occasionally
+            {
+                Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId} from tile ({tileRow},{tileCol}): " +
+                    $"computed position ({localX:F3}, {localY:F3}) outside tile bounds");
+            }
+            return null;
+        }
+        */
 
         return new
         {
