@@ -95,13 +95,16 @@ public sealed class OverlayBuilder
             }
         }
 
-        var layers = (allVersions ?? filtered.Select(e => e.Version))
+        // Deduplicate by UniqueID before building overlays
+        var deduplicated = DeduplicateByUniqueId(filtered, tileRow, tileCol);
+
+        var layers = (allVersions ?? deduplicated.Select(e => e.Version))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
             .Select(version => new
             {
                 version,
-                kinds = filtered
+                kinds = deduplicated
                     .Where(e => e.Version.Equals(version, StringComparison.OrdinalIgnoreCase))
                     .GroupBy(e => e.Kind)
                     .Select(kindGroup => new
@@ -149,28 +152,40 @@ public sealed class OverlayBuilder
             return null;
         }
         
-        // CRITICAL: Detect cross-tile duplicates
-        // Objects that span tile boundaries are duplicated in ADT files for culling/LOD
-        // Only show them on their "primary" tile (where coordinates actually place them)
+        // CRITICAL: Cross-tile duplicate detection
+        // Objects spanning tile boundaries appear in multiple ADT files for culling
+        // Strategy: Keep ONE instance - prefer the tile where coordinates place it
+        // If coordinates are wrong (common in alpha data), keep it on ANY tile to avoid data loss
+        
         const double TILESIZE = 533.33333;
         const double MAP_CENTER = 32.0 * TILESIZE;
         
-        // Transform placement coordinates to world coordinates (same as used for rendering)
+        // Transform placement coordinates to world coordinates
         double worldX = MAP_CENTER - entry.WorldX;  // placement X → worldX (col axis)
         double worldY = MAP_CENTER - entry.WorldZ;  // placement Z → worldY (row axis)
         
-        // Use CoordinateTransformer to compute which tile these world coords belong to
+        // Compute which tile these coords SHOULD place object on
         var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
         
-        // If coordinates place object on different tile, this is a cross-tile duplicate
-        bool isCrossTileDuplicate = (computedRow != tileRow || computedCol != tileCol);
+        // Check if coordinates match this tile (within small tolerance for boundary objects)
+        bool coordsMatchTile = (computedRow == tileRow && computedCol == tileCol);
         
-        // TODO: Future enhancement - include cross-tile duplicates with special flag for UI toggle
-        // For now, completely filter them out to avoid duplicate rendering
-        if (isCrossTileDuplicate)
+        // Check if this is likely a duplicate by being on an adjacent tile
+        int rowDiff = Math.Abs(computedRow - tileRow);
+        int colDiff = Math.Abs(computedCol - tileCol);
+        bool isAdjacentTile = (rowDiff <= 1 && colDiff <= 1) && !coordsMatchTile;
+        
+        // KEEP if: coordinates place it here OR it's far from computed tile (bad data - keep anyway)
+        // FILTER if: on adjacent tile and coords place it elsewhere (clear duplicate)
+        if (isAdjacentTile)
         {
+            // This is a clear cross-tile duplicate - skip it
+            // Primary instance (on correct tile) will be rendered
             return null;
         }
+        
+        // Keep this instance - either coords match or we don't have better info
+        // This ensures at least ONE instance renders even if coords are wrong
 
         // DISABLED: World coordinates in ADT files often don't match the tile filename
         // This is a data integrity issue in the source files, not our code
@@ -207,6 +222,7 @@ public sealed class OverlayBuilder
         return new
         {
             uniqueId = entry.UniqueId,
+            __kind = entry.Kind.ToString(),
             assetPath = entry.AssetPath,
             folder = entry.Folder,
             category = entry.Category,
@@ -220,12 +236,19 @@ public sealed class OverlayBuilder
             fileName = entry.FileName,
             fileStem = entry.FileStem,
             extension = entry.Extension,
+            placement = new
+            {
+                // Raw ADT placement coordinates (MDDF/MODF Position fields)
+                x = Math.Round(entry.WorldX, 2, MidpointRounding.AwayFromZero),
+                y = Math.Round(entry.WorldY, 2, MidpointRounding.AwayFromZero),
+                z = Math.Round(entry.WorldZ, 2, MidpointRounding.AwayFromZero)
+            },
             world = new
             {
-                // Preserve full precision for world coordinates
-                x = Math.Round(entry.WorldX, 6, MidpointRounding.AwayFromZero),
-                y = Math.Round(entry.WorldY, 6, MidpointRounding.AwayFromZero),
-                z = Math.Round(entry.WorldZ, 6, MidpointRounding.AwayFromZero)
+                // Transformed world coordinates (used for rendering position)
+                x = Math.Round(worldX, 2, MidpointRounding.AwayFromZero),
+                y = Math.Round(worldY, 2, MidpointRounding.AwayFromZero),
+                z = Math.Round(entry.WorldY, 2, MidpointRounding.AwayFromZero)  // Height unchanged
             },
             rotation = new
             {
@@ -248,5 +271,65 @@ public sealed class OverlayBuilder
                 y = Math.Round(pixelY, 3, MidpointRounding.AwayFromZero)
             }
         };
+    }
+
+    /// <summary>
+    /// Deduplicates entries by UniqueID, keeping only ONE instance per ID.
+    /// Prefers the instance where coordinates best match the expected tile location.
+    /// </summary>
+    private static List<AssetTimelineDetailedEntry> DeduplicateByUniqueId(
+        List<AssetTimelineDetailedEntry> entries,
+        int tileRow,
+        int tileCol)
+    {
+        const double TILESIZE = 533.33333;
+        const double MAP_CENTER = 32.0 * TILESIZE;
+        
+        var byUniqueId = entries.GroupBy(e => e.UniqueId);
+        var deduplicated = new List<AssetTimelineDetailedEntry>();
+        
+        foreach (var group in byUniqueId)
+        {
+            if (group.Count() == 1)
+            {
+                // No duplicates - keep it
+                deduplicated.Add(group.First());
+                continue;
+            }
+            
+            // Multiple instances of same UniqueID - pick the best one
+            // Prefer the one where coordinates match this tile
+            AssetTimelineDetailedEntry? best = null;
+            double bestScore = double.MaxValue;
+            
+            foreach (var entry in group)
+            {
+                double worldX = MAP_CENTER - entry.WorldX;
+                double worldY = MAP_CENTER - entry.WorldZ;
+                var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
+                
+                // Calculate "distance" from expected tile
+                double score = Math.Abs(computedRow - tileRow) + Math.Abs(computedCol - tileCol);
+                
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = entry;
+                }
+            }
+            
+            if (best != null)
+            {
+                deduplicated.Add(best);
+            }
+        }
+        
+        int duplicatesRemoved = entries.Count - deduplicated.Count;
+        if (duplicatesRemoved > 0)
+        {
+            Console.WriteLine($"[OverlayBuilder] Removed {duplicatesRemoved} duplicate UniqueIDs for tile ({tileRow},{tileCol})");
+        }
+        
+        return deduplicated;
     }
 }

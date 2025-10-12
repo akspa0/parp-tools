@@ -155,6 +155,12 @@ public sealed class AnalysisViewerAdapter
 
             Console.WriteLine($"[AnalysisViewerAdapter] Viewer root generated: {viewerRoot}");
             
+            // Generate terrain overlays from MCNK terrain CSV
+            GenerateTerrainOverlays(outputDir, viewerRoot, mapName, syntheticVersion);
+            
+            // Generate cluster overlays from spatial clusters JSON
+            GenerateClusterOverlays(outputDir, viewerRoot, mapName, syntheticVersion);
+            
             // Copy UniqueID analysis CSV to expected location for "Load UniqueID Ranges" feature
             CopyUniqueIdCsvToViewer(outputDir, viewerRoot, mapName, syntheticVersion, placementsCsvPath);
 
@@ -354,32 +360,170 @@ public sealed class AnalysisViewerAdapter
         }
     }
 
+    private void GenerateTerrainOverlays(string outputDir, string viewerRoot, string mapName, string version)
+    {
+        try
+        {
+            // Look for terrain CSV: {outputDir}/{mapName}_terrain.csv
+            var terrainCsvPath = Path.Combine(outputDir, $"{mapName}_terrain.csv");
+            
+            if (!File.Exists(terrainCsvPath))
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Terrain CSV not found: {terrainCsvPath}");
+                return;
+            }
+
+            // Generate terrain overlay JSONs
+            // Target: {viewerRoot}/overlays/{version}/{mapName}/terrain_complete/tile_{col}_{row}.json
+            var overlaysRoot = Path.Combine(viewerRoot, "overlays", version, mapName);
+            var terrainDir = Path.Combine(overlaysRoot, "terrain_complete");
+            Directory.CreateDirectory(terrainDir);
+
+            var overlayGen = new OverlayGenerator();
+            var result = overlayGen.GenerateTerrainOverlaysFromCsv(outputDir, viewerRoot, mapName, version);
+            
+            if (result.Success)
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Generated terrain overlays: {result.TilesProcessed} tiles");
+            }
+            else
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Terrain overlay generation failed: {result.ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to generate terrain overlays: {ex.Message}");
+        }
+    }
+
+    private void GenerateClusterOverlays(string outputDir, string viewerRoot, string mapName, string version)
+    {
+        try
+        {
+            // Look for cluster JSON: {outputDir}/{mapName}_spatial_clusters.json
+            var clusterJsonPath = Path.Combine(outputDir, $"{mapName}_spatial_clusters.json");
+            
+            if (!File.Exists(clusterJsonPath))
+            {
+                Console.WriteLine($"[AnalysisViewerAdapter] Cluster JSON not found: {clusterJsonPath}");
+                return;
+            }
+
+            // Generate cluster overlay JSONs
+            // Target: {viewerRoot}/overlays/{version}/{mapName}/clusters/tile_{col}_{row}.json
+            var overlaysRoot = Path.Combine(viewerRoot, "overlays", version, mapName);
+            var clusterDir = Path.Combine(overlaysRoot, "clusters");
+            Directory.CreateDirectory(clusterDir);
+
+            var options = new ViewerOptions(
+                DefaultVersion: version,
+                DiffPair: null,
+                MinimapWidth: 512,
+                MinimapHeight: 512,
+                DiffDistanceThreshold: 20.0,
+                MoveEpsilonRatio: 0.1
+            );
+
+            ClusterOverlayBuilder.BuildClusterOverlays(clusterJsonPath, mapName, overlaysRoot, options);
+            Console.WriteLine($"[AnalysisViewerAdapter] Generated cluster overlays");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to generate cluster overlays: {ex.Message}");
+        }
+    }
+
     private void CopyUniqueIdCsvToViewer(string outputDir, string viewerRoot, string mapName, string version, string placementsCsvPath)
     {
         try
         {
             // Viewer expects: cached_maps/analysis/{version}/{mapName}/csv/id_ranges_by_map.csv
+            // Format: map,min,max,count (per-tile ranges)
             var csvDestDir = Path.Combine(viewerRoot, "cached_maps", "analysis", version, mapName, "csv");
             Directory.CreateDirectory(csvDestDir);
             
-            // Look for the UniqueID analysis CSV generated during analysis
-            var uniqueIdCsvPath = Path.Combine(outputDir, $"{mapName}_uniqueID_analysis.csv");
-            
-            if (File.Exists(uniqueIdCsvPath))
+            // Generate per-tile UniqueID ranges from placements CSV
+            if (File.Exists(placementsCsvPath))
             {
+                var ranges = GeneratePerTileUniqueIdRanges(placementsCsvPath, mapName);
                 var destPath = Path.Combine(csvDestDir, "id_ranges_by_map.csv");
-                File.Copy(uniqueIdCsvPath, destPath, overwrite: true);
-                Console.WriteLine($"[AnalysisViewerAdapter] Copied UniqueID ranges CSV to viewer: {destPath}");
+                File.WriteAllLines(destPath, ranges);
+                Console.WriteLine($"[AnalysisViewerAdapter] Generated UniqueID ranges CSV: {destPath}");
             }
             else
             {
-                Console.WriteLine($"[AnalysisViewerAdapter] UniqueID CSV not found: {uniqueIdCsvPath}");
+                Console.WriteLine($"[AnalysisViewerAdapter] Placements CSV not found: {placementsCsvPath}");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AnalysisViewerAdapter] Failed to copy UniqueID CSV: {ex.Message}");
+            Console.WriteLine($"[AnalysisViewerAdapter] Failed to generate UniqueID ranges: {ex.Message}");
         }
+    }
+
+    private List<string> GeneratePerTileUniqueIdRanges(string placementsCsvPath, string mapName)
+    {
+        // Read all placements and group by tile
+        var lines = File.ReadAllLines(placementsCsvPath).Skip(1); // Skip header
+        var byTile = new Dictionary<(int row, int col), List<uint>>();
+
+        foreach (var line in lines)
+        {
+            var parts = line.Split(',');
+            if (parts.Length >= 12)
+            {
+                if (uint.TryParse(parts[0], out var uniqueId) &&
+                    int.TryParse(parts[10], out var tileRow) &&
+                    int.TryParse(parts[11], out var tileCol))
+                {
+                    var key = (tileRow, tileCol);
+                    if (!byTile.ContainsKey(key))
+                        byTile[key] = new List<uint>();
+                    byTile[key].Add(uniqueId);
+                }
+            }
+        }
+
+        // Generate ranges per tile (detect gaps)
+        var output = new List<string> { "map,min,max,count" };
+        
+        foreach (var ((row, col), ids) in byTile.OrderBy(kvp => kvp.Key))
+        {
+            var sorted = ids.Distinct().OrderBy(x => x).ToList();
+            if (sorted.Count == 0) continue;
+
+            // Detect gaps > 1000 to create separate ranges
+            var ranges = new List<(uint min, uint max, int count)>();
+            uint rangeStart = sorted[0];
+            uint rangeEnd = sorted[0];
+            int rangeCount = 1;
+
+            for (int i = 1; i < sorted.Count; i++)
+            {
+                if (sorted[i] - rangeEnd > 1000) // Gap detected
+                {
+                    ranges.Add((rangeStart, rangeEnd, rangeCount));
+                    rangeStart = sorted[i];
+                    rangeEnd = sorted[i];
+                    rangeCount = 1;
+                }
+                else
+                {
+                    rangeEnd = sorted[i];
+                    rangeCount++;
+                }
+            }
+            ranges.Add((rangeStart, rangeEnd, rangeCount));
+
+            // Write ranges for this tile
+            foreach (var (min, max, count) in ranges)
+            {
+                output.Add($"{mapName}_({row}_{col}),{min},{max},{count}");
+            }
+        }
+
+        return output;
     }
 
     private void CopyMinimapsToViewer(string minimapSourceDir, string viewerRoot, string mapName, string version)
