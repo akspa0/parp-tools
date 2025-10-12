@@ -37,6 +37,9 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-map-adts":
                     return RunAnalyzeMapAdts(opts);
+                case "serve-viewer":
+                case "serve":
+                    return RunServeViewer(opts);
                 case "dry-run":
                     return RunDryRun(opts);
                 case "compare-versions":
@@ -367,6 +370,68 @@ internal static class Program
         Console.WriteLine("ℹ️  Recurring patterns show reused object compositions across the map");
         Console.WriteLine("ℹ️  Open the viewer in a web browser to explore your map interactively");
         
+        // Auto-serve if --serve flag provided
+        if (opts.ContainsKey("serve"))
+        {
+            Console.WriteLine("\n=== Starting built-in HTTP server ===");
+            var port = 8080;
+            if (opts.TryGetValue("port", out var portStr) && int.TryParse(portStr, out var parsedPort))
+            {
+                port = parsedPort;
+            }
+            
+            ViewerServer.Serve(viewerRoot, port, openBrowser: true);
+        }
+        
+        return 0;
+    }
+
+    private static int RunServeViewer(Dictionary<string, string> opts)
+    {
+        // Get viewer directory
+        var viewerDir = opts.GetValueOrDefault("viewer-dir", "");
+        
+        // If not specified, look for common locations
+        if (string.IsNullOrWhiteSpace(viewerDir))
+        {
+            var candidates = new[]
+            {
+                "analysis_output/viewer",
+                "rollback_outputs/viewer",
+                "viewer"
+            };
+            
+            foreach (var candidate in candidates)
+            {
+                if (Directory.Exists(candidate))
+                {
+                    viewerDir = candidate;
+                    break;
+                }
+            }
+        }
+        
+        if (string.IsNullOrWhiteSpace(viewerDir) || !Directory.Exists(viewerDir))
+        {
+            Console.Error.WriteLine("[error] Viewer directory not found.");
+            Console.Error.WriteLine("[info] Usage: dotnet run -- serve-viewer [--viewer-dir <path>] [--port <port>] [--no-browser]");
+            Console.Error.WriteLine("[info] Common locations checked: analysis_output/viewer, rollback_outputs/viewer, viewer");
+            return 1;
+        }
+        
+        // Get port (default 8080)
+        var port = 8080;
+        if (opts.TryGetValue("port", out var portStr) && int.TryParse(portStr, out var parsedPort))
+        {
+            port = parsedPort;
+        }
+        
+        // Check if should open browser
+        var openBrowser = !opts.ContainsKey("no-browser");
+        
+        Console.WriteLine($"[info] Starting viewer server...");
+        ViewerServer.Serve(viewerDir, port, openBrowser);
+        
         return 0;
     }
 
@@ -441,9 +506,15 @@ internal static class Program
         Console.WriteLine("  analyze-lk-adt    --map <name> --input-dir <dir> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from converted LK ADT files (preservation analysis)");
         Console.WriteLine();
-        Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>]");
+        Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>] [--serve] [--port <port>]");
         Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) and extract UniqueID data");
         Console.WriteLine("    Supports 0.6.0 through 4.0.0+ ADT formats");
+        Console.WriteLine("    Use --serve to auto-start web server after analysis");
+        Console.WriteLine();
+        Console.WriteLine("  serve-viewer  [--viewer-dir <path>] [--port <port>] [--no-browser]");
+        Console.WriteLine("    Start built-in HTTP server to host the viewer (self-contained, no Python needed)");
+        Console.WriteLine("    Auto-detects viewer directory if not specified");
+        Console.WriteLine("    Default port: 8080");
         Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");

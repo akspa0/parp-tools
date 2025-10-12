@@ -29,7 +29,8 @@ public sealed class OverlayManifestBuilder
         IEnumerable<(int Row, int Col)> tiles,
         string overlayDirectory,
         bool hasTerrainData = false,
-        bool hasShadowData = false)
+        bool hasShadowData = false,
+        bool hasClusterData = false)
     {
         ArgumentNullException.ThrowIfNull(version);
         ArgumentNullException.ThrowIfNull(mapName);
@@ -42,7 +43,7 @@ public sealed class OverlayManifestBuilder
             Version = version,
             Map = mapName,
             GeneratedAt = DateTime.UtcNow,
-            Overlays = BuildOverlayList(mapName, tileList, hasTerrainData, hasShadowData),
+            Overlays = BuildOverlayList(mapName, tileList, hasTerrainData, hasShadowData, hasClusterData),
             Tiles = BuildTileList(tileList)
         };
 
@@ -59,17 +60,33 @@ public sealed class OverlayManifestBuilder
         string mapName,
         List<(int Row, int Col)> tiles,
         bool hasTerrainData,
-        bool hasShadowData)
+        bool hasShadowData,
+        bool hasClusterData)
     {
         var overlays = new List<OverlayDefinition>();
 
-        // Object overlays (always present)
+        // Cluster overlay (default if available, better performance)
+        if (hasClusterData)
+        {
+            overlays.Add(new OverlayDefinition
+            {
+                Id = "clusters",
+                Plugin = "clusters",
+                Title = "Object Clusters",
+                Enabled = true, // DEFAULT OVERLAY - best performance
+                TilePattern = "clusters/tile_{col}_{row}.json",
+                TileCoverage = "sparse",
+                Description = "Spatial clusters of objects - lighter weight than individual objects"
+            });
+        }
+
+        // Object overlays (always present, but disabled by default if clusters exist)
         overlays.Add(new OverlayDefinition
         {
             Id = "objects.combined",
             Plugin = "objects",
             Title = "All Objects (M2 + WMO)",
-            Enabled = true,
+            Enabled = !hasClusterData, // Disable if clusters available
             TilePattern = "combined/tile_r{row}_c{col}.json",
             TileCoverage = "complete" // All tiles have objects
         });

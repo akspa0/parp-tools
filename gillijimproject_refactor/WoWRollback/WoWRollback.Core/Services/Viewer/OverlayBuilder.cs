@@ -227,6 +227,14 @@ public sealed class OverlayBuilder
                 y = Math.Round(entry.WorldY, 6, MidpointRounding.AwayFromZero),
                 z = Math.Round(entry.WorldZ, 6, MidpointRounding.AwayFromZero)
             },
+            rotation = new
+            {
+                // Rotation in degrees
+                x = Math.Round(entry.RotationX, 2, MidpointRounding.AwayFromZero),
+                y = Math.Round(entry.RotationY, 2, MidpointRounding.AwayFromZero),
+                z = Math.Round(entry.RotationZ, 2, MidpointRounding.AwayFromZero)
+            },
+            scale = Math.Round(entry.Scale, 4, MidpointRounding.AwayFromZero),
             local = new
             {
                 // 6 decimal places for normalized 0-1 coordinates

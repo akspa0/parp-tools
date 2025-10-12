@@ -1,10 +1,48 @@
-# WoWRollback - Unified Alpha Map Conversion Pipeline
+# WoWRollback - World of Warcraft Map Analysis & Rollback Toolkit
 
-**Digital archaeology toolkit** for World of Warcraft Alpha map content - converts Alpha WDTs to Lich King ADTs with AreaID patching, generates comparison data, and produces an interactive web viewer.
+**Digital archaeology toolkit** for World of Warcraft map content:
+- ✅ **Analyze loose ADT files** (0.5.x - 4.x+) without conversion
+- ✅ **Extract object placements** with spatial clustering & pattern detection  
+- ✅ **Generate MCNK terrain data** with AreaID mappings
+- ✅ **Interactive web viewer** with built-in HTTP server (no Python needed!)
+- ✅ **Version comparison** - Alpha WDT → LK ADT conversion pipeline
+- ✅ **Cross-tile duplicate filtering** - Clean object placement data
+- ✅ **Cluster visualization** - See object groups instead of 28K individual markers
 
 ---
 
 ## 🚀 Quick Start
+
+### Analyze Loose ADT Files (New!)
+
+**The fastest way to explore your map data:**
+
+```powershell
+cd WoWRollback
+
+# Step 1: Analyze ADT files
+dotnet run --project WoWRollback.Cli -- analyze-map-adts \
+  --map development \
+  --map-dir "..\test_data\development\World\Maps\development\" \
+  --out "analysis_output"
+
+# Step 2: Start built-in web server (auto-detects viewer location)
+dotnet run --project WoWRollback.Cli -- serve-viewer
+
+# Opens browser at http://localhost:8080 automatically!
+```
+
+**What you get:**
+- ✅ 26K+ M2/WMO placements extracted & overlaid on minimaps
+- ✅ MCNK terrain data (AreaIDs, flags, liquids, holes)
+- ✅ Spatial clusters showing prefabs & object groups
+- ✅ UniqueID analysis with layer detection
+- ✅ Interactive viewer with zoom, pan, object details
+- ✅ Cross-tile duplicate filtering (clean data!)
+
+---
+
+### Alpha→LK Conversion Pipeline (Original)
 
 ### 1. Organize Your Data
 
@@ -189,7 +227,94 @@ WoWRollback/
 
 ## 📖 CLI Reference
 
-### Orchestrator Command (Primary)
+### Analyze Loose ADTs (Primary - New!)
+
+**Analyze ADT files without conversion** - supports pre-Cataclysm through Cataclysm+ formats:
+
+```powershell
+dotnet run --project WoWRollback.Cli -- analyze-map-adts \
+  --map <name> \
+  --map-dir <path> \
+  [--out <dir>]
+```
+
+**What it does:**
+1. **Extracts placements** - Reads MDDF/MODF chunks from `_obj0.adt` files
+2. **Extracts terrain** - Reads MCNK chunks (AreaID, flags, liquids, holes)
+3. **Analyzes UniqueIDs** - Detects layers, gaps, ranges per tile
+4. **Detects clusters** - Finds spatial object groups (prefabs/brushes)
+5. **Generates viewer** - Creates interactive web viewer with overlays
+
+**Output:**
+```
+analysis_output/
+├── development_placements.csv          # All M2/WMO placements
+├── development_terrain.csv             # MCNK terrain data
+├── development_uniqueID_analysis.csv   # UniqueID ranges by tile
+├── development_spatial_clusters.json   # Detected object clusters
+├── development_patterns.json           # Recurring patterns
+├── development_cluster_summary.csv     # Cluster statistics
+└── viewer/                             # Self-contained web viewer
+    ├── index.html
+    ├── js/
+    ├── styles.css
+    ├── minimap/
+    │   └── analysis/development/       # WebP minimap tiles
+    ├── overlays/
+    │   └── analysis/development/
+    │       ├── combined/               # Object overlays (per-tile JSON)
+    │       ├── m2/                     # M2-only overlays
+    │       ├── wmo/                    # WMO-only overlays
+    │       ├── clusters/               # Cluster overlays (NEW!)
+    │       └── terrain_complete/       # MCNK terrain overlays
+    └── cached_maps/analysis/development/
+        └── csv/id_ranges_by_map.csv   # For UniqueID range filtering
+```
+
+**Key Features:**
+- ✅ **Cross-tile duplicate filtering** - Objects only shown on their primary tile
+- ✅ **Cluster visualization** - Default overlay shows ~100 clusters instead of 28K objects
+- ✅ **Coordinate system fixes** - Proper ADT placement→world transform (180° flip + axis swap)
+- ✅ **WebP minimaps** - 50-70% memory savings vs PNG
+- ✅ **UniqueID range loading** - Filter objects by ID ranges in viewer
+
+---
+
+### Serve Viewer (Built-in HTTP Server - New!)
+
+**Self-contained web server** - no Python, Node, or external dependencies needed:
+
+```powershell
+# Auto-detect viewer location
+dotnet run --project WoWRollback.Cli -- serve-viewer
+
+# Specify directory
+dotnet run --project WoWRollback.Cli -- serve-viewer \
+  --viewer-dir analysis_output/viewer
+
+# Custom port
+dotnet run --project WoWRollback.Cli -- serve-viewer --port 3000
+
+# Don't auto-open browser
+dotnet run --project WoWRollback.Cli -- serve-viewer --no-browser
+```
+
+**Features:**
+- ✅ Built on ASP.NET Core Kestrel (production-grade)
+- ✅ Auto-detects common viewer locations
+- ✅ Opens browser automatically
+- ✅ Proper MIME types (.webp, .json, .geojson)
+- ✅ Clean console output (only errors logged)
+- ✅ Cross-platform (Windows/Linux/macOS)
+
+**Checked locations:**
+1. `analysis_output/viewer`
+2. `rollback_outputs/viewer`
+3. `viewer`
+
+---
+
+### Orchestrator Command (Alpha→LK Pipeline)
 
 **Single unified command** that runs the full pipeline:
 
@@ -588,7 +713,42 @@ parp_out/
 
 ## ✨ Features
 
-### Current (v0.5)
+### Current (v1.0 - Loose ADT Analysis)
+
+#### ADT Analysis (NEW!)
+- ✅ **Loose ADT analysis** - No conversion needed, reads 0.5.x-4.x+ formats directly
+- ✅ **M2/WMO extraction** - Reads MDDF/MODF chunks from `_obj0.adt` files
+- ✅ **MCNK terrain extraction** - AreaIDs, flags, textures, liquids, holes
+- ✅ **Spatial clustering** - Detects prefabs & object brushes (proximity-based)
+- ✅ **Pattern recognition** - Finds recurring object compositions
+- ✅ **UniqueID analysis** - Ranges, layers, gaps per tile
+- ✅ **Cross-tile duplicate filtering** - Removes culling duplicates
+- ✅ **Coordinate transform fixes** - Proper ADT placement→world mapping
+
+#### Built-in Web Server (NEW!)
+- ✅ **Self-contained HTTP server** - ASP.NET Core Kestrel (no Python!)
+- ✅ **Auto-detection** - Finds viewer in common locations
+- ✅ **Browser integration** - Auto-opens on startup
+- ✅ **Custom MIME types** - WebP, JSON, GeoJSON support
+- ✅ **Configurable** - Custom port, optional browser launch
+
+#### Web Viewer Enhancements (NEW!)
+- ✅ **Cluster overlays** - Default view shows ~100 clusters vs 28K objects (50-100x faster!)
+- ✅ **WebP minimaps** - 50-70% memory savings, lazy loading
+- ✅ **UniqueID range filtering** - Load & filter by ID ranges
+- ✅ **Popup text wrapping** - Long asset paths no longer escape popups
+- ✅ **Coordinate labels fixed** - World X/Y/Z display correctly
+- ✅ **CDN failover** - jsdelivr.net instead of unpkg.com (no DNS hangs)
+- ✅ **Lazy tile loading** - Start zoomed to top-left, only load visible tiles
+- ✅ **All minimap tiles shown** - Even tiles with no placements
+
+#### Data Quality (NEW!)
+- ✅ **Cross-tile duplicate detection** - Same UniqueID on multiple tiles filtered
+- ✅ **Tile-only filtering** - Objects only shown on tiles where coordinates place them
+- ✅ **Coordinate validation** - 180° placement flip + axis swap corrections
+- ✅ **Dummy marker filtering** - Internal tile markers removed from overlays
+
+### Previous (v0.5 - Alpha Pipeline)
 
 #### DBC Processing
 - ✅ **AreaTable extraction** - Dumps Alpha + LK AreaTable.dbc to CSV
@@ -609,33 +769,37 @@ parp_out/
 - ✅ **MPQ archive support** - Direct extraction from compressed archives
 - ✅ **Static file serving** - Built-in HTTP server
 
-### Coming Soon (v0.6 - Analysis Stage)
+### Coming Soon (v1.1+)
 
-#### UniqueID Analysis (Phase 0: Time-Travel)
-- ⏳ **UniqueID distribution CSVs** - Track object ID ranges per tile
-- ⏳ **Layer detection** - Identify distinct "work sessions" by ID gaps
-- ⏳ **Time-travel filtering** - Timeline slider to show/hide object layers
-- ⏳ **JSON layer metadata** - Export detected layers for viewer
+#### Viewer Enhancements
+- ⏳ **Cluster overlay plugin** - Visualize clusters as circles/polygons
+- ⏳ **Click cluster → expand** - Toggle from cluster view to individual objects
+- ⏳ **Time-travel slider** - Show/hide object layers by UniqueID ranges
+- ⏳ **Diff visualization** - Compare versions side-by-side
+- ⏳ **AreaID overlay** - Show area boundaries with labels
+- ⏳ **Liquids overlay** - Visualize water/lava/slime from MCNK
+- ⏳ **Holes overlay** - Show terrain holes (gaps in ground)
 
-#### Per-Tile Overlays (Plugin Architecture)
-- ⏳ **Terrain overlays** - MCNK properties, liquids, holes per tile
-- ⏳ **Object overlays** - M2/WMO placements with UniqueIDs
-- ⏳ **Shadow overlays** - Shadow map visualization
-- ⏳ **Overlay manifest** - Plugin system coordination
+#### Analysis Enhancements
+- ⏳ **Pattern matching** - Identify identical object groups across map
+- ⏳ **Prefab detection** - Find reused building/prop compositions
+- ⏳ **Change detection** - Diff between versions for same map
+- ⏳ **Asset catalog** - Generate inventory of all M2/WMO paths used
 
-#### MCNK Metadata
-- ⏳ **Terrain CSVs** - Complete MCNK data per tile
-- ⏳ **Property analysis** - Flags, layers, holes statistics
-- ⏳ **AreaID validation** - Verify patched values
+#### Data Export
+- ⏳ **GeoJSON export** - Placements as geospatial data
+- ⏳ **SQLite export** - Queryable database of all objects
+- ⏳ **Filtered ADT export** - Write modified ADTs with selected ranges
 
-### Future Enhancements (Phase 1+)
+### Future Ideas (v2.0+)
 
-- 🔮 **Diff visualization** - Show object additions/removals between versions
-- 🔮 **Multi-map comparison** - Side-by-side map views
+- 🔮 **Multi-map comparison** - Analyze multiple maps simultaneously
 - 🔮 **ADT grid overlay** - wow.tools-style tile grid with labels
 - 🔮 **Heatmap overlays** - Object density, change magnitude
-- 🔮 **Export filtered ADTs** - Write modified ADTs with selected ranges
 - 🔮 **Alpha backporting** - LK → Alpha format conversion
+- 🔮 **3D visualization** - WebGL-based 3D map view
+- 🔮 **Heightmap export** - Generate height data from MCVT
+- 🔮 **WDT analysis** - Global map metadata extraction
 
 ---
 

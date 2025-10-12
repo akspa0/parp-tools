@@ -209,6 +209,7 @@ public sealed class ViewerReportWriter
                     if (!terrainOverlaysGenerated.Contains(terrainKey))
                     {
                         GenerateTerrainOverlays(result.RootDirectory, version, mapName, versionRoot, safeMap);
+                        GenerateClusterOverlays(result.RootDirectory, version, mapName, versionRoot, safeMap, resolvedOptions);
                         terrainOverlaysGenerated.Add(terrainKey);
                     }
                 }
@@ -450,12 +451,40 @@ public sealed class ViewerReportWriter
         return string.IsNullOrWhiteSpace(sanitized) ? "unnamed" : sanitized;
     }
 
+    private static void GenerateClusterOverlays(
+        string rootDirectory,
+        string version,
+        string mapName,
+        string versionRoot,
+        string safeMap,
+        ViewerOptions options)
+    {
+        try
+        {
+            // Look for cluster JSON in root directory
+            var clusterJsonPath = Path.Combine(rootDirectory, $"{mapName}_spatial_clusters.json");
+            
+            if (!File.Exists(clusterJsonPath))
+            {
+                Console.WriteLine($"[ViewerReportWriter] Cluster JSON not found: {clusterJsonPath}");
+                return;
+            }
+
+            var overlayVersionRoot = Path.Combine(versionRoot, "overlays", version);
+            ClusterOverlayBuilder.BuildClusterOverlays(clusterJsonPath, mapName, overlayVersionRoot, options);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ViewerReportWriter] Error generating cluster overlays: {ex.Message}");
+        }
+    }
+
     private static void GenerateTerrainOverlays(
         string rootDirectory,
         string version,
         string mapName,
-        string overlayVersionRoot,
-        string safeMapName)
+        string versionRoot,
+        string safeMap)
     {
         // Look for MCNK terrain CSV in the output directory structure
         // Path: rollback_outputs/{version}/csv/{map}/{map}_mcnk_terrain.csv
@@ -467,6 +496,8 @@ public sealed class ViewerReportWriter
             // CSV not found - terrain overlays were not extracted, skip silently
             return;
         }
+        
+        var overlayVersionRoot = Path.Combine(versionRoot, "overlays", version);
         
         // Generate shadow map overlays if available
         McnkShadowOverlayBuilder.BuildOverlaysForMap(mapName, csvMapDir, overlayVersionRoot, version);
@@ -526,11 +557,13 @@ public sealed class ViewerReportWriter
                 var versionRoot = Path.Combine(overlaysRoot, safeVersion);
                 var mapOverlayDir = Path.Combine(versionRoot, safeMap);
 
-                // Check if terrain/shadow data exists
+                // Check if terrain/shadow/cluster data exists
                 var terrainDir = Path.Combine(mapOverlayDir, "terrain_complete");
                 var shadowDir = Path.Combine(mapOverlayDir, "shadow_map");
+                var clusterDir = Path.Combine(mapOverlayDir, "clusters");
                 var hasTerrainData = Directory.Exists(terrainDir) && Directory.GetFiles(terrainDir, "*.json").Length > 0;
                 var hasShadowData = Directory.Exists(shadowDir) && Directory.GetFiles(shadowDir, "*.json").Length > 0;
+                var hasClusterData = Directory.Exists(clusterDir) && Directory.GetFiles(clusterDir, "*.json").Length > 0;
 
                 // Generate manifest
                 var manifestJson = manifestBuilder.BuildManifest(
@@ -539,7 +572,8 @@ public sealed class ViewerReportWriter
                     tileCoordsForMap,
                     mapOverlayDir,
                     hasTerrainData,
-                    hasShadowData);
+                    hasShadowData,
+                    hasClusterData);
 
                 var manifestPath = Path.Combine(mapOverlayDir, "overlay_manifest.json");
                 File.WriteAllText(manifestPath, manifestJson);
