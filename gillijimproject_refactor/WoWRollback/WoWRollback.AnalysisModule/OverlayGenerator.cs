@@ -750,7 +750,7 @@ public sealed class OverlayGenerator
         try
         {
             var m2Placements = placements
-                .Where(p => p.Type == AssetType.MdxOrM2)
+                .Where(p => p.Type == "M2")
                 .Select(p => new
                 {
                     uniqueId = p.UniqueId,
@@ -758,15 +758,15 @@ public sealed class OverlayGenerator
                     x = p.WorldX,
                     y = p.WorldY,
                     z = p.WorldZ,
-                    rotX = p.RotationX,
-                    rotY = p.RotationY,
-                    rotZ = p.RotationZ,
+                    rotX = p.RotX,
+                    rotY = p.RotY,
+                    rotZ = p.RotZ,
                     scale = p.Scale
                 })
                 .ToList();
 
             var wmoPlacements = placements
-                .Where(p => p.Type == AssetType.Wmo)
+                .Where(p => p.Type == "WMO")
                 .Select(p => new
                 {
                     uniqueId = p.UniqueId,
@@ -774,9 +774,9 @@ public sealed class OverlayGenerator
                     x = p.WorldX,
                     y = p.WorldY,
                     z = p.WorldZ,
-                    rotX = p.RotationX,
-                    rotY = p.RotationY,
-                    rotZ = p.RotationZ,
+                    rotX = p.RotX,
+                    rotY = p.RotY,
+                    rotZ = p.RotZ,
                     doodadSet = p.DoodadSet,
                     nameSet = p.NameSet
                 })

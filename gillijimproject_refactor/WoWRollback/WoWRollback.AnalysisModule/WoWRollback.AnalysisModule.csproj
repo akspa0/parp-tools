@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
 
 </Project>

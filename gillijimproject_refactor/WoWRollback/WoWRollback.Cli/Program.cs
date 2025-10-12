@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using WoWRollback.AnalysisModule;
 using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Config;
@@ -34,6 +35,8 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-ranges": // Legacy alias for analyze-lk-adt
                     return RunAnalyzeLkAdt(opts);
+                case "analyze-map-adts":
+                    return RunAnalyzeMapAdts(opts);
                 case "dry-run":
                     return RunDryRun(opts);
                 case "compare-versions":
@@ -244,6 +247,57 @@ internal static class Program
         return 0;
     }
 
+    private static int RunAnalyzeMapAdts(Dictionary<string, string> opts)
+    {
+        Require(opts, "map-dir");
+        Require(opts, "map");
+        
+        var mapDir = opts["map-dir"];
+        var mapName = opts["map"];
+        var outDir = opts.GetValueOrDefault("out", Path.Combine("analysis_output", mapName));
+
+        Console.WriteLine($"[info] Analyzing ADT files for map: {mapName}");
+        Console.WriteLine($"[info] Map directory: {mapDir}");
+        Console.WriteLine($"[info] Output directory: {outDir}");
+
+        // Step 1: Extract placements from ADT files
+        Console.WriteLine("\n=== Step 1: Extracting placements from ADT files ===");
+        var extractor = new AdtPlacementsExtractor();
+        var placementsCsvPath = Path.Combine(outDir, $"{mapName}_placements.csv");
+        var extractResult = extractor.Extract(mapDir, mapName, placementsCsvPath);
+
+        if (!extractResult.Success)
+        {
+            Console.Error.WriteLine($"[error] Placement extraction failed: {extractResult.ErrorMessage}");
+            return 1;
+        }
+
+        Console.WriteLine($"[ok] Extracted {extractResult.M2Count} M2 placements");
+        Console.WriteLine($"[ok] Extracted {extractResult.WmoCount} WMO placements");
+        Console.WriteLine($"[ok] Processed {extractResult.TilesProcessed} tiles");
+        Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
+
+        // Step 2: Analyze UniqueIDs and detect layers
+        Console.WriteLine("\n=== Step 2: Analyzing UniqueIDs and detecting layers ===");
+        var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
+        var analysisResult = analyzer.AnalyzeFromPlacementsCsv(placementsCsvPath, mapName, outDir);
+
+        if (!analysisResult.Success)
+        {
+            Console.Error.WriteLine($"[error] UniqueID analysis failed: {analysisResult.ErrorMessage}");
+            return 1;
+        }
+
+        Console.WriteLine($"[ok] Analyzed {analysisResult.TileCount} tiles");
+        Console.WriteLine($"[ok] UniqueID analysis CSV: {analysisResult.CsvPath}");
+        Console.WriteLine($"[ok] Layers JSON: {analysisResult.LayersJsonPath}");
+
+        Console.WriteLine("\n=== Analysis Complete ===");
+        Console.WriteLine($"All outputs written to: {outDir}");
+        
+        return 0;
+    }
+
     private static int RunDryRun(Dictionary<string, string> opts)
     {
         Require(opts, "input-dir");
@@ -314,6 +368,10 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  analyze-lk-adt    --map <name> --input-dir <dir> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from converted LK ADT files (preservation analysis)");
+        Console.WriteLine();
+        Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>]");
+        Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) and extract UniqueID data");
+        Console.WriteLine("    Supports 0.6.0 through 4.0.0+ ADT formats");
         Console.WriteLine();
         Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
         Console.WriteLine("    Preview rollback effects without modifying files");
