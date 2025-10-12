@@ -111,10 +111,23 @@ public sealed class MinimapHandler
     {
         try
         {
+            // Convert to absolute path for reliable navigation
+            var absoluteMapDir = Path.GetFullPath(mapDirectory);
+            Console.WriteLine($"[MinimapHandler] Resolving minimaps from: {absoluteMapDir}");
+
             // Navigate from World\Maps\{mapName}\ to World\
-            var worldDir = Path.GetDirectoryName(Path.GetDirectoryName(mapDirectory));
+            var mapsDir = Path.GetDirectoryName(absoluteMapDir);  // Maps
+            Console.WriteLine($"[MinimapHandler] Maps directory: {mapsDir}");
+            
+            var worldDir = Path.GetDirectoryName(mapsDir);        // World
+            
             if (string.IsNullOrEmpty(worldDir))
+            {
+                Console.WriteLine($"[MinimapHandler] Could not resolve World directory");
                 return null;
+            }
+
+            Console.WriteLine($"[MinimapHandler] World directory: {worldDir}");
 
             // Check common locations for minimaps
             var candidates = new[]
@@ -127,22 +140,34 @@ public sealed class MinimapHandler
                 Path.Combine(worldDir, "Minimaps")                       // Alternative structure
             };
 
-            foreach (var candidate in candidates)
+            for (int i = 0; i < candidates.Length; i++)
             {
-                if (Directory.Exists(candidate))
+                var candidate = candidates[i];
+                bool exists = Directory.Exists(candidate);
+                Console.WriteLine($"[MinimapHandler] Candidate {i + 1}: {candidate} (exists: {exists})");
+                
+                if (exists)
                 {
                     // Verify it contains PNG files
-                    if (Directory.EnumerateFiles(candidate, "*.png", SearchOption.TopDirectoryOnly).Any())
+                    var pngFiles = Directory.EnumerateFiles(candidate, "*.png", SearchOption.TopDirectoryOnly).ToList();
+                    if (pngFiles.Count > 0)
                     {
+                        Console.WriteLine($"[MinimapHandler] ✓ Found {pngFiles.Count} PNG files - using this directory");
                         return candidate;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[MinimapHandler] Directory exists but contains no PNG files");
                     }
                 }
             }
 
+            Console.WriteLine($"[MinimapHandler] No minimap directory found");
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[MinimapHandler] Error resolving minimap directory: {ex.Message}");
             return null;
         }
     }

@@ -331,10 +331,26 @@ internal static class Program
             Console.WriteLine($"[ok] Summary CSV: {clusterResult.SummaryCsvPath}");
         }
 
+        // Step 4: Generate standalone viewer
+        Console.WriteLine("\n=== Step 4: Generating viewer ===");
+        var viewerGenerator = new SimpleViewerGenerator();
+        var viewerResult = viewerGenerator.Generate(outDir, mapName);
+
+        if (viewerResult.Success)
+        {
+            Console.WriteLine($"[ok] Viewer generated: {viewerResult.ViewerPath}");
+            Console.WriteLine($"[info] Open: {Path.Combine(viewerResult.ViewerPath!, "index.html")}");
+        }
+        else
+        {
+            Console.WriteLine($"[warn] Viewer generation failed: {viewerResult.ErrorMessage}");
+        }
+
         Console.WriteLine("\n=== Analysis Complete ===");
         Console.WriteLine($"All outputs written to: {outDir}");
         Console.WriteLine("\nℹ️  Spatial clusters reveal object groups placed together - likely prefabs or brushes");
         Console.WriteLine("ℹ️  Recurring patterns show reused object compositions across the map");
+        Console.WriteLine("ℹ️  Open the viewer in a web browser to explore your map interactively");
         
         return 0;
     }
