@@ -156,19 +156,20 @@ public sealed class OverlayBuilder
         */
 
         // Transform MDDF/MODF placement coordinates to world coordinates
-        // Per ADT spec coordinate table:
-        // - Placement: X = West←East (32*TILE - x), Y = Up, Z = North←South (32*TILE - z)
-        // - World/ADT: X = North←South, Y = West←East, Z = Up
-        // The stored WorldX/WorldZ are already in placement space, need to map to world space
+        // Per ADT spec: worldX = 32*TILESIZE - placementZ, worldY = 32*TILESIZE - placementX
+        // Placement system: X = West←East, Z = North←South  
+        // World system: X = North←South, Y = West←East
+        // BUT CoordinateTransformer uses: worldX affects col, worldY affects row
+        // So we need to SWAP them!
         
         const double TILESIZE = 533.33333;
         const double MAP_CENTER = 32.0 * TILESIZE; // 17066.66656
         
-        // Placement coords stored in entry: entry.WorldX = placement X, entry.WorldZ = placement Z
-        // Mapping: placement X → world Y, placement Z → world X
-        // BUT signs: world system has +X=north, +Y=west; placement has opposite orientation
-        double worldX = entry.WorldZ;  // placement Z → world X (North-South axis)
-        double worldY = entry.WorldX;  // placement X → world Y (West-East axis)
+        // entry.WorldX = placement X, entry.WorldZ = placement Z
+        // CoordinateTransformer expects: worldX=col axis (west-east), worldY=row axis (north-south)
+        // So swap the mapping:
+        double worldX = MAP_CENTER - entry.WorldX;  // placement X → worldX (col/horizontal)
+        double worldY = MAP_CENTER - entry.WorldZ;  // placement Z → worldY (row/vertical)
         
         var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);

@@ -63,10 +63,14 @@ function initializeMap() {
         crs: L.CRS.Simple,
         minZoom: 0,
         maxZoom: 12,  // Increased for 4x more zoom detail
-        zoom: 2,
+        zoom: 4,  // Start zoomed in to reduce initial tile load
         zoomControl: true,
         zoomSnap: 0.1,
-        zoomDelta: 0.5
+        zoomDelta: 0.5,
+        // Performance optimizations for lazy loading
+        preferCanvas: true,  // Use canvas rendering for better performance
+        updateWhenIdle: false,  // Update tiles continuously during pan
+        keepBuffer: 2  // Keep 2 tile rows/cols outside viewport (default is 2)
     });
 
     objectMarkers.addTo(map);
@@ -109,10 +113,10 @@ function initializeMap() {
         }
     });
     
-    // Set initial view to center
-    // Start roughly center; for wow.tools mapping lat ≈ 31–32 is center too
-    map.setView([32, 32], 2);
-    console.log('Map initialized with WoW coordinate system (0,0 = NW)');
+    // Set initial view to top-left corner (tile 0,0) to minimize initial tile loading
+    // At zoom 4, only ~16-25 tiles will be loaded initially instead of all 2252
+    map.setView([4, 4], 4);  // Slightly offset from 0,0 to show border
+    console.log('Map initialized with WoW coordinate system (0,0 = NW), starting at top-left');
 }
 
 // Dynamic radius scaling based on zoom level
