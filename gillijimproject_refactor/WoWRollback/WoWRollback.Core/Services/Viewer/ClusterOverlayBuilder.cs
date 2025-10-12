@@ -180,43 +180,40 @@ public static class ClusterOverlayBuilder
         [JsonPropertyName("objectCount")]
         public int ObjectCount { get; set; }
         
-        [JsonPropertyName("centroidX")]
-        public float CentroidX { get; set; }
+        [JsonPropertyName("centroid")]
+        public CentroidData Centroid { get; set; } = new();
         
-        [JsonPropertyName("centroidY")]
-        public float CentroidY { get; set; }
+        [JsonPropertyName("boundingRadius")]
+        public float BoundingRadius { get; set; }
         
-        [JsonPropertyName("centroidZ")]
-        public float CentroidZ { get; set; }
-        
-        [JsonPropertyName("minX")]
-        public float MinX { get; set; }
-        
-        [JsonPropertyName("maxX")]
-        public float MaxX { get; set; }
-        
-        [JsonPropertyName("minY")]
-        public float MinY { get; set; }
-        
-        [JsonPropertyName("maxY")]
-        public float MaxY { get; set; }
-        
-        [JsonPropertyName("minZ")]
-        public float MinZ { get; set; }
-        
-        [JsonPropertyName("maxZ")]
-        public float MaxZ { get; set; }
-        
-        [JsonPropertyName("isStamp")]
+        [JsonPropertyName("isPlacementStamp")]
         public bool IsStamp { get; set; }
         
-        [JsonPropertyName("hasConsecutiveIds")]
-        public bool HasConsecutiveIds { get; set; }
+        // Computed accessors for backwards compatibility
+        public float CentroidX => Centroid.X;
+        public float CentroidY => Centroid.Y;
+        public float CentroidZ => Centroid.Z;
         
-        [JsonPropertyName("tileX")]
-        public int TileX { get; set; }
+        public float MinX => CentroidX - BoundingRadius;
+        public float MaxX => CentroidX + BoundingRadius;
+        public float MinY => CentroidY - BoundingRadius;
+        public float MaxY => CentroidY + BoundingRadius;
+        public float MinZ => CentroidZ - BoundingRadius;
+        public float MaxZ => CentroidZ + BoundingRadius;
+        public bool HasConsecutiveIds => false; // Not in JSON
+        public int TileX => 0; // Will be set by parent
+        public int TileY => 0; // Will be set by parent
+    }
+    
+    private class CentroidData
+    {
+        [JsonPropertyName("x")]
+        public float X { get; set; }
         
-        [JsonPropertyName("tileY")]
-        public int TileY { get; set; }
+        [JsonPropertyName("y")]
+        public float Y { get; set; }
+        
+        [JsonPropertyName("z")]
+        public float Z { get; set; }
     }
 }

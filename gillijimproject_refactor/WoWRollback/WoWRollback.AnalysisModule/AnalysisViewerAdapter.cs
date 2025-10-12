@@ -465,19 +465,23 @@ public sealed class AnalysisViewerAdapter
     private List<string> GeneratePerTileUniqueIdRanges(string placementsCsvPath, string mapName)
     {
         // Read all placements and group by tile
+        // CSV header: map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set
         var lines = File.ReadAllLines(placementsCsvPath).Skip(1); // Skip header
         var byTile = new Dictionary<(int row, int col), List<uint>>();
 
         foreach (var line in lines)
         {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            
             var parts = line.Split(',');
-            if (parts.Length >= 12)
+            if (parts.Length >= 6)  // Need at least: map,tile_x,tile_y,type,asset_path,unique_id
             {
-                if (uint.TryParse(parts[0], out var uniqueId) &&
-                    int.TryParse(parts[10], out var tileRow) &&
-                    int.TryParse(parts[11], out var tileCol))
+                // Column indices: map=0, tile_x=1, tile_y=2, unique_id=5
+                if (uint.TryParse(parts[5], out var uniqueId) &&
+                    int.TryParse(parts[1], out var tileX) &&
+                    int.TryParse(parts[2], out var tileY))
                 {
-                    var key = (tileRow, tileCol);
+                    var key = (tileY, tileX);  // Use (row, col) convention
                     if (!byTile.ContainsKey(key))
                         byTile[key] = new List<uint>();
                     byTile[key].Add(uniqueId);

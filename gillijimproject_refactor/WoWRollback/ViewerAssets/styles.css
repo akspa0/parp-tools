@@ -195,6 +195,7 @@ body {
     background: #2a2a2a;
     color: #e0e0e0;
     border: 1px solid #444;
+    max-width: 400px !important; /* Prevent excessively wide popups */
 }
 
 .leaflet-popup-tip {
@@ -204,6 +205,11 @@ body {
 .leaflet-popup-content {
     margin: 10px;
     font-size: 12px;
+    max-width: 380px;
+    /* Handle long asset paths */
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .leaflet-popup-content strong {
@@ -247,8 +253,16 @@ body {
     background: #2a2a2a;
     color: #e0e0e0;
     border: 1px solid #444;
-    border-radius: 6px;
+    border-radius: 4px;
     box-shadow: 0 3px 14px rgba(0,0,0,0.6);
+    max-width: 400px !important;
+}
+
+.persistent-popup .leaflet-popup-content {
+    max-width: 380px;
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .persistent-popup .leaflet-popup-tip {

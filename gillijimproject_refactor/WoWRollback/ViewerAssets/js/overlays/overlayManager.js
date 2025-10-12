@@ -103,7 +103,7 @@ export class OverlayManager {
         try {
             const response = await fetch(overlayPath);
             if (!response.ok) {
-                console.warn(`Overlay not found: ${overlayPath}`);
+                // Silently skip - terrain data is sparse, most tiles won't have overlays
                 return;
             }
 
@@ -121,7 +121,8 @@ export class OverlayManager {
             // }
             
         } catch (error) {
-            console.error(`Failed to load overlay ${overlayPath}:`, error);
+            // Silently skip - terrain data is sparse, most tiles won't have overlays
+            // Uncomment for debugging: console.error(`Failed to load overlay ${overlayPath}:`, error);
         }
     }
 

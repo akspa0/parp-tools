@@ -210,6 +210,104 @@ function setupUI() {
     
     // Setup terrain overlay controls
     setupTerrainOverlayControls();
+    
+    // Setup cluster overlay controls
+    setupClusterOverlayControls();
+}
+
+function setupClusterOverlayControls() {
+    const showClusters = document.getElementById('showClusters');
+    
+    showClusters.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            loadAndRenderClusters();
+        } else {
+            clearClusters();
+        }
+    });
+    
+    // Uncheck by default - let user opt-in to cluster view
+    showClusters.checked = false;
+}
+
+const clusterLayers = new Map(); // tile_key -> L.layerGroup
+
+async function loadAndRenderClusters() {
+    console.log('[Clusters] Loading cluster overlays...');
+    clearClusters();
+    
+    // Get current map/version from global state
+    const version = window.currentVersion || 'analysis';
+    const mapName = window.currentMap || 'development';
+    
+    // Load clusters for visible tiles
+    const bounds = map.getBounds();
+    const minRow = Math.max(0, Math.floor(bounds.getSouth()));
+    const maxRow = Math.min(63, Math.ceil(bounds.getNorth()));
+    const minCol = Math.max(0, Math.floor(bounds.getWest()));
+    const maxCol = Math.min(63, Math.ceil(bounds.getEast()));
+    
+    let totalClusters = 0;
+    
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            const clusterPath = `overlays/${version}/${mapName}/clusters/tile_${col}_${row}.json`;
+            
+            try {
+                const response = await fetch(clusterPath);
+                if (!response.ok) continue; // Tile might not have clusters
+                
+                const data = await response.json();
+                if (!data.clusters || data.clusters.length === 0) continue;
+                
+                const layerGroup = L.layerGroup();
+                
+                data.clusters.forEach(cluster => {
+                    const lat = row + (cluster.position.localY || 0);
+                    const lng = col + (cluster.position.localX || 0);
+                    
+                    // Calculate radius in pixels (scale based on zoom)
+                    const radiusMeters = cluster.radius || (cluster.objectCount * 2);
+                    const radiusPixels = Math.max(5, Math.min(50, radiusMeters / 10));
+                    
+                    const circle = L.circleMarker([lat, lng], {
+                        radius: radiusPixels,
+                        color: cluster.isStamp ? '#FF6B6B' : '#4ECDC4',
+                        fillColor: cluster.isStamp ? '#FF6B6B' : '#4ECDC4',
+                        fillOpacity: 0.3,
+                        weight: 2,
+                        opacity: 0.8
+                    });
+                    
+                    circle.bindPopup(`
+                        <div style="padding: 6px;">
+                            <strong>Cluster #${cluster.clusterId}</strong><br>
+                            <strong>Objects:</strong> ${cluster.objectCount}<br>
+                            ${cluster.isStamp ? '<strong style="color: #FF6B6B;">Placement Stamp</strong><br>' : ''}
+                            <strong>Position:</strong> ${cluster.centroid.x.toFixed(1)}, ${cluster.centroid.y.toFixed(1)}, ${cluster.centroid.z.toFixed(1)}
+                        </div>
+                    `);
+                    
+                    circle.addTo(layerGroup);
+                });
+                
+                layerGroup.addTo(map);
+                clusterLayers.set(`${row}_${col}`, layerGroup);
+                totalClusters += data.clusters.length;
+                
+            } catch (error) {
+                // Silently skip - not all tiles have clusters
+            }
+        }
+    }
+    
+    console.log(`[Clusters] Loaded ${totalClusters} clusters across ${clusterLayers.size} tiles`);
+}
+
+function clearClusters() {
+    clusterLayers.forEach(layer => map.removeLayer(layer));
+    clusterLayers.clear();
+    console.log('[Clusters] Cleared all cluster overlays');
 }
 
 function setupTerrainOverlayControls() {
@@ -667,9 +765,15 @@ async function performObjectMarkerUpdate() {
                             <strong style="font-size: 14px;">${obj.fileName || 'Unknown'}</strong><br>
                             <div style="margin-top: 8px; font-size: 12px;">
                                 <strong>UID:</strong> ${obj.uniqueId || 'N/A'}<br>
-                                <strong>World X:</strong> ${obj.world.x.toFixed(3)}<br>
-                                <strong>World Y:</strong> ${obj.world.y.toFixed(3)}<br>
-                                <strong>World Z:</strong> ${obj.world.z.toFixed(2)}<br>
+                                <strong title="Transformed world coordinates (±17066 map bounds)">Position:</strong><br>
+                                <div style="margin-left: 10px; font-family: monospace;">
+                                    X: ${obj.world.x.toFixed(2)}<br>
+                                    Y: ${obj.world.y.toFixed(2)}<br>
+                                    Z: ${obj.world.z.toFixed(2)}
+                                </div>
+                                ${obj.rotation ? `<strong>Rotation:</strong> ${obj.rotation.x.toFixed(1)}°, ${obj.rotation.y.toFixed(1)}°, ${obj.rotation.z.toFixed(1)}°<br>` : ''}
+                                ${obj.scale ? `<strong>Scale:</strong> ${obj.scale.toFixed(4)}<br>` : ''}
+                                ${obj.placement ? `<details style="margin-top: 4px;"><summary style="cursor: pointer; color: #888; font-size: 11px;">Raw ADT Coords</summary><div style="margin-left: 10px; font-family: monospace; font-size: 11px; color: #888;">${obj.placement.x.toFixed(2)}, ${obj.placement.y.toFixed(2)}, ${obj.placement.z.toFixed(2)}</div></details>` : ''}
                                 ${obj.assetPath ? `<strong>Path:</strong> ${obj.assetPath}<br>` : ''}
                             </div>
                         </div>
