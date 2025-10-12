@@ -75,6 +75,8 @@ The unified orchestrator runs **4 stages sequentially**:
 
 [4/4] Viewer Stage
   ✓ Copies static viewer assets (HTML/JS/CSS)
+  ✓ Extracts minimap tiles (from loose files or MPQ archives)
+  ✓ Converts BLP minimap tiles to PNG format
   ✓ Generates index.json and config.json
   ✓ Prepares overlay metadata
 ```
@@ -180,6 +182,7 @@ WoWRollback/
 - **.NET SDK 9.0** (64-bit)
 - **Alpha WoW data** - Extracted WDT/ADT/DBC files in standard layout
 - **LK 3.3.5 DBCs** - AreaTable.dbc, Map.dbc for crosswalk generation
+- Optional: **MPQ Archives** - For minimap extraction from compressed archives
 - Optional: **WoWDBDefs** - For DBC schema definitions (auto-resolved)
 
 ---
@@ -208,6 +211,7 @@ dotnet run --project WoWRollback.Orchestrator -- \
 **Optional Arguments:**
 - `--serve` - Start web server after generation
 - `--port` - Web server port (default: 8080)
+- `--mpq-path` - Path to MPQ archives for minimap extraction (see [Minimap Sources](#minimap-sources))
 - `--verbose` - Enable detailed logging
 - `--output-dir` - Custom output directory (default: `parp_out`)
 - `--dbd-dir` - Custom WoWDBDefs directory
@@ -215,7 +219,7 @@ dotnet run --project WoWRollback.Orchestrator -- \
 **Examples:**
 
 ```powershell
-# Single map, with viewer
+# Single map, with viewer (loose files)
 dotnet run --project WoWRollback.Orchestrator -- \
   --maps Shadowfang \
   --versions 0.5.3 \
@@ -223,12 +227,30 @@ dotnet run --project WoWRollback.Orchestrator -- \
   --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
   --serve
 
-# Multiple maps, no viewer
+# Multiple maps, no viewer (loose files)
 dotnet run --project WoWRollback.Orchestrator -- \
   --maps Azeroth,Kalimdor \
   --versions 0.5.3,0.5.5 \
   --alpha-root ..\test_data \
   --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient
+
+# Single map with MPQ archives
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Azeroth \
+  --versions 0.5.3 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --mpq-path E:\WoW_Clients \
+  --serve
+
+# Multiple versions with MPQ archives
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Azeroth,Kalimdor \
+  --versions 0.5.3,0.5.5,0.6.0 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --mpq-path E:\WoW_Clients \
+  --serve --port 8080
 
 # Verbose output
 dotnet run --project WoWRollback.Orchestrator -- \
@@ -241,10 +263,162 @@ dotnet run --project WoWRollback.Orchestrator -- \
 
 ---
 
+## 🗺️ Minimap Sources
+
+WoWRollback supports two methods for extracting minimap tiles for the web viewer:
+
+### Method 1: Loose BLP Files (Default)
+
+If `--mpq-path` is **not specified**, the pipeline scans for loose `.blp` minimap files in your Alpha data directories.
+
+**Expected Directory Structure:**
+```
+test_data/
+├── 0.5.3/
+│   └── tree/
+│       └── World/Textures/Minimap/
+│           ├── md5translate.trs         # Translation table
+│           ├── Azeroth/
+│           │   ├── map00_00.blp
+│           │   ├── map00_01.blp
+│           │   └── ...
+│           └── Kalimdor/
+│               ├── map00_00.blp
+│               └── ...
+└── 0.5.5/
+    └── tree/ (same structure)
+```
+
+**Command:**
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Azeroth,Kalimdor \
+  --versions 0.5.3,0.5.5 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --serve
+```
+
+**Pros:**
+- ✅ Fastest extraction (direct file access)
+- ✅ No additional tools needed
+- ✅ Works with pre-extracted data
+
+**Cons:**
+- ❌ Requires pre-extraction from MPQs
+- ❌ Takes significant disk space
+
+---
+
+### Method 2: MPQ Archives (Recommended)
+
+If `--mpq-path` **is specified**, the pipeline reads minimap tiles directly from compressed MPQ archives using StormLib.
+
+**Expected Directory Structure:**
+```
+E:\WoW_Clients\
+├── 0.5.3\
+│   ├── base.MPQ              # Base data archive
+│   ├── patch.MPQ             # Patch archive (optional)
+│   └── patch-2.MPQ           # Additional patches (optional)
+└── 0.5.5\
+    ├── base.MPQ
+    └── patch.MPQ
+```
+
+**MPQ Archive Contents** (internal paths):
+```
+base.MPQ:
+  └── textures\minimap\
+      ├── md5translate.trs     # Translation table (inside MPQ)
+      ├── <hash1>.blp          # Hashed minimap tiles
+      ├── <hash2>.blp
+      └── ...
+```
+
+**Command:**
+```powershell
+dotnet run --project WoWRollback.Orchestrator -- \
+  --maps Azeroth,Kalimdor \
+  --versions 0.5.3,0.5.5 \
+  --alpha-root ..\test_data \
+  --lk-dbc-dir ..\test_data\3.3.5\tree\DBFilesClient \
+  --mpq-path E:\WoW_Clients \
+  --serve
+```
+
+**Pros:**
+- ✅ No pre-extraction required
+- ✅ Saves disk space (keeps files compressed)
+- ✅ Handles patched archives automatically
+- ✅ Works with original client installations
+
+**Cons:**
+- ❌ Slightly slower than loose files (decompression overhead)
+- ❌ Requires StormLib wrapper (included)
+
+---
+
+### How It Works
+
+**Loose Files (Default):**
+1. Scans `{alpha-root}/{version}/tree/World/Textures/Minimap/`
+2. Parses `md5translate.trs` to map tile names to BLP files
+3. Opens BLP files directly from filesystem
+4. Converts to PNG for web viewer
+
+**MPQ Archives (`--mpq-path`):**
+1. Opens all `.MPQ` files in `{mpq-path}/{version}/`
+2. Applies patch archives on top of base archives
+3. Reads `md5translate.trs` from inside the MPQ
+4. Extracts BLP tiles by MD5 hash from MPQ streams
+5. Converts to PNG for web viewer
+
+**Path Resolution:**
+- `--mpq-path E:\WoW_Clients` + `--versions 0.5.3,0.5.5`
+- → Looks for MPQs in `E:\WoW_Clients\0.5.3\` and `E:\WoW_Clients\0.5.5\`
+
+---
+
+### Choosing a Method
+
+**Use Loose Files if:**
+- You already have extracted minimap directories
+- You need maximum performance
+- Your Alpha data is pre-organized
+
+**Use MPQ Archives if:**
+- You have original client installations
+- You want to save disk space
+- You need to handle patched versions
+- You're processing many versions
+
+---
+
 ## 🔧 Building
 
+### Initial Setup
+
+**1. Initialize Git Submodules** (First time only):
+
+WoWRollback depends on several libraries that use git submodules. You must initialize them before building:
+
 ```powershell
-cd WoWRollback
+cd lib\WoWTools.Minimaps
+git submodule init
+git submodule update --recursive
+```
+
+This will checkout:
+- **TACT.NET** - MPQ archive handling
+- **Warcraft.NET** - WoW file format library
+- **SereniaBLPLib** - BLP texture decoder
+- **CascLib** - CASC storage library
+
+**2. Build Solution:**
+
+```powershell
+cd ..\..\WoWRollback
 dotnet build WoWRollback.sln
 ```
 
@@ -252,6 +426,16 @@ dotnet build WoWRollback.sln
 ```powershell
 dotnet test
 ```
+
+### Common Build Issues
+
+**"TACT.Net not found" errors:**
+- Run `git submodule update --recursive` from the `lib\WoWTools.Minimaps` directory
+- Verify submodules checked out: `git submodule status`
+
+**"StormLibWrapper failed to build":**
+- Ensure all submodules are initialized
+- Check that `TACT.NET` directory exists and is not empty
 
 ---
 
@@ -306,6 +490,12 @@ parp_out/
         ├── index.html
         ├── js/
         ├── styles.css
+        ├── minimap/            # Extracted minimap tiles
+        │   ├── {version}/
+        │   │   └── {map}/
+        │   │       ├── {map}_0_0.png
+        │   │       ├── {map}_0_1.png
+        │   │       └── ...
         ├── overlays/
         │   ├── {version}/{map}/
         │   │   ├── terrain_complete/
@@ -349,6 +539,25 @@ parp_out/
 - Run `dotnet restore` before building
 - Check all project references exist
 
+### Minimap Issues
+
+**No minimap tiles generated**
+- **Loose Files Mode**: Check that minimap BLPs exist at `{alpha-root}/{version}/tree/World/Textures/Minimap/{map}/`
+- **MPQ Mode**: Verify MPQ archives exist at `{mpq-path}/{version}/*.MPQ`
+- Check console logs for `[MpqMinimapProvider]` or `[LooseFileMinimapProvider]` messages
+- Ensure `md5translate.trs` exists (loose files) or is inside MPQ archives
+
+**MPQ archives not opening**
+- Verify MPQ files are readable (not corrupted)
+- Check file permissions on MPQ directory
+- Ensure StormLib dependencies are present (auto-included)
+- Try with a different version to isolate the issue
+
+**Minimap tiles appear black/corrupted**
+- BLP format may be incompatible with SereniaBLPLib decoder
+- Check BLP file integrity
+- Verify tiles display correctly in WoW Model Viewer or similar tools
+
 ### Viewer Issues
 
 **Overlays missing in viewer**
@@ -365,6 +574,7 @@ parp_out/
 - Normal for missing overlay tiles (sparse coverage)
 - Check `05_viewer/overlays/metadata.json` for available overlays
 - Verify viewer assets copied correctly
+- Minimap tile 404s are normal for unpopulated map regions
 
 ### Performance
 
@@ -395,6 +605,8 @@ parp_out/
 #### Web Viewer
 - ✅ **Interactive map viewer** - Leaflet-based tile viewer
 - ✅ **Version switching** - Compare multiple Alpha versions
+- ✅ **Minimap extraction** - Supports loose BLP files and MPQ archives
+- ✅ **MPQ archive support** - Direct extraction from compressed archives
 - ✅ **Static file serving** - Built-in HTTP server
 
 ### Coming Soon (v0.6 - Analysis Stage)
