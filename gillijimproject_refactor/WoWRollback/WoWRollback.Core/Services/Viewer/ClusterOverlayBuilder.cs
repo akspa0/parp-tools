@@ -87,7 +87,12 @@ public static class ClusterOverlayBuilder
         foreach (var cluster in clusters)
         {
             // Convert cluster centroid to tile-local coordinates
-            var (worldX, worldY) = (cluster.CentroidX, cluster.CentroidZ);
+            // Cluster centroid is raw ADT placement coords - transform like we do for objects
+            const double TILESIZE = 533.33333;
+            const double MAP_CENTER = 32.0 * TILESIZE;
+            
+            double worldX = MAP_CENTER - cluster.CentroidX;  // placement X → worldX
+            double worldY = MAP_CENTER - cluster.CentroidZ;  // placement Z → worldY
             
             var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
             var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);

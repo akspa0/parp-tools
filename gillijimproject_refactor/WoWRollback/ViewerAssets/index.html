@@ -54,6 +54,20 @@
                     Shows ~100 clusters instead of 28K objects
                 </div>
             </div>
+            
+            <!-- Tile Grid -->
+            <div class="overlay-group">
+                <label title="Show ADT tile boundaries and coordinates (0_0 to 63_63)">
+                    <input type="checkbox" id="showTileGrid"> Tile Grid
+                </label>
+                <div class="overlay-options indent" id="tileGridOptions" style="display: none;">
+                    <label><input type="checkbox" id="showTileLabels" checked> Tile Labels</label>
+                    <label class="opacity-control">
+                        Opacity: <input type="range" id="tileGridOpacity" min="0" max="1" step="0.1" value="0.5">
+                        <span id="tileGridOpacityValue">0.5</span>
+                    </label>
+                </div>
+            </div>
         </div>
         
         <!-- Terrain Overlays Section -->
@@ -175,6 +189,12 @@
         <div class="layers-content">
             <div class="layers-filter">
                 <input type="text" id="layersSearch" placeholder="Filter by UniqueID range...">
+            </div>
+            <div style="padding: 8px; border-bottom: 1px solid #333;">
+                <label style="display: flex; align-items: center; cursor: pointer; font-size: 11px;">
+                    <input type="checkbox" id="showAllTiles" style="margin-right: 6px;">
+                    <span>Show tiles without data</span>
+                </label>
             </div>
             <div id="layersList" class="layers-list">
                 <!--Layers will be populated dynamically -->
