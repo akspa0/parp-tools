@@ -26,16 +26,23 @@ internal sealed class ViewerBuildStageRunner
             Directory.CreateDirectory(session.Paths.LogsDir);
             using var log = new StreamWriter(logPath, append: true);
             log.WriteLine($"[viewer] session={session.SessionId} packOut={packOut}");
+            var effectiveMinimapRoot = session.Options.MinimapRoot
+                                       ?? session.Options.AdtOverlayRoot
+                                       ?? session.Options.AnalysisFromDir
+                                       ?? session.Options.AlphaRoot;
+            var preferDirMinimaps = !string.IsNullOrWhiteSpace(session.Options.MinimapRoot)
+                                     || !string.IsNullOrWhiteSpace(session.Options.AdtOverlayRoot)
+                                     || !string.IsNullOrWhiteSpace(session.Options.AnalysisFromDir);
             log.WriteLine($"[viewer] alphaRoot={session.Options.AlphaRoot}");
-            log.WriteLine($"[viewer] minimapRoot={session.Options.MinimapRoot ?? session.Options.AlphaRoot}");
+            log.WriteLine($"[viewer] minimapRoot={effectiveMinimapRoot}");
             log.WriteLine($"[viewer] versions={string.Join(",", session.Options.Versions)} mapsFilter={string.Join(",", adtResults.Where(r=>r.Success).Select(r=>r.Map).Distinct())}");
 
             // Build data pack under data/
             var mapsFilter = new HashSet<string>(adtResults.Where(r => r.Success).Select(r => r.Map), StringComparer.OrdinalIgnoreCase);
             var builder = new ViewerPackBuilder();
             var buildResult = builder.Build(
-                sessionRoot: session.Options.AlphaRoot,
-                minimapRoot: session.Options.MinimapRoot ?? session.Options.AlphaRoot,
+                sessionRoot: effectiveMinimapRoot,
+                minimapRoot: effectiveMinimapRoot,
                 outRoot: packOut,
                 versionsFilter: session.Options.Versions,
                 mapsFilter: mapsFilter,
@@ -47,7 +54,10 @@ internal sealed class ViewerBuildStageRunner
             var inputs = new List<(string Version, string Map, string MapDir)>();
             foreach (var r in adtResults.Where(r => r.Success))
             {
-                var mapDir = Path.Combine(session.Paths.AdtDir, r.Version, "World", "Maps", r.Map);
+                var adtRoot = !string.IsNullOrWhiteSpace(r.AdtOutputDirectory)
+                    ? r.AdtOutputDirectory
+                    : Path.Combine(session.Paths.AdtDir, r.Version);
+                var mapDir = Path.Combine(adtRoot, "World", "Maps", r.Map);
                 if (Directory.Exists(mapDir)) inputs.Add((r.Version, r.Map, mapDir));
             }
             var overlaysRoot = Path.Combine(packOut, "data", "overlays");

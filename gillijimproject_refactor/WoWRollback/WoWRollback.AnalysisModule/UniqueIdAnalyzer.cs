@@ -57,10 +57,10 @@ public sealed class UniqueIdAnalyzer
                 }
             }
 
-            // Group by tile and asset type (writer order: type,asset_path,map,tile_x,tile_y,unique_id,...)
+            // Group by tile and asset type (placements.csv header: map,tile_x,tile_y,type,asset_path,unique_id,...)
             var groups = rows
                 .Where(r => r.Length >= 16)
-                .GroupBy(r => (tileX: ParseInt(r[3]), tileY: ParseInt(r[4]), type: (r[0] ?? string.Empty).Trim()))
+                .GroupBy(r => (tileX: ParseInt(r[1]), tileY: ParseInt(r[2]), type: (r[3] ?? string.Empty).Trim()))
                 .OrderBy(g => g.Key.tileY).ThenBy(g => g.Key.tileX).ThenBy(g => g.Key.type)
                 .ToList();
 
@@ -77,7 +77,7 @@ public sealed class UniqueIdAnalyzer
                 var (tileX, tileY, typeStr) = g.Key;
                 // Collect IDs and asset paths
                 var idsWithPath = g
-                    .Select(r => (id: ParseUInt(r[5]), asset: r[1] ?? string.Empty))
+                    .Select(r => (id: ParseUInt(r[5]), asset: r[4] ?? string.Empty))
                     .Where(t => t.id.HasValue)
                     .Select(t => (id: t.id!.Value, asset: t.asset))
                     .OrderBy(t => t.id)

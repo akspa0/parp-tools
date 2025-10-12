@@ -1,28 +1,29 @@
-# WoWRollback - Digital Archaeology of World of Warcraft Development
+# WoWRollback — Project Brief (Rewrite)
 
-## Project Vision
-WoWRollback is a digital archaeology tool that treats UniqueID ranges in World of Warcraft as **sedimentary layers of game development history**. Each range represents a "volume of work" performed by artists and developers over 20+ years, preserved as fossils in the game's data structures.
+## Purpose
+Provide a reliable analysis + viewer pipeline that emits actionable overlays and CSV diagnostics for per‑tile inspection and cross‑version cherry‑picking.
 
-## Core Purpose
-1. **Archaeological Analysis**: Extract and analyze UniqueID ranges from Alpha WDT files and converted LK ADT files to understand the evolution of WoW's content
-2. **Historical Preservation**: Document singleton IDs and small gaps that represent technological enhancements, tests, or experiments left by the development team
-3. **Rollback Functionality**: Enable selective removal of placement ranges during Alpha→LK conversion for "time-travel" map views
+## Concrete Outcomes
+- Objects overlays per tile at `05_viewer/overlays/<version>/<map>/combined/tile_r{row}_c{col}.json`.
+- Root `05_viewer/index.json` with `{ comparisonKey, versions, defaultVersion, maps[{ map, tiles[{ row, col, versions }] }] }` based on actual overlays present.
+- UniqueID CSVs and layers JSON produced from the richest available source (master index preferred, then placements CSV).
 
-## Key Insights
-- Each UniqueID range represents a discrete work session or content addition by the development team
-- Singleton IDs and outliers are precious artifacts showing experiments, tests, or technological changes
-- The data provides a chronological view of WoW's development from 2000 onwards
-- Modern WoW still contains significant amounts of Alpha-era content, preserved in the UniqueID sedimentary layers
+## Inputs
+- Converted LK ADTs directory (supports analyze‑only).
+- Optional `analysis/index.json` with placements.
+- Generated placements CSV named `<map>_placements.csv` (found under `04_analysis/<version>/objects/` or `<adt>/analysis/csv/`).
+- Master index `<map>_master_index.json` under `04_analysis/<version>/master/`.
 
-## Stakeholders
-- **WoW Historians**: Researchers studying the game's evolution
-- **Content Archaeologists**: People interested in uncovering lost or hidden content
-- **Developers**: Those working with WoW file formats and conversion tools
-- **Community**: Players interested in WoW's development history
+## Outputs
+- `04_analysis/<version>/objects/<map>_placements.csv`
+- `04_analysis/<version>/master/<map>_master_index.json`
+- `04_analysis/<version>/uniqueids/*`
+- `05_viewer/overlays/<version>/<map>/combined/tile_r{row}_c{col}.json`
+- `05_viewer/index.json`
 
-## Success Criteria
-- Extract complete UniqueID range data from both Alpha WDT and LK ADT files
-- Identify and preserve singleton outliers as important historical artifacts
-- Generate comprehensive before/after comparison showing content evolution
-- Enable rollback functionality for creating historical map versions
-- Document the archaeological significance of different UniqueID patterns
+## High‑Value Modules to Cherry‑Pick
+- `AnalysisOrchestrator.RunAnalysis()` staging, including correct probing for `<map>_placements.csv` and session paths.
+- `OverlayGenerator.GenerateFromIndex()` and `GenerateObjectsFromPlacementsCsv()` emitting layered schema and grouping by (row,col).
+- Master‑index fallback for overlays when CSV is absent.
+- Minimal viewer index builder driven by overlays found on disk.
+- World→pixel conversion constants and method used by overlay generation.

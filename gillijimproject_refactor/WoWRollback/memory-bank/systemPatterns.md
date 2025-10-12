@@ -1,4 +1,50 @@
-# System Patterns - WoWRollback Architecture
+# System Patterns — WoWRollback (Rewrite)
+
+## Session layout
+- **[structure]** `parp_out/session_YYYYMMDD_HHMMSS/`
+- **[subdirs]** `01_dbcs/`, `02_crosswalks/`, `03_adts/`, `04_analysis/`, `05_viewer/`, `logs/`, `manifest.json`.
+
+## Overlay conventions
+ - **[paths]** `05_viewer/overlays/<version>/<map>/combined/tile_r{row}_c{col}.json`.
+```json
+{
+  "layers": [
+    {
+      "version": "<version>",
+      "kinds": [
+        { "kind": "M2",  "points": [ { "world": {"x":0,"y":0,"z":0}, "pixel": {"x":0,"y":0}, "assetPath":"...", "fileName":"...", "uniqueId":123 } ] },
+        { "kind": "WMO", "points": [ /* same shape */ ] }
+      ]
+    }
+  ]
+}
+```
+
+## Viewer index
+ - **[file]** Root `05_viewer/index.json` is built by scanning overlays on disk.
+ - **[shape]** `{ comparisonKey, versions, defaultVersion, maps[{ map, tiles[{ row, col, versions }] }] }`.
+
+## Placements probing
+1. `04_analysis/<version>/objects/<map>_placements.csv`
+2. `<adtOutputDir>/analysis/csv/<map>_placements.csv`
+3. `<adtOutputDir>/analysis/csv/placements.csv` (legacy)
+
+## Overlay sources (fallback)
+ - **[prefer]** Use `04_analysis/<version>/master/<map>_master_index.json` when present.
+ - **[else]** Use `<map>_placements.csv` and group rows by tile to emit layered schema.
+
+## Viewer fetch paths
+ - **[state.js]** Viewer requests `overlays/<version>/<map>/<variant>/tile_r{row}_c{col}.json` with `variant='combined'`.
+
+## World→pixel transform
+ - **[constants]** `TILE_SIZE = 533.33333`, `MAP_HALF_SIZE = 32 * TILE_SIZE`.
+ - **[anchor]** NW corner per tile; `worldXNW = MAP_HALF_SIZE - (col * TILE_SIZE)`, `worldYNW = MAP_HALF_SIZE - (row * TILE_SIZE)`.
+ - **[scale]** `(dx,dy)` to 512x512 pixels and clamp.
+
+## Error handling
+ - **[skip-if-missing]** Optional inputs may be absent; proceed with what exists.
+ - **[log-and-continue]** Parse failures logged per-tile; do not fail the entire stage.
+ - **[deterministic outputs]** Paths and filenames are stable; never shift targets.
 
 ## Archaeological Data Model
 The WoWRollback tool treats game data as archaeological layers:

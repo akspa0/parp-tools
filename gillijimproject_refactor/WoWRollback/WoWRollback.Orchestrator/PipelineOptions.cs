@@ -24,7 +24,10 @@ internal sealed record PipelineOptions(
     string? MpqRoot = null,
     IReadOnlyList<string>? MpqLocales = null,
     bool MpqOnly = false,
-    string? AdtOverlayRoot = null)
+    string? AdtOverlayRoot = null,
+    bool AnalyzeOnly = false,
+    string? AnalysisFromDir = null,
+    string? AnalysisVersionLabel = null)
 {
     public bool HasLkDbcDirectory => !string.IsNullOrWhiteSpace(LkDbcDirectory);
 }

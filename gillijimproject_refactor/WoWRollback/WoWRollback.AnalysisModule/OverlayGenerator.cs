@@ -67,7 +67,7 @@ public sealed class OverlayGenerator
             var options = ViewerOptions.CreateDefault();
 
             var overlaysRoot = Path.Combine(viewerDir, "overlays", version, mapName);
-            var objectsDir = Path.Combine(overlaysRoot, "objects_combined");
+            var objectsDir = Path.Combine(overlaysRoot, "combined");
             Directory.CreateDirectory(objectsDir);
 
             int objectOverlays = 0;
@@ -129,10 +129,7 @@ public sealed class OverlayGenerator
     {
         try
         {
-            if (!File.Exists(placementsCsvPath))
-            {
-                return new OverlayGenerationResult(0, 0, 0, 0, Success: false, ErrorMessage: $"Missing placements CSV at {placementsCsvPath}");
-            }
+            var hasCsv = File.Exists(placementsCsvPath);
 
             MapMasterIndexDocument? master = null;
             var masterDir = Path.Combine(analysisOutputDir, "master");
@@ -143,7 +140,7 @@ public sealed class OverlayGenerator
             }
 
             var overlaysRoot = Path.Combine(viewerDir, "overlays", version, mapName);
-            var objectsDir = Path.Combine(overlaysRoot, "objects_combined");
+            var objectsDir = Path.Combine(overlaysRoot, "combined");
             Directory.CreateDirectory(objectsDir);
 
             if (master is not null)
@@ -155,6 +152,11 @@ public sealed class OverlayGenerator
                     ObjectOverlays: generated,
                     ShadowOverlays: 0,
                     Success: true);
+            }
+
+            if (!hasCsv)
+            {
+                return new OverlayGenerationResult(0, 0, 0, 0, Success: false, ErrorMessage: $"Missing placements CSV at {placementsCsvPath} and no master index at {masterPath}");
             }
 
             // Fallback: derive overlays from CSV directly
@@ -170,32 +172,53 @@ public sealed class OverlayGenerator
                 var tileX = g.Key.tileX;
                 var tileY = g.Key.tileY;
 
-                var placements = g
-                    .Select(r => new PlacementOverlayJson
-                    {
-                        Kind = r[3] ?? string.Empty,
-                        UniqueId = TryParseUIntNullable(r[5]),
-                        AssetPath = r[4] ?? string.Empty,
-                        World = new[] { TryParseFloat(r[6]), TryParseFloat(r[7]), TryParseFloat(r[8]) },
-                        TileOffset = Array.Empty<float>(),
-                        Chunk = Array.Empty<int>(),
-                        Rotation = new[] { TryParseFloat(r[9]), TryParseFloat(r[10]), TryParseFloat(r[11]) },
-                        Scale = TryParseFloat(r[12]),
-                        Flags = 0,
-                        DoodadSet = (ushort)TryParseInt(r[13]),
-                        NameSet = (ushort)TryParseInt(r[14])
-                    })
-                    .ToList();
+                // Build layered schema expected by viewer: layers[0].kinds[M2|WMO].points[]
+                var pointsM2 = new List<object>();
+                var pointsWmo = new List<object>();
 
-                var overlay = new TileOverlayJson
+                foreach (var r in g)
                 {
-                    TileX = tileX,
-                    TileY = tileY,
-                    Placements = placements
+                    var kind = (r[3] ?? string.Empty).Trim();
+                    var uniqueId = TryParseUIntNullable(r[5]);
+                    var assetPath = r[4] ?? string.Empty;
+                    var worldX = TryParseFloat(r[6]);
+                    var worldY = TryParseFloat(r[7]);
+                    var worldZ = TryParseFloat(r[8]);
+
+                    // Compute pixel coords within tile (0..512)
+                    var pxpy = WorldToPixel(tileY, tileX, worldX, worldY, 512, 512);
+                    var fileName = Path.GetFileName(assetPath);
+
+                    var point = new
+                    {
+                        uniqueId = uniqueId,
+                        assetPath = assetPath,
+                        fileName = fileName,
+                        world = new { x = (double)worldX, y = (double)worldY, z = (double)worldZ },
+                        pixel = new { x = (double)pxpy.x, y = (double)pxpy.y }
+                    };
+
+                    if (string.Equals(kind, "WMO", StringComparison.OrdinalIgnoreCase)) pointsWmo.Add(point);
+                    else pointsM2.Add(point);
+                }
+
+                var layered = new
+                {
+                    layers = new[]
+                    {
+                        new {
+                            version = version,
+                            kinds = new[]
+                            {
+                                new { kind = "M2", points = pointsM2 },
+                                new { kind = "WMO", points = pointsWmo }
+                            }
+                        }
+                    }
                 };
 
-                var jsonPath = Path.Combine(objectsDir, $"tile_{tileX}_{tileY}.json");
-                File.WriteAllText(jsonPath, JsonSerializer.Serialize(overlay, new JsonSerializerOptions { WriteIndented = true }));
+                var jsonPath = Path.Combine(objectsDir, $"tile_r{tileY}_c{tileX}.json");
+                File.WriteAllText(jsonPath, JsonSerializer.Serialize(layered, new JsonSerializerOptions { WriteIndented = true }));
                 objectOverlays++;
             }
 
@@ -211,7 +234,6 @@ public sealed class OverlayGenerator
             return new OverlayGenerationResult(0, 0, 0, 0, Success: false, ErrorMessage: $"Objects overlay (placements.csv) failed: {ex.Message}");
         }
 
-        static int TryParseInt(string s) => int.TryParse(s, out var v) ? v : 0;
         static float TryParseFloat(string s) => float.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0f;
         static uint? TryParseUIntNullable(string s)
         {
@@ -485,17 +507,50 @@ public sealed class OverlayGenerator
         foreach (var tile in master.Tiles)
         {
             if (tile.Placements.Count == 0) continue;
-            
-            var overlay = new TileOverlayJson
+
+            var pointsM2 = new List<object>();
+            var pointsWmo = new List<object>();
+
+            foreach (var p in tile.Placements)
             {
-                TileX = tile.TileX,
-                TileY = tile.TileY,
-                Placements = tile.Placements.Select(ToPlacementJson).ToList()
+                var assetPath = p.AssetPath ?? string.Empty;
+                var fileName = Path.GetFileName(assetPath);
+                // Map master fields: worldX ~ WorldWest (east-west), worldY ~ WorldNorth (north-south)
+                float worldX = p.WorldWest;
+                float worldY = p.WorldNorth;
+                float worldZ = p.WorldUp;
+
+                var pxpy = WorldToPixel(tile.TileY, tile.TileX, worldX, worldY, 512, 512);
+                var point = new
+                {
+                    uniqueId = p.UniqueId,
+                    assetPath = assetPath,
+                    fileName = fileName,
+                    world = new { x = (double)worldX, y = (double)worldY, z = (double)worldZ },
+                    pixel = new { x = (double)pxpy.x, y = (double)pxpy.y }
+                };
+
+                if (string.Equals(p.Kind, "WMO", StringComparison.OrdinalIgnoreCase)) pointsWmo.Add(point);
+                else pointsM2.Add(point);
+            }
+
+            var layered = new
+            {
+                layers = new[]
+                {
+                    new {
+                        version = master.Version,
+                        kinds = new[]
+                        {
+                            new { kind = "M2", points = pointsM2 },
+                            new { kind = "WMO", points = pointsWmo }
+                        }
+                    }
+                }
             };
-            
-            var jsonPath = Path.Combine(objectsDir, $"tile_{tile.TileX}_{tile.TileY}.json");
-            File.WriteAllText(jsonPath, JsonSerializer.Serialize(overlay, 
-                new JsonSerializerOptions { WriteIndented = true }));
+
+            var jsonPath = Path.Combine(objectsDir, $"tile_r{tile.TileY}_c{tile.TileX}.json");
+            File.WriteAllText(jsonPath, JsonSerializer.Serialize(layered, new JsonSerializerOptions { WriteIndented = true }));
             count++;
         }
         return count;
@@ -517,6 +572,21 @@ public sealed class OverlayGenerator
     private static int ParseInt(string s) => int.TryParse(s, out var v) ? v : 0;
     
     private static bool ParseBool(string s) => bool.TryParse(s, out var v) && v;
+
+    private static (float x, float y) WorldToPixel(int tileRow, int tileCol, float worldX, float worldY, int w, int h)
+    {
+        // Constants from viewer COORDINATES.md
+        const float TILE_SIZE = 533.33333f;
+        const float MAP_HALF_SIZE = 32.0f * TILE_SIZE; // 17066.66656
+        // NW corner world coords for this tile
+        var worldXNW = MAP_HALF_SIZE - (tileCol * TILE_SIZE);
+        var worldYNW = MAP_HALF_SIZE - (tileRow * TILE_SIZE);
+        var dx = worldXNW - worldX; // east offset
+        var dy = worldYNW - worldY; // south offset
+        var px = Math.Clamp(dx / TILE_SIZE * w, 0, w);
+        var py = Math.Clamp(dy / TILE_SIZE * h, 0, h);
+        return ((float)px, (float)py);
+    }
 
     /// <summary>
     /// Converts AnalysisIndex placements to AssetTimelineDetailedEntry for use with OverlayBuilder.

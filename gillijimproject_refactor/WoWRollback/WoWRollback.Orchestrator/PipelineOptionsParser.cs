@@ -41,7 +41,8 @@ internal static class PipelineOptionsParser
                 string.Equals(key, "verbose", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(key, "verify", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(key, "run-verifier", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(key, "mpq-only", StringComparison.OrdinalIgnoreCase))
+                string.Equals(key, "mpq-only", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key, "analyze-only", StringComparison.OrdinalIgnoreCase))
             {
                 flags.Add(key);
                 continue;
@@ -63,20 +64,42 @@ internal static class PipelineOptionsParser
             return false;
         }
 
-        if (!parsed.TryGetValue("versions", out var versionsValue) || string.IsNullOrWhiteSpace(versionsValue))
+        var analyzeOnly = flags.Contains("analyze-only");
+        parsed.TryGetValue("analysis-from-dir", out var analysisFromDir);
+        parsed.TryGetValue("analysis-version", out var analysisVersion);
+
+        // versions are required only for normal pipeline; in analyze-only we can label outputs
+        string? versionsValue = null;
+        if (!analyzeOnly)
         {
-            error = "--versions is required.";
-            return false;
+            if (!parsed.TryGetValue("versions", out versionsValue) || string.IsNullOrWhiteSpace(versionsValue))
+            {
+                error = "--versions is required.";
+                return false;
+            }
         }
 
-        if (!parsed.TryGetValue("alpha-root", out var alphaRoot) || string.IsNullOrWhiteSpace(alphaRoot))
+        // alpha-root is required for normal pipeline; analyze-only can skip it
+        string alphaRoot;
+        if (!analyzeOnly)
         {
-            error = "--alpha-root is required.";
-            return false;
+            if (!parsed.TryGetValue("alpha-root", out var alphaRootTmp) || string.IsNullOrWhiteSpace(alphaRootTmp))
+            {
+                error = "--alpha-root is required.";
+                return false;
+            }
+            alphaRoot = alphaRootTmp;
+        }
+        else
+        {
+            parsed.TryGetValue("alpha-root", out var alphaRootTmp2);
+            alphaRoot = !string.IsNullOrWhiteSpace(alphaRootTmp2) ? alphaRootTmp2 : Directory.GetCurrentDirectory();
         }
 
         var maps = SplitList(mapsValue);
-        var versions = SplitList(versionsValue);
+        var versions = !string.IsNullOrWhiteSpace(versionsValue)
+            ? SplitList(versionsValue)
+            : new[] { string.IsNullOrWhiteSpace(analysisVersion) ? "analysis" : analysisVersion };
 
         if (maps.Count == 0)
         {
@@ -150,7 +173,10 @@ internal static class PipelineOptionsParser
             MpqRoot: mpqRoot,
             MpqLocales: ParseLocales(mpqLocalesRaw),
             MpqOnly: flags.Contains("mpq-only"),
-            AdtOverlayRoot: adtOverlayRoot);
+            AdtOverlayRoot: adtOverlayRoot,
+            AnalyzeOnly: analyzeOnly,
+            AnalysisFromDir: analysisFromDir,
+            AnalysisVersionLabel: analysisVersion);
 
         return true;
     }

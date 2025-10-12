@@ -24,7 +24,8 @@ internal sealed class AnalysisStageRunner
         {
             ConsoleLogger.Info($"Analyzing {adtResult.Map} ({adtResult.Version})...");
 
-            var adtOutputDir = Path.Combine(session.Paths.AdtDir, adtResult.Version);
+            // Use the directory specified by the ADT stage result (supports analyze-only mode)
+            var adtOutputDir = adtResult.AdtOutputDirectory;
             var analysisOutputDir = Path.Combine(session.Paths.AnalysisDir, adtResult.Version);
             var viewerOutputDir = session.Paths.ViewerDir;
 
@@ -36,7 +37,7 @@ internal sealed class AnalysisStageRunner
                 GenerateUniqueIdCsvs = true,
                 GenerateTerrainCsvs = true,
                 // Disable legacy overlays under 05_viewer/overlays to avoid confusion; viewer consumes data/overlays only.
-                GenerateOverlays = false,
+                GenerateOverlays = true,
                 GenerateManifest = true,
                 UniqueIdGapThreshold = 100,
                 Verbose = session.Options.Verbose

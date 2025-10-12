@@ -20,47 +20,90 @@ internal sealed class PipelineOrchestrator
         ConsoleLogger.Info($"Output directory: {session.Root}");
         Console.WriteLine();
 
-        ConsoleLogger.Info("Running DBC stage...");
-        var dbcRunner = new DbcStageRunner();
-        var dbcResult = dbcRunner.Run(session);
-        if (dbcResult.Success)
+        // Analyze-only: skip DBC and ADT conversion, synthesize ADT results pointing to provided directory
+        IReadOnlyList<AdtStageResult> adtResults;
+        DbcStageResult dbcResult;
+        if (options.AnalyzeOnly || !string.IsNullOrWhiteSpace(options.AnalysisFromDir))
         {
-            ConsoleLogger.Success($"DBC stage complete: {dbcResult.Versions.Count} version(s) processed");
+            ConsoleLogger.Info("Analyze-only mode: skipping DBC and ADT stages");
+            dbcResult = new DbcStageResult(true, Array.Empty<DbcVersionResult>());
+
+            var sourceDir = options.AnalysisFromDir;
+            if (string.IsNullOrWhiteSpace(sourceDir))
+            {
+                // fallback to overlay dir if provided
+                sourceDir = options.AdtOverlayRoot;
+            }
+            if (string.IsNullOrWhiteSpace(sourceDir))
+            {
+                throw new InvalidOperationException("Analyze-only requires --analysis-from-dir or --adt-overlay-root pointing to a directory containing World/Maps/<Map>.");
+            }
+            sourceDir = Path.GetFullPath(sourceDir);
+
+            var versionLabel = options.AnalysisVersionLabel ?? options.Versions.FirstOrDefault() ?? "analysis";
+            var synthetic = new List<AdtStageResult>();
+            foreach (var map in options.Maps)
+            {
+                var mapDir = Path.Combine(sourceDir, "World", "Maps", map);
+                if (!Directory.Exists(mapDir))
+                {
+                    ConsoleLogger.Warn($"[analyze-only] Map directory not found: {mapDir}");
+                }
+                synthetic.Add(new AdtStageResult(
+                    Map: map,
+                    Version: versionLabel,
+                    Success: true,
+                    TilesProcessed: 0,
+                    AreaIdsPatched: 0,
+                    AdtOutputDirectory: sourceDir,
+                    Error: null));
+            }
+            adtResults = synthetic;
         }
         else
         {
-            ConsoleLogger.Error("DBC stage failed");
-            foreach (var v in dbcResult.Versions)
+            ConsoleLogger.Info("Running DBC stage...");
+            var dbcRunner = new DbcStageRunner();
+            dbcResult = dbcRunner.Run(session);
+            if (dbcResult.Success)
             {
-                if (v.Error != null)
+                ConsoleLogger.Success($"DBC stage complete: {dbcResult.Versions.Count} version(s) processed");
+            }
+            else
+            {
+                ConsoleLogger.Error("DBC stage failed");
+                foreach (var v in dbcResult.Versions)
                 {
-                    ConsoleLogger.Error($"  {v.SourceVersion}: {v.Error}");
+                    if (v.Error != null)
+                    {
+                        ConsoleLogger.Error($"  {v.SourceVersion}: {v.Error}");
+                    }
                 }
             }
-        }
-        Console.WriteLine();
+            Console.WriteLine();
 
-        ConsoleLogger.Info("Running ADT conversion stage...");
-        if (!string.IsNullOrWhiteSpace(options.AdtOverlayRoot))
-        {
-            ConsoleLogger.Info($"Materializing ADT overlay: {options.AdtOverlayRoot}");
-            try
+            ConsoleLogger.Info("Running ADT conversion stage...");
+            if (!string.IsNullOrWhiteSpace(options.AdtOverlayRoot))
             {
-                LooseAdtMaterializer.Materialize(
-                    session,
-                    options.AdtOverlayRoot!,
-                    options.AdtRoot ?? options.AlphaRoot,
-                    options.Versions,
-                    options.Maps);
-                ConsoleLogger.Success("ADT overlay materialization completed");
+                ConsoleLogger.Info($"Materializing ADT overlay: {options.AdtOverlayRoot}");
+                try
+                {
+                    LooseAdtMaterializer.Materialize(
+                        session,
+                        options.AdtOverlayRoot!,
+                        options.AdtRoot ?? options.AlphaRoot,
+                        options.Versions,
+                        options.Maps);
+                    ConsoleLogger.Success("ADT overlay materialization completed");
+                }
+                catch (Exception ex)
+                {
+                    ConsoleLogger.Warn($"ADT overlay materialization encountered issues: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                ConsoleLogger.Warn($"ADT overlay materialization encountered issues: {ex.Message}");
-            }
+            var adtRunner = new AdtStageRunner();
+            adtResults = adtRunner.Run(session);
         }
-        var adtRunner = new AdtStageRunner();
-        var adtResults = adtRunner.Run(session);
         var adtSuccessCount = adtResults.Count(r => r.Success);
         if (adtSuccessCount == adtResults.Count)
         {
