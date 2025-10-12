@@ -16,7 +16,9 @@ internal sealed record PipelineOptions(
     string? AreaOverrideDirectory,
     bool Serve,
     int Port,
-    bool Verbose)
+    bool Verbose,
+    string? MpqPath)
 {
     public bool HasLkDbcDirectory => !string.IsNullOrWhiteSpace(LkDbcDirectory);
+    public bool HasMpqPath => !string.IsNullOrWhiteSpace(MpqPath);
 }

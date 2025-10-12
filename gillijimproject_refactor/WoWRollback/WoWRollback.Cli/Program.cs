@@ -320,9 +320,11 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>] [--yaml-report]");
         Console.WriteLine("                    [--viewer-report] [--default-version <ver>] [--diff base,comp]");
+        Console.WriteLine("                    [--mpq-path <dir>]");
         Console.WriteLine("    Compare placement ranges across versions; outputs CSVs under rollback_outputs/comparisons/<key>");
         Console.WriteLine("    If --yaml-report is present, also writes YAML exploration reports under .../<key>/yaml/.");
         Console.WriteLine("    --viewer-report additionally emits minimaps, overlays, and diffs for the static viewer.");
+        Console.WriteLine("    --mpq-path specifies MPQ archive directory for minimap extraction (default: loose files)");
         Console.WriteLine();
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");

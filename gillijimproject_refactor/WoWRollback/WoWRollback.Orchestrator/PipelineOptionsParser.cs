@@ -102,6 +102,7 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("lk-listfile", out var lkListfile);
         parsed.TryGetValue("noggit-client-path", out var noggitClientPathRaw);
         parsed.TryGetValue("area-overrides", out var areaOverrides);
+        parsed.TryGetValue("mpq-path", out var mpqPath);
         var noggitClientPath = !string.IsNullOrWhiteSpace(noggitClientPathRaw)
             ? noggitClientPathRaw
             : DefaultNoggitClientPath;
@@ -134,7 +135,8 @@ internal static class PipelineOptionsParser
             AreaOverrideDirectory: areaOverrides,
             Serve: flags.Contains("serve"),
             Port: port,
-            Verbose: flags.Contains("verbose"));
+            Verbose: flags.Contains("verbose"),
+            MpqPath: mpqPath);
 
         return true;
     }

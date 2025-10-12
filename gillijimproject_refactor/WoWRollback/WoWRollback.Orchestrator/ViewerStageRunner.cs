@@ -155,10 +155,22 @@ internal sealed class ViewerStageRunner
 
     private static int GenerateMinimapTiles(SessionContext session, IReadOnlyList<AdtStageResult> adtResults)
     {
-        // Build MinimapLocator to find existing minimap BLP files in source data
-        var locator = WoWRollback.Core.Services.Viewer.MinimapLocator.Build(
-            session.Options.AlphaRoot,
-            session.Options.Versions.ToList());
+        // Build MinimapLocator - use MPQ provider if mpq-path is specified, otherwise use loose files
+        MinimapLocator locator;
+        if (session.Options.HasMpqPath)
+        {
+            // Build version -> MPQ path mapping
+            var versionMpqPaths = session.Options.Versions.ToDictionary(
+                v => v,
+                v => Path.Combine(session.Options.MpqPath!, v));
+            locator = MinimapLocator.BuildFromMpq(versionMpqPaths);
+        }
+        else
+        {
+            locator = MinimapLocator.Build(
+                session.Options.AlphaRoot,
+                session.Options.Versions.ToList());
+        }
 
         var composer = new MinimapComposer();
         var options = ViewerOptions.CreateDefault();
