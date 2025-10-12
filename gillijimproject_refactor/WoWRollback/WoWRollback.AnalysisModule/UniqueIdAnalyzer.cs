@@ -457,47 +457,50 @@ public sealed class UniqueIdAnalyzer
             return new List<LayerInfo>();
 
         var layers = new List<LayerInfo>();
-        int currentLayer = 1;
-        uint layerStart = sortedIds[0];
-        uint lastId = sortedIds[0];
-        var currentLayerIds = new List<uint> { sortedIds[0] };
+        uint currentStart = sortedIds[0];
+        uint currentEnd = sortedIds[0];
+        int layerNum = 0;
 
         for (int i = 1; i < sortedIds.Count; i++)
         {
-            var currentId = sortedIds[i];
-            var gap = currentId - lastId;
+            uint gap = sortedIds[i] - sortedIds[i - 1];
 
-            if (gap > _gapThreshold)
+            if (gap > (uint)_gapThreshold)
             {
                 // End current layer
                 layers.Add(new LayerInfo
                 {
-                    LayerNumber = currentLayer,
-                    IdRangeStart = layerStart,
-                    IdRangeEnd = lastId,
-                    ObjectCount = currentLayerIds.Count
+                    LayerNumber = layerNum++,
+                    IdRangeStart = currentStart,
+                    IdRangeEnd = currentEnd,
+                    ObjectCount = CountIdsInRange(sortedIds, currentStart, currentEnd)
                 });
 
                 // Start new layer
-                currentLayer++;
-                layerStart = currentId;
-                currentLayerIds = new List<uint>();
+                currentStart = sortedIds[i];
+                currentEnd = sortedIds[i];
             }
-
-            currentLayerIds.Add(currentId);
-            lastId = currentId;
+            else
+            {
+                currentEnd = sortedIds[i];
+            }
         }
 
         // Add final layer
         layers.Add(new LayerInfo
         {
-            LayerNumber = currentLayer,
-            IdRangeStart = layerStart,
-            IdRangeEnd = lastId,
-            ObjectCount = currentLayerIds.Count
+            LayerNumber = layerNum,
+            IdRangeStart = currentStart,
+            IdRangeEnd = currentEnd,
+            ObjectCount = CountIdsInRange(sortedIds, currentStart, currentEnd)
         });
 
         return layers;
+    }
+
+    private static int CountIdsInRange(List<uint> ids, uint start, uint end)
+    {
+        return ids.Count(id => id >= start && id <= end);
     }
 
     private GlobalLayerInfo DetectGlobalLayers(List<TileIdDistribution> tiles, string mapName)

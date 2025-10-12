@@ -277,6 +277,27 @@ internal static class Program
         Console.WriteLine($"[ok] Processed {extractResult.TilesProcessed} tiles");
         Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
 
+        // Step 1.5: Process minimap tiles
+        Console.WriteLine("\n=== Processing minimap tiles ===");
+        var minimapHandler = new MinimapHandler();
+        var minimapResult = minimapHandler.ProcessMinimaps(mapDir, mapName, outDir);
+
+        if (minimapResult.Success && minimapResult.TilesCopied > 0)
+        {
+            Console.WriteLine($"[ok] Copied {minimapResult.TilesCopied} minimap tiles");
+            Console.WriteLine($"[ok] Minimap directory: {minimapResult.MinimapDir}");
+        }
+        else if (minimapResult.Success)
+        {
+            Console.WriteLine($"[info] No minimap PNG files found");
+            Console.WriteLine($"[info] Expected location: World\\Textures\\Minimap\\ or World\\Textures\\Minimap\\{mapName}\\");
+            Console.WriteLine($"[info] Place PNGs named {mapName}_X_Y.png or mapX_Y.png for minimap support");
+        }
+        else
+        {
+            Console.WriteLine($"[warn] Minimap processing failed: {minimapResult.ErrorMessage}");
+        }
+
         // Step 2: Analyze UniqueIDs and detect layers
         Console.WriteLine("\n=== Step 2: Analyzing UniqueIDs and detecting layers ===");
         var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
@@ -292,8 +313,28 @@ internal static class Program
         Console.WriteLine($"[ok] UniqueID analysis CSV: {analysisResult.CsvPath}");
         Console.WriteLine($"[ok] Layers JSON: {analysisResult.LayersJsonPath}");
 
+        // Step 3: Detect spatial clusters and patterns (prefabs/brushes)
+        Console.WriteLine("\n=== Step 3: Detecting spatial clusters and patterns ===");
+        var clusterAnalyzer = new ClusterAnalyzer(proximityThreshold: 50.0f, minClusterSize: 3);
+        var clusterResult = clusterAnalyzer.Analyze(placementsCsvPath, mapName, outDir);
+
+        if (!clusterResult.Success)
+        {
+            Console.WriteLine($"[warn] Cluster analysis failed: {clusterResult.ErrorMessage}");
+        }
+        else
+        {
+            Console.WriteLine($"[ok] Detected {clusterResult.TotalClusters} spatial clusters");
+            Console.WriteLine($"[ok] Identified {clusterResult.TotalPatterns} recurring patterns (potential prefabs)");
+            Console.WriteLine($"[ok] Clusters JSON: {clusterResult.ClustersJsonPath}");
+            Console.WriteLine($"[ok] Patterns JSON: {clusterResult.PatternsJsonPath}");
+            Console.WriteLine($"[ok] Summary CSV: {clusterResult.SummaryCsvPath}");
+        }
+
         Console.WriteLine("\n=== Analysis Complete ===");
         Console.WriteLine($"All outputs written to: {outDir}");
+        Console.WriteLine("\nℹ️  Spatial clusters reveal object groups placed together - likely prefabs or brushes");
+        Console.WriteLine("ℹ️  Recurring patterns show reused object compositions across the map");
         
         return 0;
     }
