@@ -70,6 +70,48 @@ public sealed class AnalysisViewerAdapter
                 Console.WriteLine($"[AnalysisViewerAdapter] Sample entry: Map={sampleEntry.Map}, TileRow={sampleEntry.TileRow}, TileCol={sampleEntry.TileCol}, Version={sampleEntry.Version}, Kind={sampleEntry.Kind}");
                 Console.WriteLine($"[AnalysisViewerAdapter] Sample coords: World=({sampleEntry.WorldX:F1}, {sampleEntry.WorldY:F1}, {sampleEntry.WorldZ:F1}), Path={sampleEntry.AssetPath}");
             }
+            
+            // CRITICAL: Add entries for ALL minimap tiles, even if they have no placements
+            // This ensures the viewer shows all map tiles
+            if (!string.IsNullOrEmpty(minimapDir) && Directory.Exists(minimapDir))
+            {
+                var minimapPngs = Directory.GetFiles(minimapDir, "*.png", SearchOption.TopDirectoryOnly);
+                Console.WriteLine($"[AnalysisViewerAdapter] Found {minimapPngs.Length} minimap tiles");
+                
+                foreach (var pngFile in minimapPngs)
+                {
+                    // Parse tile coords from filename: development_X_Y.png
+                    var fileName = Path.GetFileNameWithoutExtension(pngFile);
+                    var parts = fileName.Split('_');
+                    if (parts.Length >= 3 &&
+                        int.TryParse(parts[^2], out var tileX) &&
+                        int.TryParse(parts[^1], out var tileY))
+                    {
+                        // Add dummy placement entry to ensure tile appears in index
+                        // Use TileRow=Y, TileCol=X per our mapping
+                        if (!placements.Any(p => p.TileRow == tileY && p.TileCol == tileX))
+                        {
+                            placements.Add(new AssetTimelineDetailedEntry(
+                                Version: syntheticVersion,
+                                Map: mapName,
+                                TileRow: tileY,
+                                TileCol: tileX,
+                                Kind: PlacementKind.M2,  // Dummy
+                                UniqueId: 0,  // Dummy entry - will be filtered out in overlays
+                                AssetPath: "_dummy_tile_marker",
+                                Folder: "", Category: "", Subcategory: "", DesignKit: "",
+                                SourceRule: "", KitRoot: "", SubkitPath: "", SubkitTop: "",
+                                SubkitDepth: 0, FileName: "", FileStem: "", Extension: "",
+                                WorldX: 0, WorldY: 0, WorldZ: 0,
+                                RotationX: 0, RotationY: 0, RotationZ: 0,
+                                Scale: 0, Flags: 0, DoodadSet: 0, NameSet: 0
+                            ));
+                        }
+                    }
+                }
+                
+                Console.WriteLine($"[AnalysisViewerAdapter] Total placements after minimap tiles: {placements.Count}");
+            }
 
             // Convert to VersionComparisonResult format
             var result = new VersionComparisonResult(
@@ -188,8 +230,8 @@ public sealed class AnalysisViewerAdapter
                 entries.Add(new AssetTimelineDetailedEntry(
                     Version: "analysis",
                     Map: mapName,
-                    TileRow: tileX,  // tile_x → TileRow (matches OverlayGenerator)
-                    TileCol: tileY,  // tile_y → TileCol (matches OverlayGenerator)
+                    TileRow: tileY,  // tile_y → TileRow (Y is vertical/row)
+                    TileCol: tileX,  // tile_x → TileCol (X is horizontal/col)
                     Kind: kind,
                     UniqueId: (uint)uniqueId,
                     AssetPath: assetPath,

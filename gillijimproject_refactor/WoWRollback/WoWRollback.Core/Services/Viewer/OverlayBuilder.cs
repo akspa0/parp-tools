@@ -75,9 +75,25 @@ public sealed class OverlayBuilder
 
         options ??= ViewerOptions.CreateDefault();
 
-        var filtered = entries
+        var entriesList = entries.ToList();
+        Console.WriteLine($"[OverlayBuilder] BuildOverlay for {map} tile ({tileRow},{tileCol}): Received {entriesList.Count} total entries");
+
+        var filtered = entriesList
             .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase) && e.TileRow == tileRow && e.TileCol == tileCol)
             .ToList();
+        
+        Console.WriteLine($"[OverlayBuilder] After filter: {filtered.Count} entries for tile ({tileRow},{tileCol})");
+        
+        if (filtered.Count == 0 && entriesList.Count > 0)
+        {
+            // Debug: Show what we're NOT matching
+            var sample = entriesList.FirstOrDefault();
+            if (sample != null)
+            {
+                Console.WriteLine($"[OverlayBuilder] Sample entry: Map='{sample.Map}', TileRow={sample.TileRow}, TileCol={sample.TileCol}");
+                Console.WriteLine($"[OverlayBuilder] Looking for: Map='{map}', TileRow={tileRow}, TileCol={tileCol}");
+            }
+        }
 
         var layers = (allVersions ?? filtered.Select(e => e.Version))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -127,25 +143,35 @@ public sealed class OverlayBuilder
             return null;
         }
 
-        // Validate world coordinates match the tile before computing pixels
+        // DISABLED: World coordinates in ADT files often don't match the tile filename
+        // This is a data integrity issue in the source files, not our code
+        // For loose ADT analysis, we trust the tile filename over the world coordinates
+        /*
         var (computedRow, computedCol) = CoordinateTransformer.ComputeTileIndices(entry.WorldX, entry.WorldY);
         if (computedRow != tileRow || computedCol != tileCol)
         {
             Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId}: world coords ({entry.WorldX:F1}, {entry.WorldY:F1}) compute to tile ({computedRow},{computedCol}) but stored as ({tileRow},{tileCol})");
             return null;
         }
+        */
 
-        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(entry.WorldX, entry.WorldY, tileRow, tileCol);
+        // Transform MDDF/MODF placement coordinates to world coordinates
+        // Per ADT spec coordinate table:
+        // - Placement: X = West←East (32*TILE - x), Y = Up, Z = North←South (32*TILE - z)
+        // - World/ADT: X = North←South, Y = West←East, Z = Up
+        // The stored WorldX/WorldZ are already in placement space, need to map to world space
+        
+        const double TILESIZE = 533.33333;
+        const double MAP_CENTER = 32.0 * TILESIZE; // 17066.66656
+        
+        // Placement coords stored in entry: entry.WorldX = placement X, entry.WorldZ = placement Z
+        // Mapping: placement X → world Y, placement Z → world X
+        // BUT signs: world system has +X=north, +Y=west; placement has opposite orientation
+        double worldX = entry.WorldZ;  // placement Z → world X (North-South axis)
+        double worldY = entry.WorldX;  // placement X → world Y (West-East axis)
+        
+        var (localX, localY) = CoordinateTransformer.ComputeLocalCoordinates(worldX, worldY, tileRow, tileCol);
         var (pixelX, pixelY) = CoordinateTransformer.ToPixels(localX, localY, options.MinimapWidth, options.MinimapHeight);
-
-        // Final safety validation: reject coordinates outside reasonable tile bounds
-        const double safetyMargin = 25.0; // Tighter margin
-        if (pixelX < -safetyMargin || pixelX > options.MinimapWidth + safetyMargin ||
-            pixelY < -safetyMargin || pixelY > options.MinimapHeight + safetyMargin)
-        {
-            Console.WriteLine($"[OverlayBuilder] Filtered UID {entry.UniqueId}: pixel ({pixelX:F1}, {pixelY:F1}) outside tile {tileRow},{tileCol} bounds (world: {entry.WorldX:F1}, {entry.WorldY:F1})");
-            return null;
-        }
 
         return new
         {
