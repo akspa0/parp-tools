@@ -745,7 +745,7 @@ internal static class Program
             return 1;
         }
 
-        Console.WriteLine($"[ok] Extracted {result.M2Count} M2 and {result.WmoCount} WMO placements from {result.TilesProcessed} tiles");
+        Console.WriteLine($"[ok] {result.ErrorMessage}");
         Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
         return 0;
     }

@@ -91,13 +91,10 @@ namespace WoWRollback.Core.Services.Archive
                         fileStream.CopyTo(ms);
                         fileStream.Dispose();
                         ms.Position = 0;
-                        
-                        Console.WriteLine($"[debug] Successfully read {ms.Length} bytes for {virtualPath}");
                         return ms;
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Console.WriteLine($"[debug] Failed to read {virtualPath}: {ex.Message}");
                         fileStream?.Dispose();
                     }
                 }
