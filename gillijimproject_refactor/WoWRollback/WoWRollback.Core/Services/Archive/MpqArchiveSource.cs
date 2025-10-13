@@ -78,29 +78,38 @@ namespace WoWRollback.Core.Services.Archive
                 if (!StormLib.SFileHasFile(h, norm))
                     continue;
 
-                if (!StormLib.SFileOpenFileEx(h, norm, StormLib.SFILE_OPEN_FROM_MPQ, out var file))
+                if (!StormLib.SFileOpenFileEx(h, norm, StormLib.SFILE_OPEN_PATCHED_FILE, out var file))
                     continue;
 
                 try
                 {
-                    uint sizeHigh;
-                    var sizeLow = StormLib.SFileGetFileSize(file, out sizeHigh);
-                    var size = ((long)sizeHigh << 32) | sizeLow;
-                    if (size <= 0) return new MemoryStream(Array.Empty<byte>(), writable: false);
-
-                    var buffer = Marshal.AllocHGlobal((IntPtr)size);
+                    const int Chunk = 64 * 1024;
+                    var ms = new MemoryStream();
+                    var unmanaged = Marshal.AllocHGlobal(Chunk);
                     try
                     {
-                        if (!StormLib.SFileReadFile(file, buffer, (uint)size, out var read, IntPtr.Zero))
-                            throw new IOException($"Failed to read file from MPQ: {norm}");
-
-                        var managed = new byte[read];
-                        Marshal.Copy(buffer, managed, 0, (int)read);
-                        return new MemoryStream(managed, writable: false);
+                        while (true)
+                        {
+                            if (!StormLib.SFileReadFile(file, unmanaged, (uint)Chunk, out var read, IntPtr.Zero))
+                            {
+                                var err = Marshal.GetLastWin32Error();
+                                // ERROR_HANDLE_EOF = 38 is normal end-of-file for SFileReadFile
+                                if (err == 38 || err == 0)
+                                    break;
+                                throw new IOException($"Failed to read file from MPQ: {norm} (Win32={err})");
+                            }
+                            if (read == 0)
+                                break;
+                            var managed = new byte[read];
+                            Marshal.Copy(unmanaged, managed, 0, (int)read);
+                            ms.Write(managed, 0, (int)read);
+                        }
+                        ms.Position = 0;
+                        return ms;
                     }
                     finally
                     {
-                        Marshal.FreeHGlobal(buffer);
+                        Marshal.FreeHGlobal(unmanaged);
                         StormLib.SFileCloseFile(file);
                     }
                 }

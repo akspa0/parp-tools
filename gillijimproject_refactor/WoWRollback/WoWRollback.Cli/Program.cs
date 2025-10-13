@@ -97,6 +97,8 @@ internal static class Program
         }
 
         var resolver = new MinimapFileResolver(src, index);
+        using var fsOnly = new FileSystemArchiveSource(clientRoot);
+        using var mpqOnly = new MpqArchiveSource(mpqs);
 
         // Gather candidate tiles using md5 index when available (preferred for hashed root layouts)
         var candidates = new List<(int X, int Y)>();
@@ -160,7 +162,25 @@ internal static class Program
         {
             if (resolver.TryResolveTile(mapName, x, y, out var path))
             {
-                Console.WriteLine($"  {mapName}_{x}_{y} -> {path}");
+                // Determine origin: loose or MPQ
+                bool isLoose = fsOnly.FileExists(path) || fsOnly.FileExists(Path.Combine("Data", path).Replace('\\','/'));
+                bool isMpq = mpqOnly.FileExists(path);
+
+                long size = 0;
+                try
+                {
+                    using var s = src.OpenFile(path);
+                    // obtain size; for FileStream use Length, for MemoryStream use Length, otherwise copy small chunk
+                    if (s.CanSeek) size = s.Length; else { using var ms = new MemoryStream(); s.CopyTo(ms); size = ms.Length; }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  {mapName}_{x}_{y} -> {path} [open failed: {ex.Message}]");
+                    continue;
+                }
+
+                var origin = isLoose ? "loose" : (isMpq ? "mpq" : "unknown");
+                Console.WriteLine($"  {mapName}_{x}_{y} -> {path}  [origin: {origin}, size: {size}]");
                 resolved++;
             }
             else
