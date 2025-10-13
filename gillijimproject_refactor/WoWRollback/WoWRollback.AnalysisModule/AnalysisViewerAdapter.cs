@@ -10,7 +10,7 @@ using SixLabors.ImageSharp.Formats.Webp;
 namespace WoWRollback.AnalysisModule;
 
 /// <summary>
-/// Adapts single-map analysis results to work with the existing ViewerReportWriter.
+/// Adapts single-map or multi-map analysis results to work with the existing ViewerReportWriter.
 /// Creates a synthetic "version" for standalone map analysis.
 /// </summary>
 public sealed class AnalysisViewerAdapter
@@ -23,6 +23,134 @@ public sealed class AnalysisViewerAdapter
         Console.WriteLine(msg);
         _logWriter?.WriteLine(msg);
         _logWriter?.Flush();
+    }
+    
+    /// <summary>
+    /// Generates a unified viewer for multiple maps.
+    /// </summary>
+    public string GenerateUnifiedViewer(
+        List<(string MapName, string PlacementsCsv, string? MinimapDir)> maps,
+        string baseOutputDir,
+        string versionLabel)
+    {
+        try
+        {
+            // Setup logging
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var logPath = Path.Combine(baseOutputDir, $"unified_viewer_{timestamp}.log");
+            _logWriter = new StreamWriter(logPath, append: false);
+            Log($"=== Unified Viewer Generation Started ===");
+            Log($"Processing {maps.Count} maps for version: {versionLabel}");
+
+            var allPlacements = new List<AssetTimelineDetailedEntry>();
+
+            // Load placements from all maps
+            foreach (var (mapName, placementsCsv, minimapDir) in maps)
+            {
+                Log($"Loading map: {mapName}");
+                
+                // Setup minimaps if available
+                if (!string.IsNullOrEmpty(minimapDir) && Directory.Exists(minimapDir))
+                {
+                    SetupMinimaps(minimapDir, mapName, baseOutputDir, versionLabel);
+                }
+                
+                // Load placements
+                var mapPlacements = LoadPlacementsFromCsv(placementsCsv, mapName, versionLabel);
+                Log($"  Loaded {mapPlacements.Count} placements");
+                
+                // Add minimap tile markers
+                if (!string.IsNullOrEmpty(minimapDir) && Directory.Exists(minimapDir))
+                {
+                    var minimapPngs = Directory.GetFiles(minimapDir, "*.png", SearchOption.TopDirectoryOnly);
+                    foreach (var pngFile in minimapPngs)
+                    {
+                        var fileName = Path.GetFileNameWithoutExtension(pngFile);
+                        var parts = fileName.Split('_');
+                        if (parts.Length >= 3 &&
+                            int.TryParse(parts[^2], out var tileX) &&
+                            int.TryParse(parts[^1], out var tileY))
+                        {
+                            if (!mapPlacements.Any(p => p.TileRow == tileY && p.TileCol == tileX))
+                            {
+                                mapPlacements.Add(new AssetTimelineDetailedEntry(
+                                    Version: versionLabel,
+                                    Map: mapName,
+                                    TileRow: tileY,
+                                    TileCol: tileX,
+                                    Kind: PlacementKind.M2,
+                                    UniqueId: 0,
+                                    AssetPath: "_dummy_tile_marker",
+                                    Folder: "", Category: "", Subcategory: "", DesignKit: "",
+                                    SourceRule: "", KitRoot: "", SubkitPath: "", SubkitTop: "",
+                                    SubkitDepth: 0, FileName: "", FileStem: "", Extension: "",
+                                    WorldX: 0, WorldY: 0, WorldZ: 0,
+                                    RotationX: 0, RotationY: 0, RotationZ: 0,
+                                    Scale: 0, Flags: 0, DoodadSet: 0, NameSet: 0
+                                ));
+                            }
+                        }
+                    }
+                }
+                
+                allPlacements.AddRange(mapPlacements);
+            }
+
+            Log($"Total placements across all maps: {allPlacements.Count}");
+
+            // Generate unified viewer
+            var result = new VersionComparisonResult(
+                RootDirectory: baseOutputDir,
+                ComparisonKey: $"unified_analysis",
+                Versions: new[] { versionLabel },
+                RangeEntries: Array.Empty<VersionRangeEntry>(),
+                MapSummaries: Array.Empty<MapVersionSummary>(),
+                Overlaps: Array.Empty<RangeOverlapEntry>(),
+                AssetFirstSeen: Array.Empty<AssetFirstSeenEntry>(),
+                AssetFolderSummaries: Array.Empty<AssetFolderSummary>(),
+                AssetFolderTimeline: Array.Empty<AssetFolderTimelineEntry>(),
+                AssetTimeline: Array.Empty<AssetTimelineEntry>(),
+                DesignKitAssets: Array.Empty<DesignKitAssetEntry>(),
+                DesignKitRanges: Array.Empty<DesignKitRangeEntry>(),
+                DesignKitSummaries: Array.Empty<DesignKitSummaryEntry>(),
+                DesignKitTimeline: Array.Empty<DesignKitTimelineEntry>(),
+                DesignKitAssetDetails: Array.Empty<DesignKitAssetDetailEntry>(),
+                UniqueIdAssets: Array.Empty<UniqueIdAssetEntry>(),
+                AssetTimelineDetailed: allPlacements,
+                Warnings: Array.Empty<string>()
+            );
+
+            var viewerWriter = new ViewerReportWriter();
+            var viewerOptions = new ViewerOptions(
+                DefaultVersion: versionLabel,
+                DiffPair: null,
+                MinimapWidth: 256,
+                MinimapHeight: 256,
+                DiffDistanceThreshold: 10.0,
+                MoveEpsilonRatio: 0.1
+            );
+
+            var viewerRoot = viewerWriter.Generate(
+                baseOutputDir,
+                result,
+                viewerOptions,
+                diffPair: null
+            );
+
+            Log($"=== Unified Viewer Generation Complete ===");
+            _logWriter?.Close();
+            _logWriter = null;
+
+            return viewerRoot;
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR: {ex.Message}");
+            Log($"Stack trace: {ex.StackTrace}");
+            _logWriter?.Close();
+            _logWriter = null;
+            throw;
+        }
     }
     
     public string GenerateViewer(

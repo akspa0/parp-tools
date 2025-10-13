@@ -108,19 +108,62 @@ namespace WoWRollback.Core.Services.Minimap
             var x2 = tileX.ToString("00");
             var y2 = tileY.ToString("00");
             
+            // Generate space-separated variant for 0.6.0 bug (e.g., "EmeraldDream" → "Emerald Dream")
+            var mapNameWithSpace = InsertSpaceBeforeCapitals(mapName);
+            
             // Alpha/early clients use "map##_##.blp" format in md5translate
             yield return $"textures/minimap/{mapName}/map{x2}_{y2}.blp";
             yield return $"{mapName}/map{x2}_{y2}.blp"; // short form for md5translate lookup
+            
+            // 0.6.0 bug: Try space-separated variant (e.g., "Emerald Dream" instead of "EmeraldDream")
+            if (mapNameWithSpace != mapName)
+            {
+                yield return $"textures/minimap/{mapNameWithSpace}/map{x2}_{y2}.blp";
+                yield return $"{mapNameWithSpace}/map{x2}_{y2}.blp";
+            }
             
             // common forms under subfolder
             yield return $"textures/Minimap/{mapName}/{mapName}_{tileX}_{tileY}.blp";
             yield return $"textures/Minimap/{mapName}/{mapName}_{x2}_{y2}.blp";
             yield return $"textures/Minimap/{mapName}/map{tileX}_{tileY}.blp";
             
+            // Space-separated variants
+            if (mapNameWithSpace != mapName)
+            {
+                yield return $"textures/Minimap/{mapNameWithSpace}/{mapNameWithSpace}_{tileX}_{tileY}.blp";
+                yield return $"textures/Minimap/{mapNameWithSpace}/{mapNameWithSpace}_{x2}_{y2}.blp";
+                yield return $"textures/Minimap/{mapNameWithSpace}/map{tileX}_{tileY}.blp";
+            }
+            
             // sometimes placed directly under Minimap root
             yield return $"textures/Minimap/{mapName}_{tileX}_{tileY}.blp";
             yield return $"textures/Minimap/{mapName}_{x2}_{y2}.blp";
             yield return $"textures/Minimap/map{x2}_{y2}.blp";
+        }
+        
+        /// <summary>
+        /// Inserts spaces before capital letters in camelCase/PascalCase strings.
+        /// E.g., "EmeraldDream" → "Emerald Dream"
+        /// Handles 0.6.0 bug where some map names had spaces in md5translate.
+        /// </summary>
+        private static string InsertSpaceBeforeCapitals(string input)
+        {
+            if (string.IsNullOrEmpty(input) || input.Length == 1)
+                return input;
+            
+            var result = new System.Text.StringBuilder();
+            result.Append(input[0]);
+            
+            for (int i = 1; i < input.Length; i++)
+            {
+                if (char.IsUpper(input[i]) && !char.IsUpper(input[i - 1]))
+                {
+                    result.Append(' ');
+                }
+                result.Append(input[i]);
+            }
+            
+            return result.ToString();
         }
 
         private static string Normalize(string s) => s.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();

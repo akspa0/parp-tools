@@ -920,6 +920,7 @@ internal static class Program
         var buildVersion = opts.GetValueOrDefault("build", "0.6.0");
         var dbdDir = opts.GetValueOrDefault("dbd-dir", Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"));
         var baseOutDir = opts.GetValueOrDefault("out", "analysis_output");
+        var versionLabel = ExtractVersionFromPath(clientRoot) ?? buildVersion;
 
         Console.WriteLine($"[info] === Batch Analysis Mode ===");
         Console.WriteLine($"[info] Discovering maps from Map.dbc...");
@@ -951,19 +952,22 @@ internal static class Program
         int successCount = 0;
         int failCount = 0;
         var failedMaps = new List<string>();
+        var processedMaps = new List<(string MapName, string PlacementsCsv, string? MinimapDir)>();
 
+        // Phase 1: Extract and analyze each map
         foreach (var map in terrainMaps)
         {
-            Console.WriteLine($"\n{'='} Analyzing map: {map.Folder} ({map.Name}) {'='}");
+            Console.WriteLine($"\n=== Analyzing map: {map.Folder} ({map.Name}) ===");
             
             try
             {
                 var mapOutDir = Path.Combine(baseOutDir, map.Folder);
-                var exitCode = AnalyzeSingleMap(src, clientRoot, map.Folder, mapOutDir, opts);
+                var exitCode = AnalyzeSingleMapNoViewer(src, clientRoot, map.Folder, mapOutDir, out var placementsCsv, out var minimapDir);
                 
-                if (exitCode == 0)
+                if (exitCode == 0 && !string.IsNullOrEmpty(placementsCsv))
                 {
                     successCount++;
+                    processedMaps.Add((map.Folder, placementsCsv, minimapDir));
                     Console.WriteLine($"[ok] {map.Folder} completed successfully");
                 }
                 else if (exitCode == 2)
@@ -986,11 +990,45 @@ internal static class Program
             }
         }
 
+        // Phase 2: Generate unified viewer for all processed maps
+        if (processedMaps.Count > 0)
+        {
+            Console.WriteLine($"\n=== Generating Unified Viewer ===");
+            Console.WriteLine($"[info] Creating viewer for {processedMaps.Count} maps...");
+            
+            try
+            {
+                var viewerAdapter = new AnalysisViewerAdapter();
+                var viewerRoot = viewerAdapter.GenerateUnifiedViewer(processedMaps, baseOutDir, versionLabel);
+                
+                if (!string.IsNullOrEmpty(viewerRoot))
+                {
+                    Console.WriteLine($"[ok] Unified viewer generated: {viewerRoot}");
+                    Console.WriteLine($"[info] Open: {Path.Combine(viewerRoot, "index.html")}");
+                    
+                    // Auto-serve if requested
+                    if (opts.ContainsKey("serve"))
+                    {
+                        var port = 8080;
+                        if (opts.TryGetValue("port", out var portStr) && int.TryParse(portStr, out var parsedPort))
+                        {
+                            port = parsedPort;
+                        }
+                        ViewerServer.Serve(viewerRoot, port, openBrowser: !opts.ContainsKey("no-browser"));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[error] Unified viewer generation failed: {ex.Message}");
+            }
+        }
+
         // Cleanup temp directory
         try { Directory.Delete(tempDir, true); } catch { }
 
         // Summary
-        Console.WriteLine($"\n{'='} Batch Analysis Complete {'='}");
+        Console.WriteLine($"\n=== Batch Analysis Complete ===");
         Console.WriteLine($"[ok] Successfully analyzed: {successCount}/{terrainMaps.Count} maps");
         if (failCount > 0)
         {
@@ -998,6 +1036,86 @@ internal static class Program
         }
 
         return failCount > 0 ? 1 : 0;
+    }
+
+    private static int AnalyzeSingleMapNoViewer(IArchiveSource src, string clientRoot, string mapName, string outDir, out string? placementsCsv, out string? minimapDir)
+    {
+        placementsCsv = null;
+        minimapDir = null;
+        
+        Console.WriteLine($"[info] Analyzing ADTs from MPQs for map: {mapName}");
+        Console.WriteLine($"[info] Output directory: {outDir}");
+
+        // Check if map folder exists in MPQ
+        var wdtPath = $"world/maps/{mapName}/{mapName}.wdt";
+        if (!src.FileExists(wdtPath))
+        {
+            Console.WriteLine($"[warn] Map folder not found in MPQ: {mapName}");
+            Console.WriteLine($"[info] Skipping map (no WDT file)");
+            return 2; // Non-fatal error code
+        }
+        
+        // Step 1: Extract placements
+        Console.WriteLine("  Step 1: Extracting placements...");
+        var extractor = new AdtMpqChunkPlacementsExtractor();
+        placementsCsv = Path.Combine(outDir, $"{mapName}_placements.csv");
+        var extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsv);
+
+        if (!extractResult.Success)
+        {
+            Console.WriteLine($"[warn] {extractResult.ErrorMessage}");
+            placementsCsv = null;
+            return 2; // Non-fatal error code
+        }
+
+        var totalPlacements = extractResult.M2Count + extractResult.WmoCount;
+        if (totalPlacements == 0)
+        {
+            Console.WriteLine($"[info] No placements found for map: {mapName}");
+            placementsCsv = null;
+            return 0; // Success but no data
+        }
+
+        Console.WriteLine($"  [ok] Extracted {extractResult.M2Count} M2 + {extractResult.WmoCount} WMO placements");
+
+        // Step 2: Extract minimaps
+        Console.WriteLine("  Step 2: Extracting minimaps...");
+        minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
+        if (!string.IsNullOrEmpty(minimapDir))
+        {
+            var count = Directory.GetFiles(minimapDir, "*.png").Length;
+            Console.WriteLine($"  [ok] Extracted {count} minimap tiles");
+        }
+
+        // Step 3: Analyze UniqueIDs
+        Console.WriteLine("  Step 3: Analyzing UniqueIDs...");
+        var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
+        var analysisResult = analyzer.AnalyzeFromPlacementsCsv(placementsCsv, mapName, outDir);
+
+        if (!analysisResult.Success)
+        {
+            Console.WriteLine($"  [warn] UniqueID analysis failed: {analysisResult.ErrorMessage}");
+        }
+        else
+        {
+            Console.WriteLine($"  [ok] Analyzed {analysisResult.TileCount} tiles");
+        }
+
+        // Step 4: Detect clusters
+        Console.WriteLine("  Step 4: Detecting spatial clusters...");
+        var clusterAnalyzer = new ClusterAnalyzer(proximityThreshold: 50.0f, minClusterSize: 3);
+        var clusterResult = clusterAnalyzer.Analyze(placementsCsv, mapName, outDir);
+
+        if (!clusterResult.Success)
+        {
+            Console.WriteLine($"  [warn] Cluster analysis failed: {clusterResult.ErrorMessage}");
+        }
+        else
+        {
+            Console.WriteLine($"  [ok] Detected {clusterResult.TotalClusters} clusters, {clusterResult.TotalPatterns} patterns");
+        }
+
+        return 0;
     }
 
     private static int AnalyzeSingleMap(IArchiveSource src, string clientRoot, string mapName, string outDir, Dictionary<string, string> opts)
