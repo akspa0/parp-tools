@@ -649,6 +649,98 @@ internal static class Program
         if (!opts.ContainsKey(key) || string.IsNullOrWhiteSpace(opts[key]))
             throw new ArgumentException($"Missing required --{key}");
     }
+    
+    private static string? ExtractMinimapsFromMpq(IArchiveSource src, string mapName, string outputDir)
+    {
+        try
+        {
+            // Load md5translate if present
+            WoWRollback.Core.Services.Minimap.Md5TranslateIndex? index = null;
+            if (Md5TranslateResolver.TryLoad(src, out var loaded, out var _))
+            {
+                index = loaded;
+            }
+
+            var resolver = new MinimapFileResolver(src, index);
+            var minimapOutDir = Path.Combine(outputDir, "minimaps");
+            Directory.CreateDirectory(minimapOutDir);
+
+            // Scan for all tiles (0-63 grid)
+            int extracted = 0;
+            for (int x = 0; x < 64; x++)
+            {
+                for (int y = 0; y < 64; y++)
+                {
+                    if (resolver.TryResolveTile(mapName, x, y, out var virtualPath) && !string.IsNullOrEmpty(virtualPath))
+                    {
+                        try
+                        {
+                            // Read BLP from MPQ
+                            using var blpStream = src.OpenFile(virtualPath);
+                            using var ms = new MemoryStream();
+                            blpStream.CopyTo(ms);
+                            var blpData = ms.ToArray();
+                            
+                            // Convert BLP to PNG using Warcraft.NET
+                            var blp = new Warcraft.NET.Files.BLP.BLP(blpData);
+                            var image = blp.GetMipMap(0); // Get highest resolution mipmap
+                            
+                            var outputPath = Path.Combine(minimapOutDir, $"{mapName}_{x}_{y}.png");
+                            using var outStream = File.Create(outputPath);
+                            image.Save(outStream, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                            extracted++;
+                        }
+                        catch
+                        {
+                            // Skip tiles that fail to extract/convert
+                        }
+                    }
+                }
+            }
+
+            if (extracted > 0)
+            {
+                Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→PNG)");
+                return minimapOutDir;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] Minimap extraction failed: {ex.Message}");
+            return null;
+        }
+    }
+    
+    private static string? ExtractVersionFromPath(string clientPath)
+    {
+        // Try to extract version from path like "0.X_Pre-Release_Windows_enUS_0.6.0.3592\World of Warcraft"
+        // Check the full path first
+        var match = System.Text.RegularExpressions.Regex.Match(clientPath, @"(\d+\.\d+\.\d+\.\d+)");
+        if (match.Success)
+        {
+            return match.Groups[1].Value;
+        }
+        
+        // Try parent directory if current is generic
+        var dirName = Path.GetFileName(clientPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (dirName.Equals("World of Warcraft", StringComparison.OrdinalIgnoreCase) || 
+            dirName.Equals("Data", StringComparison.OrdinalIgnoreCase))
+        {
+            var parentPath = Path.GetDirectoryName(clientPath);
+            if (!string.IsNullOrEmpty(parentPath))
+            {
+                match = System.Text.RegularExpressions.Regex.Match(parentPath, @"(\d+\.\d+\.\d+\.\d+)");
+                if (match.Success)
+                {
+                    return match.Groups[1].Value;
+                }
+            }
+        }
+        
+        return null;
+    }
 
     private static Dictionary<string, string> ParseArgs(string[] args)
     {
@@ -678,8 +770,10 @@ internal static class Program
         Console.WriteLine("  probe-minimap    --client-path <dir> --map <name> [--limit <n>]");
         Console.WriteLine("    Resolve sample minimap tiles using md5translate when present; prints resolved virtual paths (no viewer changes).");
         Console.WriteLine();
-        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> --map <name> [--out <dir>]");
-        Console.WriteLine("    Analyze ADT files directly from MPQs (patched view) and export placements CSV (M2/WMO)");
+        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> --map <name> [--out <dir>] [--serve] [--port <port>]");
+        Console.WriteLine("    Analyze ADT files directly from MPQs (patched view), detect layers/clusters, and generate viewer");
+        Console.WriteLine("    Supports MDX/M2/WMO extraction from all WoW versions (0.6.0+)");
+        Console.WriteLine("    Use --serve to auto-start web server after analysis");
         Console.WriteLine();
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
@@ -734,19 +828,100 @@ internal static class Program
 
         Console.WriteLine($"[info] Analyzing ADTs from MPQs for map: {mapName}");
         Console.WriteLine($"[info] Client: {clientRoot}");
+        Console.WriteLine($"[info] Output directory: {outDir}");
 
+        // Step 1: Extract placements from MPQ archives
+        Console.WriteLine("\n=== Step 1: Extracting placements from MPQ archives ===");
         var extractor = new AdtMpqChunkPlacementsExtractor();
         var placementsCsvPath = Path.Combine(outDir, $"{mapName}_placements.csv");
-        var result = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
+        var extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
 
-        if (!result.Success)
+        if (!extractResult.Success)
         {
-            Console.Error.WriteLine($"[error] {result.ErrorMessage}");
+            Console.Error.WriteLine($"[error] {extractResult.ErrorMessage}");
             return 1;
         }
 
-        Console.WriteLine($"[ok] {result.ErrorMessage}");
+        Console.WriteLine($"[ok] {extractResult.ErrorMessage}");
         Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
+
+        // Step 1.5: Extract minimaps from MPQ
+        Console.WriteLine("\n=== Step 1.5: Extracting minimaps from MPQ ===");
+        var minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
+        if (!string.IsNullOrEmpty(minimapDir))
+        {
+            Console.WriteLine($"[ok] Extracted minimaps to: {minimapDir}");
+        }
+        else
+        {
+            Console.WriteLine($"[info] No minimaps found in MPQ");
+        }
+
+        // Step 2: Analyze UniqueIDs and detect layers
+        Console.WriteLine("\n=== Step 2: Analyzing UniqueIDs and detecting layers ===");
+        var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
+        var analysisResult = analyzer.AnalyzeFromPlacementsCsv(placementsCsvPath, mapName, outDir);
+
+        if (!analysisResult.Success)
+        {
+            Console.Error.WriteLine($"[error] UniqueID analysis failed: {analysisResult.ErrorMessage}");
+            return 1;
+        }
+
+        Console.WriteLine($"[ok] Analyzed {analysisResult.TileCount} tiles");
+        Console.WriteLine($"[ok] UniqueID analysis CSV: {analysisResult.CsvPath}");
+        Console.WriteLine($"[ok] Layers JSON: {analysisResult.LayersJsonPath}");
+
+        // Step 3: Detect spatial clusters and patterns
+        Console.WriteLine("\n=== Step 3: Detecting spatial clusters and patterns ===");
+        var clusterAnalyzer = new ClusterAnalyzer(proximityThreshold: 50.0f, minClusterSize: 3);
+        var clusterResult = clusterAnalyzer.Analyze(placementsCsvPath, mapName, outDir);
+
+        if (!clusterResult.Success)
+        {
+            Console.WriteLine($"[warn] Cluster analysis failed: {clusterResult.ErrorMessage}");
+        }
+        else
+        {
+            Console.WriteLine($"[ok] Detected {clusterResult.TotalClusters} spatial clusters");
+            Console.WriteLine($"[ok] Identified {clusterResult.TotalPatterns} recurring patterns (potential prefabs)");
+            Console.WriteLine($"[ok] Clusters JSON: {clusterResult.ClustersJsonPath}");
+            Console.WriteLine($"[ok] Patterns JSON: {clusterResult.PatternsJsonPath}");
+            Console.WriteLine($"[ok] Summary CSV: {clusterResult.SummaryCsvPath}");
+        }
+
+        // Step 4: Generate viewer
+        Console.WriteLine("\n=== Step 4: Generating viewer ===");
+        var viewerAdapter = new AnalysisViewerAdapter();
+        var versionLabel = ExtractVersionFromPath(clientRoot) ?? "mpq-analysis";
+        var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapDir: minimapDir, versionLabel: versionLabel);
+
+        if (!string.IsNullOrEmpty(viewerRoot))
+        {
+            Console.WriteLine($"[ok] Viewer generated: {viewerRoot}");
+            Console.WriteLine($"[info] Open: {Path.Combine(viewerRoot, "index.html")}");
+        }
+        else
+        {
+            Console.WriteLine($"[warn] Viewer generation skipped (no placements)");
+        }
+
+        Console.WriteLine("\n=== Analysis Complete ===");
+        Console.WriteLine($"All outputs written to: {outDir}");
+        
+        // Check if --serve flag is present
+        if (opts.ContainsKey("serve"))
+        {
+            Console.WriteLine("\n=== Starting viewer server ===");
+            var port = TryParseInt(opts, "port") ?? 8080;
+            var openBrowser = !opts.ContainsKey("no-browser");
+            ViewerServer.Serve(viewerRoot, port, openBrowser);
+        }
+        else
+        {
+            Console.WriteLine("\nℹ️  Use --serve to auto-start web server after analysis");
+        }
+        
         return 0;
     }
 

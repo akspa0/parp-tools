@@ -29,17 +29,19 @@ public sealed class AnalysisViewerAdapter
         string placementsCsvPath,
         string mapName,
         string outputDir,
-        string? minimapDir = null)
+        string? minimapDir = null,
+        string? versionLabel = null)
     {
         try
         {
-            // Setup logging
-            var logPath = Path.Combine(outputDir, "analysis_debug.log");
+            // Setup logging with timestamp to avoid file locking issues
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var logPath = Path.Combine(outputDir, $"analysis_debug_{timestamp}.log");
             _logWriter = new StreamWriter(logPath, append: false);
             Log($"=== Analysis started for map '{mapName}' ===");
             
-            // Create synthetic version for analysis
-            const string syntheticVersion = "analysis";
+            // Use provided version label or default to "analysis"
+            string syntheticVersion = versionLabel ?? "analysis";
             
             // Setup minimap structure if provided
             if (!string.IsNullOrEmpty(minimapDir) && Directory.Exists(minimapDir))
@@ -48,7 +50,7 @@ public sealed class AnalysisViewerAdapter
             }
             
             // Load placements from CSV
-            var placements = LoadPlacementsFromCsv(placementsCsvPath, mapName);
+            var placements = LoadPlacementsFromCsv(placementsCsvPath, mapName, syntheticVersion);
             
             Log($"Loaded {placements.Count} placements from CSV");
             
@@ -219,7 +221,7 @@ public sealed class AnalysisViewerAdapter
         }
     }
 
-    private List<AssetTimelineDetailedEntry> LoadPlacementsFromCsv(string csvPath, string mapName)
+    private List<AssetTimelineDetailedEntry> LoadPlacementsFromCsv(string csvPath, string mapName, string versionLabel)
     {
         var entries = new List<AssetTimelineDetailedEntry>();
 
@@ -263,12 +265,12 @@ public sealed class AnalysisViewerAdapter
                 var worldY = float.Parse(fields[7]);
                 var worldZ = float.Parse(fields[8]);
 
-                var kind = type.Equals("M2", StringComparison.OrdinalIgnoreCase)
+                var kind = type.Equals("M2", StringComparison.OrdinalIgnoreCase) || type.Equals("MDX", StringComparison.OrdinalIgnoreCase)
                     ? PlacementKind.M2
                     : PlacementKind.WMO;
 
                 var entry = new AssetTimelineDetailedEntry(
-                    Version: "analysis",
+                    Version: versionLabel,
                     Map: mapName,
                     TileRow: tileY,  // tile_y → TileRow (Y is vertical/row)
                     TileCol: tileX,  // tile_x → TileCol (X is horizontal/col)
