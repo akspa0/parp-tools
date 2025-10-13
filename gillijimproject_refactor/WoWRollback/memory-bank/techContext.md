@@ -88,6 +88,105 @@ The `AlphaWdtAnalyzer` currently has placeholder implementations:
 - **GillijimProject.WowFiles**: Leverage existing format parsers
 - **Configuration System**: JSON/YAML for rollback rules
 
+## MPQ Archive Infrastructure (Added 2025-10-12)
+
+### Existing Infrastructure
+Located in `lib/WoWTools.Minimaps/StormLibWrapper/`:
+- **MpqArchive.cs** - C# wrapper for StormLib (open/read MPQ files)
+- **MPQReader.cs** - Extract files from MPQ archives
+- **DirectoryReader.cs** - Auto-detect and sort patch chain
+- **MpqArchive.AddPatchArchives()** - Automatic patch application
+
+### WoW File Resolution Priority (CRITICAL)
+WoW reads files in this exact order:
+1. **Loose files in Data/ subfolders** (HIGHEST priority)
+2. **Patch MPQs** (patch-3.MPQ > patch-2.MPQ > patch.MPQ)
+3. **Base MPQs** (lowest priority)
+
+**Why This Matters:**
+- Players exploited loose file overrides for model swapping (giant campfire = escape geometry)
+- `md5translate.txt` can exist in BOTH MPQ and `Data/textures/Minimap/md5translate.txt`
+- **Any archive reader MUST check filesystem BEFORE MPQ**
+
+### Implementation Requirements
+```csharp
+// Required abstraction (not yet implemented)
+interface IArchiveSource {
+    bool FileExists(string path);
+    Stream OpenFile(string path);
+}
+
+// Priority wrapper (MUST implement)
+class PrioritizedArchiveSource : IArchiveSource {
+    // 1. Check loose file in Data/ folder FIRST
+    // 2. If not found, delegate to MpqArchive
+}
+```
+
+### Patch Chain Handling
+- `DirectoryReader.cs` automatically detects and sorts patch MPQs
+- Higher-numbered patches override lower (patch-3 > patch-2 > patch-1 > base)
+- `MpqArchive.AddPatchArchives()` applies patch chain automatically
+
+### Current Gap
+- StormLibWrapper exists but not integrated with WoWRollback
+- No loose file priority layer implemented
+- No IArchiveSource abstraction
+
+## WDT and Map Type Detection (Added 2025-10-12)
+
+### WDT File Structure
+```
+WDT File:
+├── MPHD chunk (header with flags)
+├── MAIN chunk (64x64 tile grid, flags indicate which ADTs exist)
+└── MWMO chunk (WMO filename for WMO-only maps)
+```
+
+### Map Types
+1. **ADT-based**: Normal terrain (Azeroth, Kalimdor, Outland)
+2. **WMO-only**: Instances with single WMO (Karazhan, Scarlet Monastery, Deadmines)
+3. **Battlegrounds**: Special handling (Alterac Valley, Warsong Gulch)
+
+### Detection Logic
+- **MPHD.GlobalWMO flag** - Indicates WMO-only map (no ADTs)
+- **MAIN grid entries** - Each has flags indicating if ADT exists
+- **MWMO chunk** - Contains WMO path for instances
+
+**Benefit:** Prevents scanning for non-existent ADT files, handles instances correctly
+
+### Current Gap
+- `analyze-map-adts` assumes all ADTs exist
+- No WDT pre-check before ADT processing
+- Can't handle Karazhan and other WMO-only maps
+
+## MCNK Terrain Data (Added 2025-10-12)
+
+### MCNK Structure
+Each ADT has 256 MCNK chunks (16x16 grid). Each chunk has subchunks:
+- **MCVT** - 145 vertex heights (enables height map overlays)
+- **MCNR** - Normal vectors (lighting/shading)
+- **MCLY** - Texture layers (up to 4 per chunk with blend modes)
+- **MCAL** - Alpha maps (texture blending)
+- **MCLQ** - Liquid data (water/lava/slime types, heights, flags)
+- **MCRF** - Doodad/WMO references in this chunk
+- **MCSH** - Shadow map (baked shadows)
+- **MCSE** - Sound emitters (ambient sound)
+
+### Current Implementation
+`AdtTerrainExtractor.cs` only extracts basic MCNK header:
+- AreaID, Flags, TextureLayers count, HasLiquids, HasHoles, IsImpassible
+
+**Missing:** All subchunk data (MCVT, MCNR, MCLY, MCAL, MCLQ, MCRF, MCSH, MCSE)
+
+### Planned Enhancement
+New module `WoWRollback.DetailedAnalysisModule` will extract full MCNK data for:
+- Height map overlays (MCVT heatmaps)
+- Texture distribution overlays (MCLY)
+- Liquid region overlays (MCLQ)
+- Impassable terrain overlays (MCNK flags)
+- Area boundary overlays (AreaID changes)
+
 ## Archaeological Terminology Integration
 - **Console Output**: Uses archaeological language ("excavation", "preservation", "artifacts")
 - **Variable Naming**: "sedimentary layers", "volumes of work", "ancient developers"

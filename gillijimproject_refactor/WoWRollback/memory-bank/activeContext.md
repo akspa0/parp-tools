@@ -1,99 +1,127 @@
-# Active Context - WoWRollback Unified Orchestrator Refactor
+# Active Context - WoWRollback Viewer Coordinate System & Archive Reading
 
-## Current Focus (2025-10-07)
-**Unified Orchestrator Implementation - Replacing PowerShell/Python Orchestration**
+## Current Focus (2025-10-12)
+**Overlay Coordinate System Fixes & Enhanced Archive Analysis Planning**
 
-We are executing a **major architectural refactor** to replace fragmented PowerShell and Python orchestration with a single unified C# application (`WoWRollback.Orchestrator`). This is based on the detailed plan in `docs/refactor/WoWRollback-Unified-Orchestrator.md`.
+We successfully fixed critical coordinate system bugs in the viewer overlays where objects and clusters were appearing in wrong tiles. Now planning major enhancement to read from WoW client installations (MPQ + loose files) and generate comprehensive analysis for all maps.
 
-## What We're Building
-A single executable that orchestrates the entire Alpha→Lich King pipeline:
-1. **DBC Analysis** (via DBCTool.V2) - Extract and compare AreaTables
-2. **ADT Conversion** (via AlphaWdtAnalyzer.Core) - Convert Alpha WDT/ADT → LK format with AreaID patching
-3. **Viewer Generation** - Generate static HTML viewer with overlays
-4. **Embedded HTTP Server** - Serve viewer directly from orchestrator
+## What We Just Fixed (Session: 2025-10-12)
 
-## Recent Changes (Session: 2025-10-07)
+### ✅ Critical Bug Fixed: Overlay Coordinate System
 
-### ✅ Phase 1 Complete: Module Architecture Created
-Created three new module projects to wrap existing tools as library APIs:
+**The Problem:**
+- ADT placement coordinates are **absolute offsets from map corner (0,0)**, not tile-local
+- Dark Portal at coords `(1086, 1099)` was stored in ADT files `development_1_1.adt` and `development_2_1.adt`
+- But actual world coords `(15980, 15966)` place it in tile `(2,2)`!
+- Objects and clusters were appearing in wrong tiles on the viewer
 
-1. **WoWRollback.DbcModule** (NEW)
-   - `DbcOrchestrator.cs` - Wraps DBCTool.V2 CLI commands
-   - `DumpAreaTables()` - Returns structured result instead of exit code
-   - `GenerateCrosswalks()` - Returns paths to maps.json and crosswalk CSVs
+**The Root Cause:**
+- `ViewerReportWriter` was pre-filtering entries by CSV tile (from ADT filename)
+- `OverlayBuilder` was re-filtering by computed actual tile (from coordinates)
+- **Double filtering = nothing matched!**
 
-2. **WoWRollback.AdtModule** (NEW)
-   - `AdtOrchestrator.cs` - Wraps AlphaWdtAnalyzer.Core.Export
-   - `ConvertAlphaToLk()` - Clean API for ADT conversion
-   - `ConversionOptions` - Typed configuration instead of massive option struct
+**The Fix:**
+1. Created `ComputeActualTile()` - computes owning tile from coordinates instead of trusting ADT filename
+2. Removed pre-filtering in `ViewerReportWriter` - passes ALL version entries to OverlayBuilder
+3. `OverlayBuilder` filters by computed tile, correctly placing objects
+4. `ClusterOverlayBuilder` now also groups by computed tile (same fix)
+5. Filter dummy markers early to prevent UID=0 spam
 
-3. **WoWRollback.ViewerModule** (NEW)
-   - `ViewerServer.cs` - Embedded HTTP server using HttpListener
-   - `Start(viewerDir, port)` - Serves static files without external dependencies
-   - `Stop()` / `Dispose()` - Clean shutdown
+### ✅ Key Technical Insights
 
-### ✅ Phase 2 Complete: Infrastructure Fixed
+1. **ADT Coordinate System**
+   - Placement coords in MDDF/MODF chunks are ABSOLUTE from map NW corner `(0,0)`
+   - NOT relative to the ADT tile!
+   - Must compute: `tileCol = floor(32 - worldX/533.33)`, `tileRow = floor(32 - worldY/533.33)`
 
-4. **WoWRollback.Core** - Populated with shared utilities
-   - `IO/FileHelpers.cs` - Directory copy operations (extracted from DbcStageRunner)
-   - `Logging/ConsoleLogger.cs` - Structured console output with timestamps
-   - `Models/SessionManifest.cs` - Session metadata models for manifest.json
+2. **Cross-Tile Objects**
+   - Objects spanning tile boundaries appear in MULTIPLE ADT files
+   - Same UniqueID, same coordinates, different ADT files
+   - Deduplication by UniqueID prevents duplicates
 
-5. **SessionManager** - **CRITICAL FIX**: Correct output structure per spec
-   - ✅ NOW: `session_YYYYMMDD_HHMMSS/01_dbcs/`, `02_crosswalks/`, `03_adts/`, `04_analysis/`, `05_viewer/`, `logs/`
-   - ❌ BEFORE: `shared_outputs/dbc/`, `shared_outputs/crosswalks/` (WRONG)
-   - All stage runners updated to use new paths
+3. **Dummy Tile Markers**
+   - Tiles without placements get dummy entry: `UID=0`, `AssetPath="_dummy_tile_marker"`
+   - Must filter early to avoid processing overhead
 
-### 🚧 Current Work: Day 3 - Wire Modules into Orchestrator
+## Current Blockers
 
-**Next immediate tasks:**
-1. Refactor `DbcStageRunner` to call `DbcOrchestrator` API (not CLI directly)
-2. Refactor `AdtStageRunner` to call `AdtOrchestrator` API
-3. Implement `ViewerStageRunner` with HTML and overlay generation
-4. Add `--serve` and `--port` CLI flags and wire `ViewerServer`
+### ❌ Terrain MCNK Extraction Returning 0 Chunks
+- `AdtTerrainExtractor.ExtractTerrainForMap()` returns 0 chunks
+- Likely `AdtFormatDetector.EnumerateMapTiles()` not finding files
+- Added diagnostics logging but not tested yet
+- Each ADT should have 256 MCNK chunks (16x16 grid)
 
-## Key Architectural Decisions
+### ❌ No MPQ Archive Reading
+- Currently only works with extracted/loose files
+- **GOOD NEWS**: `StormLibWrapper` already exists in `lib/WoWTools.Minimaps/`!
+- Just need to wrap it with loose-file-priority layer
 
-### Module Separation
-- DbcModule, AdtModule, ViewerModule are **thin wrappers** around existing tools
-- They provide clean typed APIs instead of exit codes and shell execution
-- Orchestrator consumes these modules, not CLI commands directly
+## Next Steps (For Fresh Session)
 
-### Output Structure
-Per spec (page 60-73), all outputs go into numbered session subdirectories:
+### Immediate Tasks
+1. **Fix terrain extraction** - Add diagnostics to see why 0 tiles found
+2. **Remove `terrain_complete` viewer code** - It's broken, will be replaced
+3. **Create `IArchiveSource` abstraction** - Wrap existing `MpqArchive` with loose file priority
+
+### Major Enhancement: WoW Client Archive Reading
+See `plans/enhanced-archive-analysis.md` for full 5-phase plan:
+- Phase 1: Archive reading (MPQ + loose files with priority)
+- Phase 2: DBC export & map discovery
+- Phase 3: WDT parsing (map types, tile detection)
+- Phase 4: Detailed terrain analysis (full MCNK subchunks)
+- Phase 5: CLI redesign (`analyze-archive` command)
+
+## CRITICAL: WoW File Resolution Priority
+
+**WoW reads files in this order:**
+1. ✅ **Loose files in Data/ folders** (HIGHEST priority)
+2. ✅ Patch MPQs (patch-3.MPQ > patch-2.MPQ > patch.MPQ)
+3. ✅ Base MPQs
+
+**Why This Matters:**
+- Players exploited this for model swapping (giant campfire = escape geometry)
+- `md5translate.txt` can exist in BOTH MPQ and `Data/textures/Minimap/md5translate.txt`
+- **Implementation MUST check filesystem BEFORE MPQ**
+
+**Existing Infrastructure:**
+- `StormLibWrapper/MpqArchive.cs` - Open/read MPQ
+- `StormLibWrapper/MPQReader.cs` - Extract files
+- `StormLibWrapper/DirectoryReader.cs` - Auto-detect patch chain
+- `MpqArchive.AddPatchArchives()` - Automatic patching
+
+**What We Need:**
+```csharp
+interface IArchiveSource {
+    bool FileExists(string path);
+    Stream OpenFile(string path);
+}
+
+class PrioritizedArchiveSource : IArchiveSource {
+    // Check loose files FIRST, then delegate to MpqArchive
+}
 ```
-parp_out/
-└─ session_20251007_001830/
-   ├─ 01_dbcs/           ← DBC dumps per version
-   ├─ 02_crosswalks/     ← Maps.json and area mapping CSVs
-   ├─ 03_adts/           ← Converted ADTs per version/map
-   ├─ 04_analysis/       ← Terrain CSVs (future)
-   ├─ 05_viewer/         ← Static HTML viewer
-   ├─ logs/              ← Per-stage logs
-   └─ manifest.json      ← Session metadata
-```
 
-### Testing Strategy
-- Unit tests for each module (DbcModule, AdtModule, ViewerModule)
-- Integration test: Shadowfang 0.5.3 end-to-end
-- Verify output structure matches spec exactly
+## Git Status
+- **Branch**: `wrb-poc3b`
+- **Last Commit**: `f2ee2f8` - "Minor fixes to cluster overlays"
+- **Test Data**: `test_data/development/World/Maps/development/`
+- **Output**: `analysis_output/viewer/` (served at `http://localhost:8080`)
 
-## Challenges & Solutions
+## Files Modified This Session
+- `WoWRollback.Core/Services/Viewer/OverlayBuilder.cs` - Added `ComputeActualTile()`, early dummy filtering
+- `WoWRollback.Core/Services/Viewer/ViewerReportWriter.cs` - Removed pre-filtering by CSV tile
+- `WoWRollback.Core/Services/Viewer/ClusterOverlayBuilder.cs` - Group by computed tile
+- `WoWRollback.AnalysisModule/AdtTerrainExtractor.cs` - Added diagnostics (not tested)
+- `WoWRollback.Core/Services/Viewer/TerrainOverlayBuilder.cs` - Fixed CSV parsing column indices
 
-### Challenge: CLI Command Dependencies
-**Problem**: DbcStageRunner was calling `new DumpAreaCommand()` and `new CompareAreaV2Command()` directly
-**Solution**: Created DbcOrchestrator wrapper that provides library API, still uses CLI commands internally for now
+## What Works Now
+✅ Objects appear in correct tiles on viewer  
+✅ Clusters appear in correct tiles  
+✅ Cross-tile objects deduplicated properly  
+✅ No more UID=0 spam in logs  
+✅ Viewer serves at `http://localhost:8080`  
 
-### Challenge: Wrong Output Structure
-**Problem**: Original implementation used `shared_outputs/` concept not in spec
-**Solution**: Fixed SessionManager to use numbered directories per spec (01_, 02_, etc.)
-
-### Challenge: No Web Server
-**Problem**: ViewerStageRunner was a stub returning success without doing anything
-**Solution**: Created ViewerModule with HttpListener-based server for zero dependencies
-
-## Non-Negotiables
-- Match spec exactly (docs/refactor/WoWRollback-Unified-Orchestrator.md)
-- No shell execution for main pipeline tools (use library APIs)
-- Predictable output structure (numbered directories)
-- All file paths under orchestrator control
+## What's Still Broken
+❌ Terrain extraction (0 chunks)  
+❌ terrain_complete overlay (needs removal)  
+❌ No MPQ reading (only loose files work)
