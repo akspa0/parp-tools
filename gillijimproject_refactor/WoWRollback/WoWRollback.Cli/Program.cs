@@ -7,6 +7,8 @@ using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Config;
 using WoWRollback.Core.Services.Viewer;
+using WoWRollback.Core.Services.Archive;
+using WoWRollback.Core.Services.Minimap;
 
 namespace WoWRollback.Cli;
 
@@ -21,7 +23,6 @@ internal static class Program
             PrintHelp();
             return 0;
         }
-
         var cmd = args[0].ToLowerInvariant();
         var opts = ParseArgs(args.Skip(1).ToArray());
 
@@ -37,6 +38,10 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-map-adts":
                     return RunAnalyzeMapAdts(opts);
+                case "probe-archive":
+                    return RunProbeArchive(opts);
+                case "probe-minimap":
+                    return RunProbeMinimap(opts);
                 case "serve-viewer":
                 case "serve":
                     return RunServeViewer(opts);
@@ -55,6 +60,138 @@ internal static class Program
             Console.Error.WriteLine($"[error] {ex.Message}");
             return 1;
         }
+    }
+
+    private static int RunProbeMinimap(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        Require(opts, "map");
+        var clientRoot = opts["client-path"]; 
+        var mapName = opts["map"]; 
+        var limit = TryParseInt(opts, "limit") ?? 12;
+
+        Console.WriteLine($"[probe] Client root: {clientRoot}");
+        Console.WriteLine($"[probe] Map: {mapName}");
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine("[error] --client-path does not exist");
+            return 1;
+        }
+
+        EnsureStormLibOnPath();
+
+        // Build prioritized source
+        var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
+        using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
+
+        // Load md5translate if present
+        WoWRollback.Core.Services.Minimap.Md5TranslateIndex? index = null;
+        if (Md5TranslateResolver.TryLoad(src, out var loaded, out var usedPath))
+        {
+            index = loaded;
+            Console.WriteLine($"[probe] md5translate loaded: {usedPath}");
+        }
+        else
+        {
+            Console.WriteLine("[probe] md5translate not found; will attempt plain and scan fallbacks");
+        }
+
+        var resolver = new MinimapFileResolver(src, index);
+
+        // Gather candidate tiles using md5 index when available (preferred for hashed root layouts)
+        var candidates = new List<(int X, int Y)>();
+
+        if (index is not null)
+        {
+            var found = 0;
+            foreach (var plain in index.PlainToHash.Keys)
+            {
+                // restrict to requested map; accept keys within textures/minimap/<map>/... or starting with <map>_
+                var containsMapFolder = plain.IndexOf($"/" + mapName + "/", StringComparison.OrdinalIgnoreCase) >= 0;
+                var startsWithMap = Path.GetFileNameWithoutExtension(plain).StartsWith(mapName + "_", StringComparison.OrdinalIgnoreCase);
+                if (!containsMapFolder && !startsWithMap) continue;
+
+                if (TryParseTileFromPath(plain, mapName, out var x, out var y))
+                {
+                    var tuple = (x, y);
+                    if (!candidates.Contains(tuple))
+                    {
+                        candidates.Add(tuple);
+                        found++;
+                        if (found >= limit) break;
+                    }
+                }
+            }
+        }
+
+        // Fallback to filename enumeration if md5 index didn’t produce candidates
+        if (candidates.Count == 0)
+        {
+            foreach (var p in src.EnumerateFiles($"textures/Minimap/{mapName}/*.blp"))
+            {
+                if (TryParseTileFromPath(p, mapName, out var x, out var y))
+                {
+                    candidates.Add((x, y));
+                }
+                if (candidates.Count >= limit) break;
+            }
+            if (candidates.Count < limit)
+            {
+                foreach (var p in src.EnumerateFiles("textures/Minimap/*.blp"))
+                {
+                    if (TryParseTileFromPath(p, mapName, out var x, out var y))
+                    {
+                        if (!candidates.Contains((x, y))) candidates.Add((x, y));
+                    }
+                    if (candidates.Count >= limit) break;
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            Console.WriteLine("[probe] No candidate tiles discovered via enumeration; try with different --map or ensure assets exist.");
+            return 0;
+        }
+
+        Console.WriteLine($"[probe] Resolving up to {candidates.Count} tiles using resolver:");
+        int resolved = 0;
+        foreach (var (x, y) in candidates)
+        {
+            if (resolver.TryResolveTile(mapName, x, y, out var path))
+            {
+                Console.WriteLine($"  {mapName}_{x}_{y} -> {path}");
+                resolved++;
+            }
+            else
+            {
+                Console.WriteLine($"  {mapName}_{x}_{y} -> (not found)");
+            }
+        }
+
+        Console.WriteLine($"[ok] Resolved {resolved}/{candidates.Count} tiles (no viewer changes).");
+        return 0;
+    }
+
+    private static bool TryParseTileFromPath(string virtualPath, string mapName, out int x, out int y)
+    {
+        x = 0; y = 0;
+        var file = Path.GetFileNameWithoutExtension(virtualPath);
+        if (file.StartsWith(mapName + "_", StringComparison.OrdinalIgnoreCase))
+        {
+            var tail = file.Substring(mapName.Length + 1);
+            var parts = tail.Split('_');
+            if (parts.Length >= 2 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y))
+                return true;
+        }
+        if (file.StartsWith("map", StringComparison.OrdinalIgnoreCase))
+        {
+            var tail = file.Substring(3);
+            var parts = tail.Split('_');
+            if (parts.Length >= 2 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y))
+                return true;
+        }
+        return false;
     }
 
     private static int RunAnalyzeAlphaWdt(Dictionary<string, string> opts)
@@ -500,6 +637,12 @@ internal static class Program
         Console.WriteLine("WoWRollback CLI - Digital Archaeology of World of Warcraft Development");
         Console.WriteLine();
         Console.WriteLine("Commands:");
+        Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
+        Console.WriteLine("    Probe mixed inputs (loose Data + MPQs). Reads md5translate from Data if present, and lists minimap BLPs.");
+        Console.WriteLine();
+        Console.WriteLine("  probe-minimap    --client-path <dir> --map <name> [--limit <n>]");
+        Console.WriteLine("    Resolve sample minimap tiles using md5translate when present; prints resolved virtual paths (no viewer changes).");
+        Console.WriteLine();
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
@@ -531,6 +674,123 @@ internal static class Program
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
         Console.WriteLine("  Singleton IDs and outliers are precious artifacts showing experiments and tests.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
+    }
+
+    private static int RunProbeArchive(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        var clientRoot = opts["client-path"]; 
+        var mapName = opts.GetValueOrDefault("map", "");
+        var limit = TryParseInt(opts, "limit") ?? 10;
+
+        Console.WriteLine($"[probe] Client root: {clientRoot}");
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine("[error] --client-path does not exist");
+            return 1;
+        }
+
+        EnsureStormLibOnPath();
+
+        // Locate MPQs with base then ascending patches
+        var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
+        Console.WriteLine($"[probe] MPQs found: {mpqs.Count}");
+        if (mpqs.Count == 0) Console.WriteLine("[probe] No MPQs detected; loose files only.");
+
+        using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
+
+        // md5translate: prefer loose Data/textures/Minimap
+        var md5Candidates = new[]
+        {
+            "textures/Minimap/md5translate.txt",
+            "textures/Minimap/md5translate.trs"
+        };
+
+        string? md5Used = null;
+        foreach (var cand in md5Candidates)
+        {
+            if (src.FileExists(cand)) { md5Used = cand; break; }
+        }
+
+        if (md5Used is null)
+        {
+            Console.WriteLine("[probe] md5translate not found in Data or MPQs");
+        }
+        else
+        {
+            Console.WriteLine($"[probe] md5translate detected at virtual path: {md5Used}");
+            try
+            {
+                using var s = src.OpenFile(md5Used);
+                using var r = new StreamReader(s);
+                Console.WriteLine("[probe] md5translate preview (first 5 non-empty lines):");
+                int shown = 0;
+                while (!r.EndOfStream && shown < 5)
+                {
+                    var line = r.ReadLine();
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    Console.WriteLine("  " + line);
+                    shown++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[warn] Failed reading md5translate: {ex.Message}");
+            }
+        }
+
+        // Enumerate a few minimap BLPs from Textures/Minimap (loose-first, then MPQ union)
+        var pattern = string.IsNullOrWhiteSpace(mapName)
+            ? "textures/Minimap/*.blp"
+            : $"textures/Minimap/{mapName}/*.blp";
+
+        Console.WriteLine($"[probe] Enumerating BLPs with pattern: {pattern}");
+        var all = src.EnumerateFiles(pattern).Take(limit).ToList();
+        if (all.Count == 0)
+        {
+            Console.WriteLine("[probe] No BLPs found for minimap pattern.");
+        }
+        else
+        {
+            Console.WriteLine($"[probe] Showing up to {limit} BLPs:");
+            foreach (var f in all)
+            {
+                Console.WriteLine("  " + f);
+            }
+        }
+
+        Console.WriteLine("[ok] Probe complete (no viewer changes made).");
+        return 0;
+    }
+
+    private static void EnsureStormLibOnPath()
+    {
+        // Try to ensure native StormLib.dll can be resolved by the process loader.
+        var baseDir = AppContext.BaseDirectory;
+        var local = Path.Combine(baseDir, "StormLib.dll");
+        if (File.Exists(local)) return;
+
+        // Common repo-relative locations during dev
+        var candidates = new List<string>();
+        var cwd = Directory.GetCurrentDirectory();
+        candidates.Add(Path.Combine(cwd, "WoWRollback.Mpq", "runtimes", "win-x64", "native"));
+        candidates.Add(Path.Combine(cwd, "..", "WoWRollback.Mpq", "runtimes", "win-x64", "native"));
+        candidates.Add(Path.Combine(cwd, "..", "..", "WoWRollback.Mpq", "runtimes", "win-x64", "native"));
+
+        foreach (var dir in candidates)
+        {
+            if (!Directory.Exists(dir)) continue;
+            var dll = Path.Combine(dir, "StormLib.dll");
+            if (!File.Exists(dll)) continue;
+
+            var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            if (!path.Split(Path.PathSeparator).Any(p => string.Equals(Path.GetFullPath(p), Path.GetFullPath(dir), StringComparison.OrdinalIgnoreCase)))
+            {
+                Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + path);
+                Console.WriteLine($"[probe] Added to PATH: {dir}");
+            }
+            return;
+        }
     }
 
     private static void EnsureComparisonPrerequisites(
