@@ -513,19 +513,37 @@ public sealed class AnalysisViewerAdapter
             var minimapDestDir = Path.Combine(outputDir, version, "World", "Textures", "Minimap", mapName);
             Directory.CreateDirectory(minimapDestDir);
 
-            // Copy all PNG files
+            // Convert PNG files to WebP (viewer expects WebP)
             var pngFiles = Directory.GetFiles(minimapSourceDir, "*.png", SearchOption.TopDirectoryOnly);
-            Console.WriteLine($"[AnalysisViewerAdapter] Copying {pngFiles.Length} minimap files to {minimapDestDir}");
+            Log($"Converting {pngFiles.Length} minimap PNG files to WebP...");
 
+            int converted = 0;
             foreach (var sourceFile in pngFiles)
             {
-                var destFile = Path.Combine(minimapDestDir, Path.GetFileName(sourceFile));
-                File.Copy(sourceFile, destFile, overwrite: true);
+                try
+                {
+                    // Load PNG
+                    using var image = Image.Load(sourceFile);
+                    
+                    // Save as WebP with same filename (change extension)
+                    var fileName = Path.GetFileNameWithoutExtension(sourceFile);
+                    var destFile = Path.Combine(minimapDestDir, $"{fileName}.webp");
+                    
+                    using var outStream = File.Create(destFile);
+                    image.Save(outStream, new WebpEncoder { Quality = 90 });
+                    converted++;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to convert {Path.GetFileName(sourceFile)}: {ex.Message}");
+                }
             }
+            
+            Log($"Converted {converted}/{pngFiles.Length} minimap tiles to WebP");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AnalysisViewerAdapter] Failed to setup minimaps: {ex.Message}");
+            Log($"Failed to setup minimaps: {ex.Message}");
         }
     }
 
