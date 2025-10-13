@@ -33,13 +33,14 @@ internal static class Program
                 case "analyze-alpha-wdt":
                     return RunAnalyzeAlphaWdt(opts);
                 case "analyze-lk-adt":
-                    return RunAnalyzeLkAdt(opts);
                 case "analyze-ranges": // Legacy alias for analyze-lk-adt
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-map-adts":
                     return RunAnalyzeMapAdts(opts);
                 case "analyze-map-adts-mpq":
                     return RunAnalyzeMapAdtsMpq(opts);
+                case "discover-maps":
+                    return RunDiscoverMaps(opts);
                 case "probe-archive":
                     return RunProbeArchive(opts);
                 case "probe-minimap":
@@ -764,57 +765,134 @@ internal static class Program
         Console.WriteLine("WoWRollback CLI - Digital Archaeology of World of Warcraft Development");
         Console.WriteLine();
         Console.WriteLine("Commands:");
-        Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
-        Console.WriteLine("    Probe mixed inputs (loose Data + MPQs). Reads md5translate from Data if present, and lists minimap BLPs.");
+        Console.WriteLine("  discover-maps  --client-path <dir> [--build <version>] [--dbd-dir <path>] [--out <csv>]");
+        Console.WriteLine("    Discover all maps from Map.dbc and analyze their WDT files");
+        Console.WriteLine("    Shows terrain vs WMO-only maps, tile counts, and hybrid maps");
         Console.WriteLine();
-        Console.WriteLine("  probe-minimap    --client-path <dir> --map <name> [--limit <n>]");
-        Console.WriteLine("    Resolve sample minimap tiles using md5translate when present; prints resolved virtual paths (no viewer changes).");
-        Console.WriteLine();
-        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> --map <name> [--out <dir>] [--serve] [--port <port>]");
+        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> (--map <name> | --all-maps) [--out <dir>] [--build <ver>]");
+        Console.WriteLine("                        [--serve] [--port <port>]");
         Console.WriteLine("    Analyze ADT files directly from MPQs (patched view), detect layers/clusters, and generate viewer");
+        Console.WriteLine("    Use --all-maps to discover and analyze all maps from Map.dbc");
         Console.WriteLine("    Supports MDX/M2/WMO extraction from all WoW versions (0.6.0+)");
-        Console.WriteLine("    Use --serve to auto-start web server after analysis");
+        Console.WriteLine();
+        Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>] [--serve] [--port <port>]");
+        Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) from loose files");
+        Console.WriteLine("    Supports 0.6.0 through 4.0.0+ ADT formats");
         Console.WriteLine();
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
-        Console.WriteLine("  analyze-lk-adt    --map <name> --input-dir <dir> [--out <dir>]");
-        Console.WriteLine("    Extract UniqueID ranges from converted LK ADT files (preservation analysis)");
+        Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
+        Console.WriteLine("    Probe mixed inputs (loose Data + MPQs)");
         Console.WriteLine();
-        Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>] [--serve] [--port <port>]");
-        Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) and extract UniqueID data");
-        Console.WriteLine("    Supports 0.6.0 through 4.0.0+ ADT formats");
-        Console.WriteLine("    Use --serve to auto-start web server after analysis");
+        Console.WriteLine("  probe-minimap    --client-path <dir> --map <name> [--limit <n>]");
+        Console.WriteLine("    Resolve sample minimap tiles using md5translate");
         Console.WriteLine();
         Console.WriteLine("  serve-viewer  [--viewer-dir <path>] [--port <port>] [--no-browser]");
-        Console.WriteLine("    Start built-in HTTP server to host the viewer (self-contained, no Python needed)");
-        Console.WriteLine("    Auto-detects viewer directory if not specified");
-        Console.WriteLine("    Default port: 8080");
-        Console.WriteLine();
-        Console.WriteLine("  dry-run           --map <name> --input-dir <dir> [--config <file>] [--keep-range min:max] [--drop-range min:max] [--mode keep|drop]");
-        Console.WriteLine("    Preview rollback effects without modifying files");
-        Console.WriteLine();
-        Console.WriteLine("  compare-versions  --versions v1,v2[,v3...] [--maps m1,m2,...] [--root <dir>] [--yaml-report]");
-        Console.WriteLine("                    [--viewer-report] [--default-version <ver>] [--diff base,comp]");
-        Console.WriteLine("                    [--mpq-path <dir>]");
-        Console.WriteLine("    Compare placement ranges across versions; outputs CSVs under rollback_outputs/comparisons/<key>");
-        Console.WriteLine("    If --yaml-report is present, also writes YAML exploration reports under .../<key>/yaml/.");
-        Console.WriteLine("    --viewer-report additionally emits minimaps, overlays, and diffs for the static viewer.");
-        Console.WriteLine("    --mpq-path specifies MPQ archive directory for minimap extraction (default: loose files)");
+        Console.WriteLine("    Start built-in HTTP server to host the viewer");
         Console.WriteLine();
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
-        Console.WriteLine("  Singleton IDs and outliers are precious artifacts showing experiments and tests.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
+    }
+
+    private static int RunDiscoverMaps(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        var clientRoot = opts["client-path"];
+        var buildVersion = opts.GetValueOrDefault("build", "0.5.3");
+        var dbdDir = opts.GetValueOrDefault("dbd-dir", Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"));
+        var outCsv = opts.GetValueOrDefault("out", "discovered_maps.csv");
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"[error] Client path not found: {clientRoot}");
+            return 1;
+        }
+
+        if (!Directory.Exists(dbdDir))
+        {
+            Console.Error.WriteLine($"[error] DBD definitions not found: {dbdDir}");
+            Console.Error.WriteLine($"[info] Clone WoWDBDefs: git clone https://github.com/wowdev/WoWDBDefs.git");
+            return 1;
+        }
+
+        Console.WriteLine($"[info] Discovering maps from: {clientRoot}");
+        Console.WriteLine($"[info] Build version: {buildVersion}");
+        Console.WriteLine($"[info] DBD definitions: {dbdDir}");
+
+        EnsureStormLibOnPath();
+        var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
+        using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
+
+        // Extract Map.dbc to temp directory
+        var tempDir = Path.Combine(Path.GetTempPath(), "wowrollback_dbc_" + Guid.NewGuid().ToString("N"));
+        var discoveryService = new MapDiscoveryService(dbdDir);
+        
+        Console.WriteLine($"[info] Extracting Map.dbc from MPQ...");
+        var dbcDir = discoveryService.ExtractMapDbc(src, tempDir);
+        
+        if (string.IsNullOrEmpty(dbcDir))
+        {
+            Console.Error.WriteLine($"[error] Failed to extract Map.dbc from MPQ");
+            return 1;
+        }
+
+        Console.WriteLine($"[info] Analyzing maps and WDT files...");
+        var result = discoveryService.DiscoverMaps(src, buildVersion, Path.GetDirectoryName(dbcDir)!);
+
+        if (!result.Success)
+        {
+            Console.Error.WriteLine($"[error] {result.ErrorMessage}");
+            return 1;
+        }
+
+        // Write CSV
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("id,name,folder,wdt_exists,map_type,tile_count,has_wmo,wmo_path");
+
+        foreach (var map in result.Maps.OrderBy(m => m.Id))
+        {
+            var wmoPath = map.WmoPlacement?.WmoPath ?? "";
+            csv.AppendLine($"{map.Id},{map.Name},{map.Folder},{map.WdtExists},{map.MapType},{map.TileCount},{map.WmoPlacement != null},{wmoPath}");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outCsv))!);
+        File.WriteAllText(outCsv, csv.ToString());
+
+        // Print summary
+        Console.WriteLine($"\n[ok] Discovered {result.Maps.Length} maps");
+        Console.WriteLine($"[ok] Maps CSV: {outCsv}");
+        
+        var terrainMaps = result.Maps.Count(m => m.HasTerrain && !m.IsWmoOnly);
+        var wmoOnlyMaps = result.Maps.Count(m => m.IsWmoOnly && !m.HasTerrain);
+        var hybridMaps = result.Maps.Count(m => m.IsWmoOnly && m.HasTerrain);
+        var noWdtMaps = result.Maps.Count(m => !m.WdtExists);
+
+        Console.WriteLine($"\n=== Map Type Summary ===");
+        Console.WriteLine($"  Terrain maps: {terrainMaps}");
+        Console.WriteLine($"  WMO-only maps: {wmoOnlyMaps}");
+        Console.WriteLine($"  Hybrid (WMO + Terrain): {hybridMaps}");
+        Console.WriteLine($"  No WDT: {noWdtMaps}");
+
+        // Cleanup temp directory
+        try { Directory.Delete(tempDir, true); } catch { }
+
+        return 0;
     }
 
     private static int RunAnalyzeMapAdtsMpq(Dictionary<string, string> opts)
     {
         Require(opts, "client-path");
-        Require(opts, "map");
-        var clientRoot = opts["client-path"]; 
-        var mapName = opts["map"]; 
-        var outDir = opts.GetValueOrDefault("out", Path.Combine("analysis_output", mapName));
+        var clientRoot = opts["client-path"];
+        var allMaps = opts.ContainsKey("all-maps");
+        var mapName = opts.GetValueOrDefault("map", "");
+        
+        if (!allMaps && string.IsNullOrWhiteSpace(mapName))
+        {
+            Console.Error.WriteLine("[error] Either --map <name> or --all-maps is required");
+            return 1;
+        }
 
         if (!Directory.Exists(clientRoot))
         {
@@ -826,20 +904,138 @@ internal static class Program
         var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
         using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
 
+        // Batch mode: discover all maps and analyze each
+        if (allMaps)
+        {
+            return RunBatchAnalysis(src, clientRoot, opts);
+        }
+
+        // Single map mode
+        var outDir = opts.GetValueOrDefault("out", Path.Combine("analysis_output", mapName));
+        return AnalyzeSingleMap(src, clientRoot, mapName, outDir, opts);
+    }
+
+    private static int RunBatchAnalysis(IArchiveSource src, string clientRoot, Dictionary<string, string> opts)
+    {
+        var buildVersion = opts.GetValueOrDefault("build", "0.6.0");
+        var dbdDir = opts.GetValueOrDefault("dbd-dir", Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"));
+        var baseOutDir = opts.GetValueOrDefault("out", "analysis_output");
+
+        Console.WriteLine($"[info] === Batch Analysis Mode ===");
+        Console.WriteLine($"[info] Discovering maps from Map.dbc...");
+
+        // Extract Map.dbc and discover maps
+        var tempDir = Path.Combine(Path.GetTempPath(), "wowrollback_dbc_" + Guid.NewGuid().ToString("N"));
+        var discoveryService = new MapDiscoveryService(dbdDir);
+        
+        var dbcDir = discoveryService.ExtractMapDbc(src, tempDir);
+        if (string.IsNullOrEmpty(dbcDir))
+        {
+            Console.Error.WriteLine($"[error] Failed to extract Map.dbc from MPQ");
+            return 1;
+        }
+
+        var result = discoveryService.DiscoverMaps(src, buildVersion, Path.GetDirectoryName(dbcDir)!);
+        if (!result.Success)
+        {
+            Console.Error.WriteLine($"[error] {result.ErrorMessage}");
+            return 1;
+        }
+
+        // Filter to terrain maps only (skip WMO-only for now)
+        var terrainMaps = result.Maps.Where(m => m.HasTerrain && m.TileCount > 0).ToList();
+        
+        Console.WriteLine($"[ok] Discovered {result.Maps.Length} total maps");
+        Console.WriteLine($"[info] Analyzing {terrainMaps.Count} terrain maps (skipping WMO-only maps)");
+
+        int successCount = 0;
+        int failCount = 0;
+        var failedMaps = new List<string>();
+
+        foreach (var map in terrainMaps)
+        {
+            Console.WriteLine($"\n{'='} Analyzing map: {map.Folder} ({map.Name}) {'='}");
+            
+            try
+            {
+                var mapOutDir = Path.Combine(baseOutDir, map.Folder);
+                var exitCode = AnalyzeSingleMap(src, clientRoot, map.Folder, mapOutDir, opts);
+                
+                if (exitCode == 0)
+                {
+                    successCount++;
+                    Console.WriteLine($"[ok] {map.Folder} completed successfully");
+                }
+                else if (exitCode == 2)
+                {
+                    // Non-fatal: map skipped (no data, no WDT, etc.)
+                    Console.WriteLine($"[info] {map.Folder} skipped (no data)");
+                }
+                else
+                {
+                    failCount++;
+                    failedMaps.Add(map.Folder);
+                    Console.WriteLine($"[warn] {map.Folder} failed with exit code {exitCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                failCount++;
+                failedMaps.Add(map.Folder);
+                Console.WriteLine($"[error] {map.Folder} failed: {ex.Message}");
+            }
+        }
+
+        // Cleanup temp directory
+        try { Directory.Delete(tempDir, true); } catch { }
+
+        // Summary
+        Console.WriteLine($"\n{'='} Batch Analysis Complete {'='}");
+        Console.WriteLine($"[ok] Successfully analyzed: {successCount}/{terrainMaps.Count} maps");
+        if (failCount > 0)
+        {
+            Console.WriteLine($"[warn] Failed maps ({failCount}): {string.Join(", ", failedMaps)}");
+        }
+
+        return failCount > 0 ? 1 : 0;
+    }
+
+    private static int AnalyzeSingleMap(IArchiveSource src, string clientRoot, string mapName, string outDir, Dictionary<string, string> opts)
+    {
         Console.WriteLine($"[info] Analyzing ADTs from MPQs for map: {mapName}");
         Console.WriteLine($"[info] Client: {clientRoot}");
         Console.WriteLine($"[info] Output directory: {outDir}");
 
         // Step 1: Extract placements from MPQ archives
         Console.WriteLine("\n=== Step 1: Extracting placements from MPQ archives ===");
+        
+        // Check if map folder exists in MPQ
+        var wdtPath = $"world/maps/{mapName}/{mapName}.wdt";
+        if (!src.FileExists(wdtPath))
+        {
+            Console.WriteLine($"[warn] Map folder not found in MPQ: {mapName}");
+            Console.WriteLine($"[info] Skipping map (no WDT file)");
+            return 2; // Non-fatal error code
+        }
+        
         var extractor = new AdtMpqChunkPlacementsExtractor();
         var placementsCsvPath = Path.Combine(outDir, $"{mapName}_placements.csv");
         var extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
 
         if (!extractResult.Success)
         {
-            Console.Error.WriteLine($"[error] {extractResult.ErrorMessage}");
-            return 1;
+            Console.WriteLine($"[warn] {extractResult.ErrorMessage}");
+            Console.WriteLine($"[info] Skipping map (extraction failed)");
+            return 2; // Non-fatal error code
+        }
+
+        // Check if any placements were found
+        var totalPlacements = extractResult.M2Count + extractResult.WmoCount;
+        if (totalPlacements == 0)
+        {
+            Console.WriteLine($"[info] No placements found for map: {mapName}");
+            Console.WriteLine($"[info] Skipping remaining analysis steps");
+            return 0; // Success but no data
         }
 
         Console.WriteLine($"[ok] {extractResult.ErrorMessage}");
