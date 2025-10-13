@@ -94,6 +94,7 @@ public sealed class OverlayBuilder
         
         var filtered = entriesList
             .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase))
+            .Where(e => !(e.UniqueId == 0 && e.AssetPath == "_dummy_tile_marker")) // Skip dummy markers early
             .Select(e => new { Entry = e, ActualTile = ComputeActualTile(e) })
             .Where(x => x.ActualTile.Row == tileRow && x.ActualTile.Col == tileCol)
             .Select(x => x.Entry)
@@ -160,8 +161,8 @@ public sealed class OverlayBuilder
         // Compute tile indices from world coords
         var (tileRow, tileCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
         
-        // DEBUG: Log first few to verify computation
-        if (entry.UniqueId % 10000 == 0) // Sample logging
+        // DEBUG: Log samples to verify computation (skip dummy markers)
+        if (entry.UniqueId > 0 && entry.UniqueId % 100000 == 0) // Sample every 100k
         {
             Console.WriteLine($"[ComputeActualTile] UID={entry.UniqueId}: ADT coords ({entry.WorldX:F2}, {entry.WorldZ:F2}) → world ({worldX:F2}, {worldY:F2}) → tile ({tileRow},{tileCol}) vs CSV tile ({entry.TileRow},{entry.TileCol})");
         }

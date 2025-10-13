@@ -1127,6 +1127,12 @@ async function performObjectMarkerUpdate() {
 }
 
 function handleMapClick(e) {
+    // Close any open popup when clicking on the map (not on an object)
+    if (currentPopup && !e.originalEvent.defaultPrevented) {
+        map.closePopup(currentPopup);
+        currentPopup = null;
+    }
+    
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     

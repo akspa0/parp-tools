@@ -37,20 +37,23 @@ public static class ClusterOverlayBuilder
                 return;
             }
 
-            // Group clusters by tile
+            // Group clusters by COMPUTED actual tile from centroid coordinates
+            // (not by CSV tile - same issue as OverlayBuilder had)
             var clustersByTile = new Dictionary<(int Row, int Col), List<ClusterInfo>>();
             
             foreach (var tile in clusterData.Tiles)
             {
-                var key = (tile.TileY, tile.TileX);
-                if (!clustersByTile.ContainsKey(key))
-                {
-                    clustersByTile[key] = new List<ClusterInfo>();
-                }
-                
                 foreach (var cluster in tile.Clusters)
                 {
-                    clustersByTile[key].Add(cluster);
+                    // Compute actual owning tile from centroid coordinates
+                    var actualTile = ComputeActualTileFromCentroid(cluster.CentroidX, cluster.CentroidZ);
+                    
+                    if (!clustersByTile.ContainsKey(actualTile))
+                    {
+                        clustersByTile[actualTile] = new List<ClusterInfo>();
+                    }
+                    
+                    clustersByTile[actualTile].Add(cluster);
                 }
             }
 
@@ -73,6 +76,25 @@ public static class ClusterOverlayBuilder
         {
             Console.WriteLine($"[ClusterOverlayBuilder] Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Computes which tile actually owns a cluster based on centroid coordinates.
+    /// Same logic as OverlayBuilder.ComputeActualTile().
+    /// </summary>
+    private static (int Row, int Col) ComputeActualTileFromCentroid(double centroidX, double centroidZ)
+    {
+        const double TILESIZE = 533.33333;
+        const double MAP_CENTER = 32.0 * TILESIZE; // 17066.67
+        
+        // Convert ADT placement coords to world coords
+        double worldX = MAP_CENTER - centroidX;
+        double worldY = MAP_CENTER - centroidZ;
+        
+        // Compute tile indices from world coords
+        var (tileRow, tileCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
+        
+        return (tileRow, tileCol);
     }
 
     private static string BuildTileClusterOverlay(

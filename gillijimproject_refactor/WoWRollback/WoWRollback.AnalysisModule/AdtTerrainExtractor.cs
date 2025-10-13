@@ -25,6 +25,16 @@ public sealed class AdtTerrainExtractor
         int tilesProcessed = 0;
         int tilesSkipped = 0;
 
+        Console.WriteLine($"[AdtTerrainExtractor] Found {tiles.Count} ADT tiles in {mapDirectory}");
+        
+        if (tiles.Count == 0)
+        {
+            Console.WriteLine($"[AdtTerrainExtractor] No ADT tiles found - check mapDirectory path");
+            var emptyCsvPath = Path.Combine(outputDir, $"{mapName}_terrain.csv");
+            ExportToCsv(allRecords, mapName, emptyCsvPath); // Write empty CSV
+            return new TerrainExtractionResult(Success: true, ChunksExtracted: 0, TilesProcessed: 0, CsvPath: emptyCsvPath);
+        }
+        
         Console.WriteLine($"[AdtTerrainExtractor] Extracting terrain from {tiles.Count} tiles...");
 
         foreach (var (tileX, tileY, format) in tiles)
@@ -88,11 +98,14 @@ public sealed class AdtTerrainExtractor
             var adtData = File.ReadAllBytes(adtPath);
             var terrain = new Terrain(adtData);
 
-            // Extract MCNK chunks (16x16 grid per tile)
+            // Extract MCNK chunks (16x16 grid per tile - 256 chunks expected)
             if (terrain.Chunks == null || terrain.Chunks.Length == 0)
             {
+                Console.WriteLine($"[AdtTerrainExtractor] WARNING: tile {tileX}_{tileY} has no MCNK chunks! (Chunks={terrain.Chunks?.Length ?? 0})");
                 return records;
             }
+            
+            Console.WriteLine($"[AdtTerrainExtractor] Tile {tileX}_{tileY}: Found {terrain.Chunks.Length} MCNK chunks");
 
             foreach (var mcnk in terrain.Chunks)
             {
