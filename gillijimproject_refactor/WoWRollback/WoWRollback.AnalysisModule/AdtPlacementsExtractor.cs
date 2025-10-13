@@ -133,6 +133,12 @@ public sealed class AdtPlacementsExtractor
     {
         var placements = new List<PlacementRecord>();
 
+        // CRITICAL: MDDF/MODF Position fields use INCONSISTENT coordinate systems!
+        // - Some tiles have tile-local coords (0-533 range)
+        // - Some tiles have world coords (thousands, can be negative for SE quadrant)
+        // - We extract RAW values and trust tile assignment from filename (tileX, tileY)
+        // - Coordinate validation is done in OverlayBuilder (currently disabled due to this issue)
+
         if (format == AdtFormatDetector.AdtFormat.Cataclysm)
         {
             // Cataclysm+ split files: read from _obj0.adt

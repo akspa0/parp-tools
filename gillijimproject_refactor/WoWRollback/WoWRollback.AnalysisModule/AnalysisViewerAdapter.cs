@@ -408,31 +408,20 @@ public sealed class AnalysisViewerAdapter
             
             if (!File.Exists(terrainCsvPath))
             {
-                Console.WriteLine($"[AnalysisViewerAdapter] Terrain CSV not found: {terrainCsvPath}");
+                Log($"Terrain CSV not found: {terrainCsvPath} - terrain overlays will not be available");
                 return;
             }
 
-            // Generate terrain overlay JSONs
+            // Generate terrain overlay JSONs using TerrainOverlayBuilder
             // Target: {viewerRoot}/overlays/{version}/{mapName}/terrain_complete/tile_{col}_{row}.json
-            var overlaysRoot = Path.Combine(viewerRoot, "overlays", version, mapName);
-            var terrainDir = Path.Combine(overlaysRoot, "terrain_complete");
-            Directory.CreateDirectory(terrainDir);
-
-            var overlayGen = new OverlayGenerator();
-            var result = overlayGen.GenerateTerrainOverlaysFromCsv(outputDir, viewerRoot, mapName, version);
+            var builder = new TerrainOverlayBuilder();
+            builder.BuildTerrainOverlays(terrainCsvPath, mapName, version, viewerRoot);
             
-            if (result.Success)
-            {
-                Console.WriteLine($"[AnalysisViewerAdapter] Generated terrain overlays: {result.TilesProcessed} tiles");
-            }
-            else
-            {
-                Console.WriteLine($"[AnalysisViewerAdapter] Terrain overlay generation failed: {result.ErrorMessage}");
-            }
+            Log("Terrain overlays generated successfully");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AnalysisViewerAdapter] Failed to generate terrain overlays: {ex.Message}");
+            Log($"Failed to generate terrain overlays: {ex.Message}");
         }
     }
 

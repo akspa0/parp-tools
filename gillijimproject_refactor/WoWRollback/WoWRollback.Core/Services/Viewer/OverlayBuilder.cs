@@ -78,39 +78,30 @@ public sealed class OverlayBuilder
         var entriesList = entries.ToList();
         Console.WriteLine($"[OverlayBuilder] BuildOverlay for {map} tile ({tileRow},{tileCol}): Received {entriesList.Count} total entries");
 
-        // COORDINATE-BASED FILTERING: Use object coordinates to determine tile membership
-        // This ensures objects appear on the correct tile regardless of entry.TileRow/TileCol
+        // ===== FILTERING PHILOSOPHY =====
+        // 
+        // COMPUTE ACTUAL TILE FROM COORDINATES:
+        // ADT placement coords are ABSOLUTE offsets from map NW corner (0,0).
+        // The ADT filename may not match the object's actual tile location!
+        // 
+        // Example: Dark Portal at coords (1086, 1099):
+        // - Stored in ADT files development_1_1.adt and development_2_1.adt
+        // - But world coords (15980, 15966) place it in tile (2,2)!
+        // 
+        // We MUST compute the actual owning tile from coordinates, not trust filename.
+        //
+        // See AdtPlacementsExtractor.cs for details on coordinate system issues.
+        
         var filtered = entriesList
             .Where(e => e.Map.Equals(map, StringComparison.OrdinalIgnoreCase))
-            .Select(e => new { Entry = e, TileIndices = ComputeTileFromCoordinates(e) })
-            .Where(x => x.TileIndices.Row == tileRow && x.TileIndices.Col == tileCol)
+            .Select(e => new { Entry = e, ActualTile = ComputeActualTile(e) })
+            .Where(x => x.ActualTile.Row == tileRow && x.ActualTile.Col == tileCol)
             .Select(x => x.Entry)
             .ToList();
         
-        Console.WriteLine($"[OverlayBuilder] After tile-based filter: {filtered.Count} entries for tile ({tileRow},{tileCol})");
-        
-        if (filtered.Count == 0 && entriesList.Count > 0)
-        {
-            // Debug: Show sample and what tiles we have
-            var sample = entriesList.FirstOrDefault();
-            if (sample != null)
-            {
-                Console.WriteLine($"[OverlayBuilder] Sample entry: Map='{sample.Map}', TileRow={sample.TileRow}, TileCol={sample.TileCol}, WorldX={sample.WorldX:F1}, WorldZ={sample.WorldZ:F1}");
-                Console.WriteLine($"[OverlayBuilder] Looking for tile: ({tileRow},{tileCol})");
-                
-                // Show distribution of tiles in the input
-                var tileDistribution = entriesList
-                    .GroupBy(e => (e.TileRow, e.TileCol))
-                    .OrderBy(g => g.Key.TileRow)
-                    .ThenBy(g => g.Key.TileCol)
-                    .Take(10)
-                    .Select(g => $"({g.Key.TileRow},{g.Key.TileCol}):{g.Count()}")
-                    .ToList();
-                Console.WriteLine($"[OverlayBuilder] Tile distribution (first 10): {string.Join(", ", tileDistribution)}");
-            }
-        }
+        Console.WriteLine($"[OverlayBuilder] After tile filter: {filtered.Count} entries for tile ({tileRow},{tileCol})");
 
-        // Deduplicate by UniqueID (in case same object appears with slightly different coords)
+        // Deduplicate by UniqueID to handle cross-tile object spanning
         var deduplicated = DeduplicateByUniqueId(filtered, tileRow, tileCol);
 
         var layers = (allVersions ?? deduplicated.Select(e => e.Version))
@@ -153,16 +144,29 @@ public sealed class OverlayBuilder
     }
 
     /// <summary>
-    /// Returns which tile an entry belongs to.
-    /// Uses the tile coordinates from the CSV (which tile the ADT file was from).
+    /// Computes which tile actually owns this entry based on its coordinates.
+    /// ADT placement coords are absolute offsets from (0,0), so we convert to world
+    /// coords and compute the tile indices.
     /// </summary>
-    private static (int Row, int Col) ComputeTileFromCoordinates(AssetTimelineDetailedEntry entry)
+    private static (int Row, int Col) ComputeActualTile(AssetTimelineDetailedEntry entry)
     {
-        // IMPORTANT: entry.WorldX/WorldZ are TILE-LOCAL coordinates (0-533 range)
-        // They come from ADT MDDF/MODF Position fields which are relative to the tile
-        // The CSV already tells us which tile via entry.TileRow/TileCol
-        // So just use those directly!
-        return (entry.TileRow, entry.TileCol);
+        const double TILESIZE = 533.33333;
+        const double MAP_CENTER = 32.0 * TILESIZE; // 17066.67
+        
+        // Convert ADT placement coords to world coords
+        double worldX = MAP_CENTER - entry.WorldX;
+        double worldY = MAP_CENTER - entry.WorldZ;
+        
+        // Compute tile indices from world coords
+        var (tileRow, tileCol) = CoordinateTransformer.ComputeTileIndices(worldX, worldY);
+        
+        // DEBUG: Log first few to verify computation
+        if (entry.UniqueId % 10000 == 0) // Sample logging
+        {
+            Console.WriteLine($"[ComputeActualTile] UID={entry.UniqueId}: ADT coords ({entry.WorldX:F2}, {entry.WorldZ:F2}) → world ({worldX:F2}, {worldY:F2}) → tile ({tileRow},{tileCol}) vs CSV tile ({entry.TileRow},{entry.TileCol})");
+        }
+        
+        return (tileRow, tileCol);
     }
 
     private static object? BuildPoint(AssetTimelineDetailedEntry entry, int tileRow, int tileCol, ViewerOptions options)
@@ -173,11 +177,25 @@ public sealed class OverlayBuilder
             return null;
         }
         
-        // At this point, entry is already filtered to this tile by ComputeTileFromCoordinates
-        // Just compute rendering position
+        // Entry is already filtered by actual tile computed from coordinates
+        // Compute rendering position from raw ADT coordinates
         
         const double TILESIZE = 533.33333;
-        const double MAP_CENTER = 32.0 * TILESIZE;
+        const double MAP_CENTER = 32.0 * TILESIZE; // 17066.67
+        
+        // CRITICAL: ADT MDDF/MODF coordinate system transformation!
+        // 
+        // From ADT wiki - MDDF/MODF (Placement) coordinate system:
+        // - Coords are stored as ABSOLUTE offsets from NW corner (tile 0,0)
+        // - x' = 32 * TILESIZE - x (INVERTED from our viewer coords)
+        // - z' = 32 * TILESIZE - z (INVERTED from our viewer coords)
+        //
+        // ADT coords appear to be consistent: absolute offsets from map NW corner.
+        // We ALWAYS transform: worldCoord = MAP_CENTER - adtCoord
+        //
+        // Example: Dark Portal at (1086, 1099) in tile (1,1):
+        // - These are offsets from (0,0), NOT tile-local coords within tile (1,1)
+        // - Transform: worldX = 17066 - 1086 = 15980 (places it ~2 tiles from corner)
         
         double worldX = MAP_CENTER - entry.WorldX;
         double worldY = MAP_CENTER - entry.WorldZ;

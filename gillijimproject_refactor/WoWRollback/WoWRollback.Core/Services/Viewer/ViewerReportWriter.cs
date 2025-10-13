@@ -169,6 +169,8 @@ public sealed class ViewerReportWriter
                     Directory.CreateDirectory(modelsDir);
                     Directory.CreateDirectory(wmoDir);
 
+                    // Get ALL entries for this version/map
+                    // OverlayBuilder will filter by computed actual tile from coordinates
                     entriesByVersion.TryGetValue(version, out var versionEntries);
                     versionEntries ??= new List<AssetTimelineDetailedEntry>();
 
