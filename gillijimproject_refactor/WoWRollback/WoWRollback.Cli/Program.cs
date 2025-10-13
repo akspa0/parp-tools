@@ -38,6 +38,8 @@ internal static class Program
                     return RunAnalyzeLkAdt(opts);
                 case "analyze-map-adts":
                     return RunAnalyzeMapAdts(opts);
+                case "analyze-map-adts-mpq":
+                    return RunAnalyzeMapAdtsMpq(opts);
                 case "probe-archive":
                     return RunProbeArchive(opts);
                 case "probe-minimap":
@@ -160,7 +162,7 @@ internal static class Program
         int resolved = 0;
         foreach (var (x, y) in candidates)
         {
-            if (resolver.TryResolveTile(mapName, x, y, out var path))
+            if (resolver.TryResolveTile(mapName, x, y, out var path) && path is not null)
             {
                 // Determine origin: loose or MPQ
                 bool isLoose = fsOnly.FileExists(path) || fsOnly.FileExists(Path.Combine("Data", path).Replace('\\','/'));
@@ -171,7 +173,20 @@ internal static class Program
                 {
                     using var s = src.OpenFile(path);
                     // obtain size; for FileStream use Length, for MemoryStream use Length, otherwise copy small chunk
-                    if (s.CanSeek) size = s.Length; else { using var ms = new MemoryStream(); s.CopyTo(ms); size = ms.Length; }
+                    if (s.CanSeek) 
+                    {
+                        size = s.Length;
+                        if (size == 0)
+                        {
+                            Console.WriteLine($"  {mapName}_{x}_{y} -> {path} [warning: stream length is 0, stream type: {s.GetType().Name}]");
+                        }
+                    }
+                    else 
+                    { 
+                        using var ms = new MemoryStream(); 
+                        s.CopyTo(ms); 
+                        size = ms.Length; 
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -663,6 +678,9 @@ internal static class Program
         Console.WriteLine("  probe-minimap    --client-path <dir> --map <name> [--limit <n>]");
         Console.WriteLine("    Resolve sample minimap tiles using md5translate when present; prints resolved virtual paths (no viewer changes).");
         Console.WriteLine();
+        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> --map <name> [--out <dir>]");
+        Console.WriteLine("    Analyze ADT files directly from MPQs (patched view) and export placements CSV (M2/WMO)");
+        Console.WriteLine();
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
@@ -694,6 +712,42 @@ internal static class Program
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
         Console.WriteLine("  Singleton IDs and outliers are precious artifacts showing experiments and tests.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
+    }
+
+    private static int RunAnalyzeMapAdtsMpq(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        Require(opts, "map");
+        var clientRoot = opts["client-path"]; 
+        var mapName = opts["map"]; 
+        var outDir = opts.GetValueOrDefault("out", Path.Combine("analysis_output", mapName));
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"[error] client path not found: {clientRoot}");
+            return 1;
+        }
+
+        EnsureStormLibOnPath();
+        var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
+        using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
+
+        Console.WriteLine($"[info] Analyzing ADTs from MPQs for map: {mapName}");
+        Console.WriteLine($"[info] Client: {clientRoot}");
+
+        var extractor = new AdtMpqChunkPlacementsExtractor();
+        var placementsCsvPath = Path.Combine(outDir, $"{mapName}_placements.csv");
+        var result = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
+
+        if (!result.Success)
+        {
+            Console.Error.WriteLine($"[error] {result.ErrorMessage}");
+            return 1;
+        }
+
+        Console.WriteLine($"[ok] Extracted {result.M2Count} M2 and {result.WmoCount} WMO placements from {result.TilesProcessed} tiles");
+        Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
+        return 0;
     }
 
     private static int RunProbeArchive(Dictionary<string, string> opts)

@@ -27,17 +27,7 @@ namespace WoWRollback.Core.Services.Minimap
             blpVirtualPath = null;
             var candidates = EnumeratePlainCandidates(mapName, tileX, tileY);
 
-            // 1) Direct plain candidates
-            foreach (var plain in candidates)
-            {
-                if (_source.FileExists(plain))
-                {
-                    blpVirtualPath = plain;
-                    return true;
-                }
-            }
-
-            // 2) Use md5translate mapping: map plain->hashed (or reversed) and test existence
+            // 1) If md5translate exists, prioritize hashed lookups (for Alpha/early clients)
             if (_index is not null)
             {
                 foreach (var plain in candidates)
@@ -50,6 +40,16 @@ namespace WoWRollback.Core.Services.Minimap
                             return true;
                         }
                     }
+                }
+            }
+
+            // 2) Direct plain candidates (for later clients without md5 hashing)
+            foreach (var plain in candidates)
+            {
+                if (_source.FileExists(plain))
+                {
+                    blpVirtualPath = plain;
+                    return true;
                 }
             }
 
@@ -107,14 +107,20 @@ namespace WoWRollback.Core.Services.Minimap
         {
             var x2 = tileX.ToString("00");
             var y2 = tileY.ToString("00");
+            
+            // Alpha/early clients use "map##_##.blp" format in md5translate
+            yield return $"textures/minimap/{mapName}/map{x2}_{y2}.blp";
+            yield return $"{mapName}/map{x2}_{y2}.blp"; // short form for md5translate lookup
+            
             // common forms under subfolder
             yield return $"textures/Minimap/{mapName}/{mapName}_{tileX}_{tileY}.blp";
             yield return $"textures/Minimap/{mapName}/{mapName}_{x2}_{y2}.blp";
             yield return $"textures/Minimap/{mapName}/map{tileX}_{tileY}.blp";
-            yield return $"textures/Minimap/{mapName}/map{x2}_{y2}.blp";
+            
             // sometimes placed directly under Minimap root
             yield return $"textures/Minimap/{mapName}_{tileX}_{tileY}.blp";
             yield return $"textures/Minimap/{mapName}_{x2}_{y2}.blp";
+            yield return $"textures/Minimap/map{x2}_{y2}.blp";
         }
 
         private static string Normalize(string s) => s.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant();
