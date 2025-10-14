@@ -523,7 +523,8 @@ function renderTileGrid() {
                 color: '#FFFF00',
                 weight: 1,
                 opacity: opacity,
-                fill: false
+                fill: false,
+                interactive: false  // Don't block clicks - allow popups to work
             });
             rect.addTo(tileGridLayer);
         }
@@ -532,7 +533,19 @@ function renderTileGrid() {
     // Add tile coordinate labels if enabled
     if (showLabels) {
         const zoom = map.getZoom();
-        const labelStep = zoom < 1 ? 4 : (zoom < 2 ? 2 : 1);
+        
+        // Hide labels at very low zoom levels (0-2)
+        if (zoom < 3) {
+            console.log('[TileGrid] Zoom too low for labels, skipping');
+            tileGridLayer.addTo(map);
+            return;
+        }
+        
+        // Scale font size with zoom: 8px at zoom 3, 10px at zoom 4, 12px at zoom 5+
+        const fontSize = Math.min(12, 6 + zoom * 1.5);
+        
+        // Reduce label density at lower zoom levels
+        const labelStep = zoom < 4 ? 2 : 1;
         
         for (let row = minRow; row <= maxRow; row += labelStep) {
             for (let col = minCol; col <= maxCol; col += labelStep) {
@@ -545,16 +558,17 @@ function renderTileGrid() {
                         className: 'tile-label',
                         html: `<div style="
                             color: black;
-                            font-size: 10px;
+                            font-size: ${fontSize}px;
                             font-weight: normal;
                             text-align: left;
                             pointer-events: none;
-                            background: rgba(255,255,255,0.8);
-                            padding: 1px 3px;
-                            border: 1px solid #ccc;
+                            background: rgba(255,255,255,0.7);
+                            padding: 2px 4px;
+                            border: 1px solid rgba(0,0,0,0.3);
                             white-space: nowrap;
+                            border-radius: 2px;
                         ">${row}_${col}</div>`,
-                        iconSize: [40, 14],
+                        iconSize: [fontSize * 4, fontSize + 4],
                         iconAnchor: [0, 0]
                     }),
                     interactive: false
