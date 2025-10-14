@@ -161,6 +161,13 @@ public sealed class AnalysisViewerAdapter
                 GenerateClusterOverlays(baseOutputDir, viewerRoot, mapName, versionLabel);
             }
 
+            // Copy terrain meshes to viewer output
+            Log($"Copying terrain meshes to viewer...");
+            foreach (var (mapName, placementsCsv, minimapDir) in maps)
+            {
+                CopyTerrainMeshesToViewer(baseOutputDir, viewerRoot, mapName, versionLabel);
+            }
+
             Log($"=== Unified Viewer Generation Complete ===");
             _logWriter?.Close();
             _logWriter = null;
@@ -630,6 +637,51 @@ public sealed class AnalysisViewerAdapter
         catch (Exception ex)
         {
             Console.WriteLine($"[AnalysisViewerAdapter] Failed to generate cluster overlays: {ex.Message}");
+        }
+    }
+
+    private void CopyTerrainMeshesToViewer(string outputDir, string viewerRoot, string mapName, string version)
+    {
+        try
+        {
+            // Source: {outputDir}/{mapName}_mesh/
+            var sourceMeshDir = Path.Combine(outputDir, $"{mapName}_mesh");
+            
+            if (!Directory.Exists(sourceMeshDir))
+            {
+                Log($"Mesh directory not found: {sourceMeshDir} - skipping mesh copy");
+                return;
+            }
+
+            // Target: {viewerRoot}/overlays/{version}/{mapName}/mesh/
+            var targetMeshDir = Path.Combine(viewerRoot, "overlays", version, mapName, "mesh");
+            Directory.CreateDirectory(targetMeshDir);
+
+            // Copy all GLB files and manifest
+            var files = Directory.GetFiles(sourceMeshDir, "*.*", SearchOption.TopDirectoryOnly);
+            int copiedCount = 0;
+
+            foreach (var sourceFile in files)
+            {
+                var fileName = Path.GetFileName(sourceFile);
+                var targetFile = Path.Combine(targetMeshDir, fileName);
+                
+                try
+                {
+                    File.Copy(sourceFile, targetFile, overwrite: true);
+                    copiedCount++;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to copy {fileName}: {ex.Message}");
+                }
+            }
+
+            Log($"Copied {copiedCount} mesh files to viewer: {targetMeshDir}");
+        }
+        catch (Exception ex)
+        {
+            Log($"Failed to copy terrain meshes: {ex.Message}");
         }
     }
 

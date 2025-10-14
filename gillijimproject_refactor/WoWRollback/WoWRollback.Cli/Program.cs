@@ -1143,6 +1143,35 @@ internal static class Program
             Console.WriteLine($"  [warn] Terrain extraction error: {ex.Message}");
         }
 
+        // Step 6: Extract terrain meshes (GLB) for 3D visualization
+        Console.WriteLine("  Step 6: Extracting terrain meshes (GLB)...");
+        try
+        {
+            var meshExtractor = new AdtMeshExtractor();
+            var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, maxTiles: 0);
+            
+            if (meshResult.Success && meshResult.TilesProcessed > 0)
+            {
+                Console.WriteLine($"  [ok] Extracted {meshResult.TilesProcessed} tile meshes to {meshResult.MeshDirectory}");
+                if (!string.IsNullOrEmpty(meshResult.ManifestPath))
+                {
+                    Console.WriteLine($"  [ok] Mesh manifest: {Path.GetFileName(meshResult.ManifestPath)}");
+                }
+            }
+            else if (meshResult.Success && meshResult.TilesProcessed == 0)
+            {
+                Console.WriteLine($"  [info] No mesh data extracted (map may be WMO-only)");
+            }
+            else
+            {
+                Console.WriteLine($"  [warn] Mesh extraction failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [warn] Mesh extraction error: {ex.Message}");
+        }
+
         return 0;
     }
 
