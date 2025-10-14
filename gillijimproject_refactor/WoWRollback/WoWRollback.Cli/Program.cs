@@ -718,30 +718,55 @@ internal static class Program
     
     private static string? ExtractVersionFromPath(string clientPath)
     {
-        // Try to extract version from path like "0.X_Pre-Release_Windows_enUS_0.6.0.3592\World of Warcraft"
-        // Check the full path first
-        var match = System.Text.RegularExpressions.Regex.Match(clientPath, @"(\d+\.\d+\.\d+\.\d+)");
-        if (match.Success)
-        {
-            return match.Groups[1].Value;
-        }
+        // Try to extract version from path patterns:
+        // - E:\Archive\0.6.0.3592\World of Warcraft\Data
+        // - E:\Archive\0.X_Pre-Release_Windows_enUS_0.6.0.3592\World of Warcraft
+        // - E:\WoW_Clients\1.12.1\Data
+        // - E:\WoW\3.3.5a\World of Warcraft
         
-        // Try parent directory if current is generic
-        var dirName = Path.GetFileName(clientPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (dirName.Equals("World of Warcraft", StringComparison.OrdinalIgnoreCase) || 
-            dirName.Equals("Data", StringComparison.OrdinalIgnoreCase))
+        var currentPath = clientPath;
+        
+        // Walk up the directory tree looking for version pattern
+        for (int i = 0; i < 5; i++) // Check up to 5 levels up
         {
-            var parentPath = Path.GetDirectoryName(clientPath);
-            if (!string.IsNullOrEmpty(parentPath))
+            if (string.IsNullOrEmpty(currentPath))
+                break;
+                
+            // Try to find version pattern in current path segment
+            var dirName = Path.GetFileName(currentPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            
+            // Pattern 1: Full version (0.6.0.3592, 1.12.1.5875, 3.3.5.12340)
+            var match = System.Text.RegularExpressions.Regex.Match(dirName, @"^(\d+\.\d+\.\d+\.\d+)");
+            if (match.Success)
             {
-                match = System.Text.RegularExpressions.Regex.Match(parentPath, @"(\d+\.\d+\.\d+\.\d+)");
-                if (match.Success)
-                {
-                    return match.Groups[1].Value;
-                }
+                Console.WriteLine($"[info] Detected build version from path: {match.Groups[1].Value}");
+                return match.Groups[1].Value;
             }
+            
+            // Pattern 2: Version with suffix (3.3.5a, 1.12.1b)
+            match = System.Text.RegularExpressions.Regex.Match(dirName, @"^(\d+\.\d+\.\d+)[a-z]?$");
+            if (match.Success)
+            {
+                // For versions without build number, add a default
+                var version = match.Groups[1].Value;
+                var withBuild = version + ".0"; // Default build 0
+                Console.WriteLine($"[info] Detected version from path: {version} (using {withBuild})");
+                return withBuild;
+            }
+            
+            // Pattern 3: Version embedded in longer string (0.X_Pre-Release_Windows_enUS_0.6.0.3592)
+            match = System.Text.RegularExpressions.Regex.Match(dirName, @"(\d+\.\d+\.\d+\.\d+)");
+            if (match.Success)
+            {
+                Console.WriteLine($"[info] Detected build version from path: {match.Groups[1].Value}");
+                return match.Groups[1].Value;
+            }
+            
+            // Move up one directory
+            currentPath = Path.GetDirectoryName(currentPath);
         }
         
+        Console.WriteLine("[warn] Could not detect build version from path, using default");
         return null;
     }
 
@@ -767,15 +792,16 @@ internal static class Program
         Console.WriteLine("WoWRollback CLI - Digital Archaeology of World of Warcraft Development");
         Console.WriteLine();
         Console.WriteLine("Commands:");
-        Console.WriteLine("  discover-maps  --client-path <dir> [--build <version>] [--dbd-dir <path>] [--out <csv>]");
+        Console.WriteLine("  discover-maps  --client-path <dir> [--version <ver>] [--dbd-dir <path>] [--out <csv>]");
         Console.WriteLine("    Discover all maps from Map.dbc and analyze their WDT files");
         Console.WriteLine("    Shows terrain vs WMO-only maps, tile counts, and hybrid maps");
+        Console.WriteLine("    Version auto-detected from path or use --version (e.g., 0.6.0.3592)");
         Console.WriteLine();
-        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> (--map <name> | --all-maps) [--out <dir>] [--build <ver>]");
+        Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> (--map <name> | --all-maps) [--out <dir>] [--version <ver>]");
         Console.WriteLine("                        [--serve] [--port <port>]");
         Console.WriteLine("    Analyze ADT files directly from MPQs (patched view), detect layers/clusters, and generate viewer");
         Console.WriteLine("    Use --all-maps to discover and analyze all maps from Map.dbc");
-        Console.WriteLine("    Supports MDX/M2/WMO extraction from all WoW versions (0.6.0+)");
+        Console.WriteLine("    Version auto-detected from path or use --version (e.g., 0.6.0.3592)");
         Console.WriteLine();
         Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>] [--serve] [--port <port>]");
         Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) from loose files");
@@ -802,7 +828,13 @@ internal static class Program
     {
         Require(opts, "client-path");
         var clientRoot = opts["client-path"];
-        var buildVersion = opts.GetValueOrDefault("build", "0.5.3");
+        
+        // Try auto-detection first, then check both --version and --build parameters
+        var detectedVersion = ExtractVersionFromPath(clientRoot);
+        var buildVersion = opts.GetValueOrDefault("version", 
+                          opts.GetValueOrDefault("build", 
+                          detectedVersion ?? "0.5.3"));
+        
         var dbdDir = opts.GetValueOrDefault("dbd-dir", Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"));
         var outCsv = opts.GetValueOrDefault("out", "discovered_maps.csv");
 
@@ -919,10 +951,15 @@ internal static class Program
 
     private static int RunBatchAnalysis(IArchiveSource src, string clientRoot, Dictionary<string, string> opts)
     {
-        var buildVersion = opts.GetValueOrDefault("build", "0.6.0");
+        // Try auto-detection first, then check both --version and --build parameters
+        var detectedVersion = ExtractVersionFromPath(clientRoot);
+        var buildVersion = opts.GetValueOrDefault("version", 
+                          opts.GetValueOrDefault("build", 
+                          detectedVersion ?? "0.6.0"));
+        
         var dbdDir = opts.GetValueOrDefault("dbd-dir", Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"));
         var baseOutDir = opts.GetValueOrDefault("out", "analysis_output");
-        var versionLabel = ExtractVersionFromPath(clientRoot) ?? buildVersion;
+        var versionLabel = buildVersion; // Use the resolved version
 
         Console.WriteLine($"[info] === Batch Analysis Mode ===");
         Console.WriteLine($"[info] Discovering maps from Map.dbc...");
