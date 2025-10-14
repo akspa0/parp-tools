@@ -147,6 +147,20 @@ public sealed class AnalysisViewerAdapter
                 }
             }
 
+            // Generate terrain overlays for each map (AreaIDs, liquids, holes, etc.)
+            Log($"Generating terrain overlays from MCNK data...");
+            foreach (var (mapName, placementsCsv, minimapDir) in maps)
+            {
+                GenerateTerrainOverlays(baseOutputDir, viewerRoot, mapName, versionLabel);
+            }
+
+            // Generate cluster overlays for each map
+            Log($"Generating cluster overlays...");
+            foreach (var (mapName, placementsCsv, minimapDir) in maps)
+            {
+                GenerateClusterOverlays(baseOutputDir, viewerRoot, mapName, versionLabel);
+            }
+
             Log($"=== Unified Viewer Generation Complete ===");
             _logWriter?.Close();
             _logWriter = null;

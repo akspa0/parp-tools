@@ -264,6 +264,9 @@ export class SedimentaryLayersManagerCSV {
         const listContainer = document.getElementById('layersList');
         listContainer.innerHTML = '';
         
+        // Track last clicked checkbox for shift-click range selection
+        let lastClickedIndex = null;
+        
         // Add control buttons (reload + bulk selection)
         const controlButtons = document.createElement('div');
         controlButtons.style.cssText = 'padding: 8px; background: #2a2a2a; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;';
@@ -366,15 +369,33 @@ export class SedimentaryLayersManagerCSV {
             countSpan.style.fontSize = '10px';
             
             checkbox.addEventListener('change', (e) => {
+                // Handle shift-click range selection
+                if (e.shiftKey && lastClickedIndex !== null && lastClickedIndex !== index) {
+                    const start = Math.min(lastClickedIndex, index);
+                    const end = Math.max(lastClickedIndex, index);
+                    const targetState = e.target.checked;
+                    
+                    // Set all ranges in the range to the same state
+                    for (let i = start; i <= end; i++) {
+                        this.ranges[i].enabled = targetState;
+                    }
+                    
+                    // Re-render to update all checkboxes
+                    this.renderRangeCheckboxes();
+                    return;
+                }
+                
+                // Normal single click
                 range.enabled = e.target.checked;
                 item.style.background = range.enabled ? '#2a2a2a' : '#1a1a1a';
+                lastClickedIndex = index;
                 this.applyFilters();
             });
             
             item.addEventListener('click', (e) => {
                 if (e.target !== checkbox) {
                     checkbox.checked = !checkbox.checked;
-                    checkbox.dispatchEvent(new Event('change'));
+                    checkbox.dispatchEvent(new Event('change', { shiftKey: e.shiftKey }));
                 }
             });
             
@@ -526,11 +547,23 @@ export class SedimentaryLayersManagerCSV {
         
         let hiddenCount = 0;
         let shownCount = 0;
+        let skippedCount = 0;
+        
+        // PERFORMANCE FIX: Only filter markers that are currently loaded in the viewport
+        // The viewport culling system in main.js only loads tiles that are visible
+        // We should respect that and not iterate over markers from unloaded tiles
         
         for (const [uniqueId, markers] of this.uniqueIdToMarkers.entries()) {
             const inEnabledRange = enabledRanges.some(r => uniqueId >= r.min && uniqueId <= r.max);
             
             for (const marker of markers) {
+                // Skip markers that aren't in the DOM (from unloaded tiles)
+                // Check if marker's parent layer is currently on the map
+                if (!marker._map) {
+                    skippedCount++;
+                    continue;  // Skip - this marker isn't currently loaded
+                }
+                
                 let shouldShow = inEnabledRange;
                 
                 // Apply tile filter if enabled
@@ -554,7 +587,7 @@ export class SedimentaryLayersManagerCSV {
             }
         }
         
-        console.log(`[SedimentaryLayersCSV] Filter applied: ${shownCount} shown, ${hiddenCount} hidden/dimmed`);
+        console.log(`[SedimentaryLayersCSV] Filter applied: ${shownCount} shown, ${hiddenCount} hidden/dimmed, ${skippedCount} skipped (not in viewport)`);
         
         // Note: We no longer hide minimap tiles - only filter markers
         // Minimap tiles stay visible regardless of filter state

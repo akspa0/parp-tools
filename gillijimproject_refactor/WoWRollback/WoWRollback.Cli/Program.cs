@@ -1117,6 +1117,32 @@ internal static class Program
             Console.WriteLine($"  [ok] Detected {clusterResult.TotalClusters} clusters, {clusterResult.TotalPatterns} patterns");
         }
 
+        // Step 5: Extract terrain data from ADTs in MPQ
+        Console.WriteLine("  Step 5: Extracting terrain data (MCNK chunks)...");
+        try
+        {
+            var terrainExtractor = new AdtMpqTerrainExtractor();
+            var terrainCsvPath = Path.Combine(outDir, $"{mapName}_terrain.csv");
+            var terrainResult = terrainExtractor.ExtractFromArchive(src, mapName, terrainCsvPath);
+            
+            if (terrainResult.Success && terrainResult.ChunksExtracted > 0)
+            {
+                Console.WriteLine($"  [ok] Extracted {terrainResult.ChunksExtracted} MCNK chunks from {terrainResult.TilesProcessed} tiles");
+            }
+            else if (terrainResult.Success && terrainResult.ChunksExtracted == 0)
+            {
+                Console.WriteLine($"  [info] No terrain data found (map may be WMO-only)");
+            }
+            else
+            {
+                Console.WriteLine($"  [warn] Terrain extraction failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [warn] Terrain extraction error: {ex.Message}");
+        }
+
         return 0;
     }
 
