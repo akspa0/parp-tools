@@ -20,6 +20,7 @@ const overlayVariants = {
 let objectMarkers = L.layerGroup();
 let lastVersion = null;
 let lastMap = null;
+let lastVariant = null;
 let showObjects = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
@@ -34,20 +35,40 @@ let dragCurrent = null;
 
 export async function init() {
     try {
-        console.log('Initializing viewer...');
-        await state.loadIndex();
-        console.log('Index loaded:', state.index);
-        await state.loadConfig();
-        console.log('Config loaded:', state.config);
+        console.log('[INIT] Starting viewer initialization...');
         
+        console.log('[INIT] Loading index.json...');
+        await state.loadIndex();
+        console.log('[INIT] Index loaded successfully:', {
+            comparisonKey: state.index.comparisonKey,
+            versions: state.index.versions,
+            mapCount: state.index.maps?.length,
+            maps: state.index.maps?.map(m => m.map)
+        });
+        
+        console.log('[INIT] Loading config.json...');
+        await state.loadConfig();
+        console.log('[INIT] Config loaded:', state.config);
+        
+        console.log('[INIT] Initializing Leaflet map...');
         initializeMap();
+        
+        console.log('[INIT] Setting up UI controls...');
         setupUI();
+        
+        console.log('[INIT] Setting up overview canvas...');
         setupOverview();
+        
+        console.log('[INIT] Subscribing to state changes...');
         state.subscribe(onStateChange);
+        
+        console.log('[INIT] Updating tile layer...');
         updateTileLayer();
-        console.log('Viewer initialized successfully');
+        
+        console.log('[INIT] SUCCESS: Viewer initialized successfully!');
     } catch (error) {
-        console.error('Failed to initialize viewer:', error);
+        console.error('[INIT] ERROR: Failed to initialize viewer:', error);
+        console.error('[INIT] Error stack:', error.stack);
         document.body.innerHTML = `
             <div style="padding: 20px; color: #F44336; background: #1a1a1a; font-family: monospace;">
                 <h2>Failed to Load Viewer</h2>
@@ -126,10 +147,20 @@ function initializeMap() {
         }
     });
     
-    // Set initial view to top-left corner (tile 0,0) to minimize initial tile loading
-    // At zoom 4, only ~16-25 tiles will be loaded initially instead of all 2252
-    map.setView([4, 4], 4);  // Slightly offset from 0,0 to show border
-    console.log('Map initialized with WoW coordinate system (0,0 = NW), starting at top-left');
+    // Set initial view to first available tile for the selected map
+    const tiles = state.getTilesForMap(state.selectedMap);
+    if (tiles && tiles.length > 0) {
+        // Find first tile available for selected version
+        const firstTile = tiles.find(t => t.versions && t.versions.includes(state.selectedVersion)) || tiles[0];
+        const centerRow = firstTile.row + 0.5;
+        const centerCol = firstTile.col + 0.5;
+        map.setView([centerRow, centerCol], 4);
+        console.log(`Map initialized, centered on first available tile: (${firstTile.row}, ${firstTile.col})`);
+    } else {
+        // Fallback to top-left if no tiles found
+        map.setView([4, 4], 4);
+        console.log('Map initialized with default view (no tiles found)');
+    }
     
     // Trigger initial overlay load after map is settled
     setTimeout(() => {
@@ -743,15 +774,21 @@ function onStateChange() {
         variantSelect.value = state.overlayVariant;
     }
     
-    // Clear cache and tiles if version OR map changed
+    // Clear cache and tiles if version OR map OR variant changed
     const versionChanged = lastVersion !== state.selectedVersion;
     const mapChanged = lastMap !== state.selectedMap;
+    const variantChanged = lastVariant !== state.overlayVariant;
     
-    if (versionChanged || mapChanged) {
-        console.log(`State change detected - version: ${versionChanged}, map: ${mapChanged}`);
+    if (versionChanged || mapChanged || variantChanged) {
+        console.log(`State change detected - version: ${versionChanged}, map: ${mapChanged}, variant: ${variantChanged}`);
         lastVersion = state.selectedVersion;
         lastMap = state.selectedMap;
+        lastVariant = state.overlayVariant;
         clearCache();
+        
+        // Clear loaded tile layers (viewport culling cache)
+        objectMarkers.clearLayers();
+        loadedTileLayers.clear();
         
         // Remove all existing minimap image overlays to force refresh
         for (const [, overlay] of minimapImages.entries()) {
@@ -774,6 +811,18 @@ function onStateChange() {
         // Clear overlay data when switching maps
         if (overlayManager) {
             overlayManager.clearAllData();
+        }
+        
+        // Re-center on first available tile when map changes
+        if (mapChanged) {
+            const tiles = state.getTilesForMap(state.selectedMap);
+            if (tiles && tiles.length > 0) {
+                const firstTile = tiles.find(t => t.versions && t.versions.includes(state.selectedVersion)) || tiles[0];
+                const centerRow = firstTile.row + 0.5;
+                const centerCol = firstTile.col + 0.5;
+                map.setView([centerRow, centerCol], 4);
+                console.log(`Map changed, centered on first available tile: (${firstTile.row}, ${firstTile.col})`);
+            }
         }
     }
 
@@ -932,12 +981,18 @@ async function updateObjectMarkers() {
     }, 500);
 }
 
+// Track loaded tiles: Map<"row_col", L.LayerGroup>
+const loadedTileLayers = new Map();
+
 async function performObjectMarkerUpdate() {
-    objectMarkers.clearLayers();
+    if (!showObjects) {
+        // Clear all if objects are hidden
+        objectMarkers.clearLayers();
+        loadedTileLayers.clear();
+        return;
+    }
     
-    if (!showObjects) return;
-    
-    // Only load overlays for visible tiles (max 8x8 grid)
+    // Calculate visible tile bounds (max 8x8 grid)
     const bounds = map.getBounds();
     const latS = bounds.getSouth();
     const latN = bounds.getNorth();
@@ -956,18 +1011,51 @@ async function performObjectMarkerUpdate() {
         maxCol = minCol + 7;
     }
     
-    const tileCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-    console.log(`Loading objects for ${tileCount} tiles: r${minRow}-${maxRow}, c${minCol}-${maxCol}`);
+    // Build set of visible tile keys
+    const visibleTiles = new Set();
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            visibleTiles.add(`${row}_${col}`);
+        }
+    }
+    
+    // Remove tiles that are no longer visible
+    let removedCount = 0;
+    for (const [tileKey, layerGroup] of loadedTileLayers.entries()) {
+        if (!visibleTiles.has(tileKey)) {
+            objectMarkers.removeLayer(layerGroup);
+            loadedTileLayers.delete(tileKey);
+            removedCount++;
+        }
+    }
+    
+    // Load new tiles that aren't already loaded
+    const tilesToLoad = [];
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            const tileKey = `${row}_${col}`;
+            if (!loadedTileLayers.has(tileKey)) {
+                tilesToLoad.push({ row, col, tileKey });
+            }
+        }
+    }
+    
+    const tileCount = visibleTiles.size;
+    console.log(`[Viewport] Visible: ${tileCount} tiles, Loaded: ${loadedTileLayers.size}, ToLoad: ${tilesToLoad.length}, Removed: ${removedCount}`);
     
     const tiles = state.getTilesForMap(state.selectedMap);
     const currentVariant = state.overlayVariant || 'combined';
     const style = overlayVariants[currentVariant] ?? overlayVariants.combined;
-    for (let row = minRow; row <= maxRow; row++) {
-        for (let col = minCol; col <= maxCol; col++) {
-            // Only fetch overlays for tiles listed in index.json and available for the selected version
-            const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
-            if (!available) continue;
-            try {
+    
+    // Only load tiles that aren't already loaded
+    for (const { row, col, tileKey } of tilesToLoad) {
+        // Only fetch overlays for tiles listed in index.json and available for the selected version
+        const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
+        if (!available) continue;
+        
+        try {
+            // Create a layer group for this tile's markers
+            const tileLayerGroup = L.layerGroup();
                 const overlayPath = state.getOverlayPath(state.selectedMap, row, col, state.selectedVersion, currentVariant);
                 const data = await loadOverlay(overlayPath);
                 
@@ -1043,13 +1131,11 @@ async function performObjectMarkerUpdate() {
                                 currentPopup = square.getPopup();
                                 bringPopupToFront(square.getPopup());
                             });
-                            objectMarkers.addLayer(square);
+                            tileLayerGroup.addLayer(square);
                             
                             // Register with sedimentary layers
                             if (sedimentaryLayers) {
                                 sedimentaryLayers.registerMarker(square, obj.uniqueId || 0, row, col);
-                            } else {
-                                console.warn('[main] Square created but sedimentaryLayers not ready, UID:', obj.uniqueId);
                             }
                         }
                         else
@@ -1067,7 +1153,7 @@ async function performObjectMarkerUpdate() {
                                 currentPopup = circle.getPopup();
                                 bringPopupToFront(circle.getPopup());
                             });
-                            objectMarkers.addLayer(circle);
+                            tileLayerGroup.addLayer(circle);
                             
                             // Register with sedimentary layers
                             if (sedimentaryLayers) {
@@ -1090,7 +1176,7 @@ async function performObjectMarkerUpdate() {
                             currentPopup = marker.getPopup();
                             bringPopupToFront(marker.getPopup());
                         });
-                        objectMarkers.addLayer(marker);
+                        tileLayerGroup.addLayer(marker);
                         
                         // Register with sedimentary layers
                         if (sedimentaryLayers) {
@@ -1116,14 +1202,18 @@ async function performObjectMarkerUpdate() {
                             fillColor: '#FFD54F',
                             fillOpacity: 0.9
                         });
-                        objectMarkers.addLayer(m);
+                        tileLayerGroup.addLayer(m);
                     });
                 }
+                
+                // Add tile layer group to map and track it
+                objectMarkers.addLayer(tileLayerGroup);
+                loadedTileLayers.set(tileKey, tileLayerGroup);
+                
             } catch (e) {
                 // Skip tiles without overlay data
             }
         }
-    }
 }
 
 function handleMapClick(e) {

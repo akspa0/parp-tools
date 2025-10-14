@@ -65,8 +65,11 @@ export class State {
     }
 
     setOverlayVariant(variant) {
-        this.overlayVariant = variant;
-        this.notify();
+        if (this.overlayVariant !== variant) {
+            this.overlayVariant = variant;
+            this.cacheBust = Date.now(); // Force reload of tiles
+            this.notify();
+        }
     }
 
     getMapData(mapName) {

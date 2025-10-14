@@ -19,6 +19,7 @@ export class SedimentaryLayersManagerCSV {
         this.isInitialized = false;
         this.isFiltering = false; // Prevent recursive filtering
         this.filterTimeout = null; // Debounce timer
+        this.showAllTiles = false; // Toggle for showing tiles without data
         
         this.initUI();
     }
@@ -60,6 +61,15 @@ export class SedimentaryLayersManagerCSV {
             }
             this.handleManualSearch(query);
         });
+        
+        // Show all tiles toggle
+        const showAllTilesCheckbox = document.getElementById('showAllTiles');
+        if (showAllTilesCheckbox) {
+            showAllTilesCheckbox.addEventListener('change', (e) => {
+                this.showAllTiles = e.target.checked;
+                this.updateMinimapTileVisibility();
+            });
+        }
         
         // Create mode selector
         this.createModeSelector(panel);
@@ -253,7 +263,10 @@ export class SedimentaryLayersManagerCSV {
             }
         }
         
-        console.log(`[SedimentaryLayersCSV] Parsed ${this.ranges.length} ranges`);
+        // Sort ranges by min UniqueID (smallest to largest)
+        this.ranges.sort((a, b) => a.min - b.min);
+        
+        console.log(`[SedimentaryLayersCSV] Parsed ${this.ranges.length} ranges (sorted by min)`);
     }
     
     renderRangeCheckboxes() {
@@ -348,9 +361,13 @@ export class SedimentaryLayersManagerCSV {
             checkbox.style.marginRight = '8px';
             
             const label = document.createElement('label');
-            label.textContent = `${range.min} - ${range.max}`;
+            // Extract tile info from map field if available (format: "mapName_(row_col)")
+            const tileMatch = range.map?.match(/_\((\d+)_(\d+)\)$/);
+            const tileInfo = tileMatch ? ` [${tileMatch[1]},${tileMatch[2]}]` : '';
+            label.textContent = `${range.min} - ${range.max}${tileInfo}`;
             label.style.flex = '1';
             label.style.cursor = 'pointer';
+            label.title = range.map || `Range ${range.min}-${range.max}`;
             
             const countSpan = document.createElement('span');
             countSpan.textContent = range.count.toLocaleString();
@@ -421,8 +438,8 @@ export class SedimentaryLayersManagerCSV {
         }
         this.uniqueIdToMarkers.get(uniqueId).push(marker);
         
-        // Register by tile
-        const tileKey = `${tileRow}_${tileCol}`;
+        // Register by tile - use same format as minimap keys: r{row}_c{col}
+        const tileKey = `r${tileRow}_c${tileCol}`;
         if (!this.tileToMarkers.has(tileKey)) {
             this.tileToMarkers.set(tileKey, []);
         }
@@ -438,10 +455,24 @@ export class SedimentaryLayersManagerCSV {
             this.applyFilterToSingleMarker(marker, uniqueId);
         }
         
-        // Debug: log first few registrations
-        if (this.uniqueIdToMarkers.size <= 5) {
-            console.log(`[SedimentaryLayersCSV] Registered marker UID=${uniqueId} tile=${tileRow},${tileCol}`);
+        // Debug: log registrations to track data
+        const totalRegistered = Array.from(this.uniqueIdToMarkers.values()).reduce((sum, arr) => sum + arr.length, 0);
+        if (totalRegistered % 100 === 0) {
+            console.log(`[SedimentaryLayersCSV] Registered ${totalRegistered} markers across ${this.uniqueIdToMarkers.size} UniqueIDs, ${this.tileToMarkers.size} tiles`);
         }
+    }
+    
+    getRegistrationStats() {
+        const tileStats = new Map();
+        for (const [tileKey, markers] of this.tileToMarkers.entries()) {
+            tileStats.set(tileKey, markers.length);
+        }
+        return {
+            totalMarkers: Array.from(this.uniqueIdToMarkers.values()).reduce((sum, arr) => sum + arr.length, 0),
+            uniqueIds: this.uniqueIdToMarkers.size,
+            tiles: this.tileToMarkers.size,
+            tileStats: tileStats
+        };
     }
     
     applyFilterToSingleMarker(marker, uniqueId) {
@@ -490,6 +521,19 @@ export class SedimentaryLayersManagerCSV {
         console.log(`[SedimentaryLayersCSV] Filtering with ${enabledRanges.length}/${this.ranges.length} enabled ranges`);
         console.log(`[SedimentaryLayersCSV] Registered markers: ${this.uniqueIdToMarkers.size} UniqueIDs, total markers: ${Array.from(this.uniqueIdToMarkers.values()).reduce((sum, arr) => sum + arr.length, 0)}`);
         
+        // If no ranges enabled, reset minimap and show all markers
+        if (enabledRanges.length === 0) {
+            console.log('[SedimentaryLayersCSV] No ranges enabled, showing all markers and resetting minimap');
+            for (const markers of this.uniqueIdToMarkers.values()) {
+                for (const marker of markers) {
+                    this.applyMarkerVisibility(marker, true);
+                }
+            }
+            this.resetMinimapVisibility();
+            this.isFiltering = false;
+            return;
+        }
+        
         let hiddenCount = 0;
         let shownCount = 0;
         
@@ -522,8 +566,130 @@ export class SedimentaryLayersManagerCSV {
         
         console.log(`[SedimentaryLayersCSV] Filter applied: ${shownCount} shown, ${hiddenCount} hidden/dimmed`);
         
+        // Update minimap tile visibility based on enabled ranges
+        this.updateMinimapTileVisibility();
+        
         // Reset filtering flag
         this.isFiltering = false;
+    }
+    
+    updateMinimapTileVisibility() {
+        // Track which tiles have objects in enabled ranges
+        const tilesWithData = new Set();
+        const enabledRanges = this.ranges.filter(r => r.enabled);
+        
+        console.log('[SedimentaryLayersCSV] updateMinimapTileVisibility called');
+        console.log('[SedimentaryLayersCSV] Total UniqueIDs registered:', this.uniqueIdToMarkers.size);
+        console.log('[SedimentaryLayersCSV] Enabled ranges:', enabledRanges.length);
+        
+        // Build complete set of tiles with data BEFORE updating opacity
+        for (const [uniqueId, markers] of this.uniqueIdToMarkers.entries()) {
+            const inEnabledRange = enabledRanges.some(r => uniqueId >= r.min && uniqueId <= r.max);
+            if (inEnabledRange) {
+                for (const marker of markers) {
+                    const tileKey = `r${marker.options.tileRow}_c${marker.options.tileCol}`;
+                    tilesWithData.add(tileKey);
+                }
+            }
+        }
+        
+        console.log('[SedimentaryLayersCSV] Tiles with data:', Array.from(tilesWithData).sort());
+        console.log('[SedimentaryLayersCSV] Tiles registered in system:', Array.from(this.tileToMarkers.keys()).sort());
+        console.log('[SedimentaryLayersCSV] window.minimapImages exists?', !!window.minimapImages);
+        console.log('[SedimentaryLayersCSV] window.minimapImages size:', window.minimapImages?.size);
+        console.log('[SedimentaryLayersCSV] window.minimapImages keys:', window.minimapImages ? Array.from(window.minimapImages.keys()).sort() : 'N/A');
+        
+        // Store this for future tile loads
+        this._currentTilesWithData = tilesWithData;
+        
+        // Update visibility for ALL currently loaded minimap tiles
+        // minimapImages is a Map with key format "r{row}_c{col}" -> L.ImageOverlay
+        if (window.minimapImages && window.minimapLayer) {
+            let shown = 0;
+            let hidden = 0;
+            
+            console.log('[SedimentaryLayersCSV] Available minimap keys:', Array.from(window.minimapImages.keys()).sort());
+            
+            // Update all loaded tiles - HIDE tiles without data, SHOW tiles with data or if showAllTiles enabled
+            window.minimapImages.forEach((imageOverlay, key) => {
+                const hasData = tilesWithData.has(key);
+                
+                if (hasData || this.showAllTiles || enabledRanges.length === 0) {
+                    // Show tile (has data, user toggled show all, or no filter active)
+                    if (!window.minimapLayer.hasLayer(imageOverlay)) {
+                        imageOverlay.addTo(window.minimapLayer);
+                    }
+                    imageOverlay.setOpacity(1.0);
+                    shown++;
+                } else {
+                    // Hide tile (no data and user wants to hide)
+                    if (window.minimapLayer.hasLayer(imageOverlay)) {
+                        window.minimapLayer.removeLayer(imageOverlay);
+                    }
+                    hidden++;
+                }
+            });
+            
+            console.log(`[SedimentaryLayersCSV] Updated minimap visibility: ${shown} shown, ${hidden} hidden (${tilesWithData.size} tiles have data, showAllTiles=${this.showAllTiles})`);
+            
+            // Hook into minimap tile loading to apply visibility to newly loaded tiles
+            this._hookMinimapTileLoading();
+        } else {
+            console.warn('[SedimentaryLayersCSV] window.minimapImages or window.minimapLayer not available');
+        }
+    }
+    
+    _hookMinimapTileLoading() {
+        // Ensure we only hook once
+        if (this._minimapHooked) return;
+        this._minimapHooked = true;
+        
+        const self = this;
+        
+        // Intercept when new minimap tiles are added
+        if (window.minimapImages && !window.minimapImages._visibilityHooked) {
+            window.minimapImages._visibilityHooked = true;
+            
+            const originalMapSet = window.minimapImages.set.bind(window.minimapImages);
+            window.minimapImages.set = function(key, imageOverlay) {
+                // Call original set
+                const result = originalMapSet(key, imageOverlay);
+                
+                // Apply visibility to newly loaded tile
+                if (self._currentTilesWithData && self.ranges.length > 0) {
+                    const hasData = self._currentTilesWithData.has(key);
+                    const enabledRanges = self.ranges.filter(r => r.enabled);
+                    
+                    if (hasData || self.showAllTiles || enabledRanges.length === 0) {
+                        // Tile should be visible - it's already added by main.js
+                        imageOverlay.setOpacity(1.0);
+                    } else {
+                        // Tile should be hidden - remove it
+                        if (window.minimapLayer && window.minimapLayer.hasLayer(imageOverlay)) {
+                            window.minimapLayer.removeLayer(imageOverlay);
+                        }
+                    }
+                    console.log(`[SedimentaryLayersCSV] Applied visibility to newly loaded tile ${key}: ${hasData ? 'visible' : 'hidden'}`);
+                }
+                
+                return result;
+            };
+            
+            console.log('[SedimentaryLayersCSV] Hooked minimap tile loading for visibility control');
+        }
+    }
+    
+    resetMinimapVisibility() {
+        // Reset all minimap tiles to visible with full opacity
+        if (window.minimapImages && window.minimapLayer) {
+            window.minimapImages.forEach((imageOverlay, key) => {
+                if (!window.minimapLayer.hasLayer(imageOverlay)) {
+                    imageOverlay.addTo(window.minimapLayer);
+                }
+                imageOverlay.setOpacity(1.0);
+            });
+            console.log('[SedimentaryLayersCSV] Reset all minimap tiles to visible');
+        }
     }
     
     applyMarkerVisibility(marker, shouldShow) {

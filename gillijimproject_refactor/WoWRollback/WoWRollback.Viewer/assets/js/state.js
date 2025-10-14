@@ -65,8 +65,11 @@ export class State {
     }
 
     setOverlayVariant(variant) {
-        this.overlayVariant = variant;
-        this.notify();
+        if (this.overlayVariant !== variant) {
+            this.overlayVariant = variant;
+            this.cacheBust = Date.now(); // Force reload of tiles
+            this.notify();
+        }
     }
 
     getMapData(mapName) {
@@ -85,9 +88,10 @@ export class State {
     }
 
     getMinimapPath(mapName, row, col, version) {
-        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.png
+        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.webp
+        // Using WebP for 50-70% memory savings vs PNG
         const t = this.cacheBust || 0;
-        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.png?t=${t}`;
+        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.webp?t=${t}`;
     }
 
     getOverlayPath(mapName, row, col, version, variant) {

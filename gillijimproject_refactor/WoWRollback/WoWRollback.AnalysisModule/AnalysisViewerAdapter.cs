@@ -137,6 +137,16 @@ public sealed class AnalysisViewerAdapter
                 diffPair: null
             );
 
+            // Generate UniqueID range CSVs for each map (for Sedimentary Layers feature)
+            Log($"Generating UniqueID range CSVs for Sedimentary Layers...");
+            foreach (var (mapName, placementsCsv, minimapDir) in maps)
+            {
+                if (File.Exists(placementsCsv))
+                {
+                    CopyUniqueIdCsvToViewer(baseOutputDir, viewerRoot, mapName, versionLabel, placementsCsv);
+                }
+            }
+
             Log($"=== Unified Viewer Generation Complete ===");
             _logWriter?.Close();
             _logWriter = null;

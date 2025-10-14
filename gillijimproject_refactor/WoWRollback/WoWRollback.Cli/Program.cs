@@ -48,6 +48,8 @@ internal static class Program
                 case "serve-viewer":
                 case "serve":
                     return RunServeViewer(opts);
+                case "fix-minimap-webp":
+                    return RunFixMinimapWebp(opts);
                 case "dry-run":
                     return RunDryRun(opts);
                 case "compare-versions":
@@ -1576,4 +1578,93 @@ internal static class Program
 
     private static string? GetOption(Dictionary<string, string> opts, string key, string? fallback = null) =>
         opts.TryGetValue(key, out var value) ? value : fallback;
+
+    private static int RunFixMinimapWebp(Dictionary<string, string> opts)
+    {
+        var outputDir = opts.GetValueOrDefault("out");
+        if (string.IsNullOrEmpty(outputDir) || !Directory.Exists(outputDir))
+        {
+            Console.Error.WriteLine("[error] --out directory not found or not specified");
+            Console.Error.WriteLine("Usage: fix-minimap-webp --out <output_directory>");
+            return 1;
+        }
+
+        Console.WriteLine($"[info] === Minimap WebP Fix-up Tool ===");
+        Console.WriteLine($"[info] Scanning: {outputDir}");
+
+        // Find all PNG files in {version}/World/Textures/Minimap/{map}/ folders
+        var versionDirs = Directory.GetDirectories(outputDir)
+            .Where(d => !Path.GetFileName(d).Equals("viewer", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (versionDirs.Count == 0)
+        {
+            Console.WriteLine("[warn] No version directories found");
+            return 0;
+        }
+
+        int totalConverted = 0;
+        int totalMaps = 0;
+
+        foreach (var versionDir in versionDirs)
+        {
+            var version = Path.GetFileName(versionDir);
+            var minimapBaseDir = Path.Combine(versionDir, "World", "Textures", "Minimap");
+            
+            if (!Directory.Exists(minimapBaseDir))
+            {
+                Console.WriteLine($"[info] No minimap directory for version: {version}");
+                continue;
+            }
+
+            // Find all map subdirectories
+            var mapDirs = Directory.GetDirectories(minimapBaseDir);
+            
+            foreach (var mapDir in mapDirs)
+            {
+                var mapName = Path.GetFileName(mapDir);
+                var pngFiles = Directory.GetFiles(mapDir, "*.png", SearchOption.TopDirectoryOnly);
+                
+                if (pngFiles.Length == 0) continue;
+
+                totalMaps++;
+                Console.WriteLine($"[info] Processing {mapName} ({version}): {pngFiles.Length} PNG files");
+
+                // Create viewer minimap directory
+                var viewerMinimapDir = Path.Combine(outputDir, "viewer", "minimap", version, mapName);
+                Directory.CreateDirectory(viewerMinimapDir);
+
+                int converted = 0;
+                foreach (var pngFile in pngFiles)
+                {
+                    try
+                    {
+                        // Load PNG
+                        using var image = SixLabors.ImageSharp.Image.Load(pngFile);
+                        
+                        // Save as WebP
+                        var fileName = Path.GetFileNameWithoutExtension(pngFile);
+                        var webpPath = Path.Combine(viewerMinimapDir, $"{fileName}.webp");
+                        
+                        using var outStream = File.Create(webpPath);
+                        image.Save(outStream, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder { Quality = 90 });
+                        converted++;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[warn] Failed to convert {Path.GetFileName(pngFile)}: {ex.Message}");
+                    }
+                }
+
+                totalConverted += converted;
+                Console.WriteLine($"[ok] Converted {converted}/{pngFiles.Length} tiles for {mapName}");
+            }
+        }
+
+        Console.WriteLine($"\n[ok] === Fix-up Complete ===");
+        Console.WriteLine($"[ok] Processed {totalMaps} maps, converted {totalConverted} tiles to WebP");
+        Console.WriteLine($"[ok] WebP files are now in: {Path.Combine(outputDir, "viewer", "minimap")}");
+
+        return 0;
+    }
 }

@@ -9,6 +9,8 @@ let map;
 let tileLayer; // no longer used, kept for minimal diff
 let minimapLayer = L.layerGroup();
 const minimapImages = new Map(); // key: "r{row}_c{col}" -> L.ImageOverlay
+window.minimapImages = minimapImages; // Expose for sedimentary layers to update visibility
+window.minimapLayer = minimapLayer; // Expose for sedimentary layers to hide/show tiles
 const overlayVariants = {
     combined: { label: 'All Objects (M2 + WMO)', color: '#2196F3', radius: 5 },
     m2: { label: 'M2 Models Only', color: '#2196F3', radius: 8 },
@@ -18,6 +20,7 @@ const overlayVariants = {
 let objectMarkers = L.layerGroup();
 let lastVersion = null;
 let lastMap = null;
+let lastVariant = null;
 let showObjects = true;
 let overviewCanvas, overviewCtx;
 let uidFilter = null; // { min: number, max: number } or null
@@ -58,29 +61,41 @@ export async function init() {
 }
 
 function initializeMap() {
-    // Use standard CRS.Simple - tiles are positioned directly by row/col
+    // Use Leaflet CRS.Simple without custom flip; do all flips in our math to match wow.tools
     map = L.map('map', {
         crs: L.CRS.Simple,
         minZoom: 0,
         maxZoom: 12,  // Increased for 4x more zoom detail
-        zoom: 2,
+        zoom: 4,  // Start zoomed in to reduce initial tile load
         zoomControl: true,
         zoomSnap: 0.1,
-        zoomDelta: 0.5
+        zoomDelta: 0.5,
+        // Performance optimizations for lazy loading
+        preferCanvas: true,  // Use canvas rendering for better performance
+        updateWhenIdle: false,  // Update tiles continuously during pan
+        keepBuffer: 2  // Keep 2 tile rows/cols outside viewport (default is 2)
     });
 
     objectMarkers.addTo(map);
     minimapLayer.addTo(map);
-    
-    // Grid disabled - was masking tiles
-    // TODO: Fix grid coordinate system to match tile positions
     
     // Initialize overlay manager
     overlayManager = new OverlayManager(map);
     
     // Initialize sedimentary layers manager (CSV-based)
     sedimentaryLayers = new SedimentaryLayersManagerCSV(map, state);
-    window.sedimentaryLayers = sedimentaryLayers; // Expose for debugging
+    window.sedimentaryLayers = sedimentaryLayers; // For debugging
+    
+    // Debug helper
+    window.debugSedimentary = () => {
+        const stats = sedimentaryLayers.getRegistrationStats();
+        console.log('=== Sedimentary Layers Debug ===');
+        console.log('Total markers:', stats.totalMarkers);
+        console.log('Unique IDs:', stats.uniqueIds);
+        console.log('Tiles with markers:', stats.tiles);
+        console.log('Markers per tile:', Array.from(stats.tileStats.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
+        return stats;
+    };
     console.log('[main] Sedimentary Layers initialized:', sedimentaryLayers);
     
     // Re-render markers when zoom changes for dynamic scaling
@@ -112,10 +127,27 @@ function initializeMap() {
         }
     });
     
-    // Set initial view to center
-    // Start roughly center; for wow.tools mapping lat ≈ 31–32 is center too
-    map.setView([32, 32], 2);
-    console.log('Map initialized with WoW coordinate system (0,0 = NW)');
+    // Set initial view to first available tile for the selected map
+    const tiles = state.getTilesForMap(state.selectedMap);
+    if (tiles && tiles.length > 0) {
+        // Find first tile available for selected version
+        const firstTile = tiles.find(t => t.versions && t.versions.includes(state.selectedVersion)) || tiles[0];
+        const centerRow = firstTile.row + 0.5;
+        const centerCol = firstTile.col + 0.5;
+        map.setView([centerRow, centerCol], 4);
+        console.log(`Map initialized, centered on first available tile: (${firstTile.row}, ${firstTile.col})`);
+    } else {
+        // Fallback to top-left if no tiles found
+        map.setView([4, 4], 4);
+        console.log('Map initialized with default view (no tiles found)');
+    }
+    
+    // Trigger initial overlay load after map is settled
+    setTimeout(() => {
+        if (document.getElementById('showClusters')?.checked) {
+            loadAndRenderClusters();
+        }
+    }, 500);
 }
 
 // Dynamic radius scaling based on zoom level
@@ -209,6 +241,319 @@ function setupUI() {
     
     // Setup terrain overlay controls
     setupTerrainOverlayControls();
+    
+    // Setup cluster overlay controls
+    setupClusterOverlayControls();
+    
+    // Setup tile grid controls
+    setupTileGridControls();
+}
+
+function setupClusterOverlayControls() {
+    const showClusters = document.getElementById('showClusters');
+    
+    showClusters.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            loadAndRenderClusters();
+            // Viewport-only rendering: reload on pan/zoom
+            map.on('moveend', updateClustersOnMove);
+            map.on('zoomend', updateClustersOnZoom);
+        } else {
+            clearClusters();
+            map.off('moveend', updateClustersOnMove);
+            map.off('zoomend', updateClustersOnZoom);
+        }
+    });
+    
+    // Uncheck by default - let user opt-in to cluster view
+    showClusters.checked = false;
+}
+
+function updateClustersOnMove() {
+    if (document.getElementById('showClusters')?.checked) {
+        loadAndRenderClusters();
+    }
+}
+
+function updateClustersOnZoom() {
+    if (document.getElementById('showClusters')?.checked) {
+        // Rescale existing clusters without reloading
+        clusterLayers.forEach(layerGroup => {
+            layerGroup.eachLayer(layer => {
+                if (layer instanceof L.CircleMarker && layer._baseRadius) {
+                    const radius = getScaledRadius(layer._baseRadius);
+                    layer.setRadius(radius);
+                }
+            });
+        });
+    }
+}
+
+const clusterLayers = new Map(); // tile_key -> L.layerGroup
+
+async function loadAndRenderClusters() {
+    console.log('[Clusters] Loading cluster overlays...');
+    clearClusters();
+    
+    // Get current map/version from state
+    const version = state.selectedVersion || 'analysis';
+    const mapName = state.selectedMap || 'development';
+    
+    console.log(`[Clusters] Using version=${version}, map=${mapName}`);
+    
+    // Load clusters for visible tiles - with coordinate transformation
+    const bounds = map.getBounds();
+    
+    let minRow, maxRow, minCol, maxCol;
+    
+    if (isWowTools()) {
+        // Convert Leaflet bounds to ADT tile coordinates (Y-axis inversion)
+        minRow = Math.max(0, Math.floor(63 - bounds.getNorth()) - 1);
+        maxRow = Math.min(63, Math.ceil(63 - bounds.getSouth()) + 1);
+    } else {
+        minRow = Math.max(0, Math.floor(bounds.getSouth()) - 1);
+        maxRow = Math.min(63, Math.ceil(bounds.getNorth()) + 1);
+    }
+    
+    minCol = Math.max(0, Math.floor(bounds.getWest()) - 1);
+    maxCol = Math.min(63, Math.ceil(bounds.getEast()) + 1);
+    
+    let totalClusters = 0;
+    
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            const clusterPath = `overlays/${version}/${mapName}/clusters/tile_${col}_${row}.json`;
+            
+            try {
+                const response = await fetch(clusterPath);
+                if (!response.ok) continue; // Tile might not have clusters
+                
+                const data = await response.json();
+                if (!data.clusters || data.clusters.length === 0) continue;
+                
+                const layerGroup = L.layerGroup();
+                
+                data.clusters.forEach(cluster => {
+                    // Use pixelToLatLng for coordinate transformation
+                    const px = (cluster.position.localX || 0) * 512; // Convert 0-1 to pixel coords
+                    const py = (cluster.position.localY || 0) * 512;
+                    const { lat, lng } = pixelToLatLng(row, col, px, py, 512, 512);
+                    
+                    // Calculate radius based on object count
+                    const baseRadius = Math.min(20, 3 + Math.sqrt(cluster.objectCount || 5));
+                    const radius = getScaledRadius(baseRadius);
+                    
+                    const circle = L.circleMarker([lat, lng], {
+                        radius: radius,
+                        color: cluster.isStamp ? '#FF6B6B' : '#4ECDC4',
+                        fillColor: cluster.isStamp ? '#FF6B6B' : '#4ECDC4',
+                        fillOpacity: 0.4,
+                        weight: 2,
+                        opacity: 0.9
+                    });
+                    circle._baseRadius = baseRadius; // Store for zoom rescaling
+                    
+                    // Build detailed popup
+                    const bounds = cluster.bounds;
+                    const size = {
+                        x: (bounds.maxX - bounds.minX).toFixed(1),
+                        y: (bounds.maxY - bounds.minY).toFixed(1),
+                        z: (bounds.maxZ - bounds.minZ).toFixed(1)
+                    };
+                    
+                    const popupHtml = `
+                        <div style="min-width: 280px; padding: 8px; font-size: 12px;">
+                            <div style="font-size: 14px; font-weight: bold; margin-bottom: 8px;">
+                                Cluster #${cluster.clusterId}
+                                ${cluster.isStamp ? ' <span style="color: #FF6B6B;">⭐ Stamp</span>' : ''}
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin-bottom: 8px;">
+                                <strong>Objects:</strong><span>${cluster.objectCount}</span>
+                                <strong>Radius:</strong><span>${cluster.radius.toFixed(1)}m</span>
+                                <strong>Consecutive:</strong><span>${cluster.hasConsecutiveIds ? 'Yes' : 'No'}</span>
+                                <strong>Tile:</strong><span>${row}_${col}</span>
+                            </div>
+                            
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+                                <strong>Centroid:</strong><br>
+                                <div style="margin-left: 8px; font-family: monospace; font-size: 11px;">
+                                    X: ${cluster.centroid.x.toFixed(2)}<br>
+                                    Y: ${cluster.centroid.y.toFixed(2)}<br>
+                                    Z: ${cluster.centroid.z.toFixed(2)}
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+                                <strong>Bounding Box:</strong><br>
+                                <div style="margin-left: 8px; font-family: monospace; font-size: 11px;">
+                                    Size: ${size.x} × ${size.y} × ${size.z}m<br>
+                                    Min: (${bounds.minX.toFixed(1)}, ${bounds.minY.toFixed(1)}, ${bounds.minZ.toFixed(1)})<br>
+                                    Max: (${bounds.maxX.toFixed(1)}, ${bounds.maxY.toFixed(1)}, ${bounds.maxZ.toFixed(1)})
+                                </div>
+                            </div>
+                            
+                            ${!cluster.objects ? '<div style="margin-top: 8px; padding: 4px; background: #f0f0f0; font-size: 10px; color: #666;">⚠️ Object details require backend export</div>' : ''}
+                        </div>
+                    `;
+                    
+                    circle.bindPopup(popupHtml, {
+                        maxWidth: 350,
+                        closeButton: true
+                    });
+                    
+                    circle.addTo(layerGroup);
+                });
+                
+                layerGroup.addTo(map);
+                clusterLayers.set(`${row}_${col}`, layerGroup);
+                totalClusters += data.clusters.length;
+                
+            } catch (error) {
+                // Silently skip - not all tiles have clusters
+            }
+        }
+    }
+    
+    console.log(`[Clusters] Loaded ${totalClusters} clusters across ${clusterLayers.size} tiles`);
+}
+
+function clearClusters() {
+    clusterLayers.forEach(layer => map.removeLayer(layer));
+    clusterLayers.clear();
+    console.log('[Clusters] Cleared all cluster overlays');
+}
+
+let tileGridLayer = null;
+
+function setupTileGridControls() {
+    const showTileGrid = document.getElementById('showTileGrid');
+    const tileGridOptions = document.getElementById('tileGridOptions');
+    const showTileLabels = document.getElementById('showTileLabels');
+    const tileGridOpacity = document.getElementById('tileGridOpacity');
+    const tileGridOpacityValue = document.getElementById('tileGridOpacityValue');
+    
+    // Toggle options panel
+    showTileGrid.addEventListener('change', (e) => {
+        tileGridOptions.style.display = e.target.checked ? '' : 'none';
+        if (e.target.checked) {
+            renderTileGrid();
+            // Update grid when map moves (viewport-based rendering)
+            map.on('moveend zoomend', updateTileGridOnMove);
+        } else {
+            clearTileGrid();
+            map.off('moveend zoomend', updateTileGridOnMove);
+        }
+    });
+    
+    // Update labels
+    showTileLabels?.addEventListener('change', () => {
+        if (showTileGrid.checked) renderTileGrid();
+    });
+    
+    // Update opacity (redraw to apply new opacity)
+    tileGridOpacity?.addEventListener('input', (e) => {
+        tileGridOpacityValue.textContent = e.target.value;
+        if (showTileGrid.checked) renderTileGrid();
+    });
+}
+
+function updateTileGridOnMove() {
+    if (document.getElementById('showTileGrid')?.checked) {
+        renderTileGrid();
+    }
+}
+
+function renderTileGrid() {
+    clearTileGrid();
+    
+    const showLabels = document.getElementById('showTileLabels')?.checked ?? true;
+    const opacity = parseFloat(document.getElementById('tileGridOpacity')?.value ?? 0.5);
+    
+    tileGridLayer = L.layerGroup();
+    
+    // Get viewport bounds in Leaflet coordinates
+    const bounds = map.getBounds();
+    
+    // Convert Leaflet bounds to ADT tile range
+    // For WoW coordinates: lat 63 = tile row 0, lat 0 = tile row 63
+    let minRow, maxRow, minCol, maxCol;
+    
+    if (isWowTools()) {
+        // Invert Y-axis for WoW coordinates
+        minRow = Math.max(0, Math.floor(63 - bounds.getNorth()) - 1);
+        maxRow = Math.min(63, Math.ceil(63 - bounds.getSouth()) + 1);
+    } else {
+        minRow = Math.max(0, Math.floor(bounds.getSouth()) - 1);
+        maxRow = Math.min(63, Math.ceil(bounds.getNorth()) + 1);
+    }
+    
+    minCol = Math.max(0, Math.floor(bounds.getWest()) - 1);
+    maxCol = Math.min(63, Math.ceil(bounds.getEast()) + 1);
+    
+    // Draw grid lines for ADT tiles in viewport
+    // For each ADT tile, draw its boundary lines
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            const bounds = tileBounds(row, col);
+            const [[south, west], [north, east]] = bounds;
+            
+            // Draw rectangle for this tile
+            const rect = L.rectangle(bounds, {
+                color: '#FFFF00',
+                weight: 1,
+                opacity: opacity,
+                fill: false
+            });
+            rect.addTo(tileGridLayer);
+        }
+    }
+    
+    // Add tile coordinate labels if enabled
+    if (showLabels) {
+        const zoom = map.getZoom();
+        const labelStep = zoom < 1 ? 4 : (zoom < 2 ? 2 : 1);
+        
+        for (let row = minRow; row <= maxRow; row += labelStep) {
+            for (let col = minCol; col <= maxCol; col += labelStep) {
+                // Get the top-left corner of this ADT tile in Leaflet coordinates
+                const bounds = tileBounds(row, col);
+                const [[south, west], [north, east]] = bounds;
+                
+                const label = L.marker([north, west], {
+                    icon: L.divIcon({
+                        className: 'tile-label',
+                        html: `<div style="
+                            color: black;
+                            font-size: 10px;
+                            font-weight: normal;
+                            text-align: left;
+                            pointer-events: none;
+                            background: rgba(255,255,255,0.8);
+                            padding: 1px 3px;
+                            border: 1px solid #ccc;
+                            white-space: nowrap;
+                        ">${row}_${col}</div>`,
+                        iconSize: [40, 14],
+                        iconAnchor: [0, 0]
+                    }),
+                    interactive: false
+                });
+                label.addTo(tileGridLayer);
+            }
+        }
+    }
+    
+    tileGridLayer.addTo(map);
+    console.log(`[TileGrid] Rendered grid for ADT tiles: rows ${minRow}-${maxRow}, cols ${minCol}-${maxCol}`);
+}
+
+function clearTileGrid() {
+    if (tileGridLayer) {
+        map.removeLayer(tileGridLayer);
+        tileGridLayer = null;
+        console.log('[TileGrid] Cleared tile grid overlay');
+    }
 }
 
 function setupTerrainOverlayControls() {
@@ -409,15 +754,21 @@ function onStateChange() {
         variantSelect.value = state.overlayVariant;
     }
     
-    // Clear cache and tiles if version OR map changed
+    // Clear cache and tiles if version OR map OR variant changed
     const versionChanged = lastVersion !== state.selectedVersion;
     const mapChanged = lastMap !== state.selectedMap;
+    const variantChanged = lastVariant !== state.overlayVariant;
     
-    if (versionChanged || mapChanged) {
-        console.log(`State change detected - version: ${versionChanged}, map: ${mapChanged}`);
+    if (versionChanged || mapChanged || variantChanged) {
+        console.log(`State change detected - version: ${versionChanged}, map: ${mapChanged}, variant: ${variantChanged}`);
         lastVersion = state.selectedVersion;
         lastMap = state.selectedMap;
+        lastVariant = state.overlayVariant;
         clearCache();
+        
+        // Clear loaded tile layers (viewport culling cache)
+        objectMarkers.clearLayers();
+        loadedTileLayers.clear();
         
         // Remove all existing minimap image overlays to force refresh
         for (const [, overlay] of minimapImages.entries()) {
@@ -440,6 +791,18 @@ function onStateChange() {
         // Clear overlay data when switching maps
         if (overlayManager) {
             overlayManager.clearAllData();
+        }
+        
+        // Re-center on first available tile when map changes
+        if (mapChanged) {
+            const tiles = state.getTilesForMap(state.selectedMap);
+            if (tiles && tiles.length > 0) {
+                const firstTile = tiles.find(t => t.versions && t.versions.includes(state.selectedVersion)) || tiles[0];
+                const centerRow = firstTile.row + 0.5;
+                const centerCol = firstTile.col + 0.5;
+                map.setView([centerRow, centerCol], 4);
+                console.log(`Map changed, centered on first available tile: (${firstTile.row}, ${firstTile.col})`);
+            }
         }
     }
 
@@ -598,12 +961,18 @@ async function updateObjectMarkers() {
     }, 500);
 }
 
+// Track loaded tiles: Map<"row_col", L.LayerGroup>
+const loadedTileLayers = new Map();
+
 async function performObjectMarkerUpdate() {
-    objectMarkers.clearLayers();
+    if (!showObjects) {
+        // Clear all if objects are hidden
+        objectMarkers.clearLayers();
+        loadedTileLayers.clear();
+        return;
+    }
     
-    if (!showObjects) return;
-    
-    // Only load overlays for visible tiles (max 8x8 grid)
+    // Calculate visible tile bounds (max 8x8 grid)
     const bounds = map.getBounds();
     const latS = bounds.getSouth();
     const latN = bounds.getNorth();
@@ -622,18 +991,51 @@ async function performObjectMarkerUpdate() {
         maxCol = minCol + 7;
     }
     
-    const tileCount = (maxRow - minRow + 1) * (maxCol - minCol + 1);
-    console.log(`Loading objects for ${tileCount} tiles: r${minRow}-${maxRow}, c${minCol}-${maxCol}`);
+    // Build set of visible tile keys
+    const visibleTiles = new Set();
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            visibleTiles.add(`${row}_${col}`);
+        }
+    }
+    
+    // Remove tiles that are no longer visible
+    let removedCount = 0;
+    for (const [tileKey, layerGroup] of loadedTileLayers.entries()) {
+        if (!visibleTiles.has(tileKey)) {
+            objectMarkers.removeLayer(layerGroup);
+            loadedTileLayers.delete(tileKey);
+            removedCount++;
+        }
+    }
+    
+    // Load new tiles that aren't already loaded
+    const tilesToLoad = [];
+    for (let row = minRow; row <= maxRow; row++) {
+        for (let col = minCol; col <= maxCol; col++) {
+            const tileKey = `${row}_${col}`;
+            if (!loadedTileLayers.has(tileKey)) {
+                tilesToLoad.push({ row, col, tileKey });
+            }
+        }
+    }
+    
+    const tileCount = visibleTiles.size;
+    console.log(`[Viewport] Visible: ${tileCount} tiles, Loaded: ${loadedTileLayers.size}, ToLoad: ${tilesToLoad.length}, Removed: ${removedCount}`);
     
     const tiles = state.getTilesForMap(state.selectedMap);
     const currentVariant = state.overlayVariant || 'combined';
     const style = overlayVariants[currentVariant] ?? overlayVariants.combined;
-    for (let row = minRow; row <= maxRow; row++) {
-        for (let col = minCol; col <= maxCol; col++) {
-            // Only fetch overlays for tiles listed in index.json and available for the selected version
-            const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
-            if (!available) continue;
-            try {
+    
+    // Only load tiles that aren't already loaded
+    for (const { row, col, tileKey } of tilesToLoad) {
+        // Only fetch overlays for tiles listed in index.json and available for the selected version
+        const available = tiles.find(t => t.row === row && t.col === col && t.versions && t.versions.includes(state.selectedVersion));
+        if (!available) continue;
+        
+        try {
+            // Create a layer group for this tile's markers
+            const tileLayerGroup = L.layerGroup();
                 const overlayPath = state.getOverlayPath(state.selectedMap, row, col, state.selectedVersion, currentVariant);
                 const data = await loadOverlay(overlayPath);
                 
@@ -666,9 +1068,15 @@ async function performObjectMarkerUpdate() {
                             <strong style="font-size: 14px;">${obj.fileName || 'Unknown'}</strong><br>
                             <div style="margin-top: 8px; font-size: 12px;">
                                 <strong>UID:</strong> ${obj.uniqueId || 'N/A'}<br>
-                                <strong>World X:</strong> ${obj.world.x.toFixed(3)}<br>
-                                <strong>World Y:</strong> ${obj.world.y.toFixed(3)}<br>
-                                <strong>World Z:</strong> ${obj.world.z.toFixed(2)}<br>
+                                <strong title="Transformed world coordinates (±17066 map bounds)">Position:</strong><br>
+                                <div style="margin-left: 10px; font-family: monospace;">
+                                    X: ${obj.world.x.toFixed(2)}<br>
+                                    Y: ${obj.world.y.toFixed(2)}<br>
+                                    Z: ${obj.world.z.toFixed(2)}
+                                </div>
+                                ${obj.rotation ? `<strong>Rotation:</strong> ${obj.rotation.x.toFixed(1)}°, ${obj.rotation.y.toFixed(1)}°, ${obj.rotation.z.toFixed(1)}°<br>` : ''}
+                                ${obj.scale ? `<strong>Scale:</strong> ${obj.scale.toFixed(4)}<br>` : ''}
+                                ${obj.placement ? `<details style="margin-top: 4px;"><summary style="cursor: pointer; color: #888; font-size: 11px;">Raw ADT Coords</summary><div style="margin-left: 10px; font-family: monospace; font-size: 11px; color: #888;">${obj.placement.x.toFixed(2)}, ${obj.placement.y.toFixed(2)}, ${obj.placement.z.toFixed(2)}</div></details>` : ''}
                                 ${obj.assetPath ? `<strong>Path:</strong> ${obj.assetPath}<br>` : ''}
                             </div>
                         </div>
@@ -703,13 +1111,11 @@ async function performObjectMarkerUpdate() {
                                 currentPopup = square.getPopup();
                                 bringPopupToFront(square.getPopup());
                             });
-                            objectMarkers.addLayer(square);
+                            tileLayerGroup.addLayer(square);
                             
                             // Register with sedimentary layers
                             if (sedimentaryLayers) {
                                 sedimentaryLayers.registerMarker(square, obj.uniqueId || 0, row, col);
-                            } else {
-                                console.warn('[main] Square created but sedimentaryLayers not ready, UID:', obj.uniqueId);
                             }
                         }
                         else
@@ -727,7 +1133,7 @@ async function performObjectMarkerUpdate() {
                                 currentPopup = circle.getPopup();
                                 bringPopupToFront(circle.getPopup());
                             });
-                            objectMarkers.addLayer(circle);
+                            tileLayerGroup.addLayer(circle);
                             
                             // Register with sedimentary layers
                             if (sedimentaryLayers) {
@@ -750,7 +1156,7 @@ async function performObjectMarkerUpdate() {
                             currentPopup = marker.getPopup();
                             bringPopupToFront(marker.getPopup());
                         });
-                        objectMarkers.addLayer(marker);
+                        tileLayerGroup.addLayer(marker);
                         
                         // Register with sedimentary layers
                         if (sedimentaryLayers) {
@@ -776,9 +1182,14 @@ async function performObjectMarkerUpdate() {
                             fillColor: '#FFD54F',
                             fillOpacity: 0.9
                         });
-                        objectMarkers.addLayer(m);
+                        tileLayerGroup.addLayer(m);
                     });
                 }
+                
+                // Add tile layer group to map and track it
+                objectMarkers.addLayer(tileLayerGroup);
+                loadedTileLayers.set(tileKey, tileLayerGroup);
+                
             } catch (e) {
                 // Skip tiles without overlay data
             }
@@ -787,6 +1198,12 @@ async function performObjectMarkerUpdate() {
 }
 
 function handleMapClick(e) {
+    // Close any open popup when clicking on the map (not on an object)
+    if (currentPopup && !e.originalEvent.defaultPrevented) {
+        map.closePopup(currentPopup);
+        currentPopup = null;
+    }
+    
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     
@@ -984,50 +1401,6 @@ function drawOverview() {
         }
     }
     function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-}
-
-// --- ADT Grid Overlay ---
-function addGridOverlay() {
-    // Simple ADT grid - 64x64 tiles only
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    svg.setAttribute('viewBox', '0 0 64 64');
-    svg.style.width = '100%';
-    svg.style.height = '100%';
-    
-    // Draw ADT tile boundaries only
-    for (let i = 0; i <= 64; i++) {
-        // Vertical lines
-        const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        vLine.setAttribute('x1', i);
-        vLine.setAttribute('y1', 0);
-        vLine.setAttribute('x2', i);
-        vLine.setAttribute('y2', 64);
-        vLine.setAttribute('stroke', '#555');
-        vLine.setAttribute('stroke-width', '0.05');
-        svg.appendChild(vLine);
-        
-        // Horizontal lines
-        const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        hLine.setAttribute('x1', 0);
-        hLine.setAttribute('y1', i);
-        hLine.setAttribute('x2', 64);
-        hLine.setAttribute('y2', i);
-        hLine.setAttribute('stroke', '#555');
-        hLine.setAttribute('stroke-width', '0.05');
-        svg.appendChild(hLine);
-    }
-    
-    // Add SVG as Leaflet overlay
-    const bounds = [[0, 0], [64, 64]];
-    const svgOverlay = L.svgOverlay(svg, bounds, {
-        opacity: 0.8,
-        interactive: false,
-        pane: 'overlayPane'
-    });
-    svgOverlay.addTo(map);
-    
-    console.log('[Grid] Added ADT grid overlay (64x64)');
 }
 
 // --- Mapping helpers ---
