@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using WoWRollback.Core.Models;
+using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Viewer;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
@@ -364,6 +365,10 @@ public sealed class AnalysisViewerAdapter
                 }
             }
 
+            // Copy terrain meshes to viewer output
+            Log($"Copying terrain meshes to viewer...");
+            CopyTerrainMeshesToViewer(outputDir, viewerRoot, mapName, syntheticVersion);
+
             Log("=== Analysis completed successfully ===");
             _logWriter?.Close();
             _logWriter = null;
@@ -591,10 +596,29 @@ public sealed class AnalysisViewerAdapter
                 return;
             }
 
+            // Try to load AreaTable lookup for enriching area data
+            AreaTableLookup? areaLookup = null;
+            try
+            {
+                // Look for AreaTable CSVs in the output directory
+                var alphaPath = Path.Combine(outputDir, "AreaTable_Alpha.csv");
+                var lkPath = Path.Combine(outputDir, "AreaTable_335.csv");
+                
+                if (File.Exists(alphaPath) || File.Exists(lkPath))
+                {
+                    areaLookup = AreaTableReader.LoadForVersion(outputDir);
+                    Log($"Loaded AreaTable lookup for area name enrichment");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Warning: Could not load AreaTable data: {ex.Message}");
+            }
+
             // Generate terrain overlay JSONs using TerrainOverlayBuilder
             // Target: {viewerRoot}/overlays/{version}/{mapName}/terrain_complete/tile_{col}_{row}.json
             var builder = new TerrainOverlayBuilder();
-            builder.BuildTerrainOverlays(terrainCsvPath, mapName, version, viewerRoot);
+            builder.BuildTerrainOverlays(terrainCsvPath, mapName, version, viewerRoot, areaLookup);
             
             Log("Terrain overlays generated successfully");
         }

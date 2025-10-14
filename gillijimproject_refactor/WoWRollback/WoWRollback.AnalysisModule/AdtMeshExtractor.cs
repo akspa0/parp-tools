@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -13,8 +14,11 @@ using WoWRollback.Core.Services.Archive;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
+using SharpGLTF.Memory;
 using SharpGLTF.Scenes;
 using SharpGLTF.Schema2;
+using SixLabors.ImageSharp.PixelFormats;
+using ImageSharpImage = SixLabors.ImageSharp.Image;
 
 namespace WoWRollback.AnalysisModule;
 
@@ -29,6 +33,7 @@ public sealed class AdtMeshExtractor
     private const float CHUNK_SIZE = TILE_SIZE / 16f;
     private const float UNIT_SIZE = CHUNK_SIZE / 8f;
     private const float UNIT_SIZE_HALF = UNIT_SIZE / 2f;
+    private const float MAP_CENTER = 32.0f * TILE_SIZE; // 17066.67 - same as placement world coord transform
 
     /// <summary>
     /// Extracts mesh data for all tiles in a map from MPQ archives.
@@ -38,8 +43,8 @@ public sealed class AdtMeshExtractor
         IArchiveSource source,
         string mapName,
         string outputDir,
-        bool exportGlb = false,
-        bool exportObj = true,
+        bool exportGlb = true,   // Default to GLB (smaller, faster)
+        bool exportObj = false,  // Keep as option for debugging
         int maxTiles = 0, // 0 = no limit
         int maxDegreeOfParallelism = -1) // -1 = use default (CPU count)
     {
@@ -48,6 +53,24 @@ public sealed class AdtMeshExtractor
 
         Console.WriteLine($"[AdtMeshExtractor] Extracting meshes for map: {mapName}");
         Console.WriteLine($"[AdtMeshExtractor] Output directory: {meshDir}");
+
+        // Copy minimap files to mesh directory so OBJ/GLB can reference them
+        var minimapSourceDir = Path.Combine(outputDir, "minimaps");
+        if (Directory.Exists(minimapSourceDir))
+        {
+            int copied = 0;
+            foreach (var minimapFile in Directory.GetFiles(minimapSourceDir, $"{mapName}_*.jpg"))
+            {
+                var fileName = Path.GetFileName(minimapFile);
+                var destPath = Path.Combine(meshDir, fileName);
+                File.Copy(minimapFile, destPath, overwrite: true);
+                copied++;
+            }
+            if (copied > 0)
+            {
+                Console.WriteLine($"[AdtMeshExtractor] Copied {copied} minimap textures to mesh directory");
+            }
+        }
 
         // Enumerate all ADT tiles for this map
         var adtTiles = EnumerateAdtTiles(source, mapName);
@@ -84,6 +107,9 @@ public sealed class AdtMeshExtractor
                 : maxDegreeOfParallelism
         };
 
+        var startTime = DateTime.Now;
+        var lastProgressTime = startTime;
+        
         Parallel.ForEach(adtTiles, options, tile =>
         {
             try
@@ -95,9 +121,15 @@ public sealed class AdtMeshExtractor
                     lock (lockObj)
                     {
                         tilesProcessed++;
-                        if (tilesProcessed % 10 == 0 || tilesProcessed == adtTiles.Count)
+                        // Report progress every 50 tiles or every 5 seconds (whichever comes first)
+                        var now = DateTime.Now;
+                        if (tilesProcessed % 50 == 0 || (now - lastProgressTime).TotalSeconds >= 5 || tilesProcessed == adtTiles.Count)
                         {
-                            Console.WriteLine($"[AdtMeshExtractor] Progress: {tilesProcessed}/{adtTiles.Count} tiles");
+                            var elapsed = (now - startTime).TotalSeconds;
+                            var rate = tilesProcessed / elapsed;
+                            var remaining = (adtTiles.Count - tilesProcessed) / rate;
+                            Console.WriteLine($"[AdtMeshExtractor] Progress: {tilesProcessed}/{adtTiles.Count} tiles ({rate:F1} tiles/sec, ~{remaining:F0}s remaining)");
+                            lastProgressTime = now;
                         }
                     }
                 }
@@ -108,11 +140,21 @@ public sealed class AdtMeshExtractor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AdtMeshExtractor] Warning: Failed to process tile {tile.X}_{tile.Y}: {ex.Message}");
-                lock (lockObj) { tilesSkipped++; }
+                lock (lockObj) 
+                { 
+                    tilesSkipped++;
+                    // Only log first few errors to avoid spam
+                    if (tilesSkipped <= 3)
+                    {
+                        Console.WriteLine($"[AdtMeshExtractor] Warning: Failed to process tile {tile.X}_{tile.Y}: {ex.Message}");
+                    }
+                }
             }
         });
 
+        var totalTime = (DateTime.Now - startTime).TotalSeconds;
+        var avgRate = tilesProcessed / totalTime;
+        Console.WriteLine($"[AdtMeshExtractor] Completed in {totalTime:F1}s ({avgRate:F1} tiles/sec)");
         Console.WriteLine($"[AdtMeshExtractor] Processed {tilesProcessed} tiles, skipped {tilesSkipped}");
 
         // Generate manifest JSON
@@ -204,10 +246,17 @@ public sealed class AdtMeshExtractor
 
                 for (int col = 0; col < colCount; col++)
                 {
-                    float vx = chunk.header.position.Y - (col * UNIT_SIZE);
-                    if (isShort) vx -= UNIT_SIZE_HALF;
-                    float vy = chunk.vertices.vertices[idx] + chunk.header.position.Z;
-                    float vz = chunk.header.position.X - (row * UNIT_SIZE_HALF);
+                    // Raw ADT coordinates
+                    float adtX = chunk.header.position.Y - (col * UNIT_SIZE);
+                    if (isShort) adtX -= UNIT_SIZE_HALF;
+                    float adtY = chunk.vertices.vertices[idx] + chunk.header.position.Z;
+                    float adtZ = chunk.header.position.X - (row * UNIT_SIZE_HALF);
+                    
+                    // Transform to world coordinates (same as placement world coords)
+                    // worldX = MAP_CENTER - adtX, worldY = MAP_CENTER - adtZ, worldZ = adtY (height)
+                    float vx = MAP_CENTER - adtX;
+                    float vy = adtY; // Height unchanged
+                    float vz = MAP_CENTER - adtZ;
                     
                     positions.Add((vx, vy, vz));
                     
@@ -229,6 +278,10 @@ public sealed class AdtMeshExtractor
         float spanZ = Math.Max(1e-6f, maxZ - minZ);
         const float eps = 2.5e-3f;
 
+        // UV flip flags (matching working implementation defaults)
+        bool yFlip = true;  // Flip V coordinate
+        bool xFlip = true;  // Flip U coordinate
+
         var uvs = new List<(float u, float v)>(positions.Count);
         for (int i = 0; i < positions.Count; i++)
         {
@@ -237,19 +290,27 @@ public sealed class AdtMeshExtractor
             float u = (p.x - minX) / spanX;
             float v = (maxZ - p.z) / spanZ;
             
+            // Apply flips (CRITICAL - matches working code)
+            if (yFlip) v = 1f - v;
+            if (xFlip) u = 1f - u;
+            
             u = Math.Clamp(u, eps, 1f - eps);
             v = Math.Clamp(v, eps, 1f - eps);
             
             uvs.Add((u, v));
         }
 
-        // Export GLB if requested (TODO: implement properly)
+        // Export GLB if requested
         string? glbFile = null;
         if (exportGlb && positions.Count > 0)
         {
             glbFile = $"{mapName}_{tileX}_{tileY}.glb";
-            // var glbPath = Path.Combine(meshDir, glbFile);
-            // ExportGLB(positions, uvs, chunkStartIndices, adt, glbPath);
+            var glbPath = Path.Combine(meshDir, glbFile);
+            
+            // Texture path (JPG minimap - must exist or GLB will use fallback color)
+            var texturePath = Path.Combine(meshDir, $"{mapName}_{tileX}_{tileY}.jpg");
+            
+            ExportGLB(positions, uvs, chunkStartIndices, adt, glbPath, texturePath);
         }
 
         // Export OBJ if requested
@@ -287,40 +348,118 @@ public sealed class AdtMeshExtractor
 
     private void ExportGLB(
         List<(float x, float y, float z)> positions,
-        List<int> indices,
-        string outputPath)
+        List<(float u, float v)> uvs,
+        List<int> chunkStartIndices,
+        dynamic adt,
+        string glbPath,
+        string texturePath)
     {
         var scene = new SceneBuilder();
-        var material = new MaterialBuilder("TerrainMaterial")
-            .WithMetallicRoughnessShader()
-            .WithChannelParam(KnownChannel.BaseColor, new System.Numerics.Vector4(0.6f, 0.6f, 0.6f, 1.0f));
-
-        var mesh = new MeshBuilder<VertexPosition>("TerrainMesh");
-        var prim = mesh.UsePrimitive(material);
-
-        // Add vertices
-        var vertexPositions = positions.Select(p => new VertexPosition(p.x, p.y, p.z)).ToArray();
-
-        // Add triangles
-        for (int i = 0; i < indices.Count; i += 3)
+        
+        // Load and embed texture image (JPG minimap)
+        MaterialBuilder material;
+        if (File.Exists(texturePath))
         {
-            if (i + 2 < indices.Count)
+            try
             {
-                var i0 = indices[i];
-                var i1 = indices[i + 1];
-                var i2 = indices[i + 2];
-
-                if (i0 < vertexPositions.Length && i1 < vertexPositions.Length && i2 < vertexPositions.Length)
-                {
-                    prim.AddTriangle(vertexPositions[i0], vertexPositions[i1], vertexPositions[i2]);
-                }
+                // Load texture as byte array and create MemoryImage
+                var textureBytes = File.ReadAllBytes(texturePath);
+                var memoryImage = new MemoryImage(textureBytes);
+                
+                // Create ImageBuilder from MemoryImage
+                var imageBuilder = ImageBuilder.From(memoryImage, Path.GetFileName(texturePath));
+                
+                // Create material with embedded texture
+                material = new MaterialBuilder("TerrainMaterial")
+                    .WithMetallicRoughnessShader()
+                    .WithChannelImage(KnownChannel.BaseColor, imageBuilder);
+            }
+            catch
+            {
+                // Fallback to solid color if texture loading fails
+                material = new MaterialBuilder("TerrainMaterial")
+                    .WithMetallicRoughnessShader()
+                    .WithChannelParam(KnownChannel.BaseColor, KnownProperty.RGBA, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
             }
         }
+        else
+        {
+            // No texture file - use solid color
+            material = new MaterialBuilder("TerrainMaterial")
+                .WithMetallicRoughnessShader()
+                .WithChannelParam(KnownChannel.BaseColor, KnownProperty.RGBA, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+        }
 
-        scene.AddRigidMesh(mesh, System.Numerics.Matrix4x4.Identity);
+        var mesh = new MeshBuilder<VertexPosition, VertexTexture1>("TerrainMesh");
+        var prim = mesh.UsePrimitive(material);
 
+        // Generate faces with hole detection (same logic as OBJ export)
+        int chunkIndex = 0;
+        foreach (var chunk in adt.chunks)
+        {
+            if (chunk.vertices.vertices == null || chunk.vertices.vertices.Length == 0)
+            {
+                chunkIndex++;
+                continue;
+            }
+
+            for (int j = 9, xx = 0, yy = 0; j < 145; j++, xx++)
+            {
+                if (xx >= 8) { xx = 0; yy++; }
+
+                bool isHole = IsHole(chunk, xx, yy);
+
+                if (!isHole)
+                {
+                    int baseIndex = chunkStartIndices[chunkIndex];
+                    int i0 = j;
+                    int a = baseIndex + i0;
+                    int b = baseIndex + (i0 - 9);
+                    int c = baseIndex + (i0 + 8);
+                    int d = baseIndex + (i0 - 8);
+                    int e = baseIndex + (i0 + 9);
+                    
+                    // Validate indices
+                    if (a < positions.Count && b < positions.Count && c < positions.Count &&
+                        d < positions.Count && e < positions.Count)
+                    {
+                        var pa = positions[a];
+                        var pb = positions[b];
+                        var pc = positions[c];
+                        var pd = positions[d];
+                        var pe = positions[e];
+                        
+                        var uva = uvs[a];
+                        var uvb = uvs[b];
+                        var uvc = uvs[c];
+                        var uvd = uvs[d];
+                        var uve = uvs[e];
+                        
+                        // CRITICAL: Use z,x,y order for correct orientation (same as OBJ)
+                        var va = (new VertexPosition(pa.z, pa.x, pa.y), new VertexTexture1(new Vector2(uva.u, uva.v)));
+                        var vb = (new VertexPosition(pb.z, pb.x, pb.y), new VertexTexture1(new Vector2(uvb.u, uvb.v)));
+                        var vc = (new VertexPosition(pc.z, pc.x, pc.y), new VertexTexture1(new Vector2(uvc.u, uvc.v)));
+                        var vd = (new VertexPosition(pd.z, pd.x, pd.y), new VertexTexture1(new Vector2(uvd.u, uvd.v)));
+                        var ve = (new VertexPosition(pe.z, pe.x, pe.y), new VertexTexture1(new Vector2(uve.u, uve.v)));
+                        
+                        // 4 triangles per quad
+                        prim.AddTriangle(va, vb, vc);
+                        prim.AddTriangle(va, vd, vb);
+                        prim.AddTriangle(va, ve, vd);
+                        prim.AddTriangle(va, vc, ve);
+                    }
+                }
+
+                if (((j + 1) % (9 + 8)) == 0) j += 9;
+            }
+
+            chunkIndex++;
+        }
+
+        scene.AddRigidMesh(mesh, Matrix4x4.Identity);
+        
         var model = scene.ToGltf2();
-        model.SaveGLB(outputPath);
+        model.SaveGLB(glbPath);
     }
 
     private void ExportOBJ(
@@ -337,7 +476,7 @@ public sealed class AdtMeshExtractor
         mtl.AppendLine("# Terrain material");
         mtl.AppendLine("newmtl Minimap");
         mtl.AppendLine("Kd 1.000 1.000 1.000");
-        mtl.AppendLine($"map_Kd {Path.GetFileNameWithoutExtension(baseName)}.png");
+        mtl.AppendLine($"map_Kd {Path.GetFileNameWithoutExtension(baseName)}.jpg");
         File.WriteAllText(mtlPath, mtl.ToString());
 
         // Write OBJ file (matching working implementation)

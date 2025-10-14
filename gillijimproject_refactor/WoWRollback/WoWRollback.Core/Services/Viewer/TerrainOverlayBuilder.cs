@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WoWRollback.Core.Models;
 
 namespace WoWRollback.Core.Services.Viewer;
 
@@ -17,7 +18,8 @@ public sealed class TerrainOverlayBuilder
         string terrainCsvPath,
         string mapName,
         string version,
-        string viewerRoot)
+        string viewerRoot,
+        AreaTableLookup? areaLookup = null)
     {
         if (!File.Exists(terrainCsvPath))
         {
@@ -26,6 +28,10 @@ public sealed class TerrainOverlayBuilder
         }
 
         Console.WriteLine($"[TerrainOverlayBuilder] Building terrain overlays from {terrainCsvPath}");
+        if (areaLookup != null)
+        {
+            Console.WriteLine($"[TerrainOverlayBuilder] AreaTable lookup available - will enrich area data");
+        }
 
         // Parse CSV
         var records = ParseTerrainCsv(terrainCsvPath);
@@ -46,7 +52,7 @@ public sealed class TerrainOverlayBuilder
             var chunks = tileGroup.ToList();
 
             // Build overlay JSON
-            var overlayJson = BuildTileOverlayJson(mapName, version, row, col, chunks);
+            var overlayJson = BuildTileOverlayJson(mapName, version, row, col, chunks, areaLookup);
 
             // Write to file: tile_{col}_{row}.json
             var outputPath = Path.Combine(overlaysDir, $"tile_{col}_{row}.json");
@@ -62,7 +68,8 @@ public sealed class TerrainOverlayBuilder
         string version,
         int tileRow,
         int tileCol,
-        List<TerrainRecord> chunks)
+        List<TerrainRecord> chunks,
+        AreaTableLookup? areaLookup)
     {
         // Build terrain properties data
         var terrainProperties = chunks.Select(c => new
@@ -94,12 +101,17 @@ public sealed class TerrainOverlayBuilder
             })
             .ToList();
 
-        // Build area IDs data
-        var areaIds = chunks.Select(c => new
+        // Build area IDs data with enriched AreaTable information
+        var areaIds = chunks.Select(c =>
         {
-            chunk_x = c.ChunkX,
-            chunk_y = c.ChunkY,
-            area_id = c.AreaId
+            var areaName = areaLookup?.GetName(c.AreaId, preferAlpha: false) ?? $"Area {c.AreaId}";
+            return new
+            {
+                chunk_x = c.ChunkX,
+                chunk_y = c.ChunkY,
+                area_id = c.AreaId,
+                area_name = areaName
+            };
         }).ToList();
 
         // Build complete overlay structure

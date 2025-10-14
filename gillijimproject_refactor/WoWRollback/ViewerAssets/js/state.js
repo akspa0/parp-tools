@@ -88,10 +88,10 @@ export class State {
     }
 
     getMinimapPath(mapName, row, col, version) {
-        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.webp
-        // Using WebP for 50-70% memory savings vs PNG
+        // New per-version structure: minimap/{version}/{map}/{map}_{col}_{row}.jpg
+        // Using JPG for 70% size reduction vs PNG with fast decode
         const t = this.cacheBust || 0;
-        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.webp?t=${t}`;
+        return `minimap/${version}/${mapName}/${mapName}_${col}_${row}.jpg?t=${t}`;
     }
 
     getOverlayPath(mapName, row, col, version, variant) {

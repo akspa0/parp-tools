@@ -113,16 +113,22 @@ public sealed class AdtMpqTerrainExtractor
         try
         {
             // Parse ADT using Warcraft.NET
+            // NOTE: Warcraft.NET's Terrain parser is designed for WotLK+ format
+            // Alpha 0.6.0 uses preliminary ADT v18 which may not parse correctly
             var terrain = new Terrain(adtData);
 
             // Extract MCNK chunks (16x16 grid per tile - 256 chunks expected)
             if (terrain.Chunks == null || terrain.Chunks.Length == 0)
             {
-                Console.WriteLine($"[AdtMpqTerrainExtractor] WARNING: tile {tileX}_{tileY} has no MCNK chunks!");
+                Console.WriteLine($"[AdtMpqTerrainExtractor] WARNING: tile {tileX}_{tileY} has no MCNK chunks (may be unsupported format)");
                 return records;
             }
 
-            Console.WriteLine($"[AdtMpqTerrainExtractor] Tile {tileX}_{tileY}: Found {terrain.Chunks.Length} MCNK chunks");
+            if (tileX == 0 && tileY == 0)
+            {
+                // Log first tile for debugging
+                Console.WriteLine($"[AdtMpqTerrainExtractor] Tile {tileX}_{tileY}: Found {terrain.Chunks.Length} MCNK chunks");
+            }
 
             foreach (var mcnk in terrain.Chunks)
             {
@@ -147,7 +153,9 @@ public sealed class AdtMpqTerrainExtractor
         }
         catch (Exception ex)
         {
+            // Alpha 0.6.0 ADTs use preliminary format that Warcraft.NET may not support
             Console.WriteLine($"[AdtMpqTerrainExtractor] Error parsing {adtPath}: {ex.Message}");
+            Console.WriteLine($"[AdtMpqTerrainExtractor] Note: Alpha 0.6.0 uses preliminary ADT v18 format - parser may not support it");
         }
 
         return records;

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using SixLabors.ImageSharp.Formats.Jpeg;
 using WoWRollback.AnalysisModule;
 using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
@@ -692,13 +693,13 @@ internal static class Program
                             blpStream.CopyTo(ms);
                             var blpData = ms.ToArray();
                             
-                            // Convert BLP to PNG using Warcraft.NET
+                            // Convert BLP to JPG using Warcraft.NET
                             var blp = new Warcraft.NET.Files.BLP.BLP(blpData);
                             var image = blp.GetMipMap(0); // Get highest resolution mipmap
                             
-                            var outputPath = Path.Combine(minimapOutDir, $"{mapName}_{x}_{y}.png");
+                            var outputPath = Path.Combine(minimapOutDir, $"{mapName}_{x}_{y}.jpg");
                             using var outStream = File.Create(outputPath);
-                            image.Save(outStream, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                            image.Save(outStream, new JpegEncoder { Quality = 85 });
                             extracted++;
                             
                             if (extracted == 1)
@@ -720,7 +721,7 @@ internal static class Program
 
             if (extracted > 0)
             {
-                Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→PNG)");
+                Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→JPG)");
                 if (failed > 0)
                 {
                     Console.WriteLine($"[info] Failed to extract {failed} tiles (missing or corrupt)");
@@ -1145,7 +1146,7 @@ internal static class Program
         minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
         if (!string.IsNullOrEmpty(minimapDir))
         {
-            var count = Directory.GetFiles(minimapDir, "*.png").Length;
+            var count = Directory.GetFiles(minimapDir, "*.jpg").Length;
             Console.WriteLine($"  [ok] Extracted {count} minimap tiles");
         }
 
@@ -1288,6 +1289,29 @@ internal static class Program
             Console.WriteLine($"[info] No minimaps found in MPQ");
         }
 
+        // Step 1.6: Extract AreaTable from DBC for terrain overlay enrichment
+        // NOTE: Only for 0.6.0+. Alpha (0.5.x) uses specialized hand-crafted mapping.
+        var versionStr = opts.GetValueOrDefault("version", "unknown");
+        var isAlpha = versionStr.StartsWith("0.5.");
+        
+        if (!isAlpha)
+        {
+            Console.WriteLine("\n=== Step 1.6: Extracting AreaTable from DBC ===");
+            try
+            {
+                ExtractAreaTableFromMpq(src, outDir, versionStr);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[warn] AreaTable extraction failed: {ex.Message}");
+                Console.WriteLine($"[info] Terrain overlays will work without area names");
+            }
+        }
+        else
+        {
+            Console.WriteLine("\n=== Step 1.6: Skipping AreaTable extraction (Alpha version uses specialized mapping) ===");
+        }
+
         // Step 2: Analyze UniqueIDs and detect layers
         Console.WriteLine("\n=== Step 2: Analyzing UniqueIDs and detecting layers ===");
         var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
@@ -1321,8 +1345,63 @@ internal static class Program
             Console.WriteLine($"[ok] Summary CSV: {clusterResult.SummaryCsvPath}");
         }
 
-        // Step 4: Generate viewer
-        Console.WriteLine("\n=== Step 4: Generating viewer ===");
+        // Step 4: Extract terrain data from ADTs in MPQ
+        Console.WriteLine("\n=== Step 4: Extracting terrain data (MCNK chunks) ===");
+        try
+        {
+            var terrainExtractor = new AdtMpqTerrainExtractor();
+            var terrainCsvPath = Path.Combine(outDir, $"{mapName}_terrain.csv");
+            var terrainResult = terrainExtractor.ExtractFromArchive(src, mapName, terrainCsvPath);
+            
+            if (terrainResult.Success && terrainResult.ChunksExtracted > 0)
+            {
+                Console.WriteLine($"[ok] Extracted {terrainResult.ChunksExtracted} MCNK chunks from {terrainResult.TilesProcessed} tiles");
+            }
+            else if (terrainResult.Success && terrainResult.ChunksExtracted == 0)
+            {
+                Console.WriteLine($"[info] No terrain data found (map may be WMO-only)");
+            }
+            else
+            {
+                Console.WriteLine($"[warn] Terrain extraction failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] Terrain extraction error: {ex.Message}");
+        }
+
+        // Step 5: Extract terrain meshes (GLB + OBJ) for 3D visualization
+        Console.WriteLine("\n=== Step 5: Extracting terrain meshes (GLB + OBJ) ===");
+        try
+        {
+            var meshExtractor = new AdtMeshExtractor();
+            var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, exportObj: true, maxTiles: 0);
+            
+            if (meshResult.Success && meshResult.TilesProcessed > 0)
+            {
+                Console.WriteLine($"[ok] Extracted {meshResult.TilesProcessed} tile meshes to {meshResult.MeshDirectory}");
+                if (!string.IsNullOrEmpty(meshResult.ManifestPath))
+                {
+                    Console.WriteLine($"[ok] Mesh manifest: {Path.GetFileName(meshResult.ManifestPath)}");
+                }
+            }
+            else if (meshResult.Success && meshResult.TilesProcessed == 0)
+            {
+                Console.WriteLine($"[info] No mesh data extracted (map may be WMO-only)");
+            }
+            else
+            {
+                Console.WriteLine($"[warn] Mesh extraction failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] Mesh extraction error: {ex.Message}");
+        }
+
+        // Step 6: Generate viewer
+        Console.WriteLine("\n=== Step 6: Generating viewer ===");
         var viewerAdapter = new AnalysisViewerAdapter();
         var versionLabel = ExtractVersionFromPath(clientRoot) ?? "mpq-analysis";
         var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapDir: minimapDir, versionLabel: versionLabel);
@@ -1781,5 +1860,140 @@ internal static class Program
         Console.WriteLine($"[ok] WebP files are now in: {Path.Combine(outputDir, "viewer", "minimap")}");
 
         return 0;
+    }
+
+    private static void ExtractAreaTableFromMpq(IArchiveSource src, string outputDir, string version)
+    {
+        // Check if AreaTable.dbc exists in MPQ
+        const string dbcPath = "DBFilesClient/AreaTable.dbc";
+        if (!src.FileExists(dbcPath))
+        {
+            Console.WriteLine($"[warn] AreaTable.dbc not found in MPQ");
+            return;
+        }
+
+        try
+        {
+            // Get WoWDBDefs path
+            var dbdDir = GetWoWDBDefsPath();
+            if (string.IsNullOrEmpty(dbdDir))
+            {
+                Console.WriteLine($"[warn] WoWDBDefs not found - cannot parse AreaTable");
+                return;
+            }
+
+            // Extract DBC to temp location
+            var tempDbcDir = Path.Combine(Path.GetTempPath(), $"dbc_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDbcDir);
+            var tempDbcPath = Path.Combine(tempDbcDir, "AreaTable.dbc");
+            
+            using (var dbcStream = src.OpenFile(dbcPath))
+            using (var fileStream = File.Create(tempDbcPath))
+            {
+                dbcStream.CopyTo(fileStream);
+            }
+
+            Console.WriteLine($"[info] Extracted AreaTable.dbc from MPQ");
+
+            // Use DBCD to parse and export to CSV in AreaTableReader-compatible format
+            var dbdProvider = new DBCD.Providers.FilesystemDBDProvider(dbdDir);
+            var dbcProvider = new DBCD.Providers.FilesystemDBCProvider(tempDbcDir, useCache: false);
+            var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+            var areaTable = dbcd.Load("AreaTable", version);
+
+            // Export to CSV in format: row_key,id,parent,continentId,name
+            var csvPath = Path.Combine(outputDir, "AreaTable_Alpha.csv");
+            using (var writer = new StreamWriter(csvPath))
+            {
+                // Write header matching AreaTableReader expectations
+                writer.WriteLine("row_key,id,parent,continentId,name");
+
+                // Write rows
+                int rowKey = 0;
+                foreach (var kvp in (IEnumerable<KeyValuePair<int, DBCD.DBCDRow>>)areaTable)
+                {
+                    try
+                    {
+                        var row = kvp.Value;
+                        var id = GetField<int>(row, "ID");
+                        var parent = GetField<int?>(row, "ParentAreaID") ?? GetField<int?>(row, "AreaTableParentID") ?? 0;
+                        var continentId = GetField<int?>(row, "ContinentID") ?? GetField<int?>(row, "MapID") ?? 0;
+                        var name = GetField<string>(row, "AreaName_Lang") ?? GetField<string>(row, "Name_Lang") ?? "";
+                        
+                        // Escape name if it contains commas
+                        if (name.Contains(',') || name.Contains('"'))
+                        {
+                            name = $"\"{name.Replace("\"", "\"\"")}\"";
+                        }
+                        
+                        writer.WriteLine($"{rowKey},{id},{parent},{continentId},{name}");
+                        rowKey++;
+                    }
+                    catch
+                    {
+                        // Skip rows that don't have required fields
+                        continue;
+                    }
+                }
+            }
+
+            Console.WriteLine($"[ok] AreaTable CSV: {csvPath} ({areaTable.Count} rows)");
+
+            // Cleanup temp files
+            try
+            {
+                Directory.Delete(tempDbcDir, recursive: true);
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] AreaTable extraction error: {ex.Message}");
+        }
+    }
+
+    private static string? GetWoWDBDefsPath()
+    {
+        // Try common locations for WoWDBDefs
+        var candidates = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(Directory.GetCurrentDirectory(), "lib", "WoWDBDefs", "definitions"),
+            "C:\\WoWDBDefs\\definitions"
+        };
+
+        foreach (var path in candidates)
+        {
+            if (Directory.Exists(path))
+            {
+                return Path.GetFullPath(path);
+            }
+        }
+
+        return null;
+    }
+
+    private static T? GetField<T>(DBCD.DBCDRow row, string fieldName)
+    {
+        try
+        {
+            var value = row[fieldName];
+            if (value is T typedValue)
+                return typedValue;
+            
+            // Try conversion for common types
+            if (typeof(T) == typeof(string))
+                return (T)(object)(value?.ToString() ?? "");
+            
+            if (value != null)
+                return (T)Convert.ChangeType(value, typeof(T));
+        }
+        catch
+        {
+            // Field doesn't exist or conversion failed
+        }
+        
+        return default;
     }
 }

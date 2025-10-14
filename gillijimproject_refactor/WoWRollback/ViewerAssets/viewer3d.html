@@ -347,21 +347,49 @@
         </div>
     </div>
 
-    <!-- Three.js from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    <!-- Three.js from CDN - using ES modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        
+        // Make THREE available globally for viewer3d.js
+        window.THREE = THREE;
+        window.OrbitControls = OrbitControls;
+        window.GLTFLoader = GLTFLoader;
+    </script>
 
     <!-- Our 3D viewer script -->
     <script src="js/viewer3d.js"></script>
 
     <script>
         // Initialize viewer when page loads
-        window.addEventListener('DOMContentLoaded', () => {
+        window.addEventListener('DOMContentLoaded', async () => {
             // Get map and version from URL parameters
             const params = new URLSearchParams(window.location.search);
-            const mapName = params.get('map') || 'Azeroth';
+            let mapName = params.get('map');
             const version = params.get('version') || '0.6.0.3592';
+
+            // If no map specified, try to detect from available data
+            if (!mapName) {
+                try {
+                    const response = await fetch(`cached_maps/analysis/${version}/manifest.json`);
+                    const manifest = await response.json();
+                    // Use first available map
+                    mapName = manifest.maps && manifest.maps.length > 0 ? manifest.maps[0] : 'Kalimdor';
+                } catch (e) {
+                    console.warn('Could not load manifest, defaulting to Kalimdor');
+                    mapName = 'Kalimdor';
+                }
+            }
 
             // Update UI
             document.getElementById('map-name').textContent = mapName;

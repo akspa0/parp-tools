@@ -152,8 +152,8 @@ public static class ClusterOverlayBuilder
                 radius = CalculateClusterRadius(cluster),
                 isStamp = cluster.IsStamp,
                 hasConsecutiveIds = cluster.HasConsecutiveIds,
-                tileX = cluster.TileX,
-                tileY = cluster.TileY
+                tileX = tileCol,  // Use computed tile, not source cluster tile
+                tileY = tileRow   // Use computed tile, not source cluster tile
             });
         }
 

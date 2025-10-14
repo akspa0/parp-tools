@@ -37,7 +37,7 @@
         addLog('Map created');
         
         // Test tile layer with zoom 6 for 1:1 coordinate mapping
-        const tileLayer = L.tileLayer('minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.png', {
+        const tileLayer = L.tileLayer('minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.jpg', {
             tileSize: 512,
             noWrap: true,
             bounds: [[0, 0], [64, 64]],
@@ -45,7 +45,7 @@
             maxNativeZoom: 6
         });
         
-        addLog('TileLayer created with URL template: minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.png');
+        addLog('TileLayer created with URL template: minimap/0.5.3.3368/Kalimdor/Kalimdor_{x}_{y}.jpg');
         
         tileLayer.on('tileloadstart', function(e) {
             addLog(`LOADSTART: [${e.coords.y},${e.coords.x}] z=${e.coords.z}`);

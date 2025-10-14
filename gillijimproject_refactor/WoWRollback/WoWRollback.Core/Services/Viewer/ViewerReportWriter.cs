@@ -132,13 +132,22 @@ public sealed class ViewerReportWriter
                     var versionMapMinimapDir = Path.Combine(versionMinimapRoot, safeMap);
                     Directory.CreateDirectory(versionMapMinimapDir);
 
-                    var minimapFile = $"{mapName}_{col}_{row}.png";
+                    var minimapFile = $"{mapName}_{col}_{row}.jpg";
                     var minimapPath = Path.Combine(versionMapMinimapDir, minimapFile);
 
                     try
                     {
-                        if (minimapLocator.TryGetTile(version, mapName, row, col, out var tileDescriptor))
+                        // First check if JPG already exists in minimaps/ directory (from MPQ extraction)
+                        var sourceJpgPath = Path.Combine(Path.GetDirectoryName(viewerRoot)!, "minimaps", minimapFile);
+                        
+                        if (File.Exists(sourceJpgPath))
                         {
+                            // Copy existing JPG file
+                            File.Copy(sourceJpgPath, minimapPath, overwrite: true);
+                        }
+                        else if (minimapLocator.TryGetTile(version, mapName, row, col, out var tileDescriptor))
+                        {
+                            // Fallback: decode from BLP in archive
                             using var tileStream = tileDescriptor.Open();
                             _minimapComposer.ComposeAsync(tileStream, minimapPath, resolvedOptions).GetAwaiter().GetResult();
                         }
