@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.Structs.WDT;
@@ -31,6 +32,7 @@ public sealed class AdtMeshExtractor
         string mapName,
         string outputDir,
         bool exportGlb = true,
+        bool exportObj = true,
         int maxTiles = 0) // 0 = no limit
     {
         var meshDir = Path.Combine(outputDir, $"{mapName}_mesh");
@@ -69,7 +71,7 @@ public sealed class AdtMeshExtractor
         {
             try
             {
-                var entry = ExtractTileMesh(source, mapName, tileX, tileY, meshDir, exportGlb);
+                var entry = ExtractTileMesh(source, mapName, tileX, tileY, meshDir, exportGlb, exportObj);
                 if (entry != null)
                 {
                     manifestEntries.Add(entry);
@@ -136,7 +138,8 @@ public sealed class AdtMeshExtractor
         int tileX,
         int tileY,
         string meshDir,
-        bool exportGlb)
+        bool exportGlb,
+        bool exportObj)
     {
         var adtPath = $"world/maps/{mapName}/{mapName}_{tileX}_{tileY}.adt";
         
@@ -265,11 +268,25 @@ public sealed class AdtMeshExtractor
             ExportGLB(positions, indices, glbPath);
         }
 
+        // Export OBJ if requested
+        string? objFile = null;
+        string? mtlFile = null;
+        if (exportObj && positions.Count > 0 && indices.Count > 0)
+        {
+            objFile = $"tile_{tileX}_{tileY}.obj";
+            mtlFile = $"tile_{tileX}_{tileY}.mtl";
+            var objPath = Path.Combine(meshDir, objFile);
+            var mtlPath = Path.Combine(meshDir, mtlFile);
+            ExportOBJ(positions, indices, objPath, mtlPath, mtlFile);
+        }
+
         return new MeshManifestEntry
         {
             TileX = tileX,
             TileY = tileY,
             GlbFile = glbFile,
+            ObjFile = objFile,
+            MtlFile = mtlFile,
             Bounds = new MeshBounds
             {
                 MinX = minX,
@@ -322,6 +339,55 @@ public sealed class AdtMeshExtractor
         model.SaveGLB(outputPath);
     }
 
+    private void ExportOBJ(
+        List<(float x, float y, float z)> positions,
+        List<int> indices,
+        string objPath,
+        string mtlPath,
+        string mtlFileName)
+    {
+        // Write MTL file
+        var mtl = new StringBuilder();
+        mtl.AppendLine("# WoWRollback Terrain Material");
+        mtl.AppendLine("newmtl TerrainMaterial");
+        mtl.AppendLine("Ka 0.6 0.6 0.6");  // Ambient color
+        mtl.AppendLine("Kd 0.6 0.6 0.6");  // Diffuse color
+        mtl.AppendLine("Ks 0.0 0.0 0.0");  // Specular color
+        mtl.AppendLine("Ns 10.0");         // Specular exponent
+        mtl.AppendLine("d 1.0");           // Dissolve (opacity)
+        mtl.AppendLine("illum 2");         // Illumination model
+        
+        File.WriteAllText(mtlPath, mtl.ToString());
+
+        // Write OBJ file
+        var obj = new StringBuilder();
+        obj.AppendLine("# WoWRollback Terrain Mesh");
+        obj.AppendLine($"mtllib {mtlFileName}");
+        obj.AppendLine("usemtl TerrainMaterial");
+        obj.AppendLine();
+
+        // Write vertices
+        foreach (var (x, y, z) in positions)
+        {
+            obj.AppendLine($"v {x:F6} {y:F6} {z:F6}");
+        }
+        obj.AppendLine();
+
+        // Write faces (OBJ uses 1-based indexing)
+        for (int i = 0; i < indices.Count; i += 3)
+        {
+            if (i + 2 < indices.Count)
+            {
+                var i0 = indices[i] + 1;     // +1 for 1-based indexing
+                var i1 = indices[i + 1] + 1;
+                var i2 = indices[i + 2] + 1;
+                obj.AppendLine($"f {i0} {i1} {i2}");
+            }
+        }
+
+        File.WriteAllText(objPath, obj.ToString());
+    }
+
     private void GenerateManifest(List<MeshManifestEntry> entries, string mapName, string outputPath)
     {
         var manifest = new
@@ -333,6 +399,8 @@ public sealed class AdtMeshExtractor
                 x = e.TileX,
                 y = e.TileY,
                 glb = e.GlbFile,
+                obj = e.ObjFile,
+                mtl = e.MtlFile,
                 bounds = new
                 {
                     min_x = e.Bounds.MinX,
@@ -374,6 +442,8 @@ internal sealed class MeshManifestEntry
     public required int TileX { get; init; }
     public required int TileY { get; init; }
     public string? GlbFile { get; init; }
+    public string? ObjFile { get; init; }
+    public string? MtlFile { get; init; }
     public required MeshBounds Bounds { get; init; }
     public required int VertexCount { get; init; }
     public required int TriangleCount { get; init; }

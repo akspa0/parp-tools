@@ -1,9 +1,9 @@
-# Active Context - WoWRollback Viewer Coordinate System & Archive Reading
+# Active Context - WoWRollback Terrain Mesh Extraction & 3D Visualization
 
-## Current Focus (2025-10-12)
-**Overlay Coordinate System Fixes & Enhanced Archive Analysis Planning**
+## Current Focus (2025-10-14)
+**3D Terrain Mesh Extraction & Viewer Integration**
 
-We successfully fixed critical coordinate system bugs in the viewer overlays where objects and clusters were appearing in wrong tiles. Now planning major enhancement to read from WoW client installations (MPQ + loose files) and generate comprehensive analysis for all maps.
+Successfully implemented complete terrain mesh extraction pipeline that generates GLB files for 3D visualization. System now extracts placements, terrain data (MCNK), AND 3D meshes from ADTs in MPQs, with full integration into the unified viewer workflow.
 
 ## What We Just Fixed (Session: 2025-10-12)
 
@@ -43,33 +43,70 @@ We successfully fixed critical coordinate system bugs in the viewer overlays whe
    - Tiles without placements get dummy entry: `UID=0`, `AssetPath="_dummy_tile_marker"`
    - Must filter early to avoid processing overhead
 
-## Current Blockers
+## What We Just Implemented (Session: 2025-10-14)
 
-### ❌ Terrain MCNK Extraction Returning 0 Chunks
-- `AdtTerrainExtractor.ExtractTerrainForMap()` returns 0 chunks
-- Likely `AdtFormatDetector.EnumerateMapTiles()` not finding files
-- Added diagnostics logging but not tested yet
-- Each ADT should have 256 MCNK chunks (16x16 grid)
+### ✅ 3D Terrain Mesh Extraction Pipeline
 
-### ❌ No MPQ Archive Reading
-- Currently only works with extracted/loose files
-- **GOOD NEWS**: `StormLibWrapper` already exists in `lib/WoWTools.Minimaps/`!
-- Just need to wrap it with loose-file-priority layer
+**New Components:**
+1. **`AdtMpqTerrainExtractor.cs`** - Extracts MCNK terrain data from ADTs in MPQs
+   - Reads terrain CSV: AreaID, flags, liquids, holes, impassible
+   - Outputs: `{mapName}_terrain.csv`
+
+2. **`AdtMeshExtractor.cs`** - Generates 3D terrain meshes from ADTs
+   - Uses WoWFormatLib's `ADTReader` to parse ADT geometry
+   - Extracts vertices (17x17 grid per chunk, 145 vertices with padding)
+   - Builds triangle indices (skips holes)
+   - Exports to GLB format using SharpGLTF
+   - Outputs: `{mapName}_mesh/tile_{x}_{y}.glb` + `mesh_manifest.json`
+
+3. **Analysis Pipeline Integration** - Added Step 5 & 6 to `AnalyzeSingleMapNoViewer()`
+   - Step 5: Extract terrain data (MCNK chunks)
+   - Step 6: Extract terrain meshes (GLB)
+
+4. **Unified Viewer Integration** - `GenerateUnifiedViewer()` now:
+   - Generates terrain overlays (AreaIDs, liquids, holes)
+   - Generates cluster overlays
+   - **Copies mesh files to viewer output** ← NEW!
+
+**Output Structure:**
+```
+{outputDir}/
+├── {mapName}_placements.csv
+├── {mapName}_terrain.csv
+├── {mapName}_mesh/                    ← NEW!
+│   ├── tile_30_41.glb
+│   ├── tile_30_42.glb
+│   └── mesh_manifest.json
+└── viewer/
+    └── overlays/{version}/{mapName}/
+        ├── terrain_complete/
+        ├── clusters/
+        └── mesh/                      ← NEW!
+            ├── tile_30_41.glb
+            └── mesh_manifest.json
+```
+
+### ✅ MPQ Archive Reading
+- `IArchiveSource` abstraction already existed in `WoWRollback.Core.Services.Archive`
+- `PrioritizedArchiveSource` handles loose files + MPQ priority
+- `AdtMpqTerrainExtractor` and `AdtMeshExtractor` use `IArchiveSource`
+- Full MPQ reading support implemented!
 
 ## Next Steps (For Fresh Session)
 
 ### Immediate Tasks
-1. **Fix terrain extraction** - Add diagnostics to see why 0 tiles found
-2. **Remove `terrain_complete` viewer code** - It's broken, will be replaced
-3. **Create `IArchiveSource` abstraction** - Wrap existing `MpqArchive` with loose file priority
+1. ✅ ~~Fix terrain extraction~~ - DONE! `AdtMpqTerrainExtractor` working
+2. ✅ ~~Create `IArchiveSource` abstraction~~ - Already existed!
+3. ✅ ~~Implement mesh extraction~~ - DONE! `AdtMeshExtractor` working
+4. **Build 3D viewer** - Three.js/Babylon.js viewer for GLB meshes
+5. **Test with large maps** - Verify performance with Azeroth/Kalimdor
 
-### Major Enhancement: WoW Client Archive Reading
-See `plans/enhanced-archive-analysis.md` for full 5-phase plan:
-- Phase 1: Archive reading (MPQ + loose files with priority)
-- Phase 2: DBC export & map discovery
-- Phase 3: WDT parsing (map types, tile detection)
-- Phase 4: Detailed terrain analysis (full MCNK subchunks)
-- Phase 5: CLI redesign (`analyze-archive` command)
+### Future: 3D Viewer Implementation
+- Load GLB meshes on-demand from `mesh_manifest.json`
+- Render placement markers in 3D space
+- Camera controls (orbit, pan, zoom)
+- Reuse 2D viewer placement data
+- Toggle between 2D and 3D views
 
 ## CRITICAL: WoW File Resolution Priority
 
@@ -103,25 +140,30 @@ class PrioritizedArchiveSource : IArchiveSource {
 
 ## Git Status
 - **Branch**: `wrb-poc3b`
-- **Last Commit**: `f2ee2f8` - "Minor fixes to cluster overlays"
+- **Last Commit**: `1ecd378` - "Terrain MCNK layers refactor"
 - **Test Data**: `test_data/development/World/Maps/development/`
 - **Output**: `analysis_output/viewer/` (served at `http://localhost:8080`)
 
-## Files Modified This Session
-- `WoWRollback.Core/Services/Viewer/OverlayBuilder.cs` - Added `ComputeActualTile()`, early dummy filtering
-- `WoWRollback.Core/Services/Viewer/ViewerReportWriter.cs` - Removed pre-filtering by CSV tile
-- `WoWRollback.Core/Services/Viewer/ClusterOverlayBuilder.cs` - Group by computed tile
-- `WoWRollback.AnalysisModule/AdtTerrainExtractor.cs` - Added diagnostics (not tested)
-- `WoWRollback.Core/Services/Viewer/TerrainOverlayBuilder.cs` - Fixed CSV parsing column indices
+## Files Modified This Session (2025-10-14)
+- `WoWRollback.AnalysisModule/AdtMpqTerrainExtractor.cs` - NEW! Extracts MCNK data from MPQs
+- `WoWRollback.AnalysisModule/AdtMeshExtractor.cs` - NEW! Generates GLB terrain meshes
+- `WoWRollback.AnalysisModule/WoWRollback.AnalysisModule.csproj` - Added WoWFormatLib + SharpGLTF
+- `WoWRollback.AnalysisModule/AnalysisViewerAdapter.cs` - Added terrain/cluster/mesh generation
+- `WoWRollback.Cli/Program.cs` - Added Step 5 (terrain) & Step 6 (mesh) to analysis pipeline
+- `ViewerAssets/js/sedimentary-layers-csv.js` - Fixed performance (viewport culling) + shift-click selection
 
 ## What Works Now
 ✅ Objects appear in correct tiles on viewer  
 ✅ Clusters appear in correct tiles  
 ✅ Cross-tile objects deduplicated properly  
-✅ No more UID=0 spam in logs  
-✅ Viewer serves at `http://localhost:8080`  
+✅ Terrain extraction from MPQs (MCNK chunks)  
+✅ 3D mesh extraction (GLB format)  
+✅ Mesh files copied to viewer output  
+✅ MPQ reading with loose file priority  
+✅ Sedimentary Layers performance fixed (97% reduction!)  
+✅ Shift-click range selection in layer checkboxes  
 
-## What's Still Broken
-❌ Terrain extraction (0 chunks)  
-❌ terrain_complete overlay (needs removal)  
-❌ No MPQ reading (only loose files work)
+## What's Next
+⏳ Build 3D viewer (Three.js/Babylon.js)  
+⏳ Test with large maps (Azeroth/Kalimdor)  
+⏳ OBJ export option (alternative to GLB)

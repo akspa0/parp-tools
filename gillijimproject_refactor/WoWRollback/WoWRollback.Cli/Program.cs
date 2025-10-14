@@ -1143,12 +1143,12 @@ internal static class Program
             Console.WriteLine($"  [warn] Terrain extraction error: {ex.Message}");
         }
 
-        // Step 6: Extract terrain meshes (GLB) for 3D visualization
-        Console.WriteLine("  Step 6: Extracting terrain meshes (GLB)...");
+        // Step 6: Extract terrain meshes (GLB + OBJ) for 3D visualization
+        Console.WriteLine("  Step 6: Extracting terrain meshes (GLB + OBJ)...");
         try
         {
             var meshExtractor = new AdtMeshExtractor();
-            var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, maxTiles: 0);
+            var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, exportObj: true, maxTiles: 0);
             
             if (meshResult.Success && meshResult.TilesProcessed > 0)
             {
