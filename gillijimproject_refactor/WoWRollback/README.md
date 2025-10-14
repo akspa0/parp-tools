@@ -4,6 +4,7 @@
 - ✅ **Analyze loose ADT files** (0.5.x - 4.x+) without conversion
 - ✅ **Extract object placements** with spatial clustering & pattern detection  
 - ✅ **Generate MCNK terrain data** with AreaID mappings
+- ✅ **Extract 3D terrain meshes** (GLB format) for 3D visualization
 - ✅ **Interactive web viewer** with built-in HTTP server (no Python needed!)
 - ✅ **Version comparison** - Alpha WDT → LK ADT conversion pipeline
 - ✅ **Cross-tile duplicate filtering** - Clean object placement data
@@ -35,6 +36,7 @@ dotnet run --project WoWRollback.Cli -- serve-viewer
 **What you get:**
 - ✅ 26K+ M2/WMO placements extracted & overlaid on minimaps
 - ✅ MCNK terrain data (AreaIDs, flags, liquids, holes)
+- ✅ 3D terrain meshes (GLB) for each tile
 - ✅ Spatial clusters showing prefabs & object groups
 - ✅ UniqueID analysis with layer detection
 - ✅ Interactive viewer with zoom, pan, object details
@@ -241,15 +243,20 @@ dotnet run --project WoWRollback.Cli -- analyze-map-adts \
 **What it does:**
 1. **Extracts placements** - Reads MDDF/MODF chunks from `_obj0.adt` files
 2. **Extracts terrain** - Reads MCNK chunks (AreaID, flags, liquids, holes)
-3. **Analyzes UniqueIDs** - Detects layers, gaps, ranges per tile
-4. **Detects clusters** - Finds spatial object groups (prefabs/brushes)
-5. **Generates viewer** - Creates interactive web viewer with overlays
+3. **Extracts meshes** - Generates GLB 3D terrain meshes per tile
+4. **Analyzes UniqueIDs** - Detects layers, gaps, ranges per tile
+5. **Detects clusters** - Finds spatial object groups (prefabs/brushes)
+6. **Generates viewer** - Creates interactive web viewer with overlays
 
 **Output:**
 ```
 analysis_output/
 ├── development_placements.csv          # All M2/WMO placements
 ├── development_terrain.csv             # MCNK terrain data
+├── development_mesh/                   # 3D terrain meshes (NEW!)
+│   ├── tile_30_41.glb
+│   ├── tile_30_42.glb
+│   └── mesh_manifest.json
 ├── development_uniqueID_analysis.csv   # UniqueID ranges by tile
 ├── development_spatial_clusters.json   # Detected object clusters
 ├── development_patterns.json           # Recurring patterns
@@ -265,8 +272,11 @@ analysis_output/
     │       ├── combined/               # Object overlays (per-tile JSON)
     │       ├── m2/                     # M2-only overlays
     │       ├── wmo/                    # WMO-only overlays
-    │       ├── clusters/               # Cluster overlays (NEW!)
-    │       └── terrain_complete/       # MCNK terrain overlays
+    │       ├── clusters/               # Cluster overlays
+    │       ├── terrain_complete/       # MCNK terrain overlays
+    │       └── mesh/                   # 3D terrain meshes (NEW!)
+    │           ├── tile_30_41.glb
+    │           └── mesh_manifest.json
     └── cached_maps/analysis/development/
         └── csv/id_ranges_by_map.csv   # For UniqueID range filtering
 ```
@@ -719,6 +729,7 @@ parp_out/
 - ✅ **Loose ADT analysis** - No conversion needed, reads 0.5.x-4.x+ formats directly
 - ✅ **M2/WMO extraction** - Reads MDDF/MODF chunks from `_obj0.adt` files
 - ✅ **MCNK terrain extraction** - AreaIDs, flags, textures, liquids, holes
+- ✅ **3D mesh extraction** - Generates GLB terrain meshes per tile (NEW!)
 - ✅ **Spatial clustering** - Detects prefabs & object brushes (proximity-based)
 - ✅ **Pattern recognition** - Finds recurring object compositions
 - ✅ **UniqueID analysis** - Ranges, layers, gaps per tile
@@ -771,6 +782,13 @@ parp_out/
 
 ### Coming Soon (v1.1+)
 
+#### 3D Viewer (NEW!)
+- ⏳ **Three.js/Babylon.js viewer** - 3D terrain visualization
+- ⏳ **GLB mesh loading** - On-demand tile loading from mesh manifest
+- ⏳ **3D placement markers** - M2/WMO objects in 3D space
+- ⏳ **Camera controls** - Orbit, pan, zoom in 3D
+- ⏳ **Shared data sources** - Reuses 2D viewer placement data
+
 #### Viewer Enhancements
 - ⏳ **Cluster overlay plugin** - Visualize clusters as circles/polygons
 - ⏳ **Click cluster → expand** - Toggle from cluster view to individual objects
@@ -797,9 +815,10 @@ parp_out/
 - 🔮 **ADT grid overlay** - wow.tools-style tile grid with labels
 - 🔮 **Heatmap overlays** - Object density, change magnitude
 - 🔮 **Alpha backporting** - LK → Alpha format conversion
-- 🔮 **3D visualization** - WebGL-based 3D map view
 - 🔮 **Heightmap export** - Generate height data from MCVT
 - 🔮 **WDT analysis** - Global map metadata extraction
+- 🔮 **OBJ mesh export** - Alternative to GLB for external tools
+- 🔮 **Texture baking** - Apply minimap textures to terrain meshes
 
 ---
 
