@@ -359,11 +359,11 @@ public sealed class AdtMeshExtractor
         
         File.WriteAllText(mtlPath, mtl.ToString());
 
-        // Write OBJ file
+        // Write OBJ file (following wow.export format)
         var obj = new StringBuilder();
-        obj.AppendLine("# WoWRollback Terrain Mesh");
+        obj.AppendLine("# Exported by WoWRollback");
+        obj.AppendLine("o TerrainMesh");
         obj.AppendLine($"mtllib {mtlFileName}");
-        obj.AppendLine("usemtl TerrainMaterial");
         obj.AppendLine();
 
         // Write vertices
@@ -373,7 +373,30 @@ public sealed class AdtMeshExtractor
         }
         obj.AppendLine();
 
-        // Write faces (OBJ uses 1-based indexing)
+        // Write normals (calculate per-vertex normals)
+        var normals = CalculateNormals(positions, indices);
+        foreach (var (nx, ny, nz) in normals)
+        {
+            obj.AppendLine($"vn {nx:F6} {ny:F6} {nz:F6}");
+        }
+        obj.AppendLine();
+
+        // Write UVs (simple planar mapping for now)
+        for (int i = 0; i < positions.Count; i++)
+        {
+            var (x, _, z) = positions[i];
+            float u = (x % 533.33333f) / 533.33333f; // TILE_SIZE
+            float v = (z % 533.33333f) / 533.33333f;
+            obj.AppendLine($"vt {u:F6} {v:F6}");
+        }
+        obj.AppendLine();
+
+        // Write mesh group and faces
+        obj.AppendLine("g Terrain");
+        obj.AppendLine("s 1");  // Smoothing group
+        obj.AppendLine("usemtl TerrainMaterial");
+
+        // Write faces with v/vt/vn format (OBJ uses 1-based indexing)
         for (int i = 0; i < indices.Count; i += 3)
         {
             if (i + 2 < indices.Count)
@@ -381,11 +404,63 @@ public sealed class AdtMeshExtractor
                 var i0 = indices[i] + 1;     // +1 for 1-based indexing
                 var i1 = indices[i + 1] + 1;
                 var i2 = indices[i + 2] + 1;
-                obj.AppendLine($"f {i0} {i1} {i2}");
+                obj.AppendLine($"f {i0}/{i0}/{i0} {i1}/{i1}/{i1} {i2}/{i2}/{i2}");
             }
         }
 
         File.WriteAllText(objPath, obj.ToString());
+    }
+
+    private List<(float x, float y, float z)> CalculateNormals(
+        List<(float x, float y, float z)> positions,
+        List<int> indices)
+    {
+        // Initialize normals to zero
+        var normals = new List<(float x, float y, float z)>(positions.Count);
+        for (int i = 0; i < positions.Count; i++)
+            normals.Add((0f, 0f, 0f));
+
+        // Accumulate face normals
+        for (int i = 0; i < indices.Count; i += 3)
+        {
+            if (i + 2 >= indices.Count) break;
+
+            int i0 = indices[i];
+            int i1 = indices[i + 1];
+            int i2 = indices[i + 2];
+
+            var v0 = positions[i0];
+            var v1 = positions[i1];
+            var v2 = positions[i2];
+
+            // Calculate face normal using cross product
+            var edge1 = (v1.x - v0.x, v1.y - v0.y, v1.z - v0.z);
+            var edge2 = (v2.x - v0.x, v2.y - v0.y, v2.z - v0.z);
+
+            var normal = (
+                edge1.Item2 * edge2.Item3 - edge1.Item3 * edge2.Item2,
+                edge1.Item3 * edge2.Item1 - edge1.Item1 * edge2.Item3,
+                edge1.Item1 * edge2.Item2 - edge1.Item2 * edge2.Item1
+            );
+
+            // Accumulate to vertex normals
+            normals[i0] = (normals[i0].x + normal.Item1, normals[i0].y + normal.Item2, normals[i0].z + normal.Item3);
+            normals[i1] = (normals[i1].x + normal.Item1, normals[i1].y + normal.Item2, normals[i1].z + normal.Item3);
+            normals[i2] = (normals[i2].x + normal.Item1, normals[i2].y + normal.Item2, normals[i2].z + normal.Item3);
+        }
+
+        // Normalize all normals
+        for (int i = 0; i < normals.Count; i++)
+        {
+            var n = normals[i];
+            float length = (float)Math.Sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+            if (length > 0.0001f)
+                normals[i] = (n.x / length, n.y / length, n.z / length);
+            else
+                normals[i] = (0f, 1f, 0f); // Default up
+        }
+
+        return normals;
     }
 
     private void GenerateManifest(List<MeshManifestEntry> entries, string mapName, string outputPath)

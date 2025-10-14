@@ -4,6 +4,9 @@
 
 Implement a 3D visualization system for WoW map placements with terrain backdrop. The primary focus is **placement visualization** (M2/WMO objects in 3D space) with UniqueID layer filtering, reusing existing 2D viewer data. Terrain meshes serve as optional backdrop for spatial context.
 
+**Phase 1 (Current):** Simple markers at placement coordinates
+**Phase 2 (Future):** Actual M2/WMO model rendering (requires Alpha 0.5/0.6 format parsers)
+
 ## Goals
 
 1. **Dual mesh export** - Export both GLB and OBJ formats for terrain
@@ -544,25 +547,66 @@ threeJS.z = -wow.worldY; // Flip Y to Z
 
 ---
 
-## Future Enhancements
+### Future Enhancements
 
-### v1.1
+### v1.1 (Viewer Polish)
 - Measure tool (distance between markers)
 - Search/filter by AssetPath
 - Export selected placements to CSV
 - Screenshot/camera position save
+- Bounding box visualization on hover
 
-### v1.2
-- Load actual M2/WMO models (not just markers)
+### v1.2 (Alpha Format Support)
+- **Alpha 0.5/0.6 M2 parser** - Parse early M2 format
+- **Alpha 0.5/0.6 WMO parser** - Parse early WMO format
+- **Format converter** - Convert Alpha → Retail for wow.export compatibility
+- **Texture extraction** - BLP from Alpha clients
+- **Model cache** - Store converted models for reuse
+
+### v1.3 (Actual Model Rendering)
+- Load actual M2/WMO models (using converted formats)
+- Integrate wow.export's M2Renderer/WMORenderer
 - Texture terrain with minimap tiles
-- Animated camera paths
-- VR support
+- LOD system for performance
+- Progressive loading (markers first, models on-demand)
 
-### v2.0
+### v2.0 (Advanced Features)
 - Multi-map comparison in 3D
 - Time-travel animation (show/hide by version)
 - Heatmap overlays (object density)
 - Collision detection visualization
+- Animated camera paths
+- VR support
+
+---
+
+## Alpha Format Challenges
+
+### Why We Can't Render Models Yet
+
+**Alpha 0.5/0.6 formats are different:**
+- M2 structure differs from retail (different chunk layout)
+- WMO format has variations (different versions)
+- Texture references use different paths
+- Bone structures may differ
+- Animation data incompatible with retail parsers
+
+**What We Need First:**
+1. Alpha M2 parser (C# or JS)
+2. Alpha WMO parser (C# or JS)
+3. Format converter (Alpha → Retail-compatible)
+4. Texture path resolver (Alpha → Retail mapping)
+5. Model cache system
+
+**Current Solution:**
+- Use **simple markers** (spheres/cubes) at placement coordinates
+- Show **terrain meshes** as backdrop (already working)
+- Click markers → show details (AssetPath, UniqueID, coords)
+- **Later:** Add actual model rendering when parsers are ready
+
+**Reference:**
+- wow.export has retail M2/WMO renderers we can adapt
+- But they expect retail format, not Alpha 0.5/0.6
 
 ---
 
@@ -571,11 +615,15 @@ threeJS.z = -wow.worldY; // Flip Y to Z
 ### C# Libraries
 - ✅ WoWFormatLib - ADT parsing (already added)
 - ✅ SharpGLTF - GLB export (already added)
+- ⏳ Alpha M2 parser (future)
+- ⏳ Alpha WMO parser (future)
 
 ### JavaScript Libraries
 - Three.js v0.160.0 - 3D rendering
 - OrbitControls - Camera controls
 - GLTFLoader - Load terrain meshes
+- ⏳ wow.export's M2Renderer (future, when Alpha parsers ready)
+- ⏳ wow.export's WMORenderer (future, when Alpha parsers ready)
 
 ### Browser Requirements
 - WebGL 2.0 support
@@ -586,19 +634,43 @@ threeJS.z = -wow.worldY; // Flip Y to Z
 
 ## Timeline
 
-**Phase 1 (OBJ Export):** 1-2 hours
-**Phase 2 (Basic Viewer):** 4-6 hours
-**Phase 3 (Click Interaction):** 2-3 hours
-**Phase 4 (Terrain Backdrop):** 2-3 hours (optional)
+### Current Implementation (Markers Only)
+**Phase 1 (OBJ Export):** ✅ DONE! (1-2 hours)
+**Phase 2 (Basic Viewer):** 4-6 hours (markers + camera)
+**Phase 3 (Click Interaction):** 2-3 hours (raycasting + popups)
+**Phase 4 (Terrain Backdrop):** 2-3 hours (optional GLB loading)
 
-**Total:** 9-14 hours (7-11 hours without terrain)
+**Total:** 8-14 hours (6-11 hours without terrain)
+
+### Future Implementation (Actual Models)
+**v1.2 (Alpha Parsers):** 40-60 hours
+- Alpha M2 format parser
+- Alpha WMO format parser
+- Format converter (Alpha → Retail)
+- Texture path resolver
+- Model cache system
+
+**v1.3 (Model Rendering):** 20-30 hours
+- Integrate wow.export renderers
+- Adapt for Alpha formats
+- LOD system
+- Progressive loading
+- Performance optimization
 
 ---
 
 ## Success Metrics
 
+### Phase 1 (Current - Markers)
 1. **Functionality:** All placement markers visible and clickable
 2. **Performance:** 60 FPS with 28K markers (Azeroth)
 3. **Usability:** Layer filtering works smoothly
 4. **Data Reuse:** No duplicate data generation needed
 5. **Compatibility:** Works in all major browsers
+
+### Phase 2 (Future - Models)
+1. **Accuracy:** Models render correctly from Alpha formats
+2. **Performance:** 60 FPS with 1K+ models visible
+3. **Compatibility:** Alpha 0.5/0.6 formats supported
+4. **Quality:** Textures load and display correctly
+5. **Fallback:** Graceful degradation to markers if model fails

@@ -32,8 +32,22 @@ namespace WoWRollback.Core.Services.Minimap
     {
         private static readonly string[] Candidates = new[]
         {
+            // Standard locations
             "textures/Minimap/md5translate.txt",
-            "textures/Minimap/md5translate.trs"
+            "textures/Minimap/md5translate.trs",
+            // Alternate casing (some clients use lowercase)
+            "textures/minimap/md5translate.txt",
+            "textures/minimap/md5translate.trs",
+            // World prefix (some early clients)
+            "world/textures/Minimap/md5translate.txt",
+            "world/textures/Minimap/md5translate.trs",
+            "world/textures/minimap/md5translate.txt",
+            "world/textures/minimap/md5translate.trs",
+            // Data subfolder (loose files)
+            "Data/textures/Minimap/md5translate.txt",
+            "Data/textures/Minimap/md5translate.trs",
+            "Data/textures/minimap/md5translate.txt",
+            "Data/textures/minimap/md5translate.trs"
         };
 
         public static bool TryLoad(IArchiveSource source, out Md5TranslateIndex? index, out string? usedVirtualPath)

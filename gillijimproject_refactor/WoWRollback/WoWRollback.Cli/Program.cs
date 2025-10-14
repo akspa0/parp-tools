@@ -657,11 +657,18 @@ internal static class Program
     {
         try
         {
-            // Load md5translate if present
+            // Load md5translate if present (checks loose files first, then MPQ)
             WoWRollback.Core.Services.Minimap.Md5TranslateIndex? index = null;
-            if (Md5TranslateResolver.TryLoad(src, out var loaded, out var _))
+            string? md5Path = null;
+            if (Md5TranslateResolver.TryLoad(src, out var loaded, out md5Path))
             {
                 index = loaded;
+                Console.WriteLine($"[info] Loaded md5translate from: {md5Path}");
+                Console.WriteLine($"[info] md5translate contains {index.PlainToHash.Count} minimap mappings");
+            }
+            else
+            {
+                Console.WriteLine($"[info] No md5translate file found, using direct BLP paths");
             }
 
             var resolver = new MinimapFileResolver(src, index);
@@ -670,6 +677,7 @@ internal static class Program
 
             // Scan for all tiles (0-63 grid)
             int extracted = 0;
+            int failed = 0;
             for (int x = 0; x < 64; x++)
             {
                 for (int y = 0; y < 64; y++)
@@ -678,7 +686,7 @@ internal static class Program
                     {
                         try
                         {
-                            // Read BLP from MPQ
+                            // Read BLP (IArchiveSource checks loose files FIRST, then MPQ)
                             using var blpStream = src.OpenFile(virtualPath);
                             using var ms = new MemoryStream();
                             blpStream.CopyTo(ms);
@@ -692,10 +700,19 @@ internal static class Program
                             using var outStream = File.Create(outputPath);
                             image.Save(outStream, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
                             extracted++;
+                            
+                            if (extracted == 1)
+                            {
+                                Console.WriteLine($"[info] First minimap found: {virtualPath}");
+                            }
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Skip tiles that fail to extract/convert
+                            failed++;
+                            if (failed <= 3) // Only log first few failures
+                            {
+                                Console.WriteLine($"[debug] Failed to extract tile [{x},{y}] from {virtualPath}: {ex.Message}");
+                            }
                         }
                     }
                 }
@@ -704,9 +721,15 @@ internal static class Program
             if (extracted > 0)
             {
                 Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→PNG)");
+                if (failed > 0)
+                {
+                    Console.WriteLine($"[info] Failed to extract {failed} tiles (missing or corrupt)");
+                }
                 return minimapOutDir;
             }
 
+            Console.WriteLine($"[warn] No minimap tiles found for {mapName}");
+            Console.WriteLine($"[info] Checked for: md5translate.txt/trs, loose BLPs in Data/, and MPQ archives");
             return null;
         }
         catch (Exception ex)
