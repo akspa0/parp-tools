@@ -399,6 +399,7 @@ public sealed class ViewerReportWriter
             CopyIfExists(Path.Combine(assetsPath, "index.html"), Path.Combine(viewerRoot, "index.html"));
             CopyIfExists(Path.Combine(assetsPath, "tile.html"), Path.Combine(viewerRoot, "tile.html"));
             CopyIfExists(Path.Combine(assetsPath, "test.html"), Path.Combine(viewerRoot, "test.html"));
+            CopyIfExists(Path.Combine(assetsPath, "viewer3d.html"), Path.Combine(viewerRoot, "viewer3d.html")); // 3D viewer
             CopyIfExists(Path.Combine(assetsPath, "styles.css"), Path.Combine(viewerRoot, "styles.css"));
             CopyIfExists(Path.Combine(assetsPath, "README.md"), Path.Combine(viewerRoot, "README.md"));
             CopyIfExists(Path.Combine(assetsPath, "start-viewer.ps1"), Path.Combine(viewerRoot, "start-viewer.ps1"));

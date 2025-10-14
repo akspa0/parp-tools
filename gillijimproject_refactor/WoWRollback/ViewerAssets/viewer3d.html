@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Viewer - WoWRollback</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        #viewer-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #sidebar {
+            width: 300px;
+            background: #2a2a2a;
+            border-left: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #sidebar-header {
+            padding: 15px;
+            background: #333;
+            border-bottom: 1px solid #444;
+        }
+
+        #sidebar-header h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+        }
+
+        #map-info {
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        #sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #64B5F6;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+        }
+
+        .layer-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            background: #333;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .layer-item:hover {
+            background: #3a3a3a;
+        }
+
+        .layer-item input[type="checkbox"] {
+            margin-right: 8px;
+            cursor: pointer;
+        }
+
+        .layer-item label {
+            flex: 1;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .layer-count {
+            font-size: 11px;
+            color: #888;
+            margin-left: 8px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 8px 12px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button.secondary {
+            background: #2196F3;
+        }
+
+        button.secondary:hover {
+            background: #0b7dda;
+        }
+
+        .toggle-item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            background: #333;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        .toggle-item label {
+            flex: 1;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-item input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        #details-popup {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(42, 42, 42, 0.95);
+            border: 1px solid #4CAF50;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 400px;
+            max-width: 600px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        #details-popup h3 {
+            margin-bottom: 15px;
+            color: #4CAF50;
+            font-size: 18px;
+        }
+
+        #details-popup .detail-row {
+            display: flex;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        #details-popup .detail-label {
+            font-weight: bold;
+            width: 120px;
+            color: #64B5F6;
+        }
+
+        #details-popup .detail-value {
+            flex: 1;
+            color: #e0e0e0;
+            word-break: break-all;
+        }
+
+        #details-popup .close-btn {
+            margin-top: 15px;
+            width: 100%;
+            background: #f44336;
+        }
+
+        #details-popup .close-btn:hover {
+            background: #da190b;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #4CAF50;
+            font-size: 18px;
+        }
+
+        #loading .spinner {
+            border: 4px solid #333;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #stats {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(42, 42, 42, 0.8);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        #stats div {
+            margin-bottom: 4px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #4CAF50;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer-container">
+        <div id="canvas-container">
+            <canvas id="viewer3d"></canvas>
+            
+            <div id="loading">
+                <div class="spinner"></div>
+                <div>Loading 3D Viewer...</div>
+            </div>
+
+            <div id="stats" class="hidden">
+                <div><strong>FPS:</strong> <span id="fps">0</span></div>
+                <div><strong>Markers:</strong> <span id="marker-count">0</span></div>
+                <div><strong>Visible:</strong> <span id="visible-count">0</span></div>
+            </div>
+
+            <div id="details-popup" class="hidden">
+                <h3 id="popup-title">Placement Details</h3>
+                <div id="popup-content"></div>
+                <button class="close-btn" onclick="viewer.hideDetails()">Close</button>
+            </div>
+        </div>
+
+        <div id="sidebar">
+            <div id="sidebar-header">
+                <h2>3D Viewer</h2>
+                <div id="map-info">
+                    <div><strong>Map:</strong> <span id="map-name">Loading...</span></div>
+                    <div><strong>Version:</strong> <span id="version-name">Loading...</span></div>
+                </div>
+            </div>
+
+            <div id="sidebar-content">
+                <div class="section">
+                    <h3>Layers (UniqueID Ranges)</h3>
+                    <div class="button-group">
+                        <button id="select-all-btn">Select All</button>
+                        <button id="deselect-all-btn" class="secondary">Deselect All</button>
+                    </div>
+                    <div id="layer-list">
+                        <!-- Layers will be populated by JS -->
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Display Options</h3>
+                    <div class="toggle-item">
+                        <label for="show-terrain">Show Terrain Mesh</label>
+                        <input type="checkbox" id="show-terrain" checked>
+                    </div>
+                    <div class="toggle-item">
+                        <label for="show-stats">Show Stats</label>
+                        <input type="checkbox" id="show-stats">
+                    </div>
+                    <div class="toggle-item">
+                        <label for="show-grid">Show Grid</label>
+                        <input type="checkbox" id="show-grid">
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Controls</h3>
+                    <div style="font-size: 11px; color: #aaa; line-height: 1.6;">
+                        <div><strong>Left Click + Drag:</strong> Rotate camera</div>
+                        <div><strong>Right Click + Drag:</strong> Pan camera</div>
+                        <div><strong>Scroll Wheel:</strong> Zoom in/out</div>
+                        <div><strong>Click Marker:</strong> Show details</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <!-- Our 3D viewer script -->
+    <script src="js/viewer3d.js"></script>
+
+    <script>
+        // Initialize viewer when page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            // Get map and version from URL parameters
+            const params = new URLSearchParams(window.location.search);
+            const mapName = params.get('map') || 'Azeroth';
+            const version = params.get('version') || '0.6.0.3592';
+
+            // Update UI
+            document.getElementById('map-name').textContent = mapName;
+            document.getElementById('version-name').textContent = version;
+
+            // Create viewer instance
+            window.viewer = new Viewer3D(mapName, version);
+        });
+    </script>
+</body>
+</html>
