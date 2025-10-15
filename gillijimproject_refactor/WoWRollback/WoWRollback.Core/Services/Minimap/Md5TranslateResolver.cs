@@ -55,6 +55,13 @@ namespace WoWRollback.Core.Services.Minimap
             index = null;
             usedVirtualPath = null;
 
+            // Strategy: Load MPQ version first (baseline), then overlay loose file version (updates)
+            // This ensures we get all minimap tiles (MPQ has base set, loose files have updates)
+            
+            var idx = new Md5TranslateIndex();
+            var foundAny = false;
+            var sources = new List<string>();
+
             foreach (var candidate in Candidates)
             {
                 if (!source.FileExists(candidate)) continue;
@@ -63,7 +70,6 @@ namespace WoWRollback.Core.Services.Minimap
                 {
                     using var stream = source.OpenFile(candidate);
                     using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false);
-                    var idx = new Md5TranslateIndex();
                     string? currentDir = null; // from lines like: "dir: Azeroth"
                     string? line;
                     while ((line = reader.ReadLine()) != null)
@@ -96,14 +102,21 @@ namespace WoWRollback.Core.Services.Minimap
                         }
                     }
 
-                    index = idx;
-                    usedVirtualPath = candidate;
-                    return true;
+                    foundAny = true;
+                    sources.Add(candidate);
+                    // DON'T break - continue to merge all found files
                 }
                 catch
                 {
                     // try next candidate
                 }
+            }
+
+            if (foundAny)
+            {
+                index = idx;
+                usedVirtualPath = string.Join("; ", sources); // Show all merged sources
+                return true;
             }
 
             return false;

@@ -108,7 +108,7 @@
                 
                 if (!tile) return 'No tiles found';
                 
-                const minimapPath = `minimap/${version}/${map}/${map}_${tile.col}_${tile.row}.png`;
+                const minimapPath = `minimap/${version}/${map}/${map}_${tile.col}_${tile.row}.jpg`;
                 const testResponse = await fetch(minimapPath, { method: 'HEAD' });
                 
                 if (testResponse.ok) {

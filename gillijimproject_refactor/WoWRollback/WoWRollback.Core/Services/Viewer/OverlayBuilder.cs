@@ -230,10 +230,10 @@ public sealed class OverlayBuilder
             },
             world = new
             {
-                // Transformed world coordinates (used for rendering position)
-                x = Math.Round(worldX, 2, MidpointRounding.AwayFromZero),
-                y = Math.Round(worldY, 2, MidpointRounding.AwayFromZero),
-                z = Math.Round(entry.WorldY, 2, MidpointRounding.AwayFromZero)  // Height unchanged
+                // Use ADT coordinates directly
+                x = Math.Round(entry.WorldX, 2, MidpointRounding.AwayFromZero),
+                y = Math.Round(entry.WorldY, 2, MidpointRounding.AwayFromZero),
+                z = Math.Round(entry.WorldZ, 2, MidpointRounding.AwayFromZero)
             },
             rotation = new
             {

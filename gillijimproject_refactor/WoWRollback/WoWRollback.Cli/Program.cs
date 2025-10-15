@@ -40,6 +40,8 @@ internal static class Program
                     return RunAnalyzeMapAdts(opts);
                 case "analyze-map-adts-mpq":
                     return RunAnalyzeMapAdtsMpq(opts);
+                case "debug-single-adt":
+                    return RunDebugSingleAdt(opts);
                 case "discover-maps":
                     return RunDiscoverMaps(opts);
                 case "probe-archive":
@@ -1995,5 +1997,27 @@ internal static class Program
         }
         
         return default;
+    }
+
+    private static int RunDebugSingleAdt(Dictionary<string, string> opts)
+    {
+        if (!opts.TryGetValue("tile-x", out var tileXStr) ||
+            !opts.TryGetValue("tile-y", out var tileYStr) ||
+            !opts.TryGetValue("client-path", out var clientPath) ||
+            !opts.TryGetValue("out", out var outDir) ||
+            !opts.TryGetValue("map", out var mapName))
+        {
+            Console.WriteLine("[ERROR] Required: --tile-x, --tile-y, --client-path, --out, --map");
+            return 1;
+        }
+
+        if (!int.TryParse(tileXStr, out var tileX) || !int.TryParse(tileYStr, out var tileY))
+        {
+            Console.WriteLine("[ERROR] tile-x and tile-y must be integers");
+            return 1;
+        }
+
+        Commands.DebugSingleAdtCommand.ExecuteAsync(tileX, tileY, clientPath, outDir, mapName).Wait();
+        return 0;
     }
 }

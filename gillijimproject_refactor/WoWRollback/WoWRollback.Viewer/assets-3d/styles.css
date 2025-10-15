@@ -1,0 +1,363 @@
+/* Reset and full-page layout */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Hamburger toggle button (hidden when sidebar is pinned) */
+.hamburger {
+    display: none;
+}
+
+/* Mini-map overview canvas (picture-in-picture) */
+.overview-canvas {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    width: 180px;
+    height: 180px;
+    background: #111;
+    border: 1px solid #444;
+    border-radius: 4px;
+    z-index: 1002;
+}
+
+html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+/* Map container takes full page minus sidebar */
+#map {
+    position: absolute;
+    top: 0;
+    left: 320px;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+}
+
+/* Sedimentary Layers Panel */
+.layers-panel {
+    position: fixed;
+    right: 20px;
+    top: 80px;
+    width: 320px;
+    max-height: 70vh;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 10px;
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Hamburger styles removed (sidebar permanently pinned) */
+
+/* Sidebar (permanently pinned to left) */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 320px;
+    height: 100%;
+    background: rgba(42, 42, 42, 0.98);
+    backdrop-filter: blur(10px);
+    padding: 20px;
+    z-index: 1000;
+    overflow-y: auto;
+    border-right: 2px solid #444;
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+}
+
+/* Sidebar is always visible (no .open toggle needed) */
+.sidebar.open {
+    left: 0;
+}
+
+.sidebar h2 {
+    color: #4CAF50;
+    margin-bottom: 15px;
+    font-size: 1.3em;
+}
+
+.sidebar h3 {
+    color: #4CAF50;
+    margin: 15px 0 10px 0;
+    font-size: 1em;
+}
+
+/* Control groups */
+.control-group {
+    margin-bottom: 15px;
+}
+
+.control-group label {
+    display: block;
+    color: #9E9E9E;
+    margin-bottom: 5px;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.control-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: #333;
+    color: #e0e0e0;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.control-group select:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.control-group input[type="checkbox"] {
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+/* Info sections */
+.info-section {
+    background: #333;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    font-size: 0.85em;
+}
+
+.info-section strong {
+    color: #4CAF50;
+}
+
+#clickedTile, #clickedCoord {
+    color: #e0e0e0;
+    font-family: monospace;
+}
+
+/* Legend */
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 0.85em;
+}
+
+.color-box {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid #666;
+    flex-shrink: 0;
+}
+
+/* Leaflet tile customization */
+.leaflet-tile {
+    border: 1px solid #444 !important;
+}
+
+.leaflet-container {
+    background: #1a1a1a !important;
+}
+
+/* Tile labels */
+.tile-label {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #e0e0e0;
+    padding: 2px 5px;
+    border-radius: 2px;
+    font-size: 10px;
+    font-family: monospace;
+    pointer-events: none;
+    z-index: 500;
+}
+
+/* Leaflet popup customization */
+.leaflet-popup-content-wrapper {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    max-width: 400px !important; /* Prevent excessively wide popups */
+}
+
+.leaflet-popup-tip {
+    background: #2a2a2a;
+}
+
+.leaflet-popup-content {
+    margin: 10px;
+    font-size: 12px;
+    max-width: 380px;
+    /* Handle long asset paths */
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.leaflet-popup-content strong {
+    color: #4CAF50;
+}
+
+/* Object markers */
+.object-marker {
+    background: #2196F3;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    width: 10px;
+    height: 10px;
+}
+
+/* Scrollbar */
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Leaflet controls positioning (offset for pinned sidebar) */
+.leaflet-top.leaflet-left {
+    left: 10px; /* Positioned within map area (sidebar is 320px wide) */
+}
+
+/* Persistent popup styling */
+.persistent-popup .leaflet-popup-content-wrapper {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.6);
+    max-width: 400px !important;
+}
+
+.persistent-popup .leaflet-popup-content {
+    max-width: 380px;
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.persistent-popup .leaflet-popup-tip {
+    background: #2a2a2a;
+    border: 1px solid #444;
+}
+
+.persistent-popup .leaflet-popup-close-button {
+    color: #e0e0e0 !important;
+    font-size: 20px;
+    padding: 4px 8px;
+}
+
+.persistent-popup .leaflet-popup-close-button:hover {
+    color: #4CAF50 !important;
+    background: rgba(76, 175, 80, 0.1);
+}
+
+/* Terrain Overlay Controls */
+.overlay-group {
+    margin-bottom: 12px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.overlay-group > label {
+    display: block;
+    font-weight: bold;
+    color: #e0e0e0;
+    cursor: pointer;
+    margin-bottom: 4px;
+}
+
+.overlay-group > label:hover {
+    color: #4CAF50;
+}
+
+.overlay-options {
+    margin-top: 8px;
+}
+
+.overlay-options.indent {
+    margin-left: 20px;
+}
+
+.overlay-options label {
+    display: block;
+    color: #ccc;
+    font-size: 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    font-weight: normal;
+}
+
+.overlay-options label:hover {
+    color: #fff;
+}
+
+.overlay-options input[type="checkbox"] {
+    margin-right: 6px;
+}
+
+.opacity-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.opacity-control input[type="range"] {
+    flex: 1;
+    margin: 0;
+}
+
+.opacity-control span {
+    min-width: 30px;
+    text-align: right;
+    font-size: 11px;
+    color: #4CAF50;
+}
+
+/* Area label styling for AreaID overlay */
+.area-label {
+    pointer-events: none;
+    z-index: 600;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        left: -100%;
+    }
+    
+    .sidebar.open {
+        left: 0;
+    }
+}

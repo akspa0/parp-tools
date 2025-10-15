@@ -250,6 +250,9 @@ public sealed class ViewerReportWriter
         // Phase 2: Generate overlay manifests for each version/map
         GenerateOverlayManifests(overlaysRoot, result, mapTileCatalog);
         
+        // Generate top-level manifest for 3D viewer
+        GenerateTopLevelManifest(viewerRoot, result, mapTileCatalog);
+        
         CopyViewerAssets(viewerRoot);
 
         return viewerRoot;
@@ -382,13 +385,13 @@ public sealed class ViewerReportWriter
         var assemblyDir = Path.GetDirectoryName(typeof(ViewerReportWriter).Assembly.Location);
         if (assemblyDir is null) return;
 
-        // Search upward from assembly location for ViewerAssets
+        // Search upward from assembly location for WoWRollback.Viewer/assets-3d
         var currentDir = assemblyDir;
         string? assetsPath = null;
 
         for (int i = 0; i < 6; i++) // Search up to 6 levels
         {
-            var candidate = Path.Combine(currentDir, "ViewerAssets");
+            var candidate = Path.Combine(currentDir, "WoWRollback.Viewer", "assets-3d");
             if (Directory.Exists(candidate))
             {
                 assetsPath = candidate;
@@ -592,6 +595,44 @@ public sealed class ViewerReportWriter
 
                 Console.WriteLine($"[Phase 2] Generated overlay_manifest.json for {mapName} ({version})");
             }
+        }
+    }
+
+    /// <summary>
+    /// Generates top-level manifest.json for each version listing available maps.
+    /// Used by 3D viewer to discover which maps exist.
+    /// </summary>
+    private static void GenerateTopLevelManifest(
+        string viewerRoot,
+        VersionComparisonResult result,
+        Dictionary<string, List<TileDescriptor>> mapTileCatalog)
+    {
+        var cachedMapsRoot = Path.Combine(viewerRoot, "cached_maps", "analysis");
+        
+        foreach (var version in result.Versions)
+        {
+            var versionDir = Path.Combine(cachedMapsRoot, version);
+            Directory.CreateDirectory(versionDir);
+            
+            // Get all maps for this version
+            var mapsForVersion = mapTileCatalog.Keys.ToList();
+            
+            var manifest = new
+            {
+                version = version,
+                maps = mapsForVersion
+            };
+            
+            var manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            
+            var manifestPath = Path.Combine(versionDir, "manifest.json");
+            File.WriteAllText(manifestPath, manifestJson);
+            
+            Console.WriteLine($"[Phase 2] Generated top-level manifest.json for version {version} with {mapsForVersion.Count} maps");
         }
     }
 

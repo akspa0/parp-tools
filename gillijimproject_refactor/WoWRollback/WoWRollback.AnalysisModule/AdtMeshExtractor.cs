@@ -252,11 +252,10 @@ public sealed class AdtMeshExtractor
                     float adtY = chunk.vertices.vertices[idx] + chunk.header.position.Z;
                     float adtZ = chunk.header.position.X - (row * UNIT_SIZE_HALF);
                     
-                    // Transform to world coordinates (same as placement world coords)
-                    // worldX = MAP_CENTER - adtX, worldY = MAP_CENTER - adtZ, worldZ = adtY (height)
-                    float vx = MAP_CENTER - adtX;
-                    float vy = adtY; // Height unchanged
-                    float vz = MAP_CENTER - adtZ;
+                    // Use ADT coordinates as-is
+                    float vx = adtX;
+                    float vy = adtY;
+                    float vz = adtZ;
                     
                     positions.Add((vx, vy, vz));
                     
@@ -278,9 +277,10 @@ public sealed class AdtMeshExtractor
         float spanZ = Math.Max(1e-6f, maxZ - minZ);
         const float eps = 2.5e-3f;
 
-        // UV flip flags (matching working implementation defaults)
-        bool yFlip = true;  // Flip V coordinate
-        bool xFlip = true;  // Flip U coordinate
+        // UV flip flags - adjusted for world coordinate transform
+        // Since we inverted X and Z with MAP_CENTER transform, we need opposite flips
+        bool yFlip = false;  // Don't flip V coordinate
+        bool xFlip = false;  // Don't flip U coordinate
 
         var uvs = new List<(float u, float v)>(positions.Count);
         for (int i = 0; i < positions.Count; i++)
@@ -290,7 +290,7 @@ public sealed class AdtMeshExtractor
             float u = (p.x - minX) / spanX;
             float v = (maxZ - p.z) / spanZ;
             
-            // Apply flips (CRITICAL - matches working code)
+            // Apply flips if needed
             if (yFlip) v = 1f - v;
             if (xFlip) u = 1f - u;
             
@@ -435,12 +435,15 @@ public sealed class AdtMeshExtractor
                         var uvd = uvs[d];
                         var uve = uvs[e];
                         
-                        // CRITICAL: Use z,x,y order for correct orientation (same as OBJ)
-                        var va = (new VertexPosition(pa.z, pa.x, pa.y), new VertexTexture1(new Vector2(uva.u, uva.v)));
-                        var vb = (new VertexPosition(pb.z, pb.x, pb.y), new VertexTexture1(new Vector2(uvb.u, uvb.v)));
-                        var vc = (new VertexPosition(pc.z, pc.x, pc.y), new VertexTexture1(new Vector2(uvc.u, uvc.v)));
-                        var vd = (new VertexPosition(pd.z, pd.x, pd.y), new VertexTexture1(new Vector2(uvd.u, uvd.v)));
-                        var ve = (new VertexPosition(pe.z, pe.x, pe.y), new VertexTexture1(new Vector2(uve.u, uve.v)));
+                        // CRITICAL: Use x,y,z order to match placement world coordinates
+                        // vx = MAP_CENTER - adtX → Three.js X
+                        // vy = adtY (height) → Three.js Y
+                        // vz = MAP_CENTER - adtZ → Three.js Z
+                        var va = (new VertexPosition(pa.x, pa.y, pa.z), new VertexTexture1(new Vector2(uva.u, uva.v)));
+                        var vb = (new VertexPosition(pb.x, pb.y, pb.z), new VertexTexture1(new Vector2(uvb.u, uvb.v)));
+                        var vc = (new VertexPosition(pc.x, pc.y, pc.z), new VertexTexture1(new Vector2(uvc.u, uvc.v)));
+                        var vd = (new VertexPosition(pd.x, pd.y, pd.z), new VertexTexture1(new Vector2(uvd.u, uvd.v)));
+                        var ve = (new VertexPosition(pe.x, pe.y, pe.z), new VertexTexture1(new Vector2(uve.u, uve.v)));
                         
                         // 4 triangles per quad
                         prim.AddTriangle(va, vb, vc);
