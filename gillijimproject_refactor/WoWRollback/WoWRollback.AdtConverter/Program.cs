@@ -3,6 +3,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using WoWRollback.LkToAlphaModule;
 using WoWRollback.LkToAlphaModule.Utils;
+using WoWRollback.LkToAlphaModule.Inspectors;
 
 namespace WoWRollback.AdtConverter;
 
@@ -43,6 +44,34 @@ internal static class Program
 
         root.Add(wdtCmd);
         root.Add(mapCmd);
+
+        var packCmd = new Command("pack-monolithic", "Pack a monolithic Alpha WDT (header + embedded terrain-only ADTs)");
+        var lkDirPack = new Option<string>("--lk-dir", description: "LK map directory or root containing World/Maps/<map>/") { IsRequired = true };
+        packCmd.AddOption(wdtPath);
+        packCmd.AddOption(lkDirPack);
+        packCmd.AddOption(mapOpt);
+        packCmd.AddOption(outOpt);
+        packCmd.SetHandler((string wdt, string lkDir, string map, string outDir) =>
+        {
+            var orch = new LkToAlphaOrchestrator();
+            var resolvedOut = string.IsNullOrWhiteSpace(outDir) ? OutputPathResolver.GetDefaultRoot(map) : outDir;
+            var res = orch.PackMonolithicAlphaWdt(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions());
+            Console.WriteLine(res.Success ? $"PACK OK: {res.TilesProcessed} tiles -> {Path.Combine(res.AlphaOutputDirectory, map + ".wdt")}" : $"PACK FAILED: {res.ErrorMessage}");
+        }, wdtPath, lkDirPack, mapOpt, outOpt);
+
+        root.Add(packCmd);
+
+        var inspCmd = new Command("inspect-alpha", "Inspect a real Alpha WDT and report chunk order, MHDR/MCIN alignment, and sample MAIN tiles");
+        var inspWdt = new Option<string>("--wdt", description: "Path to Alpha WDT file") { IsRequired = true };
+        var inspTiles = new Option<int>("--tiles", () => 3, "Number of sample tiles to inspect from MAIN");
+        inspCmd.AddOption(inspWdt);
+        inspCmd.AddOption(inspTiles);
+        inspCmd.SetHandler((string wdt, int tiles) =>
+        {
+            AlphaWdtInspector.Inspect(wdt, tiles);
+        }, inspWdt, inspTiles);
+
+        root.Add(inspCmd);
 
         return root.Invoke(args);
     }

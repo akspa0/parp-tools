@@ -41,19 +41,14 @@ public static class AlphaMcnkBuilder
             p = next;
         }
 
-        // Build alpha MCVT chunk
-        Chunk alphaMcvt;
+        // Build alpha raw MCVT data (no named subchunk in Alpha)
+        byte[] alphaMcvtRaw = Array.Empty<byte>();
         if (mcvtLkWhole != null)
         {
             // Convert LK-order MCVT to Alpha-order (inverse of McvtAlpha.ToMcvt)
             var lkData = new byte[BitConverter.ToInt32(mcvtLkWhole, 4)];
             Buffer.BlockCopy(mcvtLkWhole, 8, lkData, 0, lkData.Length);
-            var alphaData = ConvertMcvtLkToAlpha(lkData);
-            alphaMcvt = new Chunk("MCVT", alphaData.Length, alphaData);
-        }
-        else
-        {
-            alphaMcvt = new Chunk("MCVT", 0, Array.Empty<byte>());
+            alphaMcvtRaw = ConvertMcvtLkToAlpha(lkData);
         }
 
         // Compose Alpha MCNK header
@@ -82,7 +77,7 @@ public static class AlphaMcnkBuilder
             GroundEffectsMap4 = 0,
             Unknown6 = 0,
             Unknown7 = 0,
-            McnkChunksSize = alphaMcvt.GetWholeChunk().Length, // total size of subchunks region
+            McnkChunksSize = alphaMcvtRaw.Length, // total size of subchunks region (raw blocks)
             Unknown8 = 0,
             MclqOffset = 0,
             Unused1 = 0,
@@ -93,7 +88,7 @@ public static class AlphaMcnkBuilder
             Unused6 = 0
         };
 
-        int givenSize = McnkHeaderSize + alphaMcvt.GetRealSize();
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -109,9 +104,11 @@ public static class AlphaMcnkBuilder
         }
         ms.Write(hdrBytes, 0, McnkHeaderSize);
 
-        // Subchunks (only MCVT for now)
-        var mcvtWhole = alphaMcvt.GetWholeChunk();
-        ms.Write(mcvtWhole, 0, mcvtWhole.Length);
+        // Sub-blocks (only raw MCVT for now)
+        if (alphaMcvtRaw.Length > 0)
+        {
+            ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
+        }
 
         return ms.ToArray();
     }
