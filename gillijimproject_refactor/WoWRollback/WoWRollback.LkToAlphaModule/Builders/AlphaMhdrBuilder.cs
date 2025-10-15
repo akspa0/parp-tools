@@ -13,7 +13,7 @@ public static class AlphaMhdrBuilder
     {
         var data = new byte[DataSize];
         // offsInfo relative to MHDR data start (client seems to use data-relative addressing); place MCIN right after MHDR data => 64
-        BitConverter.GetBytes(64).CopyTo(data, 4);
+        BitConverter.GetBytes(64).CopyTo(data, 0);
         return new Chunk("MHDR", data.Length, data);
     }
 }

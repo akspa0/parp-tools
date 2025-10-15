@@ -52,6 +52,11 @@ public static class AlphaMcnkBuilder
         }
 
         // Compose Alpha MCNK header
+        var mcnrRaw = new byte[448]; // 145*3 + 13 pad
+        var mclyEmpty = new Chunk("MCLY", 0, Array.Empty<byte>());
+        var mclyWhole = mclyEmpty.GetWholeChunk(); // header only (8 bytes)
+        var mcrfEmpty = new Chunk("MCRF", 0, Array.Empty<byte>());
+        var mcrfWhole = mcrfEmpty.GetWholeChunk();
         var hdr = new McnkAlphaHeader
         {
             Flags = 0,
@@ -61,9 +66,9 @@ public static class AlphaMcnkBuilder
             NLayers = 0,
             M2Number = 0,
             McvtOffset = 0, // first subchunk immediately after header
-            McnrOffset = 0,
-            MclyOffset = 0,
-            McrfOffset = 0,
+            McnrOffset = alphaMcvtRaw.Length,
+            MclyOffset = alphaMcvtRaw.Length + mcnrRaw.Length,
+            McrfOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length,
             McalOffset = 0,
             McalSize = 0,
             McshOffset = 0,
@@ -77,7 +82,7 @@ public static class AlphaMcnkBuilder
             GroundEffectsMap4 = 0,
             Unknown6 = 0,
             Unknown7 = 0,
-            McnkChunksSize = alphaMcvtRaw.Length, // total size of subchunks region (raw blocks)
+            McnkChunksSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length, // total size of sub-blocks region
             Unknown8 = 0,
             MclqOffset = 0,
             Unused1 = 0,
@@ -88,7 +93,7 @@ public static class AlphaMcnkBuilder
             Unused6 = 0
         };
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length;
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -104,11 +109,11 @@ public static class AlphaMcnkBuilder
         }
         ms.Write(hdrBytes, 0, McnkHeaderSize);
 
-        // Sub-blocks (only raw MCVT for now)
-        if (alphaMcvtRaw.Length > 0)
-        {
-            ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
-        }
+        // Sub-blocks in Alpha order: raw MCVT, raw MCNR, then named MCLY (empty)
+        if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
+        if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
+        ms.Write(mclyWhole, 0, mclyWhole.Length);
+        ms.Write(mcrfWhole, 0, mcrfWhole.Length);
 
         return ms.ToArray();
     }

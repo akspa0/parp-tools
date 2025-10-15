@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Security.Cryptography;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using WoWRollback.LkToAlphaModule.Builders;
@@ -137,10 +138,16 @@ public sealed class AlphaWdtMonolithicWriter
 
             // MCIN absolute offset comes after MHDR
             long mcinAbsolute = ms.Position;
+            // Precompute chunk lengths for MCIN and MTEX to position first MCNK
+            int mcinChunkLen = new Chunk("MCIN", 256 * 16, new byte[256 * 16]).GetWholeChunk().Length;
+            int mtexChunkLen = new Chunk("MTEX", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
+            int mddfChunkLen = new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
+            int modfChunkLen = new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
+            long firstMcnkAbsolute = mcinAbsolute + mcinChunkLen + mtexChunkLen + mddfChunkLen + modfChunkLen;
+
             // Compute MCIN entry absolute offsets (to MCNK letters) and sizes
             int[] mcnkAbs = new int[256];
             int[] mcnkSizes = new int[256];
-            long firstMcnkAbsolute = mcinAbsolute + new Chunk("MCIN", 256 * 16, new byte[256 * 16]).GetWholeChunk().Length;
             long cursor = firstMcnkAbsolute;
             for (int i = 0; i < 256; i++)
             {
@@ -156,12 +163,48 @@ public sealed class AlphaWdtMonolithicWriter
                     mcnkSizes[i] = 0;
                 }
             }
+            // Patch MHDR offsTex/sizeTex and offsDoo/sizeDoo and offsMob/sizeMob relative to MHDR.data
+            if (presentIndices.Count >= 0)
+            {
+                long mhdrDataStart = mhdrAbsolute + 8;
+                int offsTexRel = 64 + mcinChunkLen;
+                long save = ms.Position;
+                ms.Position = mhdrDataStart + 4; // offsTex
+                ms.Write(BitConverter.GetBytes(offsTexRel));
+                ms.Position = mhdrDataStart + 8; // sizeTex (0 for empty MTEX)
+                ms.Write(BitConverter.GetBytes(0));
+                // offsDoo (MDDF)
+                int offsDooRel = offsTexRel + mtexChunkLen;
+                ms.Position = mhdrDataStart + 0x0C; // offsDoo
+                ms.Write(BitConverter.GetBytes(offsDooRel));
+                ms.Position = mhdrDataStart + 0x10; // sizeDoo
+                ms.Write(BitConverter.GetBytes(0));
+                // offsMob (MODF)
+                int offsMobRel = offsDooRel + mddfChunkLen;
+                ms.Position = mhdrDataStart + 0x14; // offsMob
+                ms.Write(BitConverter.GetBytes(offsMobRel));
+                ms.Position = mhdrDataStart + 0x18; // sizeMob
+                ms.Write(BitConverter.GetBytes(0));
+                ms.Position = save;
+            }
+
             // MAIN.size = (first MCNK absolute - MHDR start), or 0 if none
             mhdrToFirstMcnkSizes[tileIndex] = presentIndices.Count > 0 ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
 
             var mcin = AlphaMcinBuilder.BuildMcin(mcnkAbs, mcnkSizes);
             var mcinWhole = mcin.GetWholeChunk();
             ms.Write(mcinWhole, 0, mcinWhole.Length);
+
+            // Write minimal MTEX chunk (empty)
+            var mtex = new Chunk("MTEX", 0, Array.Empty<byte>());
+            var mtexWhole = mtex.GetWholeChunk();
+            ms.Write(mtexWhole, 0, mtexWhole.Length);
+
+            // Write empty MDDF and MODF chunks
+            var mddf = new Chunk("MDDF", 0, Array.Empty<byte>());
+            ms.Write(mddf.GetWholeChunk());
+            var modf = new Chunk("MODF", 0, Array.Empty<byte>());
+            ms.Write(modf.GetWholeChunk());
 
             // Write MCNK bytes in index order
             for (int i = 0; i < 256; i++)
@@ -189,6 +232,20 @@ public sealed class AlphaWdtMonolithicWriter
             Console.WriteLine($"[pack] non-zero MAIN cells: {nonZeroMain}, final size: {finalBytes.Length} bytes");
         }
         File.WriteAllBytes(outWdtPath, finalBytes);
+
+        // Emit plain-hex MD5 sidecar '<map>.md5' next to the WDT
+        using (var md5 = MD5.Create())
+        {
+            var hash = md5.ComputeHash(finalBytes);
+            var sb = new StringBuilder(hash.Length * 2);
+            foreach (var b in hash) sb.Append(b.ToString("x2"));
+            var md5Path = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", Path.GetFileNameWithoutExtension(outWdtPath) + ".md5");
+            File.WriteAllText(md5Path, sb.ToString());
+            if (verbose)
+            {
+                Console.WriteLine($"[pack] wrote MD5: {md5Path}");
+            }
+        }
     }
 
     private static int FindFourCC(byte[] buf, string forwardFourCC)
