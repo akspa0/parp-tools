@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Security.Cryptography;
+using WoWRollback.LkToAlphaModule;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using WoWRollback.LkToAlphaModule.Builders;
@@ -14,8 +15,9 @@ public sealed class AlphaWdtMonolithicWriter
 {
     private const int GridTiles = 64 * 64; // 4096
 
-    public void Pack(string lkWdtPath, string lkMapDir, string outWdtPath, string mapName, bool verbose = false)
+    public void Pack(string lkWdtPath, string lkMapDir, string outWdtPath, string mapName, LkToAlphaOptions? opts = null)
     {
+        bool verbose = opts?.Verbose == true;
         if (string.IsNullOrWhiteSpace(lkWdtPath)) throw new ArgumentException("lkWdtPath required");
         if (string.IsNullOrWhiteSpace(lkMapDir)) throw new ArgumentException("lkMapDir required");
         if (string.IsNullOrWhiteSpace(outWdtPath)) throw new ArgumentException("outWdtPath required");
@@ -61,6 +63,10 @@ public sealed class AlphaWdtMonolithicWriter
         long monmStart = ms.Position;
         var monm = new Chunk("MONM", 0, Array.Empty<byte>());
         ms.Write(monm.GetWholeChunk());
+        // Some Alpha WDTs (e.g., RazorfenDowns) include a top-level empty MODF after MONM
+        long topModfStart = ms.Position;
+        var topModf = new Chunk("MODF", 0, Array.Empty<byte>());
+        ms.Write(topModf.GetWholeChunk());
 
         // Patch MPHD with offsets to MDNM/MONM
         // struct SMMapHeader { uint32 nDoodadNames; uint32 offsDoodadNames; uint32 nMapObjNames; uint32 offsMapObjNames; uint8 pad[112]; };
@@ -114,7 +120,7 @@ public sealed class AlphaWdtMonolithicWriter
                 int off = (i < lkMcnkOffsets.Count) ? lkMcnkOffsets[i] : 0;
                 if (off > 0)
                 {
-                    alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off);
+                    alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts);
                     presentIndices.Add(i);
                 }
                 else
@@ -140,7 +146,11 @@ public sealed class AlphaWdtMonolithicWriter
             long mcinAbsolute = ms.Position;
             // Precompute chunk lengths for MCIN and MTEX to position first MCNK
             int mcinChunkLen = new Chunk("MCIN", 256 * 16, new byte[256 * 16]).GetWholeChunk().Length;
-            int mtexChunkLen = new Chunk("MTEX", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
+            // Minimal MTEX with one base texture entry
+            // Default to a known Alpha-era texture the client should have
+            var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
+            var mtexData = Encoding.ASCII.GetBytes(baseTexturePath + "\0");
+            int mtexChunkLen = new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk().Length;
             int mddfChunkLen = new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
             int modfChunkLen = new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk().Length; // typically 8
             long firstMcnkAbsolute = mcinAbsolute + mcinChunkLen + mtexChunkLen + mddfChunkLen + modfChunkLen;
@@ -169,10 +179,16 @@ public sealed class AlphaWdtMonolithicWriter
                 long mhdrDataStart = mhdrAbsolute + 8;
                 int offsTexRel = 64 + mcinChunkLen;
                 long save = ms.Position;
+                
+                // CRITICAL: Write offsInfo field (offset to MCIN)
+                // This field was missing and caused client crash!
+                ms.Position = mhdrDataStart + 0; // offsInfo
+                ms.Write(BitConverter.GetBytes(64)); // MCIN immediately follows 64-byte MHDR.data
+                
                 ms.Position = mhdrDataStart + 4; // offsTex
                 ms.Write(BitConverter.GetBytes(offsTexRel));
-                ms.Position = mhdrDataStart + 8; // sizeTex (0 for empty MTEX)
-                ms.Write(BitConverter.GetBytes(0));
+                ms.Position = mhdrDataStart + 8; // sizeTex
+                ms.Write(BitConverter.GetBytes(mtexData.Length));
                 // offsDoo (MDDF)
                 int offsDooRel = offsTexRel + mtexChunkLen;
                 ms.Position = mhdrDataStart + 0x0C; // offsDoo
@@ -195,8 +211,8 @@ public sealed class AlphaWdtMonolithicWriter
             var mcinWhole = mcin.GetWholeChunk();
             ms.Write(mcinWhole, 0, mcinWhole.Length);
 
-            // Write minimal MTEX chunk (empty)
-            var mtex = new Chunk("MTEX", 0, Array.Empty<byte>());
+            // Write MTEX with one texture string
+            var mtex = new Chunk("MTEX", mtexData.Length, mtexData);
             var mtexWhole = mtex.GetWholeChunk();
             ms.Write(mtexWhole, 0, mtexWhole.Length);
 
@@ -220,9 +236,14 @@ public sealed class AlphaWdtMonolithicWriter
         // Patch MAIN data with MHDR absolute offsets
         ms.Position = mainStart;
         // Rebuild MAIN with collected offsets
-        var patchedMain = AlphaMainBuilder.BuildMain(mhdrAbsoluteOffsets, mhdrToFirstMcnkSizes);
+        bool pointToData = opts?.MainPointToMhdrData ?? false;
+        var patchedMain = AlphaMainBuilder.BuildMain(mhdrAbsoluteOffsets, mhdrToFirstMcnkSizes, pointToData);
         var patchedMainWhole = patchedMain.GetWholeChunk();
         ms.Write(patchedMainWhole, 0, patchedMainWhole.Length);
+        if (verbose)
+        {
+            Console.WriteLine($"[pack] MAIN offset mode: {(pointToData ? "MHDR.data (+8)" : "MHDR letters")}");
+        }
 
         // Flush to file
         var finalBytes = ms.ToArray();

@@ -46,30 +46,49 @@ internal static class Program
         root.Add(mapCmd);
 
         var packCmd = new Command("pack-monolithic", "Pack a monolithic Alpha WDT (header + embedded terrain-only ADTs)");
+        var wdtPathPack = new Option<string>("--lk-wdt", description: "Path to LK WDT file") { IsRequired = true };
         var lkDirPack = new Option<string>("--lk-dir", description: "LK map directory or root containing World/Maps/<map>/") { IsRequired = true };
-        packCmd.AddOption(wdtPath);
+        var mapOptPack = new Option<string>("--map", description: "Map name (e.g., Azeroth)") { IsRequired = true };
+        var outOptPack = new Option<string?>("--out", description: "Output directory (default: project_output/<map>_<ts>)");
+        var forceArea = new Option<int?>("--force-area-id", description: "Override AreaID when LK AreaId==0");
+        var debugFlat = new Option<float?>("--debug-flat-mcvt", description: "Force constant terrain height for all MCVT samples");
+        var baseTex = new Option<string?>("--base-texture", description: "Override MTEX path for base texture");
+        var mainPointToData = new Option<bool>("--main-point-to-data", () => false, "MAIN offsets point to MHDR.data (+8) instead of letters");
+        packCmd.AddOption(wdtPathPack);
         packCmd.AddOption(lkDirPack);
-        packCmd.AddOption(mapOpt);
-        packCmd.AddOption(outOpt);
-        packCmd.SetHandler((string wdt, string lkDir, string map, string outDir) =>
+        packCmd.AddOption(mapOptPack);
+        packCmd.AddOption(outOptPack);
+        packCmd.AddOption(forceArea);
+        packCmd.AddOption(debugFlat);
+        packCmd.AddOption(baseTex);
+        packCmd.AddOption(mainPointToData);
+        packCmd.SetHandler((string wdt, string lkDir, string map, string? outDir, int? forceAreaId, float? debugFlatMcvt, string? baseTexture, bool pointToData) =>
         {
             var orch = new LkToAlphaOrchestrator();
             var resolvedOut = string.IsNullOrWhiteSpace(outDir) ? OutputPathResolver.GetDefaultRoot(map) : outDir;
-            var res = orch.PackMonolithicAlphaWdt(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions());
+            var res = orch.PackMonolithicAlphaWdt(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions
+            {
+                ForceAreaId = forceAreaId,
+                DebugFlatMcvt = debugFlatMcvt,
+                BaseTexture = baseTexture,
+                MainPointToMhdrData = pointToData
+            });
             Console.WriteLine(res.Success ? $"PACK OK: {res.TilesProcessed} tiles -> {Path.Combine(res.AlphaOutputDirectory, map + ".wdt")}" : $"PACK FAILED: {res.ErrorMessage}");
-        }, wdtPath, lkDirPack, mapOpt, outOpt);
+        }, wdtPathPack, lkDirPack, mapOptPack, outOptPack, forceArea, debugFlat, baseTex, mainPointToData);
 
         root.Add(packCmd);
 
         var inspCmd = new Command("inspect-alpha", "Inspect a real Alpha WDT and report chunk order, MHDR/MCIN alignment, and sample MAIN tiles");
         var inspWdt = new Option<string>("--wdt", description: "Path to Alpha WDT file") { IsRequired = true };
         var inspTiles = new Option<int>("--tiles", () => 3, "Number of sample tiles to inspect from MAIN");
+        var inspJson = new Option<string?>("--json", description: "Optional path to write a JSON report");
         inspCmd.AddOption(inspWdt);
         inspCmd.AddOption(inspTiles);
-        inspCmd.SetHandler((string wdt, int tiles) =>
+        inspCmd.AddOption(inspJson);
+        inspCmd.SetHandler((string wdt, int tiles, string? json) =>
         {
-            AlphaWdtInspector.Inspect(wdt, tiles);
-        }, inspWdt, inspTiles);
+            AlphaWdtInspector.Inspect(wdt, tiles, json);
+        }, inspWdt, inspTiles, inspJson);
 
         root.Add(inspCmd);
 

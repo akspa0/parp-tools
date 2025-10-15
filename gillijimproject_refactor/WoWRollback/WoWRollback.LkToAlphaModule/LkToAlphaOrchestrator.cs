@@ -154,7 +154,7 @@ public sealed class LkToAlphaOrchestrator
                 .ToList();
 
             var outWdtPath = Path.Combine(outDir, mapName + ".wdt");
-            new AlphaWdtMonolithicWriter().Pack(wdtPath, lkMapDir, outWdtPath, mapName);
+            new AlphaWdtMonolithicWriter().Pack(wdtPath, lkMapDir, outWdtPath, mapName, opts);
 
             return new LkToAlphaConversionResult(
                 AlphaOutputDirectory: outDir,
