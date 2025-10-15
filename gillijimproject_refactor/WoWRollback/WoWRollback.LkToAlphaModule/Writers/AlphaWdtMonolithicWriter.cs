@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Security.Cryptography;
 using WoWRollback.LkToAlphaModule;
+using WoWRollback.LkToAlphaModule.Readers;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using WoWRollback.LkToAlphaModule.Builders;
@@ -37,6 +38,25 @@ public sealed class AlphaWdtMonolithicWriter
             }
         }
 
+        // Read WMO names from source LK WDT
+        var wdtReader = new LkWdtReader();
+        var wmoNames = wdtReader.ReadWmoNames(lkWdtPath);
+        
+        // CRITICAL: Alpha client crashes if MONM is empty but nMapObjNames > 0
+        // Add dummy WMO name if source has none to prevent client from reading garbage
+        if (wmoNames.Count == 0)
+        {
+            wmoNames.Add(@"world\wmo\cameron.wmo");  // Test WMO from earliest rendering code
+            if (verbose)
+            {
+                Console.WriteLine("[pack] No WMO names in source, adding dummy cameron.wmo");
+            }
+        }
+        else if (verbose)
+        {
+            Console.WriteLine($"[pack] Found {wmoNames.Count} WMO names in source WDT");
+        }
+
         using var ms = new MemoryStream();
         // Write MVER
         var mver = new Chunk("MVER", 4, BitConverter.GetBytes(18));
@@ -56,12 +76,15 @@ public sealed class AlphaWdtMonolithicWriter
         var mainWhole = main.GetWholeChunk();
         ms.Write(mainWhole, 0, mainWhole.Length);
 
-        // MDNM then MONM must follow MAIN in Alpha order (even if empty)
+        // MDNM then MONM must follow MAIN in Alpha order
         long mdnmStart = ms.Position;
         var mdnm = new Chunk("MDNM", 0, Array.Empty<byte>());
         ms.Write(mdnm.GetWholeChunk());
+        
+        // Write MONM with actual WMO names from source
         long monmStart = ms.Position;
-        var monm = new Chunk("MONM", 0, Array.Empty<byte>());
+        byte[] monmData = BuildMonmData(wmoNames);
+        var monm = new Chunk("MONM", monmData.Length, monmData);
         ms.Write(monm.GetWholeChunk());
         // Some Alpha WDTs (e.g., RazorfenDowns) include a top-level empty MODF after MONM
         long topModfStart = ms.Position;
@@ -77,8 +100,11 @@ public sealed class AlphaWdtMonolithicWriter
         BitConverter.GetBytes(0).CopyTo(mphdData);
         // offsDoodadNames = absolute offset to MDNM letters
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
-        // nMapObjNames = 0
-        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(8));
+        // nMapObjNames = actual count from source
+        // Note: Alpha client counts by splitting on nulls, so "name\0" = 2 parts (name + empty)
+        // We need to add 1 to match this behavior if we have any names
+        int wmoCount = wmoNames.Count > 0 ? wmoNames.Count + 1 : 0;
+        BitConverter.GetBytes(wmoCount).CopyTo(mphdData.Slice(8));
         // offsMapObjNames = absolute offset to MONM letters
         BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
         // write patched data
@@ -246,27 +272,22 @@ public sealed class AlphaWdtMonolithicWriter
         }
 
         // Flush to file
-        var finalBytes = ms.ToArray();
-        if (verbose)
-        {
-            int nonZeroMain = mhdrAbsoluteOffsets.Count(v => v != 0);
-            Console.WriteLine($"[pack] non-zero MAIN cells: {nonZeroMain}, final size: {finalBytes.Length} bytes");
-        }
-        File.WriteAllBytes(outWdtPath, finalBytes);
+        File.WriteAllBytes(outWdtPath, ms.ToArray());
+    }
 
-        // Emit plain-hex MD5 sidecar '<map>.md5' next to the WDT
-        using (var md5 = MD5.Create())
+    private static byte[] BuildMonmData(List<string> wmoNames)
+    {
+        if (wmoNames == null || wmoNames.Count == 0)
+            return Array.Empty<byte>();
+
+        using var ms = new MemoryStream();
+        foreach (var name in wmoNames)
         {
-            var hash = md5.ComputeHash(finalBytes);
-            var sb = new StringBuilder(hash.Length * 2);
-            foreach (var b in hash) sb.Append(b.ToString("x2"));
-            var md5Path = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", Path.GetFileNameWithoutExtension(outWdtPath) + ".md5");
-            File.WriteAllText(md5Path, sb.ToString());
-            if (verbose)
-            {
-                Console.WriteLine($"[pack] wrote MD5: {md5Path}");
-            }
+            var nameBytes = Encoding.UTF8.GetBytes(name);
+            ms.Write(nameBytes, 0, nameBytes.Length);
+            ms.WriteByte(0); // null terminator
         }
+        return ms.ToArray();
     }
 
     private static int FindFourCC(byte[] buf, string forwardFourCC)

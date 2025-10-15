@@ -551,4 +551,168 @@ public static class AlphaWdtInspector
         public int NSndEmitters { get; set; }
         public int MclqOffset { get; set; }
     }
+
+    public static void CompareFiles(string referenceFile, string testFile, int maxBytes)
+    {
+        Console.WriteLine($"Comparing Alpha WDT files:");
+        Console.WriteLine($"  Reference: {referenceFile}");
+        Console.WriteLine($"  Test:      {testFile}");
+        Console.WriteLine();
+
+        if (!File.Exists(referenceFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"ERROR: Reference file not found: {referenceFile}");
+            Console.ResetColor();
+            return;
+        }
+
+        if (!File.Exists(testFile))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"ERROR: Test file not found: {testFile}");
+            Console.ResetColor();
+            return;
+        }
+
+        var refBytes = File.ReadAllBytes(referenceFile);
+        var testBytes = File.ReadAllBytes(testFile);
+
+        Console.WriteLine($"File sizes:");
+        Console.WriteLine($"  Reference: {refBytes.Length:N0} bytes");
+        Console.WriteLine($"  Test:      {testBytes.Length:N0} bytes");
+        
+        if (refBytes.Length != testBytes.Length)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"  Difference: {testBytes.Length - refBytes.Length:+#;-#;0} bytes");
+            Console.ResetColor();
+        }
+        Console.WriteLine();
+
+        int compareLength = Math.Min(Math.Min(refBytes.Length, testBytes.Length), maxBytes);
+        int differenceCount = 0;
+        int firstDifferenceOffset = -1;
+
+        for (int i = 0; i < compareLength; i++)
+        {
+            if (refBytes[i] != testBytes[i])
+            {
+                if (firstDifferenceOffset == -1)
+                {
+                    firstDifferenceOffset = i;
+                }
+                differenceCount++;
+            }
+        }
+
+        if (differenceCount == 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"✓ Files are IDENTICAL (first {compareLength:N0} bytes)");
+            Console.ResetColor();
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"✗ Found {differenceCount:N0} byte differences in first {compareLength:N0} bytes");
+        Console.ResetColor();
+        Console.WriteLine();
+
+        // Show first difference in detail
+        Console.WriteLine($"First difference at offset 0x{firstDifferenceOffset:X} ({firstDifferenceOffset:N0}):");
+        
+        int contextStart = Math.Max(0, firstDifferenceOffset - 16);
+        int contextEnd = Math.Min(compareLength, firstDifferenceOffset + 48);
+
+        Console.WriteLine();
+        Console.WriteLine("Reference:");
+        PrintHexContext(refBytes, contextStart, contextEnd, firstDifferenceOffset);
+        
+        Console.WriteLine();
+        Console.WriteLine("Test:");
+        PrintHexContext(testBytes, contextStart, contextEnd, firstDifferenceOffset);
+
+        // Try to identify what chunk we're in
+        Console.WriteLine();
+        IdentifyChunkAtOffset(refBytes, firstDifferenceOffset, "Reference");
+        IdentifyChunkAtOffset(testBytes, firstDifferenceOffset, "Test");
+    }
+
+    private static void PrintHexContext(byte[] data, int start, int end, int highlightOffset)
+    {
+        for (int i = start; i < end; i += 16)
+        {
+            Console.Write($"  {i:X8}: ");
+            
+            // Hex bytes
+            for (int j = 0; j < 16 && i + j < end; j++)
+            {
+                if (i + j == highlightOffset)
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                
+                Console.Write($"{data[i + j]:X2} ");
+                
+                if (i + j == highlightOffset)
+                    Console.ResetColor();
+            }
+            
+            // ASCII
+            Console.Write(" | ");
+            for (int j = 0; j < 16 && i + j < end; j++)
+            {
+                byte b = data[i + j];
+                char c = (b >= 32 && b < 127) ? (char)b : '.';
+                
+                if (i + j == highlightOffset)
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                
+                Console.Write(c);
+                
+                if (i + j == highlightOffset)
+                    Console.ResetColor();
+            }
+            Console.WriteLine();
+        }
+    }
+
+    private static void IdentifyChunkAtOffset(byte[] data, int offset, string label)
+    {
+        // Search backwards for chunk header (FourCC + size)
+        for (int i = offset; i >= 0; i -= 4)
+        {
+            if (i + 8 <= data.Length)
+            {
+                string token = Encoding.ASCII.GetString(data, i, 4);
+                int size = BitConverter.ToInt32(data, i + 4);
+                
+                // Check if this looks like a valid chunk header
+                if (IsValidFourCC(token) && size >= 0 && size < 100_000_000)
+                {
+                    int dataStart = i + 8;
+                    int dataEnd = dataStart + size;
+                    
+                    if (offset >= dataStart && offset < dataEnd)
+                    {
+                        int offsetInChunk = offset - dataStart;
+                        Console.WriteLine($"{label}: Inside chunk '{ForwardFourCC(token)}' at offset +0x{offsetInChunk:X} ({offsetInChunk}) from chunk data start");
+                        Console.WriteLine($"         Chunk header at 0x{i:X}, size={size}");
+                        return;
+                    }
+                }
+            }
+        }
+        
+        Console.WriteLine($"{label}: Could not identify chunk");
+    }
+
+    private static bool IsValidFourCC(string token)
+    {
+        if (token.Length != 4) return false;
+        foreach (char c in token)
+        {
+            if (c < 32 || c > 126) return false;
+        }
+        return true;
+    }
 }

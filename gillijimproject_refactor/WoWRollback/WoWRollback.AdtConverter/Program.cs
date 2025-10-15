@@ -92,6 +92,20 @@ internal static class Program
 
         root.Add(inspCmd);
 
+        var compareCmd = new Command("compare-alpha", "Compare two Alpha WDT files byte-by-byte");
+        var compareRef = new Option<string>("--reference", description: "Reference Alpha WDT file (known good)") { IsRequired = true };
+        var compareTest = new Option<string>("--test", description: "Test Alpha WDT file (to check)") { IsRequired = true };
+        var compareBytes = new Option<int>("--max-bytes", () => 100000, "Maximum bytes to compare");
+        compareCmd.AddOption(compareRef);
+        compareCmd.AddOption(compareTest);
+        compareCmd.AddOption(compareBytes);
+        compareCmd.SetHandler((string refFile, string testFile, int maxBytes) =>
+        {
+            AlphaWdtInspector.CompareFiles(refFile, testFile, maxBytes);
+        }, compareRef, compareTest, compareBytes);
+
+        root.Add(compareCmd);
+
         return root.Invoke(args);
     }
 }

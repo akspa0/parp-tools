@@ -76,12 +76,18 @@ public static class AlphaMcnkBuilder
         var mcshWhole = mcshEmpty.GetWholeChunk();
         var mcalEmpty = new Chunk("MCAL", 0, Array.Empty<byte>());
         var mcalWhole = mcalEmpty.GetWholeChunk();
+        
+        // Calculate total size of sub-chunks for MclqOffset
+        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length;
+        
+        // Calculate bounding sphere radius from MCVT heights
+        float radius = CalculateRadius(alphaMcvtRaw);
         var hdr = new McnkAlphaHeader
         {
             Flags = 0,
             IndexX = lkHeader.IndexX,
             IndexY = lkHeader.IndexY,
-            Unknown1 = 0,
+            Unknown1 = radius,
             NLayers = 1,
             M2Number = 0,
             McvtOffset = 0, // first subchunk immediately after header
@@ -101,9 +107,9 @@ public static class AlphaMcnkBuilder
             GroundEffectsMap4 = 0,
             Unknown6 = 0,
             Unknown7 = 0,
-            McnkChunksSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length, // total size of sub-blocks region
+            McnkChunksSize = totalSubChunkSize, // total size of sub-blocks region
             Unknown8 = 0,
-            MclqOffset = 0,
+            MclqOffset = totalSubChunkSize, // Point to end of sub-chunks
             Unused1 = 0,
             Unused2 = 0,
             Unused3 = 0,
@@ -234,5 +240,31 @@ public static class AlphaMcnkBuilder
             }
         }
         return alphaData;
+    }
+    
+    private static float CalculateRadius(byte[] mcvtRaw)
+    {
+        // MCVT contains 145 floats (9x9 outer + 8x8 inner)
+        if (mcvtRaw.Length < 145 * 4) return 0f;
+        
+        float minH = float.MaxValue;
+        float maxH = float.MinValue;
+        
+        for (int i = 0; i < 145; i++)
+        {
+            float h = BitConverter.ToSingle(mcvtRaw, i * 4);
+            if (h < minH) minH = h;
+            if (h > maxH) maxH = h;
+        }
+        
+        // Simple bounding sphere: use height range as radius approximation
+        // Real calculation would be sqrt(dx^2 + dy^2 + dz^2) but this is close enough
+        // Alpha chunks are ~33.33 units wide, so diagonal is ~47 units
+        // Add height range for vertical component
+        float heightRange = maxH - minH;
+        float horizontalRadius = 23.57f; // ~sqrt(33.33^2 + 33.33^2) / 2
+        
+        // Combine horizontal and vertical components
+        return (float)Math.Sqrt(horizontalRadius * horizontalRadius + (heightRange / 2) * (heightRange / 2));
     }
 }
