@@ -71,6 +71,56 @@ public static class AlphaWdtInspector
         return new string(new[] { onDisk[3], onDisk[2], onDisk[1], onDisk[0] });
         }
 
+    /// <summary>
+    /// Validates that MHDR offsets point to the correct chunk types
+    /// </summary>
+    private static bool ValidateOffsets(FileStream fs, long mhdrDataStart, int offsTex, int offsDoo, int offsMob, int sizeTex, int sizeDoo, int sizeMob, out List<string> errors)
+    {
+        errors = new List<string>();
+        bool valid = true;
+        
+        // Validate MTEX offset (should point to MTEX FourCC - Alpha convention)
+        if (offsTex > 0)
+        {
+            long mtexAbs = mhdrDataStart + offsTex;
+            string tokAtOffset = ReadToken(fs, mtexAbs);
+            string fwd = ForwardFourCC(tokAtOffset);
+            if (fwd != "MTEX")
+            {
+                errors.Add($"offsTex={offsTex:X} points to offset 0x{mtexAbs:X} with token '{fwd}' not 'MTEX'");
+                valid = false;
+            }
+        }
+        
+        // Validate MDDF offset (should point to MDDF FourCC for empty chunks)
+        if (offsDoo > 0)
+        {
+            long mddfAbs = mhdrDataStart + offsDoo;
+            string tokAtOffset = ReadToken(fs, mddfAbs);
+            string fwd = ForwardFourCC(tokAtOffset);
+            if (fwd != "MDDF")
+            {
+                errors.Add($"offsDoo={offsDoo:X} points to offset 0x{mddfAbs:X} with token '{fwd}' not 'MDDF'");
+                valid = false;
+            }
+        }
+        
+        // Validate MODF offset (should point to MODF FourCC for empty chunks)
+        if (offsMob > 0)
+        {
+            long modfAbs = mhdrDataStart + offsMob;
+            string tokAtOffset = ReadToken(fs, modfAbs);
+            string fwd = ForwardFourCC(tokAtOffset);
+            if (fwd != "MODF")
+            {
+                errors.Add($"offsMob={offsMob:X} points to offset 0x{modfAbs:X} with token '{fwd}' not 'MODF' - THIS IS THE BUG!");
+                valid = false;
+            }
+        }
+        
+        return valid;
+    }
+
     public static void Inspect(string wdtPath, int sampleTiles, string? jsonPath = null)
     {
         using var fs = File.OpenRead(wdtPath);
@@ -203,6 +253,20 @@ public static class AlphaWdtInspector
             Console.WriteLine($"  offsDoo={offsDoo} (0x{offsDoo:X}), sizeDoo={sizeDoo}");
             Console.WriteLine($"  offsMob={offsMob} (0x{offsMob:X}), sizeMob={sizeMob}");
             Console.WriteLine($"  firstMCNK @0x{firstMcnkAbs:X} token='{firstMcnkTok}' (MAIN.size={t.sizeToFirstMcnk})");
+            
+            // VALIDATE OFFSETS
+            if (!ValidateOffsets(fs, mhdrDataStart, offsTex, offsDoo, offsMob, sizeTex, sizeDoo, sizeMob, out var offsetErrors))
+            {
+                Console.WriteLine($"  ❌ OFFSET VALIDATION FAILED:");
+                foreach (var err in offsetErrors)
+                {
+                    Console.WriteLine($"     {err}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"  ✓ Offset validation passed");
+            }
             
             // Calculate chunk spacing
             long mcinAbsolute = mcinAtDataRel;

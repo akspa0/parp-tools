@@ -1,5 +1,12 @@
 # Alpha WDT Conversion - Quick Reference
 
+## ⚠️ Current Scope: Terrain-Only
+
+**Working**: Dungeon maps with top-level WMO data (e.g., RazorfenDowns)  
+**Not Working**: Outdoor maps with per-tile WMO/M2 data (e.g., Kalidar)
+
+See `Known-Limitations.md` for details.
+
 ## 🔴 CRITICAL: Must-Fix Issues
 
 ### 1. WMO Name Counting (CRASH FIX)

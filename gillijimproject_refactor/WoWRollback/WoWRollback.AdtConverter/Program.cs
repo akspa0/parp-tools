@@ -4,6 +4,7 @@ using System.CommandLine.Invocation;
 using WoWRollback.LkToAlphaModule;
 using WoWRollback.LkToAlphaModule.Utils;
 using WoWRollback.LkToAlphaModule.Inspectors;
+using WoWRollback.LkToAlphaModule.Validators;
 
 namespace WoWRollback.AdtConverter;
 
@@ -105,6 +106,40 @@ internal static class Program
         }, compareRef, compareTest, compareBytes);
 
         root.Add(compareCmd);
+
+        var validateCmd = new Command("validate-wdt", "Validate WDT structure against reference (automated test)");
+        var validateTest = new Option<string>("--test", description: "WDT file to validate") { IsRequired = true };
+        var validateRef = new Option<string>("--reference", description: "Reference WDT (known good)") { IsRequired = true };
+        validateCmd.AddOption(validateTest);
+        validateCmd.AddOption(validateRef);
+        validateCmd.SetHandler((string testFile, string refFile) =>
+        {
+            var result = WdtStructureValidator.ValidateAgainstReference(testFile, refFile);
+            Console.WriteLine();
+            if (result.IsValid)
+            {
+                Console.WriteLine("✓ VALIDATION PASSED");
+            }
+            else
+            {
+                Console.WriteLine("✗ VALIDATION FAILED");
+                Console.WriteLine("\nErrors:");
+                foreach (var err in result.Errors)
+                {
+                    Console.WriteLine($"  - {err}");
+                }
+            }
+            if (result.Warnings.Count > 0)
+            {
+                Console.WriteLine("\nWarnings:");
+                foreach (var warn in result.Warnings)
+                {
+                    Console.WriteLine($"  - {warn}");
+                }
+            }
+        }, validateTest, validateRef);
+
+        root.Add(validateCmd);
 
         return root.Invoke(args);
     }

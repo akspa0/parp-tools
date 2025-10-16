@@ -57,4 +57,102 @@ public sealed class LkAdtReader : IAdtReader
         }
         return list;
     }
+
+    /// <summary>
+    /// Read WMO names (MWMO chunk) from a LK root ADT file
+    /// </summary>
+    public List<string> ReadWmoNames(string rootAdtPath)
+    {
+        var result = new List<string>();
+        if (!File.Exists(rootAdtPath)) return result;
+
+        var bytes = File.ReadAllBytes(rootAdtPath);
+        int i = 0;
+        while (i + 8 <= bytes.Length)
+        {
+            string fourCC = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > bytes.Length) break;
+
+            if (fourCC == "OMWM") // MWMO reversed
+            {
+                // Parse null-terminated strings
+                int pos = dataStart;
+                int end = dataStart + size;
+                while (pos < end)
+                {
+                    int nullPos = Array.IndexOf(bytes, (byte)0, pos, end - pos);
+                    if (nullPos == -1) nullPos = end;
+                    
+                    int len = nullPos - pos;
+                    if (len > 0)
+                    {
+                        string name = Encoding.UTF8.GetString(bytes, pos, len);
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            result.Add(name);
+                        }
+                    }
+                    
+                    pos = nullPos + 1;
+                }
+                break;
+            }
+
+            i = next;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Read M2 names (MMDX chunk) from a LK root ADT file
+    /// </summary>
+    public List<string> ReadM2Names(string rootAdtPath)
+    {
+        var result = new List<string>();
+        if (!File.Exists(rootAdtPath)) return result;
+
+        var bytes = File.ReadAllBytes(rootAdtPath);
+        int i = 0;
+        while (i + 8 <= bytes.Length)
+        {
+            string fourCC = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > bytes.Length) break;
+
+            if (fourCC == "XDMM") // MMDX reversed
+            {
+                // Parse null-terminated strings
+                int pos = dataStart;
+                int end = dataStart + size;
+                while (pos < end)
+                {
+                    int nullPos = Array.IndexOf(bytes, (byte)0, pos, end - pos);
+                    if (nullPos == -1) nullPos = end;
+                    
+                    int len = nullPos - pos;
+                    if (len > 0)
+                    {
+                        string name = Encoding.UTF8.GetString(bytes, pos, len);
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            result.Add(name);
+                        }
+                    }
+                    
+                    pos = nullPos + 1;
+                }
+                break;
+            }
+
+            i = next;
+        }
+
+        return result;
+    }
 }
