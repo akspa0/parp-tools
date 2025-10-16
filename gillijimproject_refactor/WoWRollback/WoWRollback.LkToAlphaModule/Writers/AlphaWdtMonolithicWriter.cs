@@ -125,17 +125,17 @@ public sealed class AlphaWdtMonolithicWriter
             Console.WriteLine("[pack] Written empty MDNM/MONM/MODF for terrain-only mode");
         }
 
-        // Patch MPHD to point to empty chunks
+        // Patch MPHD - CRITICAL: Set offsets to 0 when counts are 0!
         // struct SMMapHeader { uint32 nDoodadNames; uint32 offsDoodadNames; uint32 nMapObjNames; uint32 offsMapObjNames; uint8 pad[112]; };
+        // Client expects null pointers (0) for empty arrays, not pointers to empty chunks
         long savePos = ms.Position;
         ms.Position = mphdDataStart;
         Span<byte> mphdData = stackalloc byte[128];
         mphdData.Clear();
-        // Point to chunks but with count=0 since they're empty
         BitConverter.GetBytes(0).CopyTo(mphdData);      // nDoodadNames = 0
-        BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));  // offsDoodadNames = offset to MDNM
+        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(4));  // offsDoodadNames = 0 (NULL when count is 0)
         BitConverter.GetBytes(0).CopyTo(mphdData.Slice(8));  // nMapObjNames = 0  
-        BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12)); // offsMapObjNames = offset to MONM
+        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(12)); // offsMapObjNames = 0 (NULL when count is 0)
         // write patched data
         ms.Write(mphdData);
         // restore
@@ -292,27 +292,38 @@ public sealed class AlphaWdtMonolithicWriter
             Console.WriteLine($"  Calculated offsDoo: {offsDooRel}");
             Console.WriteLine($"  Calculated offsMob: {offsMobRel}");
             
-            // Write offsInfo (offset to MCIN)
+            // Write Alpha MHDR structure (NO sizeInfo field!)
+            // struct SMAreaHeader {
+            //     uint32_t offsInfo;  // MCIN  [offset 0]
+            //     uint32_t offsTex;   // MTEX  [offset 4]
+            //     uint32_t sizeTex;           [offset 8]
+            //     uint32_t offsDoo;   // MDDF  [offset 12]
+            //     uint32_t sizeDoo;           [offset 16]
+            //     uint32_t offsMob;   // MODF  [offset 20]
+            //     uint32_t sizeMob;           [offset 24]
+            //     uint8_t pad[36];            [offset 28-63]
+            // };
+            
             ms.Position = mhdrDataStart + 0;
-            ms.Write(BitConverter.GetBytes(64)); // MCIN immediately follows 64-byte MHDR.data
+            ms.Write(BitConverter.GetBytes(64)); // offsInfo - MCIN immediately follows 64-byte MHDR.data
             
-            // Write offsTex and sizeTex
             ms.Position = mhdrDataStart + 4;
-            ms.Write(BitConverter.GetBytes(offsTexRel));
+            ms.Write(BitConverter.GetBytes(offsTexRel)); // offsTex
+            
             ms.Position = mhdrDataStart + 8;
-            ms.Write(BitConverter.GetBytes(mtexData.Length));
+            ms.Write(BitConverter.GetBytes(mtexData.Length)); // sizeTex
             
-            // Write offsDoo and sizeDoo (MDDF)
-            ms.Position = mhdrDataStart + 0x0C;
-            ms.Write(BitConverter.GetBytes(offsDooRel));
-            ms.Position = mhdrDataStart + 0x10;
-            ms.Write(BitConverter.GetBytes(0));
+            ms.Position = mhdrDataStart + 12;
+            ms.Write(BitConverter.GetBytes(offsDooRel)); // offsDoo
             
-            // Write offsMob and sizeMob (MODF)
-            ms.Position = mhdrDataStart + 0x14;
-            ms.Write(BitConverter.GetBytes(offsMobRel));
-            ms.Position = mhdrDataStart + 0x18;
-            ms.Write(BitConverter.GetBytes(0));
+            ms.Position = mhdrDataStart + 16;
+            ms.Write(BitConverter.GetBytes(0)); // sizeDoo
+            
+            ms.Position = mhdrDataStart + 20;
+            ms.Write(BitConverter.GetBytes(offsMobRel)); // offsMob
+            
+            ms.Position = mhdrDataStart + 24;
+            ms.Write(BitConverter.GetBytes(0)); // sizeMob
             
             // STEP 4: Go back and rewrite MCIN with correct MCNK positions
             ms.Position = mcinPosition;

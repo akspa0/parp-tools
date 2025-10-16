@@ -261,10 +261,10 @@ public static class AlphaMcnkBuilder
             McnrOffset = alphaMcvtRaw.Length,
             MclyOffset = alphaMcvtRaw.Length + mcnrRaw.Length,
             McrfOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length,
-            McalOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length,
-            McalSize = mcalWhole.Length > 8 ? mcalWhole.Length - 8 : 0, // Size excludes chunk header
             McshOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length,
             McshSize = mcshWhole.Length > 8 ? mcshWhole.Length - 8 : 0, // Size excludes chunk header
+            McalOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length,
+            McalSize = mcalWhole.Length > 8 ? mcalWhole.Length - 8 : 0, // Size excludes chunk header
             Unknown3 = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId,
             WmoNumber = 0,
             Holes = 0,
