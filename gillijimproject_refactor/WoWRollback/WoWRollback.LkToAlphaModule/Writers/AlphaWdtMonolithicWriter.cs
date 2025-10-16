@@ -147,16 +147,18 @@ public sealed class AlphaWdtMonolithicWriter
 
         foreach (var rootAdt in rootAdts)
         {
-            // Parse tile indices from file name map_yy_xx.adt
-            var file = Path.GetFileNameWithoutExtension(rootAdt);
-            // Expected: <map>_YY_XX
-            var parts = file.Split('_');
-            if (parts.Length < 3) continue;
-            if (!int.TryParse(parts[^2], out int yy)) continue;
-            if (!int.TryParse(parts[^1], out int xx)) continue;
-            int tileIndex = yy * 64 + xx;
+            try
+            {
+                // Parse tile indices from file name map_yy_xx.adt
+                var file = Path.GetFileNameWithoutExtension(rootAdt);
+                // Expected: <map>_YY_XX
+                var parts = file.Split('_');
+                if (parts.Length < 3) continue;
+                if (!int.TryParse(parts[^2], out int yy)) continue;
+                if (!int.TryParse(parts[^1], out int xx)) continue;
+                int tileIndex = yy * 64 + xx;
 
-            var bytes = File.ReadAllBytes(rootAdt);
+                var bytes = File.ReadAllBytes(rootAdt);
             // Locate LK MHDR → MCIN to get MCNK offsets to know which exist
             int mhdrOffset = FindFourCC(bytes, "MHDR");
             if (mhdrOffset < 0) continue;
@@ -203,7 +205,17 @@ public sealed class AlphaWdtMonolithicWriter
             
             // Prepare MTEX data
             var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
-            var mtexData = Encoding.ASCII.GetBytes(baseTexturePath + "\0");
+            // Ensure proper null-termination and encoding
+            var mtexString = baseTexturePath + "\0";
+            byte[] mtexData;
+            try
+            {
+                mtexData = Encoding.ASCII.GetBytes(mtexString);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to encode MTEX texture path '{baseTexturePath}': {ex.Message}", ex);
+            }
 
             // STEP 1: Write all chunks FIRST and track their actual positions
             // This ensures offsets always match reality
@@ -323,6 +335,11 @@ public sealed class AlphaWdtMonolithicWriter
                     ms.Write(buf, 0, buf.Length);
                 }
             }
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to process tile '{Path.GetFileName(rootAdt)}': {ex.Message}", ex);
+            }
         }
 
         // Patch MAIN data with MHDR absolute offsets
@@ -361,16 +378,31 @@ public sealed class AlphaWdtMonolithicWriter
 
     private static int FindFourCC(byte[] buf, string forwardFourCC)
     {
+        if (buf == null || buf.Length < 8) return -1;
+        if (string.IsNullOrEmpty(forwardFourCC) || forwardFourCC.Length != 4) return -1;
+        
         // On-disk bytes are reversed in our Chunk reader logic; here we scan for reversed letters
         string reversed = new string(new[] { forwardFourCC[3], forwardFourCC[2], forwardFourCC[1], forwardFourCC[0] });
         for (int i = 0; i + 8 <= buf.Length;)
         {
+            // Ensure we have enough bytes for FourCC
+            if (i < 0 || i + 4 > buf.Length) break;
+            
             string fcc = Encoding.ASCII.GetString(buf, i, 4);
             int size = BitConverter.ToInt32(buf, i + 4);
+            
+            // Validate size to prevent infinite loops or negative values
+            if (size < 0 || size > buf.Length) break;
+            
             int dataStart = i + 8;
             int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            
             if (fcc == reversed) return i;
             if (dataStart + size > buf.Length) break;
+            
+            // Ensure we're making forward progress
+            if (next <= i) break;
+            
             i = next;
         }
         return -1;

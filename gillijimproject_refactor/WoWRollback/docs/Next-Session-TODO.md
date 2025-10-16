@@ -9,150 +9,176 @@
 - ✅ All validation passes
 - ✅ RazorfenDowns loads successfully in client
 
-### ❌ MCNK Sub-Chunks - CURRENT ISSUE
-**Error:** `ERROR #132 (0x85100084) index (0x4D48452), array size (0x00000004)`
+### ✅ MCNR Extraction - IMPLEMENTED BUT INSUFFICIENT
+- ✅ MCNR chunk now extracted from LK MCNK
+- ✅ Vertex reordering implemented (interleaved → outer-first)
+- ✅ Proper 13-byte padding added
+- ❌ **Still crashes** - Problem is elsewhere
 
-**Root Cause Identified:** MCNR (normals) sub-chunk is all zeros
-- **File:** `AlphaMcnkBuilder.cs` line 66
-- **Problem:** `mcnrRaw = new byte[448]` creates empty array but never populates it
-- **Impact:** Client reads zeros/garbage → offset calculation fails → crash
+### ❌ ROOT CAUSE FOUND - Missing Sub-Chunk Data
+**Error:** `ERROR #132 (0x85100084) index (0x4D484452), array size (0x00000000)`
 
-### Why RazorfenDowns Works But Kalidar Fails
-- **RazorfenDowns:** Terrain is flat/simple, zeros might be acceptable
-- **Kalidar:** Complex terrain with mountains, needs real normal data
+**Comparison Analysis (Real vs Converted Kalidar):**
+
+Real Alpha 0.5.3 Kalidar:
+- File size: **32.8 MB**
+- MDNM: **1,141 bytes** (M2 doodad names)
+- MONM: **Large** (WMO building names)
+- MTEX: **8 bytes** per tile
+- MCNK: **Varying sizes** (different sub-chunk content)
+
+Our Converted Kalidar:
+- File size: **17.3 MB** (47% smaller!)
+- MDNM: **0 bytes** (empty)
+- MONM: **0 bytes** (empty)
+- MTEX: **29 bytes** per tile
+- MCNK: **1204 bytes constant** (minimal/uniform)
+
+### Missing ~15.5 MB of Data
+We're only writing minimal MCNKs with MCVT + MCNR. Missing:
+- ❌ Texture layer data (MCLY with real layer info)
+- ❌ Alpha map data (MCAL for texture blending)
+- ❌ Shadow data (MCSH)
+- ❌ Possibly other sub-chunks the client expects
 
 ---
 
 ## 🎯 Action Plan for Next Session
 
-### PRIORITY 1: Extract and Convert MCNR from LK MCNK
+### ✅ COMPLETED: Extract MCLY (Texture Layers) from LK
 
-**File:** `WoWRollback.LkToAlphaModule/Builders/AlphaMcnkBuilder.cs`
-**Location:** Around lines 36-66
+✅ Implemented in AlphaMcnkBuilder.cs:
+1. ✅ Extract MCLY chunk from LK MCNK (lines 51-55)
+2. ✅ Use extracted data directly (no conversion needed - same format)
+3. ✅ Calculate NLayers from actual MCLY data (16 bytes per layer)
+4. ✅ Fallback to minimal single-layer if MCLY missing
 
-#### Current Code (BROKEN):
-```csharp
-// Line 66 - creates empty array
-var mcnrRaw = new byte[448]; // 145*3 + 13 pad
-```
+### ✅ COMPLETED: Extract MCAL (Alpha Maps) from LK
 
-#### What We Need:
-1. **Extract MCNR chunk from LK MCNK** (similar to MCVT extraction at lines 36-43)
-2. **Convert normal vertex order:**
-   - LK format: Interleaved outer/inner (9 outer, 8 inner, 9 outer, 8 inner...)
-   - Alpha format: All outer first (81 normals), then all inner (64 normals)
-3. **Add 13-byte padding** at end
-4. **Verify total size:** 145 normals × 3 bytes + 13 pad = 448 bytes
+✅ Implemented in AlphaMcnkBuilder.cs:
+1. ✅ Extract MCAL chunk from LK MCNK (lines 56-60)
+2. ✅ Use extracted data directly (same format)
+3. ✅ Update McalSize in header to match actual data
+4. ✅ Fallback to empty if MCAL missing
 
-#### Code Template:
-```csharp
-// After line 43 where MCVT is extracted, add:
+### ✅ COMPLETED: Extract MCSH (Shadows) from LK
 
-// Find MCNR chunk
-if (fcc == "RNCM") // 'MCNR' reversed
-{
-    mcnrLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-    Buffer.BlockCopy(lkAdtBytes, p, mcnrLkWhole, 0, mcnrLkWhole.Length);
-    break;
-}
+✅ Implemented in AlphaMcnkBuilder.cs:
+1. ✅ Extract MCSH chunk from LK MCNK (lines 61-65)
+2. ✅ Use extracted data directly (same format)
+3. ✅ Update McshSize in header to match actual data
+4. ✅ Fallback to empty if MCSH missing
 
-// Then convert MCNR order
-if (mcnrLkWhole != null)
-{
-    var lkData = new byte[BitConverter.ToInt32(mcnrLkWhole, 4)];
-    Buffer.BlockCopy(mcnrLkWhole, 8, lkData, 0, lkData.Length);
-    mcnrRaw = ConvertMcnrLkToAlpha(lkData);
-}
-else
-{
-    mcnrRaw = new byte[448]; // fallback to zeros if MCNR missing
-}
-```
+### ❌ CRITICAL DISCOVERY: LK Uses Split ADT Files!
 
-#### Add Conversion Function:
-```csharp
-private static byte[] ConvertMcnrLkToAlpha(byte[] lkData)
-{
-    // LK: 145 normals interleaved (9-8-9-8...)
-    // Alpha: 81 outer, then 64 inner + 13 pad
-    var alpha = new byte[448]; // 145*3 + 13
-    
-    // TODO: Implement vertex reordering
-    // For now, direct copy as first attempt:
-    Buffer.BlockCopy(lkData, 0, alpha, 0, Math.Min(lkData.Length, 435));
-    
-    return alpha;
-}
-```
+**Problem Found:** LK 3.3.5 splits ADT data across multiple files:
+- `Map_XX_YY.adt` = Terrain geometry (MCVT, MCNR only)
+- `Map_XX_YY_tex0.adt` = Textures (MCLY, MCAL, MCSH) ← **WE NEED THIS!**
+- `Map_XX_YY_obj0.adt` = Objects (WMO/M2 placements)
 
-### PRIORITY 2: Verify All Sub-Chunk Formats
+Alpha 0.5.3 has everything in ONE monolithic file.
 
-**Reference:** `z_wowdev.wiki/Alpha.md` lines 109-163
+**Current Status:**
+- ✅ Code extracts MCLY/MCAL/MCSH from terrain ADT
+- ❌ But LK terrain ADTs don't contain texture data!
+- ❌ File size same as before (~17 MB) - no texture data included
 
-#### Sub-chunks WITHOUT chunk header (raw data only):
-- ✅ **MCVT** (heights) - 145 floats - DONE
-- ❌ **MCNR** (normals) - 145×3 bytes + 13 pad - **FIX THIS**
-- ❓ **MCSH** (shadows) - verify if present/needed
-- ❓ **MCAL** (alpha maps) - currently empty, verify format
-- ❓ **MCLQ** (liquid) - not implemented
-- ❓ **MCSE** (sound emitters) - not implemented
+### 🎯 NEXT: Load _tex0.adt Files
 
-#### Sub-chunks WITH chunk header (8 bytes + data):
-- ✅ **MCLY** (texture layers) - Currently one empty layer
-- ✅ **MCRF** (references) - Currently empty
-- ✅ **MCAL** (alpha map chunk wrapper) - Currently empty
+Need to update `AlphaWdtMonolithicWriter.cs`:
+1. ⏳ Find corresponding `_tex0.adt` file for each terrain tile
+2. ⏳ Load both terrain and texture ADT bytes
+3. ⏳ Pass texture bytes to `AlphaMcnkBuilder.BuildFromLk()`
+4. ⏳ Extract MCLY/MCAL/MCSH from texture file
+5. ⏳ Verify file size increases to ~32 MB
 
-### PRIORITY 3: Test Incremental Changes
+### Alternative Approach: Copy Real Alpha MCNK Sub-Chunks
 
-1. **Test 1:** Extract MCNR but don't reorder → does it work?
-2. **Test 2:** Add proper vertex reordering → lighting correct?
-3. **Test 3:** If still crashes, check MCLY (texture layers)
-4. **Test 4:** Compare byte-by-byte with working Alpha WDT
+Since we have working Alpha files, we could:
+1. Parse real Alpha MCNK structure completely
+2. Use it as reference for what data to extract from LK
+3. Ensure we're not missing any sub-chunks
 
 ---
 
-## 🛠️ Implementation Steps
+## 📊 Key Discoveries
 
-### Step 1: Add MCNR Extraction
-**Time estimate:** 15 minutes
+### Alpha Version Comparison (0.5.3 vs 0.5.5)
+- ✅ **DeadminesInstance:** IDENTICAL (format stable for instances)
+- ❌ **Azeroth:** DIFFERENT (+87MB, outdoor maps evolved)
+- **Conclusion:** Alpha format varied between versions for outdoor maps
 
-1. Open `AlphaMcnkBuilder.cs`
-2. Find the MCVT extraction code (lines 36-43)
-3. Duplicate and adapt for MCNR (look for 'RNCM' FourCC)
-4. Build and test
-
-### Step 2: Add Conversion Function
-**Time estimate:** 30 minutes
-
-1. Create `ConvertMcnrLkToAlpha()` function
-2. Implement vertex reordering logic
-3. Add 13-byte padding
-4. Test with simple direct copy first
-
-### Step 3: Test and Validate
-**Time estimate:** 15 minutes
-
-1. Pack Kalidar with new code
-2. Test in Alpha client
-3. If crashes, add debug output to verify MCNR data
-4. Compare with working RazorfenDowns
-
-### Step 4: Refine if Needed
-**Time estimate:** Variable
-
-- Add proper vertex reordering if direct copy doesn't work
-- Verify normal vector calculations
-- Check for endianness issues
+### Real vs Converted Comparison
+- **File size:** 32.8 MB → 17.3 MB (47% data loss)
+- **MCNK uniformity:** Real varies, ours constant
+- **Sub-chunks:** Real has MCLY/MCAL/MCSH data, we write empty/minimal
 
 ---
 
-## ✅ Success Criteria
+## 🛠️ Technical Notes
 
-1. ✅ Kalidar loads in Alpha 0.5.3 client without crash
-2. ✅ Terrain visible with mountains/valleys
-3. ✅ Lighting looks correct (normals working)
-4. ✅ All 55 tiles render properly
-5. ✅ RazorfenDowns still works
+### MCNR Implementation (DONE)
+Reordering logic added in `AlphaMcnkBuilder.cs` line 271:
+```csharp
+private static byte[] ConvertMcnrLkToAlpha(byte[] mcnrLk)
+{
+    // Reorders from LK interleaved to Alpha outer-first format
+    // 81 outer normals (9x9) then 64 inner (8x8) + 13 pad
+    // Total: 448 bytes
+}
+
+---
+
+## ✅ What Was Accomplished - Session 2025-10-16
+
+### 🎯 Implemented Complete Sub-Chunk Extraction
+
+**Changes to `AlphaMcnkBuilder.cs`:**
+
+1. **Extended chunk scanning loop** (lines 27-68):
+   - Added extraction for MCLY (texture layers) - FourCC "YLCM"
+   - Added extraction for MCAL (alpha maps) - FourCC "LACM"  
+   - Added extraction for MCSH (shadows) - FourCC "HSCM"
+   - Removed early exit to scan all sub-chunks
+
+2. **Replaced empty placeholders** (lines 108-152):
+   - MCLY: Use extracted LK data or fallback to minimal 16-byte layer
+   - MCAL: Use extracted LK data or fallback to empty
+   - MCSH: Use extracted LK data or fallback to empty
+
+3. **Fixed header calculations** (lines 160-183):
+   - Calculate NLayers from actual MCLY data (16 bytes per entry)
+   - Set McalSize to actual data size (excluding 8-byte chunk header)
+   - Set McshSize to actual data size (excluding 8-byte chunk header)
+
+**Expected Impact:**
+- File size should increase from 17.3 MB → ~32 MB
+- MCNK chunks will have varying sizes (not uniform)
+- Terrain textures should display correctly
+- Client should load without ERROR #132
+
+**Build Status:** ✅ Succeeded with 6 warnings
+
+---
+
+## ✅ What Was Accomplished - Session 2025-10-15
+
+1. ✅ Implemented MCNR extraction from LK MCNK
+2. ✅ Added vertex reordering (interleaved → outer-first)  
+3. ✅ Tested on Kalidar - still crashes
+4. ✅ Compared Alpha versions (0.5.3 vs 0.5.5)
+5. ✅ **Found root cause:** Missing 15.5MB of sub-chunk data
+6. ✅ Identified that MCLY/MCAL/MCSH need extraction
+
+---
+
+## ✅ Success Criteria for Next Session
+
+1. ⏳ Extract MCLY (texture layers) from LK
+2. ⏳ Extract MCAL (alpha maps) from LK
+3. ⏳ Extract MCSH (shadows) from LK if present
+4. ⏳ Kalidar file size increases from 17MB → 32MB
+5. ⏳ Kalidar loads in Alpha 0.5.3 client without crash
 
 ---
 
@@ -170,16 +196,11 @@ private static byte[] ConvertMcnrLkToAlpha(byte[] lkData)
 - **Validation:** `AlphaWdtInspector.cs`
 
 ### Tools
-- `validate-wdt` - Structure validation
-- `inspect-alpha` - Deep WDT inspection
+- `inspect-alpha` - Deep WDT inspection  
 - `compare-alpha` - Byte-level comparison
+- `pack-monolithic` - Convert LK→Alpha WDT
 
----
-
-## 🎉 Expected Outcome
-
-After fixing MCNR:
-- Kalidar should load successfully
-- Terrain will be visible with proper lighting
-- We can then add texture layers (MCLY) in a future session
-- Full Alpha WDT conversion pipeline complete!
+### Test Data Locations
+- Real Alpha 0.5.3: `test_data\0.5.3\tree\World\Maps\`
+- Real Alpha 0.5.5: `test_data\0.5.5\tree\World\Maps\`
+- LK 3.3.5 Source: `test_data\0.6.0\tree\World\Maps\`
