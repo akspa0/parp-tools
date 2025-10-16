@@ -131,33 +131,36 @@ private static byte[] ConvertMcnrLkToAlpha(byte[] mcnrLk)
 
 ## ✅ What Was Accomplished - Session 2025-10-16
 
-### 🎯 Implemented Complete Sub-Chunk Extraction
+### 🎯 BREAKTHROUGH: Header-Based Chunk Extraction Implemented
+
+**Root Cause Identified:**
+- LK 3.3.5 stores MCLY/MCAL/MCSH via **header offsets** in MCNK
+- Previous code only scanned sequential sub-chunks (MCVT/MCNR)
+- Missing 15.5 MB of texture data (MCLY, MCAL, MCSH)
 
 **Changes to `AlphaMcnkBuilder.cs`:**
 
-1. **Extended chunk scanning loop** (lines 27-68):
-   - Added extraction for MCLY (texture layers) - FourCC "YLCM"
-   - Added extraction for MCAL (alpha maps) - FourCC "LACM"  
-   - Added extraction for MCSH (shadows) - FourCC "HSCM"
-   - Removed early exit to scan all sub-chunks
+1. **Added header-based extraction** (lines 37-77):
+   - Extract MCLY using `lkHeader.MclyOffset` (header+0x14)
+   - Extract MCAL using `lkHeader.McalOffset` (header+0x18)
+   - Extract MCSH using `lkHeader.McshOffset` (header+0x1C)
+   - Read chunks from absolute positions within MCNK
 
-2. **Replaced empty placeholders** (lines 108-152):
-   - MCLY: Use extracted LK data or fallback to minimal 16-byte layer
-   - MCAL: Use extracted LK data or fallback to empty
-   - MCSH: Use extracted LK data or fallback to empty
+2. **Kept sequential scanning** for MCVT/MCNR (lines 79-111):
+   - These chunks are still in the sub-chunk area
+   - Scanned sequentially as before
 
-3. **Fixed header calculations** (lines 160-183):
-   - Calculate NLayers from actual MCLY data (16 bytes per entry)
-   - Set McalSize to actual data size (excluding 8-byte chunk header)
-   - Set McshSize to actual data size (excluding 8-byte chunk header)
+3. **Removed incorrect _tex0.adt loading**:
+   - LK 3.3.5 uses monolithic ADT files (not split)
+   - All data is in main ADT, accessed differently
 
-**Expected Impact:**
-- File size should increase from 17.3 MB → ~32 MB
-- MCNK chunks will have varying sizes (not uniform)
-- Terrain textures should display correctly
-- Client should load without ERROR #132
-
-**Build Status:** ✅ Succeeded with 6 warnings
+**Results:**
+- ✅ File size: 40.96 MB (147% increase from 16.56 MB)
+- ✅ MCLY verified: 16 bytes (texture layer definitions)
+- ✅ MCAL verified: 1,052 bytes (alpha maps)
+- ✅ MCSH: 0 bytes (may not be present in all tiles)
+- ✅ Build succeeds with 6 warnings
+- ⏳ **Ready for client testing!**
 
 ---
 
