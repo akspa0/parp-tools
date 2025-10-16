@@ -54,7 +54,7 @@ public sealed class AlphaWdtMonolithicWriter
             allWmoNames.Add(name);
         }
         
-        // Read from each tile ADT
+        // Read from each tile ADT (root and obj variants)
         foreach (var rootAdt in rootAdts)
         {
             var tileWmos = adtReader.ReadWmoNames(rootAdt);
@@ -67,6 +67,24 @@ public sealed class AlphaWdtMonolithicWriter
             foreach (var name in tileM2s)
             {
                 allM2Names.Add(name);
+            }
+
+            // Also scan OBJ ADT if present (often carries additional names)
+            var objAdt = Path.Combine(Path.GetDirectoryName(rootAdt)!,
+                Path.GetFileNameWithoutExtension(rootAdt) + "_obj.adt");
+            if (File.Exists(objAdt))
+            {
+                var objWmos = adtReader.ReadWmoNames(objAdt);
+                foreach (var name in objWmos)
+                {
+                    allWmoNames.Add(name);
+                }
+
+                var objM2s = adtReader.ReadM2Names(objAdt);
+                foreach (var name in objM2s)
+                {
+                    allM2Names.Add(name);
+                }
             }
         }
         
@@ -104,38 +122,34 @@ public sealed class AlphaWdtMonolithicWriter
         ms.Write(mainWhole, 0, mainWhole.Length);
 
         // MDNM then MONM must follow MAIN in Alpha order
-        // NOTE: Alpha client doesn't support M2 names in WDT, keep MDNM empty
-        // CRITICAL: Client EXPECTS these chunks to exist, even if empty
-        // Write them with size=0 for terrain-only mode
+        // Build from collected LK names (MMDX → MDNM, MWMO → MONM)
+        var mdnmDataBytes = BuildMdnmData(m2Names);
+        var monmDataBytes = BuildMonmData(wmoNames);
+
         long mdnmStart = ms.Position;
-        var mdnm = new Chunk("MDNM", 0, Array.Empty<byte>());
+        var mdnm = new Chunk("MDNM", mdnmDataBytes.Length, mdnmDataBytes);
         ms.Write(mdnm.GetWholeChunk());
-        
+
         long monmStart = ms.Position;
-        var monm = new Chunk("MONM", 0, Array.Empty<byte>());
+        var monm = new Chunk("MONM", monmDataBytes.Length, monmDataBytes);
         ms.Write(monm.GetWholeChunk());
-        
-        // Some Alpha WDTs include empty MODF after MONM
-        long topModfStart = ms.Position;
-        var topModf = new Chunk("MODF", 0, Array.Empty<byte>());
-        ms.Write(topModf.GetWholeChunk());
-        
+
         if (verbose)
         {
-            Console.WriteLine("[pack] Written empty MDNM/MONM/MODF for terrain-only mode");
+            Console.WriteLine($"[pack] MDNM bytes: {mdnmDataBytes.Length}, names: {m2Names.Count}");
+            Console.WriteLine($"[pack] MONM bytes: {monmDataBytes.Length}, names: {wmoNames.Count}");
         }
 
-        // Patch MPHD - CRITICAL: Set offsets to 0 when counts are 0!
+        // Patch MPHD with counts and offsets (absolute file offsets to chunk FourCC)
         // struct SMMapHeader { uint32 nDoodadNames; uint32 offsDoodadNames; uint32 nMapObjNames; uint32 offsMapObjNames; uint8 pad[112]; };
-        // Client expects null pointers (0) for empty arrays, not pointers to empty chunks
         long savePos = ms.Position;
         ms.Position = mphdDataStart;
         Span<byte> mphdData = stackalloc byte[128];
         mphdData.Clear();
-        BitConverter.GetBytes(0).CopyTo(mphdData);      // nDoodadNames = 0
-        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(4));  // offsDoodadNames = 0 (NULL when count is 0)
-        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(8));  // nMapObjNames = 0  
-        BitConverter.GetBytes(0).CopyTo(mphdData.Slice(12)); // offsMapObjNames = 0 (NULL when count is 0)
+        BitConverter.GetBytes(m2Names.Count).CopyTo(mphdData);                  // nDoodadNames
+        BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));   // offsDoodadNames (absolute)
+        BitConverter.GetBytes(wmoNames.Count).CopyTo(mphdData.Slice(8));            // nMapObjNames
+        BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));  // offsMapObjNames (absolute)
         // write patched data
         ms.Write(mphdData);
         // restore
@@ -203,18 +217,26 @@ public sealed class AlphaWdtMonolithicWriter
             long mcinAbsolute = ms.Position;
             long mhdrDataStart = mhdrAbsolute + 8;
             
-            // Prepare MTEX data
-            var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
-            // Ensure proper null-termination and encoding
-            var mtexString = baseTexturePath + "\0";
-            byte[] mtexData;
-            try
+            // Prepare MTEX data: prefer LK tile TEX ADT MTEX; then root ADT; fallback to BaseTexture
+            byte[] mtexData = Array.Empty<byte>();
+            var rootDir = Path.GetDirectoryName(rootAdt)!;
+            var baseName = Path.GetFileNameWithoutExtension(rootAdt);
+            var texAdt = Path.Combine(rootDir, baseName + "_tex.adt");
+            if (File.Exists(texAdt))
             {
-                mtexData = Encoding.ASCII.GetBytes(mtexString);
+                var texBytes = File.ReadAllBytes(texAdt);
+                mtexData = ExtractLkMtexData(texBytes);
             }
-            catch (Exception ex)
+            if (mtexData.Length == 0)
             {
-                throw new InvalidOperationException($"Failed to encode MTEX texture path '{baseTexturePath}': {ex.Message}", ex);
+                mtexData = ExtractLkMtexData(bytes);
+            }
+            if (mtexData.Length == 0)
+            {
+                var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
+                var mtexString = baseTexturePath + "\0";
+                try { mtexData = Encoding.ASCII.GetBytes(mtexString); }
+                catch (Exception ex) { throw new InvalidOperationException($"Failed to encode MTEX texture path '{baseTexturePath}': {ex.Message}", ex); }
             }
 
             // STEP 1: Write all chunks FIRST and track their actual positions
@@ -369,6 +391,44 @@ public sealed class AlphaWdtMonolithicWriter
 
         // Flush to file
         File.WriteAllBytes(outWdtPath, ms.ToArray());
+    }
+
+    private static byte[] BuildMdnmData(List<string> m2Names)
+    {
+        if (m2Names == null || m2Names.Count == 0)
+            return Array.Empty<byte>();
+
+        using var ms = new MemoryStream();
+        foreach (var name in m2Names)
+        {
+            var nameBytes = Encoding.ASCII.GetBytes(name);
+            ms.Write(nameBytes, 0, nameBytes.Length);
+            ms.WriteByte(0);
+        }
+        return ms.ToArray();
+    }
+
+    private static byte[] ExtractLkMtexData(byte[] adtBytes)
+    {
+        if (adtBytes == null || adtBytes.Length < 8) return Array.Empty<byte>();
+        int i = 0;
+        while (i + 8 <= adtBytes.Length)
+        {
+            string fcc = Encoding.ASCII.GetString(adtBytes, i, 4);
+            int size = BitConverter.ToInt32(adtBytes, i + 4);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > adtBytes.Length) break;
+            if (fcc == "XETM") // MTEX reversed
+            {
+                // Return the raw string table as-is
+                var data = new byte[size];
+                Buffer.BlockCopy(adtBytes, dataStart, data, 0, size);
+                return data;
+            }
+            i = next;
+        }
+        return Array.Empty<byte>();
     }
 
     private static byte[] BuildMonmData(List<string> wmoNames)

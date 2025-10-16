@@ -32,6 +32,7 @@ public static class AlphaMcnkBuilder
         byte[]? mclyLkWhole = null;
         byte[]? mcalLkWhole = null;
         byte[]? mcshLkWhole = null;
+        byte[]? mcseLkWhole = null;
         
         // Extract MCLY, MCAL, MCSH using header offsets (LK stores them as proper chunks)
         if (lkHeader.MclyOffset > 0)
@@ -105,12 +106,17 @@ public static class AlphaMcnkBuilder
                 mcnrLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
                 Buffer.BlockCopy(lkAdtBytes, p, mcnrLkWhole, 0, mcnrLkWhole.Length);
             }
+            else if (fcc == "ESCM") // 'MCSE' reversed on disk
+            {
+                mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
+                Buffer.BlockCopy(lkAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
+            }
             // Note: MCLY, MCAL, MCSH are extracted via header offsets above, not scanned here
             
             p = next;
         }
         
-        // If texture ADT provided, scan it for MCLY/MCAL/MCSH
+        // If texture ADT provided, scan it for MCLY/MCAL/MCSH/MCSE
         if (lkTexAdtBytes != null && texMcNkOffset >= 0)
         {
             int texSubStart = texMcNkOffset + ChunkLettersAndSize + McnkHeaderSize;
@@ -145,6 +151,11 @@ public static class AlphaMcnkBuilder
                 {
                     mcshLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
                     Buffer.BlockCopy(lkTexAdtBytes, p, mcshLkWhole, 0, mcshLkWhole.Length);
+                }
+                else if (fcc == "ESCM") // 'MCSE' reversed on disk
+                {
+                    mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
+                    Buffer.BlockCopy(lkTexAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
                 }
                 
                 p = next;
@@ -189,103 +200,110 @@ public static class AlphaMcnkBuilder
             mcnrRaw = new byte[448];
         }
 
-        // Build MCLY chunk - use extracted LK data or create minimal fallback
-        byte[] mclyWhole;
+        // Build MCLY raw - use extracted LK data or create minimal fallback
+        byte[] mclyRaw;
         if (mclyLkWhole != null && mclyLkWhole.Length > 8)
         {
-            // Use extracted MCLY from LK (already includes chunk header)
-            mclyWhole = mclyLkWhole;
+            // Strip LK chunk header (8 bytes) -> raw table
+            int sz = BitConverter.ToInt32(mclyLkWhole, 4);
+            mclyRaw = new byte[sz];
+            Buffer.BlockCopy(mclyLkWhole, 8, mclyRaw, 0, sz);
         }
         else
         {
             // Fallback: One base layer referencing texture 0. Layout (16 bytes):
-            // int textureId; uint flags; uint ofsMCAL; int effectId
-            var mclyData = new byte[16];
-            var mclyChunk = new Chunk("MCLY", mclyData.Length, mclyData);
-            mclyWhole = mclyChunk.GetWholeChunk();
+            // uint32 textureId; uint32 props; uint32 offsAlpha; uint16 effectId; uint8 pad[2]
+            mclyRaw = new byte[16];
+            // all zeros is acceptable minimal layer
         }
         
-        // Build MCAL chunk - use extracted LK data or create empty fallback
-        byte[] mcalWhole;
+        // Build MCAL raw - use extracted LK data or create empty fallback
+        byte[] mcalRaw;
         if (mcalLkWhole != null && mcalLkWhole.Length > 8)
         {
-            // Use extracted MCAL from LK (already includes chunk header)
-            mcalWhole = mcalLkWhole;
+            int sz = BitConverter.ToInt32(mcalLkWhole, 4);
+            mcalRaw = new byte[sz];
+            Buffer.BlockCopy(mcalLkWhole, 8, mcalRaw, 0, sz);
         }
         else
         {
-            var mcalEmpty = new Chunk("MCAL", 0, Array.Empty<byte>());
-            mcalWhole = mcalEmpty.GetWholeChunk();
+            mcalRaw = Array.Empty<byte>();
         }
         
-        // Build MCSH chunk - use extracted LK data or create empty fallback
-        byte[] mcshWhole;
+        // Build MCSH raw - use extracted LK data or create empty fallback
+        byte[] mcshRaw;
         if (mcshLkWhole != null && mcshLkWhole.Length > 8)
         {
-            // Use extracted MCSH from LK (already includes chunk header)
-            mcshWhole = mcshLkWhole;
+            int sz = BitConverter.ToInt32(mcshLkWhole, 4);
+            mcshRaw = new byte[sz];
+            Buffer.BlockCopy(mcshLkWhole, 8, mcshRaw, 0, sz);
         }
         else
         {
-            var mcshEmpty = new Chunk("MCSH", 0, Array.Empty<byte>());
-            mcshWhole = mcshEmpty.GetWholeChunk();
+            mcshRaw = Array.Empty<byte>();
         }
         
-        // MCRF is always empty in Alpha
-        var mcrfEmpty = new Chunk("MCRF", 0, Array.Empty<byte>());
-        var mcrfWhole = mcrfEmpty.GetWholeChunk();
-        
-        // Calculate total size of sub-chunks for MclqOffset
-        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length;
+        // Build MCSE raw - use extracted LK data or create empty
+        byte[] mcseRaw;
+        if (mcseLkWhole != null && mcseLkWhole.Length > 8)
+        {
+            int sz = BitConverter.ToInt32(mcseLkWhole, 4);
+            mcseRaw = new byte[sz];
+            Buffer.BlockCopy(mcseLkWhole, 8, mcseRaw, 0, sz);
+        }
+        else
+        {
+            mcseRaw = Array.Empty<byte>();
+        }
+
+        // MCRF raw is empty in our current flow
+        var mcrfRaw = Array.Empty<byte>();
+
+        // Build named chunk wrappers (Alpha expects FourCC headers for these)
+        var mclyChunk = new Chunk("MCLY", mclyRaw.Length, mclyRaw);
+        var mcrfChunk = new Chunk("MCRF", mcrfRaw.Length, mcrfRaw);
+        var mcshChunk = new Chunk("MCSH", mcshRaw.Length, mcshRaw);
+        var mcalChunk = new Chunk("MCAL", mcalRaw.Length, mcalRaw);
+        var mcseChunk = new Chunk("MCSE", mcseRaw.Length, mcseRaw);
+
+        byte[] mclyWhole = mclyChunk.GetWholeChunk();
+        byte[] mcrfWhole = mcrfChunk.GetWholeChunk();
+        byte[] mcshWhole = mcshChunk.GetWholeChunk();
+        byte[] mcalWhole = mcalChunk.GetWholeChunk();
+        byte[] mcseWhole = mcseChunk.GetWholeChunk();
+
+        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
         
         // Calculate bounding sphere radius from MCVT heights
         float radius = CalculateRadius(alphaMcvtRaw);
         
-        // Calculate number of texture layers from MCLY data (each entry is 16 bytes)
-        int nLayers = 0;
-        if (mclyWhole.Length > 8)
-        {
-            int mclyDataSize = mclyWhole.Length - 8; // Exclude chunk header
-            nLayers = mclyDataSize / 16; // Each MCLY entry is 16 bytes
-        }
+        // Calculate number of texture layers from MCLY raw table (each entry is 16 bytes)
+        int nLayers = mclyRaw.Length / 16;
         
-        var hdr = new McnkAlphaHeader
-        {
-            Flags = 0,
-            IndexX = lkHeader.IndexX,
-            IndexY = lkHeader.IndexY,
-            Unknown1 = radius,
-            NLayers = nLayers,
-            M2Number = 0,
-            McvtOffset = 0, // first subchunk immediately after header
-            McnrOffset = alphaMcvtRaw.Length,
-            MclyOffset = alphaMcvtRaw.Length + mcnrRaw.Length,
-            McrfOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length,
-            McshOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length,
-            McshSize = mcshWhole.Length > 8 ? mcshWhole.Length - 8 : 0, // Size excludes chunk header
-            McalOffset = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length,
-            McalSize = mcalWhole.Length > 8 ? mcalWhole.Length - 8 : 0, // Size excludes chunk header
-            Unknown3 = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId,
-            WmoNumber = 0,
-            Holes = 0,
-            GroundEffectsMap1 = 0,
-            GroundEffectsMap2 = 0,
-            GroundEffectsMap3 = 0,
-            GroundEffectsMap4 = 0,
-            Unknown6 = 0,
-            Unknown7 = 0,
-            McnkChunksSize = totalSubChunkSize, // total size of sub-blocks region
-            Unknown8 = 0,
-            MclqOffset = totalSubChunkSize, // Point to end of sub-chunks
-            Unused1 = 0,
-            Unused2 = 0,
-            Unused3 = 0,
-            Unused4 = 0,
-            Unused5 = 0,
-            Unused6 = 0
-        };
+        // Compute Alpha SMChunk header fields (offsets relative to BEGINNING of MCNK chunk)
+        const int headerTotal = 8 + McnkHeaderSize; // FourCC+size + 128-byte header
+        int offsHeight = headerTotal; // MCVT raw starts immediately after header
+        int offsNormal = offsHeight + alphaMcvtRaw.Length;
+        int offsLayer  = offsNormal + mcnrRaw.Length;
+        int offsRefs   = offsLayer  + mclyWhole.Length;
+        int offsShadow = offsRefs   + mcrfWhole.Length;
+        int offsAlpha  = offsShadow + mcshWhole.Length;
+        int offsSnd    = offsAlpha  + mcalWhole.Length;
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length;
+        int sizeShadow = mcshRaw.Length;
+        int sizeAlpha  = mcalRaw.Length;
+        int sizeSnd    = mcseRaw.Length;
+
+        // Best-effort nSndEmitters detection: prefer 76-byte entries (0.5.3), else 52-byte (1.12.1), else 0
+        int nSnd = 0;
+        if (sizeSnd > 0)
+        {
+            if ((sizeSnd % 76) == 0) nSnd = sizeSnd / 76;
+            else if ((sizeSnd % 52) == 0) nSnd = sizeSnd / 52;
+        }
+        int areaIdVal  = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId;
+
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -293,21 +311,68 @@ public static class AlphaMcnkBuilder
         ms.Write(reversedLetters, 0, 4);
         ms.Write(BitConverter.GetBytes(givenSize), 0, 4);
 
-        // Header
-        var hdrBytes = Util.StructToByteArray(hdr);
-        if (hdrBytes.Length != McnkHeaderSize)
-        {
-            Array.Resize(ref hdrBytes, McnkHeaderSize);
-        }
-        ms.Write(hdrBytes, 0, McnkHeaderSize);
+        // Build Alpha SMChunk header (128 bytes)
+        Span<byte> smh = stackalloc byte[McnkHeaderSize];
+        smh.Clear();
+        // Offsets within header (see Alpha.md):
+        // 0x00 flags
+        // 0x04 indexX
+        // 0x08 indexY
+        // 0x0C radius (float)
+        // 0x10 nLayers
+        // 0x14 nDoodadRefs
+        // 0x18 offsHeight (MCVT)
+        // 0x1C offsNormal (MCNR)
+        // 0x20 offsLayer (MCLY)
+        // 0x24 offsRefs (MCRF)
+        // 0x28 offsAlpha (MCAL)
+        // 0x2C sizeAlpha
+        // 0x30 offsShadow (MCSH)
+        // 0x34 sizeShadow
+        // 0x38 areaid
+        // 0x3C nMapObjRefs
+        // 0x40 holes (uint16)
+        // 0x42 pad0 (uint16)
+        // 0x44 predTex[8] (uint16 x8)
+        // 0x54 noEffectDoodad[8] (uint8 x8)
+        // 0x5C offsSndEmitters
+        // 0x60 nSndEmitters
+        // 0x64 offsLiquid
+        // 0x68 pad1[24]
 
-        // Sub-blocks in Alpha order: raw MCVT, raw MCNR, then named MCLY (empty)
+        BitConverter.GetBytes(0).CopyTo(smh[0x00..]); // flags
+        BitConverter.GetBytes(lkHeader.IndexX).CopyTo(smh[0x04..]);
+        BitConverter.GetBytes(lkHeader.IndexY).CopyTo(smh[0x08..]);
+        BitConverter.GetBytes(radius).CopyTo(smh[0x0C..]);
+        BitConverter.GetBytes(nLayers).CopyTo(smh[0x10..]);
+        BitConverter.GetBytes(0).CopyTo(smh[0x14..]); // nDoodadRefs (we write empty MCRF)
+        BitConverter.GetBytes(offsHeight).CopyTo(smh[0x18..]);
+        BitConverter.GetBytes(offsNormal).CopyTo(smh[0x1C..]);
+        BitConverter.GetBytes(offsLayer).CopyTo(smh[0x20..]);
+        BitConverter.GetBytes(offsRefs).CopyTo(smh[0x24..]);
+        BitConverter.GetBytes(offsAlpha).CopyTo(smh[0x28..]);
+        BitConverter.GetBytes(sizeAlpha).CopyTo(smh[0x2C..]);
+        BitConverter.GetBytes(offsShadow).CopyTo(smh[0x30..]);
+        BitConverter.GetBytes(sizeShadow).CopyTo(smh[0x34..]);
+        BitConverter.GetBytes(areaIdVal).CopyTo(smh[0x38..]);
+        BitConverter.GetBytes(0).CopyTo(smh[0x3C..]); // nMapObjRefs
+        // holes (uint16) at 0x40, pad0 at 0x42 (leave zeros)
+        // predTex[8] at 0x44, noEffectDoodad[8] at 0x54 (already zeros)
+        BitConverter.GetBytes(offsSnd).CopyTo(smh[0x5C..]);
+        BitConverter.GetBytes(nSnd).CopyTo(smh[0x60..]);
+        // offsLiquid zero by default
+
+        // Write header
+        ms.Write(smh);
+
+        // Sub-blocks in Alpha order (raw, no named headers): MCVT, MCNR, MCLY, MCRF, MCSH, MCAL, MCSE
         if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
         if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
         ms.Write(mclyWhole, 0, mclyWhole.Length);
         ms.Write(mcrfWhole, 0, mcrfWhole.Length);
         ms.Write(mcshWhole, 0, mcshWhole.Length);
         ms.Write(mcalWhole, 0, mcalWhole.Length);
+        ms.Write(mcseWhole, 0, mcseWhole.Length);
 
         return ms.ToArray();
     }

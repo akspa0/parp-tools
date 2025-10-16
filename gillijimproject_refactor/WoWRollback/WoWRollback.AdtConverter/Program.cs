@@ -141,6 +141,83 @@ internal static class Program
 
         root.Add(validateCmd);
 
+        // Alpha -> LK groundwork: unpack-monolithic (read alpha and summarize)
+        var unpackCmd = new Command("unpack-monolithic", "Read an Alpha WDT and summarize tiles, MCSE counts (groundwork for Alpha->LK)");
+        var alphaWdt = new Option<string>("--alpha-wdt", description: "Path to Alpha WDT file") { IsRequired = true };
+        var outCsv = new Option<string?>("--out-csv", description: "Optional CSV to write per-tile summary");
+        var tilesOpt = new Option<int>("--tiles", () => 8, "Number of tiles to print in console summary");
+        unpackCmd.AddOption(alphaWdt);
+        unpackCmd.AddOption(outCsv);
+        unpackCmd.AddOption(tilesOpt);
+        unpackCmd.SetHandler((string wdt, string? csv, int tiles) =>
+        {
+            try
+            {
+                var alpha = WoWRollback.LkToAlphaModule.Readers.AlphaWdtReader.Read(wdt);
+                Console.WriteLine($"Read Alpha WDT: {wdt}");
+                Console.WriteLine($"Tiles parsed: {alpha.Tiles.Count}");
+                int totalMcse = 0;
+                foreach (var t in alpha.Tiles)
+                    totalMcse += t.Mcse.Count;
+                Console.WriteLine($"Total MCSE emitters: {totalMcse}");
+
+                Console.WriteLine("\nSample tiles:");
+                int shown = 0;
+                foreach (var t in alpha.Tiles)
+                {
+                    if (shown++ >= tiles) break;
+                    var h = t.FirstMcnk;
+                    if (h is null) { Console.WriteLine($"  Tile {t.Index}: no MCNK"); continue; }
+                    Console.WriteLine($"  Tile {t.Index}: NLayers={h.NLayers} MCSE={t.Mcse.Count} OffsSnd={h.OffsSndEmitters} SizeAlpha={h.SizeAlpha} SizeShadow={h.SizeShadow}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(csv))
+                {
+                    using var sw = new System.IO.StreamWriter(csv);
+                    sw.WriteLine("TileIndex,NLayers,MCSE,OffsSndEmitters,SizeAlpha,SizeShadow");
+                    foreach (var t in alpha.Tiles)
+                    {
+                        var h = t.FirstMcnk;
+                        if (h is null) continue;
+                        sw.WriteLine(string.Join(',', t.Index, h.NLayers, t.Mcse.Count, h.OffsSndEmitters, h.SizeAlpha, h.SizeShadow));
+                    }
+                    Console.WriteLine($"\nWrote CSV: {csv}");
+                }
+
+                Console.WriteLine("\nUNPACK (read-only) complete.");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"unpack-monolithic failed: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, alphaWdt, outCsv, tilesOpt);
+
+        root.Add(unpackCmd);
+
+        // Append MCSE from Alpha WDT into existing LK ADTs (Alpha -> LK partial conversion)
+        var mcseCmd = new Command("alpha-to-lk-mcse", "Append MCSE emitters parsed from an Alpha WDT into LK ADTs for the given map");
+        var alphaWdtIn = new Option<string>("--alpha-wdt", description: "Path to Alpha WDT") { IsRequired = true };
+        var lkDirOut = new Option<string>("--lk-dir", description: "LK map directory (containing <map>_YY_XX.adt or World/Maps/<map>/…)") { IsRequired = true };
+        var mapNameOpt = new Option<string>("--map", description: "Map name (e.g., Shadowfang)") { IsRequired = true };
+        mcseCmd.AddOption(alphaWdtIn);
+        mcseCmd.AddOption(lkDirOut);
+        mcseCmd.AddOption(mapNameOpt);
+        mcseCmd.SetHandler((string alphaWdtPath, string lkDir, string map) =>
+        {
+            try
+            {
+                WoWRollback.LkToAlphaModule.Writers.AlphaToLkMcseAppender.AppendMcseFromAlpha(alphaWdtPath, lkDir, map);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"alpha-to-lk-mcse failed: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, alphaWdtIn, lkDirOut, mapNameOpt);
+
+        root.Add(mcseCmd);
+
         return root.Invoke(args);
     }
 }
