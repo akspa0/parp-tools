@@ -11,6 +11,7 @@ public sealed record LkToAlphaOptions
     public int? ForceAreaId { get; init; }
     public float? DebugFlatMcvt { get; init; }
     public string? BaseTexture { get; init; }
+    public bool DisableAlphaEdgeFix { get; init; }
     /// <summary>
     /// If true, MAIN cell offsets point to MHDR.data (+8 from letters); if false, point to MHDR letters.
     /// Use inspector to determine correct behavior for target client.

@@ -55,6 +55,7 @@ internal static class Program
         var debugFlat = new Option<float?>("--debug-flat-mcvt", description: "Force constant terrain height for all MCVT samples");
         var baseTex = new Option<string?>("--base-texture", description: "Override MTEX path for base texture");
         var mainPointToData = new Option<bool>("--main-point-to-data", () => false, "MAIN offsets point to MHDR.data (+8) instead of letters");
+        var disableAlphaEdgeFix = new Option<bool>("--disable-alpha-edge-fix", () => false, "Skip post-process alpha edge smoothing to preserve raw masks");
         var verboseLog = new Option<bool>("--verbose-logging", () => false, "Enable detailed logging and debug dumps during packing");
         packCmd.AddOption(wdtPathPack);
         packCmd.AddOption(lkDirPack);
@@ -64,6 +65,7 @@ internal static class Program
         packCmd.AddOption(debugFlat);
         packCmd.AddOption(baseTex);
         packCmd.AddOption(mainPointToData);
+        packCmd.AddOption(disableAlphaEdgeFix);
         packCmd.AddOption(verboseLog);
         packCmd.SetHandler((InvocationContext context) =>
         {
@@ -75,6 +77,7 @@ internal static class Program
             var debugFlatMcvt = context.ParseResult.GetValueForOption(debugFlat);
             var baseTexture = context.ParseResult.GetValueForOption(baseTex);
             var pointToData = context.ParseResult.GetValueForOption(mainPointToData);
+            var skipEdgeFix = context.ParseResult.GetValueForOption(disableAlphaEdgeFix);
             var verboseLogging = context.ParseResult.GetValueForOption(verboseLog);
 
             var orch = new LkToAlphaOrchestrator();
@@ -85,6 +88,7 @@ internal static class Program
                 DebugFlatMcvt = debugFlatMcvt,
                 BaseTexture = baseTexture,
                 MainPointToMhdrData = pointToData,
+                DisableAlphaEdgeFix = skipEdgeFix,
                 VerboseLogging = verboseLogging
             });
             Console.WriteLine(res.Success ? $"PACK OK: {res.TilesProcessed} tiles -> {Path.Combine(res.AlphaOutputDirectory, map + ".wdt")}" : $"PACK FAILED: {res.ErrorMessage}");

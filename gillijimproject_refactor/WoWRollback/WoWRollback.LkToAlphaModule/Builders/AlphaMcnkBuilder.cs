@@ -219,12 +219,27 @@ public static class AlphaMcnkBuilder
         
         // Build MCAL raw - use extracted LK data or create empty fallback
         byte[] mcalRaw;
-        if (mcalLkWhole != null && mcalLkWhole.Length > 8)
+        bool hasAlphaFlags = mclyRaw.Length >= 16 && LayerUsesAlpha(mclyRaw);
+        if (mcalLkWhole != null && mcalLkWhole.Length > 8 && hasAlphaFlags)
         {
             int sz = BitConverter.ToInt32(mcalLkWhole, 4);
-            mcalRaw = new byte[sz];
-            Buffer.BlockCopy(mcalLkWhole, 8, mcalRaw, 0, sz);
-            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+            var raw = new byte[sz];
+            Buffer.BlockCopy(mcalLkWhole, 8, raw, 0, sz);
+            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, raw, opts);
+
+            bool isCompressed = LayerUsesCompressedAlpha(mclyRaw);
+            bool useBigAlpha = LayerUsesBigAlpha(mclyRaw);
+
+            if (isCompressed || !useBigAlpha)
+            {
+                raw = ExpandAlpha(raw, isCompressed, opts?.DisableAlphaEdgeFix != true);
+            }
+            else
+            {
+                raw = ReorderBigAlpha(raw, opts?.DisableAlphaEdgeFix != true);
+            }
+
+            mcalRaw = raw;
         }
         else
         {
@@ -378,6 +393,140 @@ public static class AlphaMcnkBuilder
         ms.Write(mcseWhole, 0, mcseWhole.Length);
 
         return ms.ToArray();
+    }
+
+    private static bool LayerUsesAlpha(ReadOnlySpan<byte> mclyRaw)
+    {
+        for (int offset = 0; offset + 16 <= mclyRaw.Length; offset += 16)
+        {
+            uint flags = BitConverter.ToUInt32(mclyRaw.Slice(offset + 4, 4));
+            if ((flags & 0x80) != 0) return true;
+        }
+
+        return false;
+    }
+
+    private static bool LayerUsesCompressedAlpha(ReadOnlySpan<byte> mclyRaw)
+    {
+        for (int offset = 0; offset + 16 <= mclyRaw.Length; offset += 16)
+        {
+            uint flags = BitConverter.ToUInt32(mclyRaw.Slice(offset + 4, 4));
+            if ((flags & 0x200) != 0) return true;
+        }
+
+        return false;
+    }
+
+    private static bool LayerUsesBigAlpha(ReadOnlySpan<byte> mclyRaw)
+    {
+        for (int offset = 0; offset + 16 <= mclyRaw.Length; offset += 16)
+        {
+            uint flags = BitConverter.ToUInt32(mclyRaw.Slice(offset + 4, 4));
+            if ((flags & 0x100) != 0) return true;
+        }
+
+        return false;
+    }
+
+    private static byte[] ExpandAlpha(byte[] source, bool compressed, bool fixEdges)
+    {
+        if (!compressed)
+        {
+            return ReorderBigAlpha(source, fixEdges);
+        }
+
+        var expanded = new byte[64 * 64];
+        int dst = 0;
+        int columnPos = 0;
+        int cursor = 0;
+
+        while (cursor < source.Length && dst < expanded.Length)
+        {
+            byte descriptor = source[cursor++];
+            int count = descriptor & 0x7F;
+            bool isFill = (descriptor & 0x80) != 0;
+
+            if (count == 0)
+            {
+                continue;
+            }
+
+            if (isFill)
+            {
+                if (cursor >= source.Length) break;
+                byte value = source[cursor++];
+                for (int i = 0; i < count && dst < expanded.Length; i++, dst++, columnPos++)
+                {
+                    expanded[dst] = value;
+                    if (columnPos == 63)
+                    {
+                        columnPos = -1;
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < count && dst < expanded.Length && cursor < source.Length; i++, dst++, cursor++, columnPos++)
+                {
+                    expanded[dst] = source[cursor];
+                    if (columnPos == 63)
+                    {
+                        columnPos = -1;
+                    }
+                }
+                cursor++;
+            }
+        }
+
+        return ReorderBigAlpha(expanded, fixEdges);
+    }
+
+    private static byte[] ReorderBigAlpha(byte[] source, bool fixEdges)
+    {
+        var dst = new byte[64 * 64];
+
+        if (source.Length >= 64 * 64)
+        {
+            for (int row = 0; row < 64; row++)
+            {
+                for (int col = 0; col < 64; col++)
+                {
+                    dst[col * 64 + row] = source[row * 64 + col];
+                }
+            }
+        }
+        else
+        {
+            int srcIndex = 0;
+            for (int col = 0; col < 64; col++)
+            {
+                for (int row = 0; row < 64; row += 2)
+                {
+                    if (srcIndex >= source.Length) break;
+                    byte packed = source[srcIndex++];
+                    byte lower = (byte)(packed & 0x0F);
+                    byte upper = (byte)((packed >> 4) & 0x0F);
+
+                    dst[col * 64 + row] = (byte)(lower | (lower << 4));
+                    if (row + 1 < 64)
+                    {
+                        dst[col * 64 + row + 1] = (byte)(upper | (upper << 4));
+                    }
+                }
+            }
+        }
+
+        if (fixEdges)
+        {
+            for (int i = 0; i < 64; i++)
+            {
+                dst[i * 64 + 63] = dst[i * 64 + 62];
+                dst[63 * 64 + i] = dst[62 * 64 + i];
+            }
+            dst[63 * 64 + 63] = dst[62 * 64 + 62];
+        }
+
+        return dst;
     }
 
     private static void DumpMcalData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
