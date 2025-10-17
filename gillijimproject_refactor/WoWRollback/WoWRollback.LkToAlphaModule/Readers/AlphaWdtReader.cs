@@ -47,7 +47,12 @@ public sealed class AlphaWdtReader
             int sizeToFirstMcnk = BitConverter.ToInt32(_bytes, pos + 4);
             if (mhdrAbs <= 0) continue;
 
-            var tile = new AlphaTile { Index = i, MhdrOffset = mhdrAbs };
+            var tile = new AlphaTile
+            {
+                Index = i,
+                MhdrOffset = mhdrAbs,
+                SizeToFirstMcnk = sizeToFirstMcnk
+            };
             tile.Mhdr = ReadMhdr(mhdrAbs + 8);
 
             // Resolve first MCNK by max(end of MCIN, MTEX, MDDF, MODF)
@@ -88,6 +93,22 @@ public sealed class AlphaWdtReader
             }
 
             wdt.Tiles.Add(tile);
+        }
+
+        if (wdt.Tiles.Count > 0)
+        {
+            var orderedTiles = new List<AlphaTile>(wdt.Tiles);
+            orderedTiles.Sort((a, b) => a.MhdrOffset.CompareTo(b.MhdrOffset));
+            for (int i = 0; i < orderedTiles.Count; i++)
+            {
+                var current = orderedTiles[i];
+                int nextOffset = (i + 1) < orderedTiles.Count ? orderedTiles[i + 1].MhdrOffset : _bytes.Length;
+                if (nextOffset <= current.MhdrOffset || nextOffset > _bytes.Length)
+                {
+                    nextOffset = _bytes.Length;
+                }
+                current.DataEndOffset = nextOffset;
+            }
         }
 
         return wdt;

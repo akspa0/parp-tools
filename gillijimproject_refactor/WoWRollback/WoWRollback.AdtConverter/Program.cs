@@ -287,19 +287,40 @@ internal static class Program
         root.Add(mcseCmd);
 
         // Round-trip test command: Alpha → LK → Alpha
-        var roundTripCmd = new Command("roundtrip-test", "Test Alpha→LK→Alpha conversion for validation");
-        var alphaAdtIn = new Option<string>("--alpha-adt", description: "Input Alpha ADT file") { IsRequired = true };
+        var roundTripCmd = new Command("roundtrip-test", "Test Alpha↔LK round-trip conversion for validation");
+        var alphaAdtIn = new Option<string?>("--alpha-adt", description: "Input Alpha ADT file (0.5.x)");
+        var lkAdtIn = new Option<string?>("--lk-adt", description: "Input LK root ADT file (3.3.5)");
         var roundTripOut = new Option<string>("--out", () => "roundtrip_output", "Output directory for test results");
         roundTripCmd.AddOption(alphaAdtIn);
+        roundTripCmd.AddOption(lkAdtIn);
         roundTripCmd.AddOption(roundTripOut);
-        roundTripCmd.SetHandler((string alphaAdt, string outDir) =>
+        roundTripCmd.SetHandler((string? alphaAdt, string? lkAdt, string outDir) =>
         {
             try
             {
-                Console.WriteLine($"Round-trip test: {alphaAdt}");
+                bool hasAlpha = !string.IsNullOrWhiteSpace(alphaAdt);
+                bool hasLk = !string.IsNullOrWhiteSpace(lkAdt);
+
+                if (hasAlpha == hasLk)
+                {
+                    Console.Error.WriteLine("roundtrip-test requires exactly one of --alpha-adt or --lk-adt");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                if (hasAlpha)
+                {
+                    Console.WriteLine($"Round-trip test (Alpha source): {alphaAdt}");
+                }
+                else
+                {
+                    Console.WriteLine($"Round-trip test (LK source): {lkAdt}");
+                }
                 Console.WriteLine($"Output: {outDir}");
                 
-                var result = RoundTripValidator.ValidateRoundTrip(alphaAdt, outDir);
+                RoundTripValidator.ValidationResult result = hasAlpha
+                    ? RoundTripValidator.ValidateRoundTrip(alphaAdt!, outDir)
+                    : RoundTripValidator.ValidateRoundTripFromLkAdt(lkAdt!, outDir);
                 
                 if (result.Success)
                 {
@@ -322,7 +343,7 @@ internal static class Program
                 Console.Error.WriteLine(ex.StackTrace);
                 Environment.ExitCode = 1;
             }
-        }, alphaAdtIn, roundTripOut);
+        }, alphaAdtIn, lkAdtIn, roundTripOut);
 
         root.Add(roundTripCmd);
 

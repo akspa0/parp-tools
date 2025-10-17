@@ -22,6 +22,8 @@ public sealed class AlphaTile
 {
     public int Index { get; set; }           // 0..4095
     public int MhdrOffset { get; set; }      // absolute file offset to MHDR letters
+    public int SizeToFirstMcnk { get; set; }
+    public int DataEndOffset { get; set; }
     public AlphaMhdr Mhdr { get; set; } = new();
     public AlphaMcnkHeader? FirstMcnk { get; set; }
     public List<AlphaMcseEntry> Mcse { get; } = new();

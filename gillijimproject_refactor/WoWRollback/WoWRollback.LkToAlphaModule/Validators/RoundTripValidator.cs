@@ -6,6 +6,7 @@ using System.Text;
 using WoWRollback.LkToAlphaModule.Builders;
 using WoWRollback.LkToAlphaModule.Readers;
 using WoWRollback.LkToAlphaModule.Services;
+using WoWRollback.LkToAlphaModule.Models;
 
 namespace WoWRollback.LkToAlphaModule.Validators;
 
@@ -62,11 +63,9 @@ public static class RoundTripValidator
                 // Handle monolithic WDT (Alpha 0.5.3 format)
                 return ValidateRoundTripMonolithicWdt(originalAlphaPath, outputDir, options, originalBytes, fileName);
             }
-            else
-            {
-                // Handle standalone ADT file
-                return ValidateRoundTripStandaloneAdt(originalAlphaPath, outputDir, options, originalBytes, fileName);
-            }
+
+            // Handle standalone ADT file
+            return ValidateRoundTripStandaloneAdt(originalAlphaPath, outputDir, options, originalBytes, fileName);
         }
         catch (Exception ex)
         {
@@ -134,6 +133,69 @@ public static class RoundTripValidator
         
         return comparisonResult with { TilesProcessed = lkSource.Mcnks.Count };
     }
+
+    /// <summary>
+    /// Validates round-trip for LK root ADT files: LK → Alpha → LK.
+    /// </summary>
+    public static ValidationResult ValidateRoundTripFromLkAdt(
+        string lkAdtPath,
+        string outputDir,
+        LkToAlphaOptions? options = null)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(lkAdtPath) || !File.Exists(lkAdtPath))
+            {
+                return new ValidationResult(false, $"LK ADT file not found: {lkAdtPath}");
+            }
+
+            options ??= new LkToAlphaOptions();
+            Directory.CreateDirectory(outputDir);
+
+            var originalBytes = File.ReadAllBytes(lkAdtPath);
+            var fileName = Path.GetFileName(lkAdtPath);
+
+            Console.WriteLine($"[RoundTrip] Starting LK→Alpha→LK validation for: {fileName}");
+            Console.WriteLine($"[RoundTrip] Original LK file size: {originalBytes.Length:N0} bytes");
+
+            // Step 1: Convert LK ADT to Alpha using the managed builder
+            Console.WriteLine("[RoundTrip] Step 1: Converting LK ADT to Alpha format...");
+            var alphaBytes = ConvertLkToAlpha(originalBytes, options);
+            var alphaOutPath = Path.Combine(outputDir, fileName.Replace(".adt", "_alpha_from_lk.adt"));
+            File.WriteAllBytes(alphaOutPath, alphaBytes);
+            Console.WriteLine($"[RoundTrip] Alpha ADT saved: {alphaOutPath} ({alphaBytes.Length:N0} bytes)");
+
+            // Step 2: Extract Alpha data and rebuild LK ADT
+            Console.WriteLine("[RoundTrip] Step 2: Extracting Alpha ADT for LK rebuild...");
+            var alphaSource = AlphaDataExtractor.ExtractFromAlphaAdt(alphaOutPath);
+            Console.WriteLine($"[RoundTrip] Extracted {alphaSource.Mcnks.Count} MCNK chunks from Alpha conversion");
+
+            Console.WriteLine("[RoundTrip] Step 3: Building LK ADT from converted Alpha data...");
+            var rebuiltLkBytes = LkAdtBuilder.Build(alphaSource, options);
+            var rebuiltLkPath = Path.Combine(outputDir, fileName.Replace(".adt", "_roundtrip_lk.adt"));
+            File.WriteAllBytes(rebuiltLkPath, rebuiltLkBytes);
+            Console.WriteLine($"[RoundTrip] Rebuilt LK ADT saved: {rebuiltLkPath} ({rebuiltLkBytes.Length:N0} bytes)");
+
+            // Step 4: Compare original LK with rebuilt LK
+            Console.WriteLine("[RoundTrip] Step 4: Comparing original LK with round-trip LK result...");
+            var comparison = CompareByteArrays(originalBytes, rebuiltLkBytes, fileName);
+
+            if (comparison.Success)
+            {
+                Console.WriteLine("[RoundTrip] ✓ LK round-trip validation PASSED - Files are identical!");
+            }
+            else
+            {
+                Console.WriteLine($"[RoundTrip] ✗ LK round-trip validation FAILED - {comparison.ErrorMessage}");
+            }
+
+            return comparison with { TilesProcessed = alphaSource.Mcnks.Count };
+        }
+        catch (Exception ex)
+        {
+            return new ValidationResult(false, $"LK round-trip validation failed: {ex.Message}\n{ex.StackTrace}");
+        }
+    }
     
     /// <summary>
     /// Validates round-trip for monolithic Alpha WDT files (0.5.3 format with embedded ADTs).
@@ -161,169 +223,68 @@ public static class RoundTripValidator
         var lkAdtDir = Path.Combine(outputDir, "lk_adts");
         Directory.CreateDirectory(lkAdtDir);
         
-        var tileResults = new List<(int index, bool success, string? error)>();
-        int successCount = 0;
-        
-        foreach (var tile in alphaWdt.Tiles)
-        {
-            try
-            {
-                // Extract tile's ADT data from the monolithic WDT
-                var tileAdtBytes = ExtractTileAdtFromWdt(originalBytes, tile);
-                
-                // Save extracted tile for debugging
-                var extractedPath = Path.Combine(outputDir, $"tile_{tile.Index:D4}_extracted.adt");
-                File.WriteAllBytes(extractedPath, tileAdtBytes);
-                
-                // Convert to LK format
-                var tempAdtPath = Path.Combine(outputDir, $"temp_tile_{tile.Index:D4}.adt");
-                File.WriteAllBytes(tempAdtPath, tileAdtBytes);
-                
-                var lkSource = AlphaDataExtractor.ExtractFromAlphaAdt(tempAdtPath);
-                var lkAdtBytes = LkAdtBuilder.Build(lkSource, options);
-                
-                // Save LK ADT
-                var lkAdtPath = Path.Combine(lkAdtDir, $"tile_{tile.Index:D4}_lk.adt");
-                File.WriteAllBytes(lkAdtPath, lkAdtBytes);
-                
-                // Clean up temp file
-                File.Delete(tempAdtPath);
-                
-                tileResults.Add((tile.Index, true, null));
-                successCount++;
-                
-                if (successCount % 10 == 0)
-                {
-                    Console.WriteLine($"[RoundTrip] Converted {successCount}/{alphaWdt.Tiles.Count} tiles...");
-                }
-            }
-            catch (Exception ex)
-            {
-                tileResults.Add((tile.Index, false, ex.Message));
-                Console.WriteLine($"[RoundTrip] Warning: Failed to convert tile {tile.Index}: {ex.Message}");
-            }
-        }
-        
-        Console.WriteLine($"[RoundTrip] Converted {successCount}/{alphaWdt.Tiles.Count} tiles successfully");
-        
-        if (successCount == 0)
-        {
-            return new ValidationResult(
-                false,
-                $"Failed to convert any tiles. First error: {tileResults.FirstOrDefault(r => !r.success).error}",
-                TilesProcessed: alphaWdt.Tiles.Count);
-        }
-        
-        // Step 3: Convert LK ADTs back to Alpha and pack into monolithic WDT
-        Console.WriteLine("[RoundTrip] Step 3: Converting LK ADTs back to Alpha format...");
-        
-        var convertedTiles = new Dictionary<int, byte[]>();
-        int convertBackCount = 0;
-        
-        foreach (var result in tileResults.Where(r => r.success))
-        {
-            try
-            {
-                var lkAdtPath = Path.Combine(lkAdtDir, $"tile_{result.index:D4}_lk.adt");
-                var lkAdtBytes = File.ReadAllBytes(lkAdtPath);
-                
-                // Convert back to Alpha
-                var alphaAdtBytes = ConvertLkToAlpha(lkAdtBytes, options);
-                convertedTiles[result.index] = alphaAdtBytes;
-                convertBackCount++;
-                
-                if (convertBackCount % 10 == 0)
-                {
-                    Console.WriteLine($"[RoundTrip] Converted back {convertBackCount}/{successCount} tiles...");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[RoundTrip] Warning: Failed to convert tile {result.index} back to Alpha: {ex.Message}");
-            }
-        }
-        
-        Console.WriteLine($"[RoundTrip] Converted {convertBackCount}/{successCount} tiles back to Alpha");
-        
-        // Step 4: Pack converted tiles into monolithic WDT
-        Console.WriteLine("[RoundTrip] Step 4: Packing tiles into monolithic WDT...");
-        
-        // For now, save individual converted tiles and report
-        // Full WDT packing would require implementing the packing logic
-        var convertedTilesDir = Path.Combine(outputDir, "converted_tiles");
+        var extractionDir = Path.Combine(outputDir, "tiles_extracted");
+        Directory.CreateDirectory(extractionDir);
+
+        var convertedTilesDir = Path.Combine(outputDir, "tiles_converted_alpha");
         Directory.CreateDirectory(convertedTilesDir);
-        
-        foreach (var kvp in convertedTiles)
-        {
-            var tilePath = Path.Combine(convertedTilesDir, $"tile_{kvp.Key:D4}_roundtrip.adt");
-            File.WriteAllBytes(tilePath, kvp.Value);
-        }
-        
-        // Step 5: Compare individual tiles
-        Console.WriteLine("[RoundTrip] Step 5: Comparing converted tiles with originals...");
-        
-        int identicalTiles = 0;
-        int differentTiles = 0;
-        long totalBytesDifferent = 0;
-        
-        foreach (var kvp in convertedTiles)
-        {
-            var originalTilePath = Path.Combine(outputDir, $"tile_{kvp.Key:D4}_extracted.adt");
-            if (File.Exists(originalTilePath))
-            {
-                var originalTileBytes = File.ReadAllBytes(originalTilePath);
-                var convertedTileBytes = kvp.Value;
-                
-                if (originalTileBytes.Length == convertedTileBytes.Length)
-                {
-                    long diff = 0;
-                    for (int i = 0; i < originalTileBytes.Length; i++)
-                    {
-                        if (originalTileBytes[i] != convertedTileBytes[i])
-                            diff++;
-                    }
-                    
-                    if (diff == 0)
-                    {
-                        identicalTiles++;
-                    }
-                    else
-                    {
-                        differentTiles++;
-                        totalBytesDifferent += diff;
-                    }
-                }
-                else
-                {
-                    differentTiles++;
-                    totalBytesDifferent += Math.Abs(originalTileBytes.Length - convertedTileBytes.Length);
-                }
-            }
-        }
-        
-        Console.WriteLine($"[RoundTrip] Tile comparison results:");
-        Console.WriteLine($"  Identical tiles: {identicalTiles}/{convertedTiles.Count}");
-        Console.WriteLine($"  Different tiles: {differentTiles}/{convertedTiles.Count}");
-        Console.WriteLine($"  Total bytes different: {totalBytesDifferent:N0}");
-        
-        if (identicalTiles == convertedTiles.Count)
-        {
-            Console.WriteLine("[RoundTrip] ✓ All converted tiles are identical to originals!");
-            return new ValidationResult(
-                true,
-                $"All {identicalTiles} tiles converted successfully with byte-for-byte parity",
-                TilesProcessed: alphaWdt.Tiles.Count);
-        }
-        else
+
+        var lkIntermediateDir = Path.Combine(outputDir, "tiles_converted_lk");
+        Directory.CreateDirectory(lkIntermediateDir);
+
+        var extractionResults = ExtractTiles(alphaWdt, originalBytes, extractionDir, options);
+
+        if (extractionResults.SuccessCount == 0)
         {
             return new ValidationResult(
                 false,
-                $"Round-trip completed but {differentTiles} tiles differ. Total bytes different: {totalBytesDifferent:N0}. " +
-                $"Note: Full WDT packing not yet implemented - tiles saved individually for inspection.",
-                TilesProcessed: alphaWdt.Tiles.Count,
-                TilesMismatched: differentTiles,
-                BytesDifferent: totalBytesDifferent);
+                extractionResults.ErrorMessage ?? "Failed to extract tiles from monolithic WDT",
+                TilesProcessed: alphaWdt.Tiles.Count);
         }
+
+        Console.WriteLine($"[RoundTrip] Step 3: Alpha → LK → Alpha conversion on {extractionResults.SuccessCount} tiles...");
+        var roundTripTiles = ConvertTilesAlphaToLkToAlpha(extractionResults, lkIntermediateDir, convertedTilesDir, options);
+
+        Console.WriteLine("[RoundTrip] Step 4: Packing converted tiles into monolithic WDT...");
+        var repackedWdtPath = Path.Combine(outputDir, fileName.Replace(".wdt", "_roundtrip.wdt"));
+        PackConvertedTilesIntoWdt(alphaWdt, originalWdtPath, repackedWdtPath, roundTripTiles, options);
+
+        Console.WriteLine("[RoundTrip] Step 5: Comparing repacked WDT with original...");
+        var repackedBytes = File.ReadAllBytes(repackedWdtPath);
+        var overallComparison = CompareAlphaAdtsDetailed(originalBytes, repackedBytes, fileName);
+
+        // Supplement overall result with per-tile stats
+        var tileComparison = CompareTiles(roundTripTiles);
+
+        if (overallComparison.Success && tileComparison.DifferentTiles == 0)
+        {
+            Console.WriteLine("[RoundTrip] ✓ Monolithic WDT round-trip succeeded with byte parity");
+            return overallComparison with
+            {
+                TilesProcessed = alphaWdt.Tiles.Count,
+                TilesMismatched = 0,
+                BytesDifferent = 0
+            };
+        }
+
+        var errorBuilder = new StringBuilder();
+        if (!overallComparison.Success)
+        {
+            errorBuilder.AppendLine(overallComparison.ErrorMessage);
+        }
+        if (tileComparison.DifferentTiles > 0)
+        {
+            errorBuilder.AppendLine($"{tileComparison.DifferentTiles} tile(s) differ ({tileComparison.TotalDifferentBytes:N0} bytes)");
+        }
+
+        return new ValidationResult(
+            false,
+            errorBuilder.ToString().TrimEnd(),
+            TilesProcessed: alphaWdt.Tiles.Count,
+            TilesMismatched: tileComparison.DifferentTiles,
+            BytesDifferent: tileComparison.TotalDifferentBytes,
+            Differences: overallComparison.Differences
+        );
     }
     
     /// <summary>
@@ -331,59 +292,231 @@ public static class RoundTripValidator
     /// </summary>
     private static byte[] ExtractTileAdtFromWdt(byte[] wdtBytes, Models.AlphaTile tile)
     {
-        // The tile's ADT data starts at MHDR and includes all MCNKs
-        // We need to find the end of the last MCNK to know how much data to extract
-        
         int mhdrOffset = tile.MhdrOffset;
         if (mhdrOffset <= 0 || mhdrOffset + 8 > wdtBytes.Length)
         {
             throw new InvalidDataException($"Invalid MHDR offset for tile {tile.Index}: {mhdrOffset}");
         }
-        
-        // Read MHDR to find MCIN
-        int mhdrDataStart = mhdrOffset + 8;
-        int mcinOffset = BitConverter.ToInt32(wdtBytes, mhdrDataStart + 0); // OffsInfo
-        
-        if (mcinOffset <= 0)
+
+        int firstMcnkSize = tile.SizeToFirstMcnk > 0 ? tile.SizeToFirstMcnk : 0;
+        int dataEnd = tile.DataEndOffset > mhdrOffset ? tile.DataEndOffset : wdtBytes.Length;
+
+        // Ensure we stay within file bounds
+        dataEnd = Math.Min(dataEnd, wdtBytes.Length);
+
+        int safeSize = dataEnd - mhdrOffset;
+        if (safeSize <= 0)
         {
-            throw new InvalidDataException($"Invalid MCIN offset for tile {tile.Index}: {mcinOffset}");
+            throw new InvalidDataException($"Unable to determine tile length for tile {tile.Index}");
         }
-        
-        int mcinPos = mhdrDataStart + mcinOffset;
-        
-        // MCIN has 256 entries, find the last valid MCNK
-        int lastMcnkEnd = mcinPos + 8 + 4096; // Default to end of MCIN
-        
-        for (int i = 0; i < 256; i++)
+
+        var adtBytes = new byte[safeSize];
+        Buffer.BlockCopy(wdtBytes, mhdrOffset, adtBytes, 0, safeSize);
+
+        if (firstMcnkSize > 0 && firstMcnkSize < safeSize)
         {
-            int entryPos = mcinPos + 8 + (i * 16);
-            if (entryPos + 8 > wdtBytes.Length) break;
-            
-            int mcnkOffset = BitConverter.ToInt32(wdtBytes, entryPos);
-            int mcnkSize = BitConverter.ToInt32(wdtBytes, entryPos + 4);
-            
-            if (mcnkOffset > 0 && mcnkSize > 0)
+            // Trim trailing data beyond first MCNK boundary if DataEndOffset overestimates
+            int trimmedSize = firstMcnkSize + ComputeTrailingMcnkLength(adtBytes, firstMcnkSize);
+            if (trimmedSize > 0 && trimmedSize <= safeSize)
             {
-                int mcnkEnd = mhdrDataStart + mcnkOffset + 8 + mcnkSize;
-                if (mcnkEnd > lastMcnkEnd)
-                {
-                    lastMcnkEnd = mcnkEnd;
-                }
+                Array.Resize(ref adtBytes, trimmedSize);
             }
         }
-        
-        // Extract from MHDR start to end of last MCNK
-        int adtSize = lastMcnkEnd - mhdrOffset;
-        if (adtSize <= 0 || mhdrOffset + adtSize > wdtBytes.Length)
-        {
-            throw new InvalidDataException($"Invalid ADT size for tile {tile.Index}: {adtSize}");
-        }
-        
-        var adtBytes = new byte[adtSize];
-        Buffer.BlockCopy(wdtBytes, mhdrOffset, adtBytes, 0, adtSize);
-        
+
         return adtBytes;
     }
+
+    private static int ComputeTrailingMcnkLength(byte[] adtBytes, int firstMcnkSize)
+    {
+        if (adtBytes.Length <= firstMcnkSize)
+        {
+            return 0;
+        }
+
+        int offset = firstMcnkSize;
+        int totalLength = 0;
+        while (offset + 8 <= adtBytes.Length)
+        {
+            string fcc = Encoding.ASCII.GetString(adtBytes, offset, 4);
+            int size = BitConverter.ToInt32(adtBytes, offset + 4);
+            int next = offset + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (next <= offset || next > adtBytes.Length)
+            {
+                break;
+            }
+            totalLength = next - firstMcnkSize;
+            offset = next;
+        }
+
+        return totalLength;
+    }
+
+    private static TileExtractionResult ExtractTiles(AlphaWdt alphaWdt, byte[] wdtBytes, string extractionDir, LkToAlphaOptions options)
+    {
+        var successes = new List<ExtractedTile>();
+        var failures = new List<(int TileIndex, string Error)>();
+
+        foreach (var tile in alphaWdt.Tiles)
+        {
+            try
+            {
+                var tileBytes = ExtractTileAdtFromWdt(wdtBytes, tile);
+                var extractedPath = Path.Combine(extractionDir, $"tile_{tile.Index:D4}_extracted.adt");
+                File.WriteAllBytes(extractedPath, tileBytes);
+
+                successes.Add(new ExtractedTile(tile.Index, tile, extractedPath, tileBytes.Length));
+            }
+            catch (Exception ex)
+            {
+                failures.Add((tile.Index, ex.Message));
+                Console.WriteLine($"[RoundTrip] Warning: Failed to extract tile {tile.Index}: {ex.Message}");
+            }
+        }
+
+        var message = failures.Count > 0
+            ? $"Extracted {successes.Count} tile(s); {failures.Count} failed (first error: {failures[0].Error})"
+            : null;
+
+        return new TileExtractionResult(successes, failures, successes.Count, message);
+    }
+
+    private static RoundTripTiles ConvertTilesAlphaToLkToAlpha(
+        TileExtractionResult extraction,
+        string lkIntermediateDir,
+        string convertedTilesDir,
+        LkToAlphaOptions options)
+    {
+        var successes = new List<RoundTripTile>();
+        var failures = new List<(int TileIndex, string Error)>();
+        int processed = 0;
+
+        foreach (var extracted in extraction.Successes)
+        {
+            try
+            {
+                var lkSource = AlphaDataExtractor.ExtractFromAlphaAdt(extracted.ExtractedAlphaPath);
+                var lkBytes = LkAdtBuilder.Build(lkSource, options);
+
+                int tileIndex = extracted.Tile.Index;
+                var lkPath = Path.Combine(lkIntermediateDir, $"tile_{tileIndex:D4}_lk.adt");
+                File.WriteAllBytes(lkPath, lkBytes);
+
+                var alphaBytes = ConvertLkToAlpha(lkBytes, options);
+                var convertedPath = Path.Combine(convertedTilesDir, $"tile_{tileIndex:D4}_roundtrip.adt");
+                File.WriteAllBytes(convertedPath, alphaBytes);
+
+                successes.Add(new RoundTripTile(extracted.Tile, extracted.ExtractedAlphaPath, lkPath, convertedPath, extracted.OriginalLength, alphaBytes.Length));
+
+                processed++;
+                if (processed % 16 == 0)
+                {
+                    Console.WriteLine($"[RoundTrip] Processed {processed}/{extraction.SuccessCount} tiles...");
+                }
+            }
+            catch (Exception ex)
+            {
+                failures.Add((extracted.Tile.Index, ex.Message));
+                Console.WriteLine($"[RoundTrip] Warning: Failed round-trip for tile {extracted.Tile.Index}: {ex.Message}");
+            }
+        }
+
+        return new RoundTripTiles(successes, failures);
+    }
+
+    private static void PackConvertedTilesIntoWdt(
+        AlphaWdt alphaWdt,
+        string originalWdtPath,
+        string repackedWdtPath,
+        RoundTripTiles roundTripTiles,
+        LkToAlphaOptions options)
+    {
+        var originalBytes = File.ReadAllBytes(originalWdtPath);
+        var outputBytes = new byte[originalBytes.Length];
+        Buffer.BlockCopy(originalBytes, 0, outputBytes, 0, originalBytes.Length);
+
+        foreach (var tile in roundTripTiles.Successes)
+        {
+            var convertedBytes = File.ReadAllBytes(tile.ConvertedAlphaPath);
+            var originalTileBytes = File.ReadAllBytes(tile.ExtractedAlphaPath);
+
+            if (convertedBytes.Length != originalTileBytes.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Tile {tile.Tile.Index} size mismatch: original {originalTileBytes.Length} vs converted {convertedBytes.Length}");
+            }
+
+            if (tile.Tile.MhdrOffset + convertedBytes.Length > outputBytes.Length)
+            {
+                throw new InvalidOperationException($"Tile {tile.Tile.Index} out of bounds when packing");
+            }
+
+            Buffer.BlockCopy(convertedBytes, 0, outputBytes, tile.Tile.MhdrOffset, convertedBytes.Length);
+        }
+
+        File.WriteAllBytes(repackedWdtPath, outputBytes);
+    }
+
+    private static TileComparisonResult CompareTiles(RoundTripTiles roundTripTiles)
+    {
+        int differentTiles = 0;
+        long totalDifferentBytes = 0;
+
+        foreach (var tile in roundTripTiles.Successes)
+        {
+            var originalBytes = File.ReadAllBytes(tile.ExtractedAlphaPath);
+            var convertedBytes = File.ReadAllBytes(tile.ConvertedAlphaPath);
+
+            if (originalBytes.Length != convertedBytes.Length)
+            {
+                differentTiles++;
+                totalDifferentBytes += Math.Abs(originalBytes.Length - convertedBytes.Length);
+                continue;
+            }
+
+            long diff = 0;
+            for (int i = 0; i < originalBytes.Length; i++)
+            {
+                if (originalBytes[i] != convertedBytes[i])
+                {
+                    diff++;
+                }
+            }
+
+            if (diff > 0)
+            {
+                differentTiles++;
+                totalDifferentBytes += diff;
+            }
+        }
+
+        return new TileComparisonResult(differentTiles, totalDifferentBytes);
+    }
+
+    private sealed record class TileExtractionResult(
+        IReadOnlyList<ExtractedTile> Successes,
+        IReadOnlyList<(int TileIndex, string Error)> Failures,
+        int SuccessCount,
+        string? ErrorMessage);
+
+    private sealed record class ExtractedTile(
+        int TileIndex,
+        AlphaTile Tile,
+        string ExtractedAlphaPath,
+        int OriginalLength);
+
+    private sealed record class RoundTripTiles(
+        IReadOnlyList<RoundTripTile> Successes,
+        IReadOnlyList<(int TileIndex, string Error)> Failures);
+
+    private sealed record class RoundTripTile(
+        AlphaTile Tile,
+        string ExtractedAlphaPath,
+        string LkAdtPath,
+        string ConvertedAlphaPath,
+        int OriginalLength,
+        int ConvertedLength);
+
+    private sealed record class TileComparisonResult(int DifferentTiles, long TotalDifferentBytes);
     
     /// <summary>
     /// Converts a LK ADT back to Alpha format using AlphaMcnkBuilder.
@@ -604,5 +737,29 @@ public static class RoundTripValidator
             TilesMismatched: differences.Count,
             BytesDifferent: totalDifferentBytes,
             Differences: differences);
+    }
+
+    private static ValidationResult CompareByteArrays(byte[] original, byte[] rebuilt, string fileName)
+    {
+        if (original.Length != rebuilt.Length)
+        {
+            return new ValidationResult(false, $"LK round-trip size mismatch: {original.Length:N0} vs {rebuilt.Length:N0}");
+        }
+
+        long diff = 0;
+        for (int i = 0; i < original.Length; i++)
+        {
+            if (original[i] != rebuilt[i])
+            {
+                diff++;
+            }
+        }
+
+        if (diff == 0)
+        {
+            return new ValidationResult(true, "LK files are byte-for-byte identical");
+        }
+
+        return new ValidationResult(false, $"LK round-trip differs in {diff:N0} bytes");
     }
 }
