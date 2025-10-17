@@ -170,7 +170,8 @@ public sealed class AlphaWdtMonolithicWriter
                 if (parts.Length < 3) continue;
                 if (!int.TryParse(parts[^2], out int yy)) continue;
                 if (!int.TryParse(parts[^1], out int xx)) continue;
-                int tileIndex = yy * 64 + xx;
+                // Alpha MAIN grid stores tiles with X-major ordering (xx as rows).
+                int tileIndex = xx * 64 + yy;
 
                 var bytes = File.ReadAllBytes(rootAdt);
             // Locate LK MHDR → MCIN to get MCNK offsets to know which exist
