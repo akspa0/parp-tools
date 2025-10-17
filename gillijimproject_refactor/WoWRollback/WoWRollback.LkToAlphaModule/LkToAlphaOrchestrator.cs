@@ -170,4 +170,8 @@ public sealed class LkToAlphaOrchestrator
                 ErrorMessage: ex.Message);
         }
     }
+
+    // TODO: Implement Alpha→LK managed builder conversion
+    // Requires proper API discovery for AdtAlpha/McnkAlpha classes
+    // See memory-bank/progress.md for implementation plan
 }

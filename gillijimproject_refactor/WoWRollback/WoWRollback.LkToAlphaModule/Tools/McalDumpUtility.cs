@@ -28,13 +28,13 @@ public static class McalDumpUtility
             return;
         }
 
-        if (data.Length % LayerSize != 0)
+        int layerCount = data.Length / LayerSize;
+        int remainder = data.Length % LayerSize;
+        if (remainder != 0)
         {
-            Console.WriteLine($"Unexpected MCAL length {data.Length}; must be multiple of {LayerSize}.");
-            return;
+            Console.WriteLine($"Warning: MCAL length {data.Length} includes {remainder} trailing bytes (ignored).");
         }
 
-        int layerCount = data.Length / LayerSize;
         Console.WriteLine($"MCAL summary for {stage} tile ({indexX},{indexY})");
         Console.WriteLine($"Total bytes: {data.Length}, layers (excluding base): {layerCount}");
 

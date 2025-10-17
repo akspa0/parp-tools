@@ -5,6 +5,7 @@ using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using Util = GillijimProject.Utilities.Utilities;
 using WoWRollback.LkToAlphaModule;
+using WoWRollback.LkToAlphaModule.Mcal;
 
 namespace WoWRollback.LkToAlphaModule.Builders;
 
@@ -211,12 +212,12 @@ public static class AlphaMcnkBuilder
         }
         else
         {
-            // Fallback: One base layer referencing texture 0. Layout (16 bytes):
-            // uint32 textureId; uint32 props; uint32 offsAlpha; uint16 effectId; uint8 pad[2]
             mclyRaw = new byte[16];
             // all zeros is acceptable minimal layer
         }
-        
+
+        DumpMclyTable(lkHeader.IndexX, lkHeader.IndexY, mclyRaw, opts);
+
         // Build MCAL raw - use extracted LK data or create empty fallback
         byte[] mcalRaw;
         int layerCount = mclyRaw.Length / 16;
@@ -230,11 +231,34 @@ public static class AlphaMcnkBuilder
             var assembled = new byte[4096 * maxAlphaLayers];
             int writeOffset = 0;
 
+            if (opts?.VerboseLogging == true)
+            {
+                Console.WriteLine($"[MCAL] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) layers={layerCount} totalSize={totalMcalSize}");
+            }
+
             for (int layer = 0; layer < layerCount; layer++)
             {
                 int entryOffset = layer * 16;
                 uint flags = BitConverter.ToUInt32(mclyRaw, entryOffset + 4);
                 bool usesAlpha = (flags & 0x80) != 0;
+
+                if (!usesAlpha && (flags & 0x100) != 0 && totalMcalSize > 0)
+                {
+                    flags |= 0x80;
+                    BitConverter.GetBytes(flags).CopyTo(mclyRaw, entryOffset + 4);
+                    usesAlpha = true;
+                    if (opts?.VerboseLogging == true)
+                    {
+                        Console.WriteLine($"    -> patched missing alpha bit (flags now 0x{flags:X})");
+                    }
+                }
+
+                if (opts?.VerboseLogging == true)
+                {
+                    uint textureId = BitConverter.ToUInt32(mclyRaw, entryOffset + 0);
+                    uint rawOffset = BitConverter.ToUInt32(mclyRaw, entryOffset + 8);
+                    Console.WriteLine($"  [Layer {layer}] tex={textureId} flags=0x{flags:X} rawOffset={rawOffset} usesAlpha={usesAlpha}");
+                }
 
                 if (!usesAlpha)
                 {
@@ -242,7 +266,8 @@ public static class AlphaMcnkBuilder
                     continue;
                 }
 
-                int start = Math.Min((int)BitConverter.ToUInt32(mclyRaw, entryOffset + 8), totalMcalSize);
+                int originalOffset = (int)BitConverter.ToUInt32(mclyRaw, entryOffset + 8);
+                int start = Math.Min(originalOffset, totalMcalSize);
                 int end = totalMcalSize;
                 for (int next = layer + 1; next < layerCount; next++)
                 {
@@ -259,13 +284,18 @@ public static class AlphaMcnkBuilder
                 int length = Math.Max(0, Math.Min(totalMcalSize - start, end - start));
                 var layerSpan = mcalSource.Slice(start, length);
 
-                var converted = ConvertAlphaLayer(layerSpan, flags, opts?.DisableAlphaEdgeFix != true);
+                var converted = McalAlphaDecoder.DecodeToColumnMajor(layerSpan, flags, opts?.DisableAlphaEdgeFix != true);
                 if (assembled.Length < writeOffset + converted.Length)
                 {
                     Array.Resize(ref assembled, writeOffset + converted.Length);
                 }
                 Buffer.BlockCopy(converted, 0, assembled, writeOffset, converted.Length);
                 BitConverter.GetBytes((uint)writeOffset).CopyTo(mclyRaw, entryOffset + 8);
+                if (opts?.VerboseLogging == true)
+                {
+                    uint textureId = BitConverter.ToUInt32(mclyRaw, entryOffset + 0);
+                    Console.WriteLine($"    -> usesAlpha start={start} end={end} len={length} newOffset={writeOffset} outLen={converted.Length}");
+                }
                 writeOffset += converted.Length;
             }
 
@@ -442,146 +472,6 @@ public static class AlphaMcnkBuilder
         return false;
     }
 
-    private static bool LayerUsesCompressedAlpha(ReadOnlySpan<byte> mclyRaw)
-    {
-        for (int offset = 0; offset + 16 <= mclyRaw.Length; offset += 16)
-        {
-            uint flags = BitConverter.ToUInt32(mclyRaw.Slice(offset + 4, 4));
-            if ((flags & 0x200) != 0) return true;
-        }
-
-        return false;
-    }
-
-    private static bool LayerUsesBigAlpha(ReadOnlySpan<byte> mclyRaw)
-    {
-        for (int offset = 0; offset + 16 <= mclyRaw.Length; offset += 16)
-        {
-            uint flags = BitConverter.ToUInt32(mclyRaw.Slice(offset + 4, 4));
-            if ((flags & 0x100) != 0) return true;
-        }
-
-        return false;
-    }
-
-    private static byte[] ConvertAlphaLayer(ReadOnlySpan<byte> source, uint flags, bool applyEdgeFix)
-    {
-        var rowMajor = DecodeAlphaLayerRowMajor(source, flags);
-        var columnMajor = RowToColumnMajor(rowMajor);
-        if (applyEdgeFix)
-        {
-            ApplyAlphaEdgeFix(columnMajor);
-        }
-        return columnMajor;
-    }
-
-    private static byte[] DecodeAlphaLayerRowMajor(ReadOnlySpan<byte> source, uint flags)
-    {
-        if ((flags & 0x200) != 0)
-        {
-            return DecompressCompressedAlpha(source);
-        }
-
-        if ((flags & 0x100) != 0)
-        {
-            return CopyBigAlpha(source);
-        }
-
-        return ExpandFourBitAlpha(source);
-    }
-
-    private static byte[] DecompressCompressedAlpha(ReadOnlySpan<byte> source)
-    {
-        var result = new byte[64 * 64];
-        int dst = 0;
-        int cursor = 0;
-
-        while (cursor < source.Length && dst < result.Length)
-        {
-            byte descriptor = source[cursor++];
-            int count = descriptor & 0x7F;
-            bool isFill = (descriptor & 0x80) != 0;
-
-            if (count == 0)
-            {
-                continue;
-            }
-
-            if (isFill)
-            {
-                if (cursor >= source.Length) break;
-                byte value = source[cursor++];
-                for (int i = 0; i < count && dst < result.Length; i++)
-                {
-                    result[dst++] = value;
-                }
-            }
-            else
-            {
-                for (int i = 0; i < count && dst < result.Length && cursor < source.Length; i++)
-                {
-                    result[dst++] = source[cursor++];
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private static byte[] CopyBigAlpha(ReadOnlySpan<byte> source)
-    {
-        var result = new byte[64 * 64];
-        int copyLength = Math.Min(result.Length, source.Length);
-        source.Slice(0, copyLength).CopyTo(result);
-        return result;
-    }
-
-    private static byte[] ExpandFourBitAlpha(ReadOnlySpan<byte> source)
-    {
-        var result = new byte[64 * 64];
-        int dst = 0;
-
-        for (int i = 0; i < source.Length && dst < result.Length; i++)
-        {
-            byte packed = source[i];
-            byte lower = (byte)(packed & 0x0F);
-            byte upper = (byte)((packed >> 4) & 0x0F);
-
-            result[dst++] = (byte)(lower | (lower << 4));
-            if (dst < result.Length)
-            {
-                result[dst++] = (byte)(upper | (upper << 4));
-            }
-        }
-
-        return result;
-    }
-
-    private static byte[] RowToColumnMajor(byte[] rowMajor)
-    {
-        var dst = new byte[64 * 64];
-
-        for (int row = 0; row < 64; row++)
-        {
-            for (int col = 0; col < 64; col++)
-            {
-                dst[col * 64 + row] = rowMajor[row * 64 + col];
-            }
-        }
-
-        return dst;
-    }
-
-    private static void ApplyAlphaEdgeFix(Span<byte> data)
-    {
-        for (int i = 0; i < 64; i++)
-        {
-            data[i * 64 + 63] = data[i * 64 + 62];
-            data[63 * 64 + i] = data[62 * 64 + i];
-        }
-        data[63 * 64 + 63] = data[62 * 64 + 62];
-    }
-
     private static void DumpMcalData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
     {
         if (opts?.VerboseLogging != true) return;
@@ -598,6 +488,39 @@ public static class AlphaMcnkBuilder
         catch (Exception ex)
         {
             Console.WriteLine($"[dump] Failed to write MCAL {stage} for tile {indexY:D2}_{indexX:D2}: {ex.Message}");
+        }
+    }
+
+    private static void DumpMclyTable(int indexX, int indexY, byte[] table, LkToAlphaOptions? opts)
+    {
+        if (table is null || table.Length == 0) return;
+        if (opts?.VerboseLogging == true)
+        {
+            Console.WriteLine($"[MCLY] Tile ({indexX},{indexY}) entries={table.Length / 16}");
+            int layers = table.Length / 16;
+            for (int layer = 0; layer < layers; layer++)
+            {
+                int offset = layer * 16;
+                uint textureId = BitConverter.ToUInt32(table, offset + 0);
+                uint flags = BitConverter.ToUInt32(table, offset + 4);
+                uint rawOffset = BitConverter.ToUInt32(table, offset + 8);
+                ushort effectId = BitConverter.ToUInt16(table, offset + 12);
+                var hex = BitConverter.ToString(table, offset, Math.Min(16, table.Length - offset)).Replace("-", string.Empty);
+                Console.WriteLine($"  [Layer {layer}] tex={textureId} flags=0x{flags:X} rawOffset={rawOffset} effect={effectId} raw={hex}");
+            }
+
+            try
+            {
+                string root = Path.Combine("debug_mcal", $"{indexY:D2}_{indexX:D2}");
+                Directory.CreateDirectory(root);
+                string path = Path.Combine(root, "mcly_raw.bin");
+                File.WriteAllBytes(path, table.ToArray());
+                Console.WriteLine($"[dump] MCLY raw -> {path} ({table.Length} bytes)");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[dump] Failed to write MCLY raw for tile {indexY:D2}_{indexX:D2}: {ex.Message}");
+            }
         }
     }
 
