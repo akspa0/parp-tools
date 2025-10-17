@@ -219,31 +219,68 @@ public static class AlphaMcnkBuilder
         
         // Build MCAL raw - use extracted LK data or create empty fallback
         byte[] mcalRaw;
+        int layerCount = mclyRaw.Length / 16;
         bool hasAlphaFlags = mclyRaw.Length >= 16 && LayerUsesAlpha(mclyRaw);
         if (mcalLkWhole != null && mcalLkWhole.Length > 8 && hasAlphaFlags)
         {
-            int sz = BitConverter.ToInt32(mcalLkWhole, 4);
-            var raw = new byte[sz];
-            Buffer.BlockCopy(mcalLkWhole, 8, raw, 0, sz);
-            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, raw, opts);
+            int totalMcalSize = BitConverter.ToInt32(mcalLkWhole, 4);
+            var mcalSource = new ReadOnlySpan<byte>(mcalLkWhole, 8, totalMcalSize);
 
-            bool isCompressed = LayerUsesCompressedAlpha(mclyRaw);
-            bool useBigAlpha = LayerUsesBigAlpha(mclyRaw);
+            int maxAlphaLayers = Math.Max(0, layerCount - 1);
+            var assembled = new byte[4096 * maxAlphaLayers];
+            int writeOffset = 0;
 
-            if (isCompressed || !useBigAlpha)
+            for (int layer = 0; layer < layerCount; layer++)
             {
-                raw = ExpandAlpha(raw, isCompressed, opts?.DisableAlphaEdgeFix != true);
-            }
-            else
-            {
-                raw = ReorderBigAlpha(raw, opts?.DisableAlphaEdgeFix != true);
+                int entryOffset = layer * 16;
+                uint flags = BitConverter.ToUInt32(mclyRaw, entryOffset + 4);
+                bool usesAlpha = (flags & 0x80) != 0;
+
+                if (!usesAlpha)
+                {
+                    BitConverter.GetBytes(0u).CopyTo(mclyRaw, entryOffset + 8);
+                    continue;
+                }
+
+                int start = Math.Min((int)BitConverter.ToUInt32(mclyRaw, entryOffset + 8), totalMcalSize);
+                int end = totalMcalSize;
+                for (int next = layer + 1; next < layerCount; next++)
+                {
+                    uint nextFlags = BitConverter.ToUInt32(mclyRaw, next * 16 + 4);
+                    if ((nextFlags & 0x80) != 0)
+                    {
+                        end = Math.Min(end, (int)BitConverter.ToUInt32(mclyRaw, next * 16 + 8));
+                        break;
+                    }
+                }
+
+                if (start < 0) start = 0;
+                if (end < start) end = start;
+                int length = Math.Max(0, Math.Min(totalMcalSize - start, end - start));
+                var layerSpan = mcalSource.Slice(start, length);
+
+                var converted = ConvertAlphaLayer(layerSpan, flags, opts?.DisableAlphaEdgeFix != true);
+                if (assembled.Length < writeOffset + converted.Length)
+                {
+                    Array.Resize(ref assembled, writeOffset + converted.Length);
+                }
+                Buffer.BlockCopy(converted, 0, assembled, writeOffset, converted.Length);
+                BitConverter.GetBytes((uint)writeOffset).CopyTo(mclyRaw, entryOffset + 8);
+                writeOffset += converted.Length;
             }
 
-            mcalRaw = raw;
+            Array.Resize(ref assembled, writeOffset);
+            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, new ReadOnlySpan<byte>(assembled).ToArray(), opts);
+            mcalRaw = assembled;
         }
         else
         {
             mcalRaw = Array.Empty<byte>();
+
+            for (int layer = 0; layer < layerCount; layer++)
+            {
+                BitConverter.GetBytes(0u).CopyTo(mclyRaw, layer * 16 + 8);
+            }
         }
         
         // Build MCSH raw - use extracted LK data or create empty fallback
@@ -296,7 +333,6 @@ public static class AlphaMcnkBuilder
         float radius = CalculateRadius(alphaMcvtRaw);
         
         // Calculate number of texture layers from MCLY raw table (each entry is 16 bytes)
-        int nLayers = mclyRaw.Length / 16;
         
         // Compute Alpha SMChunk header fields (offsets relative to BEGINNING of MCNK chunk)
         const int headerTotal = 8 + McnkHeaderSize; // FourCC+size + 128-byte header
@@ -362,7 +398,7 @@ public static class AlphaMcnkBuilder
         BitConverter.GetBytes(lkHeader.IndexX).CopyTo(smh[0x04..]);
         BitConverter.GetBytes(lkHeader.IndexY).CopyTo(smh[0x08..]);
         BitConverter.GetBytes(radius).CopyTo(smh[0x0C..]);
-        BitConverter.GetBytes(nLayers).CopyTo(smh[0x10..]);
+        BitConverter.GetBytes(layerCount).CopyTo(smh[0x10..]);
         BitConverter.GetBytes(0).CopyTo(smh[0x14..]); // nDoodadRefs (we write empty MCRF)
         BitConverter.GetBytes(offsHeight).CopyTo(smh[0x18..]);
         BitConverter.GetBytes(offsNormal).CopyTo(smh[0x1C..]);
@@ -428,19 +464,39 @@ public static class AlphaMcnkBuilder
         return false;
     }
 
-    private static byte[] ExpandAlpha(byte[] source, bool compressed, bool fixEdges)
+    private static byte[] ConvertAlphaLayer(ReadOnlySpan<byte> source, uint flags, bool applyEdgeFix)
     {
-        if (!compressed)
+        var rowMajor = DecodeAlphaLayerRowMajor(source, flags);
+        var columnMajor = RowToColumnMajor(rowMajor);
+        if (applyEdgeFix)
         {
-            return ReorderBigAlpha(source, fixEdges);
+            ApplyAlphaEdgeFix(columnMajor);
+        }
+        return columnMajor;
+    }
+
+    private static byte[] DecodeAlphaLayerRowMajor(ReadOnlySpan<byte> source, uint flags)
+    {
+        if ((flags & 0x200) != 0)
+        {
+            return DecompressCompressedAlpha(source);
         }
 
-        var expanded = new byte[64 * 64];
+        if ((flags & 0x100) != 0)
+        {
+            return CopyBigAlpha(source);
+        }
+
+        return ExpandFourBitAlpha(source);
+    }
+
+    private static byte[] DecompressCompressedAlpha(ReadOnlySpan<byte> source)
+    {
+        var result = new byte[64 * 64];
         int dst = 0;
-        int columnPos = 0;
         int cursor = 0;
 
-        while (cursor < source.Length && dst < expanded.Length)
+        while (cursor < source.Length && dst < result.Length)
         {
             byte descriptor = source[cursor++];
             int count = descriptor & 0x7F;
@@ -455,78 +511,75 @@ public static class AlphaMcnkBuilder
             {
                 if (cursor >= source.Length) break;
                 byte value = source[cursor++];
-                for (int i = 0; i < count && dst < expanded.Length; i++, dst++, columnPos++)
+                for (int i = 0; i < count && dst < result.Length; i++)
                 {
-                    expanded[dst] = value;
-                    if (columnPos == 63)
-                    {
-                        columnPos = -1;
-                    }
+                    result[dst++] = value;
                 }
             }
             else
             {
-                for (int i = 0; i < count && dst < expanded.Length && cursor < source.Length; i++, dst++, cursor++, columnPos++)
+                for (int i = 0; i < count && dst < result.Length && cursor < source.Length; i++)
                 {
-                    expanded[dst] = source[cursor];
-                    if (columnPos == 63)
-                    {
-                        columnPos = -1;
-                    }
+                    result[dst++] = source[cursor++];
                 }
-                cursor++;
             }
         }
 
-        return ReorderBigAlpha(expanded, fixEdges);
+        return result;
     }
 
-    private static byte[] ReorderBigAlpha(byte[] source, bool fixEdges)
+    private static byte[] CopyBigAlpha(ReadOnlySpan<byte> source)
+    {
+        var result = new byte[64 * 64];
+        int copyLength = Math.Min(result.Length, source.Length);
+        source.Slice(0, copyLength).CopyTo(result);
+        return result;
+    }
+
+    private static byte[] ExpandFourBitAlpha(ReadOnlySpan<byte> source)
+    {
+        var result = new byte[64 * 64];
+        int dst = 0;
+
+        for (int i = 0; i < source.Length && dst < result.Length; i++)
+        {
+            byte packed = source[i];
+            byte lower = (byte)(packed & 0x0F);
+            byte upper = (byte)((packed >> 4) & 0x0F);
+
+            result[dst++] = (byte)(lower | (lower << 4));
+            if (dst < result.Length)
+            {
+                result[dst++] = (byte)(upper | (upper << 4));
+            }
+        }
+
+        return result;
+    }
+
+    private static byte[] RowToColumnMajor(byte[] rowMajor)
     {
         var dst = new byte[64 * 64];
 
-        if (source.Length >= 64 * 64)
+        for (int row = 0; row < 64; row++)
         {
-            for (int row = 0; row < 64; row++)
-            {
-                for (int col = 0; col < 64; col++)
-                {
-                    dst[col * 64 + row] = source[row * 64 + col];
-                }
-            }
-        }
-        else
-        {
-            int srcIndex = 0;
             for (int col = 0; col < 64; col++)
             {
-                for (int row = 0; row < 64; row += 2)
-                {
-                    if (srcIndex >= source.Length) break;
-                    byte packed = source[srcIndex++];
-                    byte lower = (byte)(packed & 0x0F);
-                    byte upper = (byte)((packed >> 4) & 0x0F);
-
-                    dst[col * 64 + row] = (byte)(lower | (lower << 4));
-                    if (row + 1 < 64)
-                    {
-                        dst[col * 64 + row + 1] = (byte)(upper | (upper << 4));
-                    }
-                }
+                dst[col * 64 + row] = rowMajor[row * 64 + col];
             }
-        }
-
-        if (fixEdges)
-        {
-            for (int i = 0; i < 64; i++)
-            {
-                dst[i * 64 + 63] = dst[i * 64 + 62];
-                dst[63 * 64 + i] = dst[62 * 64 + i];
-            }
-            dst[63 * 64 + 63] = dst[62 * 64 + 62];
         }
 
         return dst;
+    }
+
+    private static void ApplyAlphaEdgeFix(Span<byte> data)
+    {
+        for (int i = 0; i < 64; i++)
+        {
+            data[i * 64 + 63] = data[i * 64 + 62];
+            data[63 * 64 + i] = data[62 * 64 + i];
+        }
+        data[63 * 64 + 63] = data[62 * 64 + 62];
     }
 
     private static void DumpMcalData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
