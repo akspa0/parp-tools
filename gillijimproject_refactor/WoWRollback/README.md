@@ -33,6 +33,29 @@ dotnet run --project WoWRollback.Cli -- serve-viewer
 # Opens browser at http://localhost:8080 automatically!
 ```
 
+### WoWRollback.AdtConverter (Standalone CLI)
+
+`WoWRollback.AdtConverter` now ships inside `WoWRollback.sln` and builds with the rest of the toolkit. Run it directly for LK ⇄ Alpha terrain workflows:
+
+```powershell
+# Optional: build the converter by itself
+dotnet build WoWRollback.AdtConverter/WoWRollback.AdtConverter.csproj --no-incremental
+
+# Pack a monolithic Alpha WDT with embedded terrain-only ADTs
+dotnet run --project WoWRollback.AdtConverter -- pack-monolithic \
+  --lk-dir <path-to-lk-map-dir> \
+  --lk-wdt <path-to-lk-wdt> \
+  --map <MapName> \
+  [--out <output-root>] \
+  [--force-area-id <id>] \
+  [--main-point-to-data] \
+  [--verbose-logging]
+```
+
+- **Output** defaults to `project_output/<map>_<timestamp>/` with the packed `<map>.wdt`.
+- **Verbose logging** (`--verbose-logging`) writes LK vs Alpha `MCAL` dumps to `debug_mcal/YY_XX/` for troubleshooting mask ordering.
+- **More commands**: `dotnet run --project WoWRollback.AdtConverter -- --help` lists `convert-wdt`, `convert-map-terrain`, `inspect-alpha`, `compare-alpha`, `validate-wdt`, `unpack-monolithic`, and `alpha-to-lk-mcse`.
+
 **What you get:**
 - ✅ 26K+ M2/WMO placements extracted & overlaid on minimaps
 - ✅ MCNK terrain data (AreaIDs, flags, liquids, holes)
@@ -724,6 +747,18 @@ parp_out/
 ## ✨ Features
 
 ### Current (v1.0 - Loose ADT Analysis)
+`WoWRollback.AdtConverter` now ships inside `WoWRollback.sln` and builds with the rest of the toolkit. Run it directly for LK ⇄ Alpha terrain workflows:
+
+```powershell
+dotnet run --project WoWRollback.AdtConverter -- pack-monolithic \
+  --lk-dir <path-to-lk-map-dir> \
+  --lk-wdt <path-to-lk-wdt> \
+  --map <MapName> \
+  [--out <output-root>] \
+  [--force-area-id <id>] \
+  [--main-point-to-data] \
+  [--verbose-logging]
+```
 
 #### ADT Analysis (NEW!)
 - ✅ **Loose ADT analysis** - No conversion needed, reads 0.5.x-4.x+ formats directly

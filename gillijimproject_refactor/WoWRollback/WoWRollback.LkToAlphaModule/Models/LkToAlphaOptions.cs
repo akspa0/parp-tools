@@ -7,6 +7,7 @@ public sealed record LkToAlphaOptions
     public string? TextureMappingPath { get; init; }
     public bool Validate { get; init; }
     public bool Verbose { get; init; }
+    public bool VerboseLogging { get; init; }
     public int? ForceAreaId { get; init; }
     public float? DebugFlatMcvt { get; init; }
     public string? BaseTexture { get; init; }

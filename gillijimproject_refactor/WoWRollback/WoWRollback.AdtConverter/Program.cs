@@ -55,6 +55,7 @@ internal static class Program
         var debugFlat = new Option<float?>("--debug-flat-mcvt", description: "Force constant terrain height for all MCVT samples");
         var baseTex = new Option<string?>("--base-texture", description: "Override MTEX path for base texture");
         var mainPointToData = new Option<bool>("--main-point-to-data", () => false, "MAIN offsets point to MHDR.data (+8) instead of letters");
+        var verboseLog = new Option<bool>("--verbose-logging", () => false, "Enable detailed logging and debug dumps during packing");
         packCmd.AddOption(wdtPathPack);
         packCmd.AddOption(lkDirPack);
         packCmd.AddOption(mapOptPack);
@@ -63,8 +64,19 @@ internal static class Program
         packCmd.AddOption(debugFlat);
         packCmd.AddOption(baseTex);
         packCmd.AddOption(mainPointToData);
-        packCmd.SetHandler((string wdt, string lkDir, string map, string? outDir, int? forceAreaId, float? debugFlatMcvt, string? baseTexture, bool pointToData) =>
+        packCmd.AddOption(verboseLog);
+        packCmd.SetHandler((InvocationContext context) =>
         {
+            var wdt = context.ParseResult.GetValueForOption(wdtPathPack)!;
+            var lkDir = context.ParseResult.GetValueForOption(lkDirPack)!;
+            var map = context.ParseResult.GetValueForOption(mapOptPack)!;
+            var outDir = context.ParseResult.GetValueForOption(outOptPack);
+            var forceAreaId = context.ParseResult.GetValueForOption(forceArea);
+            var debugFlatMcvt = context.ParseResult.GetValueForOption(debugFlat);
+            var baseTexture = context.ParseResult.GetValueForOption(baseTex);
+            var pointToData = context.ParseResult.GetValueForOption(mainPointToData);
+            var verboseLogging = context.ParseResult.GetValueForOption(verboseLog);
+
             var orch = new LkToAlphaOrchestrator();
             var resolvedOut = string.IsNullOrWhiteSpace(outDir) ? OutputPathResolver.GetDefaultRoot(map) : outDir;
             var res = orch.PackMonolithicAlphaWdt(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions
@@ -72,10 +84,11 @@ internal static class Program
                 ForceAreaId = forceAreaId,
                 DebugFlatMcvt = debugFlatMcvt,
                 BaseTexture = baseTexture,
-                MainPointToMhdrData = pointToData
+                MainPointToMhdrData = pointToData,
+                VerboseLogging = verboseLogging
             });
             Console.WriteLine(res.Success ? $"PACK OK: {res.TilesProcessed} tiles -> {Path.Combine(res.AlphaOutputDirectory, map + ".wdt")}" : $"PACK FAILED: {res.ErrorMessage}");
-        }, wdtPathPack, lkDirPack, mapOptPack, outOptPack, forceArea, debugFlat, baseTex, mainPointToData);
+        });
 
         root.Add(packCmd);
 

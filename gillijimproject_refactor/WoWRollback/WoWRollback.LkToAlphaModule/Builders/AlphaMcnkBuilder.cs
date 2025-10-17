@@ -224,6 +224,7 @@ public static class AlphaMcnkBuilder
             int sz = BitConverter.ToInt32(mcalLkWhole, 4);
             mcalRaw = new byte[sz];
             Buffer.BlockCopy(mcalLkWhole, 8, mcalRaw, 0, sz);
+            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
         }
         else
         {
@@ -263,6 +264,8 @@ public static class AlphaMcnkBuilder
         var mclyChunk = new Chunk("MCLY", mclyRaw.Length, mclyRaw);
         var mcrfChunk = new Chunk("MCRF", mcrfRaw.Length, mcrfRaw);
         var mcshChunk = new Chunk("MCSH", mcshRaw.Length, mcshRaw);
+        DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+
         var mcalChunk = new Chunk("MCAL", mcalRaw.Length, mcalRaw);
         var mcseChunk = new Chunk("MCSE", mcseRaw.Length, mcseRaw);
 
@@ -375,6 +378,25 @@ public static class AlphaMcnkBuilder
         ms.Write(mcseWhole, 0, mcseWhole.Length);
 
         return ms.ToArray();
+    }
+
+    private static void DumpMcalData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
+    {
+        if (opts?.VerboseLogging != true) return;
+        if (data is null || data.Length == 0) return;
+
+        try
+        {
+            string root = Path.Combine("debug_mcal", $"{indexY:D2}_{indexX:D2}");
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, $"{stage}_mcal.bin");
+            File.WriteAllBytes(path, data);
+            Console.WriteLine($"[dump] MCAL {stage} -> {path} ({data.Length} bytes)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[dump] Failed to write MCAL {stage} for tile {indexY:D2}_{indexX:D2}: {ex.Message}");
+        }
     }
 
     public static byte[] BuildEmpty(int indexX, int indexY)
