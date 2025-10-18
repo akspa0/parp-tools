@@ -6,6 +6,7 @@ using GillijimProject.WowFiles.LichKing;
 using Util = GillijimProject.Utilities.Utilities;
 using WoWRollback.LkToAlphaModule;
 using WoWRollback.LkToAlphaModule.Mcal;
+using WoWRollback.LkToAlphaModule.Liquids;
 
 namespace WoWRollback.LkToAlphaModule.Builders;
 
@@ -34,7 +35,9 @@ public static class AlphaMcnkBuilder
         byte[]? mcalLkWhole = null;
         byte[]? mcshLkWhole = null;
         byte[]? mcseLkWhole = null;
-        
+        byte[]? mcrfLkWhole = null;
+        byte[]? mh2oLkWhole = null;
+
         // Extract MCLY, MCAL, MCSH using header offsets (LK stores them as proper chunks)
         if (lkHeader.MclyOffset > 0)
         {
@@ -49,7 +52,6 @@ public static class AlphaMcnkBuilder
                 }
             }
         }
-        
         if (lkHeader.McalOffset > 0 && lkHeader.McalSize > 0)
         {
             int mcalPos = mcNkOffset + lkHeader.McalOffset;
@@ -78,6 +80,50 @@ public static class AlphaMcnkBuilder
             }
         }
         
+        if (lkHeader.McrfOffset > 0)
+        {
+            int mcrfPos = mcNkOffset + lkHeader.McrfOffset;
+            if (mcrfPos + 8 <= lkAdtBytes.Length)
+            {
+                int mcrfSize = BitConverter.ToInt32(lkAdtBytes, mcrfPos + 4);
+                if (mcrfSize > 0 && mcrfPos + 8 + mcrfSize <= lkAdtBytes.Length)
+                {
+                    mcrfLkWhole = new byte[mcrfSize];
+                    Buffer.BlockCopy(lkAdtBytes, mcrfPos + 8, mcrfLkWhole, 0, mcrfSize);
+                }
+            }
+        }
+        
+        // Extract MH2O (liquids) if present and not skipped
+        if (lkHeader.MclqOffset > 0 && opts?.SkipLiquids != true)
+        {
+            int mh2oPos = mcNkOffset + lkHeader.MclqOffset;
+            if (mh2oPos + 8 <= lkAdtBytes.Length)
+            {
+                int mh2oSize = BitConverter.ToInt32(lkAdtBytes, mh2oPos + 4);
+                if (mh2oSize > 0 && mh2oPos + 8 + mh2oSize <= lkAdtBytes.Length)
+                {
+                    mh2oLkWhole = new byte[8 + mh2oSize]; // Include chunk header
+                    Buffer.BlockCopy(lkAdtBytes, mh2oPos, mh2oLkWhole, 0, 8 + mh2oSize);
+                }
+            }
+        }
+        
+        // Extract MCSE (sound emitters) if present
+        if (lkHeader.McseOffset > 0)
+        {
+            int mcsePos = mcNkOffset + lkHeader.McseOffset;
+            if (mcsePos + 8 <= lkAdtBytes.Length)
+            {
+                int mcseSize = BitConverter.ToInt32(lkAdtBytes, mcsePos + 4);
+                if (mcseSize > 0 && mcsePos + 8 + mcseSize <= lkAdtBytes.Length)
+                {
+                    mcseLkWhole = new byte[mcseSize];
+                    Buffer.BlockCopy(lkAdtBytes, mcsePos + 8, mcseLkWhole, 0, mcseSize);
+                }
+            }
+        }
+
         // Scan for MCVT and MCNR (these are in the sub-chunk area)
         for (int p = subStart; p + 8 <= subEnd;)
         {
@@ -334,9 +380,31 @@ public static class AlphaMcnkBuilder
         {
             mcseRaw = Array.Empty<byte>();
         }
+        
+        // Build MCLQ raw - convert MH2O to Alpha MCLQ if liquids enabled
+        byte[] mclqRaw = Array.Empty<byte>();
+        if (mh2oLkWhole != null && mh2oLkWhole.Length > 0 && opts?.SkipLiquids != true)
+        {
+            try
+            {
+                mclqRaw = ConvertMh2oToMclq(mh2oLkWhole, opts);
+                if (opts?.VerboseLogging == true && mclqRaw.Length > 0)
+                {
+                    Console.WriteLine($"[MCLQ] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) converted MH2O -> MCLQ ({mclqRaw.Length} bytes)");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (opts?.VerboseLogging == true)
+                {
+                    Console.WriteLine($"[MCLQ] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) conversion failed: {ex.Message}");
+                }
+                mclqRaw = Array.Empty<byte>();
+            }
+        }
 
         // MCRF raw is empty in our current flow
-        var mcrfRaw = Array.Empty<byte>();
+        var mcrfRaw = BuildAlphaMcrfTable(mcrfLkWhole, lkHeader.M2Number, lkHeader.WmoNumber, out int alphaDoodadRefs, out int alphaWmoRefs);
 
         DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
 
@@ -345,8 +413,9 @@ public static class AlphaMcnkBuilder
         byte[] mcshWhole = mcshRaw;
         byte[] mcalWhole = mcalRaw;
         byte[] mcseWhole = mcseRaw;
+        byte[] mclqWhole = mclqRaw;
 
-        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
+        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length + mclqWhole.Length;
         
         // Calculate bounding sphere radius from MCVT heights
         float radius = CalculateRadius(alphaMcvtRaw);
@@ -362,10 +431,12 @@ public static class AlphaMcnkBuilder
         int offsShadow = offsRefs   + mcrfWhole.Length;
         int offsAlpha  = offsShadow + mcshWhole.Length;
         int offsSnd    = mcseWhole.Length > 0 ? offsAlpha + mcalWhole.Length : 0;
+        int offsLiquid = mclqWhole.Length > 0 ? (offsSnd > 0 ? offsSnd + mcseWhole.Length : offsAlpha + mcalWhole.Length) : 0;
 
         int sizeShadow = mcshRaw.Length;
         int sizeAlpha  = mcalRaw.Length;
         int sizeSnd    = mcseRaw.Length;
+        int sizeLiquid = mclqRaw.Length;
 
         // Best-effort nSndEmitters detection: prefer 76-byte entries (0.5.3), else 52-byte (1.12.1), else 0
         int nSnd = 0;
@@ -413,12 +484,12 @@ public static class AlphaMcnkBuilder
         // 0x64 offsLiquid
         // 0x68 pad1[24]
 
-        BitConverter.GetBytes(0).CopyTo(smh[0x00..]); // flags
+        BitConverter.GetBytes(lkHeader.Flags).CopyTo(smh[0x00..]);
         BitConverter.GetBytes(lkHeader.IndexX).CopyTo(smh[0x04..]);
         BitConverter.GetBytes(lkHeader.IndexY).CopyTo(smh[0x08..]);
         BitConverter.GetBytes(radius).CopyTo(smh[0x0C..]);
         BitConverter.GetBytes(layerCount).CopyTo(smh[0x10..]);
-        BitConverter.GetBytes(0).CopyTo(smh[0x14..]); // nDoodadRefs (we write empty MCRF)
+        BitConverter.GetBytes(alphaDoodadRefs).CopyTo(smh[0x14..]);
         BitConverter.GetBytes(offsHeight).CopyTo(smh[0x18..]);
         BitConverter.GetBytes(offsNormal).CopyTo(smh[0x1C..]);
         BitConverter.GetBytes(offsLayer).CopyTo(smh[0x20..]);
@@ -428,26 +499,86 @@ public static class AlphaMcnkBuilder
         BitConverter.GetBytes(offsShadow).CopyTo(smh[0x30..]);
         BitConverter.GetBytes(sizeShadow).CopyTo(smh[0x34..]);
         BitConverter.GetBytes(areaIdVal).CopyTo(smh[0x38..]);
-        BitConverter.GetBytes(0).CopyTo(smh[0x3C..]); // nMapObjRefs
-        // holes (uint16) at 0x40, pad0 at 0x42 (leave zeros)
-        // predTex[8] at 0x44, noEffectDoodad[8] at 0x54 (already zeros)
+        BitConverter.GetBytes(alphaWmoRefs).CopyTo(smh[0x3C..]);
+        BitConverter.GetBytes((ushort)lkHeader.Holes).CopyTo(smh[0x40..]);
+
+        // predictor textures stored as int in LK header; pack low/high words into first two slots
+        ushort predLow = (ushort)(lkHeader.PredTex & 0xFFFF);
+        ushort predHigh = (ushort)((lkHeader.PredTex >> 16) & 0xFFFF);
+        BitConverter.GetBytes(predLow).CopyTo(smh[0x44..]);
+        BitConverter.GetBytes(predHigh).CopyTo(smh[0x46..]);
+
+        uint noEffect = (uint)lkHeader.NEffectDoodad;
+        smh[0x54] = (byte)(noEffect & 0xFF);
+        smh[0x55] = (byte)((noEffect >> 8) & 0xFF);
+        smh[0x56] = (byte)((noEffect >> 16) & 0xFF);
+        smh[0x57] = (byte)((noEffect >> 24) & 0xFF);
+
         BitConverter.GetBytes(offsSnd).CopyTo(smh[0x5C..]);
         BitConverter.GetBytes(nSnd).CopyTo(smh[0x60..]);
-        // offsLiquid zero by default
-
+        BitConverter.GetBytes(offsLiquid).CopyTo(smh[0x64..]);
+        // Note: sizeLiquid not stored in Alpha header (0x68 onwards is padding)
+        
         // Write header
         ms.Write(smh);
 
-        // Sub-blocks in Alpha order (raw, no named headers): MCVT, MCNR, MCLY, MCRF, MCSH, MCAL, MCSE
+        // Sub-blocks in Alpha order (raw, no named headers): MCVT, MCNR, MCLY, MCRF, MCSH, MCAL, MCSE, MCLQ
         if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
         if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
         ms.Write(mclyWhole, 0, mclyWhole.Length);
         ms.Write(mcrfWhole, 0, mcrfWhole.Length);
         ms.Write(mcshWhole, 0, mcshWhole.Length);
         ms.Write(mcalWhole, 0, mcalWhole.Length);
-        ms.Write(mcseWhole, 0, mcseWhole.Length);
+        if (mcseWhole.Length > 0) ms.Write(mcseWhole, 0, mcseWhole.Length);
+        if (mclqWhole.Length > 0) ms.Write(mclqWhole, 0, mclqWhole.Length);
 
         return ms.ToArray();
+    }
+
+    private static byte[] BuildAlphaMcrfTable(byte[]? lkMcrfRaw, int doodadCount, int wmoCount, out int alphaDoodadRefs, out int alphaWmoRefs)
+    {
+        int safeDoodadCount = Math.Max(doodadCount, 0);
+        int safeWmoCount = Math.Max(wmoCount, 0);
+        int totalRefs = safeDoodadCount + safeWmoCount;
+        alphaDoodadRefs = 0;
+        alphaWmoRefs = 0;
+        if (totalRefs == 0 || lkMcrfRaw is null || lkMcrfRaw.Length == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        int availableRefs = lkMcrfRaw.Length / sizeof(int);
+        if (availableRefs == 0)
+        {
+            return Array.Empty<byte>();
+        }
+
+        if (availableRefs < totalRefs)
+        {
+            totalRefs = availableRefs;
+            safeDoodadCount = Math.Min(safeDoodadCount, totalRefs);
+            safeWmoCount = Math.Min(safeWmoCount, totalRefs - safeDoodadCount);
+        }
+
+        int doodadBytes = safeDoodadCount * sizeof(int);
+        int wmoBytes = safeWmoCount * sizeof(int);
+        var output = new byte[doodadBytes + wmoBytes];
+
+        alphaDoodadRefs = safeDoodadCount;
+        alphaWmoRefs = safeWmoCount;
+
+        if (doodadBytes > 0)
+        {
+            Buffer.BlockCopy(lkMcrfRaw, 0, output, 0, doodadBytes);
+        }
+
+        if (wmoBytes > 0)
+        {
+            int wmoSourceOffset = Math.Max(0, (availableRefs - safeWmoCount) * sizeof(int));
+            Buffer.BlockCopy(lkMcrfRaw, wmoSourceOffset, output, doodadBytes, Math.Min(wmoBytes, lkMcrfRaw.Length - wmoSourceOffset));
+        }
+
+        return output;
     }
 
     private static bool LayerUsesAlpha(ReadOnlySpan<byte> mclyRaw)
@@ -678,5 +809,213 @@ public static class AlphaMcnkBuilder
         
         // Combine horizontal and vertical components
         return (float)Math.Sqrt(horizontalRadius * horizontalRadius + (heightRange / 2) * (heightRange / 2));
+    }
+
+    private static byte[] ConvertMh2oToMclq(byte[] mh2oChunkBytes, LkToAlphaOptions? opts)
+    {
+        // Parse MH2O chunk - note: this is a single-chunk MH2O for one MCNK
+        // The chunk format is: [4 bytes FourCC "MH2O"] [4 bytes size] [payload]
+        if (mh2oChunkBytes.Length < 8)
+            return Array.Empty<byte>();
+            
+        // Skip FourCC and size to get payload
+        byte[] mh2oPayload = new byte[mh2oChunkBytes.Length - 8];
+        Buffer.BlockCopy(mh2oChunkBytes, 8, mh2oPayload, 0, mh2oPayload.Length);
+        
+        // Parse MH2O using existing infrastructure
+        // Note: MH2O in LK ADT is per-chunk, not per-ADT array
+        var mh2oChunk = ParseSingleMh2oChunk(mh2oPayload);
+        
+        if (mh2oChunk == null || mh2oChunk.IsEmpty)
+            return Array.Empty<byte>();
+        
+        // Convert MH2O to MCLQ using LiquidsConverter
+        var liquidsOpts = new LiquidsOptions
+        {
+            EnableLiquids = true,
+            Precedence = new[] { MclqLiquidType.Magma, MclqLiquidType.Slime, MclqLiquidType.River, MclqLiquidType.Ocean },
+            GreenLava = false,
+            Mapping = LiquidTypeMapping.CreateDefault()
+        };
+        
+        var mclqData = LiquidsConverter.Mh2oToMclq(mh2oChunk, liquidsOpts);
+        
+        // Serialize MCLQ to Alpha format
+        return SerializeMclq(mclqData);
+    }
+    
+    private static Mh2oChunk? ParseSingleMh2oChunk(byte[] payload)
+    {
+        // Single-chunk MH2O format (per MCNK):
+        // [12 bytes header: offsetInstances(4), layerCount(4), offsetAttributes(4)]
+        // [instance data...]
+        if (payload.Length < 12)
+            return null;
+            
+        using var ms = new MemoryStream(payload);
+        using var reader = new BinaryReader(ms);
+        
+        uint offsetInstances = reader.ReadUInt32();
+        uint layerCount = reader.ReadUInt32();
+        uint offsetAttributes = reader.ReadUInt32();
+        
+        if (layerCount == 0)
+            return null;
+            
+        var chunk = new Mh2oChunk();
+        
+        // Read instances
+        if (offsetInstances > 0 && offsetInstances < payload.Length)
+        {
+            ms.Position = offsetInstances;
+            for (int i = 0; i < layerCount; i++)
+            {
+                if (ms.Position + 24 > payload.Length)
+                    break;
+                    
+                var instance = new Mh2oInstance
+                {
+                    LiquidTypeId = reader.ReadUInt16(),
+                    Lvf = (LiquidVertexFormat)reader.ReadUInt16(),
+                    MinHeightLevel = reader.ReadSingle(),
+                    MaxHeightLevel = reader.ReadSingle(),
+                    XOffset = reader.ReadByte(),
+                    YOffset = reader.ReadByte(),
+                    Width = reader.ReadByte(),
+                    Height = reader.ReadByte(),
+                    ExistsBitmap = null,
+                    HeightMap = null,
+                    DepthMap = null
+                };
+                
+                uint offsetExistsBitmap = reader.ReadUInt32();
+                uint offsetVertexData = reader.ReadUInt32();
+                
+                // Read exists bitmap if present
+                byte[]? existsBitmap = null;
+                if (offsetExistsBitmap > 0 && offsetExistsBitmap < payload.Length)
+                {
+                    long savedPos = ms.Position;
+                    ms.Position = offsetExistsBitmap;
+                    int bitmapSize = (instance.Width * instance.Height + 7) / 8;
+                    existsBitmap = reader.ReadBytes(bitmapSize);
+                    ms.Position = savedPos;
+                }
+                
+                // Read vertex data if present
+                float[]? heightMap = null;
+                byte[]? depthMap = null;
+                if (offsetVertexData > 0 && offsetVertexData < payload.Length)
+                {
+                    long savedPos = ms.Position;
+                    ms.Position = offsetVertexData;
+                    
+                    int vertexCount = (instance.Width + 1) * (instance.Height + 1);
+                    switch (instance.Lvf)
+                    {
+                        case LiquidVertexFormat.HeightDepth:
+                        {
+                            heightMap = new float[vertexCount];
+                            for (int v = 0; v < vertexCount; v++)
+                                heightMap[v] = reader.ReadSingle();
+                            depthMap = reader.ReadBytes(vertexCount);
+                            break;
+                        }
+                        case LiquidVertexFormat.DepthOnly:
+                        {
+                            depthMap = reader.ReadBytes(vertexCount);
+                            break;
+                        }
+                    }
+                    
+                    ms.Position = savedPos;
+                }
+                
+                // Create final instance with all data
+                instance = new Mh2oInstance
+                {
+                    LiquidTypeId = instance.LiquidTypeId,
+                    Lvf = instance.Lvf,
+                    MinHeightLevel = instance.MinHeightLevel,
+                    MaxHeightLevel = instance.MaxHeightLevel,
+                    XOffset = instance.XOffset,
+                    YOffset = instance.YOffset,
+                    Width = instance.Width,
+                    Height = instance.Height,
+                    ExistsBitmap = existsBitmap,
+                    HeightMap = heightMap,
+                    DepthMap = depthMap
+                };
+                
+                chunk.Add(instance);
+            }
+        }
+        
+        // Read attributes if present
+        if (offsetAttributes > 0 && offsetAttributes < payload.Length)
+        {
+            ms.Position = offsetAttributes;
+            if (ms.Position + 16 <= payload.Length)
+            {
+                ulong fishable = 0;
+                ulong deep = 0;
+                for (int y = 0; y < 8; y++)
+                {
+                    byte fishRow = reader.ReadByte();
+                    for (int x = 0; x < 8; x++)
+                    {
+                        if ((fishRow & (1 << x)) != 0)
+                            fishable |= 1UL << (y * 8 + x);
+                    }
+                }
+                for (int y = 0; y < 8; y++)
+                {
+                    byte deepRow = reader.ReadByte();
+                    for (int x = 0; x < 8; x++)
+                    {
+                        if ((deepRow & (1 << x)) != 0)
+                            deep |= 1UL << (y * 8 + x);
+                    }
+                }
+                chunk = new Mh2oChunk { Attributes = new Mh2oAttributes(fishable, deep) };
+                foreach (var inst in chunk.Instances.ToArray())
+                    chunk.Add(inst);
+            }
+        }
+        
+        return chunk;
+    }
+    
+    private static byte[] SerializeMclq(MclqData mclqData)
+    {
+        // Alpha MCLQ format:
+        // [9x9 float heights = 324 bytes]
+        // [9x9 byte depths = 81 bytes]
+        // [8x8 byte tile data (type in low nibble, flags in high nibble) = 64 bytes]
+        // Total: 469 bytes
+        
+        using var ms = new MemoryStream(469);
+        using var writer = new BinaryWriter(ms);
+        
+        // Write heights (9x9 = 81 floats)
+        for (int i = 0; i < 81; i++)
+            writer.Write(mclqData.Heights[i]);
+        
+        // Write depths (9x9 = 81 bytes)
+        writer.Write(mclqData.Depth, 0, 81);
+        
+        // Write tile data (8x8 = 64 bytes, type | flags)
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                byte tileType = (byte)mclqData.Types[x, y];
+                byte tileFlags = (byte)mclqData.Flags[x, y];
+                byte combined = (byte)(tileType | tileFlags);
+                writer.Write(combined);
+            }
+        }
+        
+        return ms.ToArray();
     }
 }

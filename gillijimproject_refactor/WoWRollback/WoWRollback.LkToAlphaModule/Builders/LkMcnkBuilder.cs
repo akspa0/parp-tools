@@ -45,10 +45,10 @@ public static class LkMcnkBuilder
             BitConverter.TryWriteBytes(header[(0x44 + i * 2)..], source.PredictedTextures[i]);
         }
 
-        BitConverter.TryWriteBytes(header[0x54..], source.NoEffectDoodad);
-        BitConverter.TryWriteBytes(header[0x5C..], source.OffsSndEmitters);
-        BitConverter.TryWriteBytes(header[0x60..], source.SndEmitterCount);
-        BitConverter.TryWriteBytes(header[0x64..], source.OffsLiquid);
+        BitConverter.TryWriteBytes(header[0x54..], (uint)(source.NoEffectDoodadMask & 0xFFFFFFFF));
+        BitConverter.TryWriteBytes(header[0x5C..], 0);
+        BitConverter.TryWriteBytes(header[0x60..], 0);
+        BitConverter.TryWriteBytes(header[0x64..], 0);
 
         writer.Write(header);
 
@@ -102,7 +102,7 @@ public static class LkMcnkBuilder
         BitConverter.TryWriteBytes(patch[0x30..], mcshOffset);
         BitConverter.TryWriteBytes(patch[0x34..], source.McshRaw.Length);
         BitConverter.TryWriteBytes(patch[0x5C..], mcseOffset);
-        BitConverter.TryWriteBytes(patch[0x60..], source.SndEmitterCount);
+        BitConverter.TryWriteBytes(patch[0x60..], 0);
 
         ms.Position = ChunkHeaderSize;
         writer.Write(patch);

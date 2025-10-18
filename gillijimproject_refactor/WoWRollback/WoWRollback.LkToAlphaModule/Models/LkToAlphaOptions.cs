@@ -2,7 +2,7 @@ namespace WoWRollback.LkToAlphaModule;
 
 public sealed record LkToAlphaOptions
 {
-    public bool SkipLiquids { get; init; } = true;
+    public bool SkipLiquids { get; init; } = false;
     public bool SkipWmos { get; init; }
     public string? TextureMappingPath { get; init; }
     public bool Validate { get; init; }
