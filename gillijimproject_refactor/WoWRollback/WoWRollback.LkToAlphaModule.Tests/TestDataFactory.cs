@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
+using WoWRollback.LkToAlphaModule.Liquids;
 using WoWRollback.LkToAlphaModule.Models;
 
 namespace WoWRollback.LkToAlphaModule.Tests;
@@ -152,7 +154,7 @@ public static class TestDataFactory
     /// <summary>
     /// Creates a complete test LkAdtSource with 256 MCNK chunks.
     /// </summary>
-    public static LkAdtSource CreateTestAdtSource(string mapName = "TestMap", int tileX = 0, int tileY = 0)
+    public static LkAdtSource CreateTestAdtSource(string mapName = "TestMap", int tileX = 0, int tileY = 0, bool includeLiquids = false, bool includePlacements = false)
     {
         var source = new LkAdtSource
         {
@@ -168,6 +170,16 @@ public static class TestDataFactory
             {
                 source.Mcnks.Add(CreateTestMcnkSource(x, y, layerCount: 1));
             }
+        }
+
+        if (includeLiquids)
+        {
+            source.Mh2oByChunk[0] = CreateTestMh2oChunk();
+        }
+
+        if (includePlacements)
+        {
+            AddTestPlacements(source);
         }
 
         return source;
@@ -202,5 +214,44 @@ public static class TestDataFactory
         byte[] data = new byte[size];
         Array.Copy(chunkBytes, 8, data, 0, size);
         return data;
+    }
+
+    public static Mh2oChunk CreateTestMh2oChunk()
+    {
+        var chunk = new Mh2oChunk
+        {
+            Attributes = new Mh2oAttributes(0b11, 0b1UL << 8)
+        };
+
+        var heightMap = Enumerable.Range(0, 9).Select(i => (float)i).ToArray();
+        var depthMap = Enumerable.Range(0, 9).Select(i => (byte)(i + 1)).ToArray();
+
+        var instance = new Mh2oInstance
+        {
+            LiquidTypeId = 1,
+            Lvf = LiquidVertexFormat.HeightDepth,
+            MinHeightLevel = heightMap.Min(),
+            MaxHeightLevel = heightMap.Max(),
+            XOffset = 0,
+            YOffset = 0,
+            Width = 2,
+            Height = 2,
+            HeightMap = heightMap,
+            DepthMap = depthMap
+        };
+
+        chunk.Add(instance);
+        return chunk;
+    }
+
+    private static void AddTestPlacements(LkAdtSource source)
+    {
+        source.MmdxFilenames.Add("World\\Generic\\Human\\PassiveDoodads\\barrel01.m2");
+        source.MmidOffsets.Add(0);
+        source.MddfPlacements.Add(new LkMddfPlacement(0, 9001, 10f, 20f, 30f, 0f, 0f, 0f, 1f, 0));
+
+        source.MwmoFilenames.Add("World\\Wmo\\Human\\Stormwind\\Stormwind.wmo");
+        source.MwidOffsets.Add(0);
+        source.ModfPlacements.Add(new LkModfPlacement(0, 5001, 40f, 50f, 60f, 0f, 0f, 0f, 5f, 6f, 7f, 0, 1, 2, 1024));
     }
 }

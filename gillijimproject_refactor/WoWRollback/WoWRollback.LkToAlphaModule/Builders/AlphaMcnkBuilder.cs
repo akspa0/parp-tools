@@ -44,8 +44,8 @@ public static class AlphaMcnkBuilder
                 int mclySize = BitConverter.ToInt32(lkAdtBytes, mclyPos + 4);
                 if (mclySize > 0 && mclyPos + 8 + mclySize <= lkAdtBytes.Length)
                 {
-                    mclyLkWhole = new byte[8 + mclySize + ((mclySize & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkAdtBytes, mclyPos, mclyLkWhole, 0, mclyLkWhole.Length);
+                    mclyLkWhole = new byte[mclySize];
+                    Buffer.BlockCopy(lkAdtBytes, mclyPos + 8, mclyLkWhole, 0, mclySize);
                 }
             }
         }
@@ -58,8 +58,8 @@ public static class AlphaMcnkBuilder
                 int mcalSize = BitConverter.ToInt32(lkAdtBytes, mcalPos + 4);
                 if (mcalSize > 0 && mcalPos + 8 + mcalSize <= lkAdtBytes.Length)
                 {
-                    mcalLkWhole = new byte[8 + mcalSize + ((mcalSize & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkAdtBytes, mcalPos, mcalLkWhole, 0, mcalLkWhole.Length);
+                    mcalLkWhole = new byte[mcalSize];
+                    Buffer.BlockCopy(lkAdtBytes, mcalPos + 8, mcalLkWhole, 0, mcalSize);
                 }
             }
         }
@@ -72,8 +72,8 @@ public static class AlphaMcnkBuilder
                 int mcshSize = BitConverter.ToInt32(lkAdtBytes, mcshPos + 4);
                 if (mcshSize > 0 && mcshPos + 8 + mcshSize <= lkAdtBytes.Length)
                 {
-                    mcshLkWhole = new byte[8 + mcshSize + ((mcshSize & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkAdtBytes, mcshPos, mcshLkWhole, 0, mcshLkWhole.Length);
+                    mcshLkWhole = new byte[mcshSize];
+                    Buffer.BlockCopy(lkAdtBytes, mcshPos + 8, mcshLkWhole, 0, mcshSize);
                 }
             }
         }
@@ -140,23 +140,23 @@ public static class AlphaMcnkBuilder
                 
                 if (fcc == "YLCM") // 'MCLY' reversed on disk
                 {
-                    mclyLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mclyLkWhole, 0, mclyLkWhole.Length);
+                    mclyLkWhole = new byte[size];
+                    Buffer.BlockCopy(lkTexAdtBytes, p + 8, mclyLkWhole, 0, size);
                 }
                 else if (fcc == "LACM") // 'MCAL' reversed on disk
                 {
-                    mcalLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcalLkWhole, 0, mcalLkWhole.Length);
+                    mcalLkWhole = new byte[size];
+                    Buffer.BlockCopy(lkTexAdtBytes, p + 8, mcalLkWhole, 0, size);
                 }
                 else if (fcc == "HSCM") // 'MCSH' reversed on disk
                 {
-                    mcshLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcshLkWhole, 0, mcshLkWhole.Length);
+                    mcshLkWhole = new byte[size];
+                    Buffer.BlockCopy(lkTexAdtBytes, p + 8, mcshLkWhole, 0, size);
                 }
                 else if (fcc == "ESCM") // 'MCSE' reversed on disk
                 {
-                    mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
+                    mcseLkWhole = new byte[size];
+                    Buffer.BlockCopy(lkTexAdtBytes, p + 8, mcseLkWhole, 0, size);
                 }
                 
                 p = next;
@@ -203,12 +203,10 @@ public static class AlphaMcnkBuilder
 
         // Build MCLY raw - use extracted LK data or create minimal fallback
         byte[] mclyRaw;
-        if (mclyLkWhole != null && mclyLkWhole.Length > 8)
+        if (mclyLkWhole != null && mclyLkWhole.Length > 0)
         {
-            // Strip LK chunk header (8 bytes) -> raw table
-            int sz = BitConverter.ToInt32(mclyLkWhole, 4);
-            mclyRaw = new byte[sz];
-            Buffer.BlockCopy(mclyLkWhole, 8, mclyRaw, 0, sz);
+            mclyRaw = new byte[mclyLkWhole.Length];
+            Buffer.BlockCopy(mclyLkWhole, 0, mclyRaw, 0, mclyRaw.Length);
         }
         else
         {
@@ -222,10 +220,10 @@ public static class AlphaMcnkBuilder
         byte[] mcalRaw;
         int layerCount = mclyRaw.Length / 16;
         bool hasAlphaFlags = mclyRaw.Length >= 16 && LayerUsesAlpha(mclyRaw);
-        if (mcalLkWhole != null && mcalLkWhole.Length > 8 && hasAlphaFlags)
+        if (mcalLkWhole != null && mcalLkWhole.Length > 0 && hasAlphaFlags)
         {
-            int totalMcalSize = BitConverter.ToInt32(mcalLkWhole, 4);
-            var mcalSource = new ReadOnlySpan<byte>(mcalLkWhole, 8, totalMcalSize);
+            int totalMcalSize = mcalLkWhole.Length;
+            var mcalSource = new ReadOnlySpan<byte>(mcalLkWhole, 0, totalMcalSize);
 
             int maxAlphaLayers = Math.Max(0, layerCount - 1);
             var assembled = new byte[4096 * maxAlphaLayers];
@@ -315,11 +313,10 @@ public static class AlphaMcnkBuilder
         
         // Build MCSH raw - use extracted LK data or create empty fallback
         byte[] mcshRaw;
-        if (mcshLkWhole != null && mcshLkWhole.Length > 8)
+        if (mcshLkWhole != null && mcshLkWhole.Length > 0)
         {
-            int sz = BitConverter.ToInt32(mcshLkWhole, 4);
-            mcshRaw = new byte[sz];
-            Buffer.BlockCopy(mcshLkWhole, 8, mcshRaw, 0, sz);
+            mcshRaw = new byte[mcshLkWhole.Length];
+            Buffer.BlockCopy(mcshLkWhole, 0, mcshRaw, 0, mcshRaw.Length);
         }
         else
         {
@@ -328,11 +325,10 @@ public static class AlphaMcnkBuilder
         
         // Build MCSE raw - use extracted LK data or create empty
         byte[] mcseRaw;
-        if (mcseLkWhole != null && mcseLkWhole.Length > 8)
+        if (mcseLkWhole != null && mcseLkWhole.Length > 0)
         {
-            int sz = BitConverter.ToInt32(mcseLkWhole, 4);
-            mcseRaw = new byte[sz];
-            Buffer.BlockCopy(mcseLkWhole, 8, mcseRaw, 0, sz);
+            mcseRaw = new byte[mcseLkWhole.Length];
+            Buffer.BlockCopy(mcseLkWhole, 0, mcseRaw, 0, mcseRaw.Length);
         }
         else
         {
@@ -342,20 +338,13 @@ public static class AlphaMcnkBuilder
         // MCRF raw is empty in our current flow
         var mcrfRaw = Array.Empty<byte>();
 
-        // Build named chunk wrappers (Alpha expects FourCC headers for these)
-        var mclyChunk = new Chunk("MCLY", mclyRaw.Length, mclyRaw);
-        var mcrfChunk = new Chunk("MCRF", mcrfRaw.Length, mcrfRaw);
-        var mcshChunk = new Chunk("MCSH", mcshRaw.Length, mcshRaw);
         DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
 
-        var mcalChunk = new Chunk("MCAL", mcalRaw.Length, mcalRaw);
-        var mcseChunk = new Chunk("MCSE", mcseRaw.Length, mcseRaw);
-
-        byte[] mclyWhole = mclyChunk.GetWholeChunk();
-        byte[] mcrfWhole = mcrfChunk.GetWholeChunk();
-        byte[] mcshWhole = mcshChunk.GetWholeChunk();
-        byte[] mcalWhole = mcalChunk.GetWholeChunk();
-        byte[] mcseWhole = mcseChunk.GetWholeChunk();
+        byte[] mclyWhole = mclyRaw;
+        byte[] mcrfWhole = mcrfRaw;
+        byte[] mcshWhole = mcshRaw;
+        byte[] mcalWhole = mcalRaw;
+        byte[] mcseWhole = mcseRaw;
 
         int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
         
@@ -366,13 +355,13 @@ public static class AlphaMcnkBuilder
         
         // Compute Alpha SMChunk header fields (offsets relative to BEGINNING of MCNK chunk)
         const int headerTotal = 8 + McnkHeaderSize; // FourCC+size + 128-byte header
-        int offsHeight = headerTotal; // MCVT raw starts immediately after header
+        int offsHeight = 0; // Offsets are relative to the subchunk data region (immediately after header)
         int offsNormal = offsHeight + alphaMcvtRaw.Length;
         int offsLayer  = offsNormal + mcnrRaw.Length;
         int offsRefs   = offsLayer  + mclyWhole.Length;
         int offsShadow = offsRefs   + mcrfWhole.Length;
         int offsAlpha  = offsShadow + mcshWhole.Length;
-        int offsSnd    = offsAlpha  + mcalWhole.Length;
+        int offsSnd    = mcseWhole.Length > 0 ? offsAlpha + mcalWhole.Length : 0;
 
         int sizeShadow = mcshRaw.Length;
         int sizeAlpha  = mcalRaw.Length;

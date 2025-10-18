@@ -15,7 +15,19 @@ public sealed class LkAdtReader : IAdtReader
         if (string.IsNullOrWhiteSpace(objAdtPath)) throw new ArgumentException("obj ADT path required", nameof(objAdtPath));
         if (string.IsNullOrWhiteSpace(texAdtPath)) throw new ArgumentException("tex ADT path required", nameof(texAdtPath));
         // TODO: Use WowFiles to parse ADT chunks
-        return new Models.LkAdtData();
+        var data = new Models.LkAdtData
+        {
+            HasMh2o = HasMh2oChunk(rootAdtPath)
+        };
+
+        data.MmdxNames.AddRange(ReadM2Names(rootAdtPath));
+        data.MwmoNames.AddRange(ReadWmoNames(rootAdtPath));
+        data.MmidOffsets.AddRange(ReadMmidOffsets(rootAdtPath));
+        data.MwidOffsets.AddRange(ReadMwidOffsets(rootAdtPath));
+        data.MddfPlacements.AddRange(ReadMddfEntries(rootAdtPath));
+        data.ModfPlacements.AddRange(ReadModfEntries(rootAdtPath));
+
+        return data;
     }
 
     public List<McnkLk> ReadRootMcnks(string rootAdtPath)
@@ -105,6 +117,129 @@ public sealed class LkAdtReader : IAdtReader
         }
 
         return result;
+    }
+
+    private static bool HasMh2oChunk(string rootAdtPath)
+    {
+        if (!File.Exists(rootAdtPath)) return false;
+        var bytes = File.ReadAllBytes(rootAdtPath);
+        for (int i = 0; i + 8 <= bytes.Length;)
+        {
+            string fcc = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (fcc == "O2HM") return true;
+            if (size < 0 || next <= i || next > bytes.Length) break;
+            i = next;
+        }
+        return false;
+    }
+
+    private static IEnumerable<int> ReadMmidOffsets(string rootAdtPath)
+        => ReadIntTableChunk(rootAdtPath, "DIMM");
+
+    private static IEnumerable<int> ReadMwidOffsets(string rootAdtPath)
+        => ReadIntTableChunk(rootAdtPath, "DIWM");
+
+    private static IEnumerable<int> ReadIntTableChunk(string rootAdtPath, string fourCC)
+    {
+        var list = new List<int>();
+        if (!File.Exists(rootAdtPath)) return list;
+
+        var bytes = File.ReadAllBytes(rootAdtPath);
+        for (int i = 0; i + 8 <= bytes.Length;)
+        {
+            string fcc = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (size < 0 || next <= i || next > bytes.Length) break;
+
+            if (fcc == fourCC)
+            {
+                for (int offset = 0; offset + 4 <= size; offset += 4)
+                {
+                    list.Add(BitConverter.ToInt32(bytes, dataStart + offset));
+                }
+                break;
+            }
+
+            i = next;
+        }
+
+        return list;
+    }
+
+    private static IEnumerable<Models.LkMddfPlacement> ReadMddfEntries(string rootAdtPath)
+        => ReadPlacementEntries(rootAdtPath, "FDDM", 36, ParseMddfPlacement);
+
+    private static IEnumerable<Models.LkModfPlacement> ReadModfEntries(string rootAdtPath)
+        => ReadPlacementEntries(rootAdtPath, "FDOM", 64, ParseModfPlacement);
+
+    private static IEnumerable<T> ReadPlacementEntries<T>(string rootAdtPath, string fourCC, int entrySize, System.Func<byte[], int, T> parser)
+    {
+        var list = new List<T>();
+        if (!File.Exists(rootAdtPath)) return list;
+
+        var bytes = File.ReadAllBytes(rootAdtPath);
+        for (int i = 0; i + 8 <= bytes.Length;)
+        {
+            string fcc = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (size < 0 || next <= i || next > bytes.Length) break;
+
+            if (fcc == fourCC)
+            {
+                for (int offset = 0; offset + entrySize <= size; offset += entrySize)
+                {
+                    list.Add(parser(bytes, dataStart + offset));
+                }
+                break;
+            }
+
+            i = next;
+        }
+
+        return list;
+    }
+
+    private static Models.LkMddfPlacement ParseMddfPlacement(byte[] bytes, int offset)
+    {
+        int nameIndex = BitConverter.ToInt32(bytes, offset + 0);
+        int uniqueId = BitConverter.ToInt32(bytes, offset + 4);
+        float posX = BitConverter.ToSingle(bytes, offset + 8);
+        float posY = BitConverter.ToSingle(bytes, offset + 12);
+        float posZ = BitConverter.ToSingle(bytes, offset + 16);
+        float rotX = BitConverter.ToSingle(bytes, offset + 20);
+        float rotY = BitConverter.ToSingle(bytes, offset + 24);
+        float rotZ = BitConverter.ToSingle(bytes, offset + 28);
+        ushort scaleRaw = BitConverter.ToUInt16(bytes, offset + 32);
+        ushort flags = BitConverter.ToUInt16(bytes, offset + 34);
+        float scale = scaleRaw / 1024.0f;
+        return new Models.LkMddfPlacement(nameIndex, uniqueId, posX, posY, posZ, rotX, rotY, rotZ, scale, flags);
+    }
+
+    private static Models.LkModfPlacement ParseModfPlacement(byte[] bytes, int offset)
+    {
+        int nameIndex = BitConverter.ToInt32(bytes, offset + 0);
+        int uniqueId = BitConverter.ToInt32(bytes, offset + 4);
+        float posX = BitConverter.ToSingle(bytes, offset + 8);
+        float posY = BitConverter.ToSingle(bytes, offset + 12);
+        float posZ = BitConverter.ToSingle(bytes, offset + 16);
+        float rotX = BitConverter.ToSingle(bytes, offset + 20);
+        float rotY = BitConverter.ToSingle(bytes, offset + 24);
+        float rotZ = BitConverter.ToSingle(bytes, offset + 28);
+        float extentsX = BitConverter.ToSingle(bytes, offset + 32);
+        float extentsY = BitConverter.ToSingle(bytes, offset + 36);
+        float extentsZ = BitConverter.ToSingle(bytes, offset + 40);
+        ushort flags = BitConverter.ToUInt16(bytes, offset + 44);
+        ushort doodadSet = BitConverter.ToUInt16(bytes, offset + 46);
+        ushort nameSet = BitConverter.ToUInt16(bytes, offset + 48);
+        ushort scale = BitConverter.ToUInt16(bytes, offset + 50);
+        return new Models.LkModfPlacement(nameIndex, uniqueId, posX, posY, posZ, rotX, rotY, rotZ,
+            extentsX, extentsY, extentsZ, flags, doodadSet, nameSet, scale);
     }
 
     /// <summary>

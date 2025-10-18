@@ -12,8 +12,12 @@ public sealed class LkAdtData
     public List<byte[]> AlphaMaps { get; } = new(); // placeholder raw alpha maps
 
     // Placements
-    public List<string> ModelNames { get; } = new();
-    public List<string> WmoNames { get; } = new();
+    public List<string> MmdxNames { get; } = new();
+    public List<int> MmidOffsets { get; } = new();
+    public List<Models.LkMddfPlacement> MddfPlacements { get; } = new();
+    public List<string> MwmoNames { get; } = new();
+    public List<int> MwidOffsets { get; } = new();
+    public List<Models.LkModfPlacement> ModfPlacements { get; } = new();
 
     // Liquids
     public bool HasMh2o { get; set; }

@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using GillijimProject.WowFiles.Alpha;
+using WoWRollback.LkToAlphaModule.Liquids;
 using WoWRollback.LkToAlphaModule.Models;
 
 namespace WoWRollback.LkToAlphaModule.Services;
@@ -11,6 +14,7 @@ namespace WoWRollback.LkToAlphaModule.Services;
 public static class AlphaDataExtractor
 {
     private const int ChunkHeaderSize = 8; // FourCC (4) + Size (4)
+    private const int McnkHeaderSize = 128;
     
     /// <summary>
     /// Reads an Alpha MCNK chunk and extracts raw data to populate LkMcnkSource.
@@ -25,10 +29,37 @@ public static class AlphaDataExtractor
 
         using var fs = File.OpenRead(alphaAdtPath);
         
-        // Read MCNK header (128 bytes after FourCC+size)
-        fs.Seek(mcnkOffset + ChunkHeaderSize, SeekOrigin.Begin);
-        var headerBytes = new byte[128];
-        fs.Read(headerBytes, 0, 128);
+        fs.Seek(mcnkOffset, SeekOrigin.Begin);
+        Span<byte> chunkHeader = stackalloc byte[ChunkHeaderSize];
+        if (fs.Read(chunkHeader) != ChunkHeaderSize)
+        {
+            throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: unable to read chunk header at offset 0x{mcnkOffset:X}.");
+        }
+
+        string fourCC = Encoding.ASCII.GetString(chunkHeader[..4]);
+        if (!string.Equals(fourCC, "KNCM", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: expected 'KNCM' FourCC at offset 0x{mcnkOffset:X}, found '{fourCC}'.");
+        }
+
+        int payloadSize = BitConverter.ToInt32(chunkHeader[4..8]);
+        if (payloadSize < McnkHeaderSize)
+        {
+            throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: invalid payload size {payloadSize} (< {McnkHeaderSize}).");
+        }
+
+        long headerStart = mcnkOffset + ChunkHeaderSize;
+        long dataStart = headerStart + McnkHeaderSize;
+        long chunkEnd = headerStart + payloadSize;
+        int chunkDataLength = payloadSize - McnkHeaderSize;
+        if (chunkEnd > fs.Length)
+        {
+            throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: chunk extends beyond file length (end=0x{chunkEnd:X}, len=0x{fs.Length:X}).");
+        }
+
+        fs.Seek(headerStart, SeekOrigin.Begin);
+        var headerBytes = new byte[McnkHeaderSize];
+        fs.Read(headerBytes, 0, McnkHeaderSize);
         
         // Parse header fields we need
         int indexX = BitConverter.ToInt32(headerBytes, 0x04);
@@ -45,112 +76,209 @@ public static class AlphaDataExtractor
         int mcshOffset = BitConverter.ToInt32(headerBytes, 0x30);
         int mcshSize = BitConverter.ToInt32(headerBytes, 0x34);
         
+        uint flags = BitConverter.ToUInt32(headerBytes, 0x00);
+        int doodadRefs = BitConverter.ToInt32(headerBytes, 0x14);
+        float radius = BitConverter.ToSingle(headerBytes, 0x0C);
+        int mapObjRefs = BitConverter.ToInt32(headerBytes, 0x3C);
+        ushort holes = BitConverter.ToUInt16(headerBytes, 0x40);
+        uint offsSndEmit = BitConverter.ToUInt32(headerBytes, 0x5C);
+        uint sndEmitCount = BitConverter.ToUInt32(headerBytes, 0x60);
+        uint offsLiquid = BitConverter.ToUInt32(headerBytes, 0x64);
+
         var source = new LkMcnkSource
         {
             IndexX = indexX,
             IndexY = indexY,
             AreaId = (uint)areaId,
-            Flags = 0,
-            HolesLowRes = 0,
-            Radius = 100.0f,
-            DoodadRefCount = 0,
-            MapObjectRefs = 0,
-            NoEffectDoodad = 0,
-            OffsLiquid = 0,
-            OffsSndEmitters = 0,
-            SndEmitterCount = 0
+            Flags = flags,
+            HolesLowRes = holes,
+            Radius = radius,
+            DoodadRefCount = (uint)Math.Max(doodadRefs, 0),
+            MapObjectRefs = (uint)Math.Max(mapObjRefs, 0),
+            OffsLiquid = offsLiquid,
+            OffsSndEmitters = offsSndEmit,
+            SndEmitterCount = sndEmitCount
         };
-        
+
+        // Helper to compute size from current offset to next populated offset (or chunk end)
+        int ComputeSize(int currentOffset, params int[] potentialNextOffsets)
+        {
+            if (currentOffset <= 0)
+            {
+                return 0;
+            }
+
+            int next = chunkDataLength;
+            foreach (int candidate in potentialNextOffsets)
+            {
+                if (candidate > currentOffset && candidate < next)
+                {
+                    next = candidate;
+                }
+            }
+
+            int size = next - currentOffset;
+            if (size < 0)
+            {
+                throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: computed negative size for offset {currentOffset}.");
+            }
+
+            return size;
+        }
+
+        // Helper local to load raw slices (supports both headerless and headered layouts)
+        ReadOnlySpan<byte> ReadRawSlice(int relativeOffset, int declaredSize, string label)
+        {
+            if (relativeOffset <= 0)
+            {
+                return ReadOnlySpan<byte>.Empty;
+            }
+
+            long sliceStart = dataStart + relativeOffset;
+            if (sliceStart < dataStart || sliceStart > chunkEnd)
+            {
+                throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: {label} offset 0x{relativeOffset:X} points outside chunk (start=0x{sliceStart:X}, dataStart=0x{dataStart:X}, end=0x{chunkEnd:X}).");
+            }
+
+            // If declaredSize is zero (Alpha headerless), infer from next chunk or chunk end
+            int size = declaredSize;
+            if (size <= 0)
+            {
+                size = (int)Math.Min(chunkEnd - sliceStart, int.MaxValue);
+            }
+
+            long sliceEnd = sliceStart + size;
+            if (sliceEnd > chunkEnd)
+            {
+                throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: {label} overflows chunk (end=0x{sliceEnd:X} > 0x{chunkEnd:X}).");
+            }
+
+            var buffer = new byte[size];
+            fs.Seek(sliceStart, SeekOrigin.Begin);
+            fs.Read(buffer, 0, size);
+
+            // Handle embedded LK-style chunk headers if present (e.g., 'MCLY', 'MCAL')
+            if (size >= ChunkHeaderSize)
+            {
+                string embeddedFourCc = Encoding.ASCII.GetString(buffer, 0, 4);
+                if ((embeddedFourCc == "KNCM" || embeddedFourCc == "YLCM" || embeddedFourCc == "LACM" || embeddedFourCc == "HSCM" || embeddedFourCc == "ESCM")
+                    && BitConverter.ToInt32(buffer, 4) >= 0
+                    && BitConverter.ToInt32(buffer, 4) <= size - ChunkHeaderSize)
+                {
+                    int embeddedSize = BitConverter.ToInt32(buffer, 4);
+                    if (embeddedFourCc == "KNCM")
+                    {
+                        throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: nested MCNK detected inside {label}.");
+                    }
+
+                    int dataLength = embeddedSize;
+                    var trimmed = new byte[dataLength];
+                    Buffer.BlockCopy(buffer, ChunkHeaderSize, trimmed, 0, dataLength);
+                    return trimmed;
+                }
+            }
+
+            return buffer;
+        }
+
         // Extract MCVT raw data (580 bytes, no chunk header in Alpha)
         if (mcvtOffset > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mcvtOffset, SeekOrigin.Begin);
-            source.McvtRaw = new byte[580];
-            fs.Read(source.McvtRaw, 0, 580);
+            var mcvt = ReadRawSlice(mcvtOffset, 580, "MCVT");
+            if (mcvt.Length != 580)
+            {
+                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCVT expected 580 bytes but read {mcvt.Length}.");
+            }
+            source.McvtRaw = mcvt.ToArray();
         }
-        
+
         // Extract MCNR raw data (448 bytes, no chunk header in Alpha)
         if (mcnrOffset > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mcnrOffset, SeekOrigin.Begin);
-            source.McnrRaw = new byte[448];
-            fs.Read(source.McnrRaw, 0, 448);
+            var mcnr = ReadRawSlice(mcnrOffset, 448, "MCNR");
+            if (mcnr.Length != 448)
+            {
+                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCNR expected 448 bytes but read {mcnr.Length}.");
+            }
+            source.McnrRaw = mcnr.ToArray();
         }
-        
-        // Extract MCLY chunk (with header)
+
+        // Extract MCLY chunk (optional header)
         if (mclyOffset > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mclyOffset, SeekOrigin.Begin);
-            var mclyHeader = new byte[ChunkHeaderSize];
-            fs.Read(mclyHeader, 0, ChunkHeaderSize);
-            int mclyDataSize = BitConverter.ToInt32(mclyHeader, 4);
-            
-            // Read just the data portion (no header)
-            source.MclyRaw = new byte[mclyDataSize];
-            fs.Read(source.MclyRaw, 0, mclyDataSize);
+            int mclySize = ComputeSize(mclyOffset, mcrfOffset, mcshOffset, mcalOffset, (int)offsSndEmit, (int)offsLiquid);
+            var mcly = ReadRawSlice(mclyOffset, mclySize, "MCLY");
+            source.MclyRaw = mcly.ToArray();
+            if (mcly.Length % 16 != 0)
+            {
+                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCLY length {mcly.Length} is not a multiple of 16.");
+            }
         }
-        
-        // Extract MCRF chunk (with header)
+
+        // Extract MCRF chunk
         if (mcrfOffset > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mcrfOffset, SeekOrigin.Begin);
-            var mcrfHeader = new byte[ChunkHeaderSize];
-            fs.Read(mcrfHeader, 0, ChunkHeaderSize);
-            int mcrfDataSize = BitConverter.ToInt32(mcrfHeader, 4);
-            
-            source.McrfRaw = new byte[mcrfDataSize];
-            fs.Read(source.McrfRaw, 0, mcrfDataSize);
+            int mcrfSize = ComputeSize(mcrfOffset, mcshOffset, mcalOffset, (int)offsSndEmit, (int)offsLiquid);
+            var mcrf = ReadRawSlice(mcrfOffset, mcrfSize, "MCRF");
+            source.McrfRaw = mcrf.ToArray();
         }
-        
-        // Extract MCSH data (no chunk header, just raw data)
+
+        // Extract MCSH data
         if (mcshOffset > 0 && mcshSize > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mcshOffset, SeekOrigin.Begin);
-            source.McshRaw = new byte[mcshSize];
-            fs.Read(source.McshRaw, 0, mcshSize);
+            var mcsh = ReadRawSlice(mcshOffset, mcshSize, "MCSH");
+            source.McshRaw = mcsh.ToArray();
         }
-        
-        // Extract MCAL chunk (with header)
+
+        // Extract MCAL chunk
         if (mcalOffset > 0 && mcalSize > 0)
         {
-            fs.Seek(mcnkOffset + ChunkHeaderSize + 128 + mcalOffset, SeekOrigin.Begin);
-            var mcalHeader = new byte[ChunkHeaderSize];
-            fs.Read(mcalHeader, 0, ChunkHeaderSize);
-            int mcalDataSize = BitConverter.ToInt32(mcalHeader, 4);
-            
-            // Store MCAL as alpha layers
-            var mcalData = new byte[mcalDataSize];
-            fs.Read(mcalData, 0, mcalDataSize);
-            
-            // Parse MCLY to determine layer count
-            int layerCount = source.MclyRaw.Length / 16;
-            
-            // Convert MCAL data to alpha layers (4096 bytes each)
-            // For now, just store raw - the encoder will handle it
-            // TODO: Parse MCAL properly based on MCLY flags
+            var mcal = ReadRawSlice(mcalOffset, mcalSize, "MCAL");
+            var mcalArray = mcal.ToArray();
+
+            int layerCount = Math.Max(0, source.MclyRaw.Length / 16);
             source.AlphaLayers.Clear();
-            for (int i = 0; i < layerCount - 1; i++) // First layer has no alpha
+
+            int alphaLayerCount = Math.Max(0, layerCount - 1);
+            int expectedAlphaBytes = alphaLayerCount * 4096;
+
+            if (mcal.Length < expectedAlphaBytes)
             {
-                var layer = new byte[4096];
+                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCAL length {mcal.Length} < expected {expectedAlphaBytes} for {alphaLayerCount} layers.");
+            }
+
+            for (int i = 0; i < alphaLayerCount; i++)
+            {
                 int offset = i * 4096;
-                if (offset + 4096 <= mcalData.Length)
+                var layer = new byte[4096];
+                if (offset < mcal.Length)
                 {
-                    Buffer.BlockCopy(mcalData, offset, layer, 0, 4096);
+                    int copy = Math.Min(4096, mcal.Length - offset);
+                    Buffer.BlockCopy(mcalArray, offset, layer, 0, copy);
                 }
                 source.AlphaLayers.Add(new LkMcnkAlphaLayer
                 {
-                    LayerIndex = i + 1, // Layer 0 is base, alpha layers start at 1
+                    LayerIndex = i + 1,
                     ColumnMajorAlpha = layer
                 });
             }
         }
-        
+        else
+        {
+            source.AlphaLayers.Clear();
+        }
+
         // MCSE not commonly used in Alpha, leave empty
         source.McseRaw = Array.Empty<byte>();
-        
+
+        if (source.MclyRaw.Length == 0 && source.AlphaLayers.Count > 0)
+        {
+            Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} produced alpha layers without MCLY entries.");
+        }
+
         return source;
     }
-    
+
     /// <summary>
     /// Extracts all 256 MCNK chunks from an Alpha ADT file.
     /// </summary>
@@ -171,37 +299,87 @@ public static class AlphaDataExtractor
         using var fs = File.OpenRead(alphaAdtPath);
         var allBytes = new byte[fs.Length];
         fs.Read(allBytes, 0, (int)fs.Length);
-        
-        // Alpha ADTs are just 256 MCNK chunks concatenated (no MVER/MHDR)
-        int offset = 0;
-        for (int i = 0; i < 256; i++)
+
+        ParseTopLevelChunks(alphaAdtPath, allBytes, source);
+
+        // Populate MH2O sources (per MCNK) via Alpha liquid extraction
+        var liquidsOptions = new LiquidsOptions();
+        var mclqExtractor = new AlphaMclqExtractor(alphaAdtPath);
+        var mclqs = mclqExtractor.Extract();
+        if (mclqs is not null)
         {
-            if (offset + 8 > allBytes.Length) break;
-            
-            // Check for MCNK signature
-            string fourCC = System.Text.Encoding.ASCII.GetString(allBytes, offset, 4);
-            if (fourCC == "KNCM") // "MCNK" reversed
+            int count = Math.Min(mclqs.Length, source.Mh2oByChunk.Length);
+            for (int i = 0; i < count; i++)
             {
-                var mcnkSource = ExtractFromAlphaMcnk(alphaAdtPath, offset, i);
-                source.Mcnks.Add(mcnkSource);
-                
-                // Move to next MCNK
-                int mcnkSize = BitConverter.ToInt32(allBytes, offset + 4);
-                offset += 8 + mcnkSize;
-            }
-            else
-            {
-                // Add empty placeholder
-                source.Mcnks.Add(new LkMcnkSource
-                {
-                    IndexX = i % 16,
-                    IndexY = i / 16
-                });
-                break; // No more MCNKs
+                var mclq = mclqs[i];
+                if (mclq is null) continue;
+                source.Mh2oByChunk[i] = LiquidsConverter.MclqToMh2o(mclq, liquidsOptions);
             }
         }
-        
-        // Fill remaining slots with empty MCNKs
+
+        return source;
+    }
+
+    private static void ParseTopLevelChunks(string alphaAdtPath, byte[] allBytes, LkAdtSource source)
+    {
+        var mcnkOffsets = new List<int>();
+        int position = 0;
+        while (position + 8 <= allBytes.Length)
+        {
+            string fourCC = Encoding.ASCII.GetString(allBytes, position, 4);
+            int size = BitConverter.ToInt32(allBytes, position + 4);
+            if (size < 0 || position + 8 + size > allBytes.Length)
+            {
+                break;
+            }
+
+            int dataStart = position + 8;
+
+            switch (fourCC)
+            {
+                case "XDDM":
+                    if (source.MmdxFilenames.Count == 0)
+                        ParseStringTable(allBytes, dataStart, size, source.MmdxFilenames);
+                    break;
+                case "DIMM":
+                    if (source.MmidOffsets.Count == 0)
+                        ParseOffsetTable(allBytes, dataStart, size, source.MmidOffsets);
+                    break;
+                case "OMWM":
+                    if (source.MwmoFilenames.Count == 0)
+                        ParseStringTable(allBytes, dataStart, size, source.MwmoFilenames);
+                    break;
+                case "DIWM":
+                    if (source.MwidOffsets.Count == 0)
+                        ParseOffsetTable(allBytes, dataStart, size, source.MwidOffsets);
+                    break;
+                case "FDDM":
+                    ParseMddfEntries(allBytes, dataStart, size, source.MddfPlacements);
+                    break;
+                case "FDOM":
+                    ParseModfEntries(allBytes, dataStart, size, source.ModfPlacements);
+                    break;
+                case "KNCM":
+                    mcnkOffsets.Add(position);
+                    break;
+            }
+
+            position = AlignPosition(position + 8 + size);
+        }
+
+        int index = 0;
+        foreach (int mcnkOffset in mcnkOffsets)
+        {
+            if (index >= 256)
+            {
+                break;
+            }
+
+            var mcnkSource = ExtractFromAlphaMcnk(alphaAdtPath, mcnkOffset, index);
+            source.Mcnks.Add(mcnkSource);
+            index++;
+        }
+
         while (source.Mcnks.Count < 256)
         {
             int i = source.Mcnks.Count;
@@ -211,7 +389,98 @@ public static class AlphaDataExtractor
                 IndexY = i / 16
             });
         }
-        
-        return source;
+    }
+
+    private static void ParseStringTable(byte[] data, int start, int size, List<string> destination)
+    {
+        destination.Clear();
+        int end = start + size;
+        int cursor = start;
+        while (cursor < end)
+        {
+            int terminator = cursor;
+            while (terminator < end && data[terminator] != 0)
+            {
+                terminator++;
+            }
+
+            int length = terminator - cursor;
+            if (length > 0)
+            {
+                string value = Encoding.UTF8.GetString(data, cursor, length);
+                destination.Add(value);
+            }
+
+            cursor = terminator + 1;
+        }
+    }
+
+    private static void ParseOffsetTable(byte[] data, int start, int size, List<int> destination)
+    {
+        destination.Clear();
+        for (int offset = 0; offset + 4 <= size; offset += 4)
+        {
+            destination.Add(BitConverter.ToInt32(data, start + offset));
+        }
+    }
+
+    private static void ParseMddfEntries(byte[] data, int start, int size, List<LkMddfPlacement> destination)
+    {
+        destination.Clear();
+        const int entrySize = 36;
+        for (int offset = 0; offset + entrySize <= size; offset += entrySize)
+        {
+            int baseOffset = start + offset;
+            int nameIndex = BitConverter.ToInt32(data, baseOffset + 0);
+            int uniqueId = BitConverter.ToInt32(data, baseOffset + 4);
+            float posX = BitConverter.ToSingle(data, baseOffset + 8);
+            float posY = BitConverter.ToSingle(data, baseOffset + 12);
+            float posZ = BitConverter.ToSingle(data, baseOffset + 16);
+            float rotX = BitConverter.ToSingle(data, baseOffset + 20);
+            float rotY = BitConverter.ToSingle(data, baseOffset + 24);
+            float rotZ = BitConverter.ToSingle(data, baseOffset + 28);
+            ushort scaleRaw = BitConverter.ToUInt16(data, baseOffset + 32);
+            ushort flags = BitConverter.ToUInt16(data, baseOffset + 34);
+
+            float scale = scaleRaw / 1024.0f;
+            destination.Add(new LkMddfPlacement(nameIndex, uniqueId, posX, posY, posZ, rotX, rotY, rotZ, scale, flags));
+        }
+    }
+
+    private static void ParseModfEntries(byte[] data, int start, int size, List<LkModfPlacement> destination)
+    {
+        destination.Clear();
+        const int entrySize = 64;
+        for (int offset = 0; offset + entrySize <= size; offset += entrySize)
+        {
+            int baseOffset = start + offset;
+            int nameIndex = BitConverter.ToInt32(data, baseOffset + 0);
+            int uniqueId = BitConverter.ToInt32(data, baseOffset + 4);
+            float posX = BitConverter.ToSingle(data, baseOffset + 8);
+            float posY = BitConverter.ToSingle(data, baseOffset + 12);
+            float posZ = BitConverter.ToSingle(data, baseOffset + 16);
+            float rotX = BitConverter.ToSingle(data, baseOffset + 20);
+            float rotY = BitConverter.ToSingle(data, baseOffset + 24);
+            float rotZ = BitConverter.ToSingle(data, baseOffset + 28);
+            float extentsX = BitConverter.ToSingle(data, baseOffset + 32);
+            float extentsY = BitConverter.ToSingle(data, baseOffset + 36);
+            float extentsZ = BitConverter.ToSingle(data, baseOffset + 40);
+            ushort flags = BitConverter.ToUInt16(data, baseOffset + 44);
+            ushort doodadSet = BitConverter.ToUInt16(data, baseOffset + 46);
+            ushort nameSet = BitConverter.ToUInt16(data, baseOffset + 48);
+            ushort scale = BitConverter.ToUInt16(data, baseOffset + 50);
+
+            destination.Add(new LkModfPlacement(nameIndex, uniqueId, posX, posY, posZ, rotX, rotY, rotZ,
+                extentsX, extentsY, extentsZ, flags, doodadSet, nameSet, scale));
+        }
+    }
+
+    private static int AlignPosition(int position)
+    {
+        if ((position & 1) != 0)
+        {
+            position++;
+        }
+        return position;
     }
 }

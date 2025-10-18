@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Xunit;
 using WoWRollback.LkToAlphaModule.Builders;
@@ -36,9 +37,9 @@ public class LkAdtBuilderTests
 
         // Assert
         Assert.True(result.Length >= 12, "Output too small for MVER chunk");
-        
+
         string fourCC = Encoding.ASCII.GetString(result, 0, 4);
-        Assert.Equal("REVM", fourCC); // Reversed "MVER"
+        Assert.Equal("MVER", fourCC);
         
         int size = BitConverter.ToInt32(result, 4);
         Assert.Equal(4, size); // MVER data is always 4 bytes
@@ -150,6 +151,145 @@ public class LkAdtBuilderTests
     }
 
     [Fact]
+    public void Build_WithoutLiquids_OmitsMh2oChunk()
+    {
+        var source = TestDataFactory.CreateTestAdtSource(includeLiquids: false);
+
+        byte[] result = LkAdtBuilder.Build(source, new LkToAlphaOptions());
+
+        Assert.False(TryFindChunk(result, "MH2O", out _, out _));
+    }
+
+    [Fact]
+    public void Build_WithLiquids_WritesMh2oChunkWithInstance()
+    {
+        var source = TestDataFactory.CreateTestAdtSource(includeLiquids: true);
+
+        byte[] result = LkAdtBuilder.Build(source, new LkToAlphaOptions());
+
+        Assert.True(TryFindChunk(result, "MH2O", out int mh2oOffset, out int mh2oSize));
+        Assert.True(mh2oSize > 0);
+
+        var chunkData = new byte[mh2oSize];
+        Buffer.BlockCopy(result, mh2oOffset + 8, chunkData, 0, mh2oSize);
+
+        const int headerTableSize = 256 * 12;
+        Assert.True(chunkData.Length >= headerTableSize);
+
+        int firstInstanceOffset = BitConverter.ToInt32(chunkData, 0);
+        uint instanceCount = BitConverter.ToUInt32(chunkData, 4);
+        int attributesOffset = BitConverter.ToInt32(chunkData, 8);
+
+        Assert.True(instanceCount > 0);
+        Assert.True(firstInstanceOffset >= headerTableSize);
+        Assert.True(attributesOffset >= headerTableSize);
+
+        int instanceStructOffset = mh2oOffset + 8 + firstInstanceOffset;
+        ushort liquidTypeId = BitConverter.ToUInt16(result, instanceStructOffset);
+        ushort vertexFormat = BitConverter.ToUInt16(result, instanceStructOffset + 2);
+        byte xOffset = result[instanceStructOffset + 12];
+        byte yOffset = result[instanceStructOffset + 13];
+        byte width = result[instanceStructOffset + 14];
+        byte height = result[instanceStructOffset + 15];
+        uint vertexDataOffset = BitConverter.ToUInt32(result, instanceStructOffset + 20);
+
+        Assert.Equal(1, liquidTypeId);
+        Assert.Equal(0u, (uint)vertexFormat);
+        Assert.Equal(0, xOffset);
+        Assert.Equal(0, yOffset);
+        Assert.Equal(2, width);
+        Assert.Equal(2, height);
+        Assert.True(vertexDataOffset >= headerTableSize);
+
+        int absoluteVertexData = mh2oOffset + 8 + (int)vertexDataOffset;
+        float firstHeight = BitConverter.ToSingle(result, absoluteVertexData);
+        Assert.Equal(0f, firstHeight);
+        byte firstDepth = result[absoluteVertexData + (9 * sizeof(float))];
+        Assert.Equal(1, firstDepth);
+
+        int absoluteAttributes = mh2oOffset + 8 + attributesOffset;
+        Assert.True(absoluteAttributes + 16 <= mh2oOffset + 8 + mh2oSize);
+        byte fishableRow0 = result[absoluteAttributes];
+        Assert.Equal(0b00000011, fishableRow0);
+    }
+
+    [Fact]
+    public void Build_WithPlacements_WritesMddfAndModfChunks()
+    {
+        var source = TestDataFactory.CreateTestAdtSource(includePlacements: true);
+
+        byte[] result = LkAdtBuilder.Build(source, new LkToAlphaOptions());
+
+        Assert.True(TryFindChunk(result, "MMDX", out int mmdxOffset, out int mmdxSize));
+        Assert.True(mmdxSize > 0, "MMDX chunk should contain at least one filename");
+        var mmdxData = new byte[mmdxSize];
+        Buffer.BlockCopy(result, mmdxOffset + 8, mmdxData, 0, mmdxSize);
+        string mmdxString = Encoding.UTF8.GetString(mmdxData).TrimEnd('\0');
+        Assert.Contains("World\\Generic\\Human\\PassiveDoodads\\barrel01.m2", mmdxString);
+
+        Assert.True(TryFindChunk(result, "MWMO", out int mwmoOffset, out int mwmoSize));
+        Assert.True(mwmoSize > 0, "MWMO chunk should contain at least one filename");
+        var mwmoData = new byte[mwmoSize];
+        Buffer.BlockCopy(result, mwmoOffset + 8, mwmoData, 0, mwmoSize);
+        string mwmoString = Encoding.UTF8.GetString(mwmoData).TrimEnd('\0');
+        Assert.Contains("World\\Wmo\\Human\\Stormwind\\Stormwind.wmo", mwmoString);
+
+        Assert.True(TryFindChunk(result, "MDDF", out int mddfOffset, out int mddfSize));
+        Assert.Equal(36, mddfSize);
+        var mddfData = new byte[mddfSize];
+        Buffer.BlockCopy(result, mddfOffset + 8, mddfData, 0, mddfSize);
+        int doodadNameIndex = BitConverter.ToInt32(mddfData, 0);
+        int doodadUniqueId = BitConverter.ToInt32(mddfData, 4);
+        float doodadX = BitConverter.ToSingle(mddfData, 8);
+        ushort doodadScaleRaw = BitConverter.ToUInt16(mddfData, 32);
+        ushort doodadFlags = BitConverter.ToUInt16(mddfData, 34);
+        Assert.Equal(0, doodadNameIndex);
+        Assert.Equal(9001, doodadUniqueId);
+        Assert.Equal(10f, doodadX);
+        Assert.Equal(1024, doodadScaleRaw);
+        Assert.Equal((ushort)0, doodadFlags);
+
+        Assert.True(TryFindChunk(result, "MODF", out int modfOffset, out int modfSize));
+        Assert.Equal(52, modfSize);
+        var modfData = new byte[modfSize];
+        Buffer.BlockCopy(result, modfOffset + 8, modfData, 0, modfSize);
+        int wmoNameIndex = BitConverter.ToInt32(modfData, 0);
+        int wmoUniqueId = BitConverter.ToInt32(modfData, 4);
+        float wmoX = BitConverter.ToSingle(modfData, 8);
+        ushort wmoFlags = BitConverter.ToUInt16(modfData, 44);
+        ushort wmoDoodadSet = BitConverter.ToUInt16(modfData, 46);
+        ushort wmoNameSet = BitConverter.ToUInt16(modfData, 48);
+        ushort wmoScale = BitConverter.ToUInt16(modfData, 50);
+        Assert.Equal(0, wmoNameIndex);
+        Assert.Equal(5001, wmoUniqueId);
+        Assert.Equal(40f, wmoX);
+        Assert.Equal((ushort)0, wmoFlags);
+        Assert.Equal((ushort)1, wmoDoodadSet);
+        Assert.Equal((ushort)2, wmoNameSet);
+        Assert.Equal((ushort)1024, wmoScale);
+    }
+
+    [Fact]
+    public void Build_WithoutPlacements_WritesEmptyPlacementChunks()
+    {
+        var source = TestDataFactory.CreateTestAdtSource(includePlacements: false);
+
+        byte[] result = LkAdtBuilder.Build(source, new LkToAlphaOptions());
+
+        Assert.True(TryFindChunk(result, "MMDX", out int mmdxOffset, out int mmdxSize));
+        Assert.Equal(0, mmdxSize);
+
+        Assert.True(TryFindChunk(result, "MWMO", out int mwmoOffset, out int mwmoSize));
+        Assert.Equal(0, mwmoSize);
+
+        Assert.True(TryFindChunk(result, "MDDF", out int mddfOffset, out int mddfSize));
+        Assert.Equal(0, mddfSize);
+
+        Assert.True(TryFindChunk(result, "MODF", out int modfOffset, out int modfSize));
+        Assert.Equal(0, modfSize);
+    }
+
+    [Fact]
     public void Build_OutputSizeIsReasonable()
     {
         // Arrange
@@ -232,5 +372,33 @@ public class LkAdtBuilderTests
         }
         
         return count;
+    }
+
+    private bool TryFindChunk(byte[] data, string fourCc, out int offset, out int size)
+    {
+        string reversed = new string(fourCc.Reverse().ToArray());
+        int position = 0;
+        while (position + 8 <= data.Length)
+        {
+            string id = Encoding.ASCII.GetString(data, position, 4);
+            int chunkSize = BitConverter.ToInt32(data, position + 4);
+            if (id == reversed)
+            {
+                offset = position;
+                size = chunkSize;
+                return true;
+            }
+
+            if (chunkSize < 0)
+                break;
+
+            position += 8 + chunkSize;
+            if (chunkSize == 0)
+                position += 0;
+        }
+
+        offset = 0;
+        size = 0;
+        return false;
     }
 }
