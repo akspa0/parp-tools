@@ -29,6 +29,7 @@ public sealed class LkMcnkSource
     public byte[] McshRaw { get; set; } = Array.Empty<byte>();
     public byte[] McseRaw { get; set; } = Array.Empty<byte>();
     public byte[] MclqRaw { get; set; } = Array.Empty<byte>();
+    public byte[] McalRaw { get; set; } = Array.Empty<byte>();
 
     public List<int> DoodadReferenceIndices { get; } = new();
     public List<int> WmoReferenceIndices { get; } = new();

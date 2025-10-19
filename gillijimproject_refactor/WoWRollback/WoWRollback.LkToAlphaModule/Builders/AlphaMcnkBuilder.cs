@@ -247,7 +247,7 @@ public static class AlphaMcnkBuilder
             mcnrRaw = new byte[448];
         }
 
-        // Build MCLY raw - use extracted LK data or create minimal fallback
+        // Build MCLY raw - prefer passthrough of LK payload when present
         byte[] mclyRaw;
         if (mclyLkWhole != null && mclyLkWhole.Length > 0)
         {
@@ -257,35 +257,35 @@ public static class AlphaMcnkBuilder
         else
         {
             mclyRaw = new byte[16];
-            // all zeros is acceptable minimal layer
         }
 
         DumpMclyTable(lkHeader.IndexX, lkHeader.IndexY, mclyRaw, opts);
 
-        // Build MCAL raw - use extracted LK data or create empty fallback
+        // Build MCAL raw
         byte[] mcalRaw;
         int layerCount = mclyRaw.Length / 16;
         bool hasAlphaFlags = mclyRaw.Length >= 16 && LayerUsesAlpha(mclyRaw);
-        if (mcalLkWhole != null && mcalLkWhole.Length > 0 && hasAlphaFlags)
+        if (opts?.UseManagedBuilders == false)
+        {
+            // Passthrough: use LK MCAL payload directly and do not modify MCLY offsets
+            mcalRaw = (mcalLkWhole != null) ? new ReadOnlySpan<byte>(mcalLkWhole).ToArray() : Array.Empty<byte>();
+        }
+        else if (mcalLkWhole != null && mcalLkWhole.Length > 0 && hasAlphaFlags)
         {
             int totalMcalSize = mcalLkWhole.Length;
             var mcalSource = new ReadOnlySpan<byte>(mcalLkWhole, 0, totalMcalSize);
-
             int maxAlphaLayers = Math.Max(0, layerCount - 1);
             var assembled = new byte[4096 * maxAlphaLayers];
             int writeOffset = 0;
-
             if (opts?.VerboseLogging == true)
             {
                 Console.WriteLine($"[MCAL] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) layers={layerCount} totalSize={totalMcalSize}");
             }
-
             for (int layer = 0; layer < layerCount; layer++)
             {
                 int entryOffset = layer * 16;
                 uint flags = BitConverter.ToUInt32(mclyRaw, entryOffset + 4);
                 bool usesAlpha = (flags & 0x80) != 0;
-
                 if (!usesAlpha && (flags & 0x100) != 0 && totalMcalSize > 0)
                 {
                     flags |= 0x80;
@@ -296,20 +296,17 @@ public static class AlphaMcnkBuilder
                         Console.WriteLine($"    -> patched missing alpha bit (flags now 0x{flags:X})");
                     }
                 }
-
                 if (opts?.VerboseLogging == true)
                 {
                     uint textureId = BitConverter.ToUInt32(mclyRaw, entryOffset + 0);
                     uint rawOffset = BitConverter.ToUInt32(mclyRaw, entryOffset + 8);
                     Console.WriteLine($"  [Layer {layer}] tex={textureId} flags=0x{flags:X} rawOffset={rawOffset} usesAlpha={usesAlpha}");
                 }
-
                 if (!usesAlpha)
                 {
                     BitConverter.GetBytes(0u).CopyTo(mclyRaw, entryOffset + 8);
                     continue;
                 }
-
                 int originalOffset = (int)BitConverter.ToUInt32(mclyRaw, entryOffset + 8);
                 int start = Math.Min(originalOffset, totalMcalSize);
                 int end = totalMcalSize;
@@ -322,12 +319,10 @@ public static class AlphaMcnkBuilder
                         break;
                     }
                 }
-
                 if (start < 0) start = 0;
                 if (end < start) end = start;
                 int length = Math.Max(0, Math.Min(totalMcalSize - start, end - start));
                 var layerSpan = mcalSource.Slice(start, length);
-
                 var converted = McalAlphaDecoder.DecodeToColumnMajor(layerSpan, flags, opts?.DisableAlphaEdgeFix != true);
                 if (assembled.Length < writeOffset + converted.Length)
                 {
@@ -342,7 +337,6 @@ public static class AlphaMcnkBuilder
                 }
                 writeOffset += converted.Length;
             }
-
             Array.Resize(ref assembled, writeOffset);
             DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, new ReadOnlySpan<byte>(assembled).ToArray(), opts);
             mcalRaw = assembled;
@@ -350,7 +344,6 @@ public static class AlphaMcnkBuilder
         else
         {
             mcalRaw = Array.Empty<byte>();
-
             for (int layer = 0; layer < layerCount; layer++)
             {
                 BitConverter.GetBytes(0u).CopyTo(mclyRaw, layer * 16 + 8);
@@ -369,12 +362,28 @@ public static class AlphaMcnkBuilder
             mcshRaw = Array.Empty<byte>();
         }
         
-        // Build MCSE raw - use extracted LK data or create empty
+        // Build MCSE raw - convert LK format (52 bytes) to Alpha format (76 bytes)
         byte[] mcseRaw;
         if (mcseLkWhole != null && mcseLkWhole.Length > 0)
         {
-            mcseRaw = new byte[mcseLkWhole.Length];
-            Buffer.BlockCopy(mcseLkWhole, 0, mcseRaw, 0, mcseRaw.Length);
+            try
+            {
+                mcseRaw = ConvertMcseLkToAlpha(mcseLkWhole, opts);
+                if (opts?.VerboseLogging == true && mcseRaw.Length > 0)
+                {
+                    int lkCount = mcseLkWhole.Length / 52;
+                    int alphaCount = mcseRaw.Length / 76;
+                    Console.WriteLine($"[MCSE] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) converted {lkCount} LK entries -> {alphaCount} Alpha entries");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (opts?.VerboseLogging == true)
+                {
+                    Console.WriteLine($"[MCSE] Tile ({lkHeader.IndexX},{lkHeader.IndexY}) conversion failed: {ex.Message}");
+                }
+                mcseRaw = Array.Empty<byte>();
+            }
         }
         else
         {
@@ -447,7 +456,7 @@ public static class AlphaMcnkBuilder
         }
         int areaIdVal  = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId;
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length + mclqWhole.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -1014,6 +1023,78 @@ public static class AlphaMcnkBuilder
                 byte combined = (byte)(tileType | tileFlags);
                 writer.Write(combined);
             }
+        }
+        
+        return ms.ToArray();
+    }
+    
+    private static byte[] ConvertMcseLkToAlpha(byte[] lkMcseData, LkToAlphaOptions? opts)
+    {
+        // LK MCSE format: 52 bytes per entry (1.12.1 / 3.3.5)
+        // Alpha MCSE format: 76 bytes per entry (0.5.3)
+        const int LkEntrySize = 52;
+        const int AlphaEntrySize = 76;
+        
+        if (lkMcseData.Length % LkEntrySize != 0)
+        {
+            if (opts?.VerboseLogging == true)
+            {
+                Console.WriteLine($"[MCSE] Warning: LK MCSE data size {lkMcseData.Length} is not a multiple of {LkEntrySize}");
+            }
+            // Try to process what we can
+        }
+        
+        int entryCount = lkMcseData.Length / LkEntrySize;
+        if (entryCount == 0)
+            return Array.Empty<byte>();
+        
+        using var ms = new MemoryStream(entryCount * AlphaEntrySize);
+        using var reader = new BinaryReader(new MemoryStream(lkMcseData));
+        using var writer = new BinaryWriter(ms);
+        
+        for (int i = 0; i < entryCount; i++)
+        {
+            // Read LK format (52 bytes)
+            uint soundPointID = reader.ReadUInt32();      // 0x00
+            uint soundNameID = reader.ReadUInt32();       // 0x04
+            float posX = reader.ReadSingle();             // 0x08
+            float posY = reader.ReadSingle();             // 0x0C
+            float posZ = reader.ReadSingle();             // 0x10
+            float minDistance = reader.ReadSingle();      // 0x14
+            float maxDistance = reader.ReadSingle();      // 0x18
+            float cutoffDistance = reader.ReadSingle();   // 0x1C
+            ushort startTime = reader.ReadUInt16();       // 0x20
+            ushort endTime = reader.ReadUInt16();         // 0x22
+            ushort mode = reader.ReadUInt16();            // 0x24
+            byte loopCountMin = reader.ReadByte();        // 0x26
+            byte loopCountMax = reader.ReadByte();        // 0x27
+            ushort groupSilenceMin = reader.ReadUInt16(); // 0x28
+            ushort groupSilenceMax = reader.ReadUInt16(); // 0x2A
+            ushort playInstancesMin = reader.ReadUInt16();// 0x2C
+            ushort playInstancesMax = reader.ReadUInt16();// 0x2E
+            ushort interSoundGapMin = reader.ReadUInt16();// 0x30
+            ushort interSoundGapMax = reader.ReadUInt16();// 0x32
+            
+            // Write Alpha format (76 bytes) - expanding smaller types to UINT32
+            writer.Write(soundPointID);                   // 0x00
+            writer.Write(soundNameID);                    // 0x04
+            writer.Write(posX);                           // 0x08
+            writer.Write(posY);                           // 0x0C
+            writer.Write(posZ);                           // 0x10
+            writer.Write(minDistance);                    // 0x14
+            writer.Write(maxDistance);                    // 0x18
+            writer.Write(cutoffDistance);                 // 0x1C
+            writer.Write((uint)startTime);                // 0x20 - expand uint16 to uint32
+            writer.Write((uint)endTime);                  // 0x24 - expand uint16 to uint32
+            writer.Write((uint)mode);                     // 0x28 - expand uint16 to uint32
+            writer.Write((uint)groupSilenceMin);          // 0x2C - expand uint16 to uint32
+            writer.Write((uint)groupSilenceMax);          // 0x30 - expand uint16 to uint32
+            writer.Write((uint)playInstancesMin);         // 0x34 - expand uint16 to uint32
+            writer.Write((uint)playInstancesMax);         // 0x38 - expand uint16 to uint32
+            writer.Write((uint)loopCountMin);             // 0x3C - expand uint8 to uint32
+            writer.Write((uint)loopCountMax);             // 0x40 - expand uint8 to uint32
+            writer.Write((uint)interSoundGapMin);         // 0x44 - expand uint16 to uint32
+            writer.Write((uint)interSoundGapMax);         // 0x48 - expand uint16 to uint32
         }
         
         return ms.ToArray();

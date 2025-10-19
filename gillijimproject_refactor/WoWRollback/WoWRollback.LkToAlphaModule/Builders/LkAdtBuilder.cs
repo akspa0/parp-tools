@@ -76,10 +76,13 @@ public static class LkAdtBuilder
             WriteChunk(writer, "FXTM", mtxf);
         }
 
+        // MCIN offsets must be relative to MHDR data start (mhdrPosition + 8)
+        long mhdrDataStart = mhdrPosition + 8;
         var mcnkOffsets = new int[McnkPerTile];
         for (int i = 0; i < source.Mcnks.Count; i++)
         {
-            mcnkOffsets[i] = (int)writer.BaseStream.Position;
+            long absolutePos = writer.BaseStream.Position;
+            mcnkOffsets[i] = (int)(absolutePos - mhdrDataStart);  // Make relative to MHDR data
             var chunkBytes = LkMcnkBuilder.BuildFromAlpha(source.Mcnks[i], options);
             writer.Write(chunkBytes);
         }
@@ -118,22 +121,32 @@ public static class LkAdtBuilder
         Span<byte> buffer = stackalloc byte[MhdrSize];
         buffer.Clear();
 
-        BitConverter.TryWriteBytes(buffer[0x00..], 0u);
-        BitConverter.TryWriteBytes(buffer[0x04..], 0u);
-        BitConverter.TryWriteBytes(buffer[0x08..], 0u);
-        BitConverter.TryWriteBytes(buffer[0x0C..], 0u);
-        BitConverter.TryWriteBytes(buffer[0x10..], 0u);
-        BitConverter.TryWriteBytes(buffer[0x14..], RelativeOffset(mcinPos));
-        BitConverter.TryWriteBytes(buffer[0x18..], RelativeOffset(mtexPos));
-        BitConverter.TryWriteBytes(buffer[0x1C..], RelativeOffset(mmdxPos));
-        BitConverter.TryWriteBytes(buffer[0x20..], RelativeOffset(mmidPos));
-        BitConverter.TryWriteBytes(buffer[0x24..], RelativeOffset(mwmoPos));
-        BitConverter.TryWriteBytes(buffer[0x28..], RelativeOffset(mwidPos));
-        BitConverter.TryWriteBytes(buffer[0x2C..], RelativeOffset(mddfPos));
-        BitConverter.TryWriteBytes(buffer[0x30..], RelativeOffset(modfPos));
-        BitConverter.TryWriteBytes(buffer[0x34..], mh2oPos == 0 ? 0 : RelativeOffset(mh2oPos));
-        BitConverter.TryWriteBytes(buffer[0x38..], mfboPos == 0 ? 0 : RelativeOffset(mfboPos));
-        BitConverter.TryWriteBytes(buffer[0x3C..], mtxfPos == 0 ? 0 : RelativeOffset(mtxfPos));
+        // MHDR structure (all offsets relative to MHDR data start):
+        // 0x00: flags (uint32)
+        // 0x04: mcin offset
+        // 0x08: mtex offset
+        // 0x0C: mmdx offset
+        // 0x10: mmid offset
+        // 0x14: mwmo offset
+        // 0x18: mwid offset
+        // 0x1C: mddf offset
+        // 0x20: modf offset
+        // 0x24: mfbo offset
+        // 0x28: mh2o offset
+        // 0x2C: mtxf offset
+        
+        BitConverter.TryWriteBytes(buffer[0x00..], 0u);  // flags
+        BitConverter.TryWriteBytes(buffer[0x04..], RelativeOffset(mcinPos));
+        BitConverter.TryWriteBytes(buffer[0x08..], RelativeOffset(mtexPos));
+        BitConverter.TryWriteBytes(buffer[0x0C..], RelativeOffset(mmdxPos));
+        BitConverter.TryWriteBytes(buffer[0x10..], RelativeOffset(mmidPos));
+        BitConverter.TryWriteBytes(buffer[0x14..], RelativeOffset(mwmoPos));
+        BitConverter.TryWriteBytes(buffer[0x18..], RelativeOffset(mwidPos));
+        BitConverter.TryWriteBytes(buffer[0x1C..], RelativeOffset(mddfPos));
+        BitConverter.TryWriteBytes(buffer[0x20..], RelativeOffset(modfPos));
+        BitConverter.TryWriteBytes(buffer[0x24..], mfboPos == 0 ? 0 : RelativeOffset(mfboPos));
+        BitConverter.TryWriteBytes(buffer[0x28..], mh2oPos == 0 ? 0 : RelativeOffset(mh2oPos));
+        BitConverter.TryWriteBytes(buffer[0x2C..], mtxfPos == 0 ? 0 : RelativeOffset(mtxfPos));
 
         writer.Write(buffer);
 

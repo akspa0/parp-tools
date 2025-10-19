@@ -75,8 +75,11 @@ public static class AlphaDataExtractor
         int mcalSize = BitConverter.ToInt32(headerBytes, 0x2C);
         int mcshOffset = BitConverter.ToInt32(headerBytes, 0x30);
         int mcshSize = BitConverter.ToInt32(headerBytes, 0x34);
+        int nLayers = BitConverter.ToInt32(headerBytes, 0x10);
         
-        uint flags = BitConverter.ToUInt32(headerBytes, 0x00);
+        Console.WriteLine($"[AlphaExtract] MCNK {indexX},{indexY}: nLayers={nLayers}, mclyOffset={mclyOffset}, mcalOffset={mcalOffset}, mcalSize={mcalSize}");
+        
+        uint mcnkFlags = BitConverter.ToUInt32(headerBytes, 0x00);
         int doodadRefs = BitConverter.ToInt32(headerBytes, 0x14);
         float radius = BitConverter.ToSingle(headerBytes, 0x0C);
         int mapObjRefs = BitConverter.ToInt32(headerBytes, 0x3C);
@@ -90,7 +93,7 @@ public static class AlphaDataExtractor
             IndexX = indexX,
             IndexY = indexY,
             AreaId = (uint)areaId,
-            Flags = flags,
+            Flags = mcnkFlags,
             HolesLowRes = holes,
             Radius = radius,
             DoodadRefCount = (uint)Math.Max(doodadRefs, 0),
@@ -182,7 +185,7 @@ public static class AlphaDataExtractor
         }
 
         // Extract MCVT raw data (580 bytes, no chunk header in Alpha)
-        if (mcvtOffset > 0)
+        if (mcvtOffset >= 0)
         {
             var mcvt = ReadRawSlice(mcvtOffset, 580, "MCVT");
             if (mcvt.Length != 580)
@@ -193,7 +196,7 @@ public static class AlphaDataExtractor
         }
 
         // Extract MCNR raw data (448 bytes, no chunk header in Alpha)
-        if (mcnrOffset > 0)
+        if (mcnrOffset >= 0)
         {
             var mcnr = ReadRawSlice(mcnrOffset, 448, "MCNR");
             if (mcnr.Length != 448)
@@ -203,64 +206,105 @@ public static class AlphaDataExtractor
             source.McnrRaw = mcnr.ToArray();
         }
 
-        // Extract MCLY chunk (optional header)
-        if (mclyOffset > 0)
+        // Extract MCLY table (Alpha layout is headerless; use header offsets to infer size)
+        if (mclyOffset >= 0)
         {
-            int mclySize = ComputeSize(mclyOffset, mcrfOffset, mcshOffset, mcalOffset, (int)offsSndEmit, (int)offsLiquid);
-            var mcly = ReadRawSlice(mclyOffset, mclySize, "MCLY");
-            source.MclyRaw = mcly.ToArray();
-            if (mcly.Length % 16 != 0)
+            int mclySize = ComputeSize(mclyOffset, mcrfOffset, mcalOffset, mcshOffset, (int)offsSndEmit, (int)offsLiquid);
+            if (mclySize > 0)
             {
-                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCLY length {mcly.Length} is not a multiple of 16.");
+                var mcly = ReadRawSlice(mclyOffset, mclySize, "MCLY");
+                source.MclyRaw = mcly.ToArray();
+                if (source.MclyRaw.Length % 16 != 0)
+                {
+                    Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCLY length {source.MclyRaw.Length} is not a multiple of 16.");
+                }
             }
         }
 
-        // Extract MCRF chunk
-        if (mcrfOffset > 0)
+        // Extract MCRF table (Alpha layout is headerless; use header offsets to infer size)
+        if (mcrfOffset >= 0)
         {
-            int mcrfSize = ComputeSize(mcrfOffset, mcshOffset, mcalOffset, (int)offsSndEmit, (int)offsLiquid);
-            var mcrf = ReadRawSlice(mcrfOffset, mcrfSize, "MCRF");
-            source.McrfRaw = mcrf.ToArray();
+            int mcrfSize = ComputeSize(mcrfOffset, mcalOffset, mcshOffset, (int)offsSndEmit, (int)offsLiquid);
+            if (mcrfSize > 0)
+            {
+                var mcrf = ReadRawSlice(mcrfOffset, mcrfSize, "MCRF");
+                source.McrfRaw = mcrf.ToArray();
+            }
         }
 
         // Extract MCSH data
-        if (mcshOffset > 0 && mcshSize > 0)
+        if (mcshOffset >= 0 && mcshSize > 0)
         {
             var mcsh = ReadRawSlice(mcshOffset, mcshSize, "MCSH");
             source.McshRaw = mcsh.ToArray();
         }
 
         // Extract MCAL chunk
-        if (mcalOffset > 0 && mcalSize > 0)
+        // Alpha MCAL: raw bytes (no chunk header), size from MCNK header sizeAlpha field
+        // MCAL stores compressed/partial alpha data per layer based on MCLY props
+        if (mcalOffset >= 0 && mcalSize > 0)
         {
             var mcal = ReadRawSlice(mcalOffset, mcalSize, "MCAL");
             var mcalArray = mcal.ToArray();
+            // Preserve raw MCAL for passthrough
+            source.McalRaw = mcalArray;
 
             int layerCount = Math.Max(0, source.MclyRaw.Length / 16);
             source.AlphaLayers.Clear();
 
-            int alphaLayerCount = Math.Max(0, layerCount - 1);
-            int expectedAlphaBytes = alphaLayerCount * 4096;
-
-            if (mcal.Length < expectedAlphaBytes)
+            // In Alpha, MCAL contains raw compressed alpha data for ALL layers that use alpha
+            // We need to parse MCLY to determine which layers use alpha and their offsets
+            if (mcal.Length > 0 && source.MclyRaw.Length > 0)
             {
-                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCAL length {mcal.Length} < expected {expectedAlphaBytes} for {alphaLayerCount} layers.");
-            }
-
-            for (int i = 0; i < alphaLayerCount; i++)
-            {
-                int offset = i * 4096;
-                var layer = new byte[4096];
-                if (offset < mcal.Length)
+                for (int layerIdx = 0; layerIdx < layerCount; layerIdx++)
                 {
-                    int copy = Math.Min(4096, mcal.Length - offset);
-                    Buffer.BlockCopy(mcalArray, offset, layer, 0, copy);
+                    int mclyEntryOffset = layerIdx * 16;
+                    if (mclyEntryOffset + 16 > source.MclyRaw.Length) break;
+
+                    uint props = BitConverter.ToUInt32(source.MclyRaw, mclyEntryOffset + 4);
+                    uint alphaOffset = BitConverter.ToUInt32(source.MclyRaw, mclyEntryOffset + 8);
+                    
+                    // In Alpha MCLY: props field bit 0x4 = use_alpha_map (set for layers after first)
+                    // Layer 0 (base) never has alpha
+                    bool usesAlpha = layerIdx > 0 && (props & 0x4) != 0;
+                    
+                    if (usesAlpha && alphaOffset < mcal.Length)
+                    {
+                        // Determine size: from this offset to next layer's offset (or end of MCAL)
+                        int nextOffset = mcal.Length;
+                        for (int nextIdx = layerIdx + 1; nextIdx < layerCount; nextIdx++)
+                        {
+                            int nextMclyOffset = nextIdx * 16;
+                            if (nextMclyOffset + 12 <= source.MclyRaw.Length)
+                            {
+                                uint nextProps = BitConverter.ToUInt32(source.MclyRaw, nextMclyOffset + 4);
+                                if (nextIdx > 0 && (nextProps & 0x4) != 0)
+                                {
+                                    uint nextAlphaOffset = BitConverter.ToUInt32(source.MclyRaw, nextMclyOffset + 8);
+                                    if (nextAlphaOffset > alphaOffset)
+                                    {
+                                        nextOffset = (int)nextAlphaOffset;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        int layerSize = Math.Min(nextOffset - (int)alphaOffset, mcal.Length - (int)alphaOffset);
+                        if (layerSize > 0)
+                        {
+                            var layerData = new byte[layerSize];
+                            Buffer.BlockCopy(mcalArray, (int)alphaOffset, layerData, 0, layerSize);
+                            
+                            source.AlphaLayers.Add(new LkMcnkAlphaLayer
+                            {
+                                LayerIndex = layerIdx,
+                                ColumnMajorAlpha = layerData,
+                                OverrideFlags = props
+                            });
+                        }
+                    }
                 }
-                source.AlphaLayers.Add(new LkMcnkAlphaLayer
-                {
-                    LayerIndex = i + 1,
-                    ColumnMajorAlpha = layer
-                });
             }
         }
         else

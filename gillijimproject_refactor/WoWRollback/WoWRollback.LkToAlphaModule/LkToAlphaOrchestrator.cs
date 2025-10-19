@@ -30,8 +30,7 @@ public sealed class LkToAlphaOrchestrator
 
             // Write minimal Alpha WDT (MVER + MAIN)
             var wdtOutPath = Path.Combine(outDir, mapName + ".wdt");
-            var writer = new AlphaWdtWriter();
-            writer.WriteAlphaWdt(wdtOutPath, mainFlags);
+            AlphaWdtWriter.WriteAlphaWdt(wdtOutPath, mainFlags);
 
             return new LkToAlphaConversionResult(
                 AlphaOutputDirectory: outDir,
@@ -71,7 +70,7 @@ public sealed class LkToAlphaOrchestrator
             // 1) Write Alpha WDT
             var mainFlags = new LkWdtReader().ReadMainTileFlags(wdtPath);
             var wdtOutPath = Path.Combine(outDir, mapName + ".wdt");
-            new AlphaWdtWriter().WriteAlphaWdt(wdtOutPath, mainFlags);
+            AlphaWdtWriter.WriteAlphaWdt(wdtOutPath, mainFlags);
 
             // 2) Determine LK map directory
             string lkMapDir = Directory.Exists(lkMapDirOrRoot)

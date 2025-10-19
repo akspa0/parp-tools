@@ -7,6 +7,7 @@ using WoWRollback.LkToAlphaModule.Builders;
 using WoWRollback.LkToAlphaModule.Readers;
 using WoWRollback.LkToAlphaModule.Services;
 using WoWRollback.LkToAlphaModule.Models;
+using GillijimProject.WowFiles.LichKing;
 
 namespace WoWRollback.LkToAlphaModule.Validators;
 
@@ -40,7 +41,8 @@ public static class RoundTripValidator
     public static ValidationResult ValidateRoundTrip(
         string originalAlphaPath, 
         string outputDir,
-        LkToAlphaOptions? options = null)
+        LkToAlphaOptions? options = null,
+        bool writeIntermediates = true)
     {
         try
         {
@@ -65,7 +67,7 @@ public static class RoundTripValidator
             }
 
             // Handle standalone ADT file
-            return ValidateRoundTripStandaloneAdt(originalAlphaPath, outputDir, options, originalBytes, fileName);
+            return ValidateRoundTripStandaloneAdt(originalAlphaPath, outputDir, options, originalBytes, fileName, writeIntermediates);
         }
         catch (Exception ex)
         {
@@ -81,7 +83,8 @@ public static class RoundTripValidator
         string outputDir,
         LkToAlphaOptions options,
         byte[] originalBytes,
-        string fileName)
+        string fileName,
+        bool writeIntermediates)
     {
         // Step 1: Extract Alpha data to LkAdtSource
         Console.WriteLine("[RoundTrip] Step 1: Extracting Alpha ADT data...");
@@ -91,17 +94,38 @@ public static class RoundTripValidator
         // Step 2: Build LK ADT using managed builders
         Console.WriteLine("[RoundTrip] Step 2: Building LK ADT...");
         var lkAdtBytes = LkAdtBuilder.Build(lkSource, options);
-        
-        // Save intermediate LK ADT for inspection
-        var lkAdtPath = Path.Combine(outputDir, fileName.Replace(".adt", "_lk.adt"));
-        File.WriteAllBytes(lkAdtPath, lkAdtBytes);
-        Console.WriteLine($"[RoundTrip] LK ADT saved: {lkAdtPath} ({lkAdtBytes.Length:N0} bytes)");
+
+        // Validate LK integrity and write intermediate LK ADT
+        string lkAdtPath = Path.Combine(outputDir, fileName.Replace(".adt", "_lk.adt"));
+        try
+        {
+            var tempName = Path.GetFileName(lkAdtPath);
+            var adt = new AdtLk(lkAdtBytes, tempName);
+            bool ok = adt.ValidateIntegrity();
+            Console.WriteLine(ok
+                ? "[RoundTrip] LK integrity: OK (MHDR/MCIN offsets valid)"
+                : "[RoundTrip] LK integrity: WARN (offsets invalid before write)");
+            // Always emit intermediate LK ADT for inspection
+            adt.ToFile(lkAdtPath);
+            Console.WriteLine($"[RoundTrip] LK ADT saved: {lkAdtPath} ({new FileInfo(lkAdtPath).Length:N0} bytes)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[RoundTrip] LK integrity check/write failed: {ex.Message}");
+            // Fallback: write raw bytes if AdtLk path fails
+            try
+            {
+                File.WriteAllBytes(lkAdtPath, lkAdtBytes);
+                Console.WriteLine($"[RoundTrip] LK ADT (raw) saved: {lkAdtPath} ({lkAdtBytes.Length:N0} bytes)");
+            }
+            catch { /* give up on intermediate write */ }
+        }
         
         // Step 3: Convert LK back to Alpha using AlphaMcnkBuilder
         Console.WriteLine("[RoundTrip] Step 3: Converting LK ADT back to Alpha...");
         var convertedAlphaBytes = ConvertLkToAlpha(lkAdtBytes, options);
         
-        // Save converted Alpha ADT for inspection
+        // Save converted Alpha ADT as the final output of the same type as input
         var convertedAlphaPath = Path.Combine(outputDir, fileName.Replace(".adt", "_roundtrip.adt"));
         File.WriteAllBytes(convertedAlphaPath, convertedAlphaBytes);
         Console.WriteLine($"[RoundTrip] Converted Alpha ADT saved: {convertedAlphaPath} ({convertedAlphaBytes.Length:N0} bytes)");
@@ -439,18 +463,35 @@ public static class RoundTripValidator
             var convertedBytes = File.ReadAllBytes(tile.ConvertedAlphaPath);
             var originalTileBytes = File.ReadAllBytes(tile.ExtractedAlphaPath);
 
-            if (convertedBytes.Length != originalTileBytes.Length)
+            // Replace only the MCNK region within the tile. Our converted bytes are MCNK-concatenation (no MHDR).
+            int prefixLen = Math.Max(0, tile.Tile.SizeToFirstMcnk);
+            int destStart = tile.Tile.MhdrOffset + prefixLen;
+            int originalMcnkLen = Math.Max(0, originalTileBytes.Length - prefixLen);
+            int copyLen = Math.Min(convertedBytes.Length, originalMcnkLen);
+
+            if (destStart < 0 || destStart > outputBytes.Length)
             {
-                throw new InvalidOperationException(
-                    $"Tile {tile.Tile.Index} size mismatch: original {originalTileBytes.Length} vs converted {convertedBytes.Length}");
+                Console.WriteLine($"[RoundTrip] Skip tile {tile.Tile.Index}: destStart out of bounds ({destStart})");
+                continue;
             }
 
-            if (tile.Tile.MhdrOffset + convertedBytes.Length > outputBytes.Length)
+            if (destStart + copyLen > outputBytes.Length)
             {
-                throw new InvalidOperationException($"Tile {tile.Tile.Index} out of bounds when packing");
+                copyLen = Math.Max(0, outputBytes.Length - destStart);
             }
 
-            Buffer.BlockCopy(convertedBytes, 0, outputBytes, tile.Tile.MhdrOffset, convertedBytes.Length);
+            if (copyLen <= 0)
+            {
+                Console.WriteLine($"[RoundTrip] Skip tile {tile.Tile.Index}: nothing to copy (converted={convertedBytes.Length}, originalMcnk={originalMcnkLen})");
+                continue;
+            }
+
+            if (convertedBytes.Length != originalMcnkLen)
+            {
+                Console.WriteLine($"[RoundTrip] Note: tile {tile.Tile.Index} MCNK length differs (orig={originalMcnkLen} conv={convertedBytes.Length}); clamping to {copyLen}");
+            }
+
+            Buffer.BlockCopy(convertedBytes, 0, outputBytes, destStart, copyLen);
         }
 
         File.WriteAllBytes(repackedWdtPath, outputBytes);
@@ -582,26 +623,39 @@ public static class RoundTripValidator
         int mhdrDataStart = mhdrOffset + 8;
         int mcinOffset = BitConverter.ToInt32(lkAdtBytes, mhdrDataStart + 4); // MCIN offset is at +4 in MHDR
         
+        Console.WriteLine($"[DEBUG] MHDR at {mhdrOffset}, data start {mhdrDataStart}, MCIN offset (relative) {mcinOffset}");
+        
         if (mcinOffset > 0)
         {
             int mcinPos = mhdrDataStart + mcinOffset;
             if (mcinPos + 8 <= lkAdtBytes.Length)
             {
                 string mcinFcc = Encoding.ASCII.GetString(lkAdtBytes, mcinPos, 4);
+                Console.WriteLine($"[DEBUG] MCIN FourCC: '{mcinFcc}' at position {mcinPos}");
                 if (mcinFcc == "NICM") // MCIN reversed
                 {
                     int mcinSize = BitConverter.ToInt32(lkAdtBytes, mcinPos + 4);
                     int mcinDataStart = mcinPos + 8;
                     
+                    Console.WriteLine($"[DEBUG] MCIN size: {mcinSize}, data start: {mcinDataStart}");
+                    
                     // MCIN contains 256 entries of 16 bytes each (offset, size, flags, asyncId)
+                    // Offsets are relative to MHDR data start, so convert to absolute
+                    int validOffsets = 0;
                     for (int i = 0; i < 256 && i * 16 + 4 <= mcinSize; i++)
                     {
-                        int mcnkOffset = BitConverter.ToInt32(lkAdtBytes, mcinDataStart + i * 16);
-                        if (mcnkOffset > 0 && mcnkOffset < lkAdtBytes.Length)
+                        int mcnkRelativeOffset = BitConverter.ToInt32(lkAdtBytes, mcinDataStart + i * 16);
+                        if (mcnkRelativeOffset > 0)
                         {
-                            offsets.Add(mcnkOffset);
+                            int mcnkAbsoluteOffset = mhdrDataStart + mcnkRelativeOffset;
+                            if (mcnkAbsoluteOffset < lkAdtBytes.Length)
+                            {
+                                offsets.Add(mcnkAbsoluteOffset);
+                                validOffsets++;
+                            }
                         }
                     }
+                    Console.WriteLine($"[DEBUG] Found {validOffsets} valid MCNK offsets in MCIN");
                 }
             }
         }

@@ -69,7 +69,16 @@ public static class LkMcnkBuilder
         WriteRaw(writer, source.McrfRaw, out int mcrfOffset);
         WriteRaw(writer, source.McshRaw, out int mcshOffset);
 
-        byte[] mcalRaw = BuildMcal(source, options, mclyOffset);
+        // Prefer passthrough MCAL (raw from Alpha) when available
+        byte[] mcalRaw;
+        if (source.McalRaw.Length > 0 && source.MclyRaw.Length > 0)
+        {
+            mcalRaw = source.McalRaw;
+        }
+        else
+        {
+            mcalRaw = BuildMcal(source, options, mclyOffset);
+        }
         int mcalOffset = (int)writer.BaseStream.Position;
         if (mcalRaw.Length > 0)
         {
@@ -121,8 +130,10 @@ public static class LkMcnkBuilder
 
     private static byte[] BuildMcal(LkMcnkSource source, LkToAlphaOptions options, int mclyOffset)
     {
+        Console.WriteLine($"[BuildMcal] MCNK {source.IndexX},{source.IndexY}: AlphaLayers.Count={source.AlphaLayers.Count}, LayerCount={source.LayerCount}");
         if (source.AlphaLayers.Count == 0)
         {
+            Console.WriteLine($"[BuildMcal] MCNK {source.IndexX},{source.IndexY}: No AlphaLayers, returning empty MCAL");
             return Array.Empty<byte>();
         }
 
@@ -141,14 +152,27 @@ public static class LkMcnkBuilder
             }
 
             int entryOffset = layer.LayerIndex * LayerEntrySize;
-            uint originalFlags = BitConverter.ToUInt32(mclySpan.Slice(entryOffset + 4, 4));
-            uint effectiveFlags = layer.OverrideFlags ?? originalFlags;
-            if (options.ForceCompressedAlpha)
+            uint effectiveFlags = layer.OverrideFlags ?? BitConverter.ToUInt32(mclySpan.Slice(entryOffset + 4, 4));
+            
+            // If ColumnMajorAlpha is already compressed/encoded (from Alpha extraction), use it directly
+            // Otherwise encode it (from LK decompressed data)
+            byte[] encoded;
+            if (layer.ColumnMajorAlpha.Length == 4096)
             {
-                effectiveFlags |= 0x200;
+                // Full 4096 bytes = uncompressed, need to encode
+                if (options.ForceCompressedAlpha)
+                {
+                    effectiveFlags |= 0x200;
+                }
+                encoded = McalAlphaEncoder.Encode(layer.ColumnMajorAlpha, effectiveFlags, options.AssumeAlphaEdgeFixed);
+            }
+            else
+            {
+                // Already compressed/partial data from Alpha, use as-is
+                encoded = layer.ColumnMajorAlpha;
             }
 
-            byte[] encoded = McalAlphaEncoder.Encode(layer.ColumnMajorAlpha, effectiveFlags, options.AssumeAlphaEdgeFixed);
+            Console.WriteLine($"[BuildMcal]   Layer {layer.LayerIndex}: {encoded.Length} bytes, flags=0x{effectiveFlags:X}");
 
             BitConverter.TryWriteBytes(mclySpan.Slice(entryOffset + 4, 4), effectiveFlags);
             BitConverter.TryWriteBytes(mclySpan.Slice(entryOffset + 8, 4), (uint)ms.Position);
@@ -156,6 +180,8 @@ public static class LkMcnkBuilder
             ms.Write(encoded, 0, encoded.Length);
         }
 
-        return ms.ToArray();
+        byte[] result = ms.ToArray();
+        Console.WriteLine($"[BuildMcal] MCNK {source.IndexX},{source.IndexY}: Built MCAL with {result.Length} bytes total");
+        return result;
     }
 }
