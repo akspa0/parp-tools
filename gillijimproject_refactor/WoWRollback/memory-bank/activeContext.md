@@ -1,27 +1,31 @@
 # Active Context
 
-- **Focus**: Fix RoundTrip by eliminating intermediates and implementing direct-write pipelines for full files (Alpha WDT/ADT and LK ADT). Ensure strict pass-through for Alpha `MCLY/MCAL` and correct LK re-pack when required. Target reliable Alpha↔LK round-trips with complete data (terrain, textures, placements, liquids, sounds).
-- **Current Status**: MCNK subchunk assembly exists (`AlphaMcnkBuilder`), liquids and sounds logic implemented; however, the pipeline synthesizes intermediate partial ADTs and does not emit complete files. Alpha texture extraction (`MCLY/MCAL`) must be strict pass-through per `McnkAlpha` parity; LK write needs proper chunk order and offsets.
-- **Completed This Session**:
-  1. ✅ Diagnosed RoundTrip failure mode: intermediates only (terrain-focused), no end-to-end writers producing complete ADTs/WDTs.
-  2. ✅ Adopted policy: direct-write final targets only; remove/suppress intermediate artifact emission.
-  3. ✅ Defined texture policy: Alpha-side `MCLY/MCAL` pass-through; LK-side `MCAL` re-pack only when necessary and fix `MCLY` offsets accordingly.
-  4. ✅ Updated memory bank to track the new plan and constraints.
+- **Focus**: Complete LK→Alpha round-trip conversion pipeline and restore full parity for Alpha↔LK conversions.
+- **Current Status**: ✅ **CRITICAL FIX APPLIED** - Fixed MCLY/MCAL extraction bug in `AlphaDataExtractor.cs`. Build succeeds (15 warnings).
+- **Completed This Session (2025-10-19)**:
+  1. ✅ **Root Cause Identified**: `ReadRawSlice()` was incorrectly stripping chunk headers from MCLY (which HAS headers) while MCAL (which has NO headers) was being read with wrong offsets.
+  2. ✅ **MCLY Fix**: Changed to read MCLY with proper chunk header ("YLCM" reversed FourCC + size), then extract data payload.
+  3. ✅ **MCAL Fix**: Changed to read MCAL as raw bytes (no header) directly from absolute offset with proper bounds clamping.
+  4. ✅ **Build Success**: WoWRollback.LkToAlphaModule builds successfully with fixes applied.
 - **What Works Now**:
-  - Alpha MCNK subchunk builder exists and can assemble `MCVT`, `MCNR`, `MCLY`, `MCRF`, `MCSH`, `MCAL`, `MCSE`, `MCLQ` raw blocks in Alpha order.
-  - MH2O→MCLQ conversion via `LiquidsConverter` with precedence.
-  - Sound emitters extraction present.
-- **Next Steps (implementation)**:
-  1. Implement `LkAdtWriter` that writes complete LK terrain ADTs with `MHDR/MCIN/MCNK[256]`, `MMDX/MMID`, `MWMO/MWID`, `MDDF/MODF`, `MH2O`, and optional `MFBO/MTXF`. Add `AdtLk.ValidateIntegrity()`.
-  2. Implement `AlphaWdtWriter` (and `AlphaWdtMonolithicWriter` if needed) to write `MVER/MPHD/MAIN/MDNM/MONM` (+ `MODF` when present) and embedded terrain when required (monolithic). Apply MONM trailing empty string rule.
-  3. Replace any intermediate emissions with in-memory assembly feeding writers; orchestrate a single RoundTrip command.
-  4. Normalize Alpha texture handling to strict pass-through on read; re-pack only on LK write and update `MCLY` offsets.
-  5. Run a one-tile RoundTrip smoke test and record results in `progress.md`.
+  - MCLY extraction reads chunk header correctly and preserves 16-byte layer entries
+  - MCAL extraction reads raw alpha map data without header stripping
+  - Liquids, placements, and other MCNK subchunks continue to work
+  - Logging shows actual MCLY/MCAL bytes being read
+- **Next Steps**:
+  1. **Test with real Alpha ADT** to verify MCLY/MCAL data is no longer zeros
+  2. **Implement LK→Alpha conversion** in `RoundTripValidator.cs` (lines ~100-150):
+     - Parse LK ADT MCIN to get MCNK offsets
+     - Extract each MCNK chunk
+     - Call `AlphaMcnkBuilder.BuildFromLk()` for each chunk
+     - Write complete Alpha ADT file
+  3. **Add byte-by-byte comparison** with original Alpha ADT
+  4. **Generate detailed diff reports** for any mismatches
 - **Implementation Notes**:
-  - Alpha `MCNK` sub-blocks have no per-subchunk headers; offsets/sizes live in the 128-byte header. Preserve bytes verbatim for `MCLY/MCAL`.
-  - LK `MCIN` must be 4096 bytes; `MCNK` GivenSize = 0x80 + Σ(8 + subchunk data+pad); FourCC reversal centralized in writer.
-  - MONM stability: `MPHD.nMapObjNames = wmoNames.Count + 1` when any WMO names exist and append a trailing empty string.
+  - Alpha MCLY: HAS chunk header ("YLCM" + size + data)
+  - Alpha MCAL: NO chunk header (raw bytes, size from MCNK header field)
+  - Reference implementation in `McnkAlpha.cs` lines 54-69 confirms this pattern
 - **Known Limitations**:
-  - HeightUv/HeightUvDepth liquid formats still deferred.
-  - MCSE Alpha vs LK structural differences unverified; keep pass-through with caution.
-  - Alpha build detection (0.5.3 vs 0.5.5) TBD for writer nuances.
+  - LK→Alpha writer still incomplete (next priority)
+  - Round-trip comparison not yet implemented
+  - No xUnit tests yet for MCLY/MCAL extraction

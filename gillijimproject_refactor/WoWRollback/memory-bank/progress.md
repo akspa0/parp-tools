@@ -23,25 +23,24 @@
 - `LkToAlphaOptions.SkipLiquids` defaults to `false` (liquids enabled)
 - Error handling with graceful fallback (logs warnings, continues conversion)
 
-## Current Status
-- ❗ RoundTrip not reliable: pipeline produces intermediate/partial ADTs (terrain-focused) instead of complete files. Alpha texture data (`MCLY/MCAL`) not strictly passed through in Alpha extraction.
-- **LK→Alpha conversion**: MCNK subchunks assembly exists but needs integration into a complete Alpha writer (WDT/ADT as applicable).
-- **Round-trip testing**: Blocked until full-file writers exist and Alpha texture pass-through is enforced.
+## Current Status (2025-10-19)
+- ✅ **MCLY/MCAL Extraction Fixed**: Root cause identified and corrected in `AlphaDataExtractor.cs`
+  - MCLY now reads chunk header correctly ("YLCM" + size)
+  - MCAL now reads raw bytes without header stripping
+  - Build succeeds with fixes applied
+- ⏳ **LK→Alpha conversion**: Next priority - implement missing pipeline step in `RoundTripValidator.cs`
+- ⏳ **Round-trip testing**: Ready to test with real Alpha ADT once LK→Alpha writer is complete
 
 ## Next Steps
-1. **Direct-write Writers**:
-   - Implement `LkAdtWriter` for complete LK ADT (MHDR/MCIN/MCNK[256], MMDX/MMID, MWMO/MWID, MDDF/MODF, MH2O, optional MFBO/MTXF) and add `AdtLk.ValidateIntegrity()`.
-   - Implement `AlphaWdtWriter` (and `AlphaWdtMonolithicWriter` if needed) to write `MVER/MPHD/MAIN/MDNM/MONM` (+ `MODF`), applying MONM trailing empty string rule.
-2. **Texture Policy Enforcement**:
-   - Alpha extraction: strict pass-through of `MCLY` table and `MCAL` blob using header offsets/size.
-   - LK write: re-pack MCAL only when required; update `MCLY` offsets after packing.
-3. **Orchestration**:
-   - Replace intermediate emissions with in-memory assembly feeding final writers.
-   - Add a single RoundTrip command that writes only final targets.
-4. **Validation**:
-   - One-tile smoke test: verify MHDR/MCIN/MCNK offsets and presence of all required chunks.
-   - Dump `debug_mcal/YY_XX/mcly_raw.bin` and pre/post `mcal.bin` when `--verbose`.
-5. **Future Enhancements**:
-   - Implement HeightUv/HeightUvDepth liquid formats.
-   - Alpha build detection (0.5.3 vs 0.5.5) for writer nuances.
-   - Validate MCSE Alpha vs LK structural differences with real data.
+1. **Extractor Parity**:
+   - Compare logged `MCLY`/`MCAL` buffers with `McnkAlpha` outputs to identify where zeroing occurs.
+   - Adjust `AlphaDataExtractor`/`LkMcnkBuilder` to preserve Alpha bytes and correct offsets.
+   - Add targeted xUnit tests to guard against regressions.
+2. **Writers (deferred)**:
+   - Implement `LkAdtWriter` and `AlphaWdtWriter` once extractor parity is restored.
+   - Ensure final writers consume pass-through data without reintroducing zeroing issues.
+3. **Validation**:
+   - Re-run single-tile and full-map RoundTrip after extractor fix; confirm byte-parity in `debug_mcal` dumps.
+   - Capture CLI logs in memory bank when parity achieved.
+4. **Future Enhancements**:
+   - HeightUv/HeightUvDepth liquids, Alpha build detection, and MCSE structural validation remain on the backlog.

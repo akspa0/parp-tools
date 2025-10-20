@@ -106,7 +106,12 @@ public static class AlphaDataExtractor
         // Helper to compute size from current offset to next populated offset (or chunk end)
         int ComputeSize(int currentOffset, params int[] potentialNextOffsets)
         {
-            if (currentOffset <= 0)
+            if (currentOffset < 0)
+            {
+                return 0;
+            }
+
+            if (currentOffset > chunkDataLength)
             {
                 return 0;
             }
@@ -123,7 +128,7 @@ public static class AlphaDataExtractor
             int size = next - currentOffset;
             if (size < 0)
             {
-                throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: computed negative size for offset {currentOffset}.");
+                throw new InvalidDataException($"[{Path.GetFileName(alphaAdtPath)}] MCNK {mcnkIndex}: computed negative size for offset {currentOffset} (next={next}).");
             }
 
             return size;
@@ -132,7 +137,7 @@ public static class AlphaDataExtractor
         // Helper local to load raw slices (supports both headerless and headered layouts)
         ReadOnlySpan<byte> ReadRawSlice(int relativeOffset, int declaredSize, string label)
         {
-            if (relativeOffset <= 0)
+            if (relativeOffset < 0)
             {
                 return ReadOnlySpan<byte>.Empty;
             }
@@ -206,29 +211,66 @@ public static class AlphaDataExtractor
             source.McnrRaw = mcnr.ToArray();
         }
 
-        // Extract MCLY table (Alpha layout is headerless; use header offsets to infer size)
-        if (mclyOffset >= 0)
+        // Extract MCLY table (Alpha MCLY HAS chunk header on disk)
+        // On disk: "YLCM" (reversed) + size + data
+        // Reference: McnkAlpha.cs line 54-55 uses new Chunk(adtFile, offsetInFile)
+        if (mclyOffset >= 0 && nLayers > 0)
         {
-            int mclySize = ComputeSize(mclyOffset, mcrfOffset, mcalOffset, mcshOffset, (int)offsSndEmit, (int)offsLiquid);
-            if (mclySize > 0)
+            long mclyAbsoluteOffset = dataStart + mclyOffset;
+            
+            try
             {
-                var mcly = ReadRawSlice(mclyOffset, mclySize, "MCLY");
-                source.MclyRaw = mcly.ToArray();
-                if (source.MclyRaw.Length % 16 != 0)
+                // Chunk constructor will seek to offset and read header + data
+                var mclyChunk = new GillijimProject.WowFiles.Chunk(fs, (int)mclyAbsoluteOffset);
+                
+                // After reading, Letters will be "MCLY" (Chunk constructor reverses FourCC)
+                if (mclyChunk.Letters == "MCLY")
                 {
-                    Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCLY length {source.MclyRaw.Length} is not a multiple of 16.");
+                    source.MclyRaw = mclyChunk.Data;
+                    
+                    int expectedSize = nLayers * 16;
+                    if (source.MclyRaw.Length != expectedSize)
+                    {
+                        Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} expected MCLY data size {expectedSize}, read {source.MclyRaw.Length}.");
+                    }
+                    
+                    if (source.MclyRaw.Length > 0)
+                    {
+                        Console.WriteLine($"[AlphaExtract] MCLY raw[0..15] MCNK {indexX},{indexY}: {BitConverter.ToString(source.MclyRaw, 0, Math.Min(16, source.MclyRaw.Length))}");
+                    }
                 }
+                else
+                {
+                    Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} expected MCLY chunk, found '{mclyChunk.Letters}' size={mclyChunk.Data.Length}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AlphaExtract] Error reading MCLY for MCNK {indexX},{indexY}: {ex.Message}");
             }
         }
 
-        // Extract MCRF table (Alpha layout is headerless; use header offsets to infer size)
+        // Extract MCRF table (Alpha MCRF HAS chunk header on disk)
+        // On disk: "FRCM" (reversed) + size + data
+        // Reference: McnkAlpha.cs line 57-59 uses new Mcrf(adtFile, offsetInFile)
         if (mcrfOffset >= 0)
         {
-            int mcrfSize = ComputeSize(mcrfOffset, mcalOffset, mcshOffset, (int)offsSndEmit, (int)offsLiquid);
-            if (mcrfSize > 0)
+            long mcrfAbsoluteOffset = dataStart + mcrfOffset;
+            
+            try
             {
-                var mcrf = ReadRawSlice(mcrfOffset, mcrfSize, "MCRF");
-                source.McrfRaw = mcrf.ToArray();
+                // Mcrf inherits from Chunk, so it reads header + data
+                var mcrfChunk = new GillijimProject.WowFiles.Mcrf(fs, (int)mcrfAbsoluteOffset);
+                source.McrfRaw = mcrfChunk.Data;
+                
+                if (source.McrfRaw.Length > 0)
+                {
+                    Console.WriteLine($"[AlphaExtract] MCRF read {source.McrfRaw.Length} bytes for MCNK {indexX},{indexY}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AlphaExtract] Error reading MCRF for MCNK {indexX},{indexY}: {ex.Message}");
             }
         }
 
@@ -240,21 +282,42 @@ public static class AlphaDataExtractor
         }
 
         // Extract MCAL chunk
-        // Alpha MCAL: raw bytes (no chunk header), size from MCNK header sizeAlpha field
+        // Alpha MCAL: raw bytes (NO chunk header), size from MCNK header mcalSize field
         // MCAL stores compressed/partial alpha data per layer based on MCLY props
         if (mcalOffset >= 0 && mcalSize > 0)
         {
-            var mcal = ReadRawSlice(mcalOffset, mcalSize, "MCAL");
-            var mcalArray = mcal.ToArray();
-            // Preserve raw MCAL for passthrough
-            source.McalRaw = mcalArray;
+            long mcalAbsoluteOffset = dataStart + mcalOffset;
+            
+            // Clamp read size to chunk bounds
+            int readSize = mcalSize;
+            long mcalEnd = mcalAbsoluteOffset + readSize;
+            if (mcalEnd > chunkEnd)
+            {
+                readSize = (int)(chunkEnd - mcalAbsoluteOffset);
+                Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} MCAL size clamped from {mcalSize} to {readSize} (chunk boundary)");
+            }
+            
+            if (readSize > 0)
+            {
+                fs.Seek(mcalAbsoluteOffset, SeekOrigin.Begin);
+                var mcalArray = new byte[readSize];
+                fs.Read(mcalArray, 0, readSize);
+                
+                // Preserve raw MCAL for passthrough
+                source.McalRaw = mcalArray;
+
+                if (mcalArray.Length > 0)
+                {
+                    Console.WriteLine($"[AlphaExtract] MCAL raw[0..31] MCNK {indexX},{indexY}: {BitConverter.ToString(mcalArray, 0, Math.Min(32, mcalArray.Length))}");
+                }
+            }
 
             int layerCount = Math.Max(0, source.MclyRaw.Length / 16);
             source.AlphaLayers.Clear();
 
             // In Alpha, MCAL contains raw compressed alpha data for ALL layers that use alpha
             // We need to parse MCLY to determine which layers use alpha and their offsets
-            if (mcal.Length > 0 && source.MclyRaw.Length > 0)
+            if (source.McalRaw.Length > 0 && source.MclyRaw.Length > 0)
             {
                 for (int layerIdx = 0; layerIdx < layerCount; layerIdx++)
                 {
@@ -268,10 +331,10 @@ public static class AlphaDataExtractor
                     // Layer 0 (base) never has alpha
                     bool usesAlpha = layerIdx > 0 && (props & 0x4) != 0;
                     
-                    if (usesAlpha && alphaOffset < mcal.Length)
+                    if (usesAlpha && alphaOffset < source.McalRaw.Length)
                     {
                         // Determine size: from this offset to next layer's offset (or end of MCAL)
-                        int nextOffset = mcal.Length;
+                        int nextOffset = source.McalRaw.Length;
                         for (int nextIdx = layerIdx + 1; nextIdx < layerCount; nextIdx++)
                         {
                             int nextMclyOffset = nextIdx * 16;
@@ -290,11 +353,11 @@ public static class AlphaDataExtractor
                             }
                         }
                         
-                        int layerSize = Math.Min(nextOffset - (int)alphaOffset, mcal.Length - (int)alphaOffset);
+                        int layerSize = Math.Min(nextOffset - (int)alphaOffset, source.McalRaw.Length - (int)alphaOffset);
                         if (layerSize > 0)
                         {
                             var layerData = new byte[layerSize];
-                            Buffer.BlockCopy(mcalArray, (int)alphaOffset, layerData, 0, layerSize);
+                            Buffer.BlockCopy(source.McalRaw, (int)alphaOffset, layerData, 0, layerSize);
                             
                             source.AlphaLayers.Add(new LkMcnkAlphaLayer
                             {
