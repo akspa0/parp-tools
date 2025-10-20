@@ -61,11 +61,23 @@ public static class AlphaMcnkBuilder
             int mcalPos = mcNkOffset + lkHeader.McalOffset;
             if (mcalPos + 8 <= lkAdtBytes.Length)
             {
+                string fcc = Encoding.ASCII.GetString(lkAdtBytes, mcalPos, 4);
                 int mcalSize = BitConverter.ToInt32(lkAdtBytes, mcalPos + 4);
-                if (mcalSize > 0 && mcalPos + 8 + mcalSize <= lkAdtBytes.Length)
+                Console.WriteLine($"[MCAL Debug] MCNK {lkHeader.IndexX},{lkHeader.IndexY}: offset={lkHeader.McalOffset}, pos={mcalPos}, FourCC='{fcc}', size={mcalSize}, headerSize={lkHeader.McalSize}");
+                
+                if (fcc != "LACM")
+                {
+                    Console.WriteLine($"[MCAL Debug] ERROR: Expected 'LACM', got '{fcc}' - offset calculation is wrong!");
+                }
+                
+                if (mcalSize > 0 && mcalSize < 1000000 && mcalPos + 8 + mcalSize <= lkAdtBytes.Length)
                 {
                     mcalLkWhole = new byte[mcalSize];
                     Buffer.BlockCopy(lkAdtBytes, mcalPos + 8, mcalLkWhole, 0, mcalSize);
+                }
+                else if (mcalSize > 1000000)
+                {
+                    Console.WriteLine($"[MCAL Debug] ERROR: mcalSize={mcalSize} is suspiciously large, skipping");
                 }
             }
         }

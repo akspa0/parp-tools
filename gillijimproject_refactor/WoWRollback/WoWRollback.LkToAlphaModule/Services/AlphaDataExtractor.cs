@@ -78,11 +78,8 @@ public static class AlphaDataExtractor
         int mcshSize = BitConverter.ToInt32(headerBytes, 0x34);
         int nLayers = BitConverter.ToInt32(headerBytes, 0x10);
         
-        // Only log if there's actual texture data (nLayers > 1 or mcalSize > 0)
-        if (nLayers > 1 || mcalSize > 0)
-        {
-            Console.WriteLine($"[AlphaExtract] MCNK {indexX},{indexY}: nLayers={nLayers}, mclyOffset=0x{mclyOffset:X}, mcalOffset=0x{mcalOffset:X}, mcalSize={mcalSize}");
-        }
+        // Always log for debugging
+        Console.WriteLine($"[AlphaExtract] MCNK {indexX},{indexY}: nLayers={nLayers}, mclyOffset=0x{mclyOffset:X}, mcalOffset=0x{mcalOffset:X}, mcalSize={mcalSize}, mcshOffset=0x{mcshOffset:X}");
         
         uint mcnkFlags = BitConverter.ToUInt32(headerBytes, 0x00);
         int doodadRefs = BitConverter.ToInt32(headerBytes, 0x14);
@@ -540,6 +537,8 @@ public static class AlphaDataExtractor
     private static void ParseMddfEntries(byte[] data, int start, int size, List<LkMddfPlacement> destination)
     {
         destination.Clear();
+        const int ChunkHeaderSize = 8;
+        const int AlphaMcnkHeaderSize = 128; 
         const int entrySize = 36;
         for (int offset = 0; offset + entrySize <= size; offset += entrySize)
         {

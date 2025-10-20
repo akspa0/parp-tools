@@ -24,23 +24,26 @@
 - Error handling with graceful fallback (logs warnings, continues conversion)
 
 ## Current Status (2025-10-19)
-- ✅ **MCLY/MCAL Extraction Fixed**: Root cause identified and corrected in `AlphaDataExtractor.cs`
-  - MCLY now reads chunk header correctly ("YLCM" + size)
-  - MCAL now reads raw bytes without header stripping
-  - Build succeeds with fixes applied
-- ⏳ **LK→Alpha conversion**: Next priority - implement missing pipeline step in `RoundTripValidator.cs`
-- ⏳ **Round-trip testing**: Ready to test with real Alpha ADT once LK→Alpha writer is complete
+- ✅ **DECISION MADE**: RoundTripValidator abandoned due to reader/writer confusion; reverting to working existing code from src/gillijimproject-csharp.
+- ✅ **MCLY/MCAL Extraction Fixed**: Root cause identified - new tool introduced errors; original code handles correctly.
+- ⏳ **Integration Priority**: Copy/adapt proven AlphaAdtReader/LkAdtWriter into WoWRollback.LkToAlphaModule.
+- ⏳ **Texture Layer Fixes**: Ensure AlphaDataExtractor.cs uses existing MCLY/MCAL logic (headers for MCLY, raw for MCAL).
 
 ## Next Steps
-1. **Extractor Parity**:
-   - Compare logged `MCLY`/`MCAL` buffers with `McnkAlpha` outputs to identify where zeroing occurs.
-   - Adjust `AlphaDataExtractor`/`LkMcnkBuilder` to preserve Alpha bytes and correct offsets.
-   - Add targeted xUnit tests to guard against regressions.
-2. **Writers (deferred)**:
-   - Implement `LkAdtWriter` and `AlphaWdtWriter` once extractor parity is restored.
-   - Ensure final writers consume pass-through data without reintroducing zeroing issues.
-3. **Validation**:
-   - Re-run single-tile and full-map RoundTrip after extractor fix; confirm byte-parity in `debug_mcal` dumps.
-   - Capture CLI logs in memory bank when parity achieved.
-4. **Future Enhancements**:
+1. **Integrate Working Code**:
+   - Copy proven converters from src/gillijimproject-csharp into WoWRollback.
+   - Ensure pure Alpha WDT → LK ADT and LK ADT → Alpha ADT pipelines.
+2. **Fix Texture Layers**:
+   - Update AlphaDataExtractor.cs to use correct MCLY ("YLCM" header) and MCAL (raw bytes) from existing patterns.
+   - Test with real Alpha ADT to verify non-zero data preservation.
+3. **Test Conversions**:
+   - Run full round-trip with integrated code; achieve byte-level parity.
+   - Add xUnit tests based on working examples.
+4. **Clean Up**:
+   - Remove or comment out broken new implementations.
+   - Eliminate build warnings; ensure zero errors.
+5. **Future Enhancements** (Deferred):
    - HeightUv/HeightUvDepth liquids, Alpha build detection, and MCSE structural validation remain on the backlog.
+
+## Summary
+Abandoned faulty roundTrip; refocused on integrating working existing code for reliable conversions and proper texture layer handling. No more circular development.

@@ -1,5 +1,7 @@
 # WoWRollback - World of Warcraft Map Analysis & Rollback Toolkit
 
+wrb-poc4 branch is a dead branch with RoundTrip, a poorly designed test suite that is now abandoned.
+
 **Digital archaeology toolkit** for World of Warcraft map content:
 - ✅ **Analyze loose ADT files** (0.5.x - 4.x+) without conversion
 - ✅ **Extract object placements** with spatial clustering & pattern detection  

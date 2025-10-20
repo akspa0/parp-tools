@@ -28,7 +28,11 @@ namespace WoWRollback.RoundTripCli
 
                 Directory.CreateDirectory(outDir);
 
-                var options = new WoWRollback.LkToAlphaModule.LkToAlphaOptions { VerboseLogging = true, UseManagedBuilders = false };
+                var options = new WoWRollback.LkToAlphaModule.LkToAlphaOptions 
+                { 
+                    VerboseLogging = false,  // Disable verbose logging for cleaner output
+                    UseManagedBuilders = false 
+                };
 
                 if (!string.IsNullOrWhiteSpace(wdtAlpha))
                 {

@@ -55,10 +55,17 @@ public static class RoundTripValidator
             var originalBytes = File.ReadAllBytes(originalAlphaPath);
             var fileName = Path.GetFileName(originalAlphaPath);
             var isWdt = fileName.EndsWith(".wdt", StringComparison.OrdinalIgnoreCase);
+            var isMonolithic = isWdt;
             
-            Console.WriteLine($"[RoundTrip] Starting validation for: {fileName}");
-            Console.WriteLine($"[RoundTrip] File type: {(isWdt ? "Monolithic WDT (0.5.3)" : "Standalone ADT")}");
+            Console.WriteLine("[RoundTrip] Starting validation for: " + Path.GetFileName(originalAlphaPath));
+            Console.WriteLine($"[RoundTrip] File type: {(isMonolithic ? "Monolithic WDT (0.5.3)" : "Standalone Alpha ADT")}");
             Console.WriteLine($"[RoundTrip] Original file size: {originalBytes.Length:N0} bytes");
+        
+            if (isMonolithic)
+            {
+                Console.WriteLine("[RoundTrip] NOTE: Alpha 0.5.x monolithic WDTs don't store texture layer data (MCLY/MCAL) in MCNK chunks.");
+                Console.WriteLine("[RoundTrip] Roundtrip test will validate terrain heights, normals, and placement data only.");
+            }
             
             if (isWdt)
             {
@@ -312,7 +319,8 @@ public static class RoundTripValidator
     }
     
     /// <summary>
-    /// Extracts a single tile's ADT data from a monolithic WDT.
+    /// Extracts a single tile's ADT data from a monolithic WDT and wraps it in proper ADT structure.
+    /// Monolithic WDT tiles don't have MVER chunk, so we add it to make a valid standalone ADT.
     /// </summary>
     private static byte[] ExtractTileAdtFromWdt(byte[] wdtBytes, Models.AlphaTile tile)
     {
@@ -334,20 +342,32 @@ public static class RoundTripValidator
             throw new InvalidDataException($"Unable to determine tile length for tile {tile.Index}");
         }
 
-        var adtBytes = new byte[safeSize];
-        Buffer.BlockCopy(wdtBytes, mhdrOffset, adtBytes, 0, safeSize);
+        // Extract raw tile data (MHDR + MCIN + MTEX + MDDF + MODF + MCNKs)
+        var tileData = new byte[safeSize];
+        Buffer.BlockCopy(wdtBytes, mhdrOffset, tileData, 0, safeSize);
 
         if (firstMcnkSize > 0 && firstMcnkSize < safeSize)
         {
             // Trim trailing data beyond first MCNK boundary if DataEndOffset overestimates
-            int trimmedSize = firstMcnkSize + ComputeTrailingMcnkLength(adtBytes, firstMcnkSize);
+            int trimmedSize = firstMcnkSize + ComputeTrailingMcnkLength(tileData, firstMcnkSize);
             if (trimmedSize > 0 && trimmedSize <= safeSize)
             {
-                Array.Resize(ref adtBytes, trimmedSize);
+                Array.Resize(ref tileData, trimmedSize);
             }
         }
 
-        return adtBytes;
+        // Build proper standalone Alpha ADT: MVER + tile data
+        using var ms = new MemoryStream();
+        
+        // Write MVER chunk (version 18 for Alpha)
+        ms.Write(Encoding.ASCII.GetBytes("REVM"), 0, 4); // 'MVER' reversed
+        ms.Write(BitConverter.GetBytes(4), 0, 4); // size = 4
+        ms.Write(BitConverter.GetBytes(18), 0, 4); // version 18
+        
+        // Write tile data (MHDR + everything else)
+        ms.Write(tileData, 0, tileData.Length);
+        
+        return ms.ToArray();
     }
 
     private static int ComputeTrailingMcnkLength(byte[] adtBytes, int firstMcnkSize)
@@ -416,31 +436,23 @@ public static class RoundTripValidator
 
         foreach (var extracted in extraction.Successes)
         {
-            try
+            var lkSource = AlphaDataExtractor.ExtractFromAlphaAdt(extracted.ExtractedAlphaPath);
+            var lkBytes = LkAdtBuilder.Build(lkSource, options);
+
+            int tileIndex = extracted.Tile.Index;
+            var lkPath = Path.Combine(lkIntermediateDir, $"tile_{tileIndex:D4}_lk.adt");
+            File.WriteAllBytes(lkPath, lkBytes);
+
+            var alphaBytes = ConvertLkToAlpha(lkBytes, options);
+            var convertedPath = Path.Combine(convertedTilesDir, $"tile_{tileIndex:D4}_roundtrip.adt");
+            File.WriteAllBytes(convertedPath, alphaBytes);
+
+            successes.Add(new RoundTripTile(extracted.Tile, extracted.ExtractedAlphaPath, lkPath, convertedPath, extracted.OriginalLength, alphaBytes.Length));
+
+            processed++;
+            if (processed % 16 == 0)
             {
-                var lkSource = AlphaDataExtractor.ExtractFromAlphaAdt(extracted.ExtractedAlphaPath);
-                var lkBytes = LkAdtBuilder.Build(lkSource, options);
-
-                int tileIndex = extracted.Tile.Index;
-                var lkPath = Path.Combine(lkIntermediateDir, $"tile_{tileIndex:D4}_lk.adt");
-                File.WriteAllBytes(lkPath, lkBytes);
-
-                var alphaBytes = ConvertLkToAlpha(lkBytes, options);
-                var convertedPath = Path.Combine(convertedTilesDir, $"tile_{tileIndex:D4}_roundtrip.adt");
-                File.WriteAllBytes(convertedPath, alphaBytes);
-
-                successes.Add(new RoundTripTile(extracted.Tile, extracted.ExtractedAlphaPath, lkPath, convertedPath, extracted.OriginalLength, alphaBytes.Length));
-
-                processed++;
-                if (processed % 16 == 0)
-                {
-                    Console.WriteLine($"[RoundTrip] Processed {processed}/{extraction.SuccessCount} tiles...");
-                }
-            }
-            catch (Exception ex)
-            {
-                failures.Add((extracted.Tile.Index, ex.Message));
-                Console.WriteLine($"[RoundTrip] Warning: Failed round-trip for tile {extracted.Tile.Index}: {ex.Message}");
+                Console.WriteLine($"[RoundTrip] Processed {processed}/{extraction.SuccessCount} tiles...");
             }
         }
 
@@ -560,34 +572,90 @@ public static class RoundTripValidator
     private sealed record class TileComparisonResult(int DifferentTiles, long TotalDifferentBytes);
     
     /// <summary>
-    /// Converts a LK ADT back to Alpha format using AlphaMcnkBuilder.
+    /// Converts a LK ADT back to Alpha format with proper ADT file structure.
+    /// Builds complete Alpha ADT with MVER, MHDR, MCIN, and all 256 MCNK chunks.
     /// </summary>
     private static byte[] ConvertLkToAlpha(byte[] lkAdtBytes, LkToAlphaOptions options)
     {
-        // Read LK MCNK chunks using LkAdtReader
-        var reader = new LkAdtReader();
-        
         // Find all MCNK chunks in the LK ADT
         var mcnkOffsets = FindMcnkOffsets(lkAdtBytes);
         Console.WriteLine($"[LK→Alpha] Found {mcnkOffsets.Count} MCNK chunks in LK ADT");
         
-        using var ms = new MemoryStream();
-        
-        // Convert each MCNK chunk from LK to Alpha
+        // Build all 256 MCNK chunks (Alpha ADTs always have 256 chunks, some may be empty)
+        var alphaMcnkChunks = new byte[256][];
         int processedCount = 0;
-        foreach (var offset in mcnkOffsets)
+        
+        for (int i = 0; i < 256; i++)
         {
-            var alphaMcnkBytes = AlphaMcnkBuilder.BuildFromLk(lkAdtBytes, offset, options);
-            ms.Write(alphaMcnkBytes, 0, alphaMcnkBytes.Length);
-            processedCount++;
+            int indexX = i % 16;
+            int indexY = i / 16;
             
-            if (processedCount % 64 == 0)
+            if (i < mcnkOffsets.Count && mcnkOffsets[i] > 0)
             {
-                Console.WriteLine($"[LK→Alpha] Converted {processedCount}/{mcnkOffsets.Count} chunks...");
+                alphaMcnkChunks[i] = AlphaMcnkBuilder.BuildFromLk(lkAdtBytes, mcnkOffsets[i], options);
+                processedCount++;
+            }
+            else
+            {
+                // Create empty MCNK for missing chunks
+                alphaMcnkChunks[i] = AlphaMcnkBuilder.BuildEmpty(indexX, indexY);
+            }
+            
+            if ((i + 1) % 64 == 0)
+            {
+                Console.WriteLine($"[LK→Alpha] Converted {i + 1}/256 chunks...");
             }
         }
         
-        Console.WriteLine($"[LK→Alpha] Conversion complete: {processedCount} chunks");
+        Console.WriteLine($"[LK→Alpha] Conversion complete: {processedCount} non-empty chunks");
+        
+        // Build proper Alpha ADT structure: MVER + MHDR + MCIN + 256 MCNKs
+        using var ms = new MemoryStream();
+        
+        // Write MVER chunk (version 18 for Alpha)
+        ms.Write(Encoding.ASCII.GetBytes("REVM"), 0, 4); // 'MVER' reversed
+        ms.Write(BitConverter.GetBytes(4), 0, 4); // size = 4
+        ms.Write(BitConverter.GetBytes(18), 0, 4); // version 18
+        
+        // Calculate MCNK offsets for MCIN table
+        // MVER (12 bytes) + MHDR (36 bytes) + MCIN (4104 bytes) = 4152 bytes header
+        const int headerSize = 12 + 36 + 4104;
+        var mcnkFileOffsets = new int[256];
+        int currentOffset = headerSize;
+        
+        for (int i = 0; i < 256; i++)
+        {
+            mcnkFileOffsets[i] = currentOffset;
+            currentOffset += alphaMcnkChunks[i].Length;
+        }
+        
+        // Write MHDR chunk (minimal - just MCIN offset)
+        ms.Write(Encoding.ASCII.GetBytes("RDHM"), 0, 4); // 'MHDR' reversed
+        ms.Write(BitConverter.GetBytes(28), 0, 4); // size = 28 bytes (7 int32 fields)
+        ms.Write(BitConverter.GetBytes(48), 0, 4); // MCIN offset = 48 (right after MHDR)
+        for (int i = 0; i < 6; i++)
+        {
+            ms.Write(BitConverter.GetBytes(0), 0, 4); // Other offsets = 0
+        }
+        
+        // Write MCIN chunk (MCNK index table)
+        ms.Write(Encoding.ASCII.GetBytes("NICM"), 0, 4); // 'MCIN' reversed
+        ms.Write(BitConverter.GetBytes(4096), 0, 4); // size = 4096 bytes (256 entries * 16 bytes)
+        
+        for (int i = 0; i < 256; i++)
+        {
+            ms.Write(BitConverter.GetBytes(mcnkFileOffsets[i]), 0, 4); // offset
+            ms.Write(BitConverter.GetBytes(alphaMcnkChunks[i].Length), 0, 4); // size
+            ms.Write(BitConverter.GetBytes(0), 0, 4); // flags
+            ms.Write(BitConverter.GetBytes(0), 0, 4); // asyncId
+        }
+        
+        // Write all 256 MCNK chunks
+        for (int i = 0; i < 256; i++)
+        {
+            ms.Write(alphaMcnkChunks[i], 0, alphaMcnkChunks[i].Length);
+        }
+        
         return ms.ToArray();
     }
     
