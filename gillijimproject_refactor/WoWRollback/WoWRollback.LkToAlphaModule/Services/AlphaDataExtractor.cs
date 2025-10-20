@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using GillijimProject.WowFiles.Alpha;
 using WoWRollback.LkToAlphaModule.Liquids;
@@ -77,7 +78,11 @@ public static class AlphaDataExtractor
         int mcshSize = BitConverter.ToInt32(headerBytes, 0x34);
         int nLayers = BitConverter.ToInt32(headerBytes, 0x10);
         
-        Console.WriteLine($"[AlphaExtract] MCNK {indexX},{indexY}: nLayers={nLayers}, mclyOffset={mclyOffset}, mcalOffset={mcalOffset}, mcalSize={mcalSize}");
+        // Only log if there's actual texture data (nLayers > 1 or mcalSize > 0)
+        if (nLayers > 1 || mcalSize > 0)
+        {
+            Console.WriteLine($"[AlphaExtract] MCNK {indexX},{indexY}: nLayers={nLayers}, mclyOffset=0x{mclyOffset:X}, mcalOffset=0x{mcalOffset:X}, mcalSize={mcalSize}");
+        }
         
         uint mcnkFlags = BitConverter.ToUInt32(headerBytes, 0x00);
         int doodadRefs = BitConverter.ToInt32(headerBytes, 0x14);
@@ -234,20 +239,20 @@ public static class AlphaDataExtractor
                         Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} expected MCLY data size {expectedSize}, read {source.MclyRaw.Length}.");
                     }
                     
-                    if (source.MclyRaw.Length > 0)
-                    {
-                        Console.WriteLine($"[AlphaExtract] MCLY raw[0..15] MCNK {indexX},{indexY}: {BitConverter.ToString(source.MclyRaw, 0, Math.Min(16, source.MclyRaw.Length))}");
-                    }
                 }
                 else
                 {
-                    Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} expected MCLY chunk, found '{mclyChunk.Letters}' size={mclyChunk.Data.Length}");
+                    Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} expected MCLY chunk at offset 0x{mclyOffset:X}, found '{mclyChunk.Letters}' size={mclyChunk.Data.Length}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AlphaExtract] Error reading MCLY for MCNK {indexX},{indexY}: {ex.Message}");
+                Console.WriteLine($"[AlphaExtract] Error reading MCLY for MCNK {indexX},{indexY} at offset 0x{mclyOffset:X}: {ex.Message}");
             }
+        }
+        else if (nLayers > 1)
+        {
+            Console.WriteLine($"[AlphaExtract] Warning: MCNK {indexX},{indexY} has nLayers={nLayers} but mclyOffset={mclyOffset} (invalid)");
         }
 
         // Extract MCRF table (Alpha MCRF HAS chunk header on disk)
@@ -306,7 +311,8 @@ public static class AlphaDataExtractor
                 // Preserve raw MCAL for passthrough
                 source.McalRaw = mcalArray;
 
-                if (mcalArray.Length > 0)
+                // Only log non-zero MCAL data
+                if (mcalArray.Length > 0 && mcalArray.Any(b => b != 0))
                 {
                     Console.WriteLine($"[AlphaExtract] MCAL raw[0..31] MCNK {indexX},{indexY}: {BitConverter.ToString(mcalArray, 0, Math.Min(32, mcalArray.Length))}");
                 }
