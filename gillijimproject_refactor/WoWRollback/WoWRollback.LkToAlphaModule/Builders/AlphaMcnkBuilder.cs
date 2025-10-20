@@ -52,6 +52,10 @@ public static class AlphaMcnkBuilder
                 }
             }
         }
+        else if (opts?.VerboseLogging == true)
+        {
+            Console.WriteLine($"[MCLY] MCNK {lkHeader.IndexX},{lkHeader.IndexY}: MclyOffset=0, nLayers={lkHeader.NLayers}");
+        }
         if (lkHeader.McalOffset > 0 && lkHeader.McalSize > 0)
         {
             int mcalPos = mcNkOffset + lkHeader.McalOffset;
@@ -158,7 +162,22 @@ public static class AlphaMcnkBuilder
                 mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
                 Buffer.BlockCopy(lkAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
             }
-            // Note: MCLY, MCAL, MCSH are extracted via header offsets above, not scanned here
+            else if (fcc == "YLCM" && mclyLkWhole == null) // 'MCLY' reversed - fallback if header offset was 0
+            {
+                mclyLkWhole = new byte[size];
+                Buffer.BlockCopy(lkAdtBytes, p + 8, mclyLkWhole, 0, size);
+            }
+            else if (fcc == "LACM" && mcalLkWhole == null) // 'MCAL' reversed - fallback if header offset was 0
+            {
+                mcalLkWhole = new byte[size];
+                Buffer.BlockCopy(lkAdtBytes, p + 8, mcalLkWhole, 0, size);
+            }
+            else if (fcc == "HSCM" && mcshLkWhole == null) // 'MCSH' reversed - fallback if header offset was 0
+            {
+                mcshLkWhole = new byte[size];
+                Buffer.BlockCopy(lkAdtBytes, p + 8, mcshLkWhole, 0, size);
+            }
+            // Note: MCLY, MCAL, MCSH are primarily extracted via header offsets above, but we scan as fallback
             
             p = next;
         }
@@ -433,10 +452,11 @@ public static class AlphaMcnkBuilder
         
         // Compute Alpha SMChunk header fields (offsets relative to BEGINNING of MCNK chunk)
         const int headerTotal = 8 + McnkHeaderSize; // FourCC+size + 128-byte header
+        const int mclyChunkHeaderSize = 8; // MCLY has chunk header in Alpha: "YLCM" + size
         int offsHeight = 0; // Offsets are relative to the subchunk data region (immediately after header)
         int offsNormal = offsHeight + alphaMcvtRaw.Length;
         int offsLayer  = offsNormal + mcnrRaw.Length;
-        int offsRefs   = offsLayer  + mclyWhole.Length;
+        int offsRefs   = offsLayer  + mclyChunkHeaderSize + mclyWhole.Length; // MCLY includes 8-byte chunk header
         int offsShadow = offsRefs   + mcrfWhole.Length;
         int offsAlpha  = offsShadow + mcshWhole.Length;
         int offsSnd    = mcseWhole.Length > 0 ? offsAlpha + mcalWhole.Length : 0;
@@ -456,7 +476,7 @@ public static class AlphaMcnkBuilder
         }
         int areaIdVal  = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId;
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length + mclqWhole.Length;
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyChunkHeaderSize + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length + mclqWhole.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -531,9 +551,12 @@ public static class AlphaMcnkBuilder
         // Write header
         ms.Write(smh);
 
-        // Sub-blocks in Alpha order (raw, no named headers): MCVT, MCNR, MCLY, MCRF, MCSH, MCAL, MCSE, MCLQ
+        // Sub-blocks in Alpha order: MCVT, MCNR (raw, no headers), MCLY (HAS header), MCRF, MCSH, MCAL, MCSE, MCLQ (raw)
         if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
         if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
+        // MCLY in Alpha format requires chunk header: "YLCM" + size + data
+        ms.Write(Encoding.ASCII.GetBytes("YLCM"), 0, 4);
+        ms.Write(BitConverter.GetBytes(mclyWhole.Length), 0, 4);
         ms.Write(mclyWhole, 0, mclyWhole.Length);
         ms.Write(mcrfWhole, 0, mcrfWhole.Length);
         ms.Write(mcshWhole, 0, mcshWhole.Length);
