@@ -101,10 +101,25 @@ class Program
         
         analyzeClientCommand.SetHandler(AnalyzeClient, clientRootOption, globalOutputOption);
         
+        // rollback command - CORE FEATURE: Filter content by UniqueID threshold
+        var rollbackCommand = new Command("rollback", "Roll back map content to a specific UniqueID threshold");
+        var inputWdtOption = new Option<FileInfo>("--input", "Input WDT file to rollback") { IsRequired = true };
+        var outputWdtOption = new Option<FileInfo>("--output", "Output WDT file path") { IsRequired = true };
+        var maxUniqueIdOption = new Option<uint>("--max-uniqueid", "Maximum UniqueID to keep (placements above this will be buried)") { IsRequired = true };
+        var buryDepthOption = new Option<float>("--bury-depth", () => -5000.0f, "Z-coordinate to bury filtered placements (negative = underground)");
+        
+        rollbackCommand.AddOption(inputWdtOption);
+        rollbackCommand.AddOption(outputWdtOption);
+        rollbackCommand.AddOption(maxUniqueIdOption);
+        rollbackCommand.AddOption(buryDepthOption);
+        
+        rollbackCommand.SetHandler(RollbackWdt, inputWdtOption, outputWdtOption, maxUniqueIdOption, buryDepthOption);
+        
         rootCommand.AddCommand(plotCommand);
         rootCommand.AddCommand(exportCommand);
         rootCommand.AddCommand(visualizeCommand);
         rootCommand.AddCommand(analyzeClientCommand);
+        rootCommand.AddCommand(rollbackCommand);
         
         return await rootCommand.InvokeAsync(args);
     }
@@ -1611,6 +1626,32 @@ class Program
                 writer.WriteLine("        </div>");
                 writer.WriteLine("    </div>");
                 
+                // Rollback Controls
+                writer.WriteLine("    <h2>🎮 WoWRollback Controls</h2>");
+                writer.WriteLine("    <div class='stats' style='padding: 20px;'>");
+                writer.WriteLine("        <p style='color: #d4d4d4; margin-bottom: 15px;'>Roll back to a specific point in development. Move the slider to keep only content added up to that UniqueID:</p>");
+                writer.WriteLine("        ");
+                writer.WriteLine("        <div style='margin: 20px 0;'>");
+                writer.WriteLine($"            <label style='color: #4ec9b0; font-weight: bold; display: block; margin-bottom: 10px;'>Development Rollback Point</label>");
+                writer.WriteLine("            ");
+                writer.WriteLine("            <!-- Gradient bar background -->");
+                writer.WriteLine("            <div style='position: relative; background: linear-gradient(to right, #0000FF 0%, #00FFFF 25%, #00FF00 50%, #FFFF00 75%, #FF0000 100%); height: 40px; border-radius: 5px; border: 2px solid #3c3c3c; margin-bottom: 10px;'>");
+                writer.WriteLine($"                <input type='range' id='maxSlider' min='{globalMinId}' max='{globalMaxId}' value='{globalMaxId}' style='position: absolute; width: 100%; height: 100%; opacity: 0.01; cursor: pointer; margin: 0;' oninput='updateRollbackDisplay()'>");
+                writer.WriteLine("                <div id='sliderMarker' style='position: absolute; right: 0; top: -2px; bottom: -2px; width: 4px; background: white; box-shadow: 0 0 5px rgba(0,0,0,0.5); pointer-events: none;'></div>");
+                writer.WriteLine("            </div>");
+                writer.WriteLine("            ");
+                writer.WriteLine($"            <div id='rollbackDisplay' style='color: #569cd6; font-size: 1.2em; font-weight: bold;'>Keep content up to UniqueID: {globalMaxId:N0} <span style='color: #858585; font-size: 0.8em;'>(All content)</span></div>");
+                writer.WriteLine("        </div>");
+                writer.WriteLine("        ");
+                writer.WriteLine("        <div style='margin: 20px 0; display: flex; gap: 10px;'>");
+                writer.WriteLine("            <button onclick='savePreferences()' style='padding: 10px 20px; background: #0e639c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em;'>💾 Save Settings</button>");
+                writer.WriteLine("            <button onclick='loadPreferences()' style='padding: 10px 20px; background: #0e639c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em;'>📂 Load Settings</button>");
+                writer.WriteLine($"            <button onclick='recompileMap()' style='padding: 10px 20px; background: #2d7d2d; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; font-weight: bold;'>⚙️ Recompile Map</button>");
+                writer.WriteLine("        </div>");
+                writer.WriteLine("        ");
+                writer.WriteLine("        <p style='color: #858585; font-size: 0.9em; margin-top: 15px;'>💡 <strong>Tip:</strong> Click any tile below for per-tile layer control.</p>");
+                writer.WriteLine("    </div>");
+                
                 // Overview image
                 writer.WriteLine("    <h2>Continental Overview - Temporal Heatmap</h2>");
                 writer.WriteLine("    <div class='overview'>");
@@ -1651,81 +1692,123 @@ class Program
                     writer.WriteLine("    <div style='background: #252526; padding: 15px; border-radius: 5px; margin: 10px 0;'>");
                     writer.WriteLine("        <p style='color: #d4d4d4; margin-bottom: 15px;'>Visual representation of the map. Click any tile to view placement layers:</p>");
                     
-                    // Calculate tile grid bounds
-                    int minX = tileLayerInfos.Min(t => t.TileX);
-                    int maxX = tileLayerInfos.Max(t => t.TileX);
-                    int minY = tileLayerInfos.Min(t => t.TileY);
-                    int maxY = tileLayerInfos.Max(t => t.TileY);
-                    
-                    // Expand bounds to include ALL minimap tiles
+                    // Calculate tile grid bounds from BOTH placement tiles AND minimap files
                     var minimapDirPath = Path.Combine(outputDir.FullName, "minimaps");
+                    var allCoords = new List<(int x, int y)>();
+                    
+                    // Add coordinates from tiles with placement data
+                    foreach (var tile in tileLayerInfos)
+                    {
+                        allCoords.Add((tile.TileX, tile.TileY));
+                    }
+                    
+                    // Add coordinates from minimap files
                     if (Directory.Exists(minimapDirPath))
                     {
-                        var minimapFiles = Directory.GetFiles(minimapDirPath, $"{mapName}_*.png");
-                        foreach (var file in minimapFiles)
+                        var minimapFilesForBounds = Directory.GetFiles(minimapDirPath, $"{mapName}_*.png");
+                        foreach (var file in minimapFilesForBounds)
                         {
                             var name = Path.GetFileNameWithoutExtension(file);
                             var parts = name.Split('_');
                             if (parts.Length >= 3 && int.TryParse(parts[^2], out int x) && int.TryParse(parts[^1], out int y))
                             {
-                                minX = Math.Min(minX, x);
-                                maxX = Math.Max(maxX, x);
-                                minY = Math.Min(minY, y);
-                                maxY = Math.Max(maxY, y);
+                                allCoords.Add((x, y));
                             }
                         }
                     }
                     
+                    // Calculate bounds from ALL coordinates (use 0,0 as origin for absolute positioning)
+                    int minX = Math.Min(0, allCoords.Min(c => c.x));
+                    int maxX = allCoords.Max(c => c.x);
+                    int minY = Math.Min(0, allCoords.Min(c => c.y));
+                    int maxY = allCoords.Max(c => c.y);
+                    
+                    // Build lookup maps for tiles with data and minimap files
+                    var tileLookup = tileLayerInfos.ToDictionary(t => (t.TileX, t.TileY));
+                    var minimapLookup = new Dictionary<(int x, int y), string>();
+                    
+                    var minimapFiles = Directory.GetFiles(minimapDirPath, $"{mapName}_*.png");
+                    foreach (var file in minimapFiles)
+                    {
+                        var name = Path.GetFileNameWithoutExtension(file);
+                        var parts = name.Split('_');
+                        if (parts.Length >= 3 && int.TryParse(parts[^2], out int x) && int.TryParse(parts[^1], out int y))
+                        {
+                            minimapLookup[(x, y)] = Path.GetFileName(file);
+                        }
+                    }
+                    
+                    // Create debug log file
+                    var debugLogPath = Path.Combine(outputDir.FullName, "tile_browser_debug.log");
+                    using (var debugLog = new StreamWriter(debugLogPath))
+                    {
+                        debugLog.WriteLine("=== TILE BROWSER DEBUG LOG ===");
+                        debugLog.WriteLine($"Timestamp: {DateTime.Now}");
+                        debugLog.WriteLine();
+                        debugLog.WriteLine($"Minimap directory: {minimapDirPath}");
+                        debugLog.WriteLine($"Tiles with placement data: {tileLayerInfos.Count}");
+                        debugLog.WriteLine($"allCoords has {allCoords.Count} entries");
+                        debugLog.WriteLine($"Sample allCoords: {string.Join(", ", allCoords.Take(10))}");
+                        debugLog.WriteLine($"Grid bounds: X=[{minX},{maxX}], Y=[{minY},{maxY}]");
+                        debugLog.WriteLine();
+                        debugLog.WriteLine($"Found {minimapFiles.Length} minimap files");
+                        debugLog.WriteLine($"Loaded {minimapLookup.Count} minimap entries into lookup");
+                        debugLog.WriteLine($"Sample lookup entries: {string.Join(", ", minimapLookup.Keys.Take(10))}");
+                        debugLog.WriteLine();
+                        
+                        // Log first 20 grid cells to see what's rendered
+                        debugLog.WriteLine("First 20 grid cells:");
+                        int cellCount = 0;
+                        for (int y = minY; y <= maxY && cellCount < 20; y++)
+                        {
+                            for (int x = minX; x <= maxX && cellCount < 20; x++)
+                            {
+                                bool hasTileData = tileLookup.ContainsKey((x, y));
+                                bool hasMinimapFile = minimapLookup.ContainsKey((x, y));
+                                debugLog.WriteLine($"  [{x},{y}]: TileData={hasTileData}, Minimap={hasMinimapFile}" + 
+                                    (hasMinimapFile ? $" (file: {minimapLookup[(x, y)]})" : ""));
+                                cellCount++;
+                            }
+                        }
+                    } // Close using block for debugLog
+                    
                     int gridWidth = maxX - minX + 1;
                     int gridHeight = maxY - minY + 1;
                     
-                    // Create a lookup for quick tile access
-                    var tileLookup = tileLayerInfos.ToDictionary(t => (t.TileX, t.TileY));
-                    
                     writer.WriteLine($"        <div style='display: grid; grid-template-columns: repeat({gridWidth}, 64px); gap: 2px; max-height: 70vh; overflow: auto; padding: 5px; background: #1e1e1e; border-radius: 3px; justify-content: center;'>");
                     
-                    // Generate grid in proper 2D layout (Y rows, X columns)
+                    // Render COMPLETE grid starting from origin (proper absolute positioning)
                     for (int y = minY; y <= maxY; y++)
                     {
                         for (int x = minX; x <= maxX; x++)
                         {
-                            if (tileLookup.TryGetValue((x, y), out var tileInfo))
+                            bool hasTileData = tileLookup.TryGetValue((x, y), out var tileInfo);
+                            bool hasMinimapFile = minimapLookup.TryGetValue((x, y), out var minimapFile);
+                            
+                            if (hasTileData && hasMinimapFile)
                             {
-                                // Tile with data - show minimap thumbnail
+                                // Tile with placement data AND minimap - clickable
                                 var totalPlacements = tileInfo.Layers.Sum(l => l.PlacementCount);
-                                var minimapPath = $"minimaps/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.png";
-                                var tileExists = File.Exists(Path.Combine(outputDir.FullName, minimapPath));
-                                
-                                if (tileExists)
-                                {
-                                    writer.WriteLine($"            <a href='tiles/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html' title='Tile [{tileInfo.TileX},{tileInfo.TileY}] - {tileInfo.Layers.Count} layers, {totalPlacements} placements' style='display: block; width: 64px; height: 64px; border: 2px solid #569cd6; border-radius: 2px; overflow: hidden; transition: all 0.2s;' onmouseover='this.style.borderColor=\"#4ec9b0\"; this.style.transform=\"scale(1.05)\"; this.style.zIndex=\"10\";' onmouseout='this.style.borderColor=\"#569cd6\"; this.style.transform=\"scale(1)\"; this.style.zIndex=\"1\";'>");
-                                    writer.WriteLine($"                <img src='{minimapPath}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{tileInfo.TileX},{tileInfo.TileY}]' />");
-                                    writer.WriteLine($"            </a>");
-                                }
-                                else
-                                {
-                                    // Data exists but no minimap - show placeholder
-                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No minimap' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; background: #2d2d30; border-radius: 2px;'></div>");
-                                }
+                                writer.WriteLine($"            <a href='tiles/{mapName}_{x}_{y}.html' title='Tile [{x},{y}] - {tileInfo.Layers.Count} layers, {totalPlacements} placements' style='display: block; width: 64px; height: 64px; border: 2px solid #569cd6; border-radius: 2px; overflow: hidden; transition: all 0.2s;' onmouseover='this.style.borderColor=\"#4ec9b0\"; this.style.transform=\"scale(1.05)\"; this.style.zIndex=\"10\";' onmouseout='this.style.borderColor=\"#569cd6\"; this.style.transform=\"scale(1)\"; this.style.zIndex=\"1\";'>");
+                                writer.WriteLine($"                <img src='minimaps/{minimapFile}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{x},{y}]' />");
+                                writer.WriteLine($"            </a>");
+                            }
+                            else if (hasMinimapFile)
+                            {
+                                // Minimap exists but no placement data - non-clickable, dimmed
+                                writer.WriteLine($"            <div title='Tile [{x},{y}] - No placement data' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; border-radius: 2px; overflow: hidden; opacity: 0.5;'>");
+                                writer.WriteLine($"                <img src='minimaps/{minimapFile}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{x},{y}]' />");
+                                writer.WriteLine($"            </div>");
+                            }
+                            else if (hasTileData)
+                            {
+                                // Data exists but no minimap - show placeholder
+                                writer.WriteLine($"            <div title='Tile [{x},{y}] - No minimap' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; background: #2d2d30; border-radius: 2px;'></div>");
                             }
                             else
                             {
-                                // No placement data - check if minimap exists
-                                var minimapPath = $"minimaps/{mapName}_{x}_{y}.png";
-                                var minimapExists = File.Exists(Path.Combine(outputDir.FullName, minimapPath));
-                                
-                                if (minimapExists)
-                                {
-                                    // Show minimap thumbnail (non-clickable, no placement data)
-                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No placement data' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; border-radius: 2px; overflow: hidden; opacity: 0.5;'>");
-                                    writer.WriteLine($"                <img src='{minimapPath}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{x},{y}]' />");
-                                    writer.WriteLine($"            </div>");
-                                }
-                                else
-                                {
-                                    // No minimap, no data - empty placeholder
-                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No data' style='width: 64px; height: 64px; border: 1px solid #1e1e1e; background: #252526; border-radius: 2px;'></div>");
-                                }
+                                // Empty cell - no data, no minimap - dark background to show grid
+                                writer.WriteLine($"            <div style='width: 64px; height: 64px; background: #1e1e1e;'></div>");
                             }
                         }
                     }
@@ -1743,16 +1826,83 @@ class Program
                     writer.WriteLine("    </div>");
                 }
                 
-                // JavaScript for filtering (kept for future use)
+                // JavaScript for WoWRollback controls
                 writer.WriteLine("    <script>");
-                writer.WriteLine("        function filterTiles() {");
-                writer.WriteLine("            const input = document.getElementById('filterTileInput');");
-                writer.WriteLine("            const filter = input.value.toLowerCase();");
-                writer.WriteLine("            const items = document.querySelectorAll('#tileGrid .legend-item');");
-                writer.WriteLine("            items.forEach(item => {");
-                writer.WriteLine("                const text = item.getAttribute('data-search').toLowerCase();");
-                writer.WriteLine("                item.style.display = text.includes(filter) ? '' : 'none';");
-                writer.WriteLine("            });");
+                writer.WriteLine("        let globalSettings = {");
+                writer.WriteLine($"            maxUniqueId: {globalMaxId},");
+                writer.WriteLine("            perTileSettings: {}");
+                writer.WriteLine("        };");
+                writer.WriteLine("        ");
+                writer.WriteLine($"        const GLOBAL_MIN = {globalMinId};");
+                writer.WriteLine($"        const GLOBAL_MAX = {globalMaxId};");
+                writer.WriteLine("        ");
+                writer.WriteLine("        function updateRollbackDisplay() {");
+                writer.WriteLine("            const maxSlider = document.getElementById('maxSlider');");
+                writer.WriteLine("            const display = document.getElementById('rollbackDisplay');");
+                writer.WriteLine("            const marker = document.getElementById('sliderMarker');");
+                writer.WriteLine("            ");
+                writer.WriteLine("            const maxValue = parseInt(maxSlider.value);");
+                writer.WriteLine("            globalSettings.maxUniqueId = maxValue;");
+                writer.WriteLine("            ");
+                writer.WriteLine("            // Calculate position percentage");
+                writer.WriteLine("            const percentage = ((maxValue - GLOBAL_MIN) / (GLOBAL_MAX - GLOBAL_MIN)) * 100;");
+                writer.WriteLine("            marker.style.left = percentage + '%';");
+                writer.WriteLine("            ");
+                writer.WriteLine("            // Update text with helpful context");
+                writer.WriteLine("            let suffix = '';");
+                writer.WriteLine("            if (maxValue >= GLOBAL_MAX) {");
+                writer.WriteLine("                suffix = '<span style=\"color: #858585; font-size: 0.8em;\">(All content)</span>';");
+                writer.WriteLine("            } else if (percentage < 25) {");
+                writer.WriteLine("                suffix = '<span style=\"color: #569cd6; font-size: 0.8em;\">(Early development)</span>';");
+                writer.WriteLine("            } else if (percentage < 50) {");
+                writer.WriteLine("                suffix = '<span style=\"color: #00FFFF; font-size: 0.8em;\">(Mid development)</span>';");
+                writer.WriteLine("            } else if (percentage < 75) {");
+                writer.WriteLine("                suffix = '<span style=\"color: #FFFF00; font-size: 0.8em;\">(Late development)</span>';");
+                writer.WriteLine("            } else {");
+                writer.WriteLine("                suffix = '<span style=\"color: #FF9900; font-size: 0.8em;\">(Nearly complete)</span>';");
+                writer.WriteLine("            }");
+                writer.WriteLine("            ");
+                writer.WriteLine("            display.innerHTML = `Keep content up to UniqueID: ${maxValue.toLocaleString()} ${suffix}`;");
+                writer.WriteLine("        }");
+                writer.WriteLine("        ");
+                writer.WriteLine("        function savePreferences() {");
+                writer.WriteLine("            const dataStr = JSON.stringify(globalSettings, null, 2);");
+                writer.WriteLine("            const dataBlob = new Blob([dataStr], { type: 'application/json' });");
+                writer.WriteLine($"            const url = URL.createObjectURL(dataBlob);");
+                writer.WriteLine("            const link = document.createElement('a');");
+                writer.WriteLine($"            link.href = url;");
+                writer.WriteLine($"            link.download = '{mapName}_rollback_settings.json';");
+                writer.WriteLine("            link.click();");
+                writer.WriteLine("            URL.revokeObjectURL(url);");
+                writer.WriteLine("            alert('✅ Preferences saved to JSON file!');");
+                writer.WriteLine("        }");
+                writer.WriteLine("        ");
+                writer.WriteLine("        function loadPreferences() {");
+                writer.WriteLine("            const input = document.createElement('input');");
+                writer.WriteLine("            input.type = 'file';");
+                writer.WriteLine("            input.accept = '.json';");
+                writer.WriteLine("            input.onchange = (e) => {");
+                writer.WriteLine("                const file = e.target.files[0];");
+                writer.WriteLine("                const reader = new FileReader();");
+                writer.WriteLine("                reader.onload = (ev) => {");
+                writer.WriteLine("                    try {");
+                writer.WriteLine("                        globalSettings = JSON.parse(ev.target.result);");
+                writer.WriteLine("                        document.getElementById('maxSlider').value = globalSettings.maxUniqueId;");
+                writer.WriteLine("                        updateRollbackDisplay();");
+                writer.WriteLine("                        alert('✅ Settings loaded!');");
+                writer.WriteLine("                    } catch (err) {");
+                writer.WriteLine("                        alert('❌ Error loading preferences: ' + err.message);");
+                writer.WriteLine("                    }");
+                writer.WriteLine("                };");
+                writer.WriteLine("                reader.readAsText(file);");
+                writer.WriteLine("            };");
+                writer.WriteLine("            input.click();");
+                writer.WriteLine("        }");
+                writer.WriteLine("        ");
+                writer.WriteLine("        function recompileMap() {");
+                writer.WriteLine("            const settingsJson = JSON.stringify(globalSettings, null, 2);");
+                writer.WriteLine("            alert('⚙️ Recompile feature coming soon!\\n\\nYour settings:\\n' + settingsJson + '\\n\\nThis will generate filtered ADT/WDT files based on your UniqueID range selection.');");
+                writer.WriteLine("            // TODO: Call WoWRollback CLI tool with settings");
                 writer.WriteLine("        }");
                 writer.WriteLine("    </script>");
                 
@@ -1860,8 +2010,191 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR] {ex.Message}");
+            Console.WriteLine($"❌ Error analyzing client: {ex.Message}");
             Console.WriteLine(ex.StackTrace);
         }
+    }
+    
+    static void RollbackWdt(FileInfo inputFile, FileInfo outputFile, uint maxUniqueId, float buryDepth)
+    {
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine("          🎮 WoWRollback - CORE FEATURE");
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine($"Input WDT:      {inputFile.FullName}");
+        Console.WriteLine($"Output WDT:     {outputFile.FullName}");
+        Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
+        Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
+        Console.WriteLine();
+        
+        try
+        {
+            // Use existing WdtAlpha class to properly parse the structure
+            Console.WriteLine("═══ STEP 1: Loading Alpha WDT ===");
+            var wdt = new WdtAlpha(inputFile.FullName);
+            var existingAdts = wdt.GetExistingAdtsNumbers();
+            Console.WriteLine($"✓ Loaded WDT with {existingAdts.Count} ADT tiles");
+            Console.WriteLine();
+            
+            // Read raw file bytes for direct modification
+            byte[] wdtBytes = File.ReadAllBytes(inputFile.FullName);
+            
+            Console.WriteLine("═══ STEP 2: Processing All ADT Tiles ===");
+            int totalPlacements = 0;
+            int buriedPlacements = 0;
+            int keptPlacements = 0;
+            int tilesProcessed = 0;
+            
+            var adtOffsets = wdt.GetAdtOffsetsInMain();
+            
+            // Process each ADT tile
+            foreach (var adtNum in existingAdts)
+            {
+                int adtOffset = adtOffsets[adtNum];
+                if (adtOffset == 0) continue;
+                
+                int tileX = adtNum % 64;
+                int tileY = adtNum / 64;
+                
+                // Parse the ADT at this offset
+                var adt = new AdtAlpha(inputFile.FullName, adtOffset, adtNum);
+                var mddf = adt.GetMddf();
+                var modf = adt.GetModf();
+                
+                // Process MDDF (M2) placements - 36 bytes per entry
+                // +0x00: nameId (4 bytes)
+                // +0x04: uniqueId (4 bytes)
+                // +0x08: position X (4 bytes)
+                // +0x0C: position Z (4 bytes) <- MODIFY THIS
+                // +0x10: position Y (4 bytes)
+                const int mddfEntrySize = 36;
+                for (int offset = 0; offset + mddfEntrySize <= mddf.Data.Length; offset += mddfEntrySize)
+                {
+                    uint uniqueId = BitConverter.ToUInt32(mddf.Data, offset + 4);
+                    totalPlacements++;
+                    
+                    if (uniqueId > maxUniqueId)
+                    {
+                        // Bury it! Modify Z coordinate (offset +0x0C)
+                        byte[] newZ = BitConverter.GetBytes(buryDepth);
+                        Array.Copy(newZ, 0, mddf.Data, offset + 12, 4);
+                        buriedPlacements++;
+                    }
+                    else
+                    {
+                        keptPlacements++;
+                    }
+                }
+                
+                // Process MODF (WMO) placements - 64 bytes per entry
+                // +0x00: nameId (4 bytes)
+                // +0x04: uniqueId (4 bytes)
+                // +0x08: position X (4 bytes)
+                // +0x0C: position Z (4 bytes) <- MODIFY THIS
+                // +0x10: position Y (4 bytes)
+                const int modfEntrySize = 64;
+                for (int offset = 0; offset + modfEntrySize <= modf.Data.Length; offset += modfEntrySize)
+                {
+                    uint uniqueId = BitConverter.ToUInt32(modf.Data, offset + 4);
+                    totalPlacements++;
+                    
+                    if (uniqueId > maxUniqueId)
+                    {
+                        // Bury it! Modify Z coordinate (offset +0x0C)
+                        byte[] newZ = BitConverter.GetBytes(buryDepth);
+                        Array.Copy(newZ, 0, modf.Data, offset + 12, 4);
+                        buriedPlacements++;
+                    }
+                    else
+                    {
+                        keptPlacements++;
+                    }
+                }
+                
+                // Copy modified chunk data back to wdtBytes
+                if (mddf.Data.Length > 0)
+                {
+                    int mddfFileOffset = adt.GetMddfDataOffset();
+                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffset, mddf.Data.Length);
+                }
+                if (modf.Data.Length > 0)
+                {
+                    int modfFileOffset = adt.GetModfDataOffset();
+                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffset, modf.Data.Length);
+                }
+                
+                tilesProcessed++;
+                if (tilesProcessed % 50 == 0)
+                {
+                    Console.WriteLine($"  Processed {tilesProcessed}/{existingAdts.Count} tiles...");
+                }
+            }
+            
+            Console.WriteLine($"✓ Processed {tilesProcessed} ADT tiles");
+            Console.WriteLine();
+            Console.WriteLine($"Total Placements:  {totalPlacements:N0}");
+            Console.WriteLine($"  ✅ Kept:         {keptPlacements:N0} (UniqueID <= {maxUniqueId:N0})");
+            Console.WriteLine($"  🪦 Buried:       {buriedPlacements:N0} (UniqueID > {maxUniqueId:N0})");
+            Console.WriteLine();
+            
+            // Write modified WDT
+            Console.WriteLine("═══ STEP 3: Writing Output WDT ═══");
+            Directory.CreateDirectory(Path.GetDirectoryName(outputFile.FullName)!);
+            File.WriteAllBytes(outputFile.FullName, wdtBytes);
+            
+            Console.WriteLine($"✓ Saved: {outputFile.FullName}");
+            
+            // Generate MD5 checksum for minimap compatibility
+            Console.WriteLine();
+            Console.WriteLine("═══ STEP 4: Generating MD5 Checksum ═══");
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                var hash = md5.ComputeHash(wdtBytes);
+                var hashString = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                
+                var md5FileName = Path.GetFileNameWithoutExtension(outputFile.FullName) + ".md5";
+                var md5FilePath = Path.Combine(Path.GetDirectoryName(outputFile.FullName)!, md5FileName);
+                File.WriteAllText(md5FilePath, hashString);
+                
+                Console.WriteLine($"✓ MD5 Hash: {hashString}");
+                Console.WriteLine($"✓ Saved: {md5FilePath}");
+            }
+            Console.WriteLine();
+            Console.WriteLine("══════════════════════════════════════════");
+            Console.WriteLine("✅ ROLLBACK COMPLETE!");
+            Console.WriteLine("══════════════════════════════════════════");
+            Console.WriteLine($"Your filtered map is ready to use.");
+            Console.WriteLine($"Placements with UniqueID > {maxUniqueId:N0} have been buried at Z={buryDepth:F1}");
+            Console.WriteLine();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error during rollback: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
+    }
+    
+    static List<int> FindAllChunks(byte[] data, string chunkName)
+    {
+        var positions = new List<int>();
+        byte[] pattern = System.Text.Encoding.ASCII.GetBytes(chunkName);
+        
+        for (int i = 0; i < data.Length - pattern.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < pattern.Length; j++)
+            {
+                if (data[i + j] != pattern[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+            {
+                positions.Add(i);
+                i += 8; // Skip past chunk header to avoid false positives
+            }
+        }
+        return positions;
     }
 }
