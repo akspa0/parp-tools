@@ -260,22 +260,21 @@ public static class AlphaMcnkBuilder
         // MCRF raw is empty in our current flow
         var mcrfRaw = Array.Empty<byte>();
 
-        // Build named chunk wrappers (Alpha expects FourCC headers for these)
+        // Build named chunk wrappers ONLY for MCLY and MCRF (Alpha v18 format)
+        // CRITICAL: MCSH, MCAL, MCSE do NOT have headers in Alpha - raw data only!
         var mclyChunk = new Chunk("MCLY", mclyRaw.Length, mclyRaw);
         var mcrfChunk = new Chunk("MCRF", mcrfRaw.Length, mcrfRaw);
-        var mcshChunk = new Chunk("MCSH", mcshRaw.Length, mcshRaw);
+
+        byte[] mclyWhole = mclyChunk.GetWholeChunk();  // Has header (FourCC+size)
+        byte[] mcrfWhole = mcrfChunk.GetWholeChunk();  // Has header (FourCC+size)
+        // mcshRaw, mcalRaw, mcseRaw used directly - NO headers!
+        
         DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+        
+        // Validate MCLY/MCAL integrity to catch offset corruption bugs
+        ValidateMclyMcalIntegrity(mclyRaw, mcalRaw, lkHeader.IndexX, lkHeader.IndexY, opts);
 
-        var mcalChunk = new Chunk("MCAL", mcalRaw.Length, mcalRaw);
-        var mcseChunk = new Chunk("MCSE", mcseRaw.Length, mcseRaw);
-
-        byte[] mclyWhole = mclyChunk.GetWholeChunk();
-        byte[] mcrfWhole = mcrfChunk.GetWholeChunk();
-        byte[] mcshWhole = mcshChunk.GetWholeChunk();
-        byte[] mcalWhole = mcalChunk.GetWholeChunk();
-        byte[] mcseWhole = mcseChunk.GetWholeChunk();
-
-        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
+        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
         
         // Calculate bounding sphere radius from MCVT heights
         float radius = CalculateRadius(alphaMcvtRaw);
@@ -290,8 +289,8 @@ public static class AlphaMcnkBuilder
         int offsLayer  = offsNormal + mcnrRaw.Length;
         int offsRefs   = offsLayer  + mclyWhole.Length;
         int offsShadow = offsRefs   + mcrfWhole.Length;
-        int offsAlpha  = offsShadow + mcshWhole.Length;
-        int offsSnd    = offsAlpha  + mcalWhole.Length;
+        int offsAlpha  = offsShadow + mcshRaw.Length;   // MCSH is raw, no header
+        int offsSnd    = offsAlpha  + mcalRaw.Length;   // MCAL is raw, no header
 
         int sizeShadow = mcshRaw.Length;
         int sizeAlpha  = mcalRaw.Length;
@@ -306,7 +305,7 @@ public static class AlphaMcnkBuilder
         }
         int areaIdVal  = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId;
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshWhole.Length + mcalWhole.Length + mcseWhole.Length;
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed ('KNCM')
@@ -368,14 +367,17 @@ public static class AlphaMcnkBuilder
         // Write header
         ms.Write(smh);
 
-        // Sub-blocks in Alpha order (raw, no named headers): MCVT, MCNR, MCLY, MCRF, MCSH, MCAL, MCSE
+        // Sub-blocks in Alpha order:
+        // MCVT, MCNR: raw data (no headers)
+        // MCLY, MCRF: with headers (FourCC+size+data)
+        // MCSH, MCAL, MCSE: raw data (NO headers in Alpha v18!)
         if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
         if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
-        ms.Write(mclyWhole, 0, mclyWhole.Length);
-        ms.Write(mcrfWhole, 0, mcrfWhole.Length);
-        ms.Write(mcshWhole, 0, mcshWhole.Length);
-        ms.Write(mcalWhole, 0, mcalWhole.Length);
-        ms.Write(mcseWhole, 0, mcseWhole.Length);
+        ms.Write(mclyWhole, 0, mclyWhole.Length);  // Has header
+        ms.Write(mcrfWhole, 0, mcrfWhole.Length);  // Has header
+        if (mcshRaw.Length > 0) ms.Write(mcshRaw, 0, mcshRaw.Length);  // Raw data only!
+        if (mcalRaw.Length > 0) ms.Write(mcalRaw, 0, mcalRaw.Length);  // Raw data only!
+        if (mcseRaw.Length > 0) ms.Write(mcseRaw, 0, mcseRaw.Length);  // Raw data only!
 
         return ms.ToArray();
     }
@@ -564,5 +566,65 @@ public static class AlphaMcnkBuilder
         
         // Combine horizontal and vertical components
         return (float)Math.Sqrt(horizontalRadius * horizontalRadius + (heightRange / 2) * (heightRange / 2));
+    }
+    
+    private static void ValidateMclyMcalIntegrity(byte[] mclyRaw, byte[] mcalRaw, int indexX, int indexY, LkToAlphaOptions? opts)
+    {
+        if (mclyRaw.Length == 0 || mcalRaw.Length == 0) return;
+        
+        int numLayers = mclyRaw.Length / 16;
+        if (numLayers == 0) return;
+        
+        bool hasErrors = false;
+        
+        // Check each layer's offsetInMCAL value
+        for (int i = 0; i < numLayers; i++)
+        {
+            int layerOffset = i * 16;
+            uint textureId = BitConverter.ToUInt32(mclyRaw, layerOffset + 0);
+            uint flags = BitConverter.ToUInt32(mclyRaw, layerOffset + 4);
+            uint offsetInMCAL = BitConverter.ToUInt32(mclyRaw, layerOffset + 8);
+            int effectId = BitConverter.ToInt32(mclyRaw, layerOffset + 12);
+            
+            // Layer 0 (base) typically has no alpha map
+            if (i == 0 && offsetInMCAL == 0) continue;
+            
+            // Check if offset is within MCAL bounds
+            if (offsetInMCAL >= mcalRaw.Length)
+            {
+                Console.WriteLine($"[ERROR] Tile [{indexY:D2},{indexX:D2}] MCLY layer {i}: offsetInMCAL ({offsetInMCAL}) exceeds MCAL size ({mcalRaw.Length})");
+                Console.WriteLine($"        TextureID={textureId}, Flags=0x{flags:X8}, EffectID={effectId}");
+                hasErrors = true;
+            }
+            
+            // Warn if offset looks suspicious (e.g., exactly at midpoint, suggesting split data bug)
+            if (mcalRaw.Length == 4096 && offsetInMCAL == 2048 && i == 1)
+            {
+                Console.WriteLine($"[WARNING] Tile [{indexY:D2},{indexX:D2}] MCLY layer {i}: offsetInMCAL (2048) is exactly half of 4096-byte MCAL");
+                Console.WriteLine($"          This may indicate the 'gray dot → half-circles' bug!");
+            }
+            
+            // Check typical alpha map sizes
+            bool useAlphaMap = (flags & 0x100) != 0; // use_alpha_map flag
+            bool isCompressed = (flags & 0x200) != 0; // alpha_map_compressed flag
+            
+            if (useAlphaMap && offsetInMCAL > 0)
+            {
+                int remainingBytes = mcalRaw.Length - (int)offsetInMCAL;
+                
+                // Typical uncompressed sizes: 2048 (4-bit) or 4096 (8-bit)
+                // Compressed: 128-4160 bytes
+                if (!isCompressed && remainingBytes < 2048)
+                {
+                    Console.WriteLine($"[WARNING] Tile [{indexY:D2},{indexX:D2}] MCLY layer {i}: Only {remainingBytes} bytes remain for uncompressed alpha map (expected 2048 or 4096)");
+                }
+            }
+        }
+        
+        // Log success if verbose
+        if (!hasErrors && opts?.VerboseLogging == true)
+        {
+            Console.WriteLine($"[OK] Tile [{indexY:D2},{indexX:D2}] MCLY/MCAL validation passed: {numLayers} layers, {mcalRaw.Length} bytes alpha data");
+        }
     }
 }
