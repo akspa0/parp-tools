@@ -12,6 +12,9 @@ using WoWRollback.AnalysisModule;
 using WoWDataPlot.Models;
 using WoWRollback.Core.Services.Viewer;
 using WoWFormatLib.FileReaders;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 
 namespace WoWDataPlot;
@@ -963,6 +966,40 @@ class Program
             
             Console.WriteLine($"✓ Extracted {records.Count} placements");
             Console.WriteLine();
+            
+            // STEP 1b: Generate white placeholder tiles for tiles with placements but no minimap
+            if (minimapResult.MinimapDir != null)
+            {
+                Console.WriteLine("═══ STEP 1b: Generating Placeholder Tiles ═══");
+                var tilesWithPlacements = records.Where(r => r.TileX >= 0 && r.TileY >= 0)
+                    .Select(r => (r.TileX, r.TileY))
+                    .Distinct()
+                    .ToList();
+                
+                int placeholdersGenerated = 0;
+                foreach (var (tileX, tileY) in tilesWithPlacements)
+                {
+                    var minimapPath = Path.Combine(minimapResult.MinimapDir, $"{mapName}_{tileX}_{tileY}.png");
+                    if (!File.Exists(minimapPath))
+                    {
+                        // Create white 512x512 placeholder
+                        using var image = new Image<Rgb24>(512, 512);
+                        image.Mutate(ctx => ctx.BackgroundColor(SixLabors.ImageSharp.Color.White));
+                        await image.SaveAsPngAsync(minimapPath);
+                        placeholdersGenerated++;
+                    }
+                }
+                
+                if (placeholdersGenerated > 0)
+                {
+                    Console.WriteLine($"✓ Generated {placeholdersGenerated} white placeholder tiles");
+                }
+                else
+                {
+                    Console.WriteLine($"  All tiles have minimaps (no placeholders needed)");
+                }
+                Console.WriteLine();
+            }
             
             // STEP 2: Analyze layers per tile
             Console.WriteLine("═══ STEP 2: Analyzing Layers Per Tile ═══");
