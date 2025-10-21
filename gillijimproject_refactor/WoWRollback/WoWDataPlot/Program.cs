@@ -7,6 +7,7 @@ using System.Globalization;
 using GillijimProject.WowFiles.Alpha;
 using WoWDataPlot.Helpers;
 using WoWDataPlot.Extractors;
+using WoWDataPlot.Services;
 using WoWRollback.AnalysisModule;
 using WoWDataPlot.Models;
 using WoWRollback.Core.Services.Viewer;
@@ -58,6 +59,7 @@ class Program
         var mapMarkerSizeOption = new Option<float>("--map-marker-size", () => 5.0f, "Marker size for map overview");
         var mapMaxLayersOption = new Option<int>("--map-max-layers", () => 0, "Max layers to show on map overview (0 = all)");
         var minimapDirOption = new Option<DirectoryInfo?>("--minimap-dir", () => null, "Directory containing minimap tiles (optional)");
+        var globalRangeFileOption = new Option<FileInfo?>("--global-range-file", () => null, "JSON file with global UniqueID ranges (from analyze-client)");
         
         visualizeCommand.AddOption(wdtOptionVisualize);
         visualizeCommand.AddOption(outputDirOptionVisualize);
@@ -67,14 +69,37 @@ class Program
         visualizeCommand.AddOption(tileMarkerSizeOption);
         visualizeCommand.AddOption(mapMarkerSizeOption);
         visualizeCommand.AddOption(mapMaxLayersOption);
-        // minimapDirOption accepted but not wired (coming soon)
+        visualizeCommand.AddOption(globalRangeFileOption);
         
-        visualizeCommand.SetHandler(VisualizeComplete, wdtOptionVisualize, outputDirOptionVisualize, 
-            gapThresholdOption, tileSizeOption, mapSizeOption, tileMarkerSizeOption, mapMarkerSizeOption, mapMaxLayersOption);
+        visualizeCommand.SetHandler(async (context) => 
+        {
+            var wdt = context.ParseResult.GetValueForOption(wdtOptionVisualize)!;
+            var outputDir = context.ParseResult.GetValueForOption(outputDirOptionVisualize)!;
+            var gapThreshold = context.ParseResult.GetValueForOption(gapThresholdOption);
+            var tileSize = context.ParseResult.GetValueForOption(tileSizeOption);
+            var mapSize = context.ParseResult.GetValueForOption(mapSizeOption);
+            var tileMarkerSize = context.ParseResult.GetValueForOption(tileMarkerSizeOption);
+            var mapMarkerSize = context.ParseResult.GetValueForOption(mapMarkerSizeOption);
+            var mapMaxLayers = context.ParseResult.GetValueForOption(mapMaxLayersOption);
+            var globalRangeFile = context.ParseResult.GetValueForOption(globalRangeFileOption);
+            
+            await VisualizeComplete(wdt, outputDir, gapThreshold, tileSize, mapSize, tileMarkerSize, mapMarkerSize, mapMaxLayers, globalRangeFile);
+        });
+        
+        // analyze-client command - NEW: Global UniqueID range tracking
+        var analyzeClientCommand = new Command("analyze-client", "Analyze UniqueID ranges across all maps in a WoW client");
+        var clientRootOption = new Option<DirectoryInfo>("--client-root", "Path to WoW client root (contains World/Maps)") { IsRequired = true };
+        var globalOutputOption = new Option<FileInfo>("--output", "Output JSON file path") { IsRequired = true };
+        
+        analyzeClientCommand.AddOption(clientRootOption);
+        analyzeClientCommand.AddOption(globalOutputOption);
+        
+        analyzeClientCommand.SetHandler(AnalyzeClient, clientRootOption, globalOutputOption);
         
         rootCommand.AddCommand(plotCommand);
         rootCommand.AddCommand(exportCommand);
         rootCommand.AddCommand(visualizeCommand);
+        rootCommand.AddCommand(analyzeClientCommand);
         
         return await rootCommand.InvokeAsync(args);
     }
@@ -823,7 +848,7 @@ class Program
         return null;
     }
     
-    static async Task VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers)
+    static async Task VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers, FileInfo? globalRangeFile)
     {
         Console.WriteLine($"=== WoW Data Plot - Complete Visualization Pipeline ===");
         Console.WriteLine($"Input: {wdtFile.FullName}");
@@ -834,7 +859,19 @@ class Program
         Console.WriteLine($"Tile marker size: {tileMarkerSize}");
         Console.WriteLine($"Map marker size: {mapMarkerSize}");
         Console.WriteLine($"Map max layers: {(mapMaxLayers == 0 ? "all" : mapMaxLayers.ToString())}");
+        Console.WriteLine($"Global range file: {(globalRangeFile != null ? globalRangeFile.FullName : "none (using local ranges)")}");
         Console.WriteLine();
+        
+        // Load global ranges if provided
+        GlobalRangeResult? globalRanges = null;
+        if (globalRangeFile != null && globalRangeFile.Exists)
+        {
+            Console.WriteLine("Loading global UniqueID ranges...");
+            globalRanges = GlobalRangeAnalyzer.LoadFromJson(globalRangeFile.FullName);
+            Console.WriteLine($"  Global range: {globalRanges.GlobalMinUniqueId:N0} - {globalRanges.GlobalMaxUniqueId:N0}");
+            Console.WriteLine($"  Covering {globalRanges.Maps.Count} maps, {globalRanges.TotalPlacementCount:N0} placements");
+            Console.WriteLine();
+        }
         
         try
         {
@@ -990,9 +1027,26 @@ class Program
             Console.WriteLine("═══ STEP 3: Generating Per-Tile Images ═══");
             
             // Use GLOBAL UniqueID range for consistent colors across all tiles
-            uint visualGlobalMinId = records.Min(r => r.UniqueId);
-            uint visualGlobalMaxId = records.Max(r => r.UniqueId);
-            uint visualGlobalRange = Math.Max(visualGlobalMaxId - visualGlobalMinId, 1);
+            uint visualGlobalMinId;
+            uint visualGlobalMaxId;
+            uint visualGlobalRange;
+            
+            if (globalRanges != null)
+            {
+                // Use cross-map global ranges for TRUE temporal positioning
+                visualGlobalMinId = globalRanges.GlobalMinUniqueId;
+                visualGlobalMaxId = globalRanges.GlobalMaxUniqueId;
+                visualGlobalRange = Math.Max(visualGlobalMaxId - visualGlobalMinId, 1);
+                Console.WriteLine($"  Using GLOBAL ranges: {visualGlobalMinId:N0} - {visualGlobalMaxId:N0} (cross-map normalization)");
+            }
+            else
+            {
+                // Use local map ranges only
+                visualGlobalMinId = records.Min(r => r.UniqueId);
+                visualGlobalMaxId = records.Max(r => r.UniqueId);
+                visualGlobalRange = Math.Max(visualGlobalMaxId - visualGlobalMinId, 1);
+                Console.WriteLine($"  Using LOCAL ranges: {visualGlobalMinId:N0} - {visualGlobalMaxId:N0} (map-only normalization)");
+            }
             
             int tileCount = 0;
             
@@ -1212,14 +1266,23 @@ class Program
             
             var mapPlot = new Plot();
             
-            uint globalMinId = records.Min(r => r.UniqueId);
-            uint globalMaxId = records.Max(r => r.UniqueId);
-            uint globalRange = Math.Max(globalMaxId - globalMinId, 1);
+            // Reuse the same global ranges from STEP 3 for consistency
+            uint globalMinId = visualGlobalMinId;
+            uint globalMaxId = visualGlobalMaxId;
+            uint globalRange = visualGlobalRange;
             
             // Divide into 100 color buckets for smooth gradient across entire map
             int mapBuckets = 100;
             
-            Console.WriteLine($"  Plotting heatmap with {mapBuckets} color gradients (UniqueID {globalMinId}-{globalMaxId})...");
+            if (globalRanges != null)
+            {
+                Console.WriteLine($"  Plotting GLOBAL heatmap with {mapBuckets} color gradients (UniqueID {globalMinId}-{globalMaxId})...");
+                Console.WriteLine($"  This map's actual range: {records.Min(r => r.UniqueId):N0} - {records.Max(r => r.UniqueId):N0}");
+            }
+            else
+            {
+                Console.WriteLine($"  Plotting LOCAL heatmap with {mapBuckets} color gradients (UniqueID {globalMinId}-{globalMaxId})...");
+            }
             
             for (int bucket = 0; bucket < mapBuckets; bucket++)
             {
@@ -1498,6 +1561,54 @@ class Program
             {
                 Console.WriteLine($"[ERROR] {ex.InnerException.Message}");
             }
+            Console.WriteLine(ex.StackTrace);
+        }
+    }
+    
+    static void AnalyzeClient(DirectoryInfo clientRoot, FileInfo outputFile)
+    {
+        Console.WriteLine("=== WoW Data Archaeology - Global UniqueID Analysis ===");
+        Console.WriteLine($"Client Root: {clientRoot.FullName}");
+        Console.WriteLine($"Output: {outputFile.FullName}");
+        Console.WriteLine();
+        
+        try
+        {
+            var progress = new Progress<string>(msg => Console.WriteLine(msg));
+            
+            Console.WriteLine("═══ Scanning All Maps ═══");
+            var result = GlobalRangeAnalyzer.AnalyzeClient(clientRoot.FullName, progress);
+            
+            Console.WriteLine();
+            Console.WriteLine("═══ Global Statistics ═══");
+            Console.WriteLine($"Total maps analyzed: {result.Maps.Count}");
+            Console.WriteLine($"Total placements: {result.TotalPlacementCount:N0}");
+            Console.WriteLine($"Global UniqueID range: {result.GlobalMinUniqueId:N0} - {result.GlobalMaxUniqueId:N0}");
+            Console.WriteLine($"Range span: {result.GlobalMaxUniqueId - result.GlobalMinUniqueId:N0}");
+            Console.WriteLine();
+            
+            Console.WriteLine("═══ Per-Map Breakdown ═══");
+            foreach (var map in result.Maps.OrderBy(m => m.Value.MinUniqueId))
+            {
+                var info = map.Value;
+                Console.WriteLine($"{map.Key,-20} | {info.MinUniqueId,8:N0} - {info.MaxUniqueId,8:N0} | {info.PlacementCount,7:N0} placements ({info.M2Count,6:N0} M2, {info.WmoCount,5:N0} WMO)");
+            }
+            Console.WriteLine();
+            
+            // Save to JSON
+            Console.WriteLine("═══ Saving Results ═══");
+            GlobalRangeAnalyzer.SaveToJson(result, outputFile.FullName);
+            Console.WriteLine($"✓ Saved: {outputFile.FullName}");
+            Console.WriteLine();
+            
+            Console.WriteLine("✓ Analysis Complete!");
+            Console.WriteLine();
+            Console.WriteLine("Use this file with the visualize command:");
+            Console.WriteLine($"  --global-range-file \"{outputFile.FullName}\"");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] {ex.Message}");
             Console.WriteLine(ex.StackTrace);
         }
     }
