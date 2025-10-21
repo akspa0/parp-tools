@@ -9,6 +9,9 @@ using WoWDataPlot.Helpers;
 using WoWDataPlot.Extractors;
 using WoWRollback.AnalysisModule;
 using WoWDataPlot.Models;
+using WoWRollback.Core.Services.Viewer;
+using WoWFormatLib.FileReaders;
+using SixLabors.ImageSharp.Formats.Png;
 
 namespace WoWDataPlot;
 
@@ -230,7 +233,11 @@ class Program
                                       .OrderBy(g => g.Key.TileY)
                                       .ThenBy(g => g.Key.TileX);
             
-            Console.WriteLine($"[INFO] Analyzing {tilesWithData.Count()} tiles independently...");
+            Console.WriteLine($"  Processing {tilesWithData.Count()} tiles...");
+            
+            // Calculate GLOBAL UniqueID range for consistent coloring
+            uint globalMinId = records.Min(r => r.UniqueId);
+            uint globalMaxId = records.Max(r => r.UniqueId);
             
             foreach (var tileGroup in tilesWithData)
             {
@@ -330,7 +337,7 @@ class Program
     /// <summary>
     /// Generate an HTML page for a single tile with its layers and legend.
     /// </summary>
-    private static void GenerateTileHtmlPage(string htmlPath, string mapName, TileLayerInfo tileInfo, string imageName, string? minimapDir)
+    private static void GenerateTileHtmlPage(string htmlPath, string mapName, TileLayerInfo tileInfo, string imageName, string? minimapDir, uint globalMinId, uint globalMaxId)
     {
         using var writer = new StreamWriter(htmlPath);
         
@@ -372,12 +379,14 @@ class Program
         
         writer.WriteLine("    <div class='tile-info'>");
         writer.WriteLine($"        <strong>Total Placements:</strong> {tileInfo.Layers.Sum(l => l.PlacementCount)}<br>");
-        writer.WriteLine($"        <strong>Layers:</strong> {tileInfo.Layers.Count}");
+        writer.WriteLine($"        <strong>Layers:</strong> {tileInfo.Layers.Count}<br>");
+        writer.WriteLine("        <strong>Marker Shapes:</strong> ● = M2 Models | ■ = WMO Buildings");
         writer.WriteLine("    </div>");
         
         // Interactive layer viewer with minimap base + toggleable overlays
         var overlayDir = $"overlays_{tileInfo.TileX}_{tileInfo.TileY}";
-        var hasOverlays = Directory.Exists(Path.Combine(Path.GetDirectoryName(htmlPath)!, overlayDir));
+        var overlayPath = Path.Combine(Path.GetDirectoryName(htmlPath)!, overlayDir);
+        var hasOverlays = Directory.Exists(overlayPath);
         
         if (minimapFile != null && hasOverlays)
         {
@@ -391,13 +400,36 @@ class Program
             writer.WriteLine("                <button onclick='toggleAll(true)' style='padding: 5px 10px; margin-right: 5px; background: #4ec9b0; border: none; border-radius: 3px; color: #1e1e1e; cursor: pointer;'>All On</button>");
             writer.WriteLine("                <button onclick='toggleAll(false)' style='padding: 5px 10px; background: #ce9178; border: none; border-radius: 3px; color: #1e1e1e; cursor: pointer;'>All Off</button>");
             writer.WriteLine("            </div>");
+            writer.WriteLine("            <div style='margin: 15px 0; padding: 10px; background: #2d2d30; border-radius: 5px;'>");
+            writer.WriteLine("                <h5 style='color: #ce9178; margin-top: 0;'>🔧 Debug Transforms</h5>");
+            writer.WriteLine("                <label style='display: block; margin: 5px 0; cursor: pointer;'>");
+            writer.WriteLine("                    <input type='checkbox' id='flipX' onchange='updateTransform()' style='margin-right: 5px;'>");
+            writer.WriteLine("                    Flip X (horizontal mirror)");
+            writer.WriteLine("                </label>");
+            writer.WriteLine("                <label style='display: block; margin: 5px 0; cursor: pointer;'>");
+            writer.WriteLine("                    <input type='checkbox' id='flipY' onchange='updateTransform()' style='margin-right: 5px;'>");
+            writer.WriteLine("                    Flip Y (vertical mirror)");
+            writer.WriteLine("                </label>");
+            writer.WriteLine("                <label style='display: block; margin: 5px 0; cursor: pointer;'>");
+            writer.WriteLine("                    <input type='checkbox' id='swapXY' onchange='updateTransform()' style='margin-right: 5px;'>");
+            writer.WriteLine("                    Swap X↔Y");
+            writer.WriteLine("                </label>");
+            writer.WriteLine("                <button onclick='resetTransform()' style='margin-top: 5px; padding: 3px 8px; background: #555; border: none; border-radius: 3px; color: #ddd; cursor: pointer; font-size: 0.9em;'>Reset</button>");
+            writer.WriteLine("            </div>");
             
             foreach (var (layer, idx) in tileInfo.Layers.Select((l, i) => (l, i)))
             {
+                // Calculate ACTUAL color based on global gradient (average UniqueID of this layer)
+                uint layerMidId = (layer.MinUniqueId + layer.MaxUniqueId) / 2;
+                float normalizedPos = (layerMidId - globalMinId) / (float)(Math.Max(globalMaxId - globalMinId, 1));
+                float hue = (1.0f - normalizedPos) * 240f; // Blue (early) -> Red (late)
+                var layerColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                string htmlColor = $"#{layerColor.R:X2}{layerColor.G:X2}{layerColor.B:X2}";
+                
                 writer.WriteLine($"            <div style='margin: 8px 0; padding: 8px; background: #2d2d30; border-radius: 3px;'>");
                 writer.WriteLine($"                <label style='display: flex; align-items: center; cursor: pointer;'>");
                 writer.WriteLine($"                    <input type='checkbox' id='layer{idx}' onchange='toggleLayer({idx})' checked style='margin-right: 8px;'>");
-                writer.WriteLine($"                    <div style='width: 20px; height: 20px; background: {layer.Color}; margin-right: 8px; border: 1px solid #3c3c3c; border-radius: 2px;'></div>");
+                writer.WriteLine($"                    <div style='width: 20px; height: 20px; background: {htmlColor}; margin-right: 8px; border: 1px solid #3c3c3c; border-radius: 2px;'></div>");
                 writer.WriteLine($"                    <div style='font-size: 0.85em;'>");
                 writer.WriteLine($"                        <div style='color: #4ec9b0; font-weight: bold;'>{layer.Name}</div>");
                 writer.WriteLine($"                        <div style='color: #858585; font-size: 0.9em;'>{layer.PlacementCount} items</div>");
@@ -431,12 +463,24 @@ class Program
                 writer.WriteLine($"        layerVisible[{idx}] = true;");
             }
             
+            writer.WriteLine("        let transformState = { flipX: false, flipY: false, swapXY: false };");
             writer.WriteLine("        function redraw() {");
             writer.WriteLine("            ctx.clearRect(0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("            // Draw minimap base - always static, no transform");
             writer.WriteLine("            ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("            // Draw layers with transform applied");
             writer.WriteLine("            for (let i = 0; i < layerImgs.length; i++) {");
             writer.WriteLine("                if (layerVisible[i] && layerImgs[i].complete) {");
+            writer.WriteLine("                    ctx.save();");
+            writer.WriteLine("                    ctx.translate(canvas.width / 2, canvas.height / 2);");
+            writer.WriteLine("                    if (transformState.swapXY) {");
+            writer.WriteLine("                        ctx.rotate(Math.PI / 2);");
+            writer.WriteLine("                        ctx.scale(1, -1);");
+            writer.WriteLine("                    }");
+            writer.WriteLine("                    ctx.scale(transformState.flipX ? -1 : 1, transformState.flipY ? -1 : 1);");
+            writer.WriteLine("                    ctx.translate(-canvas.width / 2, -canvas.height / 2);");
             writer.WriteLine("                    ctx.drawImage(layerImgs[i], 0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("                    ctx.restore();");
             writer.WriteLine("                }");
             writer.WriteLine("            }");
             writer.WriteLine("        }");
@@ -449,6 +493,19 @@ class Program
             writer.WriteLine("                layerVisible[i] = visible;");
             writer.WriteLine("                document.getElementById('layer' + i).checked = visible;");
             writer.WriteLine("            }");
+            writer.WriteLine("            redraw();");
+            writer.WriteLine("        }");
+            writer.WriteLine("        function updateTransform() {");
+            writer.WriteLine("            transformState.flipX = document.getElementById('flipX').checked;");
+            writer.WriteLine("            transformState.flipY = document.getElementById('flipY').checked;");
+            writer.WriteLine("            transformState.swapXY = document.getElementById('swapXY').checked;");
+            writer.WriteLine("            redraw();");
+            writer.WriteLine("        }");
+            writer.WriteLine("        function resetTransform() {");
+            writer.WriteLine("            document.getElementById('flipX').checked = false;");
+            writer.WriteLine("            document.getElementById('flipY').checked = false;");
+            writer.WriteLine("            document.getElementById('swapXY').checked = false;");
+            writer.WriteLine("            transformState = { flipX: false, flipY: false, swapXY: false };");
             writer.WriteLine("            redraw();");
             writer.WriteLine("        }");
             writer.WriteLine("        baseImg.onload = redraw;");
@@ -466,15 +523,26 @@ class Program
             writer.WriteLine("    </div>");
         }
         
-        writer.WriteLine("    <h2>Layers in This Tile</h2>");
+        writer.WriteLine("    <h2>Layers in This Tile ({0} local layers detected)</h2>", tileInfo.Layers.Count);
+        writer.WriteLine("    <p style='color: #858585; font-size: 0.9em; margin-bottom: 10px;'>These layers were detected in this specific tile based on UniqueID gaps. Use the toggles above to show/hide individual layers.</p>");
         writer.WriteLine("    <div class='layer-list'>");
         
-        foreach (var layer in tileInfo.Layers)
+        foreach (var (layer, idx) in tileInfo.Layers.Select((l, i) => (l, i)))
         {
+            // Calculate global color for this layer
+            uint layerMidId = (layer.MinUniqueId + layer.MaxUniqueId) / 2;
+            float normalizedPos = (layerMidId - globalMinId) / (float)Math.Max(globalMaxId - globalMinId, 1);
+            float hue = (1.0f - normalizedPos) * 240f;
+            var globalColor = ColorFromHSV(hue, 0.85f, 0.95f);
+            string htmlColor = $"#{globalColor.R:X2}{globalColor.G:X2}{globalColor.B:X2}";
+            
+            var m2Count = layer.PlacementCount; // This is already the tile-specific count
+            var layerType = layer.MinUniqueId == layer.MaxUniqueId ? "Single object" : "Range";
+            
             writer.WriteLine("        <div class='layer-item'>");
-            writer.WriteLine($"            <div class='color-box' style='background-color: {layer.Color};'></div>");
+            writer.WriteLine($"            <div class='color-box' style='background-color: {htmlColor};'></div>");
             writer.WriteLine($"            <div class='layer-info-text'>");
-            writer.WriteLine($"                <strong>{layer.Name}</strong> - {layer.PlacementCount} placements");
+            writer.WriteLine($"                <strong>Layer {idx + 1}:</strong> UniqueID {layer.MinUniqueId:N0} - {layer.MaxUniqueId:N0} ({m2Count} placements)");
             writer.WriteLine($"            </div>");
             writer.WriteLine("        </div>");
         }
@@ -755,7 +823,7 @@ class Program
         return null;
     }
     
-    static void VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers)
+    static async Task VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers)
     {
         Console.WriteLine($"=== WoW Data Plot - Complete Visualization Pipeline ===");
         Console.WriteLine($"Input: {wdtFile.FullName}");
@@ -776,25 +844,73 @@ class Program
             
             var mapName = Path.GetFileNameWithoutExtension(wdtFile.Name);
             
-            // Process minimaps
+            // Process minimaps using existing provider system
             Console.WriteLine("═══ STEP 0: Processing Minimap Tiles ═══");
-            var minimapHandler = new MinimapHandler();
-            var mapDirectory = Path.GetDirectoryName(wdtFile.FullName) ?? "";
-            var minimapResult = minimapHandler.ProcessMinimaps(mapDirectory, mapName, outputDir.FullName);
             
-            if (minimapResult.Success && minimapResult.TilesCopied > 0)
+            string? minimapDir = null;
+            int tilesCopied = 0;
+            
+            try
             {
-                Console.WriteLine($"✓ Found and copied {minimapResult.TilesCopied} minimap tiles");
-                Console.WriteLine($"  Minimap directory: {minimapResult.MinimapDir}");
+                var minimapOutputDir = Path.Combine(outputDir.FullName, "minimaps");
+                Directory.CreateDirectory(minimapOutputDir);
+                
+                // Use LooseFileMinimapProvider to extract minimaps
+                // WDT: test_data/0.5.3/tree/World/Maps/Azeroth/Azeroth.wdt
+                // Need: test_data as root (6 levels up from WDT file)
+                var wdtPath = wdtFile.FullName;
+                var testDataRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(wdtPath)))))); // Go up 6 levels to test_data
+                var versions = new List<string> { "0.5.3" };
+                
+                Console.WriteLine($"  Test data root: {testDataRoot}");
+                
+                var provider = WoWRollback.Core.Services.Viewer.LooseFileMinimapProvider.Build(testDataRoot ?? "", versions);
+                var composer = new WoWRollback.Core.Services.Viewer.MinimapComposer();
+                var viewerOptions = WoWRollback.Core.Services.Viewer.ViewerOptions.CreateDefault();
+                
+                // Get all tiles for this map
+                var availableTiles = provider.EnumerateTiles("0.5.3", mapName).ToList();
+                
+                if (availableTiles.Count > 0)
+                {
+                    Console.WriteLine($"  Found {availableTiles.Count} minimap tiles");
+                    
+                    foreach (var (tileX, tileY) in availableTiles)
+                    {
+                        var stream = await provider.OpenTileAsync("0.5.3", mapName, tileX, tileY);
+                        if (stream != null)
+                        {
+                            using (stream)
+                            {
+                                var outputPath = Path.Combine(minimapOutputDir, $"{mapName}_{tileX}_{tileY}.png");
+                                await composer.ComposeAsync(stream, outputPath, viewerOptions, CancellationToken.None);
+                                tilesCopied++;
+                            }
+                        }
+                    }
+                    
+                    if (tilesCopied > 0)
+                    {
+                        minimapDir = minimapOutputDir;
+                        Console.WriteLine($"✓ Converted {tilesCopied} BLP minimap tiles to PNG");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"⚠ No minimap tiles found (optional - continuing without them)");
+                }
             }
-            else if (!string.IsNullOrEmpty(minimapResult.ErrorMessage))
+            catch (Exception ex)
             {
-                Console.WriteLine($"⚠ Minimap processing: {minimapResult.ErrorMessage}");
+                Console.WriteLine($"⚠ Minimap processing failed: {ex.Message}");
+                Console.WriteLine($"  Continuing without minimaps");
             }
-            else
-            {
-                Console.WriteLine($"⚠ No minimap tiles found (optional - continuing without them)");
-            }
+            
+            var minimapResult = new MinimapResult(
+                Success: tilesCopied > 0,
+                TilesCopied: tilesCopied,
+                MinimapDir: minimapDir,
+                ErrorMessage: null);
             Console.WriteLine();
             
             // STEP 1: Extract placement data
@@ -873,6 +989,11 @@ class Program
             // STEP 3: Generate per-tile images
             Console.WriteLine("═══ STEP 3: Generating Per-Tile Images ═══");
             
+            // Use GLOBAL UniqueID range for consistent colors across all tiles
+            uint visualGlobalMinId = records.Min(r => r.UniqueId);
+            uint visualGlobalMaxId = records.Max(r => r.UniqueId);
+            uint visualGlobalRange = Math.Max(visualGlobalMaxId - visualGlobalMinId, 1);
+            
             int tileCount = 0;
             
             foreach (var tileInfo in tileLayerInfos)
@@ -883,44 +1004,47 @@ class Program
                 
                 var plt = new Plot();
                 
-                // HEATMAP APPROACH: Plot placements in color buckets by UniqueID
                 uint tileMinId = tileRecords.Min(r => r.UniqueId);
                 uint tileMaxId = tileRecords.Max(r => r.UniqueId);
-                uint tileRange = Math.Max(tileMaxId - tileMinId, 1);
                 
-                // Divide into 50 color buckets for smooth gradient
-                int numBuckets = Math.Min(50, tileRecords.Count);
+                // HEATMAP: Color each placement based on GLOBAL UniqueID position
+                // Group by type for different marker shapes
+                var m2Records = tileRecords.Where(r => r.Type == "M2").ToList();
+                var wmoRecords = tileRecords.Where(r => r.Type == "WMO").ToList();
                 
-                for (int bucket = 0; bucket < numBuckets; bucket++)
+                // Plot M2 placements (circles)
+                foreach (var record in m2Records)
                 {
-                    uint bucketStart = tileMinId + (uint)((tileRange * bucket) / numBuckets);
-                    uint bucketEnd = tileMinId + (uint)((tileRange * (bucket + 1)) / numBuckets);
+                    float normalizedPos = (record.UniqueId - visualGlobalMinId) / (float)visualGlobalRange;
+                    float hue = (1.0f - normalizedPos) * 240f;
+                    var pointColor = ColorFromHSV(hue, 0.85f, 0.95f);
                     
-                    var bucketRecords = tileRecords.Where(r => r.UniqueId >= bucketStart && r.UniqueId < bucketEnd).ToList();
-                    if (bucket == numBuckets - 1) // Last bucket includes max
-                        bucketRecords = tileRecords.Where(r => r.UniqueId >= bucketStart && r.UniqueId <= bucketEnd).ToList();
-                    
-                    if (bucketRecords.Count == 0) continue;
-                    
-                    var plotCoords = bucketRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
-                    double[] xData = plotCoords.Select(c => c.plotX).ToArray();
-                    double[] yData = plotCoords.Select(c => c.plotY).ToArray();
-                    
-                    // Color gradient: Blue (early) -> Green -> Yellow -> Red (late)
-                    float normalizedPos = bucket / (float)(numBuckets - 1);
-                    float hue = (1.0f - normalizedPos) * 240f; // 240° = blue, 0° = red
-                    var bucketColor = ColorFromHSV(hue, 0.85f, 0.95f);
-                    
-                    var scatter = plt.Add.Scatter(xData, yData);
+                    var plotCoord = CoordinateTransform.WorldToPlot(record.X, record.Y);
+                    var scatter = plt.Add.Scatter(new[] { plotCoord.plotX }, new[] { plotCoord.plotY });
                     scatter.MarkerSize = tileMarkerSize;
-                    scatter.MarkerShape = MarkerShape.FilledCircle;
+                    scatter.MarkerShape = MarkerShape.FilledCircle; // M2 = Circle
                     scatter.LineWidth = 0;
-                    scatter.Color = ScottPlot.Color.FromColor(bucketColor);
+                    scatter.Color = ScottPlot.Color.FromColor(pointColor);
+                }
+                
+                // Plot WMO placements (squares)
+                foreach (var record in wmoRecords)
+                {
+                    float normalizedPos = (record.UniqueId - visualGlobalMinId) / (float)visualGlobalRange;
+                    float hue = (1.0f - normalizedPos) * 240f;
+                    var pointColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                    
+                    var plotCoord = CoordinateTransform.WorldToPlot(record.X, record.Y);
+                    var scatter = plt.Add.Scatter(new[] { plotCoord.plotX }, new[] { plotCoord.plotY });
+                    scatter.MarkerSize = tileMarkerSize * 1.2f; // Slightly larger for visibility
+                    scatter.MarkerShape = MarkerShape.FilledSquare; // WMO = Square
+                    scatter.LineWidth = 0;
+                    scatter.Color = ScottPlot.Color.FromColor(pointColor);
                 }
                 
                 var (centerX, centerY) = CoordinateTransform.TileToWorldCenter(tileInfo.TileX, tileInfo.TileY);
                 
-                plt.Title($"[{tileInfo.TileX},{tileInfo.TileY}] ({centerX:F0},{centerY:F0}) - UniqueID {tileMinId}-{tileMaxId}");
+                plt.Title($"[{tileInfo.TileX},{tileInfo.TileY}] ({centerX:F0},{centerY:F0}) - Global UniqueID {visualGlobalMinId}-{visualGlobalMaxId}");
                 plt.XLabel("East ← → West");
                 plt.YLabel("South ← → North");
                 plt.Axes.SquareUnits();
@@ -928,9 +1052,90 @@ class Program
                 string outputPath = Path.Combine(tilesDir.FullName, tileInfo.ImagePath!);
                 plt.SavePng(outputPath, tileSize, tileSize);
                 
-                // Generate HTML page for this tile
+                // Generate layer overlays BEFORE HTML (if minimap exists for this tile)
+                if (!string.IsNullOrEmpty(minimapResult.MinimapDir))
+                {
+                    var minimapPath = Path.Combine(minimapResult.MinimapDir, $"{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.png");
+                    if (File.Exists(minimapPath))
+                    {
+                        // Create overlay directory for this tile
+                        var overlayDir = Path.Combine(tilesDir.FullName, $"overlays_{tileInfo.TileX}_{tileInfo.TileY}");
+                        Directory.CreateDirectory(overlayDir);
+                        
+                        Console.WriteLine($"[OVERLAY] Generating overlays for tile [{tileInfo.TileX},{tileInfo.TileY}] with {tileInfo.Layers.Count} layers, {tileRecords.Count} records");
+                        
+                        // Generate one transparent PNG per layer with GLOBAL coloring
+                        foreach (var layer in tileInfo.Layers)
+                        {
+                            var layerRecords = tileRecords.Where(r => r.UniqueId >= layer.MinUniqueId && 
+                                                                      r.UniqueId <= layer.MaxUniqueId).ToList();
+                            if (layerRecords.Count == 0) continue;
+                            
+                            var layerPlt = new Plot();
+                            layerPlt.Layout.Frameless();
+                            
+                            // Make background TRANSPARENT so minimap shows through
+                            layerPlt.FigureBackground.Color = ScottPlot.Colors.Transparent;
+                            layerPlt.DataBackground.Color = ScottPlot.Colors.Transparent;
+                            
+                            // Color each point based on GLOBAL UniqueID gradient with type-specific shapes
+                            var m2LayerRecords = layerRecords.Where(r => r.Type == "M2").ToList();
+                            var wmoLayerRecords = layerRecords.Where(r => r.Type == "WMO").ToList();
+                            
+                            Console.WriteLine($"[OVERLAY] Layer {layer.Name}: {m2LayerRecords.Count} M2 + {wmoLayerRecords.Count} WMO");
+                            
+                            // Sample coordinate debug for first record
+                            if (m2LayerRecords.Count > 0)
+                            {
+                                var sample = m2LayerRecords[0];
+                                var samplePixel = CoordinateTransform.WorldToTilePixel(sample.X, sample.Y, tileSize, tileSize);
+                                Console.WriteLine($"[OVERLAY]   Sample M2: world({sample.X:F1}, {sample.Y:F1}) -> pixel({samplePixel.pixelX:F1}, {samplePixel.pixelY:F1})");
+                            }
+                            
+                            // Plot M2 (circles) - use EXACT pixel coordinates for 1:1 alignment
+                            foreach (var record in m2LayerRecords)
+                            {
+                                float normalizedPos = (record.UniqueId - visualGlobalMinId) / (float)visualGlobalRange;
+                                float hue = (1.0f - normalizedPos) * 240f;
+                                var pointColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                                
+                                var pixelCoord = CoordinateTransform.WorldToTilePixel(record.X, record.Y, tileSize, tileSize);
+                                var scatter = layerPlt.Add.Scatter(new[] { pixelCoord.pixelX }, new[] { pixelCoord.pixelY });
+                                scatter.MarkerSize = tileMarkerSize * 1.5f;
+                                scatter.MarkerShape = MarkerShape.FilledCircle;
+                                scatter.LineWidth = 0;
+                                scatter.Color = ScottPlot.Color.FromColor(pointColor);
+                            }
+                            
+                            // Plot WMO (squares) - use EXACT pixel coordinates for 1:1 alignment
+                            foreach (var record in wmoLayerRecords)
+                            {
+                                float normalizedPos = (record.UniqueId - visualGlobalMinId) / (float)visualGlobalRange;
+                                float hue = (1.0f - normalizedPos) * 240f;
+                                var pointColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                                
+                                var pixelCoord = CoordinateTransform.WorldToTilePixel(record.X, record.Y, tileSize, tileSize);
+                                var scatter = layerPlt.Add.Scatter(new[] { pixelCoord.pixelX }, new[] { pixelCoord.pixelY });
+                                scatter.MarkerSize = tileMarkerSize * 1.8f;
+                                scatter.MarkerShape = MarkerShape.FilledSquare;
+                                scatter.LineWidth = 0;
+                                scatter.Color = ScottPlot.Color.FromColor(pointColor);
+                            }
+                            
+                            // Set axes to EXACT pixel space (0 to imageSize) for perfect alignment
+                            layerPlt.Axes.SetLimits(0, tileSize, 0, tileSize);
+                            layerPlt.Axes.SquareUnits();
+                            layerPlt.HideGrid();
+                            
+                            string overlayPath = Path.Combine(overlayDir, $"layer_{layer.MinUniqueId}_{layer.MaxUniqueId}.png");
+                            layerPlt.SavePng(overlayPath, tileSize, tileSize);
+                        }
+                    }
+                }
+                
+                // Generate HTML page for this tile (overlays now exist!)
                 string tileHtmlPath = Path.Combine(tilesDir.FullName, $"{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html");
-                GenerateTileHtmlPage(tileHtmlPath, mapName, tileInfo, Path.GetFileName(outputPath), minimapResult.MinimapDir);
+                GenerateTileHtmlPage(tileHtmlPath, mapName, tileInfo, Path.GetFileName(outputPath), minimapResult.MinimapDir, visualGlobalMinId, visualGlobalMaxId);
                 
                 tileCount++;
                 if (tileCount % 50 == 0)
@@ -939,11 +1144,11 @@ class Program
                 }
             }
             
-            Console.WriteLine($"✓ Generated {tileCount} tile images + HTML pages");
+            Console.WriteLine($"✓ Generated {tileCount} tile images + HTML pages with layer overlays");
             Console.WriteLine();
             
-            // STEP 3b: Generate layer overlays for tiles with minimaps
-            if (!string.IsNullOrEmpty(minimapResult.MinimapDir))
+            // Old STEP 3b removed - now done inline above
+            if (false && !string.IsNullOrEmpty(minimapResult.MinimapDir))
             {
                 Console.WriteLine("═══ STEP 3b: Generating Layer Overlay PNGs ═══");
                 int overlaysGenerated = 0;
@@ -960,7 +1165,7 @@ class Program
                     var overlayDir = Path.Combine(tilesDir.FullName, $"overlays_{tileInfo.TileX}_{tileInfo.TileY}");
                     Directory.CreateDirectory(overlayDir);
                     
-                    // Generate one transparent PNG per layer
+                    // Generate one transparent PNG per layer with GLOBAL coloring
                     foreach (var layer in tileInfo.Layers)
                     {
                         var layerRecords = tileRecords.Where(r => r.UniqueId >= layer.MinUniqueId && 
@@ -970,17 +1175,23 @@ class Program
                         var plt = new Plot();
                         plt.Layout.Frameless();
                         
-                        var plotCoords = layerRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
-                        double[] xData = plotCoords.Select(c => c.plotX).ToArray();
-                        double[] yData = plotCoords.Select(c => c.plotY).ToArray();
-                        
-                        var scatter = plt.Add.Scatter(xData, yData);
-                        scatter.MarkerSize = tileMarkerSize * 1.5f; // Slightly larger for visibility
-                        scatter.MarkerShape = MarkerShape.FilledCircle;
-                        scatter.LineWidth = 0;
-                        
-                        var color = System.Drawing.ColorTranslator.FromHtml(layer.Color);
-                        scatter.Color = ScottPlot.Color.FromColor(color);
+                        // Color each point based on GLOBAL UniqueID gradient for consistency
+                        foreach (var record in layerRecords)
+                        {
+                            float normalizedPos = (record.UniqueId - visualGlobalMinId) / (float)visualGlobalRange;
+                            float hue = (1.0f - normalizedPos) * 240f;
+                            var pointColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                            
+                            var plotCoord = CoordinateTransform.WorldToPlot(record.X, record.Y);
+                            double[] xData = new[] { plotCoord.plotX };
+                            double[] yData = new[] { plotCoord.plotY };
+                            
+                            var scatter = plt.Add.Scatter(xData, yData);
+                            scatter.MarkerSize = tileMarkerSize * 1.5f;
+                            scatter.MarkerShape = MarkerShape.FilledCircle;
+                            scatter.LineWidth = 0;
+                            scatter.Color = ScottPlot.Color.FromColor(pointColor);
+                        }
                         
                         plt.Axes.SquareUnits();
                         plt.HideGrid();
@@ -1067,29 +1278,29 @@ class Program
                 writer.WriteLine("<head>");
                 writer.WriteLine($"    <title>{mapName} - Development Layer Analysis</title>");
                 writer.WriteLine("    <style>");
-                writer.WriteLine("        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }");
-                writer.WriteLine("        h1 { color: #4ec9b0; }");
-                writer.WriteLine("        h2 { color: #569cd6; margin-top: 30px; }");
-                writer.WriteLine("        .stats { background: #252526; padding: 15px; border-radius: 5px; margin: 20px 0; }");
-                writer.WriteLine("        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }");
-                writer.WriteLine("        .stat-item { background: #2d2d30; padding: 10px; border-radius: 3px; }");
-                writer.WriteLine("        .stat-label { color: #858585; font-size: 0.9em; }");
-                writer.WriteLine("        .stat-value { color: #4ec9b0; font-size: 1.5em; font-weight: bold; }");
-                writer.WriteLine("        .overview { text-align: center; margin: 20px 0; }");
-                writer.WriteLine("        .overview img { max-width: 100%; border: 2px solid #3c3c3c; border-radius: 5px; }");
-                writer.WriteLine("        .legend-container { margin: 20px 0; }");
-                writer.WriteLine("        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 5px; }");
-                writer.WriteLine("        .legend-item { display: flex; align-items: center; padding: 8px; background: #252526; border-radius: 3px; }");
+                writer.WriteLine("        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background: #1e1e1e; color: #d4d4d4; height: 100vh; overflow-y: auto; }");
+                writer.WriteLine("        h1 { color: #4ec9b0; margin: 0 0 10px 0; font-size: 1.5em; }");
+                writer.WriteLine("        h2 { color: #569cd6; margin: 15px 0 10px 0; font-size: 1.2em; }");
+                writer.WriteLine("        .stats { background: #252526; padding: 10px; border-radius: 5px; margin: 10px 0; }");
+                writer.WriteLine("        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }");
+                writer.WriteLine("        .stat-item { background: #2d2d30; padding: 8px; border-radius: 3px; }");
+                writer.WriteLine("        .stat-label { color: #858585; font-size: 0.8em; }");
+                writer.WriteLine("        .stat-value { color: #4ec9b0; font-size: 1.2em; font-weight: bold; }");
+                writer.WriteLine("        .overview { text-align: center; margin: 10px 0; }");
+                writer.WriteLine("        .overview img { max-width: 100%; max-height: 50vh; width: auto; height: auto; border: 2px solid #3c3c3c; border-radius: 5px; object-fit: contain; }");
+                writer.WriteLine("        .legend-container { margin: 10px 0; max-height: 35vh; overflow-y: auto; }");
+                writer.WriteLine("        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 3px; }");
+                writer.WriteLine("        .legend-item { display: flex; align-items: center; padding: 6px; background: #252526; border-radius: 3px; font-size: 0.85em; }");
                 writer.WriteLine("        .legend-item:hover { background: #2d2d30; }");
-                writer.WriteLine("        a.legend-item { color: inherit; transition: all 0.2s; }");
-                writer.WriteLine("        a.legend-item:hover { background: #3c3c3c; transform: translateX(5px); }");
-                writer.WriteLine("        .color-box { width: 30px; height: 20px; margin-right: 10px; border: 1px solid #3c3c3c; border-radius: 2px; }");
-                writer.WriteLine("        .layer-info { flex: 1; font-size: 0.9em; }");
+                writer.WriteLine("        a.legend-item { color: inherit; text-decoration: none; transition: all 0.2s; }");
+                writer.WriteLine("        a.legend-item:hover { background: #3c3c3c; transform: translateX(3px); }");
+                writer.WriteLine("        .color-box { width: 25px; height: 15px; margin-right: 8px; border: 1px solid #3c3c3c; border-radius: 2px; flex-shrink: 0; }");
+                writer.WriteLine("        .layer-info { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }");
                 writer.WriteLine("        .layer-id { color: #569cd6; font-weight: bold; }");
                 writer.WriteLine("        .layer-range { color: #4ec9b0; }");
                 writer.WriteLine("        .layer-count { color: #858585; }");
-                writer.WriteLine("        .filter { margin: 10px 0; }");
-                writer.WriteLine("        .filter input { padding: 8px; width: 300px; background: #252526; border: 1px solid #3c3c3c; color: #d4d4d4; border-radius: 3px; }");
+                writer.WriteLine("        .filter { margin: 8px 0; }");
+                writer.WriteLine("        .filter input { padding: 6px; width: 250px; background: #252526; border: 1px solid #3c3c3c; color: #d4d4d4; border-radius: 3px; font-size: 0.9em; }");
                 writer.WriteLine("    </style>");
                 writer.WriteLine("</head>");
                 writer.WriteLine("<body>");
@@ -1138,33 +1349,86 @@ class Program
                 writer.WriteLine($"        <p style='color: #858585; font-size: 0.85em; margin-top: 15px;'>UniqueID Range: {globalMinId:N0} - {globalMaxId:N0} ({records.Count:N0} total placements)</p>");
                 writer.WriteLine("    </div>");
                 
-                // Tile Browser
-                writer.WriteLine("    <h2>Tile Browser ({0} tiles)</h2>", tileLayerInfos.Count);
-                writer.WriteLine("    <div class='filter'>");
-                writer.WriteLine("        <input type='text' id='filterTileInput' placeholder='Filter tiles by coordinates or layer count...' onkeyup='filterTiles()' />");
-                writer.WriteLine("    </div>");
-                writer.WriteLine("    <div class='legend-container'>");
-                writer.WriteLine("        <div class='legend-grid' id='tileGrid'>");
-                
-                foreach (var tileInfo in tileLayerInfos.OrderBy(t => t.TileX).ThenBy(t => t.TileY))
+                // Tile Browser - 2D Map Grid with proper continent layout
+                if (tileLayerInfos.Count > 0)
                 {
-                    var totalPlacements = tileInfo.Layers.Sum(l => l.PlacementCount);
-                    var (centerX, centerY) = CoordinateTransform.TileToWorldCenter(tileInfo.TileX, tileInfo.TileY);
+                    writer.WriteLine("    <h2>Tile Browser - Continent Map ({0} tiles with data)</h2>", tileLayerInfos.Count);
+                    writer.WriteLine("    <div style='background: #252526; padding: 15px; border-radius: 5px; margin: 10px 0;'>");
+                    writer.WriteLine("        <p style='color: #d4d4d4; margin-bottom: 15px;'>Visual representation of the map. Click any tile to view placement layers:</p>");
                     
-                    writer.WriteLine($"            <a href='tiles/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html' class='legend-item' data-search='Tile [{tileInfo.TileX},{tileInfo.TileY}] {tileInfo.Layers.Count} layers {totalPlacements} placements' style='text-decoration: none;'>");
-                    writer.WriteLine($"                <div class='color-box' style='background: linear-gradient(135deg, #569cd6 0%, #4ec9b0 100%);'></div>");
-                    writer.WriteLine($"                <div class='layer-info'>");
-                    writer.WriteLine($"                    <span class='layer-id'>[{tileInfo.TileX},{tileInfo.TileY}]</span> ");
-                    writer.WriteLine($"                    <span class='layer-range'>{tileInfo.Layers.Count} layers</span> ");
-                    writer.WriteLine($"                    <span class='layer-count'>({totalPlacements} placements)</span>");
-                    writer.WriteLine($"                </div>");
-                    writer.WriteLine($"            </a>");
+                    // Calculate tile grid bounds
+                    int minX = tileLayerInfos.Min(t => t.TileX);
+                    int maxX = tileLayerInfos.Max(t => t.TileX);
+                    int minY = tileLayerInfos.Min(t => t.TileY);
+                    int maxY = tileLayerInfos.Max(t => t.TileY);
+                    int gridWidth = maxX - minX + 1;
+                    int gridHeight = maxY - minY + 1;
+                    
+                    // Create a lookup for quick tile access
+                    var tileLookup = tileLayerInfos.ToDictionary(t => (t.TileX, t.TileY));
+                    
+                    writer.WriteLine($"        <div style='display: grid; grid-template-columns: repeat({gridWidth}, 64px); gap: 2px; max-height: 70vh; overflow: auto; padding: 5px; background: #1e1e1e; border-radius: 3px; justify-content: center;'>");
+                    
+                    // Generate grid in proper 2D layout (Y rows, X columns)
+                    for (int y = minY; y <= maxY; y++)
+                    {
+                        for (int x = minX; x <= maxX; x++)
+                        {
+                            if (tileLookup.TryGetValue((x, y), out var tileInfo))
+                            {
+                                // Tile with data - show minimap thumbnail
+                                var totalPlacements = tileInfo.Layers.Sum(l => l.PlacementCount);
+                                var minimapPath = $"minimaps/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.png";
+                                var tileExists = File.Exists(Path.Combine(outputDir.FullName, minimapPath));
+                                
+                                if (tileExists)
+                                {
+                                    writer.WriteLine($"            <a href='tiles/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html' title='Tile [{tileInfo.TileX},{tileInfo.TileY}] - {tileInfo.Layers.Count} layers, {totalPlacements} placements' style='display: block; width: 64px; height: 64px; border: 2px solid #569cd6; border-radius: 2px; overflow: hidden; transition: all 0.2s;' onmouseover='this.style.borderColor=\"#4ec9b0\"; this.style.transform=\"scale(1.05)\"; this.style.zIndex=\"10\";' onmouseout='this.style.borderColor=\"#569cd6\"; this.style.transform=\"scale(1)\"; this.style.zIndex=\"1\";'>");
+                                    writer.WriteLine($"                <img src='{minimapPath}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{tileInfo.TileX},{tileInfo.TileY}]' />");
+                                    writer.WriteLine($"            </a>");
+                                }
+                                else
+                                {
+                                    // Data exists but no minimap - show placeholder
+                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No minimap' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; background: #2d2d30; border-radius: 2px;'></div>");
+                                }
+                            }
+                            else
+                            {
+                                // No placement data - check if minimap exists
+                                var minimapPath = $"minimaps/{mapName}_{x}_{y}.png";
+                                var minimapExists = File.Exists(Path.Combine(outputDir.FullName, minimapPath));
+                                
+                                if (minimapExists)
+                                {
+                                    // Show minimap thumbnail (non-clickable, no placement data)
+                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No placement data' style='width: 64px; height: 64px; border: 1px solid #3c3c3c; border-radius: 2px; overflow: hidden; opacity: 0.5;'>");
+                                    writer.WriteLine($"                <img src='{minimapPath}' style='width: 100%; height: 100%; object-fit: cover;' alt='[{x},{y}]' />");
+                                    writer.WriteLine($"            </div>");
+                                }
+                                else
+                                {
+                                    // No minimap, no data - empty placeholder
+                                    writer.WriteLine($"            <div title='Tile [{x},{y}] - No data' style='width: 64px; height: 64px; border: 1px solid #1e1e1e; background: #252526; border-radius: 2px;'></div>");
+                                }
+                            }
+                        }
+                    }
+                    
+                    writer.WriteLine("        </div>");
+                    writer.WriteLine($"        <p style='color: #858585; font-size: 0.85em; margin-top: 10px;'>Grid: {gridWidth}×{gridHeight} tiles (X: {minX}-{maxX}, Y: {minY}-{maxY})</p>");
+                    writer.WriteLine("    </div>");
+                }
+                else
+                {
+                    writer.WriteLine("    <h2>Tile Browser</h2>");
+                    writer.WriteLine("    <div style='background: #252526; padding: 15px; border-radius: 5px; margin: 10px 0;'>");
+                    writer.WriteLine("        <p style='color: #ce9178;'>⚠️ No tiles with valid placement data after coordinate filtering.</p>");
+                    writer.WriteLine("        <p style='color: #858585; font-size: 0.9em;'>This may indicate all placements were 'spanned' duplicates that don't belong to their assigned tiles.</p>");
+                    writer.WriteLine("    </div>");
                 }
                 
-                writer.WriteLine("        </div>");
-                writer.WriteLine("    </div>");
-                
-                // JavaScript for filtering
+                // JavaScript for filtering (kept for future use)
                 writer.WriteLine("    <script>");
                 writer.WriteLine("        function filterTiles() {");
                 writer.WriteLine("            const input = document.getElementById('filterTileInput');");

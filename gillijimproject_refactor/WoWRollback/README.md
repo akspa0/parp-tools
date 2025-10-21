@@ -14,9 +14,44 @@
 
 ## 🚀 Quick Start
 
-### Analyze Loose ADT Files (New!)
+### Static Visualization Tool (WoWDataPlot - New!)
 
-**The fastest way to explore your map data:**
+**Lightweight static HTML viewer for rapid data exploration** - no server needed after generation!
+
+```powershell
+cd WoWRollback
+
+# Generate static visualization with minimap overlays
+dotnet run --project WoWDataPlot -- visualize \
+  --wdt ..\test_data\0.5.3\tree\World\Maps\Kalidar\Kalidar.wdt \
+  --output-dir .\Kalidar_output \
+  --gap-threshold 50
+
+# Open the generated HTML files in any browser
+# Start with: Kalidar_output\Kalidar_legend.html
+```
+
+**What you get:**
+- ✅ **Per-tile minimap overlays** - Transparent PNG layers showing object placements
+- ✅ **Interactive layer toggles** - Show/hide UniqueID ranges on-the-fly
+- ✅ **Debug controls** - Flip X/Y, swap axes for coordinate troubleshooting
+- ✅ **Continental overview** - Heatmap showing all layers across entire map
+- ✅ **Zero server requirement** - Pure static HTML/JS/CSS files
+- ✅ **Fast generation** - Kalidar (13 tiles) processes in ~5 seconds
+
+**Key features:**
+- Placement dots align 1:1 with minimap pixels (coordinate fix applied)
+- Global UniqueID gradient coloring (blue=early, red=late)
+- Layer detection with automatic gap-based splitting (configurable threshold)
+- Analysis JSON with detailed statistics per tile
+
+See [WoWDataPlot Documentation](#wowdataplot---static-visualization) for full details.
+
+---
+
+### Analyze Loose ADT Files (Dynamic Viewer)
+
+**The fastest way to explore your map data with interactive server:**
 
 ```powershell
 cd WoWRollback
@@ -535,6 +570,161 @@ dotnet run --project WoWRollback.Orchestrator -- \
 **Path Resolution:**
 - `--mpq-path E:\WoW_Clients` + `--versions 0.5.3,0.5.5`
 - → Looks for MPQs in `E:\WoW_Clients\0.5.3\` and `E:\WoW_Clients\0.5.5\`
+
+---
+
+## 📊 WoWDataPlot - Static Visualization
+
+**WoWDataPlot** is a lightweight static visualization generator that creates interactive HTML pages with minimap overlays showing object placements. Unlike the dynamic viewer, it generates all files upfront with zero server requirements after generation.
+
+### Usage
+
+```powershell
+dotnet run --project WoWDataPlot -- visualize \
+  --wdt <path-to-wdt> \
+  --output-dir <output-directory> \
+  [--gap-threshold <number>] \
+  [--tile-size <pixels>] \
+  [--map-size <pixels>] \
+  [--tile-marker-size <number>] \
+  [--map-marker-size <number>]
+```
+
+### Arguments
+
+**Required:**
+- `--wdt` - Path to Alpha WDT file (e.g., `Kalidar.wdt`)
+- `--output-dir` - Directory for generated output
+
+**Optional:**
+- `--gap-threshold` - Split layers when UniqueID jumps exceed this value (default: 50)
+- `--tile-size` - Per-tile image size in pixels (default: 1024)
+- `--map-size` - Overview map size in pixels (default: 2048)
+- `--tile-marker-size` - Marker size for per-tile plots (default: 8)
+- `--map-marker-size` - Marker size for overview map (default: 5)
+
+### Example
+
+```powershell
+# Kalidar with default settings
+dotnet run --project WoWDataPlot -- visualize \
+  --wdt ..\test_data\0.5.3\tree\World\Maps\Kalidar\Kalidar.wdt \
+  --output-dir .\Kalidar_viz
+
+# Azeroth with custom layer detection
+dotnet run --project WoWDataPlot -- visualize \
+  --wdt ..\test_data\0.5.3\tree\World\Maps\Azeroth\Azeroth.wdt \
+  --output-dir .\Azeroth_viz \
+  --gap-threshold 100
+```
+
+### Output Structure
+
+```
+Kalidar_output/
+├── Kalidar_legend.html              # ⭐ START HERE - Interactive map + legend
+├── Kalidar_overview.png             # Continental heatmap (all layers)
+├── Kalidar_analysis.json            # Detailed statistics per tile
+├── minimaps/                        # Converted minimap tiles (PNG)
+│   ├── Kalidar_33_26.png
+│   ├── Kalidar_33_27.png
+│   └── ...
+└── tiles/                           # Per-tile interactive pages
+    ├── tile_33_26.html              # Individual tile viewer
+    ├── tile_33_26_heatmap.png       # Tile-level heatmap
+    ├── overlays_33_26/              # Transparent layer PNGs
+    │   ├── layer_325865_325887.png  # First layer (WMO buildings)
+    │   ├── layer_333184_333384.png  # Second layer (M2 props)
+    │   └── ...
+    └── ...
+```
+
+### Key Features
+
+#### 1. Minimap Overlay System
+- **Transparent PNG layers** rendered on top of minimap tiles
+- **Canvas-based rendering** in browser for smooth toggling
+- **1:1 pixel alignment** - placement coordinates match minimap exactly
+- **Per-layer isolation** - Each UniqueID range gets its own overlay file
+
+#### 2. Layer Detection
+- **Automatic gap analysis** - Splits when UniqueID jumps exceed threshold
+- **Configurable threshold** - Adjust sensitivity via `--gap-threshold`
+- **Global coloring** - Colors based on position in overall UniqueID distribution
+- **Statistics** - Min/max/count per layer saved to JSON
+
+#### 3. Interactive Controls
+- **Layer toggles** - Show/hide individual UniqueID ranges
+- **All On/Off buttons** - Quick layer management
+- **Debug transforms** - Flip X, Flip Y, Swap X↔Y for coordinate troubleshooting
+- **Live canvas updates** - Changes apply instantly without reload
+
+#### 4. Continental Overview
+- **Heatmap visualization** - 100-bucket gradient showing all placements
+- **Global color scale** - Blue (early UniqueIDs) → Red (late UniqueIDs)
+- **2048x2048 resolution** - High-detail overview of entire map
+- **Legend page** - Clickable overview with full layer list
+
+### Coordinate System
+
+**Critical Fix Applied:** WoWDataPlot includes proper coordinate transformations to align placement data with minimap tiles:
+
+```
+WoW World Coords → Tile Pixel Coords:
+1. Apply base formula: localX = (32 - worldX/533.33) - floor(...)
+2. Convert to pixels: pixelX = localX * imageWidth
+3. Flip both axes: pixelX = imageWidth - pixelX
+                    pixelY = imageHeight - pixelY
+```
+
+This ensures dots appear exactly where objects exist on the minimap terrain.
+
+### Use Cases
+
+**Data Analysis:**
+- Quickly identify object placement patterns
+- Visualize UniqueID distribution across map
+- Detect temporal layers (objects added over time)
+- Debug coordinate system issues
+
+**Documentation:**
+- Generate static reports for map content
+- Share visualizations without server setup
+- Archive historical map states
+- Compare different map versions
+
+**Development:**
+- Verify placement data extraction accuracy
+- Debug coordinate transform issues
+- Validate minimap tile associations
+- Test layer detection thresholds
+
+### Performance
+
+- **Kalidar** (13 tiles, 898 placements): ~5 seconds
+- **Small maps** (25 tiles): ~10 seconds
+- **Large maps** (140 tiles): ~1-2 minutes
+
+### Limitations
+
+- **Static generation** - No real-time updates (regenerate to refresh)
+- **Alpha WDT only** - Designed for Alpha format (0.5.x - 0.6.x)
+- **Memory usage** - Large maps with many layers may use significant RAM
+- **No 3D visualization** - 2D minimap overlays only
+
+### Comparison with Dynamic Viewer
+
+| Feature | WoWDataPlot (Static) | WoWRollback.Cli (Dynamic) |
+|---------|---------------------|---------------------------|
+| Server Required | ❌ No (after generation) | ✅ Yes (ASP.NET Core) |
+| Real-time Updates | ❌ Regenerate needed | ✅ Live data loading |
+| File Size | Small (PNGs + HTML) | Larger (WebP + JSON) |
+| Setup Time | Fast (~5s) | Slower (analysis + server) |
+| Interactivity | Layer toggles only | Full pan/zoom/filtering |
+| 3D Support | ❌ No | ✅ GLB mesh loading |
+| Cluster View | ❌ No | ✅ Yes |
+| UniqueID Filtering | Layer-based | Range-based |
+| Best For | Quick exploration | Deep analysis |
 
 ---
 

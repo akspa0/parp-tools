@@ -194,16 +194,19 @@ public sealed class MinimapHandler
                 
                 if (exists)
                 {
-                    // Verify it contains PNG files
+                    // Verify it contains minimap files (PNG or BLP)
                     var pngFiles = Directory.EnumerateFiles(candidate, "*.png", SearchOption.TopDirectoryOnly).ToList();
-                    if (pngFiles.Count > 0)
+                    var blpFiles = Directory.EnumerateFiles(candidate, "*.blp", SearchOption.TopDirectoryOnly).ToList();
+                    var totalFiles = pngFiles.Count + blpFiles.Count;
+                    
+                    if (totalFiles > 0)
                     {
-                        Console.WriteLine($"[MinimapHandler] ✓ Found {pngFiles.Count} PNG files - using this directory");
+                        Console.WriteLine($"[MinimapHandler] ✓ Found {pngFiles.Count} PNG + {blpFiles.Count} BLP files - using this directory");
                         return candidate;
                     }
                     else
                     {
-                        Console.WriteLine($"[MinimapHandler] Directory exists but contains no PNG files");
+                        Console.WriteLine($"[MinimapHandler] Directory exists but contains no minimap files (PNG/BLP)");
                     }
                 }
             }

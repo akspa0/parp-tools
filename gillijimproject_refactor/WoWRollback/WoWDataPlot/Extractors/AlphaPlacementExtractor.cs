@@ -136,11 +136,12 @@ public static class AlphaPlacementExtractor
         
         for (int start = 0; start + entrySize <= mddf.Data.Length; start += entrySize)
         {
-            // MDDF format: nameId(4), uniqueId(4), pos(12), rot(12), scale(2), flags(2)
+            // MDDF format: nameId(4), uniqueId(4), pos(12=X,Z,Y), rot(12), scale(2), flags(2)
+            // NOTE: Position is stored as X, Z, Y (not X, Y, Z!) - verified 4 weeks ago
             uint uniqueId = BitConverter.ToUInt32(mddf.Data, start + 4);
-            float x = BitConverter.ToSingle(mddf.Data, start + 8);
-            float z = BitConverter.ToSingle(mddf.Data, start + 12);
-            float y = BitConverter.ToSingle(mddf.Data, start + 16);
+            float x = BitConverter.ToSingle(mddf.Data, start + 8);   // offset +8: X
+            float z = BitConverter.ToSingle(mddf.Data, start + 12);  // offset +12: Z (height)
+            float y = BitConverter.ToSingle(mddf.Data, start + 16);  // offset +16: Y
             
             placements.Add((x, y, z, uniqueId));
         }
@@ -166,11 +167,12 @@ public static class AlphaPlacementExtractor
         
         for (int start = 0; start + entrySize <= modf.Data.Length; start += entrySize)
         {
-            // MODF format: nameId(4), uniqueId(4), pos(12), rot(12), bounds(24), flags(2), doodadSet(2), nameSet(2), scale(2)
+            // MODF format: nameId(4), uniqueId(4), pos(12=X,Z,Y), rot(12), bounds(24), flags(2), doodadSet(2), nameSet(2), scale(2)
+            // NOTE: Position is stored as X, Z, Y (not X, Y, Z!) - verified 4 weeks ago
             uint uniqueId = BitConverter.ToUInt32(modf.Data, start + 4);
-            float x = BitConverter.ToSingle(modf.Data, start + 8);
-            float z = BitConverter.ToSingle(modf.Data, start + 12);
-            float y = BitConverter.ToSingle(modf.Data, start + 16);
+            float x = BitConverter.ToSingle(modf.Data, start + 8);   // offset +8: X
+            float z = BitConverter.ToSingle(modf.Data, start + 12);  // offset +12: Z (height)
+            float y = BitConverter.ToSingle(modf.Data, start + 16);  // offset +16: Y
             
             placements.Add((x, y, z, uniqueId));
         }

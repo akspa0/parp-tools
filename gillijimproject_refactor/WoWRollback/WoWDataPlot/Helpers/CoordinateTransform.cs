@@ -77,6 +77,37 @@ public static class CoordinateTransform
     }
     
     /// <summary>
+    /// Convert WoW world coordinates to minimap tile pixel coordinates (0-imageSize).
+    /// EXACT port of tileCanvas.js worldToPixel() with FLIP X and FLIP Y applied.
+    /// </summary>
+    public static (double pixelX, double pixelY) WorldToTilePixel(float worldX, float worldY, int imageWidth, int imageHeight)
+    {
+        // Exact formula from tileCanvas.js:
+        // const localX = (32 - (worldX / tileSize)) - Math.floor(32 - (worldX / tileSize));
+        // const localY = (32 - (worldY / tileSize)) - Math.floor(32 - (worldY / tileSize));
+        // const pixelX = localX * this.width;
+        // const pixelY = (1 - localY) * this.height;
+        
+        double tileCoordX = 32 - (worldX / BLOCK_SIZE);
+        double tileCoordY = 32 - (worldY / BLOCK_SIZE);
+        
+        // Get fractional part (position within tile, 0-1)
+        double localX = tileCoordX - Math.Floor(tileCoordX);
+        double localY = tileCoordY - Math.Floor(tileCoordY);
+        
+        // Convert to pixel coordinates
+        double pixelX = localX * imageWidth;
+        double pixelY = (1 - localY) * imageHeight;
+        
+        // CRITICAL FIX: Both X and Y need to be flipped to align with minimap orientation
+        // Verified through interactive debugging controls
+        pixelX = imageWidth - pixelX;
+        pixelY = imageHeight - pixelY;
+        
+        return (pixelX, pixelY);
+    }
+    
+    /// <summary>
     /// Get tile center coordinates in world space.
     /// </summary>
     public static (float centerX, float centerY) TileToWorldCenter(int tileX, int tileY)
@@ -89,6 +120,38 @@ public static class CoordinateTransform
         float worldY = (32 - tileY - 0.5f) * BLOCK_SIZE;
         
         return (worldX, worldY);
+    }
+    
+    /// <summary>
+    /// Get the world coordinate bounds for a tile.
+    /// Returns (minX, maxX, minY, maxY) in world coordinates.
+    /// </summary>
+    public static (float minX, float maxX, float minY, float maxY) GetTileBounds(int tileX, int tileY)
+    {
+        // Each tile is BLOCK_SIZE wide (533.33 yards)
+        // Tile formula: tileX = floor(32 - (worldX / 533.33))
+        // Reverse: worldX = (32 - tileX) * 533.33 (top edge)
+        //          worldX = (32 - tileX - 1) * 533.33 (bottom edge)
+        
+        float maxX = (32 - tileX) * BLOCK_SIZE;
+        float minX = (32 - tileX - 1) * BLOCK_SIZE;
+        float maxY = (32 - tileY) * BLOCK_SIZE;
+        float minY = (32 - tileY - 1) * BLOCK_SIZE;
+        
+        return (minX, maxX, minY, maxY);
+    }
+    
+    /// <summary>
+    /// Check if world coordinates actually belong to the specified tile.
+    /// Returns true if the coordinate is within the tile's bounds.
+    /// This filters out "spanned" placements that appear on multiple tiles but don't geometrically belong.
+    /// </summary>
+    public static bool IsCoordinateInTile(float worldX, float worldY, int tileX, int tileY)
+    {
+        var (minX, maxX, minY, maxY) = GetTileBounds(tileX, tileY);
+        
+        // Check if coordinate is within tile bounds (inclusive of min, exclusive of max)
+        return worldX >= minX && worldX < maxX && worldY >= minY && worldY < maxY;
     }
     
     /// <summary>
