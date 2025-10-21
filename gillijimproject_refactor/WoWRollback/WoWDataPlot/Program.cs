@@ -53,15 +53,15 @@ class Program
         
         // visualize command - UNIFIED PIPELINE
         var visualizeCommand = new Command("visualize", "Complete pipeline: analyze layers and generate all visualizations");
-        var wdtOptionVisualize = new Option<FileInfo>("--wdt", "Path to Alpha WDT file") { IsRequired = true };
+        var wdtOptionVisualize = new Option<FileInfo>("--wdt", "Path to WDT/ADT file") { IsRequired = true };
         var outputDirOptionVisualize = new Option<DirectoryInfo>("--output-dir", "Output directory for all results") { IsRequired = true };
         var gapThresholdOption = new Option<int>("--gap-threshold", () => 50, "UniqueID gap size to split layers (gaps = dev pauses)");
-        var tileSizeOption = new Option<int>("--tile-size", () => 1024, "Tile image size (square)");
+        var tileSizeOption = new Option<int>("--tile-size", () => 256, "Tile image size (square) - should match minimap tile size");
         var mapSizeOption = new Option<int>("--map-size", () => 2048, "Map overview size (square)");
         var tileMarkerSizeOption = new Option<float>("--tile-marker-size", () => 8.0f, "Marker size for tile images");
         var mapMarkerSizeOption = new Option<float>("--map-marker-size", () => 5.0f, "Marker size for map overview");
         var mapMaxLayersOption = new Option<int>("--map-max-layers", () => 0, "Max layers to show on map overview (0 = all)");
-        var minimapDirOption = new Option<DirectoryInfo?>("--minimap-dir", () => null, "Directory containing minimap tiles (optional)");
+        var minimapDirOption = new Option<DirectoryInfo?>("--minimap-dir", () => null, "External directory containing minimap PNGs (e.g., World/Textures/Minimap)");
         var globalRangeFileOption = new Option<FileInfo?>("--global-range-file", () => null, "JSON file with global UniqueID ranges (from analyze-client)");
         
         visualizeCommand.AddOption(wdtOptionVisualize);
@@ -72,6 +72,7 @@ class Program
         visualizeCommand.AddOption(tileMarkerSizeOption);
         visualizeCommand.AddOption(mapMarkerSizeOption);
         visualizeCommand.AddOption(mapMaxLayersOption);
+        visualizeCommand.AddOption(minimapDirOption);
         visualizeCommand.AddOption(globalRangeFileOption);
         
         visualizeCommand.SetHandler(async (context) => 
@@ -84,9 +85,10 @@ class Program
             var tileMarkerSize = context.ParseResult.GetValueForOption(tileMarkerSizeOption);
             var mapMarkerSize = context.ParseResult.GetValueForOption(mapMarkerSizeOption);
             var mapMaxLayers = context.ParseResult.GetValueForOption(mapMaxLayersOption);
+            var minimapDir = context.ParseResult.GetValueForOption(minimapDirOption);
             var globalRangeFile = context.ParseResult.GetValueForOption(globalRangeFileOption);
             
-            await VisualizeComplete(wdt, outputDir, gapThreshold, tileSize, mapSize, tileMarkerSize, mapMarkerSize, mapMaxLayers, globalRangeFile);
+            await VisualizeComplete(wdt, outputDir, gapThreshold, tileSize, mapSize, tileMarkerSize, mapMarkerSize, mapMaxLayers, minimapDir, globalRangeFile);
         });
         
         // analyze-client command - NEW: Global UniqueID range tracking
@@ -118,7 +120,7 @@ class Program
         {
             // Extract placement data
             var progress = new Progress<string>(msg => Console.WriteLine($"[INFO] {msg}"));
-            var records = AlphaPlacementExtractor.Extract(wdtFile.FullName, progress);
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
             
             // Filter by type if requested
             if (!string.IsNullOrEmpty(typeFilter))
@@ -194,7 +196,7 @@ class Program
         {
             // Extract placement data
             var progress = new Progress<string>(msg => Console.WriteLine($"[INFO] {msg}"));
-            var records = AlphaPlacementExtractor.Extract(wdtFile.FullName, progress);
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
             
             if (records.Count == 0)
             {
@@ -236,7 +238,144 @@ class Program
         {
             // Extract placement data
             var progress = new Progress<string>(msg => Console.WriteLine($"[INFO] {msg}"));
-            var records = AlphaPlacementExtractor.Extract(wdtFile.FullName, progress);
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
+            
+            if (records.Count == 0)
+            {
+                Console.WriteLine("[ERROR] No placements found to analyze!");
+                return;
+            }
+            
+            Console.WriteLine($"[INFO] Analyzing {records.Count} placements...");
+            
+            // Calculate global UniqueID range
+            uint minId = records.Min(r => r.UniqueId);
+            uint maxId = records.Max(r => r.UniqueId);
+            
+            Console.WriteLine($"[INFO] Global UniqueID range: {minId} - {maxId}");
+            
+            // Analyze per-tile layers (tile-specific, not global!)
+            var tileLayerInfos = new List<TileLayerInfo>();
+            var globalLayersCollected = new HashSet<(uint min, uint max)>();
+            
+            var tilesWithData = records.Where(r => r.TileX >= 0 && r.TileY >= 0)
+                                      .GroupBy(r => (r.TileX, r.TileY))
+                                      .OrderBy(g => g.Key.TileY)
+                                      .ThenBy(g => g.Key.TileX);
+            
+            Console.WriteLine($"  Processing {tilesWithData.Count()} tiles...");
+            
+            // Calculate GLOBAL UniqueID range for consistent coloring
+            uint globalMinId = records.Min(r => r.UniqueId);
+            uint globalMaxId = records.Max(r => r.UniqueId);
+            
+            foreach (var tileGroup in tilesWithData)
+            {
+                var tileRecords = tileGroup.ToList();
+                
+                // Find unique ID ranges WITHIN THIS TILE
+                var tileUniqueIds = tileRecords.Select(r => r.UniqueId).OrderBy(id => id).ToList();
+                
+                if (tileUniqueIds.Count == 0) continue;
+                
+                uint tileMin = tileUniqueIds.First();
+                uint tileMax = tileUniqueIds.Last();
+                
+                // Generate unique colors for this tile's potential layers (estimate max 100 per tile)
+                var tileColors = GenerateColorPalette(100)
+                    .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                    .ToArray();
+                
+                // Auto-detect layers within this tile by finding gaps/clusters
+                var tileLayers = DetectLayersInTile(tileRecords, layerSize, tileColors);
+                
+                // Track all unique ranges for global summary
+                foreach (var layer in tileLayers)
+                {
+                    globalLayersCollected.Add((layer.MinUniqueId, layer.MaxUniqueId));
+                }
+                
+                tileLayerInfos.Add(new TileLayerInfo
+                {
+                    TileX = tileGroup.Key.TileX,
+                    TileY = tileGroup.Key.TileY,
+                    TotalPlacements = tileRecords.Count,
+                    Layers = tileLayers,
+                    ImagePath = $"tile_{tileGroup.Key.TileY:D2}_{tileGroup.Key.TileX:D2}_layers.png"
+                });
+            }
+            
+            Console.WriteLine($"[INFO] Analyzed {tileLayerInfos.Count} tiles");
+            
+            // Create global layer summary from all tile-specific layers
+            var globalLayersList = globalLayersCollected.OrderBy(r => r.min).ToList();
+            var globalColors = GenerateColorPalette(globalLayersList.Count)
+                .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                .ToArray();
+                
+            var globalLayers = globalLayersList
+                .Select((range, idx) => new WoWDataPlot.Models.LayerInfo
+                {
+                    Name = $"{range.min}-{range.max}",
+                    MinUniqueId = range.min,
+                    MaxUniqueId = range.max,
+                    PlacementCount = records.Count(r => r.UniqueId >= range.min && r.UniqueId <= range.max),
+                    Color = globalColors[idx]
+                })
+                .ToList();
+            
+            Console.WriteLine($"[INFO] Found {globalLayers.Count} unique UniqueID ranges across all tiles");
+            
+            // Create analysis result
+            var analysis = new WdtLayerAnalysis
+            {
+                WdtName = Path.GetFileNameWithoutExtension(wdtFile.Name),
+                TotalPlacements = records.Count,
+                MinUniqueId = minId,
+                MaxUniqueId = maxId,
+                GlobalLayers = globalLayers,
+                Tiles = tileLayerInfos,
+                AnalyzedAt = DateTime.UtcNow
+            };
+            
+            // Write JSON
+            Directory.CreateDirectory(Path.GetDirectoryName(outputFile.FullName) ?? ".");
+            
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            };
+            
+            string json = JsonSerializer.Serialize(analysis, options);
+            File.WriteAllText(outputFile.FullName, json);
+            
+            Console.WriteLine($"[SUCCESS] Layer analysis saved to: {outputFile.FullName}");
+            Console.WriteLine($"[INFO] Total layers: {globalLayers.Count}");
+            Console.WriteLine($"[INFO] Tiles with data: {tileLayerInfos.Count}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"[ERROR] {ex.InnerException.Message}");
+            }
+        }
+    }
+    
+    static void AnalyzeLayersBySize(FileInfo wdtFile, FileInfo outputFile, int layerSize)
+    {
+        Console.WriteLine($"=== WoW Data Plot - Layer Analysis (By Size) ===");
+        Console.WriteLine($"Input: {wdtFile.FullName}");
+        Console.WriteLine($"Output: {outputFile.FullName}");
+        Console.WriteLine($"Layer size: {layerSize} UniqueIDs per layer");
+        
+        try
+        {
+            // Extract placement data
+            var progress = new Progress<string>(msg => Console.WriteLine($"[INFO] {msg}"));
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
             
             if (records.Count == 0)
             {
@@ -731,7 +870,7 @@ class Program
             
             // Extract placement data
             var progress = new Progress<string>(msg => Console.WriteLine($"[INFO] {msg}"));
-            var records = AlphaPlacementExtractor.Extract(wdtFile.FullName, progress);
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
             
             if (records.Count == 0)
             {
@@ -851,7 +990,7 @@ class Program
         return null;
     }
     
-    static async Task VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers, FileInfo? globalRangeFile)
+    static async Task VisualizeComplete(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, int tileSize, int mapSize, float tileMarkerSize, float mapMarkerSize, int mapMaxLayers, DirectoryInfo? externalMinimapDir, FileInfo? globalRangeFile)
     {
         Console.WriteLine($"=== WoW Data Plot - Complete Visualization Pipeline ===");
         Console.WriteLine($"Input: {wdtFile.FullName}");
@@ -862,6 +1001,7 @@ class Program
         Console.WriteLine($"Tile marker size: {tileMarkerSize}");
         Console.WriteLine($"Map marker size: {mapMarkerSize}");
         Console.WriteLine($"Map max layers: {(mapMaxLayers == 0 ? "all" : mapMaxLayers.ToString())}");
+        Console.WriteLine($"External minimap dir: {(externalMinimapDir != null ? externalMinimapDir.FullName : "none (auto-detect)")}");
         Console.WriteLine($"Global range file: {(globalRangeFile != null ? globalRangeFile.FullName : "none (using local ranges)")}");
         Console.WriteLine();
         
@@ -895,49 +1035,104 @@ class Program
                 var minimapOutputDir = Path.Combine(outputDir.FullName, "minimaps");
                 Directory.CreateDirectory(minimapOutputDir);
                 
-                // Use LooseFileMinimapProvider to extract minimaps
-                // WDT: test_data/0.5.3/tree/World/Maps/Azeroth/Azeroth.wdt
-                // Need: test_data as root (6 levels up from WDT file)
-                var wdtPath = wdtFile.FullName;
-                var testDataRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(wdtPath)))))); // Go up 6 levels to test_data
-                var versions = new List<string> { "0.5.3" };
-                
-                Console.WriteLine($"  Test data root: {testDataRoot}");
-                
-                var provider = WoWRollback.Core.Services.Viewer.LooseFileMinimapProvider.Build(testDataRoot ?? "", versions);
-                var composer = new WoWRollback.Core.Services.Viewer.MinimapComposer();
-                var viewerOptions = WoWRollback.Core.Services.Viewer.ViewerOptions.CreateDefault();
-                
-                // Get all tiles for this map
-                var availableTiles = provider.EnumerateTiles("0.5.3", mapName).ToList();
-                
-                if (availableTiles.Count > 0)
+                // If external minimap directory is provided, copy PNGs directly
+                if (externalMinimapDir != null && externalMinimapDir.Exists)
                 {
-                    Console.WriteLine($"  Found {availableTiles.Count} minimap tiles");
+                    Console.WriteLine($"  Using external minimap directory: {externalMinimapDir.FullName}");
                     
-                    foreach (var (tileX, tileY) in availableTiles)
+                    // Try multiple naming patterns:
+                    // 1. {mapName}*.png (e.g., development_32_32.png)
+                    // 2. map*.png (e.g., map32_32.png)
+                    // 3. *.png (all PNGs - will rename to standard format)
+                    var patterns = new[] { $"{mapName}*.png", "map*.png", "*.png" };
+                    
+                    foreach (var pattern in patterns)
                     {
-                        var stream = await provider.OpenTileAsync("0.5.3", mapName, tileX, tileY);
-                        if (stream != null)
+                        var pngFiles = Directory.GetFiles(externalMinimapDir.FullName, pattern, SearchOption.AllDirectories);
+                        
+                        if (pngFiles.Length > 0)
                         {
-                            using (stream)
+                            Console.WriteLine($"  Found {pngFiles.Length} files matching pattern '{pattern}'");
+                            
+                            foreach (var pngFile in pngFiles)
                             {
-                                var outputPath = Path.Combine(minimapOutputDir, $"{mapName}_{tileX}_{tileY}.png");
-                                await composer.ComposeAsync(stream, outputPath, viewerOptions, CancellationToken.None);
+                                var fileName = Path.GetFileName(pngFile);
+                                
+                                // Try to extract tile coords from filename (supports: map32_32.png, development_32_32.png, 32_32.png)
+                                var destFileName = fileName;
+                                if (!fileName.StartsWith(mapName))
+                                {
+                                    // Rename to standard format: {mapName}_{Y}_{X}.png
+                                    // Extract coordinates if possible
+                                    var parts = Path.GetFileNameWithoutExtension(fileName).Split('_');
+                                    if (parts.Length >= 2 && int.TryParse(parts[^2], out _) && int.TryParse(parts[^1], out _))
+                                    {
+                                        destFileName = $"{mapName}_{parts[^2]}_{parts[^1]}.png";
+                                    }
+                                }
+                                
+                                var destPath = Path.Combine(minimapOutputDir, destFileName);
+                                File.Copy(pngFile, destPath, overwrite: true);
                                 tilesCopied++;
                             }
+                            break; // Stop after first successful pattern
                         }
                     }
                     
                     if (tilesCopied > 0)
                     {
                         minimapDir = minimapOutputDir;
-                        Console.WriteLine($"✓ Converted {tilesCopied} BLP minimap tiles to PNG");
+                        Console.WriteLine($"✓ Copied {tilesCopied} PNG minimap tiles");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"⚠ No PNG files found in external minimap directory");
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"⚠ No minimap tiles found (optional - continuing without them)");
+                    // Auto-detect and extract from BLP
+                    var wdtPath = wdtFile.FullName;
+                    var testDataRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(wdtPath)))))); // Go up 6 levels to test_data
+                    var versions = new List<string> { "0.5.3" };
+                    
+                    Console.WriteLine($"  Test data root: {testDataRoot}");
+                    
+                    var provider = WoWRollback.Core.Services.Viewer.LooseFileMinimapProvider.Build(testDataRoot ?? "", versions);
+                    var composer = new WoWRollback.Core.Services.Viewer.MinimapComposer();
+                    var viewerOptions = WoWRollback.Core.Services.Viewer.ViewerOptions.CreateDefault();
+                    
+                    // Get all tiles for this map
+                    var availableTiles = provider.EnumerateTiles("0.5.3", mapName).ToList();
+                    
+                    if (availableTiles.Count > 0)
+                    {
+                        Console.WriteLine($"  Found {availableTiles.Count} minimap tiles");
+                        
+                        foreach (var (tileX, tileY) in availableTiles)
+                        {
+                            var stream = await provider.OpenTileAsync("0.5.3", mapName, tileX, tileY);
+                            if (stream != null)
+                            {
+                                using (stream)
+                                {
+                                    var outputPath = Path.Combine(minimapOutputDir, $"{mapName}_{tileX}_{tileY}.png");
+                                    await composer.ComposeAsync(stream, outputPath, viewerOptions, CancellationToken.None);
+                                    tilesCopied++;
+                                }
+                            }
+                        }
+                        
+                        if (tilesCopied > 0)
+                        {
+                            minimapDir = minimapOutputDir;
+                            Console.WriteLine($"✓ Converted {tilesCopied} BLP minimap tiles to PNG");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"⚠ No minimap tiles found (optional - continuing without them)");
+                    }
                 }
             }
             catch (Exception ex)
@@ -956,7 +1151,7 @@ class Program
             // STEP 1: Extract placement data
             Console.WriteLine("═══ STEP 1: Extracting Placement Data ═══");
             var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
-            var records = AlphaPlacementExtractor.Extract(wdtFile.FullName, progress);
+            var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
             
             if (records.Count == 0)
             {
@@ -1461,6 +1656,26 @@ class Program
                     int maxX = tileLayerInfos.Max(t => t.TileX);
                     int minY = tileLayerInfos.Min(t => t.TileY);
                     int maxY = tileLayerInfos.Max(t => t.TileY);
+                    
+                    // Expand bounds to include ALL minimap tiles
+                    var minimapDirPath = Path.Combine(outputDir.FullName, "minimaps");
+                    if (Directory.Exists(minimapDirPath))
+                    {
+                        var minimapFiles = Directory.GetFiles(minimapDirPath, $"{mapName}_*.png");
+                        foreach (var file in minimapFiles)
+                        {
+                            var name = Path.GetFileNameWithoutExtension(file);
+                            var parts = name.Split('_');
+                            if (parts.Length >= 3 && int.TryParse(parts[^2], out int x) && int.TryParse(parts[^1], out int y))
+                            {
+                                minX = Math.Min(minX, x);
+                                maxX = Math.Max(maxX, x);
+                                minY = Math.Min(minY, y);
+                                maxY = Math.Max(maxY, y);
+                            }
+                        }
+                    }
+                    
                     int gridWidth = maxX - minX + 1;
                     int gridHeight = maxY - minY + 1;
                     

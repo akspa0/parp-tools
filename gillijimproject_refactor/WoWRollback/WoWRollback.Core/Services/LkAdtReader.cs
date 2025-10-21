@@ -27,7 +27,7 @@ public class LkAdtReader
     );
 
     /// <summary>
-    /// Reads all MDDF (M2/MDX) placements from a LK ADT file.
+    /// Reads MDDF (M2 filename table) from a LK ADT file.
     /// </summary>
     public static List<PlacementData> ReadMddf(string adtPath)
     {
@@ -35,6 +35,15 @@ public class LkAdtReader
         
         if (!File.Exists(adtPath))
             return placements;
+
+        // Debug: Log to file for first ADT only
+        bool isFirstFile = adtPath.Contains("_0_0_obj0.adt");
+        StreamWriter? debugLog = null;
+        if (isFirstFile)
+        {
+            debugLog = new StreamWriter("lk_adt_debug.txt", append: false);
+            debugLog.WriteLine($"=== DEBUG: {Path.GetFileName(adtPath)} ===");
+        }
 
         try
         {
@@ -64,23 +73,28 @@ public class LkAdtReader
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
                 
                 float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
-                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
-                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
+                // CATA 4.0+ CHANGED ORDER: offset 12 is now Y(height), offset 16 is now Z(north-south)!
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 12);  // Y (height) - SWAPPED in Cata!
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 16);  // Z (north-south) - SWAPPED in Cata!
                 float rotX = BitConverter.ToSingle(bytes, entryStart + 20);
                 float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
                 float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
                 ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 32);
                 ushort flags = BitConverter.ToUInt16(bytes, entryStart + 34);
                 
-                // Convert from map-corner-relative to world coordinates (centered at origin)
-                // WoW convention: Y is up (height). The horizontal plane is X/Z.
-                // World horizontal coordinates are measured from map center:
-                //   X_world = 32*TILESIZE - rawX
-                //   Z_world = 32*TILESIZE - rawZ
-                // Height stays as is: Y_world = rawY
-                float worldX = MAP_HALF_SIZE - rawX;
-                float worldY = MAP_HALF_SIZE - rawZ; // north-south
-                float worldZ = rawY;                 // height
+                // DEBUG: Log first 10 placements to file
+                if (debugLog != null && placements.Count < 10)
+                {
+                    debugLog.WriteLine($"MDDF #{placements.Count}: rawX={rawX:F1}, rawZ={rawZ:F1}, rawY={rawY:F1} | uniqueId={uniqueId}");
+                    Console.WriteLine($"[LkAdtReader] MDDF #{placements.Count}: rawX={rawX:F1}, rawZ={rawZ:F1}, rawY={rawY:F1} | uniqueId={uniqueId}");
+                }
+                
+                // LK ADT coordinates are ALREADY in world space - no conversion needed!
+                // WoW convention: Y is up (height), X/Z form the horizontal plane
+                // Just assign directly (swap Y/Z for our 2D visualization which expects X/Y as horizontal)
+                float worldX = rawX;  // east-west
+                float worldY = rawZ;  // north-south (horizontal in our visualization)
+                float worldZ = rawY;  // height (vertical in game, not used in 2D viz)
                 
                 // LK MDDF scale typically stored as ushort where 1024 == 1.0f
                 float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
@@ -92,6 +106,10 @@ public class LkAdtReader
         catch (Exception ex)
         {
             Console.WriteLine($"[LkAdtReader] Error reading MDDF from {adtPath}: {ex.Message}");
+        }
+        finally
+        {
+            debugLog?.Close();
         }
 
         return placements;
@@ -134,8 +152,9 @@ public class LkAdtReader
                 const float MAP_HALF_SIZE = 32.0f * TILESIZE; // 17066.66656
                 
                 float rawX = BitConverter.ToSingle(bytes, entryStart + 8);   // X (east-west)
-                float rawZ = BitConverter.ToSingle(bytes, entryStart + 12);  // Z (north-south)
-                float rawY = BitConverter.ToSingle(bytes, entryStart + 16);  // Y (height)
+                // CATA 4.0+ CHANGED ORDER: offset 12 is now Y(height), offset 16 is now Z(north-south)!
+                float rawY = BitConverter.ToSingle(bytes, entryStart + 12);  // Y (height) - SWAPPED in Cata!
+                float rawZ = BitConverter.ToSingle(bytes, entryStart + 16);  // Z (north-south) - SWAPPED in Cata!
                 float rotX = BitConverter.ToSingle(bytes, entryStart + 20);
                 float rotY = BitConverter.ToSingle(bytes, entryStart + 24);
                 float rotZ = BitConverter.ToSingle(bytes, entryStart + 28);
@@ -145,11 +164,17 @@ public class LkAdtReader
                 ushort nameSet = BitConverter.ToUInt16(bytes, entryStart + 60);
                 ushort scaleU = BitConverter.ToUInt16(bytes, entryStart + 62);
                 
-                // Convert from map-corner-relative to world coordinates (centered at origin)
-                // WoW convention: Y is up (height). The horizontal plane is X/Z.
-                float worldX = MAP_HALF_SIZE - rawX;
-                float worldY = MAP_HALF_SIZE - rawZ; // north-south
-                float worldZ = rawY;                 // height
+                // DEBUG: Log first 3 placements to verify byte offsets
+                if (placements.Count < 3)
+                {
+                    Console.WriteLine($"[LkAdtReader] MODF #{placements.Count}: rawX={rawX:F1}, rawZ={rawZ:F1}, rawY={rawY:F1} | uniqueId={uniqueId}");
+                }
+                
+                // LK ADT coordinates are ALREADY in world space - no conversion needed!
+                // WoW convention: Y is up (height), X/Z form the horizontal plane
+                float worldX = rawX;  // east-west
+                float worldY = rawZ;  // north-south (horizontal in our visualization)
+                float worldZ = rawY;  // height (vertical in game, not used in 2D viz)
                 
                 float scale = scaleU > 0 ? scaleU / 1024.0f : 1.0f;
 

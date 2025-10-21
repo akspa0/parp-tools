@@ -36,7 +36,7 @@ public static class GlobalRangeAnalyzer
                 var mapName = Path.GetFileNameWithoutExtension(wdtPath);
                 progress?.Report($"Analyzing {mapName}...");
                 
-                var records = AlphaPlacementExtractor.Extract(wdtPath, null);
+                var records = UnifiedPlacementExtractor.Extract(wdtPath, null);
                 
                 if (records.Count > 0)
                 {
