@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using WoWFormatLib.FileReaders;
+using SixLabors.ImageSharp.Formats.Png;
 
 namespace WoWRollback.AnalysisModule;
 
@@ -40,7 +42,9 @@ public sealed class MinimapHandler
             var patterns = new[]
             {
                 $"{mapName}_*.png",      // development_30_45.png
-                "map*.png"               // map30_45.png
+                "map*.png",              // map30_45.png
+                $"{mapName}_*.blp",      // development_30_45.blp (native WoW format)
+                "map*.blp"               // map30_45.blp
             };
 
             var foundFiles = new List<(string SourcePath, int TileX, int TileY)>();
@@ -70,7 +74,7 @@ public sealed class MinimapHandler
                     ErrorMessage: null); // Not an error - just no minimaps found
             }
 
-            // Copy files to output directory with standardized naming
+            // Copy/convert files to output directory with standardized naming
             int copied = 0;
             foreach (var (sourcePath, tileX, tileY) in foundFiles)
             {
@@ -79,12 +83,34 @@ public sealed class MinimapHandler
                     var destFileName = $"{mapName}_{tileX}_{tileY}.png";
                     var destPath = Path.Combine(minimapOutputDir, destFileName);
                     
-                    File.Copy(sourcePath, destPath, overwrite: true);
-                    copied++;
+                    var ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+                    
+                    if (ext == ".blp")
+                    {
+                        // Convert BLP to PNG
+                        var blpReader = new BLPReader();
+                        blpReader.LoadBLP(sourcePath);
+                        
+                        if (blpReader.bmp != null)
+                        {
+                            using (var fileStream = File.Create(destPath))
+                            {
+                                blpReader.bmp.Save(fileStream, new PngEncoder());
+                            }
+                            blpReader.bmp.Dispose();
+                            copied++;
+                        }
+                    }
+                    else if (ext == ".png")
+                    {
+                        // Direct copy for PNG files
+                        File.Copy(sourcePath, destPath, overwrite: true);
+                        copied++;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MinimapHandler] Warning: Failed to copy {Path.GetFileName(sourcePath)}: {ex.Message}");
+                    Console.WriteLine($"[MinimapHandler] Warning: Failed to process {Path.GetFileName(sourcePath)}: {ex.Message}");
                 }
             }
 

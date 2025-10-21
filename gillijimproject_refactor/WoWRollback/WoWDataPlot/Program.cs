@@ -375,25 +375,92 @@ class Program
         writer.WriteLine($"        <strong>Layers:</strong> {tileInfo.Layers.Count}");
         writer.WriteLine("    </div>");
         
-        // Show minimap and scatter plot side by side, or just scatter if no minimap
-        if (minimapFile != null)
+        // Interactive layer viewer with minimap base + toggleable overlays
+        var overlayDir = $"overlays_{tileInfo.TileX}_{tileInfo.TileY}";
+        var hasOverlays = Directory.Exists(Path.Combine(Path.GetDirectoryName(htmlPath)!, overlayDir));
+        
+        if (minimapFile != null && hasOverlays)
         {
-            writer.WriteLine("    <div class='tile-images'>");
-            writer.WriteLine("        <div class='tile-image'>");
-            writer.WriteLine("            <h3>In-Game Minimap</h3>");
-            writer.WriteLine($"            <img src='../minimaps/{minimapFile}' alt='Minimap [{tileInfo.TileX}, {tileInfo.TileY}]' />");
+            writer.WriteLine("    <h3 style='color: #4ec9b0;'>Interactive Layer Viewer</h3>");
+            writer.WriteLine("    <div style='display: grid; grid-template-columns: 300px 1fr; gap: 20px; margin: 20px 0;'>");
+            
+            // Layer controls sidebar
+            writer.WriteLine("        <div style='background: #252526; padding: 15px; border-radius: 5px; max-height: 800px; overflow-y: auto;'>");
+            writer.WriteLine("            <h4 style='color: #569cd6; margin-top: 0;'>Toggle Layers</h4>");
+            writer.WriteLine("            <div style='margin-bottom: 10px;'>");
+            writer.WriteLine("                <button onclick='toggleAll(true)' style='padding: 5px 10px; margin-right: 5px; background: #4ec9b0; border: none; border-radius: 3px; color: #1e1e1e; cursor: pointer;'>All On</button>");
+            writer.WriteLine("                <button onclick='toggleAll(false)' style='padding: 5px 10px; background: #ce9178; border: none; border-radius: 3px; color: #1e1e1e; cursor: pointer;'>All Off</button>");
+            writer.WriteLine("            </div>");
+            
+            foreach (var (layer, idx) in tileInfo.Layers.Select((l, i) => (l, i)))
+            {
+                writer.WriteLine($"            <div style='margin: 8px 0; padding: 8px; background: #2d2d30; border-radius: 3px;'>");
+                writer.WriteLine($"                <label style='display: flex; align-items: center; cursor: pointer;'>");
+                writer.WriteLine($"                    <input type='checkbox' id='layer{idx}' onchange='toggleLayer({idx})' checked style='margin-right: 8px;'>");
+                writer.WriteLine($"                    <div style='width: 20px; height: 20px; background: {layer.Color}; margin-right: 8px; border: 1px solid #3c3c3c; border-radius: 2px;'></div>");
+                writer.WriteLine($"                    <div style='font-size: 0.85em;'>");
+                writer.WriteLine($"                        <div style='color: #4ec9b0; font-weight: bold;'>{layer.Name}</div>");
+                writer.WriteLine($"                        <div style='color: #858585; font-size: 0.9em;'>{layer.PlacementCount} items</div>");
+                writer.WriteLine($"                    </div>");
+                writer.WriteLine($"                </label>");
+                writer.WriteLine($"            </div>");
+            }
+            
             writer.WriteLine("        </div>");
-            writer.WriteLine("        <div class='tile-image'>");
-            writer.WriteLine("            <h3>Placement Layers</h3>");
-            writer.WriteLine($"            <img src='{imageName}' alt='Placements [{tileInfo.TileX}, {tileInfo.TileY}]' />");
+            
+            // Canvas viewer
+            writer.WriteLine("        <div style='position: relative; max-width: 1024px;'>");
+            writer.WriteLine("            <canvas id='viewer' width='1024' height='1024' style='border: 2px solid #3c3c3c; border-radius: 5px; width: 100%; height: auto;'></canvas>");
             writer.WriteLine("        </div>");
+            
             writer.WriteLine("    </div>");
+            
+            // JavaScript for layer management
+            writer.WriteLine("    <script>");
+            writer.WriteLine("        const canvas = document.getElementById('viewer');");
+            writer.WriteLine("        const ctx = canvas.getContext('2d');");
+            writer.WriteLine("        const baseImg = new Image();");
+            writer.WriteLine($"        baseImg.src = '../minimaps/{minimapFile}';");
+            writer.WriteLine("        const layerImgs = [];");
+            writer.WriteLine("        const layerVisible = [];");
+            
+            foreach (var (layer, idx) in tileInfo.Layers.Select((l, i) => (l, i)))
+            {
+                writer.WriteLine($"        layerImgs[{idx}] = new Image();");
+                writer.WriteLine($"        layerImgs[{idx}].src = '{overlayDir}/layer_{layer.MinUniqueId}_{layer.MaxUniqueId}.png';");
+                writer.WriteLine($"        layerVisible[{idx}] = true;");
+            }
+            
+            writer.WriteLine("        function redraw() {");
+            writer.WriteLine("            ctx.clearRect(0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("            ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("            for (let i = 0; i < layerImgs.length; i++) {");
+            writer.WriteLine("                if (layerVisible[i] && layerImgs[i].complete) {");
+            writer.WriteLine("                    ctx.drawImage(layerImgs[i], 0, 0, canvas.width, canvas.height);");
+            writer.WriteLine("                }");
+            writer.WriteLine("            }");
+            writer.WriteLine("        }");
+            writer.WriteLine("        function toggleLayer(idx) {");
+            writer.WriteLine("            layerVisible[idx] = document.getElementById('layer' + idx).checked;");
+            writer.WriteLine("            redraw();");
+            writer.WriteLine("        }");
+            writer.WriteLine("        function toggleAll(visible) {");
+            writer.WriteLine("            for (let i = 0; i < layerVisible.length; i++) {");
+            writer.WriteLine("                layerVisible[i] = visible;");
+            writer.WriteLine("                document.getElementById('layer' + i).checked = visible;");
+            writer.WriteLine("            }");
+            writer.WriteLine("            redraw();");
+            writer.WriteLine("        }");
+            writer.WriteLine("        baseImg.onload = redraw;");
+            writer.WriteLine("        layerImgs.forEach(img => img.onload = redraw);");
+            writer.WriteLine("    </script>");
         }
         else
         {
+            // Fallback to static image if no minimap/overlays
             writer.WriteLine("    <div class='tile-images'>");
             writer.WriteLine("        <div class='tile-image single-image'>");
-            writer.WriteLine("            <h3>Placement Layers</h3>");
+            writer.WriteLine("            <h3>Placement Heatmap</h3>");
             writer.WriteLine($"            <img src='{imageName}' alt='Placements [{tileInfo.TileX}, {tileInfo.TileY}]' />");
             writer.WriteLine("        </div>");
             writer.WriteLine("    </div>");
@@ -875,6 +942,59 @@ class Program
             Console.WriteLine($"✓ Generated {tileCount} tile images + HTML pages");
             Console.WriteLine();
             
+            // STEP 3b: Generate layer overlays for tiles with minimaps
+            if (!string.IsNullOrEmpty(minimapResult.MinimapDir))
+            {
+                Console.WriteLine("═══ STEP 3b: Generating Layer Overlay PNGs ═══");
+                int overlaysGenerated = 0;
+                
+                foreach (var tileInfo in tileLayerInfos)
+                {
+                    var minimapPath = Path.Combine(minimapResult.MinimapDir, $"{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.png");
+                    if (!File.Exists(minimapPath)) continue;
+                    
+                    var tileRecords = records.Where(r => r.TileX == tileInfo.TileX && r.TileY == tileInfo.TileY).ToList();
+                    if (tileRecords.Count == 0) continue;
+                    
+                    // Create overlay directory for this tile
+                    var overlayDir = Path.Combine(tilesDir.FullName, $"overlays_{tileInfo.TileX}_{tileInfo.TileY}");
+                    Directory.CreateDirectory(overlayDir);
+                    
+                    // Generate one transparent PNG per layer
+                    foreach (var layer in tileInfo.Layers)
+                    {
+                        var layerRecords = tileRecords.Where(r => r.UniqueId >= layer.MinUniqueId && 
+                                                                  r.UniqueId <= layer.MaxUniqueId).ToList();
+                        if (layerRecords.Count == 0) continue;
+                        
+                        var plt = new Plot();
+                        plt.Layout.Frameless();
+                        
+                        var plotCoords = layerRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
+                        double[] xData = plotCoords.Select(c => c.plotX).ToArray();
+                        double[] yData = plotCoords.Select(c => c.plotY).ToArray();
+                        
+                        var scatter = plt.Add.Scatter(xData, yData);
+                        scatter.MarkerSize = tileMarkerSize * 1.5f; // Slightly larger for visibility
+                        scatter.MarkerShape = MarkerShape.FilledCircle;
+                        scatter.LineWidth = 0;
+                        
+                        var color = System.Drawing.ColorTranslator.FromHtml(layer.Color);
+                        scatter.Color = ScottPlot.Color.FromColor(color);
+                        
+                        plt.Axes.SquareUnits();
+                        plt.HideGrid();
+                        
+                        string overlayPath = Path.Combine(overlayDir, $"layer_{layer.MinUniqueId}_{layer.MaxUniqueId}.png");
+                        plt.SavePng(overlayPath, tileSize, tileSize);
+                        overlaysGenerated++;
+                    }
+                }
+                
+                Console.WriteLine($"✓ Generated {overlaysGenerated} layer overlay images");
+                Console.WriteLine();
+            }
+            
             // STEP 4: Generate map-wide overview as HEATMAP
             Console.WriteLine("═══ STEP 4: Generating Map Overview Heatmap ═══");
             Console.WriteLine($"  Found {globalLayers.Count} global layers across all tiles");
@@ -986,9 +1106,36 @@ class Program
                 writer.WriteLine("    </div>");
                 
                 // Overview image
-                writer.WriteLine("    <h2>Continental Overview</h2>");
+                writer.WriteLine("    <h2>Continental Overview - Temporal Heatmap</h2>");
                 writer.WriteLine("    <div class='overview'>");
                 writer.WriteLine($"        <img src='{mapName}_overview.png' alt='Map Overview' />");
+                writer.WriteLine("    </div>");
+                
+                // Heatmap Legend
+                writer.WriteLine("    <h3 style='color: #4ec9b0;'>Heatmap Legend</h3>");
+                writer.WriteLine("    <div style='background: #252526; padding: 20px; border-radius: 5px; margin: 20px 0;'>");
+                writer.WriteLine("        <p style='color: #d4d4d4; margin-bottom: 15px;'>Colors represent <strong>when content was added</strong> based on UniqueID temporal ordering:</p>");
+                
+                // Gradient bar
+                writer.WriteLine("        <div style='background: linear-gradient(to right, #0000FF 0%, #00FFFF 25%, #00FF00 50%, #FFFF00 75%, #FF0000 100%); height: 40px; border-radius: 5px; border: 2px solid #3c3c3c; position: relative;'>");
+                
+                // Add markers for key UniqueID values
+                int numMarkers = 5;
+                for (int i = 0; i < numMarkers; i++)
+                {
+                    float position = i / (float)(numMarkers - 1);
+                    uint markerValue = globalMinId + (uint)(globalRange * position);
+                    int leftPercent = (int)(position * 100);
+                    
+                    writer.WriteLine($"            <div style='position: absolute; left: {leftPercent}%; top: 100%; transform: translateX(-50%); margin-top: 5px; color: #d4d4d4; font-size: 0.85em; white-space: nowrap;'>{markerValue:N0}</div>");
+                }
+                
+                writer.WriteLine("        </div>");
+                writer.WriteLine("        <div style='display: flex; justify-content: space-between; margin-top: 50px; font-size: 0.9em;'>");
+                writer.WriteLine("            <div style='color: #569cd6;'><strong>← Early Development</strong> (Blue)</div>");
+                writer.WriteLine("            <div style='color: #ce9178;'><strong>Late Development →</strong> (Red)</div>");
+                writer.WriteLine("        </div>");
+                writer.WriteLine($"        <p style='color: #858585; font-size: 0.85em; margin-top: 15px;'>UniqueID Range: {globalMinId:N0} - {globalMaxId:N0} ({records.Count:N0} total placements)</p>");
                 writer.WriteLine("    </div>");
                 
                 // Tile Browser
