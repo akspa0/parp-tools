@@ -1,10 +1,13 @@
 using System.CommandLine;
-using System.Globalization;
 using System.Text.Json;
-using CsvHelper;
 using ScottPlot;
-using WoWDataPlot.Extractors;
+using CsvHelper;
+using CsvHelper.Configuration;
+using System.Globalization;
+using GillijimProject.WowFiles.Alpha;
 using WoWDataPlot.Helpers;
+using WoWDataPlot.Extractors;
+using WoWRollback.AnalysisModule;
 using WoWDataPlot.Models;
 
 namespace WoWDataPlot;
@@ -218,8 +221,6 @@ class Program
             
             Console.WriteLine($"[INFO] Global UniqueID range: {minId} - {maxId}");
             
-            string[] colors = new[] { "#0000FF", "#00FF00", "#FF0000", "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500", "#800080" };
-            
             // Analyze per-tile layers (tile-specific, not global!)
             var tileLayerInfos = new List<TileLayerInfo>();
             var globalLayersCollected = new HashSet<(uint min, uint max)>();
@@ -243,8 +244,13 @@ class Program
                 uint tileMin = tileUniqueIds.First();
                 uint tileMax = tileUniqueIds.Last();
                 
+                // Generate unique colors for this tile's potential layers (estimate max 100 per tile)
+                var tileColors = GenerateColorPalette(100)
+                    .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                    .ToArray();
+                
                 // Auto-detect layers within this tile by finding gaps/clusters
-                var tileLayers = DetectLayersInTile(tileRecords, layerSize, colors);
+                var tileLayers = DetectLayersInTile(tileRecords, layerSize, tileColors);
                 
                 // Track all unique ranges for global summary
                 foreach (var layer in tileLayers)
@@ -265,15 +271,19 @@ class Program
             Console.WriteLine($"[INFO] Analyzed {tileLayerInfos.Count} tiles");
             
             // Create global layer summary from all tile-specific layers
-            var globalLayers = globalLayersCollected
-                .OrderBy(r => r.min)
-                .Select((range, idx) => new LayerInfo
+            var globalLayersList = globalLayersCollected.OrderBy(r => r.min).ToList();
+            var globalColors = GenerateColorPalette(globalLayersList.Count)
+                .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                .ToArray();
+                
+            var globalLayers = globalLayersList
+                .Select((range, idx) => new WoWDataPlot.Models.LayerInfo
                 {
-                    Name = $"Layer {range.min}-{range.max}",
+                    Name = $"{range.min}-{range.max}",
                     MinUniqueId = range.min,
                     MaxUniqueId = range.max,
                     PlacementCount = records.Count(r => r.UniqueId >= range.min && r.UniqueId <= range.max),
-                    Color = colors[idx % colors.Length]
+                    Color = globalColors[idx]
                 })
                 .ToList();
             
@@ -318,22 +328,169 @@ class Program
     }
     
     /// <summary>
+    /// Generate an HTML page for a single tile with its layers and legend.
+    /// </summary>
+    private static void GenerateTileHtmlPage(string htmlPath, string mapName, TileLayerInfo tileInfo, string imageName, string? minimapDir)
+    {
+        using var writer = new StreamWriter(htmlPath);
+        
+        // Check if minimap exists for this tile
+        string? minimapFile = null;
+        if (!string.IsNullOrEmpty(minimapDir))
+        {
+            var minimapPath = Path.Combine(minimapDir, $"{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.png");
+            if (File.Exists(minimapPath))
+            {
+                minimapFile = Path.GetFileName(minimapPath);
+            }
+        }
+        
+        writer.WriteLine("<!DOCTYPE html>");
+        writer.WriteLine("<html>");
+        writer.WriteLine("<head>");
+        writer.WriteLine($"    <title>{mapName} - Tile [{tileInfo.TileX}, {tileInfo.TileY}]</title>");
+        writer.WriteLine("    <style>");
+        writer.WriteLine("        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }");
+        writer.WriteLine("        h1 { color: #4ec9b0; }");
+        writer.WriteLine("        .back-link { color: #569cd6; text-decoration: none; margin-bottom: 20px; display: inline-block; }");
+        writer.WriteLine("        .back-link:hover { text-decoration: underline; }");
+        writer.WriteLine("        .tile-info { background: #252526; padding: 15px; border-radius: 5px; margin: 20px 0; }");
+        writer.WriteLine("        .tile-images { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }");
+        writer.WriteLine("        .tile-image { text-align: center; }");
+        writer.WriteLine("        .tile-image h3 { color: #569cd6; margin-bottom: 10px; }");
+        writer.WriteLine("        .tile-image img { max-width: 100%; border: 2px solid #3c3c3c; border-radius: 5px; }");
+        writer.WriteLine("        .single-image { grid-column: 1 / -1; }");
+        writer.WriteLine("        .layer-list { background: #252526; padding: 15px; border-radius: 5px; }");
+        writer.WriteLine("        .layer-item { display: flex; align-items: center; padding: 8px; margin: 5px 0; background: #2d2d30; border-radius: 3px; }");
+        writer.WriteLine("        .color-box { width: 30px; height: 20px; margin-right: 10px; border: 1px solid #3c3c3c; }");
+        writer.WriteLine("        .layer-info-text { color: #d4d4d4; }");
+        writer.WriteLine("    </style>");
+        writer.WriteLine("</head>");
+        writer.WriteLine("<body>");
+        writer.WriteLine($"    <a href='../{mapName}_legend.html' class='back-link'>← Back to Overview</a>");
+        writer.WriteLine($"    <h1>Tile [{tileInfo.TileX}, {tileInfo.TileY}] - {tileInfo.Layers.Count} Layers</h1>");
+        
+        writer.WriteLine("    <div class='tile-info'>");
+        writer.WriteLine($"        <strong>Total Placements:</strong> {tileInfo.Layers.Sum(l => l.PlacementCount)}<br>");
+        writer.WriteLine($"        <strong>Layers:</strong> {tileInfo.Layers.Count}");
+        writer.WriteLine("    </div>");
+        
+        // Show minimap and scatter plot side by side, or just scatter if no minimap
+        if (minimapFile != null)
+        {
+            writer.WriteLine("    <div class='tile-images'>");
+            writer.WriteLine("        <div class='tile-image'>");
+            writer.WriteLine("            <h3>In-Game Minimap</h3>");
+            writer.WriteLine($"            <img src='../minimaps/{minimapFile}' alt='Minimap [{tileInfo.TileX}, {tileInfo.TileY}]' />");
+            writer.WriteLine("        </div>");
+            writer.WriteLine("        <div class='tile-image'>");
+            writer.WriteLine("            <h3>Placement Layers</h3>");
+            writer.WriteLine($"            <img src='{imageName}' alt='Placements [{tileInfo.TileX}, {tileInfo.TileY}]' />");
+            writer.WriteLine("        </div>");
+            writer.WriteLine("    </div>");
+        }
+        else
+        {
+            writer.WriteLine("    <div class='tile-images'>");
+            writer.WriteLine("        <div class='tile-image single-image'>");
+            writer.WriteLine("            <h3>Placement Layers</h3>");
+            writer.WriteLine($"            <img src='{imageName}' alt='Placements [{tileInfo.TileX}, {tileInfo.TileY}]' />");
+            writer.WriteLine("        </div>");
+            writer.WriteLine("    </div>");
+        }
+        
+        writer.WriteLine("    <h2>Layers in This Tile</h2>");
+        writer.WriteLine("    <div class='layer-list'>");
+        
+        foreach (var layer in tileInfo.Layers)
+        {
+            writer.WriteLine("        <div class='layer-item'>");
+            writer.WriteLine($"            <div class='color-box' style='background-color: {layer.Color};'></div>");
+            writer.WriteLine($"            <div class='layer-info-text'>");
+            writer.WriteLine($"                <strong>{layer.Name}</strong> - {layer.PlacementCount} placements");
+            writer.WriteLine($"            </div>");
+            writer.WriteLine("        </div>");
+        }
+        
+        writer.WriteLine("    </div>");
+        writer.WriteLine("</body>");
+        writer.WriteLine("</html>");
+    }
+    
+    /// <summary>
+    /// Generate a diverse color palette for visualizing many layers.
+    /// Uses HSV color space to distribute hues evenly.
+    /// </summary>
+    private static ScottPlot.Color[] GenerateColorPalette(int count)
+    {
+        var colors = new ScottPlot.Color[count];
+        
+        for (int i = 0; i < count; i++)
+        {
+            // Distribute hues evenly across the color wheel
+            float hue = (float)i / count * 360f;
+            
+            // Vary saturation and value to create more distinct colors
+            float saturation = 0.7f + ((i % 3) * 0.1f);  // 0.7, 0.8, 0.9
+            float value = 0.8f + ((i % 2) * 0.2f);       // 0.8, 1.0
+            
+            var color = ColorFromHSV(hue, saturation, value);
+            colors[i] = ScottPlot.Color.FromColor(color);
+        }
+        
+        return colors;
+    }
+    
+    /// <summary>
+    /// Convert HSV to RGB color.
+    /// </summary>
+    private static System.Drawing.Color ColorFromHSV(float hue, float saturation, float value)
+    {
+        // Clamp inputs to valid ranges
+        hue = Math.Clamp(hue, 0, 360);
+        saturation = Math.Clamp(saturation, 0, 1);
+        value = Math.Clamp(value, 0, 1);
+        
+        int hi = (int)Math.Floor(hue / 60) % 6;
+        float f = hue / 60 - (float)Math.Floor(hue / 60);
+
+        value = value * 255;
+        int v = (int)Math.Clamp(value, 0, 255);
+        int p = (int)Math.Clamp(value * (1 - saturation), 0, 255);
+        int q = (int)Math.Clamp(value * (1 - f * saturation), 0, 255);
+        int t = (int)Math.Clamp(value * (1 - (1 - f) * saturation), 0, 255);
+
+        if (hi == 0)
+            return System.Drawing.Color.FromArgb(255, v, t, p);
+        else if (hi == 1)
+            return System.Drawing.Color.FromArgb(255, q, v, p);
+        else if (hi == 2)
+            return System.Drawing.Color.FromArgb(255, p, v, t);
+        else if (hi == 3)
+            return System.Drawing.Color.FromArgb(255, p, q, v);
+        else if (hi == 4)
+            return System.Drawing.Color.FromArgb(255, t, p, v);
+        else
+            return System.Drawing.Color.FromArgb(255, v, p, q);
+    }
+    
+    /// <summary>
     /// Detect layers within a single tile by finding GAPS in UniqueID sequences.
     /// Gaps represent development pauses - they are meaningful data!
     /// Each continuous cluster of IDs = a layer (development burst).
     /// </summary>
-    private static List<LayerInfo> DetectLayersInTile(List<PlacementRecord> tileRecords, int gapThreshold, string[] colors)
+    private static List<WoWDataPlot.Models.LayerInfo> DetectLayersInTile(List<PlacementRecord> tileRecords, int gapThreshold, string[] colors)
     {
         if (tileRecords.Count == 0)
-            return new List<LayerInfo>();
+            return new List<WoWDataPlot.Models.LayerInfo>();
         
         // Get all unique UniqueIDs in this tile, sorted
         var uniqueIds = tileRecords.Select(r => r.UniqueId).Distinct().OrderBy(id => id).ToList();
         
         if (uniqueIds.Count == 0)
-            return new List<LayerInfo>();
+            return new List<WoWDataPlot.Models.LayerInfo>();
         
-        var layers = new List<LayerInfo>();
+        var layers = new List<WoWDataPlot.Models.LayerInfo>();
         uint layerStart = uniqueIds[0];
         uint layerEnd = uniqueIds[0];
         
@@ -345,41 +502,38 @@ class Program
             
             if (gap > gapThreshold)
             {
-                // Found a GAP! Finalize current layer
-                int count = tileRecords.Count(r => r.UniqueId >= layerStart && r.UniqueId <= layerEnd);
+                // Gap detected - finalize current layer
+                int placementCount = tileRecords.Count(r => r.UniqueId >= layerStart && r.UniqueId <= layerEnd);
+                string color = colors[layers.Count % colors.Length];
                 
-                layers.Add(new LayerInfo
+                layers.Add(new WoWDataPlot.Models.LayerInfo
                 {
                     Name = $"{layerStart}-{layerEnd}",
                     MinUniqueId = layerStart,
                     MaxUniqueId = layerEnd,
-                    PlacementCount = count,
-                    Color = colors[layers.Count % colors.Length]
+                    PlacementCount = placementCount,
+                    Color = color
                 });
                 
-                // Start new layer after gap
+                // Start new layer
                 layerStart = currentId;
-                layerEnd = currentId;
             }
-            else
-            {
-                // Continuous sequence - extend current layer
-                layerEnd = currentId;
-            }
+            
+            layerEnd = currentId;
         }
         
-        // Finalize last layer
-        if (layerStart <= layerEnd)
+        // Add final layer
         {
-            int count = tileRecords.Count(r => r.UniqueId >= layerStart && r.UniqueId <= layerEnd);
+            int placementCount = tileRecords.Count(r => r.UniqueId >= layerStart && r.UniqueId <= layerEnd);
+            string color = colors[layers.Count % colors.Length];
             
-            layers.Add(new LayerInfo
+            layers.Add(new WoWDataPlot.Models.LayerInfo
             {
                 Name = $"{layerStart}-{layerEnd}",
                 MinUniqueId = layerStart,
                 MaxUniqueId = layerEnd,
-                PlacementCount = count,
-                Color = colors[layers.Count % colors.Length]
+                PlacementCount = placementCount,
+                Color = color
             });
         }
         
@@ -555,6 +709,27 @@ class Program
             
             var mapName = Path.GetFileNameWithoutExtension(wdtFile.Name);
             
+            // Process minimaps
+            Console.WriteLine("═══ STEP 0: Processing Minimap Tiles ═══");
+            var minimapHandler = new MinimapHandler();
+            var mapDirectory = Path.GetDirectoryName(wdtFile.FullName) ?? "";
+            var minimapResult = minimapHandler.ProcessMinimaps(mapDirectory, mapName, outputDir.FullName);
+            
+            if (minimapResult.Success && minimapResult.TilesCopied > 0)
+            {
+                Console.WriteLine($"✓ Found and copied {minimapResult.TilesCopied} minimap tiles");
+                Console.WriteLine($"  Minimap directory: {minimapResult.MinimapDir}");
+            }
+            else if (!string.IsNullOrEmpty(minimapResult.ErrorMessage))
+            {
+                Console.WriteLine($"⚠ Minimap processing: {minimapResult.ErrorMessage}");
+            }
+            else
+            {
+                Console.WriteLine($"⚠ No minimap tiles found (optional - continuing without them)");
+            }
+            Console.WriteLine();
+            
             // STEP 1: Extract placement data
             Console.WriteLine("═══ STEP 1: Extracting Placement Data ═══");
             var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
@@ -572,8 +747,6 @@ class Program
             // STEP 2: Analyze layers per tile
             Console.WriteLine("═══ STEP 2: Analyzing Layers Per Tile ═══");
             
-            string[] colors = new[] { "#0000FF", "#00FF00", "#FF0000", "#FFFF00", "#FF00FF", "#00FFFF", "#FFA500", "#800080" };
-            
             var tileLayerInfos = new List<TileLayerInfo>();
             var globalLayersCollected = new HashSet<(uint min, uint max)>();
             
@@ -588,7 +761,13 @@ class Program
             foreach (var tileGroup in tilesWithData)
             {
                 var tileRecords = tileGroup.ToList();
-                var tileLayers = DetectLayersInTile(tileRecords, gapThreshold, colors);
+                
+                // Generate unique colors for this tile's layers (max 100 per tile)
+                var tileColors = GenerateColorPalette(100)
+                    .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                    .ToArray();
+                    
+                var tileLayers = DetectLayersInTile(tileRecords, gapThreshold, tileColors);
                 
                 foreach (var layer in tileLayers)
                 {
@@ -605,15 +784,19 @@ class Program
                 });
             }
             
-            var globalLayers = globalLayersCollected
-                .OrderBy(r => r.min)
-                .Select((range, idx) => new LayerInfo
+            var globalLayersList2 = globalLayersCollected.OrderBy(r => r.min).ToList();
+            var globalColors2 = GenerateColorPalette(globalLayersList2.Count)
+                .Select(c => $"#{(byte)(c.Red * 255):X2}{(byte)(c.Green * 255):X2}{(byte)(c.Blue * 255):X2}")
+                .ToArray();
+                
+            var globalLayers = globalLayersList2
+                .Select((range, idx) => new WoWDataPlot.Models.LayerInfo
                 {
-                    Name = $"Layer {range.min}-{range.max}",
+                    Name = $"{range.min}-{range.max}",
                     MinUniqueId = range.min,
                     MaxUniqueId = range.max,
                     PlacementCount = records.Count(r => r.UniqueId >= range.min && r.UniqueId <= range.max),
-                    Color = colors[idx % colors.Length]
+                    Color = globalColors2[idx]
                 })
                 .ToList();
             
@@ -633,38 +816,54 @@ class Program
                 
                 var plt = new Plot();
                 
-                // Plot each layer with different color
-                foreach (var layer in tileInfo.Layers)
+                // HEATMAP APPROACH: Plot placements in color buckets by UniqueID
+                uint tileMinId = tileRecords.Min(r => r.UniqueId);
+                uint tileMaxId = tileRecords.Max(r => r.UniqueId);
+                uint tileRange = Math.Max(tileMaxId - tileMinId, 1);
+                
+                // Divide into 50 color buckets for smooth gradient
+                int numBuckets = Math.Min(50, tileRecords.Count);
+                
+                for (int bucket = 0; bucket < numBuckets; bucket++)
                 {
-                    var layerRecords = tileRecords.Where(r => r.UniqueId >= layer.MinUniqueId && 
-                                                              r.UniqueId <= layer.MaxUniqueId).ToList();
+                    uint bucketStart = tileMinId + (uint)((tileRange * bucket) / numBuckets);
+                    uint bucketEnd = tileMinId + (uint)((tileRange * (bucket + 1)) / numBuckets);
                     
-                    if (layerRecords.Count == 0) continue;
+                    var bucketRecords = tileRecords.Where(r => r.UniqueId >= bucketStart && r.UniqueId < bucketEnd).ToList();
+                    if (bucket == numBuckets - 1) // Last bucket includes max
+                        bucketRecords = tileRecords.Where(r => r.UniqueId >= bucketStart && r.UniqueId <= bucketEnd).ToList();
                     
-                    var plotCoords = layerRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
+                    if (bucketRecords.Count == 0) continue;
+                    
+                    var plotCoords = bucketRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
                     double[] xData = plotCoords.Select(c => c.plotX).ToArray();
                     double[] yData = plotCoords.Select(c => c.plotY).ToArray();
                     
+                    // Color gradient: Blue (early) -> Green -> Yellow -> Red (late)
+                    float normalizedPos = bucket / (float)(numBuckets - 1);
+                    float hue = (1.0f - normalizedPos) * 240f; // 240° = blue, 0° = red
+                    var bucketColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                    
                     var scatter = plt.Add.Scatter(xData, yData);
-                    scatter.MarkerSize = tileMarkerSize;  // Use configurable marker size
+                    scatter.MarkerSize = tileMarkerSize;
                     scatter.MarkerShape = MarkerShape.FilledCircle;
                     scatter.LineWidth = 0;
-                    scatter.LegendText = $"{layer.Name} ({layerRecords.Count})";
-                    
-                    var color = System.Drawing.ColorTranslator.FromHtml(layer.Color);
-                    scatter.Color = ScottPlot.Color.FromColor(color);
+                    scatter.Color = ScottPlot.Color.FromColor(bucketColor);
                 }
                 
                 var (centerX, centerY) = CoordinateTransform.TileToWorldCenter(tileInfo.TileX, tileInfo.TileY);
                 
-                plt.Title($"[{tileInfo.TileX},{tileInfo.TileY}] ({centerX:F0},{centerY:F0}) - {tileInfo.Layers.Count} Layers");
+                plt.Title($"[{tileInfo.TileX},{tileInfo.TileY}] ({centerX:F0},{centerY:F0}) - UniqueID {tileMinId}-{tileMaxId}");
                 plt.XLabel("East ← → West");
                 plt.YLabel("South ← → North");
-                plt.ShowLegend();
                 plt.Axes.SquareUnits();
                 
                 string outputPath = Path.Combine(tilesDir.FullName, tileInfo.ImagePath!);
                 plt.SavePng(outputPath, tileSize, tileSize);
+                
+                // Generate HTML page for this tile
+                string tileHtmlPath = Path.Combine(tilesDir.FullName, $"{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html");
+                GenerateTileHtmlPage(tileHtmlPath, mapName, tileInfo, Path.GetFileName(outputPath), minimapResult.MinimapDir);
                 
                 tileCount++;
                 if (tileCount % 50 == 0)
@@ -673,71 +872,169 @@ class Program
                 }
             }
             
-            Console.WriteLine($"✓ Generated {tileCount} tile images");
+            Console.WriteLine($"✓ Generated {tileCount} tile images + HTML pages");
             Console.WriteLine();
             
-            // STEP 4: Generate map-wide overview
-            Console.WriteLine("═══ STEP 4: Generating Map Overview ═══");
+            // STEP 4: Generate map-wide overview as HEATMAP
+            Console.WriteLine("═══ STEP 4: Generating Map Overview Heatmap ═══");
+            Console.WriteLine($"  Found {globalLayers.Count} global layers across all tiles");
             
             var mapPlot = new Plot();
             
-            // Plot ALL placements on map (not layer-by-layer due to high layer count)
-            if (mapMaxLayers == 0 || globalLayers.Count <= mapMaxLayers)
+            uint globalMinId = records.Min(r => r.UniqueId);
+            uint globalMaxId = records.Max(r => r.UniqueId);
+            uint globalRange = Math.Max(globalMaxId - globalMinId, 1);
+            
+            // Divide into 100 color buckets for smooth gradient across entire map
+            int mapBuckets = 100;
+            
+            Console.WriteLine($"  Plotting heatmap with {mapBuckets} color gradients (UniqueID {globalMinId}-{globalMaxId})...");
+            
+            for (int bucket = 0; bucket < mapBuckets; bucket++)
             {
-                // Plot all placements as a single dataset for performance
-                Console.WriteLine($"  Plotting all {records.Count} placements...");
+                uint bucketStart = globalMinId + (uint)((globalRange * bucket) / mapBuckets);
+                uint bucketEnd = globalMinId + (uint)((globalRange * (bucket + 1)) / mapBuckets);
                 
-                var allPlotCoords = records.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
-                double[] allXData = allPlotCoords.Select(c => c.plotX).ToArray();
-                double[] allYData = allPlotCoords.Select(c => c.plotY).ToArray();
+                var bucketRecords = records.Where(r => r.UniqueId >= bucketStart && r.UniqueId < bucketEnd).ToList();
+                if (bucket == mapBuckets - 1) // Last bucket includes max
+                    bucketRecords = records.Where(r => r.UniqueId >= bucketStart && r.UniqueId <= bucketEnd).ToList();
                 
-                var allScatter = mapPlot.Add.Scatter(allXData, allYData);
-                allScatter.MarkerSize = mapMarkerSize;
-                allScatter.MarkerShape = MarkerShape.FilledCircle;
-                allScatter.LineWidth = 0;
-                allScatter.LegendText = $"All Placements ({records.Count})";
-                allScatter.Color = ScottPlot.Color.FromColor(System.Drawing.Color.Blue);
-            }
-            else
-            {
-                // Plot first N layers separately with different colors
-                Console.WriteLine($"  Plotting first {mapMaxLayers} layers separately...");
+                if (bucketRecords.Count == 0) continue;
                 
-                foreach (var globalLayer in globalLayers.Take(mapMaxLayers))
+                var plotCoords = bucketRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
+                double[] xData = plotCoords.Select(c => c.plotX).ToArray();
+                double[] yData = plotCoords.Select(c => c.plotY).ToArray();
+                
+                // Color gradient: Blue (early) -> Green -> Yellow -> Red (late)
+                float normalizedPos = bucket / (float)(mapBuckets - 1);
+                float hue = (1.0f - normalizedPos) * 240f; // 240° = blue, 0° = red
+                var bucketColor = ColorFromHSV(hue, 0.85f, 0.95f);
+                
+                var scatter = mapPlot.Add.Scatter(xData, yData);
+                scatter.MarkerSize = mapMarkerSize;
+                scatter.MarkerShape = MarkerShape.FilledCircle;
+                scatter.LineWidth = 0;
+                scatter.Color = ScottPlot.Color.FromColor(bucketColor);
+                
+                if ((bucket + 1) % 10 == 0)
                 {
-                    var layerRecords = records.Where(r => r.UniqueId >= globalLayer.MinUniqueId && 
-                                                          r.UniqueId <= globalLayer.MaxUniqueId).ToList();
-                    
-                    if (layerRecords.Count == 0) continue;
-                    
-                    var plotCoords = layerRecords.Select(r => CoordinateTransform.WorldToPlot(r.X, r.Y)).ToArray();
-                    double[] xData = plotCoords.Select(c => c.plotX).ToArray();
-                    double[] yData = plotCoords.Select(c => c.plotY).ToArray();
-                    
-                    var scatter = mapPlot.Add.Scatter(xData, yData);
-                    scatter.MarkerSize = mapMarkerSize;
-                    scatter.MarkerShape = MarkerShape.FilledCircle;
-                    scatter.LineWidth = 0;
-                    scatter.LegendText = $"{globalLayer.Name} ({layerRecords.Count})";
-                    
-                    var color = System.Drawing.ColorTranslator.FromHtml(globalLayer.Color);
-                    scatter.Color = ScottPlot.Color.FromColor(color);
+                    Console.WriteLine($"    Plotted {bucket + 1}/{mapBuckets} gradient buckets...");
                 }
             }
             
-            mapPlot.Title($"{mapName} - Complete Distribution ({records.Count} placements)");
+            mapPlot.Title($"{mapName} - {globalLayers.Count} Development Layers ({records.Count} placements)");
             mapPlot.XLabel("East ← → West");
             mapPlot.YLabel("South ← → North");
-            if (mapMaxLayers > 0 && globalLayers.Count > mapMaxLayers)
-            {
-                mapPlot.ShowLegend();
-            }
             mapPlot.Axes.SquareUnits();
+            
+            // Get the actual plot bounds for coordinate mapping
+            var plotBounds = mapPlot.Axes.GetLimits();
             
             string mapPath = Path.Combine(outputDir.FullName, $"{mapName}_overview.png");
             mapPlot.SavePng(mapPath, mapSize, mapSize);
             
             Console.WriteLine($"✓ Generated map overview: {mapName}_overview.png");
+            Console.WriteLine();
+            
+            // STEP 4b: Generate HTML legend with overview
+            Console.WriteLine("═══ STEP 4b: Generating Interactive Legend ═══");
+            
+            string htmlPath = Path.Combine(outputDir.FullName, $"{mapName}_legend.html");
+            using (var writer = new StreamWriter(htmlPath))
+            {
+                writer.WriteLine("<!DOCTYPE html>");
+                writer.WriteLine("<html>");
+                writer.WriteLine("<head>");
+                writer.WriteLine($"    <title>{mapName} - Development Layer Analysis</title>");
+                writer.WriteLine("    <style>");
+                writer.WriteLine("        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #d4d4d4; }");
+                writer.WriteLine("        h1 { color: #4ec9b0; }");
+                writer.WriteLine("        h2 { color: #569cd6; margin-top: 30px; }");
+                writer.WriteLine("        .stats { background: #252526; padding: 15px; border-radius: 5px; margin: 20px 0; }");
+                writer.WriteLine("        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }");
+                writer.WriteLine("        .stat-item { background: #2d2d30; padding: 10px; border-radius: 3px; }");
+                writer.WriteLine("        .stat-label { color: #858585; font-size: 0.9em; }");
+                writer.WriteLine("        .stat-value { color: #4ec9b0; font-size: 1.5em; font-weight: bold; }");
+                writer.WriteLine("        .overview { text-align: center; margin: 20px 0; }");
+                writer.WriteLine("        .overview img { max-width: 100%; border: 2px solid #3c3c3c; border-radius: 5px; }");
+                writer.WriteLine("        .legend-container { margin: 20px 0; }");
+                writer.WriteLine("        .legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 5px; }");
+                writer.WriteLine("        .legend-item { display: flex; align-items: center; padding: 8px; background: #252526; border-radius: 3px; }");
+                writer.WriteLine("        .legend-item:hover { background: #2d2d30; }");
+                writer.WriteLine("        a.legend-item { color: inherit; transition: all 0.2s; }");
+                writer.WriteLine("        a.legend-item:hover { background: #3c3c3c; transform: translateX(5px); }");
+                writer.WriteLine("        .color-box { width: 30px; height: 20px; margin-right: 10px; border: 1px solid #3c3c3c; border-radius: 2px; }");
+                writer.WriteLine("        .layer-info { flex: 1; font-size: 0.9em; }");
+                writer.WriteLine("        .layer-id { color: #569cd6; font-weight: bold; }");
+                writer.WriteLine("        .layer-range { color: #4ec9b0; }");
+                writer.WriteLine("        .layer-count { color: #858585; }");
+                writer.WriteLine("        .filter { margin: 10px 0; }");
+                writer.WriteLine("        .filter input { padding: 8px; width: 300px; background: #252526; border: 1px solid #3c3c3c; color: #d4d4d4; border-radius: 3px; }");
+                writer.WriteLine("    </style>");
+                writer.WriteLine("</head>");
+                writer.WriteLine("<body>");
+                writer.WriteLine($"    <h1>{mapName} - Development Layer Analysis</h1>");
+                
+                // Statistics
+                writer.WriteLine("    <div class='stats'>");
+                writer.WriteLine("        <div class='stats-grid'>");
+                writer.WriteLine($"            <div class='stat-item'><div class='stat-label'>Total Layers</div><div class='stat-value'>{globalLayers.Count:N0}</div></div>");
+                writer.WriteLine($"            <div class='stat-item'><div class='stat-label'>Total Placements</div><div class='stat-value'>{records.Count:N0}</div></div>");
+                writer.WriteLine($"            <div class='stat-item'><div class='stat-label'>M2 Models</div><div class='stat-value'>{records.Count(r => r.Type == "M2"):N0}</div></div>");
+                writer.WriteLine($"            <div class='stat-item'><div class='stat-label'>WMO Buildings</div><div class='stat-value'>{records.Count(r => r.Type == "WMO"):N0}</div></div>");
+                writer.WriteLine("        </div>");
+                writer.WriteLine("    </div>");
+                
+                // Overview image
+                writer.WriteLine("    <h2>Continental Overview</h2>");
+                writer.WriteLine("    <div class='overview'>");
+                writer.WriteLine($"        <img src='{mapName}_overview.png' alt='Map Overview' />");
+                writer.WriteLine("    </div>");
+                
+                // Tile Browser
+                writer.WriteLine("    <h2>Tile Browser ({0} tiles)</h2>", tileLayerInfos.Count);
+                writer.WriteLine("    <div class='filter'>");
+                writer.WriteLine("        <input type='text' id='filterTileInput' placeholder='Filter tiles by coordinates or layer count...' onkeyup='filterTiles()' />");
+                writer.WriteLine("    </div>");
+                writer.WriteLine("    <div class='legend-container'>");
+                writer.WriteLine("        <div class='legend-grid' id='tileGrid'>");
+                
+                foreach (var tileInfo in tileLayerInfos.OrderBy(t => t.TileX).ThenBy(t => t.TileY))
+                {
+                    var totalPlacements = tileInfo.Layers.Sum(l => l.PlacementCount);
+                    var (centerX, centerY) = CoordinateTransform.TileToWorldCenter(tileInfo.TileX, tileInfo.TileY);
+                    
+                    writer.WriteLine($"            <a href='tiles/{mapName}_{tileInfo.TileX}_{tileInfo.TileY}.html' class='legend-item' data-search='Tile [{tileInfo.TileX},{tileInfo.TileY}] {tileInfo.Layers.Count} layers {totalPlacements} placements' style='text-decoration: none;'>");
+                    writer.WriteLine($"                <div class='color-box' style='background: linear-gradient(135deg, #569cd6 0%, #4ec9b0 100%);'></div>");
+                    writer.WriteLine($"                <div class='layer-info'>");
+                    writer.WriteLine($"                    <span class='layer-id'>[{tileInfo.TileX},{tileInfo.TileY}]</span> ");
+                    writer.WriteLine($"                    <span class='layer-range'>{tileInfo.Layers.Count} layers</span> ");
+                    writer.WriteLine($"                    <span class='layer-count'>({totalPlacements} placements)</span>");
+                    writer.WriteLine($"                </div>");
+                    writer.WriteLine($"            </a>");
+                }
+                
+                writer.WriteLine("        </div>");
+                writer.WriteLine("    </div>");
+                
+                // JavaScript for filtering
+                writer.WriteLine("    <script>");
+                writer.WriteLine("        function filterTiles() {");
+                writer.WriteLine("            const input = document.getElementById('filterTileInput');");
+                writer.WriteLine("            const filter = input.value.toLowerCase();");
+                writer.WriteLine("            const items = document.querySelectorAll('#tileGrid .legend-item');");
+                writer.WriteLine("            items.forEach(item => {");
+                writer.WriteLine("                const text = item.getAttribute('data-search').toLowerCase();");
+                writer.WriteLine("                item.style.display = text.includes(filter) ? '' : 'none';");
+                writer.WriteLine("            });");
+                writer.WriteLine("        }");
+                writer.WriteLine("    </script>");
+                
+                writer.WriteLine("</body>");
+                writer.WriteLine("</html>");
+            }
+            
+            Console.WriteLine($"✓ Generated legend: {mapName}_legend.html ({globalLayers.Count} layers)");
             Console.WriteLine();
             
             // STEP 5: Save analysis JSON
@@ -772,9 +1069,10 @@ class Program
             Console.WriteLine("✓ COMPLETE PIPELINE FINISHED");
             Console.WriteLine("═══════════════════════════════════════════");
             Console.WriteLine($"Output directory: {outputDir.FullName}");
-            Console.WriteLine($"  ├─ {mapName}_overview.png       (map-wide visualization)");
+            Console.WriteLine($"  ├─ {mapName}_legend.html        ⭐ OPEN THIS! Clickable map + full legend");
+            Console.WriteLine($"  ├─ {mapName}_overview.png       (map with {globalLayers.Count} colored layers)");
             Console.WriteLine($"  ├─ {mapName}_analysis.json      (layer metadata)");
-            Console.WriteLine($"  └─ tiles/                       ({tileCount} tile images)");
+            Console.WriteLine($"  └─ tiles/                       ({tileCount} clickable tile pages)");
             Console.WriteLine();
             Console.WriteLine($"Total placements: {records.Count}");
             Console.WriteLine($"  M2:  {records.Count(r => r.Type == "M2")}");
