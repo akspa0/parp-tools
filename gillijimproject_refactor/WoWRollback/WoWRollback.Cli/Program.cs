@@ -620,6 +620,13 @@ internal static class Program
         return 0;
     }
 
+    private static int RunGenAreaRemap(Dictionary<string, string> opts)
+    {
+        Console.WriteLine("[info] gen-area-remap is not yet implemented in this build.");
+        Console.WriteLine("[info] Provide --area-remap-json to supply explicit mapping, or use --lk-client-path once available.");
+        return 0;
+    }
+
     private static int RunDryRun(Dictionary<string, string> opts)
     {
         Require(opts, "input-dir");
@@ -674,7 +681,7 @@ internal static class Program
             {
                 index = loaded;
                 Console.WriteLine($"[info] Loaded md5translate from: {md5Path}");
-                Console.WriteLine($"[info] md5translate contains {index.PlainToHash.Count} minimap mappings");
+                Console.WriteLine($"[info] md5translate contains {(loaded?.PlainToHash.Count ?? 0)} minimap mappings");
             }
             else
             {
