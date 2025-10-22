@@ -1,169 +1,168 @@
-# Active Context - WoWRollback Terrain Mesh Extraction & 3D Visualization
+# Active Context - WoWRollback.RollbackTool Development
 
-## Current Focus (2025-10-14)
-**3D Terrain Mesh Extraction & Viewer Integration**
+## Current Focus (2025-10-21)
+**Building WDT Rollback Tool with Terrain Hole Management**
 
-Successfully implemented complete terrain mesh extraction pipeline that generates GLB files for 3D visualization. System now extracts placements, terrain data (MCNK), AND 3D meshes from ADTs in MPQs, with full integration into the unified viewer workflow.
+Successfully implemented and **TESTED** core rollback functionality that modifies Alpha 0.5.3 WDT files! Proven working on both Azeroth and Kalimdor. Now building terrain hole management and overlay generation to complete the tool.
 
-## What We Just Fixed (Session: 2025-10-12)
+## What We Just Accomplished (2025-10-21)
 
-### ✅ Critical Bug Fixed: Overlay Coordinate System
+### ✅ PROVEN: Core Rollback Works on Alpha 0.5.3!
 
-**The Problem:**
-- ADT placement coordinates are **absolute offsets from map corner (0,0)**, not tile-local
-- Dark Portal at coords `(1086, 1099)` was stored in ADT files `development_1_1.adt` and `development_2_1.adt`
-- But actual world coords `(15980, 15966)` place it in tile `(2,2)`!
-- Objects and clusters were appearing in wrong tiles on the viewer
-
-**The Root Cause:**
-- `ViewerReportWriter` was pre-filtering entries by CSV tile (from ADT filename)
-- `OverlayBuilder` was re-filtering by computed actual tile (from coordinates)
-- **Double filtering = nothing matched!**
-
-**The Fix:**
-1. Created `ComputeActualTile()` - computes owning tile from coordinates instead of trusting ADT filename
-2. Removed pre-filtering in `ViewerReportWriter` - passes ALL version entries to OverlayBuilder
-3. `OverlayBuilder` filters by computed tile, correctly placing objects
-4. `ClusterOverlayBuilder` now also groups by computed tile (same fix)
-5. Filter dummy markers early to prevent UID=0 spam
-
-### ✅ Key Technical Insights
-
-1. **ADT Coordinate System**
-   - Placement coords in MDDF/MODF chunks are ABSOLUTE from map NW corner `(0,0)`
-   - NOT relative to the ADT tile!
-   - Must compute: `tileCol = floor(32 - worldX/533.33)`, `tileRow = floor(32 - worldY/533.33)`
-
-2. **Cross-Tile Objects**
-   - Objects spanning tile boundaries appear in MULTIPLE ADT files
-   - Same UniqueID, same coordinates, different ADT files
-   - Deduplication by UniqueID prevents duplicates
-
-3. **Dummy Tile Markers**
-   - Tiles without placements get dummy entry: `UID=0`, `AssetPath="_dummy_tile_marker"`
-   - Must filter early to avoid processing overhead
-
-## What We Just Implemented (Session: 2025-10-14)
-
-### ✅ 3D Terrain Mesh Extraction Pipeline
-
-**New Components:**
-1. **`AdtMpqTerrainExtractor.cs`** - Extracts MCNK terrain data from ADTs in MPQs
-   - Reads terrain CSV: AreaID, flags, liquids, holes, impassible
-   - Outputs: `{mapName}_terrain.csv`
-
-2. **`AdtMeshExtractor.cs`** - Generates 3D terrain meshes from ADTs
-   - Uses WoWFormatLib's `ADTReader` to parse ADT geometry
-   - Extracts vertices (17x17 grid per chunk, 145 vertices with padding)
-   - Builds triangle indices (skips holes)
-   - Exports to GLB format using SharpGLTF
-   - Outputs: `{mapName}_mesh/tile_{x}_{y}.glb` + `mesh_manifest.json`
-
-3. **Analysis Pipeline Integration** - Added Step 5 & 6 to `AnalyzeSingleMapNoViewer()`
-   - Step 5: Extract terrain data (MCNK chunks)
-   - Step 6: Extract terrain meshes (GLB)
-
-4. **Unified Viewer Integration** - `GenerateUnifiedViewer()` now:
-   - Generates terrain overlays (AreaIDs, liquids, holes)
-   - Generates cluster overlays
-   - **Copies mesh files to viewer output** ← NEW!
-
-**Output Structure:**
+**Successful Tests:**
 ```
-{outputDir}/
-├── {mapName}_placements.csv
-├── {mapName}_terrain.csv
-├── {mapName}_mesh/                    ← NEW!
-│   ├── tile_30_41.glb
-│   ├── tile_30_42.glb
-│   └── mesh_manifest.json
-└── viewer/
-    └── overlays/{version}/{mapName}/
-        ├── terrain_complete/
-        ├── clusters/
-        └── mesh/                      ← NEW!
-            ├── tile_30_41.glb
-            └── mesh_manifest.json
+Kalimdor 0.5.3 (951 ADT tiles)
+  - Total Placements: 126,297
+  - Kept (UID ≤ 78,000): 635
+  - Buried (UID > 78,000): 125,662
+  - Status: SUCCESS!
+
+Azeroth 0.5.3
+  - Multiple successful rollbacks
+  - MD5 checksum generation confirmed
+  - Status: SUCCESS!
 ```
 
-### ✅ MPQ Archive Reading
-- `IArchiveSource` abstraction already existed in `WoWRollback.Core.Services.Archive`
-- `PrioritizedArchiveSource` handles loose files + MPQ priority
-- `AdtMpqTerrainExtractor` and `AdtMeshExtractor` use `IArchiveSource`
-- Full MPQ reading support implemented!
+**What Works:**
+1. ✅ Load Alpha WDT files
+2. ✅ Parse all ADT tiles (MHDR offsets from WDT MAIN chunk)
+3. ✅ Extract MDDF/MODF chunks via AdtAlpha
+4. ✅ Modify placement Z coordinates (bury at -5000.0)
+5. ✅ Write modified data back to wdtBytes array
+6. ✅ Output modified WDT file
+7. ✅ Generate MD5 checksum for minimap compatibility
+
+### ✅ Technical Breakthroughs
+
+**AdtAlpha Integration**
+- AdtAlpha already parses MDDF and MODF chunks!
+- Added `GetMddf()` and `GetModf()` accessors
+- Added `GetMddfDataOffset()` and `GetModfDataOffset()` to locate chunks in file
+- Stored `_adtFileOffset` in constructor for offset calculations
+
+**Placement Format**
+```
+MDDF (M2 models) - 36 bytes per entry:
+  +0x00: nameId (4 bytes)
+  +0x04: uniqueId (4 bytes) ← FILTER BY THIS
+  +0x08: position X (4 bytes)
+  +0x0C: position Z (4 bytes) ← MODIFY THIS TO BURY
+  +0x10: position Y (4 bytes)
+  
+MODF (WMO buildings) - 64 bytes per entry:
+  +0x00: nameId (4 bytes)
+  +0x04: uniqueId (4 bytes) ← FILTER BY THIS
+  +0x08: position X (4 bytes)
+  +0x0C: position Z (4 bytes) ← MODIFY THIS TO BURY
+  +0x10: position Y (4 bytes)
+  ... (rest of entry)
+```
+
+**File Structure**
+```
+WDT File (Alpha 0.5.3):
+  MVER chunk
+  MPHD chunk (flags)
+  MAIN chunk (64x64 grid, offsets to ADT data)
+  ... ADT data embedded inline ...
+    ADT #0 @ offset XXXX
+      MHDR (offsets to MDDF/MODF/etc)
+      MDDF chunk
+      MODF chunk
+      MCNK chunks (256 per ADT)
+    ADT #1 @ offset YYYY
+    ...
+```
+
+## Architecture Decision: New Project Structure
+
+**Problem**: WoWDataPlot was being built as a hybrid analysis+modification+visualization tool, which violates separation of concerns.
+
+**Solution**: Split into three focused tools:
+
+```
+AlphaWDTAnalysisTool/     (EXISTS - Analysis Phase)
+  └─> Scans WDT/ADTs
+  └─> Outputs CSVs with UniqueID data
+  └─> Already has complete infrastructure!
+
+WoWRollback.RollbackTool/  (NEW - Modification Phase)
+  └─> Reads analysis CSVs
+  └─> Modifies WDT files in-place
+  └─> Manages terrain holes and shadows
+  └─> Generates MD5 checksums
+
+WoWDataPlot/               (REFOCUS - Visualization Phase)
+  └─> Reads CSVs from analysis
+  └─> Pre-generates overlay images
+  └─> Lightweight HTML viewer
+  └─> No modification, pure viz
+```
+
+**Current Implementation Status:**
+- ✅ Rollback code working in `WoWDataPlot/Program.cs` (temporary location)
+- ⏳ Need to extract to new `WoWRollback.RollbackTool` project
+- ⏳ Need to add MCNK terrain hole management
+- ⏳ Need to add MCSH shadow disabling
+- ⏳ Need to add overlay generation
 
 ## Next Steps (For Fresh Session)
 
-### Immediate Tasks
-1. ✅ ~~Fix terrain extraction~~ - DONE! `AdtMpqTerrainExtractor` working
-2. ✅ ~~Create `IArchiveSource` abstraction~~ - Already existed!
-3. ✅ ~~Implement mesh extraction~~ - DONE! `AdtMeshExtractor` working
-4. **Build 3D viewer** - Three.js/Babylon.js viewer for GLB meshes
-5. **Test with large maps** - Verify performance with Azeroth/Kalimdor
+### Phase 1: Create WoWRollback.RollbackTool Project
+1. Create new CLI project under `WoWRollback/`
+2. Move rollback code from `WoWDataPlot/Program.cs`
+3. Reference `gillijimproject-csharp` library
+4. Command structure: `analyze`, `generate-overlays`, `rollback`
 
-### Future: 3D Viewer Implementation
-- Load GLB meshes on-demand from `mesh_manifest.json`
-- Render placement markers in 3D space
-- Camera controls (orbit, pan, zoom)
-- Reuse 2D viewer placement data
-- Toggle between 2D and 3D views
+### Phase 2: MCNK Terrain Hole Management
+1. Parse MCNK chunks from each ADT (already in AdtAlpha)
+2. For each buried placement, calculate which MCNK(s) it overlaps
+   - Each ADT = 533.33 yards square
+   - Each MCNK = 33.33 yards square (16x16 grid)
+   - Formula: `mcnkX = floor((x - tileX*533.33) / 33.33)`
+3. Clear `Holes` field (offset 0x40 in MCNK header)
+4. Write modified MCNK headers back to file
 
-## CRITICAL: WoW File Resolution Priority
+### Phase 3: MCSH Shadow Disabling (Optional Feature)
+1. Find all MCSH chunks in ADT
+2. Option `--disable-shadows` zeros out MCSH chunk data
+3. Write modified chunks back to file
 
-**WoW reads files in this order:**
-1. ✅ **Loose files in Data/ folders** (HIGHEST priority)
-2. ✅ Patch MPQs (patch-3.MPQ > patch-2.MPQ > patch.MPQ)
-3. ✅ Base MPQs
+### Phase 4: Overlay Generation
+1. Pre-generate PNG overlays for each UniqueID threshold
+2. Color code: green=kept, red=buried
+3. Output naming: `overlays/{mapname}_uid_0-5000.png`
+4. Generate `overlay-index.json` manifest
 
-**Why This Matters:**
-- Players exploited this for model swapping (giant campfire = escape geometry)
-- `md5translate.txt` can exist in BOTH MPQ and `Data/textures/Minimap/md5translate.txt`
-- **Implementation MUST check filesystem BEFORE MPQ**
-
-**Existing Infrastructure:**
-- `StormLibWrapper/MpqArchive.cs` - Open/read MPQ
-- `StormLibWrapper/MPQReader.cs` - Extract files
-- `StormLibWrapper/DirectoryReader.cs` - Auto-detect patch chain
-- `MpqArchive.AddPatchArchives()` - Automatic patching
-
-**What We Need:**
-```csharp
-interface IArchiveSource {
-    bool FileExists(string path);
-    Stream OpenFile(string path);
-}
-
-class PrioritizedArchiveSource : IArchiveSource {
-    // Check loose files FIRST, then delegate to MpqArchive
-}
-```
+### Phase 5: Lightweight Viewer
+1. Pure HTML+JS slider UI
+2. Loads pre-generated overlays based on slider position
+3. Displays placement stats
+4. Generates rollback command for copying
 
 ## Git Status
-- **Branch**: `wrb-poc3b`
-- **Last Commit**: `1ecd378` - "Terrain MCNK layers refactor"
-- **Test Data**: `test_data/development/World/Maps/development/`
-- **Output**: `analysis_output/viewer/` (served at `http://localhost:8080`)
+- **Branch**: `wrb-poc5`
+- **Last Commit**: `58d0aae` - "WoWDataPlot - now with Rollback support (Tested on 0.5.3, it works!)"
+- **Test Data**: `test_data/0.5.3/tree/World/Maps/`
+- **Output**: `WoWRollback/rollback_*` directories
 
-## Files Modified This Session (2025-10-14)
-- `WoWRollback.AnalysisModule/AdtMpqTerrainExtractor.cs` - NEW! Extracts MCNK data from MPQs
-- `WoWRollback.AnalysisModule/AdtMeshExtractor.cs` - NEW! Generates GLB terrain meshes
-- `WoWRollback.AnalysisModule/WoWRollback.AnalysisModule.csproj` - Added WoWFormatLib + SharpGLTF
-- `WoWRollback.AnalysisModule/AnalysisViewerAdapter.cs` - Added terrain/cluster/mesh generation
-- `WoWRollback.Cli/Program.cs` - Added Step 5 (terrain) & Step 6 (mesh) to analysis pipeline
-- `ViewerAssets/js/sedimentary-layers-csv.js` - Fixed performance (viewport culling) + shift-click selection
+## Files Modified This Session (2025-10-21)
+- `WoWDataPlot/Program.cs` - Added complete rollback command
+- `AdtAlpha.cs` - Added `GetMddf()`, `GetModf()`, `Get*DataOffset()` methods
+- `AdtAlpha.cs` - Added `_adtFileOffset` field to track position in file
 
 ## What Works Now
-✅ Objects appear in correct tiles on viewer  
-✅ Clusters appear in correct tiles  
-✅ Cross-tile objects deduplicated properly  
-✅ Terrain extraction from MPQs (MCNK chunks)  
-✅ 3D mesh extraction (GLB format)  
-✅ Mesh files copied to viewer output  
-✅ MPQ reading with loose file priority  
-✅ Sedimentary Layers performance fixed (97% reduction!)  
-✅ Shift-click range selection in layer checkboxes  
+✅ Load Alpha 0.5.3 WDT files  
+✅ Parse all embedded ADT tiles via offsets  
+✅ Extract MDDF/MODF placements  
+✅ Modify Z coordinates to bury objects  
+✅ Write modified WDT back to disk  
+✅ Generate MD5 checksums  
+✅ TESTED on Kalimdor (951 tiles, 126K placements!)  
 
 ## What's Next
-⏳ Build 3D viewer (Three.js/Babylon.js)  
-⏳ Test with large maps (Azeroth/Kalimdor)  
-⏳ OBJ export option (alternative to GLB)
+⏳ Create WoWRollback.RollbackTool project  
+⏳ Implement MCNK hole flag clearing  
+⏳ Implement MCSH shadow disabling  
+⏳ Generate overlay images  
+⏳ Build lightweight viewer

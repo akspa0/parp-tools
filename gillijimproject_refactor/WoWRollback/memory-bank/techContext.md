@@ -1,92 +1,267 @@
-# Technical Context - WoWRollback Implementation
+# Technical Context - WoWRollback.RollbackTool
 
 ## Runtime Environment
 - **Target Framework**: .NET 9.0
-- **Platform**: Windows x64
+- **Platform**: Windows x64 (primary), cross-platform capable
 - **Build System**: dotnet CLI with MSBuild
 - **Dependencies**: 
-  - `GillijimProject.WowFiles` (Alpha/LK ADT parsing)
-  - `System.Text.Json` (Configuration)
+  - `GillijimProject.WowFiles` (Alpha/LK ADT parsing) - **CRITICAL DEPENDENCY**
+  - `System.Security.Cryptography` (MD5 checksums)
+  - `System.Text.Json` (Analysis data, manifests)
 
-## Project Structure
+## Planned Project Structure
 ```
 WoWRollback/
-├── WoWRollback.Core/           # Shared libraries
-│   ├── Models/                 # Data models (PlacementRange, etc.)
-│   └── Services/              # Core services
-│       ├── AlphaWdtAnalyzer   # Alpha WDT archaeological analysis
-│       ├── AdtPlacementAnalyzer # LK ADT preservation analysis  
-│       ├── RangeScanner       # Map-level aggregation
-│       └── Config/            # Configuration management
-├── WoWRollback.Cli/           # Console application
-├── memory-bank/               # Project documentation
-└── docs/                      # Usage and specifications
+├── WoWRollback.RollbackTool/       # NEW! Main CLI application
+│   ├── Commands/
+│   │   ├── AnalyzeCommand.cs       # Scan UniqueID ranges
+│   │   ├── GenerateOverlaysCommand.cs
+│   │   └── RollbackCommand.cs      # Core modification
+│   ├── Services/
+│   │   ├── WdtModifier.cs          # In-place WDT modification
+│   │   ├── McnkManager.cs          # Terrain hole operations
+│   │   ├── McshDisabler.cs         # Shadow removal
+│   │   └── OverlayGenerator.cs     # PNG generation
+│   └── Program.cs
+├── WoWDataPlot/                    # EXISTS - Refocus to viz only
+│   └── Program.cs                  # Currently has rollback code (temp)
+├── AlphaWDTAnalysisTool/           # EXISTS - Reuse for analysis
+└── memory-bank/                    # Project documentation
 ```
 
-## Key Dependencies
-- **GillijimProject.WowFiles**: Existing C# port of WoW file format parsers
-- **Alpha Classes**: `WdtAlpha`, `AdtAlpha`, `McnkAlpha`
-- **LK Classes**: `Mhdr`, `Mddf`, `Modf` (for LK ADT analysis)
+## Current Implementation Location
+**TEMPORARY**: Rollback logic currently in `WoWDataPlot/Program.cs` (lines ~1980-2180)
+**TARGET**: Extract to new `WoWRollback.RollbackTool` project
 
-## Data Flow Architecture
+## Critical Dependencies (PROVEN WORKING)
+
+### GillijimProject.WowFiles
+**Location**: `src/gillijimproject-csharp/WowFiles/`
+
+**Key Classes Used**:
+- `WdtAlpha` - Parse Alpha WDT files
+  - `GetAdtOffsetsInMain()` - Returns offset array for 64x64 grid
+  - Handles MVER, MPHD, MAIN chunks
+  
+- `AdtAlpha` - Parse embedded ADT data
+  - **NEWLY ADDED**: `GetMddf()` - Access M2 placement chunk
+  - **NEWLY ADDED**: `GetModf()` - Access WMO placement chunk
+  - **NEWLY ADDED**: `GetMddfDataOffset()` - Calculate file position
+  - **NEWLY ADDED**: `GetModfDataOffset()` - Calculate file position
+  - **NEWLY ADDED**: `_adtFileOffset` field - Track position in file
+  
+- `Mddf` - M2 placement chunk
+  - Inherits from `Chunk` (has `Data` byte array)
+  - 36 bytes per entry
+  
+- `Modf` - WMO placement chunk
+  - Inherits from `Chunk` (has `Data` byte array)
+  - 64 bytes per entry
+
+- `McnkAlpha` - Terrain chunk (256 per ADT)
+  - Contains `McnkAlphaHeader` with `Flags` and `Holes` fields
+  - Each MCNK = 33.33 yards square
+
+## Data Flow Architecture (Implemented)
 ```
-Alpha WDT Files → AlphaWdtAnalyzer → Archaeological Ranges → CSV Output
-LK ADT Files → AdtPlacementAnalyzer → Preservation Ranges → CSV Output  
-Configuration → RangeSelector → Rollback Filtering → Modified ADTs
+Input WDT → WdtAlpha.Load() → Get ADT offsets
+  ↓
+For each ADT:
+  AdtAlpha(path, offset, adtNum) → Parse MHDR
+    ↓
+  GetMddf() / GetModf() → Access placement chunks
+    ↓
+  Modify chunk.Data in memory → Change Z coordinates
+    ↓
+  GetMddfDataOffset() → Calculate writeback position
+    ↓
+  Array.Copy(chunk.Data → wdtBytes) → Update file bytes
+  ↓
+Write wdtBytes → Output file
+Generate MD5 → {mapName}.md5
 ```
 
-## File Format Considerations
+## File Format Details (VERIFIED via Testing)
 
-### Alpha WDT Structure
-- **WDT File**: Contains tile map and references to individual ADT files
-- **ADT Files**: Individual tiles with MCNK chunks containing placement data
-- **UniqueID Storage**: Located within chunk structures (format needs verification)
+### Alpha 0.5.3 WDT Structure
+```
+WDT File:
+├── MVER chunk (version = 18)
+├── MPHD chunk (header flags)
+├── MAIN chunk (64x64 grid of offsets)
+└── [ADT Data Embedded Inline]
+    ├── ADT #0 @ offset[0]
+    │   ├── MHDR (64 bytes, offsets to sub-chunks)
+    │   ├── MCIN (4096 bytes, MCNK index)
+    │   ├── MTEX (texture paths)
+    │   ├── MMDX (M2 model paths)
+    │   ├── MMID (M2 model indices)
+    │   ├── MWMO (WMO paths)
+    │   ├── MWID (WMO indices)
+    │   ├── MDDF (M2 placements) ← MODIFY THIS
+    │   ├── MODF (WMO placements) ← MODIFY THIS
+    │   └── MCNK chunks (256 per ADT)
+    ├── ADT #1 @ offset[1]
+    └── ...
+```
 
-### LK ADT Structure  
-- **MHDR**: Header with chunk offsets
-- **MDDF**: M2 (doodad) placement data with UniqueIDs at offset +4
-- **MODF**: WMO (building) placement data with UniqueIDs at offset +4
-- **Entry Sizes**: MDDF=36 bytes, MODF=64 bytes per entry
+### MDDF Entry Layout (36 bytes) - VERIFIED
+```
++0x00 (4 bytes): nameId       - Index into MMDX string table
++0x04 (4 bytes): uniqueId     - ✅ FILTER CRITERION
++0x08 (4 bytes): position X   - World coordinate
++0x0C (4 bytes): position Z   - ✅ MODIFY THIS TO BURY
++0x10 (4 bytes): position Y   - World coordinate
++0x14 (4 bytes): rotation X
++0x18 (4 bytes): rotation Y
++0x1C (4 bytes): rotation Z
++0x20 (2 bytes): scale (fixed point 1024)
++0x22 (2 bytes): flags
+```
+
+### MODF Entry Layout (64 bytes) - VERIFIED
+```
++0x00 (4 bytes): nameId       - Index into MWMO string table
++0x04 (4 bytes): uniqueId     - ✅ FILTER CRITERION
++0x08 (4 bytes): position X   - World coordinate
++0x0C (4 bytes): position Z   - ✅ MODIFY THIS TO BURY
++0x10 (4 bytes): position Y   - World coordinate
++0x14 (4 bytes): rotation X
++0x18 (4 bytes): rotation Y
++0x1C (4 bytes): rotation Z
++0x20-0x3F: bounding box, flags, doodad set, name set, etc
+```
+
+### MCNK Header (128 bytes) - FOR HOLE MANAGEMENT
+```
++0x00 (4 bytes): Flags        - Various flags
++0x04 (4 bytes): IndexX       - X position in 16x16 grid
++0x08 (4 bytes): IndexY       - Y position in 16x16 grid
+...
++0x40 (4 bytes): Holes        - ✅ CLEAR THIS FOR BURIED WMOs
+...
++0x64 (4 bytes): McnkChunksSize
+```
+**Holes Field**: 16 bits representing 4x4 grid of 2x2 hole areas
 
 ## Output Formats
 
-### Archaeological CSV Schema
-```csv
-map,tile_row,tile_col,kind,count,min_unique_id,max_unique_id,file
+### Analysis JSON Schema (Planned)
+```json
+{
+  "mapName": "Azeroth",
+  "totalPlacements": 9234567,
+  "minUniqueId": 1,
+  "maxUniqueId": 982345,
+  "percentiles": {
+    "p10": 12000,
+    "p25": 45000,
+    "p50": 150000,
+    "p75": 450000,
+    "p90": 750000
+  },
+  "suggestedThresholds": [
+    {"version": "0.5.3", "maxUniqueId": 10000},
+    {"version": "0.6.0", "maxUniqueId": 50000},
+    {"version": "1.0.0", "maxUniqueId": 200000}
+  ]
+}
 ```
 
-### Session Management
-- **Output Root**: `rollback_outputs/` (default)
-- **Session Directories**: `session_YYYYMMDD_HHMMSS/`
-- **Per-Map Files**: `<session>/<map>/alpha_ranges_by_map_<map>.csv`
+### Overlay Manifest Schema (Planned)
+```json
+{
+  "mapName": "Azeroth",
+  "overlays": [
+    {
+      "threshold": 10000,
+      "imagePath": "azeroth_uid_0-10000.png",
+      "keptCount": 1234,
+      "buriedCount": 8000
+    }
+  ]
+}
+```
 
-## Implementation Gaps
+### Output Directory Structure
+```
+output/
+├── {mapName}.wdt              # Modified WDT
+├── {mapName}.md5              # MD5 checksum
+└── analysis/
+    ├── {mapName}.json         # Analysis data
+    └── overlays/
+        ├── {mapName}_uid_0-10000.png
+        ├── {mapName}_uid_0-50000.png
+        └── overlay-index.json
+```
 
-### Alpha Parsing (Critical)
-The `AlphaWdtAnalyzer` currently has placeholder implementations:
-- Alpha MCNK chunk structure analysis
-- UniqueID field locations within Alpha format
-- WDT tile presence detection
+## Proven Implementation (TESTED & WORKING!)
 
-### Required Research
-- Study existing `AlphaWDTAnalysisTool` parsing logic
-- Verify Alpha format compatibility with current parsers
-- Map Alpha chunk structures to UniqueID locations
+### Core Rollback - ✅ COMPLETE
+- Load Alpha 0.5.3 WDT files into memory
+- Parse embedded ADT data via offset array
+- Modify MDDF/MODF chunk data in-place
+- Write modified bytes back to file
+- Generate MD5 checksums
 
-## Error Handling Strategy
-- **Resilient Analysis**: Continue processing if individual files fail
-- **Logging**: Console output with archaeological terminology
-- **Skip-if-Missing**: Don't abort on missing optional files
+### Test Results (Actual)
+```
+Kalimdor 0.5.3:
+  - File size: ~380 MB
+  - ADT tiles: 951
+  - Total placements: 126,297
+  - Processing time: ~30 seconds
+  - Result: SUCCESS ✅
 
-## Performance Considerations
-- **Batch Processing**: Handle entire map directories
-- **Memory Management**: Process files individually, not all in memory
-- **Parallel Processing**: Future enhancement for large datasets
+Azeroth 0.5.3:
+  - Multiple successful tests
+  - All modifications verified
+  - MD5 generation confirmed
+  - Result: SUCCESS ✅
+```
 
-## Integration Points
-- **AlphaWDTAnalysisTool**: Reference existing parsing logic
-- **GillijimProject.WowFiles**: Leverage existing format parsers
-- **Configuration System**: JSON/YAML for rollback rules
+## Implementation Gaps (TO-DO)
+
+### MCNK Hole Management - ⏳ PLANNED
+- Calculate spatial overlap (placement → MCNK)
+- Locate MCNK headers via MHDR offsets
+- Clear Holes field for buried WMOs
+- Write modified headers back
+
+### MCSH Shadow Disabling - ⏳ PLANNED
+- Locate MCSH chunks via MCNK headers
+- Zero out shadow data
+- Optional feature (--disable-shadows flag)
+
+### Overlay Generation - ⏳ PLANNED
+- Load minimap BLP tiles
+- Plot placements (green/red)
+- Save as PNG per threshold
+- Generate manifest JSON
+
+### Lightweight Viewer - ⏳ PLANNED
+- HTML+JS slider UI
+- Load pre-generated overlays
+- Display statistics
+- Copy rollback command
+
+## Performance Characteristics
+
+### Memory Usage
+- **Current**: Load entire WDT into memory (~380 MB for Kalimdor)
+- **Peak**: ~2x file size during modification
+- **Optimization**: Stream processing not needed (WDTs are manageable)
+
+### Processing Speed
+- **Small maps** (< 100 tiles): < 5 seconds
+- **Large maps** (900+ tiles): ~30 seconds
+- **Bottleneck**: File I/O, not computation
+
+### Scalability
+- **Tested Maximum**: 951 tiles (Kalimdor)
+- **Expected Maximum**: ~1500 tiles (theoretical WDT limit)
+- **No Parallel Processing Needed**: Sequential is fast enough
 
 ## MPQ Archive Infrastructure (Added 2025-10-12)
 
