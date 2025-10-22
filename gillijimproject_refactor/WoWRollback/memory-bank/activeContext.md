@@ -1,11 +1,11 @@
 # Active Context - WoWRollback.RollbackTool Development
 
-## Current Focus (2025-10-21)
-**Building WDT Rollback Tool with Terrain Hole Management**
+## Current Focus (2025-10-22)
+**Unify Alpha→LK pipeline (rollback + area map + export) and add LK patcher**
 
 Successfully implemented and **TESTED** core rollback functionality that modifies Alpha 0.5.3 WDT files! Proven working on both Azeroth and Kalimdor. Now building terrain hole management and overlay generation to complete the tool.
 
-## What We Just Accomplished (2025-10-21)
+## What We Just Accomplished (2025-10-22)
 
 ### ✅ PROVEN: Core Rollback Works on Alpha 0.5.3!
 
@@ -26,11 +26,14 @@ Azeroth 0.5.3
 **What Works:**
 1. ✅ Load Alpha WDT files
 2. ✅ Parse all ADT tiles (MHDR offsets from WDT MAIN chunk)
-3. ✅ Extract MDDF/MODF chunks via AdtAlpha
+3. ✅ Extract MDDF/MODF chunks via `AdtAlpha`
 4. ✅ Modify placement Z coordinates (bury at -5000.0)
-5. ✅ Write modified data back to wdtBytes array
-6. ✅ Output modified WDT file
-7. ✅ Generate MD5 checksum for minimap compatibility
+5. ✅ Write modified data back to `wdtBytes`
+6. ✅ Output modified WDT file + MD5 checksum
+7. ✅ Selective hole clearing per MCNK using `MCRF` references (only if all referenced placements are buried)
+8. ✅ Optional MCSH zeroing
+9. ✅ LK export path via `--export-lk-adts` with `AdtAlpha.ToAdtLk(..., areaRemap)` and `AdtLk.ToFile(<dir>)`
+10. ✅ Area mapping hook + `--area-remap-json` loader
 
 ### ✅ Technical Breakthroughs
 
@@ -108,37 +111,20 @@ WoWDataPlot/               (REFOCUS - Visualization Phase)
 
 ## Next Steps (For Fresh Session)
 
-### Phase 1: Create WoWRollback.RollbackTool Project
-1. Create new CLI project under `WoWRollback/`
-2. Move rollback code from `WoWDataPlot/Program.cs`
-3. Reference `gillijimproject-csharp` library
-4. Command structure: `analyze`, `generate-overlays`, `rollback`
+### Phase 1: Unified Pipeline Command
+1. Add `alpha-to-lk` to `WoWRollback.Cli` that composes:
+   - Rollback (bury + MCRF-gated hole clear + optional MCSH)
+   - Area mapping: load `--area-remap-json` or auto-fill from `--lk-client-path` (`DBFilesClient/AreaTable.dbc`)
+   - LK export: `AdtAlpha.ToAdtLk(..., areaRemap)` → `AdtLk.ToFile(lkOutDir)`
+2. Update `PrintHelp()` and logs.
 
-### Phase 2: MCNK Terrain Hole Management
-1. Parse MCNK chunks from each ADT (already in AdtAlpha)
-2. For each buried placement, calculate which MCNK(s) it overlaps
-   - Each ADT = 533.33 yards square
-   - Each MCNK = 33.33 yards square (16x16 grid)
-   - Formula: `mcnkX = floor((x - tileX*533.33) / 33.33)`
-3. Clear `Holes` field (offset 0x40 in MCNK header)
-4. Write modified MCNK headers back to file
+### Phase 2: AreaTable Auto-Mapper
+1. Implement minimal `AreaTableDbcReader` (IDs only) via `PrioritizedArchiveSource`/`MpqArchiveSource`.
+2. Prefill AlphaAreaId→LKAreaId when IDs exist in LK; else map to `--default-unmapped`.
 
-### Phase 3: MCSH Shadow Disabling (Optional Feature)
-1. Find all MCSH chunks in ADT
-2. Option `--disable-shadows` zeros out MCSH chunk data
-3. Write modified chunks back to file
-
-### Phase 4: Overlay Generation
-1. Pre-generate PNG overlays for each UniqueID threshold
-2. Color code: green=kept, red=buried
-3. Output naming: `overlays/{mapname}_uid_0-5000.png`
-4. Generate `overlay-index.json` manifest
-
-### Phase 5: Lightweight Viewer
-1. Pure HTML+JS slider UI
-2. Loads pre-generated overlays based on slider position
-3. Displays placement stats
-4. Generates rollback command for copying
+### Phase 3: LK Patcher Command
+1. Add `lk-to-alpha` (v1) to patch LK ADTs with the same bury/holes/mcsh rules.
+2. Output to `--out` directory; validate counts and logs.
 
 ## Git Status
 - **Branch**: `wrb-poc5`

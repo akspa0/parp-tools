@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using WoWRollback.AnalysisModule;
 using WoWRollback.Core.Models;
@@ -50,6 +51,8 @@ internal static class Program
                     return RunProbeArchive(opts);
                 case "probe-minimap":
                     return RunProbeMinimap(opts);
+                case "gen-area-remap":
+                    return RunGenAreaRemap(opts);
                 case "rollback":
                     return RunRollback(opts);
                 case "serve-viewer":
@@ -840,10 +843,14 @@ internal static class Program
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
-        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh]");
+        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--export-lk-adts] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>]");
         Console.WriteLine("    Modify Alpha WDT by burying placements with UniqueID > N, then write output + MD5");
         Console.WriteLine("    --fix-holes        Clear MCNK Holes flags across all chunks (terrain hole masks)");
         Console.WriteLine("    --disable-mcsh     Zero MCSH subchunk payloads (remove baked shadows)");
+        Console.WriteLine("    --export-lk-adts   After writing modified WDT, convert present tiles to LK ADT files");
+        Console.WriteLine("    --lk-out <dir>     Output directory root for LK ADTs (default: <out>/lk_adts/World/Maps/<map>)");
+        Console.WriteLine("    --lk-client-path   LK client folder with MPQs (for future auto AreaTable mapping)");
+        Console.WriteLine("    --area-remap-json  JSON file mapping AlphaAreaId->LKAreaId to set MCNK.AreaId");
         Console.WriteLine("    Default bury-depth = -5000.0, default out dir = <input_basename>_out next to input");
         Console.WriteLine();
         Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
@@ -2049,6 +2056,11 @@ internal static class Program
         var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
         var fixHoles = opts.ContainsKey("fix-holes");
         var disableMcsh = opts.ContainsKey("disable-mcsh");
+        var exportLkAdts = opts.ContainsKey("export-lk-adts");
+        var lkOutDefault = Path.Combine(outRoot, "lk_adts", "World", "Maps", mapName);
+        var lkOutDir = opts.GetValueOrDefault("lk-out", lkOutDefault);
+        var lkClientPath = opts.GetValueOrDefault("lk-client-path", "");
+        var areaRemapJsonPath = opts.GetValueOrDefault("area-remap-json", "");
 
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
@@ -2059,6 +2071,13 @@ internal static class Program
         Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
         if (fixHoles) Console.WriteLine("Option:         --fix-holes (clear terrain hole masks)");
         if (disableMcsh) Console.WriteLine("Option:         --disable-mcsh (zero baked shadows)");
+        if (exportLkAdts)
+        {
+            Console.WriteLine("Option:         --export-lk-adts (write LK ADTs)");
+            Console.WriteLine($"LK ADT Out:     {lkOutDir}");
+            if (!string.IsNullOrWhiteSpace(lkClientPath)) Console.WriteLine($"LK Client:      {lkClientPath}");
+            if (!string.IsNullOrWhiteSpace(areaRemapJsonPath)) Console.WriteLine($"Area Map JSON:  {areaRemapJsonPath}");
+        }
         Console.WriteLine();
 
         try
@@ -2083,6 +2102,8 @@ internal static class Program
                 var modf = adt.GetModf();
 
                 const int mddfEntrySize = 36;
+                int mddfCount = mddf.Data.Length / mddfEntrySize;
+                var mddfBuried = new bool[mddfCount];
                 for (int offset = 0; offset + mddfEntrySize <= mddf.Data.Length; offset += mddfEntrySize)
                 {
                     uint uid = BitConverter.ToUInt32(mddf.Data, offset + 4);
@@ -2092,10 +2113,14 @@ internal static class Program
                         var newZ = BitConverter.GetBytes(buryDepth);
                         Array.Copy(newZ, 0, mddf.Data, offset + 12, 4);
                         removed++;
+                        int idx = offset / mddfEntrySize;
+                        if (idx >= 0 && idx < mddfBuried.Length) mddfBuried[idx] = true;
                     }
                 }
 
                 const int modfEntrySize = 64;
+                int modfCount = modf.Data.Length / modfEntrySize;
+                var modfBuried = new bool[modfCount];
                 for (int offset = 0; offset + modfEntrySize <= modf.Data.Length; offset += modfEntrySize)
                 {
                     uint uid = BitConverter.ToUInt32(modf.Data, offset + 4);
@@ -2105,6 +2130,8 @@ internal static class Program
                         var newZ = BitConverter.GetBytes(buryDepth);
                         Array.Copy(newZ, 0, modf.Data, offset + 12, 4);
                         removed++;
+                        int idx = offset / modfEntrySize;
+                        if (idx >= 0 && idx < modfBuried.Length) modfBuried[idx] = true;
                     }
                 }
 
@@ -2143,8 +2170,47 @@ internal static class Program
                             int holesOffset = headerStart + 0x40; // McnkAlphaHeader.Holes
                             if (holesOffset + 4 <= wdtBytes.Length)
                             {
+                                // Determine if ALL referenced objects in this chunk were buried
+                                int m2Number = BitConverter.ToInt32(wdtBytes, headerStart + 0x14);
+                                int wmoNumber = BitConverter.ToInt32(wdtBytes, headerStart + 0x3C);
+                                int mcrfRel = BitConverter.ToInt32(wdtBytes, headerStart + 0x24);
+                                int mcrfChunkOffset = headerStart + 128 + mcrfRel;
+
+                                bool hasAny = false;
+                                bool anyKept = false;
+                                bool anyBuried = false;
+
+                                if (mcrfChunkOffset + 8 <= wdtBytes.Length)
+                                {
+                                    try
+                                    {
+                                        var mcrf = new Mcrf(wdtBytes, mcrfChunkOffset);
+                                        var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
+                                        var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
+
+                                        foreach (var idx in m2Idx)
+                                        {
+                                            if (idx >= 0 && idx < mddfBuried.Length)
+                                            {
+                                                hasAny = true;
+                                                if (mddfBuried[idx]) anyBuried = true; else anyKept = true;
+                                            }
+                                        }
+                                        foreach (var idx in wmoIdx)
+                                        {
+                                            if (idx >= 0 && idx < modfBuried.Length)
+                                            {
+                                                hasAny = true;
+                                                if (modfBuried[idx]) anyBuried = true; else anyKept = true;
+                                            }
+                                        }
+                                    }
+                                    catch { /* best-effort: leave holes unchanged on parse failure */ }
+                                }
+
                                 int prev = BitConverter.ToInt32(wdtBytes, holesOffset);
-                                if (prev != 0)
+                                bool shouldClear = hasAny && !anyKept && anyBuried;
+                                if (shouldClear && prev != 0)
                                 {
                                     wdtBytes[holesOffset + 0] = 0;
                                     wdtBytes[holesOffset + 1] = 0;
@@ -2198,6 +2264,58 @@ internal static class Program
 
             Console.WriteLine($"Total Placements:  {totalPlacements:N0}");
             Console.WriteLine($"  Removed:          {removed:N0}");
+
+            // Optional: Export LK ADTs from modified Alpha WDT
+            if (exportLkAdts)
+            {
+                try
+                {
+                    // Load optional area remap JSON (AlphaAreaId -> LkAreaId)
+                    Dictionary<int,int>? areaRemap = null;
+                    if (!string.IsNullOrWhiteSpace(areaRemapJsonPath) && File.Exists(areaRemapJsonPath))
+                    {
+                        try
+                        {
+                            var json = File.ReadAllText(areaRemapJsonPath);
+                            var tmp = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+                            if (tmp != null)
+                            {
+                                areaRemap = new Dictionary<int,int>();
+                                foreach (var kv in tmp) { if (int.TryParse(kv.Key, out var k)) areaRemap[k] = kv.Value; }
+                                Console.WriteLine($"[lk] areaRemap entries={areaRemap.Count}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[warn] Failed to parse area remap JSON: {ex.Message}");
+                        }
+                    }
+
+                    var wdtOut = new WdtAlpha(outputPath);
+                    var existingAfter = wdtOut.GetExistingAdtsNumbers();
+                    var adtOffsetsAfter = wdtOut.GetAdtOffsetsInMain();
+                    var mdnmNames = wdtOut.GetMdnmFileNames();
+                    var monmNames = wdtOut.GetMonmFileNames();
+
+                    Directory.CreateDirectory(lkOutDir);
+                    int written = 0;
+                    foreach (var adtNum2 in existingAfter)
+                    {
+                        int adtOff2 = adtOffsetsAfter[adtNum2];
+                        if (adtOff2 == 0) continue;
+                        var a = new AdtAlpha(outputPath, adtOff2, adtNum2);
+                        var lk = a.ToAdtLk(mdnmNames, monmNames, areaRemap);
+                        lk.ToFile(lkOutDir); // Treats directory as output root
+                        written++;
+                        if (written % 50 == 0) Console.WriteLine($"  [lk] Wrote {written}/{existingAfter.Count} ADTs...");
+                    }
+                    Console.WriteLine($"[ok] Exported {written}/{existingAfter.Count} LK ADTs to: {lkOutDir}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[warn] LK ADT export failed: {ex.Message}");
+                }
+            }
             return 0;
         }
         catch (Exception ex)

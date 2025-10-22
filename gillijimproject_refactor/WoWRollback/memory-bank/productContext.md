@@ -8,45 +8,52 @@ WoW map files contain object placements (M2 models and WMOs) tagged with **Uniqu
 
 ## How It Works
 
-### Three-Phase Workflow
+### Unified Alpha→LK Pipeline
 
-#### Phase 1: Analysis
+#### Phase 1: Rollback (Patched Alpha WDT)
 ```
-WDT File → Scan all ADT tiles → Extract all UniqueIDs → Generate statistics
+Alpha WDT + Threshold + Options → Modify placements → Fix terrain → Zero shadows → Write output + MD5
 ```
-**Output**: JSON with min/max UniqueIDs, percentile thresholds, placement counts
+**Output**: Patched Alpha WDT with MDDF/MODF buried by UID, conservative hole clearing (per-MCNK all-buried rule), optional MCSH disabled, MD5 file.
 
-#### Phase 2: Overlay Generation
+#### Phase 2: AreaTable Mapping
 ```
-Analysis JSON → Generate PNG overlays per range → Color-code objects → Build manifest
+Use mapping to set MCNK.AreaId for LK ADTs.
+Sources: --area-remap-json (explicit), or auto-fill from LK DBFilesClient/AreaTable.dbc via MPQs.
 ```
-**Output**: Pre-rendered minimap overlays showing green (kept) and red (buried) objects for each threshold
+**Output**: Dictionary AlphaAreaId→LK AreaId
 
-#### Phase 3: Rollback
+#### Phase 3: Export LK ADTs (Patched)
 ```
-WDT File + Threshold + Options → Modify placements → Fix terrain → Write output + MD5
+Patched Alpha WDT + AreaMap → Convert to LK ADTs (indices remapped, AreaId applied)
 ```
-**Output**: Modified WDT with objects buried, terrain holes cleared, shadows optionally removed
+**Output**: LK ADTs written under lk_out/World/Maps/<map>/<map>_x_y.adt
+
+### Symmetric LK→LK Patcher
+```
+LK ADTs dir + Threshold + Options → Bury placements → Selective hole clearing → Zero MCSH → Write to out
+```
+**Output**: Patched LK ADTs. Reverse LK→Alpha WDT conversion is considered later.
 
 ## User Experience Flow
 
-### Step 1: Point at Map
+### Step 1: Alpha→LK one-liner
 ```powershell
-WoWRollback analyze --input World/Maps/Azeroth/Azeroth.wdt
+WoWRollback alpha-to-lk --input World/Maps/Kalimdor/Kalimdor.wdt --max-uniqueid 125000 \
+  --fix-holes --disable-mcsh --out rollback_kl053 --export-lk-adts \
+  --lk-out rollback_kl053/lk_adts/World/Maps/Kalimdor --area-remap-json configs/kl_map.json
 ```
-**Result**: Shows UniqueID distribution and suggests thresholds
+**Result**: Patched Alpha WDT + Patched LK ADTs with AreaIds.
 
-### Step 2: Open Viewer
-```
-open analysis/azeroth/viewer/index.html
-```
-**Result**: Visual slider showing what each rollback threshold looks like
-
-### Step 3: Roll Back
+### Step 2: (Optional) LK patcher
 ```powershell
-WoWRollback rollback --input Azeroth.wdt --output rollback/Azeroth.wdt --max-uniqueid 10000 --clear-holes
+WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 \
+  --fix-holes --disable-mcsh --bury-depth -5000 --out patched_lk_kl053
 ```
-**Result**: Modified map ready to drop into WoW client
+**Result**: Patched LK ADTs written to output dir.
+
+### Optional: Overlays + Viewer (future)
+Analysis JSON → PNG overlays → HTML viewer.
 
 ## Technical Approach
 
@@ -57,8 +64,8 @@ WoWRollback rollback --input Azeroth.wdt --output rollback/Azeroth.wdt --max-uni
 
 ### Terrain Hole Fix
 - MCNK chunks have a `Holes` field (16 bits = 4x4 grid of 2x2 areas)
-- When a WMO is buried, clear its hole mask
-- Prevents "holes to void" where buildings used to be
+- Clear holes only if all referenced placements in chunk were buried (per-MCRF gating)
+- Prevents revealing terrain where kept objects remain
 
 ### Shadow Removal (Optional)
 - MCSH chunks contain baked shadow maps

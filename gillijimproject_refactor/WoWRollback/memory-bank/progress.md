@@ -1,6 +1,6 @@
 # Progress - WoWRollback.RollbackTool
 
-## ✅ Completed (2025-10-21)
+## ✅ Completed (2025-10-22)
 
 ### Core Rollback Functionality - WORKING AND TESTED!
 
@@ -19,6 +19,10 @@
 4. **Modification** - Modify Z coordinate at offset +12 in each entry
 5. **Writeback** - Copy modified chunk data back to original byte array
 6. **Output** - Write modified WDT + generate MD5 checksum
+7. **Selective Hole Clearing** - Per-MCNK, clear `Holes` only if all referenced placements (via `MCRF`) were buried
+8. **Shadow Removal** - Optional: zero Alpha MCSH payloads per MCNK offsets
+9. **LK Export** - `--export-lk-adts` converts present tiles to LK ADTs and writes to `--lk-out` (or default path)
+10. **Area Mapping Hook** - `--area-remap-json` supplies AlphaAreaId→LK AreaId mapping applied during export
 
 #### Code Locations
 - `WoWDataPlot/Program.cs` - Rollback command implementation (lines ~1980-2180)
@@ -54,66 +58,24 @@ MODF Entry (64 bytes):
 
 ## ⏳ In Progress
 
-### Architecture Refactoring
-- Moving rollback code from WoWDataPlot to new WoWRollback.RollbackTool project
-- Separating concerns: Analysis vs Modification vs Visualization
+### Pipeline Integration
+- Unifying Alpha→LK pipeline under a single command (`alpha-to-lk`): rollback + area map + export
+- Adding LK ADT patcher command (`lk-to-alpha`, v1): bury/holes/mcsh on LK ADTs
+- Implementing minimal LK `AreaTable.dbc` ID reader to auto-fill area mappings from MPQs
 
 ## 🎯 Next Steps
 
-### Phase 1: Project Structure (Next Session)
-1. Create `WoWRollback.RollbackTool` CLI project
-2. Extract rollback logic from `WoWDataPlot/Program.cs`
-3. Commands: `analyze`, `generate-overlays`, `rollback`
-4. Reference `gillijimproject-csharp` library
+### Phase 1: Unified Pipeline Command
+1. Add `alpha-to-lk` that composes rollback (bury + MCRF-gated hole clear + optional MCSH), area map (JSON or LK MPQs), and LK export
+2. Update `PrintHelp()` and logs with examples
 
-### Phase 2: MCNK Terrain Hole Management
-**Goal**: Clear terrain holes where buried WMOs used to be
+### Phase 2: AreaTable Auto-Mapper
+1. Implement `AreaTableDbcReader` (IDs only) opened via `PrioritizedArchiveSource`/`MpqArchiveSource`
+2. Build AlphaAreaId→LKAreaId: pass-through where present; else `--default-unmapped` (default 0)
 
-**Technical Approach**:
-```
-For each buried WMO placement:
-  1. Get world coordinates (X, Y, Z)
-  2. Calculate owning ADT tile
-  3. Calculate MCNK index within tile (16x16 grid)
-  4. Locate MCNK header in file (via MHDR offsets)
-  5. Clear Holes field at offset +0x40 (set to 0x0000)
-  6. Write modified header back
-```
-
-**Spatial Calculations**:
-- ADT tile size: 533.33 yards square
-- MCNK chunk size: 33.33 yards square  
-- MCNK grid: 16x16 per ADT (256 chunks)
-- Formula: `mcnkIndex = (chunkY * 16) + chunkX`
-
-**MCNK Header Structure**:
-- Offset +0x00: Flags (4 bytes)
-- Offset +0x40: **Holes** (4 bytes) ← MODIFY THIS
-- Holes field: 16 bits representing 4x4 grid of 2x2 hole areas
-
-### Phase 3: MCSH Shadow Disabling (Optional)
-**Goal**: Remove baked shadows that might look weird after object removal
-
-**Approach**:
-```
-For each ADT with buried objects:
-  1. Find all MCSH chunks (via MHDR offsets → MCNK headers → MCSH offsets)
-  2. Zero out MCSH chunk data
-  3. Update chunk size if needed
-  4. Write back
-```
-
-### Phase 4: Overlay Generation
-**Goal**: Pre-generate minimap images showing rollback thresholds
-
-**Approach**:
-```
-For each significant UniqueID threshold (percentiles or every 1000):
-  1. Read minimap BLP tiles
-  2. Overlay placement markers (green=kept, red=buried)
-  3. Save as PNG
-  4. Generate manifest JSON
-```
+### Phase 3: LK Patcher Command
+1. Add `lk-to-alpha` (v1) to patch LK ADTs (bury/holes/mcsh) and write to `--out`
+2. Validate counts and logs on Kalimdor
 
 **Output Structure**:
 ```
@@ -143,18 +105,19 @@ overlays/
 **Progress**: Core functionality complete (~60%), UX features pending (~40%)
 
 ```
-✅ Core Rollback:          100% (TESTED!)
-✅ MD5 Generation:          100%
-⏳ MCNK Hole Management:      0%
-⏳ MCSH Shadow Disabling:     0%
-⏳ Overlay Generation:        0%
-⏳ Lightweight Viewer:        0%
-⏳ Project Refactoring:       0%
+✅ Core Rollback:                 100% (TESTED!)
+✅ MD5 Generation:                100%
+✅ MCNK Hole Management:          100% (MCRF-gated)
+✅ MCSH Shadow Disabling:         100%
+✅ LK ADT Export Path:            100%
+⏳ AreaTable Auto-Mapper:          0%
+⏳ Overlay Generation:             0%
+⏳ Lightweight Viewer:             0%
 ```
 
 ## 🐛 Known Issues
 
-None! Core functionality works flawlessly on Alpha 0.5.3 data.
+- Without `--area-remap-json` (or future auto-mapper), LK ADTs may not display correct zone names
 
 ## ✨ Proven Capabilities
 

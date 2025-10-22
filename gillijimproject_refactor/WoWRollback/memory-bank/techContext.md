@@ -61,6 +61,35 @@ WoWRollback/
 - `McnkAlpha` - Terrain chunk (256 per ADT)
   - Contains `McnkAlphaHeader` with `Flags` and `Holes` fields
   - Each MCNK = 33.33 yards square
+  - Alpha header offsets used in CLI: `M2Number @ +0x14`, `McrfOffset @ +0x24`, `WmoNumber @ +0x3C`, `Holes @ +0x40`
+
+### LK Writers
+**Location**: `src/gillijimproject-csharp/WowFiles/LichKing/`
+- `AdtLk` - Construct/write LK ADTs
+  - `ToFile(<dir or path>)` treats a directory argument as output folder; writes `<map>_<x>_<y>.adt`
+- `McnkLk` - LK MCNK builder
+  - `ComputePositionFromAdt(adtNum, idxX, idxY)` used to set `PosX/PosY/PosZ`
+
+### MPQ Access
+**Location**: `WoWRollback/WoWRollback.Core/Services/Archive/`
+- `PrioritizedArchiveSource` - Union of loose files + MPQs
+- `MpqArchiveSource` - Uses `MPQToTACT.MPQ` to open files like `DBFilesClient/AreaTable.dbc`
+- Enumeration optional; we can read known paths directly
+
+### CLI (WoWRollback.Cli)
+- `rollback` options implemented:
+  - `--max-uniqueid`, `--bury-depth`, `--fix-holes`, `--disable-mcsh`
+  - `--export-lk-adts`, `--lk-out` (directory root for LK ADTs)
+  - `--area-remap-json` (AlphaAreaId→LK AreaId mapping for `MCNK.AreaId`)
+  - `--lk-client-path` (reserved for auto-mapper; printed if provided)
+- Hole clearing logic:
+  - Build `mddfBuried[]`, `modfBuried[]`; per MCNK, parse `MCRF` and clear holes only if all referenced entries were buried
+- LK export:
+  - Re-open saved Alpha WDT, enumerate present tiles, convert with `AdtAlpha.ToAdtLk(mdnm, monm, areaRemap)`, then `AdtLk.ToFile(lkOutDir)`
+
+### Planned Commands
+- `alpha-to-lk`: orchestrate rollback + area-map generation/usage + LK export
+- `lk-to-alpha` (v1): patch LK ADTs with bury/holes/mcsh; (v2) consider reverse to Alpha WDT
 
 ## Data Flow Architecture (Implemented)
 ```

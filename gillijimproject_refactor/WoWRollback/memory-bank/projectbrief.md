@@ -16,6 +16,8 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - **Shadow Disabling** - Optional: remove baked shadows (MCSH) that might look weird
 - **MD5 Checksums** - Auto-generates .md5 files for minimap compatibility
 - **Stupid Easy UI** - Drag a slider, pick a version, click a button. Done.
+- **Unified Pipeline (Alpha→LK)** - One command: Alpha WDT → patched Alpha WDT → patched LK ADTs
+- **AreaTable Mapping** - Apply `MCNK.AreaId` via JSON mapping or auto-fill from LK client MPQs
 
 ## Use Cases
 - **Empty World Screenshots**: Remove all objects for terrain-only views
@@ -25,7 +27,8 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 
 ## Success Criteria
 - ✅ Successfully bury objects in 0.5.3 WDT files (PROVEN - works on Kalimdor!)
-- ⏳ Clear terrain holes where objects were removed
+- ✅ Clear terrain holes conservatively (only chunks whose referenced objects were all buried)
+- ✅ Export LK ADTs with correct indices and applied AreaIDs (via mapping)
 - ⏳ Generate pre-rendered overlay images for all UniqueID ranges
 - ⏳ Build lightweight HTML viewer with slider control
 - ⏳ One-button rollback with all options exposed
