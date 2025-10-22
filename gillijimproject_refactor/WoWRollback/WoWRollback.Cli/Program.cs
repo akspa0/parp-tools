@@ -10,6 +10,8 @@ using WoWRollback.Core.Services.Config;
 using WoWRollback.Core.Services.Viewer;
 using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.Minimap;
+using GillijimProject.WowFiles;
+using GillijimProject.WowFiles.Alpha;
 
 namespace WoWRollback.Cli;
 
@@ -48,6 +50,8 @@ internal static class Program
                     return RunProbeArchive(opts);
                 case "probe-minimap":
                     return RunProbeMinimap(opts);
+                case "rollback":
+                    return RunRollback(opts);
                 case "serve-viewer":
                 case "serve":
                     return RunServeViewer(opts);
@@ -835,6 +839,12 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
+        Console.WriteLine();
+        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh]");
+        Console.WriteLine("    Modify Alpha WDT by burying placements with UniqueID > N, then write output + MD5");
+        Console.WriteLine("    --fix-holes        Clear MCNK Holes flags across all chunks (terrain hole masks)");
+        Console.WriteLine("    --disable-mcsh     Zero MCSH subchunk payloads (remove baked shadows)");
+        Console.WriteLine("    Default bury-depth = -5000.0, default out dir = <input_basename>_out next to input");
         Console.WriteLine();
         Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
         Console.WriteLine("    Probe mixed inputs (loose Data + MPQs)");
@@ -2019,5 +2029,201 @@ internal static class Program
 
         Commands.DebugSingleAdtCommand.ExecuteAsync(tileX, tileY, clientPath, outDir, mapName).Wait();
         return 0;
+    }
+
+    private static int RunRollback(Dictionary<string, string> opts)
+    {
+        Require(opts, "input");
+        Require(opts, "max-uniqueid");
+
+        var inputPath = opts["input"];
+        var mapName = Path.GetFileNameWithoutExtension(inputPath);
+        var defaultOut = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputPath)) ?? ".", mapName + "_out");
+        var outRoot = GetOption(opts, "out", defaultOut)!;
+        Directory.CreateDirectory(outRoot);
+        var outputPath = Path.Combine(outRoot, Path.GetFileName(inputPath));
+
+        var buryDepth = opts.TryGetValue("bury-depth", out var buryStr) && float.TryParse(buryStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var bd)
+            ? bd
+            : -5000.0f;
+        var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
+        var fixHoles = opts.ContainsKey("fix-holes");
+        var disableMcsh = opts.ContainsKey("disable-mcsh");
+
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine($"Input WDT:      {inputPath}");
+        Console.WriteLine($"Output WDT:     {outputPath}");
+        Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
+        Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
+        if (fixHoles) Console.WriteLine("Option:         --fix-holes (clear terrain hole masks)");
+        if (disableMcsh) Console.WriteLine("Option:         --disable-mcsh (zero baked shadows)");
+        Console.WriteLine();
+
+        try
+        {
+            var wdt = new WdtAlpha(inputPath);
+            var existingAdts = wdt.GetExistingAdtsNumbers();
+            var adtOffsets = wdt.GetAdtOffsetsInMain();
+            Console.WriteLine($"[info] Tiles detected: {existingAdts.Count}");
+
+            var wdtBytes = File.ReadAllBytes(inputPath);
+            int totalPlacements = 0, removed = 0, tilesProcessed = 0;
+            int holesCleared = 0, mcshZeroed = 0;
+            var processedMcnk = new HashSet<int>();
+
+            foreach (var adtNum in existingAdts)
+            {
+                int adtOffset = adtOffsets[adtNum];
+                if (adtOffset == 0) continue;
+
+                var adt = new AdtAlpha(inputPath, adtOffset, adtNum);
+                var mddf = adt.GetMddf();
+                var modf = adt.GetModf();
+
+                const int mddfEntrySize = 36;
+                for (int offset = 0; offset + mddfEntrySize <= mddf.Data.Length; offset += mddfEntrySize)
+                {
+                    uint uid = BitConverter.ToUInt32(mddf.Data, offset + 4);
+                    totalPlacements++;
+                    if (uid > maxUniqueId)
+                    {
+                        var newZ = BitConverter.GetBytes(buryDepth);
+                        Array.Copy(newZ, 0, mddf.Data, offset + 12, 4);
+                        removed++;
+                    }
+                }
+
+                const int modfEntrySize = 64;
+                for (int offset = 0; offset + modfEntrySize <= modf.Data.Length; offset += modfEntrySize)
+                {
+                    uint uid = BitConverter.ToUInt32(modf.Data, offset + 4);
+                    totalPlacements++;
+                    if (uid > maxUniqueId)
+                    {
+                        var newZ = BitConverter.GetBytes(buryDepth);
+                        Array.Copy(newZ, 0, modf.Data, offset + 12, 4);
+                        removed++;
+                    }
+                }
+
+                if (mddf.Data.Length > 0)
+                {
+                    int mddfFileOffset = adt.GetMddfDataOffset();
+                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffset, mddf.Data.Length);
+                }
+                if (modf.Data.Length > 0)
+                {
+                    int modfFileOffset = adt.GetModfDataOffset();
+                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffset, modf.Data.Length);
+                }
+
+                // Per-ADT MCNK passes using MCIN offsets
+                if (fixHoles || disableMcsh)
+                {
+                    // Parse MHDR -> MCIN for this ADT
+                    var mhdr = new Chunk(wdtBytes, adtOffset);
+                    int mhdrStart = adtOffset + 8;
+                    int mcinRel = mhdr.GetOffset(0x0);
+                    int mcinChunkOffset = mhdrStart + mcinRel;
+                    var mcin = new Mcin(wdtBytes, mcinChunkOffset);
+                    var mcnkOffsets = mcin.GetMcnkOffsets();
+
+                    foreach (var pos in mcnkOffsets)
+                    {
+                        if (pos <= 0) continue;
+                        if (!processedMcnk.Add(pos)) continue; // de-dup across tiles
+
+                        int headerStart = pos + 8; // skip 'MCNK' header
+                        if (headerStart + 128 > wdtBytes.Length) continue;
+
+                        if (fixHoles)
+                        {
+                            int holesOffset = headerStart + 0x40; // McnkAlphaHeader.Holes
+                            if (holesOffset + 4 <= wdtBytes.Length)
+                            {
+                                int prev = BitConverter.ToInt32(wdtBytes, holesOffset);
+                                if (prev != 0)
+                                {
+                                    wdtBytes[holesOffset + 0] = 0;
+                                    wdtBytes[holesOffset + 1] = 0;
+                                    wdtBytes[holesOffset + 2] = 0;
+                                    wdtBytes[holesOffset + 3] = 0;
+                                    holesCleared++;
+                                }
+                            }
+                        }
+
+                        if (disableMcsh)
+                        {
+                            int mcshOffset = BitConverter.ToInt32(wdtBytes, headerStart + 0x30);
+                            int mcshSize = BitConverter.ToInt32(wdtBytes, headerStart + 0x34);
+                            if (mcshSize > 0)
+                            {
+                                long payloadStart = (long)headerStart + 128 + mcshOffset;
+                                long payloadEnd = payloadStart + mcshSize;
+                                if (payloadStart >= 0 && payloadEnd <= wdtBytes.Length)
+                                {
+                                    Array.Clear(wdtBytes, (int)payloadStart, mcshSize);
+                                    mcshZeroed++;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                tilesProcessed++;
+                if (tilesProcessed % 50 == 0) Console.WriteLine($"  Processed {tilesProcessed}/{existingAdts.Count} tiles...");
+            }
+
+            // Log MCNK stats if passes were requested
+            if (fixHoles || disableMcsh)
+            {
+                Console.WriteLine($"[ok] MCNK pass: holesCleared={holesCleared}, mcshZeroed={mcshZeroed}, mcnkScanned={processedMcnk.Count}");
+            }
+
+            File.WriteAllBytes(outputPath, wdtBytes);
+            Console.WriteLine($"[ok] Saved: {outputPath}");
+
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                var hash = md5.ComputeHash(wdtBytes);
+                var hashString = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                var md5FilePath = Path.Combine(outRoot, Path.GetFileNameWithoutExtension(outputPath) + ".md5");
+                File.WriteAllText(md5FilePath, hashString);
+                Console.WriteLine($"[ok] MD5: {hashString}");
+                Console.WriteLine($"[ok] Saved: {md5FilePath}");
+            }
+
+            Console.WriteLine($"Total Placements:  {totalPlacements:N0}");
+            Console.WriteLine($"  Removed:          {removed:N0}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[error] Rollback failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static List<int> FindAllChunks(byte[] data, string chunkName)
+    {
+        var positions = new List<int>();
+        var pattern = System.Text.Encoding.ASCII.GetBytes(chunkName);
+        for (int i = 0; i < data.Length - pattern.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < pattern.Length; j++)
+            {
+                if (data[i + j] != pattern[j]) { match = false; break; }
+            }
+            if (match)
+            {
+                positions.Add(i);
+                i += 8; // skip chunk header to avoid immediate re-match
+            }
+        }
+        return positions;
     }
 }
