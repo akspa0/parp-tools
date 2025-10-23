@@ -1,14 +1,51 @@
 # WoWRollback - World of Warcraft Map Analysis & Rollback Toolkit
 
-**Digital archaeology toolkit** for World of Warcraft map content:
-- ✅ **Analyze loose ADT files** (0.5.x - 4.x+) without conversion
-- ✅ **Extract object placements** with spatial clustering & pattern detection  
-- ✅ **Generate MCNK terrain data** with AreaID mappings
-- ✅ **Extract 3D terrain meshes** (GLB format) for 3D visualization
-- ✅ **Interactive web viewer** with built-in HTTP server (no Python needed!)
-- ✅ **Version comparison** - Alpha WDT → LK ADT conversion pipeline
-- ✅ **Cross-tile duplicate filtering** - Clean object placement data
-- ✅ **Cluster visualization** - See object groups instead of 28K individual markers
+**Digital archaeology + conversion toolkit** focused on:
+
+## Concise Guide
+
+### 1) Lightweight Static Viewer (WoWDataPlot)
+- Generate a static, zero-dependency viewer with overlays in seconds.
+```powershell
+dotnet run --project WoWDataPlot -- visualize \
+  --wdt ..\test_data\0.5.3\tree\World\Maps\Kalidar\Kalidar.wdt \
+  --output-dir .\Kalidar_output
+```
+See: `WoWDataPlot/README.md`.
+
+### 2) Interactive Viewer (Analyze + Serve)
+- Analyze loose ADTs and start the built-in server for browsing.
+```powershell
+dotnet run --project WoWRollback.Cli -- analyze-map-adts \
+  --map development \
+  --map-dir "..\test_data\development\World\Maps\development" \
+  --out analysis_output
+
+dotnet run --project WoWRollback.Cli -- serve-viewer --viewer-dir analysis_output\viewer
+```
+See: `WoWRollback.Cli/README.md`, `WoWRollback.ViewerModule/README.md`.
+
+### 3) Alpha ↔ LK ADT Conversion
+- Alpha → LK ADTs (burial, holes, MCSH, AreaIDs):
+```powershell
+dotnet run --project WoWRollback.Cli -- alpha-to-lk \
+  --input ..\test_data\0.5.3\tree\World\Maps\Azeroth\Azeroth.wdt \
+  --max-uniqueid 43000 --fix-holes --disable-mcsh \
+  --out wrb_out \
+  --lk-out wrb_out\lk_adts\World\Maps\Azeroth \
+  --lk-client-path "J:\\wowDev\\modernwow" --default-unmapped 0
+```
+- LK → Alpha patcher (apply same terrain logic):
+```powershell
+dotnet run --project WoWRollback.Cli -- lk-to-alpha \
+  --lk-adts-dir .\wrb_out\lk_adts\World\Maps\Azeroth \
+  --map Azeroth \
+  --max-uniqueid 43000 --fix-holes --disable-mcsh \
+  --out .\patched_lk_az
+```
+See: `WoWRollback.Cli/README.md`, `WoWRollback.AdtConverter/README.md`.
+
+For module-specific details, see the Subprojects section below.
 
 ---
 
