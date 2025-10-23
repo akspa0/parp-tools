@@ -82,3 +82,14 @@ For correct Alpha WDT writing:
 - Gap analysis showing tight packing
 - Absolute file positions for reference
 - MHDR field consistency across tiles
+
+### MCNK Alpha Data Layout (Observed 2025-10-16)
+
+- `MCLY` entries remain wrapped in a standard chunk header (`'YLCM'` on disk). Each layer is 16 bytes.
+- `MCAL` **does not have a chunk header** in Alpha builds. The alpha blob begins immediately after any `MCSH` data. `SMChunk.offsAlpha` and `sizeAlpha` point directly to this raw 4-bit map region.
+- Reference Shadowfang tiles show `MCAL` occupying large contiguous ranges (e.g., 8388608 bytes) despite the inspector reporting a blank FourCC. Writers must emit raw alpha bytes without additional headers.
+
+### MONM Chunk Expectations
+
+- `MPHD.offsMapObjNames` must resolve to a valid `MONM` chunk containing null-terminated WMO name strings.
+- Alpha client asserts (`iffChunk.token == 'MONM'`) if the offset lands on an empty region or missing chunk. Even a terrain-only map requires the `MONM` header plus at least a trailing null terminator.

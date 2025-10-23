@@ -59,10 +59,10 @@ viewer/
   minimap/
     0.5.3.3368/
       Kalimdor/
-        Kalimdor_30_30.jpg
+        Kalimdor_30_30.png
     0.5.5.3494/
       Kalimdor/
-        Kalimdor_30_30.jpg
+        Kalimdor_30_30.png
 ```
 
 This prevents mixing tiles between versions (e.g., when 0.5.5 has tiles that 0.5.3 doesn't).

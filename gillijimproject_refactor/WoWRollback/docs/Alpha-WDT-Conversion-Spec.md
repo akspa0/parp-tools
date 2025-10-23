@@ -11,7 +11,6 @@ This document specifies the requirements for converting WoW 3.3.5 (LK) WDT/ADT f
 ## File Format Differences
 
 ### LK Format (3.3.5)
-- **Split files**: `map.wdt`, `map_xx_yy.adt`, `map_xx_yy_obj0.adt`, `map_xx_yy_tex0.adt`
 - **Separate chunks**: Terrain, objects, and textures in different files
 - **Modern features**: MH2O liquids, high-res holes, vertex lighting
 
@@ -232,7 +231,7 @@ MCSH (variable)
   
 MCAL (variable)
   - Alpha maps for texture blending
-  - HAS chunk header (usually empty)
+  - **NO chunk header in Alpha output**; write raw 4-bit maps back-to-back
 ```
 
 **CRITICAL**: MCVT and MCNR have NO chunk headers, just raw data!

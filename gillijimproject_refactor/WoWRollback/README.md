@@ -267,11 +267,26 @@ WoWRollback/
 
 ### Benefits
 
-- ✅ **No shell execution** - All tools called as library APIs
-- ✅ **Typed interfaces** - Structured results instead of exit codes  
-- ✅ **Clean separation** - Each module has a single responsibility
-- ✅ **Easy testing** - Modules can be tested independently
-- ✅ **Cross-platform** - Works on Windows, Linux, macOS
+- **No shell execution** - All tools called as library APIs
+- **Typed interfaces** - Structured results instead of exit codes  
+- **Clean separation** - Each module has a single responsibility
+- **Easy testing** - Modules can be tested independently
+- **Cross-platform** - Works on Windows, Linux, macOS
+
+### Subprojects
+
+- **WoWRollback.Cli** — Command-line tools for analysis, conversion, serving. [README](./WoWRollback.Cli/README.md)
+- **WoWRollback.Orchestrator** — One-command Alpha→LK pipeline runner. [README](./WoWRollback.Orchestrator/README.md)
+- **WoWDataPlot** — Static visualization generator. [README](./WoWDataPlot/README.md)
+- **WoWRollback.AdtConverter** — LK ⇄ Alpha terrain converter (standalone). [README](./WoWRollback.AdtConverter/README.md)
+- **WoWRollback.AdtModule** — ADT/WDT conversion library. [README](./WoWRollback.AdtModule/README.md)
+- **WoWRollback.DbcModule** — DBC parsing and crosswalk helpers. [README](./WoWRollback.DbcModule/README.md)
+- **WoWRollback.AnalysisModule** — UniqueID analysis and overlays. [README](./WoWRollback.AnalysisModule/README.md)
+- **WoWRollback.Core** — Shared utilities and models. [README](./WoWRollback.Core/README.md)
+- **WoWRollback.Viewer** — Static web assets for the viewer. [README](./WoWRollback.Viewer/README.md)
+- **WoWRollback.ViewerModule** — Kestrel server for the viewer. [README](./WoWRollback.ViewerModule/README.md)
+- **WoWRollback.LkToAlphaModule** — LK↔Alpha helpers (liquids, terrain). [README](./WoWRollback.LkToAlphaModule/README.md)
+- **WoWRollback.Verifier** — Integrity checks and roundtrip tests. [README](./WoWRollback.Verifier/README.md)
 
 ---
 

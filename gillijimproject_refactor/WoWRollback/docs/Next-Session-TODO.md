@@ -69,30 +69,13 @@ We're only writing minimal MCNKs with MCVT + MCNR. Missing:
 3. ✅ Update McshSize in header to match actual data
 4. ✅ Fallback to empty if MCSH missing
 
-### ❌ CRITICAL DISCOVERY: LK Uses Split ADT Files!
-
-**Problem Found:** LK 3.3.5 splits ADT data across multiple files:
-- `Map_XX_YY.adt` = Terrain geometry (MCVT, MCNR only)
-- `Map_XX_YY_tex0.adt` = Textures (MCLY, MCAL, MCSH) ← **WE NEED THIS!**
-- `Map_XX_YY_obj0.adt` = Objects (WMO/M2 placements)
-
 Alpha 0.5.3 has everything in ONE monolithic file.
 
 **Current Status:**
 - ✅ Code extracts MCLY/MCAL/MCSH from terrain ADT
-- ❌ But LK terrain ADTs don't contain texture data!
 - ❌ File size same as before (~17 MB) - no texture data included
 
-### 🎯 NEXT: Load _tex0.adt Files
-
-Need to update `AlphaWdtMonolithicWriter.cs`:
-1. ⏳ Find corresponding `_tex0.adt` file for each terrain tile
-2. ⏳ Load both terrain and texture ADT bytes
-3. ⏳ Pass texture bytes to `AlphaMcnkBuilder.BuildFromLk()`
-4. ⏳ Extract MCLY/MCAL/MCSH from texture file
-5. ⏳ Verify file size increases to ~32 MB
-
-### Alternative Approach: Copy Real Alpha MCNK Sub-Chunks
+### Copy Real Alpha MCNK Sub-Chunks
 
 Since we have working Alpha files, we could:
 1. Parse real Alpha MCNK structure completely
@@ -131,36 +114,26 @@ private static byte[] ConvertMcnrLkToAlpha(byte[] mcnrLk)
 
 ## ✅ What Was Accomplished - Session 2025-10-16
 
-### 🎯 BREAKTHROUGH: Header-Based Chunk Extraction Implemented
+### 🎯 Terrain + Texture Diagnostics
 
-**Root Cause Identified:**
-- LK 3.3.5 stores MCLY/MCAL/MCSH via **header offsets** in MCNK
-- Previous code only scanned sequential sub-chunks (MCVT/MCNR)
-- Missing 15.5 MB of texture data (MCLY, MCAL, MCSH)
+- ✅ Built new Shadowfang WDT after fixing tile index math; terrain loads but texture layers are wrong (roads render as grass).
+- ✅ Instrumented `AlphaWdtInspector` to compare reference Alpha Shadowfang against generated output.
+- ✅ Confirmed Alpha MCNK layout: raw `MCLY` table (16 bytes per layer) + contiguous raw `MCAL` alpha blob, no chunk headers.
+- ✅ Adjusted `AlphaMcnkBuilder.BuildFromLk()` to stop wrapping `MCAL` in a chunk header; offsets now point to raw data (still LK-format however).
+- ✅ Repacked Kalidar WDT (56 tiles). Top-level chunk order and offsets look correct; `inspect-alpha` reports valid MPHD offsets.
+- ❌ Kalidar still crashes Alpha client: `iffChunk.token == 'MONM'` assertion → indicates `MONM` string table empty/invalid.
 
-**Changes to `AlphaMcnkBuilder.cs`:**
+### 🔍 Key Discoveries
 
-1. **Added header-based extraction** (lines 37-77):
-   - Extract MCLY using `lkHeader.MclyOffset` (header+0x14)
-   - Extract MCAL using `lkHeader.McalOffset` (header+0x18)
-   - Extract MCSH using `lkHeader.McshOffset` (header+0x1C)
-   - Read chunks from absolute positions within MCNK
+- LK `MCAL` data is not directly compatible with Alpha. LK stores stitched bitmaps per layer (4-bit pairs) with LK-specific strides; Alpha expects 4-bit maps in a different ordering. We must decode LK alpha maps and re-encode them into Alpha’s format.
+- Our generated MCNKs remain ~1204 bytes versus ~1992 in reference files because we still lack converted alpha maps (and additional layers). Texture artifacts confirm this.
+- `MDNM`/`MONM` are still empty. Alpha client asserts when `MPHD.offsMonm` points to an empty chunk. Need to assemble doodad/WMO name tables and ensure `MCRF` references align.
+- No evidence of LK split ADTs in current data; `_tex0` files are not present for Kalidar sample. Texture info must be derived from the LK main ADT + separate database inputs.
 
-2. **Kept sequential scanning** for MCVT/MCNR (lines 79-111):
-   - These chunks are still in the sub-chunk area
-   - Scanned sequentially as before
+### ✅ Infrastructure
 
-3. **Removed incorrect _tex0.adt loading**:
-   - LK 3.3.5 uses monolithic ADT files (not split)
-   - All data is in main ADT, accessed differently
-
-**Results:**
-- ✅ File size: 40.96 MB (147% increase from 16.56 MB)
-- ✅ MCLY verified: 16 bytes (texture layer definitions)
-- ✅ MCAL verified: 1,052 bytes (alpha maps)
-- ✅ MCSH: 0 bytes (may not be present in all tiles)
-- ✅ Build succeeds with 6 warnings
-- ⏳ **Ready for client testing!**
+- `inspect-alpha` JSON reports for Shadowfang (`inspect_reference_shadowfang.json`, `inspect_generated_shadowfang.json`) and Kalidar (`inspect_generated_kalidar.json`) archived for comparison.
+- `AlphaMcnkBuilder` now writes `MCAL` raw bytes directly; header offsets (`offsAlpha`, `sizeAlpha`) are accurate.
 
 ---
 
