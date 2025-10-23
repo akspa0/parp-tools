@@ -382,6 +382,68 @@ dotnet run --project WoWRollback.Cli -- serve-viewer --no-browser
 
 ---
 
+### Alpha ↔ LK ADT Workflows (WoWRollback.Cli)
+
+Use `WoWRollback.Cli` for direct Alpha→LK export and LK→Alpha patching. These commands operate on your files without requiring the full orchestrator.
+
+#### Alpha → LK (alpha-to-lk)
+
+Converts a single Alpha WDT into LK ADTs with burial, optional hole clearing and shadow removal, and AreaID mapping.
+
+```powershell
+# Example (Azeroth, Alpha 0.5.3)
+dotnet run -c Release --project WoWRollback.Cli -- \
+  alpha-to-lk \
+  --input ..\test_data\0.5.3\tree\World\Maps\Azeroth\Azeroth.wdt \
+  --max-uniqueid 43000 \
+  --fix-holes --disable-mcsh \
+  --out wrb_out \
+  --lk-out wrb_out\lk_adts\World\Maps\Azeroth \
+  --lk-client-path "J:\\wowDev\\modernwow" \
+  --default-unmapped 0
+```
+
+- **Input:** Alpha `.wdt` file (e.g., `Azeroth.wdt`).
+- **Burial:** `--max-uniqueid` removes later work; `--bury-depth` optional (default `-5000`).
+- **Terrain fixes:** `--fix-holes` clears MCNK hole flags around buried-placement neighborhoods. `--disable-mcsh` zeros baked shadows.
+- **LK output:** `--lk-out` root directory for converted ADTs.
+- **Area IDs:**
+  - If `--area-remap-json` provided, it is used verbatim (AlphaAreaId→LKAreaId).
+  - Else, LK `AreaTable.dbc` is read from `--lk-client-path` and Alpha IDs passthrough if present; others become `--default-unmapped` (default `0`).
+  - You can also supply crosswalk CSVs via `--crosswalk-dir` / `--crosswalk-file` for precise mapping.
+
+Tips:
+- `--lk-client-path` should point to a LK (3.3.5) client root. MPQs are detected automatically; no extraction required.
+- Prefer `--crosswalk-dir`/`--crosswalk-file` (keeps legacy `--dbctool-patch-*` aliases).
+
+#### LK → Alpha Patcher (lk-to-alpha)
+
+Patches an existing set of LK ADTs by burying placements and optionally clearing holes and removing shadows. Useful for iterating on LK results.
+
+```powershell
+dotnet run -c Release --project WoWRollback.Cli -- \
+  lk-to-alpha \
+  --lk-adts-dir .\wrb_out\lk_adts\World\Maps\Azeroth \
+  --map Azeroth \
+  --max-uniqueid 43000 \
+  --fix-holes --disable-mcsh \
+  --out .\patched_lk_az
+```
+
+- **Input:** Directory containing LK ADTs (e.g., output from `alpha-to-lk`).
+- **Output:** Writes patched copies preserving relative directory structure under `--out`.
+- **Same terrain logic:** Neighbor-aware hole clearing and MCSH zeroing are applied in the same way as `alpha-to-lk`.
+
+#### Loose Files vs MPQs
+
+- **Loose files:** Alpha inputs (`.wdt`, `.adt`) are regular files; no special setup.
+- **MPQ-backed data:** When LK data is needed (AreaTable), pass `--lk-client-path` to a 3.3.5 client install. MPQs are read directly; no unpack step required.
+- **Verification:**
+  - `dotnet run --project WoWRollback.Cli -- probe-archive --client-path <lk-root>`
+  - `dotnet run --project WoWRollback.Cli -- probe-minimap --client-path <lk-root> --map <MapName>`
+
+---
+
 ### Orchestrator Command (Alpha→LK Pipeline)
 
 **Single unified command** that runs the full pipeline:
