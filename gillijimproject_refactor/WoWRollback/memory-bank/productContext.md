@@ -16,12 +16,13 @@ Alpha WDT + Threshold + Options → Modify placements → Fix terrain → Zero s
 ```
 **Output**: Patched Alpha WDT with MDDF/MODF buried by UID, conservative hole clearing (per-MCNK all-buried rule), optional MCSH disabled, MD5 file.
 
-#### Phase 2: AreaTable Mapping
+#### Phase 2: AreaTable Mapping (CSV Crosswalks)
 ```
-Use mapping to set MCNK.AreaId for LK ADTs.
-Sources: --area-remap-json (explicit), or auto-fill from LK DBFilesClient/AreaTable.dbc via MPQs.
+Use mapping to set `MCNK.AreaId` for LK ADTs.
+Primary source: CSV crosswalks loaded via `--crosswalk-dir` or `--crosswalk-file`.
+Fallbacks: `--area-remap-json` explicit mappings; write 0 when unmapped. `Map.dbc` is used only to resolve target map guards (no heuristics).
 ```
-**Output**: Dictionary AlphaAreaId→LK AreaId
+**Output**: Dictionary AlphaAreaId→LK AreaId, with zeros for unmapped
 
 #### Phase 3: Export LK ADTs (Patched)
 ```
@@ -37,11 +38,12 @@ LK ADTs dir + Threshold + Options → Bury placements → Selective hole clearin
 
 ## User Experience Flow
 
-### Step 1: Alpha→LK one-liner
+### Step 1: Alpha→LK one-liner (with crosswalks)
 ```powershell
 WoWRollback alpha-to-lk --input World/Maps/Kalimdor/Kalimdor.wdt --max-uniqueid 125000 \
   --fix-holes --disable-mcsh --out rollback_kl053 --export-lk-adts \
-  --lk-out rollback_kl053/lk_adts/World/Maps/Kalimdor --area-remap-json configs/kl_map.json
+  --lk-out rollback_kl053/lk_adts/World/Maps/Kalimdor \
+  --crosswalk-dir D:/crosswalks --lk-dbc-dir D:/lk_dbc
 ```
 **Result**: Patched Alpha WDT + Patched LK ADTs with AreaIds.
 

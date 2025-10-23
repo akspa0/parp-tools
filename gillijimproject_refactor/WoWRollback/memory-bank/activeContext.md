@@ -102,7 +102,7 @@ WoWDataPlot/               (REFOCUS - Visualization Phase)
   └─> No modification, pure viz
 ```
 
-**Current Implementation Status:**
+## Current Implementation Status:**
 - ✅ Rollback code working in `WoWDataPlot/Program.cs` (temporary location)
 - ⏳ Need to extract to new `WoWRollback.RollbackTool` project
 - ⏳ Need to add MCNK terrain hole management
@@ -112,19 +112,19 @@ WoWDataPlot/               (REFOCUS - Visualization Phase)
 ## Next Steps (For Fresh Session)
 
 ### Phase 1: Unified Pipeline Command
-1. Add `alpha-to-lk` to `WoWRollback.Cli` that composes:
-   - Rollback (bury + MCRF-gated hole clear + optional MCSH)
-   - Area mapping: load `--area-remap-json` or auto-fill from `--lk-client-path` (`DBFilesClient/AreaTable.dbc`)
+1. `alpha-to-lk` implemented (wrapper over rollback with `--export-lk-adts`):
+   - Rollback: bury + MCRF-gated hole clear + optional MCSH
+   - Area mapping: `--area-remap-json` or auto-fill via `--lk-client-path` (LK `AreaTable.dbc` IDs passthrough; unmapped→`--default-unmapped`)
    - LK export: `AdtAlpha.ToAdtLk(..., areaRemap)` → `AdtLk.ToFile(lkOutDir)`
-2. Update `PrintHelp()` and logs.
+2. CLI help updated. Added preferred crosswalk flags `--crosswalk-dir`/`--crosswalk-file` (kept legacy `dbctool-*` aliases).
 
 ### Phase 2: AreaTable Auto-Mapper
 1. Implement minimal `AreaTableDbcReader` (IDs only) via `PrioritizedArchiveSource`/`MpqArchiveSource`.
 2. Prefill AlphaAreaId→LKAreaId when IDs exist in LK; else map to `--default-unmapped`.
 
 ### Phase 3: LK Patcher Command
-1. Add `lk-to-alpha` (v1) to patch LK ADTs with the same bury/holes/mcsh rules.
-2. Output to `--out` directory; validate counts and logs.
+1. `lk-to-alpha` (v1) implemented: patches LK ADTs (bury/holes/mcsh) and writes to `--out`.
+2. Next: validate counts/logs on Kalimdor and Azeroth directories.
 
 ## Git Status
 - **Branch**: `wrb-poc5`

@@ -81,11 +81,15 @@ WoWRollback/
   - `--max-uniqueid`, `--bury-depth`, `--fix-holes`, `--disable-mcsh`
   - `--export-lk-adts`, `--lk-out` (directory root for LK ADTs)
   - `--area-remap-json` (AlphaAreaId→LK AreaId mapping for `MCNK.AreaId`)
-  - `--lk-client-path` (reserved for auto-mapper; printed if provided)
+  - `--lk-client-path` (MPQs access), `--lk-dbc-dir` (extracted DBCs for `Map.dbc` guard)
+  - `--crosswalk-dir` / `--crosswalk-file` (preferred), compatibility aliases: `--dbctool-patch-dir` / `--dbctool-patch-file`
 - Hole clearing logic:
   - Build `mddfBuried[]`, `modfBuried[]`; per MCNK, parse `MCRF` and clear holes only if all referenced entries were buried
 - LK export:
   - Re-open saved Alpha WDT, enumerate present tiles, convert with `AdtAlpha.ToAdtLk(mdnm, monm, areaRemap)`, then `AdtLk.ToFile(lkOutDir)`
+- In-place AreaID patching after write:
+  - Load CSV crosswalks; resolve `currentMapId` via `Map.dbc` (no DBCTool dependency)
+  - Patch `MCNK.AreaId` at `mcnkOffset + 8 + 0x34` using strict decision order and child-preference
 
 ### Planned Commands
 - `alpha-to-lk`: orchestrate rollback + area-map generation/usage + LK export

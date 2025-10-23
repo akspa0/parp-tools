@@ -13,6 +13,9 @@ using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.Minimap;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.Alpha;
+using AlphaWdtAnalyzer.Core.Export;
+using AlphaWdtAnalyzer.Core.Dbc;
+using WoWRollback.Core.Services.AreaMapping;
 
 namespace WoWRollback.Cli;
 
@@ -51,6 +54,10 @@ internal static class Program
                     return RunProbeArchive(opts);
                 case "probe-minimap":
                     return RunProbeMinimap(opts);
+                case "alpha-to-lk":
+                    return RunAlphaToLk(opts);
+                case "lk-to-alpha":
+                    return RunLkToAlpha(opts);
                 case "gen-area-remap":
                     return RunGenAreaRemap(opts);
                 case "rollback":
@@ -433,6 +440,236 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static int RunLkToAlpha(Dictionary<string, string> opts)
+    {
+        // Symmetric patcher for LK ADTs: bury by UniqueID and optionally clear holes / zero MCSH
+        var inputDir = opts.GetValueOrDefault("lk-adts-dir", opts.GetValueOrDefault("input-dir", ""));
+        if (string.IsNullOrWhiteSpace(inputDir)) throw new ArgumentException("Missing --lk-adts-dir (or --input-dir)");
+        Require(opts, "max-uniqueid");
+
+        var mapName = opts.GetValueOrDefault("map", Path.GetFileName(Path.GetFullPath(inputDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
+        var outRoot = GetOption(opts, "out", Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputDir)) ?? ".", mapName + "_out"))!;
+        Directory.CreateDirectory(outRoot);
+
+        var buryDepth = opts.TryGetValue("bury-depth", out var buryStr) && float.TryParse(buryStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var bd)
+            ? bd : -5000.0f;
+        var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
+        var fixHoles = opts.ContainsKey("fix-holes");
+        var disableMcsh = opts.ContainsKey("disable-mcsh");
+
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine("          🎮 WoWRollback - LK PATCHER");
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine($"Map:            {mapName}");
+        Console.WriteLine($"LK ADT Dir:     {inputDir}");
+        Console.WriteLine($"Output Dir:     {outRoot}");
+        Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
+        Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
+        if (fixHoles) Console.WriteLine("Option:         --fix-holes (clear terrain hole masks)");
+        if (disableMcsh) Console.WriteLine("Option:         --disable-mcsh (zero baked shadows)");
+        Console.WriteLine();
+
+        int filesProcessed = 0, placementsProcessed = 0, placementsBuried = 0;
+        int holesCleared = 0, mcshZeroed = 0, mcnkScanned = 0;
+
+        var allAdts = Directory.EnumerateFiles(inputDir, "*.adt", SearchOption.AllDirectories)
+            .Where(p => Path.GetFileNameWithoutExtension(p).StartsWith(mapName + "_", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p)
+            .ToList();
+
+        foreach (var inPath in allAdts)
+        {
+            var bytes = File.ReadAllBytes(inPath);
+
+            // Track buried arrays for MCRF gating per file
+            bool[] mddfBuried = Array.Empty<bool>();
+            bool[] modfBuried = Array.Empty<bool>();
+
+            void BuryMddf()
+            {
+                int start = FindChunk(bytes, "FDDM");
+                if (start < 0) return;
+                int size = BitConverter.ToInt32(bytes, start + 4);
+                int data = start + 8;
+                const int entry = 36;
+                int count = size / entry;
+                mddfBuried = new bool[count];
+                for (int off = 0; off + entry <= size; off += entry)
+                {
+                    int entryStart = data + off;
+                    uint uid = BitConverter.ToUInt32(bytes, entryStart + 4);
+                    placementsProcessed++;
+                    if (uid > maxUniqueId)
+                    {
+                        var newY = BitConverter.GetBytes(buryDepth); // height at +12
+                        Array.Copy(newY, 0, bytes, entryStart + 12, 4);
+                        placementsBuried++;
+                        int idx = off / entry; if (idx >= 0 && idx < mddfBuried.Length) mddfBuried[idx] = true;
+                    }
+                }
+            }
+
+            void BuryModf()
+            {
+                int start = FindChunk(bytes, "FDOM");
+                if (start < 0) return;
+                int size = BitConverter.ToInt32(bytes, start + 4);
+                int data = start + 8;
+                const int entry = 64;
+                int count = size / entry;
+                modfBuried = new bool[count];
+                for (int off = 0; off + entry <= size; off += entry)
+                {
+                    int entryStart = data + off;
+                    uint uid = BitConverter.ToUInt32(bytes, entryStart + 4);
+                    placementsProcessed++;
+                    if (uid > maxUniqueId)
+                    {
+                        var newY = BitConverter.GetBytes(buryDepth); // height at +12
+                        Array.Copy(newY, 0, bytes, entryStart + 12, 4);
+                        placementsBuried++;
+                        int idx = off / entry; if (idx >= 0 && idx < modfBuried.Length) modfBuried[idx] = true;
+                    }
+                }
+            }
+
+            BuryMddf();
+            BuryModf();
+
+            // Optional MCNK passes (holes + mcsh)
+            if (fixHoles || disableMcsh)
+            {
+                long fileLen = bytes.LongLength;
+                using var ms = new MemoryStream(bytes);
+                using var br = new BinaryReader(ms);
+                using var bw = new BinaryWriter(ms);
+
+                // Find MCIN
+                long mcinDataPos = -1; int mcinSize = 0;
+                ms.Position = 0;
+                while (ms.Position + 8 <= fileLen)
+                {
+                    var rev = br.ReadBytes(4);
+                    if (rev.Length < 4) break;
+                    var fourcc = ReverseFourCC(System.Text.Encoding.ASCII.GetString(rev));
+                    int sz = br.ReadInt32();
+                    long dataPos = ms.Position;
+                    if (fourcc == "MCIN") { mcinDataPos = dataPos; mcinSize = sz; break; }
+                    ms.Position = dataPos + sz + ((sz & 1) == 1 ? 1 : 0);
+                }
+
+                if (mcinDataPos >= 0 && mcinSize >= 16)
+                {
+                    ms.Position = mcinDataPos;
+                    int need = Math.Min(mcinSize, 256 * 16);
+                    var mcinBytes = br.ReadBytes(need);
+                    for (int i = 0; i < 256; i++)
+                    {
+                        int mcnkOffset = (mcinBytes.Length >= (i + 1) * 16) ? BitConverter.ToInt32(mcinBytes, i * 16) : 0;
+                        if (mcnkOffset <= 0) continue;
+                        mcnkScanned++;
+
+                        int headerStart = mcnkOffset + 8;
+                        if (headerStart + 128 > bytes.Length) continue;
+
+                        if (fixHoles)
+                        {
+                            int holesOffset = headerStart + 0x40;
+                            if (holesOffset + 4 <= bytes.Length)
+                            {
+                                int m2Number = BitConverter.ToInt32(bytes, headerStart + 0x14);
+                                int wmoNumber = BitConverter.ToInt32(bytes, headerStart + 0x3C);
+                                int mcrfRel = BitConverter.ToInt32(bytes, headerStart + 0x24);
+                                int mcrfChunkOffset = headerStart + 128 + mcrfRel;
+
+                                bool hasAny = false, anyKept = false, anyBuried = false;
+                                if (mcrfChunkOffset + 8 <= bytes.Length)
+                                {
+                                    try
+                                    {
+                                        var mcrf = new Mcrf(bytes, mcrfChunkOffset);
+                                        var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
+                                        var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
+                                        foreach (var idx in m2Idx)
+                                        {
+                                            if (idx >= 0 && idx < mddfBuried.Length)
+                                            {
+                                                hasAny = true;
+                                                if (mddfBuried[idx]) anyBuried = true; else anyKept = true;
+                                            }
+                                        }
+                                        foreach (var idx in wmoIdx)
+                                        {
+                                            if (idx >= 0 && idx < modfBuried.Length)
+                                            {
+                                                hasAny = true;
+                                                if (modfBuried[idx]) anyBuried = true; else anyKept = true;
+                                            }
+                                        }
+                                    }
+                                    catch { /* best-effort */ }
+                                }
+
+                                int prev = BitConverter.ToInt32(bytes, holesOffset);
+                                bool shouldClear = hasAny && !anyKept && anyBuried;
+                                if (shouldClear && prev != 0)
+                                {
+                                    bytes[holesOffset + 0] = 0;
+                                    bytes[holesOffset + 1] = 0;
+                                    bytes[holesOffset + 2] = 0;
+                                    bytes[holesOffset + 3] = 0;
+                                    holesCleared++;
+                                }
+                            }
+                        }
+
+                        if (disableMcsh)
+                        {
+                            int mcshOffset = BitConverter.ToInt32(bytes, headerStart + 0x30);
+                            int mcshSize = BitConverter.ToInt32(bytes, headerStart + 0x34);
+                            if (mcshSize > 0)
+                            {
+                                long payloadStart = (long)headerStart + 128 + mcshOffset;
+                                long payloadEnd = payloadStart + mcshSize;
+                                if (payloadStart >= 0 && payloadEnd <= bytes.Length)
+                                {
+                                    Array.Clear(bytes, (int)payloadStart, mcshSize);
+                                    mcshZeroed++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Write output preserving relative structure
+            var rel = Path.GetRelativePath(inputDir, inPath);
+            var outPath = Path.Combine(outRoot, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+            File.WriteAllBytes(outPath, bytes);
+            filesProcessed++;
+            if (filesProcessed % 50 == 0) Console.WriteLine($"  [lk] Patched {filesProcessed}/{allAdts.Count} ADTs...");
+        }
+
+        Console.WriteLine($"[ok] LK patch complete: files={filesProcessed}, placementsProcessed={placementsProcessed}, buried={placementsBuried}");
+        if (fixHoles || disableMcsh)
+        {
+            Console.WriteLine($"[ok] MCNK pass: holesCleared={holesCleared}, mcshZeroed={mcshZeroed}, mcnkScanned={mcnkScanned}");
+        }
+        return 0;
+    }
+
+    private static int FindChunk(byte[] bytes, string reversedFourCC)
+    {
+        var pattern = System.Text.Encoding.ASCII.GetBytes(reversedFourCC);
+        for (int i = 0; i < bytes.Length - 4; i++)
+        {
+            if (bytes[i] == pattern[0] && bytes[i + 1] == pattern[1] && bytes[i + 2] == pattern[2] && bytes[i + 3] == pattern[3])
+                return i;
+        }
+        return -1;
     }
 
     private static int RunAnalyzeMapAdts(Dictionary<string, string> opts)
@@ -850,15 +1087,28 @@ internal static class Program
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
-        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--export-lk-adts] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>]");
+        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--export-lk-adts] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
         Console.WriteLine("    Modify Alpha WDT by burying placements with UniqueID > N, then write output + MD5");
         Console.WriteLine("    --fix-holes        Clear MCNK Holes flags across all chunks (terrain hole masks)");
         Console.WriteLine("    --disable-mcsh     Zero MCSH subchunk payloads (remove baked shadows)");
         Console.WriteLine("    --export-lk-adts   After writing modified WDT, convert present tiles to LK ADT files");
         Console.WriteLine("    --lk-out <dir>     Output directory root for LK ADTs (default: <out>/lk_adts/World/Maps/<map>)");
-        Console.WriteLine("    --lk-client-path   LK client folder with MPQs (for future auto AreaTable mapping)");
+        Console.WriteLine("    --lk-client-path   LK client folder with MPQs (used for AreaTable auto-mapping)");
         Console.WriteLine("    --area-remap-json  JSON file mapping AlphaAreaId->LKAreaId to set MCNK.AreaId");
+        Console.WriteLine("    --default-unmapped AreaId to use when no mapping/ID exists in LK (default 0)");
+        Console.WriteLine("    --crosswalk-dir    Preferred: directory of crosswalk CSVs (Area_patch_crosswalk_*.csv)");
+        Console.WriteLine("    --crosswalk-file   Preferred: specific crosswalk CSV to load (resolved against dir or out root)");
+        Console.WriteLine("    --dbctool-out-root Root of DBCTool.V2 output (expects <alias>/compare/v2|v3 for crosswalk CSVs)");
+        Console.WriteLine("    --dbctool-patch-dir Legacy alias for --crosswalk-dir");
+        Console.WriteLine("    --dbctool-patch-file Legacy alias for --crosswalk-file");
+        Console.WriteLine("    --lk-dbc-dir Directory with extracted LK DBCs (Map.dbc/AreaTable.dbc), else read from --lk-client-path");
         Console.WriteLine("    Default bury-depth = -5000.0, default out dir = <input_basename>_out next to input");
+        Console.WriteLine();
+        Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
+        Console.WriteLine("    One-shot: rollback + (optional) fix-holes/MCSH + LK export with AreaTable mapping");
+        Console.WriteLine();
+        Console.WriteLine("  lk-to-alpha  --lk-adts-dir <dir> --map <name> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh]");
+        Console.WriteLine("    Patch existing LK ADTs: bury placements with UniqueID > N, optionally clear holes (MCRF-gated) and zero MCSH");
         Console.WriteLine();
         Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
         Console.WriteLine("    Probe mixed inputs (loose Data + MPQs)");
@@ -2045,6 +2295,20 @@ internal static class Program
         return 0;
     }
 
+    private static int RunAlphaToLk(Dictionary<string, string> opts)
+    {
+        // Compose rollback with LK export enabled
+        Require(opts, "input");
+        Require(opts, "max-uniqueid");
+
+        var merged = new Dictionary<string, string>(opts, StringComparer.OrdinalIgnoreCase)
+        {
+            ["export-lk-adts"] = "true"
+        };
+
+        return RunRollback(merged);
+    }
+
     private static int RunRollback(Dictionary<string, string> opts)
     {
         Require(opts, "input");
@@ -2068,6 +2332,12 @@ internal static class Program
         var lkOutDir = opts.GetValueOrDefault("lk-out", lkOutDefault);
         var lkClientPath = opts.GetValueOrDefault("lk-client-path", "");
         var areaRemapJsonPath = opts.GetValueOrDefault("area-remap-json", "");
+        var defaultUnmapped = TryParseInt(opts, "default-unmapped") ?? 0;
+        var dbctoolOutRoot = opts.GetValueOrDefault("dbctool-out-root", "");
+        // support preferred aliases --crosswalk-dir/--crosswalk-file while keeping legacy dbctool-* flags
+        var dbctoolPatchDir = opts.ContainsKey("dbctool-patch-dir") ? opts["dbctool-patch-dir"] : opts.GetValueOrDefault("crosswalk-dir", "");
+        var dbctoolPatchFile = opts.ContainsKey("dbctool-patch-file") ? opts["dbctool-patch-file"] : opts.GetValueOrDefault("crosswalk-file", "");
+        var lkDbcDir = opts.GetValueOrDefault("lk-dbc-dir", "");
 
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
@@ -2304,6 +2574,42 @@ internal static class Program
                     var mdnmNames = wdtOut.GetMdnmFileNames();
                     var monmNames = wdtOut.GetMonmFileNames();
 
+                    // Auto-map fallback when no JSON provided: use LK AreaTable.dbc to keep IDs that exist; others -> defaultUnmapped
+                    if (areaRemap == null)
+                    {
+                        var alphaAreas = new HashSet<int>();
+                        foreach (var adtNum2 in existingAfter)
+                        {
+                            int adtOff2 = adtOffsetsAfter[adtNum2];
+                            if (adtOff2 == 0) continue;
+                            var aScan = new AdtAlpha(outputPath, adtOff2, adtNum2);
+                            foreach (var aid in aScan.GetAlphaMcnkAreaIds())
+                            {
+                                if (aid >= 0) alphaAreas.Add(aid);
+                            }
+                        }
+
+                        var lkIds = string.IsNullOrWhiteSpace(lkClientPath)
+                            ? new HashSet<int>()
+                            : LkAreaTableDbcReader.LoadLkAreaIdsFromClient(lkClientPath);
+
+                        areaRemap = new Dictionary<int, int>(capacity: alphaAreas.Count);
+                        foreach (var aid in alphaAreas)
+                        {
+                            areaRemap[aid] = lkIds.Contains(aid) ? aid : defaultUnmapped;
+                        }
+                        Console.WriteLine($"[lk] auto-mapped {areaRemap.Count} alpha area IDs (default-unmapped={defaultUnmapped})");
+                    }
+
+                    // Load crosswalk patch mapping (CSV) and resolve current map id for guard
+                    var aliasUsed = ResolveSrcAlias(opts.GetValueOrDefault("version", null), inputPath);
+                    var patchMap = LoadPatchMapping(aliasUsed, dbctoolOutRoot, dbctoolPatchDir, dbctoolPatchFile);
+                    int currentMapId = ResolveMapIdFromOptions(dbctoolOutRoot, lkDbcDir, mapName);
+                    if (patchMap != null)
+                    {
+                        Console.WriteLine($"[patchmap] loaded crosswalks: per-map={patchMap.PerMapCount} global={patchMap.GlobalCount}");
+                    }
+
                     Directory.CreateDirectory(lkOutDir);
                     int written = 0;
                     foreach (var adtNum2 in existingAfter)
@@ -2313,6 +2619,25 @@ internal static class Program
                         var a = new AdtAlpha(outputPath, adtOff2, adtNum2);
                         var lk = a.ToAdtLk(mdnmNames, monmNames, areaRemap);
                         lk.ToFile(lkOutDir); // Treats directory as output root
+
+                        // Crosswalk-based AreaID patching (in-place)
+                        if (patchMap != null)
+                        {
+                            var alphaAreaIds = a.GetAlphaMcnkAreaIds();
+                            var outFile = Path.Combine(lkOutDir, $"{mapName}_{adtNum2 % 64}_{adtNum2 / 64}.adt");
+                            try
+                            {
+                                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, mapName, alphaAreaIds, patchMap, currentMapId);
+                                if (present > 0 && patched >= 0 && written < 4)
+                                {
+                                    Console.WriteLine($"  [AreaIds] {Path.GetFileName(outFile)} present={present} patched={patched}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[warn] AreaID patch failed for {outFile}: {ex.Message}");
+                            }
+                        }
                         written++;
                         if (written % 50 == 0) Console.WriteLine($"  [lk] Wrote {written}/{existingAfter.Count} ADTs...");
                     }
@@ -2330,6 +2655,265 @@ internal static class Program
             Console.Error.WriteLine($"[error] Rollback failed: {ex.Message}");
             return 1;
         }
+    }
+
+    // === Crosswalk integration helpers ===
+    private static DbcPatchMapping? LoadPatchMapping(string alias, string dbctoolOutRoot, string patchDir, string patchFile)
+    {
+        try
+        {
+            bool any = false;
+            var map = new DbcPatchMapping();
+
+            IEnumerable<string> EnumerateCrosswalkCsvs(string dir)
+            {
+                if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) yield break;
+                var patterns = new[] { "Area_patch_crosswalk_*.csv", "Area_crosswalk_v*.csv" };
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pat in patterns)
+                {
+                    foreach (var f in Directory.EnumerateFiles(dir, pat, SearchOption.AllDirectories))
+                    {
+                        if (seen.Add(f)) yield return f;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(patchFile))
+            {
+                // Resolve relative against patchDir or outRoot/<alias>/compare/v[3|2]
+                if (Path.IsPathFullyQualified(patchFile) && File.Exists(patchFile))
+                {
+                    map.LoadFile(patchFile); any = true;
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(patchDir))
+                    {
+                        var cand = Path.Combine(patchDir, patchFile);
+                        if (File.Exists(cand)) { map.LoadFile(cand); any = true; }
+                    }
+                    if (!any && !string.IsNullOrWhiteSpace(dbctoolOutRoot) && !string.IsNullOrWhiteSpace(alias))
+                    {
+                        var v3 = Path.Combine(dbctoolOutRoot, alias, "compare", "v3", patchFile);
+                        var v2 = Path.Combine(dbctoolOutRoot, alias, "compare", "v2", patchFile);
+                        if (File.Exists(v3)) { map.LoadFile(v3); any = true; }
+                        else if (File.Exists(v2)) { map.LoadFile(v2); any = true; }
+                    }
+                }
+            }
+
+            if (!any && !string.IsNullOrWhiteSpace(patchDir) && Directory.Exists(patchDir))
+            {
+                foreach (var f in EnumerateCrosswalkCsvs(patchDir)) { map.LoadFile(f); any = true; }
+            }
+
+            if (!any && !string.IsNullOrWhiteSpace(dbctoolOutRoot) && !string.IsNullOrWhiteSpace(alias))
+            {
+                var v3Dir = Path.Combine(dbctoolOutRoot, alias, "compare", "v3");
+                var v2Dir = Path.Combine(dbctoolOutRoot, alias, "compare", "v2");
+                if (Directory.Exists(v3Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v3Dir)) { map.LoadFile(f); any = true; } }
+                if (Directory.Exists(v2Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v2Dir)) { map.LoadFile(f); any = true; } }
+            }
+
+            return any ? map : null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] Failed to load crosswalk mapping: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static int ResolveMapIdFromOptions(string dbctoolOutRoot, string lkDbcDir, string mapName)
+    {
+        try
+        {
+            // Prefer MapIdResolver from DBCTool outputs if available
+            if (!string.IsNullOrWhiteSpace(dbctoolOutRoot))
+            {
+                // Try common aliases in priority order
+                foreach (var alias in new[] { "0.6.0", "0.5.5", "0.5.3" })
+                {
+                    var res = MapIdResolver.LoadFromDbcToolOutput(dbctoolOutRoot, alias);
+                    if (res != null)
+                    {
+                        var id = res.GetMapIdByDirectory(mapName);
+                        if (id.HasValue) return id.Value;
+                    }
+                }
+            }
+
+            // Fallback to reading Map.dbc directly
+            var dbc = string.Empty;
+            if (!string.IsNullOrWhiteSpace(lkDbcDir))
+            {
+                dbc = Path.Combine(lkDbcDir, "Map.dbc");
+            }
+            if (!string.IsNullOrWhiteSpace(dbc) && File.Exists(dbc))
+            {
+                return ReadMapDbcIdByDirectory(dbc, mapName);
+            }
+        }
+        catch { }
+        return -1;
+    }
+
+    private static int ReadMapDbcIdByDirectory(string dbcPath, string targetName)
+    {
+        using var fs = new FileStream(dbcPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var br = new BinaryReader(fs, System.Text.Encoding.UTF8, leaveOpen: false);
+        var magic = br.ReadBytes(4);
+        if (magic.Length != 4) return -1;
+        int recordCount = br.ReadInt32();
+        int fieldCount = br.ReadInt32();
+        int recordSize = br.ReadInt32();
+        int stringBlockSize = br.ReadInt32();
+        var records = br.ReadBytes(recordCount * recordSize);
+        var stringBlock = br.ReadBytes(stringBlockSize);
+        for (int i = 0; i < recordCount; i++)
+        {
+            int baseOff = i * recordSize;
+            var ints = new int[fieldCount];
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int off = baseOff + (f * 4);
+                if (off + 4 <= records.Length) ints[f] = BitConverter.ToInt32(records, off);
+            }
+            for (int f = 0; f < fieldCount; f++)
+            {
+                int sOff = ints[f];
+                if (sOff > 0 && sOff < stringBlock.Length)
+                {
+                    int end = sOff;
+                    while (end < stringBlock.Length && stringBlock[end] != 0) end++;
+                    if (end > sOff)
+                    {
+                        var s = System.Text.Encoding.UTF8.GetString(stringBlock, sOff, end - sOff);
+                        if (!string.IsNullOrWhiteSpace(s) && s.Equals(targetName, StringComparison.OrdinalIgnoreCase))
+                            return ints[0];
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static string ResolveSrcAlias(string? explicitAlias, string inputPath)
+    {
+        static string Normalize(string s)
+        {
+            var t = (s ?? string.Empty).Trim().ToLowerInvariant();
+            if (t.StartsWith("0.6.0")) return "0.6.0";
+            if (t.StartsWith("0.5.5")) return "0.5.5";
+            if (t.StartsWith("0.5.3")) return "0.5.3";
+            return s ?? string.Empty;
+        }
+        if (!string.IsNullOrWhiteSpace(explicitAlias)) return Normalize(explicitAlias!);
+        var corpus = inputPath?.ToLowerInvariant() ?? string.Empty;
+        if (corpus.Contains("0.6.0") || corpus.Contains("\\060\\") || corpus.Contains("/060/") || corpus.Contains("0_6_0")) return "0.6.0";
+        if (corpus.Contains("0.5.5") || corpus.Contains("\\055\\") || corpus.Contains("/055/") || corpus.Contains("0_5_5")) return "0.5.5";
+        if (corpus.Contains("0.5.3") || corpus.Contains("\\053\\") || corpus.Contains("/053/") || corpus.Contains("0_5_3")) return "0.5.3";
+        return "0.5.3";
+    }
+
+    private static string ReverseFourCC(string s) => new string(s.Reverse().ToArray());
+
+    private static string? ResolveTargetMapNameFromId(int? mapId)
+    {
+        if (!mapId.HasValue || mapId.Value < 0) return null;
+        return mapId.Value switch
+        {
+            0 => "Eastern Kingdoms",
+            1 => "Kalimdor",
+            530 => "Outland",
+            571 => "Northrend",
+            _ => null,
+        };
+    }
+
+    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, string mapName, IReadOnlyList<int> alphaAreaIds, DbcPatchMapping patchMap, int currentMapId)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, bufferSize: 65536, options: FileOptions.RandomAccess);
+        using var br = new BinaryReader(fs);
+        using var bw = new BinaryWriter(fs);
+
+        long fileLen = fs.Length;
+        long mcinDataPos = -1; int mcinSize = 0;
+        while (fs.Position + 8 <= fileLen)
+        {
+            var fourccRevBytes = br.ReadBytes(4);
+            if (fourccRevBytes.Length < 4) break;
+            var fourcc = ReverseFourCC(System.Text.Encoding.ASCII.GetString(fourccRevBytes));
+            int sz = br.ReadInt32();
+            long dpos = fs.Position;
+            if (fourcc == "MCIN") { mcinDataPos = dpos; mcinSize = sz; break; }
+            fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
+        }
+
+        int present = 0, patched = 0;
+        if (mcinDataPos >= 0 && mcinSize >= 16)
+        {
+            // Pre-read MCIN
+            fs.Position = mcinDataPos;
+            int need = Math.Min(mcinSize, 256 * 16);
+            var mcinBytes = br.ReadBytes(need);
+            for (int i = 0; i < 256; i++)
+            {
+                int mcnkOffset = (mcinBytes.Length >= (i + 1) * 16) ? BitConverter.ToInt32(mcinBytes, i * 16) : 0;
+                if (mcnkOffset <= 0) continue;
+                present++;
+
+                int lkAreaId = 0; bool mapped = false;
+                // Derive alpha numeric area (zone<<16|sub)
+                int aIdNum = -1;
+                if (alphaAreaIds != null && alphaAreaIds.Count == 256)
+                {
+                    int alt = alphaAreaIds[i];
+                    if (alt > 0) aIdNum = ((alt >> 16) == 0) ? (alt << 16) : alt;
+                }
+                int zoneBase = (aIdNum > 0) ? (aIdNum & unchecked((int)0xFFFF0000)) : 0;
+                int subLo = (aIdNum > 0) ? (aIdNum & 0xFFFF) : 0;
+
+                bool Accept(int cand)
+                {
+                    if (cand <= 0) return false;
+                    lkAreaId = cand; mapped = true; return true;
+                }
+
+                if (aIdNum > 0)
+                {
+                    if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var idSub, out _)) { Accept(idSub); }
+                    if (!mapped && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var byName)) { Accept(byName); }
+                    if (!mapped && patchMap.TryMapBySrcAreaNumber(aIdNum, out var exactId, out _)) { Accept(exactId); }
+                    if (!mapped && patchMap.TryMapViaMid(currentMapId, aIdNum, out var midId, out _, out _)) { Accept(midId); }
+                    if (!mapped && currentMapId >= 0 && patchMap.TryMapByTargetViaFirst(currentMapId, aIdNum, out var numMap, out _)) { Accept(numMap); }
+                    if (!mapped)
+                    {
+                        var tgtName = ResolveTargetMapNameFromId(currentMapId);
+                        if (!string.IsNullOrWhiteSpace(tgtName) && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var numMapName, out _)) { Accept(numMapName); }
+                    }
+                }
+
+                // Write AreaId (0 if unmapped)
+                long areaFieldPos = (long)mcnkOffset + 8 + 0x34;
+                if (areaFieldPos + 4 <= fileLen)
+                {
+                    long save = fs.Position;
+                    fs.Position = areaFieldPos;
+                    uint existing = br.ReadUInt32();
+                    int effective = mapped && lkAreaId > 0 ? lkAreaId : 0;
+                    if (existing != (uint)effective)
+                    {
+                        fs.Position = areaFieldPos;
+                        bw.Write((uint)effective);
+                        patched++;
+                    }
+                    fs.Position = save;
+                }
+            }
+        }
+        return (present, patched);
     }
 
     private static List<int> FindAllChunks(byte[] data, string chunkName)

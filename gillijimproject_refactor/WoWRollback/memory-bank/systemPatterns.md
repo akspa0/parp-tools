@@ -1,3 +1,25 @@
+## Crosswalk Mapping Pattern (CSV-Only)
+
+### Sources
+- Crosswalk CSVs: `Area_patch_crosswalk_*.csv`, `Area_crosswalk_v*.csv`
+- Loaded via CLI `--crosswalk-dir` (recursive) or `--crosswalk-file` (single)
+
+### Decision Order (Applied Per MCNK)
+1. Try sub-zone mapping (map-locked): `zoneBase/subLo`
+2. Try per-map numeric: `TryMapBySrcAreaSimple(mapName, aNum)`
+3. Try exact numeric match: `TryMapBySrcAreaNumber(aNum)`
+4. Try mid/pivot chain: `TryMapViaMid(mapId, aNum)`
+5. Try target map-locked numeric: `TryMapByTargetViaFirst(mapId, aNum)`
+6. Try target map-name numeric: `TryMapByTargetNameViaFirst(targetMapName, aNum)`
+7. Else write `0` (unmapped)
+
+### Tie-Breaks and Guards
+- Prefer child targets over parents for target-locked matches
+- Validate candidates against expected target map when applicable
+
+### Write Position
+- `MCNK.AreaId` resides at `mcnkOffset + 8 + 0x34`
+
 # System Patterns - WoWRollback.RollbackTool Architecture
 
 ## Three-Tool Separation of Concerns
