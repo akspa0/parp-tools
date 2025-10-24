@@ -387,7 +387,7 @@ internal static class Program
         if (ShouldGenerateViewer(opts))
         {
             var options = BuildViewerOptions(opts);
-            var diffPair = ParseDiffPair(opts.GetValueOrDefault("diff"));
+            var diffPair = ParseDiffPair(GetOption(opts, "diff"));
             var viewerWriter = new ViewerReportWriter();
             var viewerRoot = viewerWriter.Generate(paths.ComparisonDirectory, result, options, diffPair);
             if (string.IsNullOrEmpty(viewerRoot))
@@ -565,6 +565,13 @@ internal static class Program
                     ms.Position = mcinDataPos;
                     int need = Math.Min(mcinSize, 256 * 16);
                     var mcinBytes = br.ReadBytes(need);
+
+                    var chunkHasHoles = new bool[256];
+                    var holesOffsetByIdx = new int[256];
+                    var chunkHasBuriedRef = new bool[256];
+                    Array.Fill(holesOffsetByIdx, -1);
+
+                    // Pre-scan holes and buried references
                     for (int i = 0; i < 256; i++)
                     {
                         int mcnkOffset = (mcinBytes.Length >= (i + 1) * 16) ? BitConverter.ToInt32(mcinBytes, i * 16) : 0;
@@ -574,59 +581,84 @@ internal static class Program
                         int headerStart = mcnkOffset + 8;
                         if (headerStart + 128 > bytes.Length) continue;
 
-                        if (fixHoles)
+                        int holesOffset = headerStart + 0x40;
+                        if (holesOffset + 4 <= bytes.Length)
                         {
-                            int holesOffset = headerStart + 0x40;
-                            if (holesOffset + 4 <= bytes.Length)
+                            holesOffsetByIdx[i] = holesOffset;
+                            int prev = BitConverter.ToInt32(bytes, holesOffset);
+                            chunkHasHoles[i] = prev != 0;
+                        }
+
+                        try
+                        {
+                            int m2Number = BitConverter.ToInt32(bytes, headerStart + 0x14);
+                            int wmoNumber = BitConverter.ToInt32(bytes, headerStart + 0x3C);
+                            int mcrfRel = BitConverter.ToInt32(bytes, headerStart + 0x24);
+                            int mcrfChunkOffset = headerStart + 128 + mcrfRel;
+                            if (mcrfChunkOffset + 8 <= bytes.Length)
                             {
-                                int m2Number = BitConverter.ToInt32(bytes, headerStart + 0x14);
-                                int wmoNumber = BitConverter.ToInt32(bytes, headerStart + 0x3C);
-                                int mcrfRel = BitConverter.ToInt32(bytes, headerStart + 0x24);
-                                int mcrfChunkOffset = headerStart + 128 + mcrfRel;
-
-                                bool hasAny = false, anyKept = false, anyBuried = false;
-                                if (mcrfChunkOffset + 8 <= bytes.Length)
+                                var mcrf = new Mcrf(bytes, mcrfChunkOffset);
+                                var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
+                                var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
+                                foreach (var idx in m2Idx)
                                 {
-                                    try
-                                    {
-                                        var mcrf = new Mcrf(bytes, mcrfChunkOffset);
-                                        var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
-                                        var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
-                                        foreach (var idx in m2Idx)
-                                        {
-                                            if (idx >= 0 && idx < mddfBuried.Length)
-                                            {
-                                                hasAny = true;
-                                                if (mddfBuried[idx]) anyBuried = true; else anyKept = true;
-                                            }
-                                        }
-                                        foreach (var idx in wmoIdx)
-                                        {
-                                            if (idx >= 0 && idx < modfBuried.Length)
-                                            {
-                                                hasAny = true;
-                                                if (modfBuried[idx]) anyBuried = true; else anyKept = true;
-                                            }
-                                        }
-                                    }
-                                    catch { /* best-effort */ }
+                                    if (idx >= 0 && idx < mddfBuried.Length && mddfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
                                 }
-
-                                int prev = BitConverter.ToInt32(bytes, holesOffset);
-                                bool shouldClear = hasAny && !anyKept && anyBuried;
-                                if (shouldClear && prev != 0)
+                                if (!chunkHasBuriedRef[i])
                                 {
-                                    bytes[holesOffset + 0] = 0;
-                                    bytes[holesOffset + 1] = 0;
-                                    bytes[holesOffset + 2] = 0;
-                                    bytes[holesOffset + 3] = 0;
+                                    foreach (var idx in wmoIdx)
+                                    {
+                                        if (idx >= 0 && idx < modfBuried.Length && modfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
+                                    }
+                                }
+                            }
+                        }
+                        catch { /* best-effort */ }
+                    }
+
+                    // Clear holes in self + 8-neighbors of chunks that reference buried placements
+                    if (fixHoles)
+                    {
+                        var toClear = new bool[256];
+                        for (int i = 0; i < 256; i++)
+                        {
+                            if (!chunkHasBuriedRef[i]) continue;
+                            int cx = i % 16, cy = i / 16;
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    int nx = cx + dx, ny = cy + dy;
+                                    if (nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
+                                    int j = ny * 16 + nx;
+                                    if (chunkHasHoles[j]) toClear[j] = true;
+                                }
+                            }
+                        }
+                        for (int j = 0; j < 256; j++)
+                        {
+                            if (!toClear[j]) continue;
+                            int off = holesOffsetByIdx[j];
+                            if (off >= 0 && off + 4 <= bytes.Length)
+                            {
+                                if (bytes[off + 0] != 0 || bytes[off + 1] != 0 || bytes[off + 2] != 0 || bytes[off + 3] != 0)
+                                {
+                                    bytes[off + 0] = 0; bytes[off + 1] = 0; bytes[off + 2] = 0; bytes[off + 3] = 0;
                                     holesCleared++;
                                 }
                             }
                         }
+                    }
 
-                        if (disableMcsh)
+                    // MCSH zeroing pass
+                    if (disableMcsh)
+                    {
+                        for (int i = 0; i < 256; i++)
                         {
+                            int mcnkOffset = (mcinBytes.Length >= (i + 1) * 16) ? BitConverter.ToInt32(mcinBytes, i * 16) : 0;
+                            if (mcnkOffset <= 0) continue;
+                            int headerStart = mcnkOffset + 8;
+                            if (headerStart + 128 > bytes.Length) continue;
                             int mcshOffset = BitConverter.ToInt32(bytes, headerStart + 0x30);
                             int mcshSize = BitConverter.ToInt32(bytes, headerStart + 0x34);
                             if (mcshSize > 0)
@@ -2051,7 +2083,7 @@ internal static class Program
 
     private static int RunFixMinimapWebp(Dictionary<string, string> opts)
     {
-        var outputDir = opts.GetValueOrDefault("out");
+        var outputDir = GetOption(opts, "out");
         if (string.IsNullOrEmpty(outputDir) || !Directory.Exists(outputDir))
         {
             Console.Error.WriteLine("[error] --out directory not found or not specified");
@@ -2412,18 +2444,7 @@ internal static class Program
                     }
                 }
 
-                if (mddf.Data.Length > 0)
-                {
-                    int mddfFileOffset = adt.GetMddfDataOffset();
-                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffset, mddf.Data.Length);
-                }
-                if (modf.Data.Length > 0)
-                {
-                    int modfFileOffset = adt.GetModfDataOffset();
-                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffset, modf.Data.Length);
-                }
-
-                // Per-ADT MCNK passes using MCIN offsets
+                // Per-ADT MCNK passes using MCIN offsets (neighbor-aware holes clearing)
                 if (fixHoles || disableMcsh)
                 {
                     // Parse MHDR -> MCIN for this ADT
@@ -2434,72 +2455,102 @@ internal static class Program
                     var mcin = new Mcin(wdtBytes, mcinChunkOffset);
                     var mcnkOffsets = mcin.GetMcnkOffsets();
 
-                    foreach (var pos in mcnkOffsets)
+                    // Pre-scan: which chunks currently have holes and which reference to-be-buried placements
+                    var chunkHasHoles = new bool[256];
+                    var holesOffsetByIdx = new int[256];
+                    var chunkHasBuriedRef = new bool[256];
+                    Array.Fill(holesOffsetByIdx, -1);
+
+                    for (int i = 0; i < mcnkOffsets.Count && i < 256; i++)
                     {
+                        int pos = mcnkOffsets[i];
                         if (pos <= 0) continue;
-                        if (!processedMcnk.Add(pos)) continue; // de-dup across tiles
+                        if (!processedMcnk.Add(pos)) { /* de-dup across tiles for MCSH pass */ }
 
                         int headerStart = pos + 8; // skip 'MCNK' header
                         if (headerStart + 128 > wdtBytes.Length) continue;
 
-                        if (fixHoles)
+                        // Record holes flag state and offset
+                        int holesOffset = headerStart + 0x40; // McnkAlphaHeader.Holes
+                        if (holesOffset + 4 <= wdtBytes.Length)
                         {
-                            int holesOffset = headerStart + 0x40; // McnkAlphaHeader.Holes
-                            if (holesOffset + 4 <= wdtBytes.Length)
+                            holesOffsetByIdx[i] = holesOffset;
+                            int prev = BitConverter.ToInt32(wdtBytes, holesOffset);
+                            chunkHasHoles[i] = prev != 0;
+                        }
+
+                        // Determine if this chunk references any soon-to-be-buried MDDF/MODF entries
+                        try
+                        {
+                            int m2Number = BitConverter.ToInt32(wdtBytes, headerStart + 0x14);
+                            int wmoNumber = BitConverter.ToInt32(wdtBytes, headerStart + 0x3C);
+                            int mcrfRel = BitConverter.ToInt32(wdtBytes, headerStart + 0x24);
+                            int mcrfChunkOffset = headerStart + 128 + mcrfRel;
+                            if (mcrfChunkOffset + 8 <= wdtBytes.Length)
                             {
-                                // Determine if ALL referenced objects in this chunk were buried
-                                int m2Number = BitConverter.ToInt32(wdtBytes, headerStart + 0x14);
-                                int wmoNumber = BitConverter.ToInt32(wdtBytes, headerStart + 0x3C);
-                                int mcrfRel = BitConverter.ToInt32(wdtBytes, headerStart + 0x24);
-                                int mcrfChunkOffset = headerStart + 128 + mcrfRel;
+                                var mcrf = new Mcrf(wdtBytes, mcrfChunkOffset);
+                                var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
+                                var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
 
-                                bool hasAny = false;
-                                bool anyKept = false;
-                                bool anyBuried = false;
-
-                                if (mcrfChunkOffset + 8 <= wdtBytes.Length)
+                                foreach (var idx in m2Idx)
                                 {
-                                    try
-                                    {
-                                        var mcrf = new Mcrf(wdtBytes, mcrfChunkOffset);
-                                        var m2Idx = mcrf.GetDoodadsIndices(Math.Max(0, m2Number));
-                                        var wmoIdx = mcrf.GetWmosIndices(Math.Max(0, wmoNumber));
-
-                                        foreach (var idx in m2Idx)
-                                        {
-                                            if (idx >= 0 && idx < mddfBuried.Length)
-                                            {
-                                                hasAny = true;
-                                                if (mddfBuried[idx]) anyBuried = true; else anyKept = true;
-                                            }
-                                        }
-                                        foreach (var idx in wmoIdx)
-                                        {
-                                            if (idx >= 0 && idx < modfBuried.Length)
-                                            {
-                                                hasAny = true;
-                                                if (modfBuried[idx]) anyBuried = true; else anyKept = true;
-                                            }
-                                        }
-                                    }
-                                    catch { /* best-effort: leave holes unchanged on parse failure */ }
+                                    if (idx >= 0 && idx < mddfBuried.Length && mddfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
                                 }
-
-                                int prev = BitConverter.ToInt32(wdtBytes, holesOffset);
-                                bool shouldClear = hasAny && !anyKept && anyBuried;
-                                if (shouldClear && prev != 0)
+                                if (!chunkHasBuriedRef[i])
                                 {
-                                    wdtBytes[holesOffset + 0] = 0;
-                                    wdtBytes[holesOffset + 1] = 0;
-                                    wdtBytes[holesOffset + 2] = 0;
-                                    wdtBytes[holesOffset + 3] = 0;
+                                    foreach (var idx in wmoIdx)
+                                    {
+                                        if (idx >= 0 && idx < modfBuried.Length && modfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
+                                    }
+                                }
+                            }
+                        }
+                        catch { /* best-effort */ }
+                    }
+
+                    // Neighborhood-based holes clearing: clear holes on self + 8-neighbors when chunk references buried placements
+                    if (fixHoles)
+                    {
+                        var toClear = new bool[256];
+                        for (int i = 0; i < 256; i++)
+                        {
+                            if (!chunkHasBuriedRef[i]) continue;
+                            int cx = i % 16, cy = i / 16;
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    int nx = cx + dx, ny = cy + dy;
+                                    if (nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
+                                    int j = ny * 16 + nx;
+                                    if (chunkHasHoles[j]) toClear[j] = true;
+                                }
+                            }
+                        }
+                        for (int j = 0; j < 256; j++)
+                        {
+                            if (!toClear[j]) continue;
+                            int off = holesOffsetByIdx[j];
+                            if (off >= 0 && off + 4 <= wdtBytes.Length)
+                            {
+                                if (wdtBytes[off + 0] != 0 || wdtBytes[off + 1] != 0 || wdtBytes[off + 2] != 0 || wdtBytes[off + 3] != 0)
+                                {
+                                    wdtBytes[off + 0] = 0; wdtBytes[off + 1] = 0; wdtBytes[off + 2] = 0; wdtBytes[off + 3] = 0;
                                     holesCleared++;
                                 }
                             }
                         }
+                    }
 
-                        if (disableMcsh)
+                    // MCSH zeroing pass
+                    if (disableMcsh)
+                    {
+                        for (int i = 0; i < mcnkOffsets.Count && i < 256; i++)
                         {
+                            int pos = mcnkOffsets[i];
+                            if (pos <= 0) continue;
+                            int headerStart = pos + 8;
+                            if (headerStart + 128 > wdtBytes.Length) continue;
                             int mcshOffset = BitConverter.ToInt32(wdtBytes, headerStart + 0x30);
                             int mcshSize = BitConverter.ToInt32(wdtBytes, headerStart + 0x34);
                             if (mcshSize > 0)
@@ -2514,6 +2565,18 @@ internal static class Program
                             }
                         }
                     }
+                }
+
+                // Commit MDDF/MODF changes after hole/MCSH passes
+                if (mddf.Data.Length > 0)
+                {
+                    int mddfFileOffset = adt.GetMddfDataOffset();
+                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffset, mddf.Data.Length);
+                }
+                if (modf.Data.Length > 0)
+                {
+                    int modfFileOffset = adt.GetModfDataOffset();
+                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffset, modf.Data.Length);
                 }
 
                 tilesProcessed++;
@@ -2602,7 +2665,7 @@ internal static class Program
                     }
 
                     // Load crosswalk patch mapping (CSV) and resolve current map id for guard
-                    var aliasUsed = ResolveSrcAlias(opts.GetValueOrDefault("version", null), inputPath);
+                    var aliasUsed = ResolveSrcAlias(GetOption(opts, "version"), inputPath);
                     var patchMap = LoadPatchMapping(aliasUsed, dbctoolOutRoot, dbctoolPatchDir, dbctoolPatchFile);
                     int currentMapId = ResolveMapIdFromOptions(dbctoolOutRoot, lkDbcDir, mapName);
                     if (patchMap != null)

@@ -115,13 +115,385 @@ class Program
         
         rollbackCommand.SetHandler(RollbackWdt, inputWdtOption, outputWdtOption, maxUniqueIdOption, buryDepthOption);
         
+        // layers-ui command (lightweight per-tile layers UI generator)
+        var layersUiCommand = new Command("layers-ui", "Generate a simple per-tile layers UI (static HTML) from an Alpha WDT");
+        var wdtOpt = new Option<FileInfo>("--wdt", "Path to Alpha WDT file") { IsRequired = true };
+        var outDirOpt = new Option<DirectoryInfo>("--output-dir", "Output directory for all results") { IsRequired = true };
+        var gapOpt = new Option<int>("--gap-threshold", () => 50, "UniqueID gap size to split layers per tile");
+        var minimapOpt = new Option<DirectoryInfo?>("--minimap-dir", () => null, "Directory containing minimap PNGs for the map (optional)");
+        layersUiCommand.AddOption(wdtOpt);
+        layersUiCommand.AddOption(outDirOpt);
+        layersUiCommand.AddOption(gapOpt);
+        layersUiCommand.AddOption(minimapOpt);
+        layersUiCommand.SetHandler(async (FileInfo wdt, DirectoryInfo outDir, int gap, DirectoryInfo? minimaps) =>
+        {
+            await GenerateLayersUi(wdt, outDir, gap, minimaps);
+        }, wdtOpt, outDirOpt, gapOpt, minimapOpt);
+        
+        // layers-ui-serve command (optional HTTP hosting via ViewerModule)
+        var serveCommand = new Command("layers-ui-serve", "Serve a Layers UI folder via embedded HTTP server (ViewerModule)");
+        var serveDirOpt = new Option<DirectoryInfo>("--dir", "Directory containing index.html (e.g., layers_ui_out/layers_ui)") { IsRequired = true };
+        var portOpt = new Option<int>("--port", () => 8080, "HTTP port");
+        serveCommand.AddOption(serveDirOpt);
+        serveCommand.AddOption(portOpt);
+        serveCommand.SetHandler((DirectoryInfo dir, int port) =>
+        {
+            var abs = Path.GetFullPath(dir.FullName);
+            if (!Directory.Exists(abs)) { Console.Error.WriteLine($"[ERROR] Directory not found: {abs}"); return; }
+            Console.WriteLine($"[serve] Serving {abs} at http://localhost:{port}/ (Ctrl+C to stop)");
+            using var server = new WoWRollback.ViewerModule.ViewerServer();
+            server.Start(abs, port);
+            var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+            try { Task.Delay(Timeout.Infinite, cts.Token).Wait(); } catch { }
+            server.Stop();
+        }, serveDirOpt, portOpt);
+
         rootCommand.AddCommand(plotCommand);
         rootCommand.AddCommand(exportCommand);
         rootCommand.AddCommand(visualizeCommand);
         rootCommand.AddCommand(analyzeClientCommand);
         rootCommand.AddCommand(rollbackCommand);
-        
+        rootCommand.AddCommand(layersUiCommand);
+        rootCommand.AddCommand(serveCommand);
+
         return await rootCommand.InvokeAsync(args);
+    }
+
+    // === layers-ui implementation ===
+    private static async Task GenerateLayersUi(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, DirectoryInfo? minimapDir)
+    {
+        Console.WriteLine($"=== WoWDataPlot - Layers UI (no server) ===");
+        Console.WriteLine($"Input WDT:   {wdtFile.FullName}");
+        Console.WriteLine($"Output Dir:  {outputDir.FullName}");
+        Directory.CreateDirectory(outputDir.FullName);
+
+        var mapName = Path.GetFileNameWithoutExtension(wdtFile.Name);
+        var placementsCsv = Path.Combine(outputDir.FullName, "placements.csv");
+
+        // 1) Extract placements and write CSV in UniqueIdAnalyzer schema
+        Console.WriteLine("[1/5] Extracting placements...");
+        var progress = new Progress<string>(msg => Console.WriteLine($"[info] {msg}"));
+        var records = UnifiedPlacementExtractor.Extract(wdtFile.FullName, progress);
+        using (var sw = new StreamWriter(placementsCsv))
+        {
+            // Header expected by UniqueIdAnalyzer.AnalyzeFromPlacementsCsv
+            sw.WriteLine("map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set");
+            foreach (var r in records)
+            {
+                var line = string.Join(',',
+                    Csv(mapName),
+                    r.TileX.ToString(CultureInfo.InvariantCulture),
+                    r.TileY.ToString(CultureInfo.InvariantCulture),
+                    Csv(r.Type),
+                    Csv(r.Name ?? string.Empty),
+                    r.UniqueId.ToString(CultureInfo.InvariantCulture),
+                    r.X.ToString(CultureInfo.InvariantCulture),
+                    r.Y.ToString(CultureInfo.InvariantCulture),
+                    r.Z.ToString(CultureInfo.InvariantCulture),
+                    "0","0","0","1","",""
+                );
+                sw.WriteLine(line);
+            }
+        }
+
+        // 2) Analyze per-tile layers using AnalysisModule
+        Console.WriteLine("[2/5] Analyzing per-tile layers...");
+        var analyzer = new UniqueIdAnalyzer(gapThreshold);
+        var result = analyzer.AnalyzeFromPlacementsCsv(placementsCsv, mapName, outputDir.FullName);
+        if (!result.Success)
+        {
+            Console.WriteLine($"[ERROR] Analysis failed: {result.ErrorMessage}");
+            return;
+        }
+
+        // 3) Normalize filenames to fixed names for the UI
+        var mapTileLayersCsv = Path.Combine(outputDir.FullName, $"{mapName}_tile_layers.csv");
+        var fixedTileLayersCsv = Path.Combine(outputDir.FullName, "tile_layers.csv");
+        if (File.Exists(mapTileLayersCsv)) File.Copy(mapTileLayersCsv, fixedTileLayersCsv, overwrite: true);
+        var mapLayersJson = Path.Combine(outputDir.FullName, $"{mapName}_layers.json");
+        var fixedLayersJson = Path.Combine(outputDir.FullName, "layers.json");
+        if (File.Exists(mapLayersJson)) File.Copy(mapLayersJson, fixedLayersJson, overwrite: true);
+
+        // 4) Optionally copy minimaps (recursive) and build index
+        string miniIndexJson = "{}";
+        bool hasMinimap = false;
+        if (minimapDir != null && minimapDir.Exists)
+        {
+            var dst = Path.Combine(outputDir.FullName, "minimap");
+            Directory.CreateDirectory(dst);
+            var miniIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int copied = 0;
+            foreach (var png in Directory.EnumerateFiles(minimapDir.FullName, "*.png", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(minimapDir.FullName, png);
+                var outPath = Path.Combine(dst, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+                File.Copy(png, outPath, overwrite: true);
+                copied++;
+
+                // mapName_X_Y.png => key "X,Y"
+                var fileName = Path.GetFileName(png);
+                var m = System.Text.RegularExpressions.Regex.Match(
+                    fileName,
+                    "^" + System.Text.RegularExpressions.Regex.Escape(mapName) + "_(\\d+)_(\\d+)\\.png$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (m.Success)
+                {
+                    var key = m.Groups[1].Value + "," + m.Groups[2].Value;
+                    var webRel = rel.Replace('\\','/');
+                    miniIndex[key] = webRel;
+                }
+            }
+            hasMinimap = miniIndex.Count > 0;
+            miniIndexJson = "{" + string.Join(',', miniIndex.Select(kvp => System.Text.Json.JsonSerializer.Serialize(kvp.Key) + ":" + System.Text.Json.JsonSerializer.Serialize(kvp.Value))) + "}";
+            Console.WriteLine($"[ok] Copied {copied} minimaps: {dst}");
+        }
+
+        // 5) Generate static UI with embedded data
+        Console.WriteLine("[3/5] Preparing embedded data...");
+        var tileData = ParseTileLayersCsv(fixedTileLayersCsv);
+        var globalLayersJson = File.Exists(fixedLayersJson) ? File.ReadAllText(fixedLayersJson) : "{}";
+
+        Console.WriteLine("[4/5] Emitting UI assets...");
+        var uiDir = Path.Combine(outputDir.FullName, "layers_ui");
+        Directory.CreateDirectory(uiDir);
+
+        // index.html with embedded data variables (built with StringBuilder to avoid escape issues)
+        var sbIndex = new System.Text.StringBuilder();
+        sbIndex.AppendLine("<!DOCTYPE html>");
+        sbIndex.AppendLine("<html>");
+        sbIndex.AppendLine("<head>");
+        sbIndex.AppendLine("  <meta charset=\"utf-8\" />");
+        sbIndex.AppendLine("  <title>Layers UI - " + mapName + "</title>");
+        sbIndex.AppendLine("  <link rel=\"stylesheet\" href=\"./styles.css\" />");
+        sbIndex.AppendLine("</head>");
+        sbIndex.AppendLine("<body>");
+        sbIndex.AppendLine("  <div class=\"container\">");
+        sbIndex.AppendLine("    <h1>" + mapName + " - Layers UI</h1>");
+        sbIndex.AppendLine("    <div class=\"panel\">");
+        sbIndex.AppendLine("      <div class=\"row\">");
+        sbIndex.AppendLine("        <label>Tile</label>");
+        sbIndex.AppendLine("        <select id=\"tileSelect\"></select>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("      <div id=\"minimapSlot\"></div>");
+        sbIndex.AppendLine("      <div class=\"row\">");
+        sbIndex.AppendLine("        <label>Mode</label>");
+        sbIndex.AppendLine("        <select id=\"mode\">");
+        sbIndex.AppendLine("          <option value=\"show\">Show Only</option>");
+        sbIndex.AppendLine("          <option value=\"hide\">Hide</option>");
+        sbIndex.AppendLine("          <option value=\"dim\">Dim</option>");
+        sbIndex.AppendLine("        </select>");
+        sbIndex.AppendLine("        <label style=\"margin-left:10px\"><input type=\"checkbox\" id=\"currentTileOnly\"/> Current Tile</label>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("    </div>");
+        sbIndex.AppendLine("    <div class=\"columns\">");
+        sbIndex.AppendLine("      <div class=\"col\">");
+        sbIndex.AppendLine("        <h3>Per-Tile Layers</h3>");
+        sbIndex.AppendLine("        <div class=\"row\"><label><input type=\"checkbox\" id=\"m2Toggle\" checked/> M2</label> <label style=\"margin-left:10px\"><input type=\"checkbox\" id=\"wmoToggle\" checked/> WMO</label></div>");
+        sbIndex.AppendLine("        <div id=\"tileLayersList\"></div>");
+        sbIndex.AppendLine("        <h3 style=\"margin-top:10px\">Per-Tile Custom Ranges</h3>");
+        sbIndex.AppendLine("        <div id=\"tileCustomList\"></div>");
+        sbIndex.AppendLine("        <div class=\"row\">");
+        sbIndex.AppendLine("          <input id=\"rangeMinTile\" type=\"number\" placeholder=\"Min UniqueID\" style=\"width:120px\"/>");
+        sbIndex.AppendLine("          <input id=\"rangeMaxTile\" type=\"number\" placeholder=\"Max UniqueID\" style=\"width:120px\"/>");
+        sbIndex.AppendLine("          <select id=\"rangeTypeTile\"><option value=\"M2\">M2</option><option value=\"WMO\">WMO</option><option value=\"both\">Both</option></select>");
+        sbIndex.AppendLine("          <button id=\"addTileRange\">Add Tile Range</button>");
+        sbIndex.AppendLine("          <button id=\"clearTileCustom\">Clear Tile Custom</button>");
+        sbIndex.AppendLine("        </div>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("      <div class=\"col\">");
+        sbIndex.AppendLine("        <h3>Global Ranges</h3>");
+        sbIndex.AppendLine("        <div id=\"globalLayersList\"></div>");
+        sbIndex.AppendLine("        <div class=\"row\">");
+        sbIndex.AppendLine("          <input id=\"rangeMin\" type=\"number\" placeholder=\"Min UniqueID\" style=\"width:120px\"/>");
+        sbIndex.AppendLine("          <input id=\"rangeMax\" type=\"number\" placeholder=\"Max UniqueID\" style=\"width:120px\"/>");
+        sbIndex.AppendLine("          <select id=\"rangeType\"><option value=\"both\">Both</option><option value=\"M2\">M2</option><option value=\"WMO\">WMO</option></select>");
+        sbIndex.AppendLine("          <button id=\"addGlobalRange\">Add Global Range</button>");
+        sbIndex.AppendLine("        </div>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("    </div>");
+        sbIndex.AppendLine("    <div class=\"columns\">");
+        sbIndex.AppendLine("      <div class=\"col\">");
+        sbIndex.AppendLine("        <h3>Preset</h3>");
+        sbIndex.AppendLine("        <div class=\"row\"><button id=\"savePreset\">Save Preset</button> <input type=\"file\" id=\"loadPreset\" accept=\"application/json\" /></div>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("      <div class=\"col\">");
+        sbIndex.AppendLine("        <h3>Command Generator</h3>");
+        sbIndex.AppendLine("        <div class=\"row\"><input id=\"inputWdt\" placeholder=\"Alpha WDT path\" style=\"width:100%\"/></div>");
+        sbIndex.AppendLine("        <div class=\"row\"><input id=\"outRoot\" placeholder=\"Output root folder\" style=\"width:100%\"/></div>");
+        sbIndex.AppendLine("        <div class=\"row\"><input id=\"lkOut\" placeholder=\"LK ADT out (optional)\" style=\"width:100%\"/></div>");
+        sbIndex.AppendLine("        <div class=\"row\"><input id=\"lkClient\" placeholder=\"LK client path (optional)\" style=\"width:100%\"/></div>");
+        sbIndex.AppendLine("        <div class=\"row\"><button id=\"genAlphaToLk\">Generate alpha-to-lk</button> <button id=\"genLkToAlpha\">Generate lk-to-alpha</button></div>");
+        sbIndex.AppendLine("        <textarea id=\"cmdOut\" rows=\"6\" style=\"width:100%;\"></textarea>");
+        sbIndex.AppendLine("      </div>");
+        sbIndex.AppendLine("    </div>");
+        sbIndex.AppendLine("  </div>");
+        sbIndex.AppendLine("  <script>");
+        sbIndex.AppendLine("    window.__mapName = " + JsonEscape(mapName) + ";");
+        sbIndex.AppendLine("    window.__tileLayers = " + tileData + ";");
+        sbIndex.AppendLine("    window.__globalLayers = " + globalLayersJson + ";");
+        sbIndex.AppendLine("    window.__hasMinimap = " + (hasMinimap?"true":"false") + ";");
+        sbIndex.AppendLine("    window.__minimapIndex = " + miniIndexJson + ";");
+        sbIndex.AppendLine("  </script>");
+        sbIndex.AppendLine("  <script src=\"./app.js\"></script>");
+        sbIndex.AppendLine("</body>");
+        sbIndex.AppendLine("</html>");
+        File.WriteAllText(Path.Combine(uiDir, "index.html"), sbIndex.ToString());
+
+        // app.js (use single quotes and build with StringBuilder to avoid escaping headaches)
+        var sbJs = new System.Text.StringBuilder();
+        sbJs.AppendLine("(function(){");
+        sbJs.AppendLine("  const state = { mode:'show', currentTileOnly:false, m2:true, wmo:true, preset:{ global:{m2:[], wmo:[]}, tiles:{} } };");
+        sbJs.AppendLine("  const TL = window.__tileLayers || [];");
+        sbJs.AppendLine("  const GL = (window.__globalLayers && (window.__globalLayers.globalLayers || window.__globalLayers.GlobalLayers)) || [];");
+        sbJs.AppendLine("  const mapName = window.__mapName || '';");
+        sbJs.AppendLine("  let tileState = {};");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function tileKey(x,y){ return 'r'+y+'_c'+x; }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function ensureGlobalState(){");
+        sbJs.AppendLine("    if (state.preset.global.m2.length===0 && state.preset.global.wmo.length===0){");
+        sbJs.AppendLine("      GL.forEach(g=>{ const min = g.idRangeStart ?? g.IdRangeStart ?? g.minId ?? 0; const max = g.idRangeEnd ?? g.IdRangeEnd ?? g.maxId ?? 0; state.preset.global.m2.push({min,max,enabled:true}); state.preset.global.wmo.push({min,max,enabled:true}); });");
+        sbJs.AppendLine("    }");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function ensureTileState(x,y){");
+        sbJs.AppendLine("    const key = tileKey(x,y);");
+        sbJs.AppendLine("    let ts = tileState[key];");
+        sbJs.AppendLine("    if (!ts){");
+        sbJs.AppendLine("      ts = { base:{m2:[], wmo:[]}, custom:{m2:[], wmo:[]}, _hydrated:false };");
+        sbJs.AppendLine("      const rows = TL.filter(r=>r.tile_x===x && r.tile_y===y).sort((a,b)=>a.layer-b.layer);");
+        sbJs.AppendLine("      rows.forEach(r=>{ const e = { layer:r.layer, min:r.range_start, max:r.range_end, count:r.count, enabled:true }; if(r.type==='M2') ts.base.m2.push(e); else ts.base.wmo.push(e); });");
+        sbJs.AppendLine("      tileState[key] = ts;");
+        sbJs.AppendLine("    }");
+        sbJs.AppendLine("    if (!ts._hydrated){");
+        sbJs.AppendLine("      const presetTile = (state.preset && state.preset.tiles && state.preset.tiles[key]) || null;");
+        sbJs.AppendLine("      if (presetTile){");
+        sbJs.AppendLine("        const applyArr = (arr, baseArr, customArr) => { (arr||[]).forEach(e=>{ const on = (e.enabled!==false); const m = baseArr.find(b=>b.layer===e.layer && b.min===e.min && b.max===e.max); if(m){ m.enabled = on; } else { customArr.push({ layer: (typeof e.layer==='number'?e.layer:-1), min:e.min, max:e.max, count: e.count||0, enabled: on }); } }); };");
+        sbJs.AppendLine("        applyArr(presetTile.m2, ts.base.m2, ts.custom.m2);");
+        sbJs.AppendLine("        applyArr(presetTile.wmo, ts.base.wmo, ts.custom.wmo);");
+        sbJs.AppendLine("      }");
+        sbJs.AppendLine("      ts._hydrated = true;");
+        sbJs.AppendLine("    }");
+        sbJs.AppendLine("    return ts;");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function init(){");
+        sbJs.AppendLine("    const sel = document.getElementById('tileSelect');");
+        sbJs.AppendLine("    const tiles = new Set(TL.map(r=>r.tile_x+','+r.tile_y));");
+        sbJs.AppendLine("    Array.from(tiles).sort((a,b)=>{ const [ax,ay]=a.split(',').map(Number); const [bx,by]=b.split(',').map(Number); return (ay - by) || (ax - bx); }).forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent='['+t+']'; sel.appendChild(o); });");
+        sbJs.AppendLine("    if (sel.options.length > 0) sel.selectedIndex = 0;");
+        sbJs.AppendLine("    sel.addEventListener('change', ()=>{ renderTileLayers(); renderTileCustom(); });");
+        sbJs.AppendLine("    document.getElementById('m2Toggle').addEventListener('change',e=>{state.m2=e.target.checked; renderTileLayers();});");
+        sbJs.AppendLine("    document.getElementById('wmoToggle').addEventListener('change',e=>{state.wmo=e.target.checked; renderTileLayers();});");
+        sbJs.AppendLine("    document.getElementById('mode').addEventListener('change',e=>{state.mode=e.target.value;});");
+        sbJs.AppendLine("    document.getElementById('currentTileOnly').addEventListener('change',e=>{state.currentTileOnly=e.target.checked;});");
+        sbJs.AppendLine("    document.getElementById('savePreset').addEventListener('click',savePreset);");
+        sbJs.AppendLine("    document.getElementById('loadPreset').addEventListener('change',loadPreset);");
+        sbJs.AppendLine("    document.getElementById('genAlphaToLk').addEventListener('click',genAlphaToLk);");
+        sbJs.AppendLine("    document.getElementById('genLkToAlpha').addEventListener('click',genLkToAlpha);");
+        sbJs.AppendLine("    const addBtn = document.getElementById('addGlobalRange'); if(addBtn) addBtn.addEventListener('click', addGlobalRange);");
+        sbJs.AppendLine("    const addTileBtn = document.getElementById('addTileRange'); if(addTileBtn) addTileBtn.addEventListener('click', addTileRange);");
+        sbJs.AppendLine("    const clearTileBtn = document.getElementById('clearTileCustom'); if(clearTileBtn) clearTileBtn.addEventListener('click', clearTileCustom);");
+        sbJs.AppendLine("    ensureGlobalState();");
+        sbJs.AppendLine("    renderGlobal();");
+        sbJs.AppendLine("    renderTileLayers();");
+        sbJs.AppendLine("    renderTileCustom();");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function renderTileLayers(){");
+        sbJs.AppendLine("    const list = document.getElementById('tileLayersList'); list.innerHTML='';");
+        sbJs.AppendLine("    const val = document.getElementById('tileSelect').value || '0,0';");
+        sbJs.AppendLine("    const parts = val.split(','); const x = parseInt(parts[0],10)||0; const y = parseInt(parts[1],10)||0;");
+        sbJs.AppendLine("    if(window.__hasMinimap){");
+        sbJs.AppendLine("      const slot=document.getElementById('minimapSlot'); slot.innerHTML=''; const idx=window.__minimapIndex||{}; const k = x+','+y; const rel = idx[k]; if(rel){ const img=new Image(); img.src='../minimap/'+rel; img.style.maxWidth='256px'; img.style.border='1px solid #444'; img.onerror=()=>{ img.style.display='none'; }; slot.appendChild(img);} }");
+        sbJs.AppendLine("    const tState = ensureTileState(x,y);");
+        sbJs.AppendLine("    const rows = [];");
+        sbJs.AppendLine("    if (state.m2) tState.base.m2.forEach(e=>rows.push({type:'M2', layer:e.layer, min:e.min, max:e.max, count:e.count, enabled:e.enabled}));");
+        sbJs.AppendLine("    if (state.wmo) tState.base.wmo.forEach(e=>rows.push({type:'WMO', layer:e.layer, min:e.min, max:e.max, count:e.count, enabled:e.enabled}));");
+        sbJs.AppendLine("    rows.sort((a,b)=>a.layer-b.layer);");
+        sbJs.AppendLine("    rows.forEach(r=>{ const id='tile_'+x+'_'+y+'_'+r.type+'_'+r.layer; const div=document.createElement('div'); div.className='item'; div.innerHTML = '<label><input type=\\'checkbox\\' id=\\''+id+'\\' '+(r.enabled?'checked':'')+'/> ['+r.type+'] L'+r.layer+': '+r.min+'-'+r.max+' <span class=\\'muted\\'>('+r.count+')</span></label>'; list.appendChild(div); document.getElementById(id).addEventListener('change', e=>{ if(r.type==='M2'){ const o = tState.base.m2.find(x=>x.layer===r.layer && x.min===r.min && x.max===r.max); if(o) o.enabled = e.target.checked; } else { const o = tState.base.wmo.find(x=>x.layer===r.layer && x.min===r.min && x.max===r.max); if(o) o.enabled = e.target.checked; } }); });");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function renderTileCustom(){");
+        sbJs.AppendLine("    const list = document.getElementById('tileCustomList'); if(!list) return; list.innerHTML='';");
+        sbJs.AppendLine("    const val = document.getElementById('tileSelect').value || '0,0'; const parts = val.split(','); const x = parseInt(parts[0],10)||0; const y = parseInt(parts[1],10)||0; const tState = ensureTileState(x,y);");
+        sbJs.AppendLine("    const rows = []; tState.custom.m2.forEach(e=>rows.push({type:'M2', ref:e})); tState.custom.wmo.forEach(e=>rows.push({type:'WMO', ref:e}));");
+        sbJs.AppendLine("    let idx=0; rows.forEach(r=>{ const e=r.ref; const id='cust_'+idx; const del='del_'+id; const div=document.createElement('div'); div.className='item'; div.innerHTML = '<label><input type=\\'checkbox\\' id=\\''+id+'\\' '+(e.enabled?'checked':'')+'/> [Custom '+r.type+'] '+e.min+'-'+e.max+'</label> <button id=\\''+del+'\\' style=\\'float:right\\'>\u2715</button>'; list.appendChild(div); document.getElementById(id).addEventListener('change', ev=>{ e.enabled = ev.target.checked; }); document.getElementById(del).addEventListener('click', ()=>{ const arr = (r.type==='M2') ? tState.custom.m2 : tState.custom.wmo; const j = arr.indexOf(e); if(j>=0){ arr.splice(j,1); renderTileCustom(); } }); idx++; });");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function renderGlobal(){");
+        sbJs.AppendLine("    ensureGlobalState();");
+        sbJs.AppendLine("    const list = document.getElementById('globalLayersList'); list.innerHTML='';");
+        sbJs.AppendLine("    const byKey = {};");
+        sbJs.AppendLine("    state.preset.global.m2.forEach(e=>{ const k=e.min+','+e.max; byKey[k] = byKey[k]||{min:e.min,max:e.max,m2:false,wmo:false}; byKey[k].m2 = e.enabled; });");
+        sbJs.AppendLine("    state.preset.global.wmo.forEach(e=>{ const k=e.min+','+e.max; byKey[k] = byKey[k]||{min:e.min,max:e.max,m2:false,wmo:false}; byKey[k].wmo = e.enabled; });");
+        sbJs.AppendLine("    Object.values(byKey).sort((a,b)=>a.min-b.min).forEach((g,idx)=>{ const id='global_'+idx; const div=document.createElement('div'); div.className='item'; const both = (g.m2 && g.wmo); div.innerHTML = '<label><input type=\\'checkbox\\' id=\\''+id+'\\' '+(both?'checked':'')+'/> '+g.min+'-'+g.max+'</label>'; list.appendChild(div); document.getElementById(id).addEventListener('change', e=>{ const setEntry=(arr)=>{ const t = arr.find(x=>x.min===g.min && x.max===g.max); if(t) t.enabled = e.target.checked; else arr.push({min:g.min,max:g.max,enabled:e.target.checked}); }; setEntry(state.preset.global.m2); setEntry(state.preset.global.wmo); }); });");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function addGlobalRange(){ const min = parseInt(document.getElementById('rangeMin').value,10); const max = parseInt(document.getElementById('rangeMax').value,10); const type = document.getElementById('rangeType').value; if(isNaN(min)||isNaN(max)||max<min){ alert('Invalid range'); return; } const add=(arr)=>{ const ex = arr.find(e=>e.min===min && e.max===max); if(ex) ex.enabled=true; else arr.push({min,max,enabled:true}); }; if(type==='both'){ add(state.preset.global.m2); add(state.preset.global.wmo);} else if(type==='M2'){ add(state.preset.global.m2);} else { add(state.preset.global.wmo);} renderGlobal(); }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function buildPreset(){");
+        sbJs.AppendLine("    const tilesOut = {};");
+        sbJs.AppendLine("    Object.keys(tileState).forEach(k=>{ const t = tileState[k]; const m2 = []; const wmo = []; t.base.m2.forEach(e=>{ if(e.enabled) m2.push({layer:e.layer,min:e.min,max:e.max,enabled:true}); }); t.custom.m2.forEach(e=>{ if(e.enabled) m2.push({layer:e.layer,min:e.min,max:e.max,enabled:true}); }); t.base.wmo.forEach(e=>{ if(e.enabled) wmo.push({layer:e.layer,min:e.min,max:e.max,enabled:true}); }); t.custom.wmo.forEach(e=>{ if(e.enabled) wmo.push({layer:e.layer,min:e.min,max:e.max,enabled:true}); }); if(m2.length||wmo.length){ tilesOut[k] = { m2, wmo }; } });");
+        sbJs.AppendLine("    const savedTiles = (state.preset && state.preset.tiles) || {}; Object.keys(savedTiles).forEach(k=>{ if(!tilesOut[k]){ const st = savedTiles[k]; const m2 = (st.m2||[]).filter(e=>e.enabled!==false).map(e=>({layer:(typeof e.layer==='number'?e.layer:-1),min:e.min,max:e.max,enabled:true})); const wmo = (st.wmo||[]).filter(e=>e.enabled!==false).map(e=>({layer:(typeof e.layer==='number'?e.layer:-1),min:e.min,max:e.max,enabled:true})); if(m2.length||wmo.length){ tilesOut[k] = { m2, wmo }; } }});");
+        sbJs.AppendLine("    const globalOut = { m2: state.preset.global.m2.filter(e=>e.enabled).map(e=>({min:e.min,max:e.max,enabled:true})), wmo: state.preset.global.wmo.filter(e=>e.enabled).map(e=>({min:e.min,max:e.max,enabled:true})) };");
+        sbJs.AppendLine("    return { map: mapName, global: globalOut, tiles: tilesOut };");
+        sbJs.AppendLine("  }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function savePreset(){ const preset = buildPreset(); const blob = new Blob([JSON.stringify(preset,null,2)], {type:'application/json'}); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=mapName+'_preset.json'; a.click(); }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function loadPreset(ev){ const f = ev.target.files && ev.target.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = ()=>{ try{ state.preset = JSON.parse(reader.result); tileState = {}; ensureGlobalState(); renderGlobal(); renderTileLayers(); renderTileCustom(); }catch(e){ alert('Invalid preset'); } }; reader.readAsText(f); }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function addTileRange(){ const min = parseInt(document.getElementById('rangeMinTile').value,10); const max = parseInt(document.getElementById('rangeMaxTile').value,10); const type = document.getElementById('rangeTypeTile').value; if(isNaN(min)||isNaN(max)||max<min){ alert('Invalid range'); return; } const val = document.getElementById('tileSelect').value || '0,0'; const parts = val.split(','); const x = parseInt(parts[0],10)||0; const y = parseInt(parts[1],10)||0; const tState = ensureTileState(x,y); const pushUnique=(arr)=>{ const ex = arr.find(e=>e.layer===-1 && e.min===min && e.max===max); if(ex) ex.enabled=true; else arr.push({layer:-1,min,max,count:0,enabled:true}); }; if(type==='both'){ pushUnique(tState.custom.m2); pushUnique(tState.custom.wmo);} else if(type==='M2'){ pushUnique(tState.custom.m2);} else { pushUnique(tState.custom.wmo);} renderTileCustom(); }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function clearTileCustom(){ const val = document.getElementById('tileSelect').value || '0,0'; const parts = val.split(','); const x = parseInt(parts[0],10)||0; const y = parseInt(parts[1],10)||0; const tState = ensureTileState(x,y); tState.custom.m2 = []; tState.custom.wmo = []; renderTileCustom(); }");
+        sbJs.AppendLine("  function genAlphaToLk(){ const input = document.getElementById('inputWdt').value.trim(); const out = document.getElementById('outRoot').value.trim(); const lkOut = document.getElementById('lkOut').value.trim(); const lkClient = document.getElementById('lkClient').value.trim(); const presetPath = mapName+'_preset.json'; const cmd = 'dotnet run --project WoWRollback.Cli -- alpha-to-lk  --input \"'+input+'\" --out \"'+out+'\"'+(lkOut?(' --lk-out \"'+lkOut+'\"'):'')+(lkClient?(' --lk-client-path \"'+lkClient+'\"'):'')+' --preset-json \"'+presetPath+'\" --fix-holes --disable-mcsh'; document.getElementById('cmdOut').value = cmd + '\\n# save preset as '+presetPath+' in working dir before running'; }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  function genLkToAlpha(){ const lkDir = document.getElementById('lkOut').value.trim(); const out = document.getElementById('outRoot').value.trim(); const presetPath = mapName+'_preset.json'; const cmd = 'dotnet run --project WoWRollback.Cli -- lk-to-alpha --lk-adts-dir \"'+lkDir+'\" --map '+mapName+' --out \"'+out+'\" --preset-json \"'+presetPath+'\" --fix-holes --disable-mcsh'; document.getElementById('cmdOut').value = cmd + '\\n# save preset as '+presetPath+' in working dir before running'; }");
+        sbJs.AppendLine();
+        sbJs.AppendLine("  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();");
+        sbJs.AppendLine("})();");
+        File.WriteAllText(Path.Combine(uiDir, "app.js"), sbJs.ToString());
+
+        // styles.css
+        var styles = @"body{font-family:Segoe UI,Arial;background:#1e1e1e;color:#dedede;margin:20px} .container{max-width:1100px;margin:0 auto}
+h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;margin:10px 0}
+.columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row{display:flex;gap:8px;align-items:center;margin:6px 0}
+.item{padding:6px;border-bottom:1px solid #3c3c3c}
+.muted{color:#888}
+";
+        File.WriteAllText(Path.Combine(uiDir, "styles.css"), styles);
+
+        Console.WriteLine($"[5/5] UI ready: {Path.Combine(uiDir, "index.html")}");
+        await Task.CompletedTask;
+
+        static string Csv(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return (s.Contains(',') || s.Contains('"')) ? '"' + s.Replace("\"", "\"\"") + '"' : s;
+        }
+
+        static string JsonEscape(string s) => System.Text.Json.JsonSerializer.Serialize(s);
+
+        static string ParseTileLayersCsv(string path)
+        {
+            if (!File.Exists(path)) return "[]";
+            var lines = File.ReadAllLines(path);
+            if (lines.Length <= 1) return "[]";
+            var list = new List<string>();
+            // header: map,tile_x,tile_y,type,layer,range_start,range_end,count
+            for (int i = 1; i < lines.Length; i++)
+            {
+                var parts = lines[i].Split(',');
+                if (parts.Length < 8) continue;
+                string obj = $"{{\"map\":{JsonEscape(parts[0])},\"tile_x\":{parts[1]},\"tile_y\":{parts[2]},\"type\":{JsonEscape(parts[3])},\"layer\":{parts[4]},\"range_start\":{parts[5]},\"range_end\":{parts[6]},\"count\":{parts[7]} }}";
+                list.Add(obj);
+            }
+            return "[" + string.Join(',', list) + "]";
+        }
     }
     
     static void PlotUniqueId(FileInfo wdtFile, FileInfo outputFile, int width, int height, string? typeFilter)

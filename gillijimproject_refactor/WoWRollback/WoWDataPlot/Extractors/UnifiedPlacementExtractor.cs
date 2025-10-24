@@ -31,19 +31,15 @@ public static class UnifiedPlacementExtractor
         if (!isWdt && !isAdt)
             return FileFormat.Unknown;
         
-        // Detect Alpha vs LK by checking for MVER chunk
-        // Alpha: MVER version is typically 0x12 (18)
-        // LK: MVER version is 0x12 but has different chunk structure
-        
-        // Simple heuristic: Check for MHDR chunk (LK) vs MAOF/MMDX (Alpha WDT)
+        // Detect Alpha vs LK using reliable WDT marker:
+        // - LK WDT contains MPHD (reversed on disk as 'DPHM') and MAIN
+        // - Alpha WDT does NOT have MPHD; MAIN may still be present
         if (isWdt)
         {
-            // Alpha WDT has MMDX, MMID, MWMO, MWID, MDDF, MODF
-            // LK WDT has MPHD, MAIN chunks
-            if (HasChunk(bytes, "DPHM") || HasChunk(bytes, "NIAM")) // Reversed on disk
+            // If MPHD exists -> LK WDT; otherwise assume Alpha WDT
+            if (HasChunk(bytes, "DPHM"))
                 return FileFormat.LkWdt;
-            if (HasChunk(bytes, "XDMM") || HasChunk(bytes, "FDDM")) // Alpha chunks
-                return FileFormat.AlphaWdt;
+            return FileFormat.AlphaWdt;
         }
         else if (isAdt)
         {

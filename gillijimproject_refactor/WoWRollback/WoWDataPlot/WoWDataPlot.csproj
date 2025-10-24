@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.ViewerModule\WoWRollback.ViewerModule.csproj" />
   </ItemGroup>
 
 </Project>
