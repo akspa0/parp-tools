@@ -4,6 +4,26 @@
 
 ## Concise Guide
 
+### Quick Start (CLI-first)
+- Use `WoWRollback.Cli` as the primary entrypoint. The Orchestrator is considered legacy (see note below).
+
+```powershell
+dotnet run --project WoWRollback.Cli -- alpha-to-lk `
+  --input "..\test_data\0.5.3\tree\World\Maps\Azeroth\Azeroth.wdt" `
+  --preset-json ".\Westfall2001.json" `
+  --max-uniqueid 75000 `
+  --fix-holes --holes-scope self --holes-wmo-preserve true `
+  --report-areaid `
+  --dbd-dir ..\lib\WoWDBDefs\definitions\ `
+  --src-dbc-dir ..\test_data\0.5.3\tree\DBFilesClient\ `
+  --lk-dbc-dir  ..\test_data\3.3.5\tree\DBFilesClient\ `
+  --auto-crosswalks
+```
+
+Outputs: `lk_adts/World/Maps/<Map>/` with `<Map>.wdt` + ADTs, and `reports/areaid_patch_summary_<Map>.csv`.
+
+Data preparation: see `DBCTool.V2/docs/input-data-prep.md` for folder layout.
+
 ### 1) Lightweight Static Viewer (WoWDataPlot)
 - Generate a static, zero-dependency viewer with overlays in seconds.
 ```powershell
@@ -505,7 +525,9 @@ dotnet run -c Release --project WoWRollback.Cli -- \
 
 ---
 
-### Orchestrator Command (Alpha→LK Pipeline)
+### Orchestrator Command (Alpha→LK Pipeline) [Legacy]
+
+> Note: The Orchestrator is an older pipeline that has been largely superseded by direct commands in `WoWRollback.Cli`. Prefer the CLI examples above. See this section only if you specifically want the single-command orchestrated flow.
 
 **Single unified command** that runs the full pipeline:
 
