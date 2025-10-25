@@ -148,11 +148,4 @@ WoWDataPlot/               (REFOCUS - Visualization Phase)
 ✅ Modify Z coordinates to bury objects  
 ✅ Write modified WDT back to disk  
 ✅ Generate MD5 checksums  
-✅ TESTED on Kalimdor (951 tiles, 126K placements!)  
-
-## What's Next
-⏳ Create WoWRollback.RollbackTool project  
-⏳ Implement MCNK hole flag clearing  
-⏳ Implement MCSH shadow disabling  
-⏳ Generate overlay images  
-⏳ Build lightweight viewer
+✅ TESTED on Kalimdor (951 tiles, 126K placements!)

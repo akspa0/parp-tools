@@ -37,35 +37,25 @@ try
         var port = options.Port;
 
         using var server = new ViewerServer();
-        
         try
         {
             server.Start(viewerDir, port);
-            Console.WriteLine($"✓ Viewer server started at http://localhost:{port}");
+            Console.WriteLine($"✓ Viewer server http://localhost:{port}");
             Console.WriteLine($"  Serving: {viewerDir}");
             Console.WriteLine();
             Console.WriteLine("Press Ctrl+C to stop the server...");
-            
-            // Block until Ctrl+C
+
             var cts = new CancellationTokenSource();
-            Console.CancelKeyPress += (s, e) =>
-            {
-                e.Cancel = true;
-                cts.Cancel();
-            };
-            
+            Console.CancelKeyPress += (s, e) => { e.Cancel = true; cts.Cancel(); };
             cts.Token.WaitHandle.WaitOne();
-            
+
             Console.WriteLine();
             Console.WriteLine("Shutting down server...");
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Failed to start viewer server: {ex.Message}");
-            if (verbose)
-            {
-                Console.Error.WriteLine(ex);
-            }
+            if (verbose) Console.Error.WriteLine(ex);
             return 3;
         }
     }

@@ -143,8 +143,8 @@ overlays/
 - [x] Modify placement Z coordinates
 - [x] Write modified WDT back to disk
 - [x] Generate MD5 checksums
-- [ ] Clear terrain holes (MCNK modification)
-- [ ] Disable baked shadows (MCSH modification)
+- [x] Clear terrain holes (MCNK modification)
+- [x] Disable baked shadows (MCSH modification)
 - [ ] Pre-generate overlay images
 - [ ] Lightweight HTML viewer
 

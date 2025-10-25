@@ -47,6 +47,16 @@ WoWRollback alpha-to-lk --input World/Maps/Kalimdor/Kalimdor.wdt --max-uniqueid 
 ```
 **Result**: Patched Alpha WDT + Patched LK ADTs with AreaIds and `<Map>.wdt` emitted.
 
+```powershell
+# Alternative: run via dotnet
+dotnet run --project WoWRollback/WoWRollback.Cli -- \
+  alpha-to-lk --input World/Maps/Kalimdor/Kalimdor.wdt --max-uniqueid 125000 \
+  --fix-holes --disable-mcsh --out rollback_kl053 --export-lk-adts \
+  --lk-out rollback_kl053/lk_adts/World/Maps/Kalimdor \
+  --crosswalk-dir D:/crosswalks --lk-dbc-dir D:/lk_dbc
+```
+*Invariant*: LK export always emits `<Map>.wdt` alongside the ADTs in the LK output folder.
+
 ### Step 2: (Optional) LK patcher
 ```powershell
 WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 \

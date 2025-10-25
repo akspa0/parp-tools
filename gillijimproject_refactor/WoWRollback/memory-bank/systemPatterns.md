@@ -19,6 +19,9 @@
 ### Write Position
 - `MCNK.AreaId` resides at `mcnkOffset + 8 + 0x34`
 
+### Invariants
+- Always emit `<Map>.wdt` alongside LK ADTs in the LK output folder
+
 # System Patterns - WoWRollback.RollbackTool Architecture
 
 ## Three-Tool Separation of Concerns

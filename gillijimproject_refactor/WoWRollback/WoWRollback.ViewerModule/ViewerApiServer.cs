@@ -1,95 +1,53 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 
 namespace WoWRollback.ViewerModule;
 
-/// <summary>
-/// Embedded HTTP server for serving static viewer files.
-/// Uses HttpListener for simple, dependency-free static file serving.
-/// </summary>
-public sealed class ViewerServer : IDisposable
+public sealed class ViewerApiServer : IDisposable
 {
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _serverTask;
-    private string? _viewerDir;
 
-    // In-process job registry for CLI runs
-    private readonly Dictionary<string, Job> _jobs = new();
     private readonly object _jobsLock = new();
+    private readonly Dictionary<string, Job> _jobs = new();
 
-    /// <summary>
-    /// Starts the HTTP server on the specified port, serving files from viewerDir.
-    /// </summary>
-    /// <param name="viewerDir">Root directory containing static files to serve</param>
-    /// <param name="port">HTTP port to listen on (default: 8080)</param>
-    public void Start(string viewerDir, int port = 8080)
+    public void Start(int port = 8081)
     {
-        if (_listener != null)
-            throw new InvalidOperationException("Server is already running");
+        if (_listener != null) throw new InvalidOperationException("API server already running");
 
-        if (string.IsNullOrWhiteSpace(viewerDir))
-            throw new ArgumentException("Viewer directory is required", nameof(viewerDir));
-
-        if (!Directory.Exists(viewerDir))
-            throw new DirectoryNotFoundException($"Viewer directory not found: {viewerDir}");
-
-        _viewerDir = Path.GetFullPath(viewerDir);
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://localhost:{port}/");
-        
         try
         {
             _listener.Start();
         }
         catch (HttpListenerException ex)
         {
-            throw new InvalidOperationException(
-                $"Failed to start HTTP server on port {port}. " +
-                $"Port may be in use or require administrator privileges. Error: {ex.Message}", 
-                ex);
+            throw new InvalidOperationException($"Failed to start API server on port {port}: {ex.Message}", ex);
         }
 
         _cts = new CancellationTokenSource();
-        _serverTask = Task.Run(() => ServeFilesAsync(_cts.Token));
+        _serverTask = Task.Run(() => ServeAsync(_cts.Token));
     }
 
-    /// <summary>
-    /// Stops the HTTP server and waits for pending requests to complete.
-    /// </summary>
     public void Stop()
     {
-        if (_listener == null)
-            return;
-
+        if (_listener == null) return;
         _cts?.Cancel();
-        
-        if (_serverTask != null)
-        {
-            try
-            {
-                _serverTask.Wait(TimeSpan.FromSeconds(5));
-            }
-            catch (AggregateException)
-            {
-                // Expected when task is cancelled
-            }
-        }
-
-        _listener?.Stop();
-        _listener?.Close();
+        try { _serverTask?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+        _listener.Stop();
+        _listener.Close();
         _listener = null;
         _serverTask = null;
     }
 
-    /// <summary>
-    /// Disposes the server, stopping it if still running.
-    /// </summary>
     public void Dispose()
     {
         Stop();
@@ -97,143 +55,64 @@ public sealed class ViewerServer : IDisposable
         _cts = null;
     }
 
-    private async Task ServeFilesAsync(CancellationToken cancellationToken)
+    private async Task ServeAsync(CancellationToken token)
     {
-        if (_listener == null || _viewerDir == null)
-            return;
-
-        while (!cancellationToken.IsCancellationRequested && _listener.IsListening)
+        if (_listener == null) return;
+        while (!token.IsCancellationRequested && _listener.IsListening)
         {
             try
             {
-                var context = await _listener.GetContextAsync();
-                
-                // Handle request asynchronously to allow concurrent requests
-                _ = Task.Run(() => HandleRequestAsync(context), cancellationToken);
+                var ctx = await _listener.GetContextAsync();
+                _ = Task.Run(() => HandleAsync(ctx), token);
             }
             catch (HttpListenerException)
             {
-                // Listener was stopped
                 break;
             }
             catch (ObjectDisposedException)
             {
-                // Listener was disposed
                 break;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[ViewerServer] Error accepting request: {ex.Message}");
+                Console.Error.WriteLine($"[ViewerApiServer] Accept error: {ex.Message}");
             }
         }
     }
 
-    private async Task HandleRequestAsync(HttpListenerContext context)
-    {
-        var request = context.Request;
-        var response = context.Response;
-
-        try
-        {
-            var urlPath = request.Url?.AbsolutePath ?? "/";
-            
-            // Default to index.html for root
-            if (urlPath == "/")
-                urlPath = "/index.html";
-
-            // API routes
-            if (urlPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
-            {
-                await HandleApiAsync(context);
-                return;
-            }
-
-            // Remove leading slash and sanitize path
-            var relativePath = urlPath.TrimStart('/');
-            
-            // Prevent directory traversal attacks
-            if (relativePath.Contains(".."))
-            {
-                response.StatusCode = 400;
-                await SendTextResponseAsync(response, "Bad Request: Invalid path");
-                return;
-            }
-
-            var filePath = Path.Combine(_viewerDir!, relativePath);
-
-            if (!File.Exists(filePath))
-            {
-                response.StatusCode = 404;
-                await SendTextResponseAsync(response, $"Not Found: {urlPath}");
-                return;
-            }
-
-            // Determine content type
-            var extension = Path.GetExtension(filePath).ToLowerInvariant();
-            response.ContentType = GetContentType(extension);
-
-            // Serve file
-            using var fileStream = File.OpenRead(filePath);
-            response.ContentLength64 = fileStream.Length;
-            await fileStream.CopyToAsync(response.OutputStream);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[ViewerServer] Error handling request: {ex.Message}");
-            
-            if (!response.OutputStream.CanWrite)
-                return;
-
-            try
-            {
-                response.StatusCode = 500;
-                await SendTextResponseAsync(response, "Internal Server Error");
-            }
-            catch
-            {
-                // Ignore errors during error response
-            }
-        }
-        finally
-        {
-            try
-            {
-                response.Close();
-            }
-            catch
-            {
-                // Ignore close errors
-            }
-        }
-    }
-
-    private async Task HandleApiAsync(HttpListenerContext ctx)
+    private async Task HandleAsync(HttpListenerContext ctx)
     {
         var req = ctx.Request;
         var res = ctx.Response;
 
+        // CORS
+        SetCors(res);
+        if (req.HttpMethod.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+        {
+            res.StatusCode = 200;
+            res.Close();
+            return;
+        }
+
         try
         {
-            var path = req.Url?.AbsolutePath ?? string.Empty;
+            var path = req.Url?.AbsolutePath ?? "/";
 
-            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
-                path.Equals("/api/defaults", StringComparison.OrdinalIgnoreCase))
+            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) && path.Equals("/api/defaults", StringComparison.OrdinalIgnoreCase))
             {
                 var d = DefaultPathsService.Discover();
                 await JsonAsync(res, new { wdt = d.Wdt, crosswalkDir = d.CrosswalkDir, lkDbcDir = d.LkDbcDir });
                 return;
             }
 
-            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
-                path.Equals("/api/presets", StringComparison.OrdinalIgnoreCase))
+            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) && path.Equals("/api/presets", StringComparison.OrdinalIgnoreCase))
             {
                 var payload = BuildSeedPresets();
                 await JsonAsync(res, payload);
                 return;
             }
 
-            if (req.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) &&
-                path.Equals("/api/build/alpha-to-lk", StringComparison.OrdinalIgnoreCase))
+            if (req.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) && path.Equals("/api/build/alpha-to-lk", StringComparison.OrdinalIgnoreCase))
             {
                 using var sr = new StreamReader(req.InputStream, req.ContentEncoding);
                 var body = await sr.ReadToEndAsync();
@@ -243,33 +122,32 @@ public sealed class ViewerServer : IDisposable
                 return;
             }
 
-            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
-                path.StartsWith("/api/jobs/", StringComparison.OrdinalIgnoreCase) &&
-                !path.EndsWith("/events", StringComparison.OrdinalIgnoreCase))
+            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) && path.StartsWith("/api/jobs/", StringComparison.OrdinalIgnoreCase) && !path.EndsWith("/events", StringComparison.OrdinalIgnoreCase))
             {
                 var id = path.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
-                if (string.IsNullOrWhiteSpace(id)) { await SendTextResponseAsync(res, "Bad Request"); res.StatusCode = 400; return; }
+                if (string.IsNullOrWhiteSpace(id)) { await TextAsync(res, 400, "Bad Request"); return; }
                 Job? job; lock (_jobsLock) _jobs.TryGetValue(id, out job);
-                if (job == null) { res.StatusCode = 404; await SendTextResponseAsync(res, "Not Found"); return; }
+                if (job == null) { await TextAsync(res, 404, "Not Found"); return; }
                 await JsonAsync(res, new { id = job.Id, status = job.Status.ToString(), startedAt = job.StartedAt, finishedAt = job.FinishedAt, output = new { wdt = job.OutputWdt, lkOut = job.OutputLkDir } });
                 return;
             }
 
-            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) &&
-                path.EndsWith("/events", StringComparison.OrdinalIgnoreCase))
+            if (req.HttpMethod.Equals("GET", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/events", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3) { res.StatusCode = 400; await SendTextResponseAsync(res, "Bad Request"); return; }
+                if (parts.Length < 3) { await TextAsync(res, 400, "Bad Request"); return; }
                 var id = parts[^2];
                 Job? job; lock (_jobsLock) _jobs.TryGetValue(id, out job);
-                if (job == null) { res.StatusCode = 404; await SendTextResponseAsync(res, "Not Found"); return; }
+                if (job == null) { await TextAsync(res, 404, "Not Found"); return; }
 
                 res.StatusCode = 200;
                 res.ContentType = "text/event-stream";
                 res.SendChunked = true;
                 res.Headers["Cache-Control"] = "no-cache";
+                SetCors(res);
 
                 await SseAsync(res, new { type = "status", status = job.Status.ToString() });
+
                 var next = 0;
                 while (job.IsActive)
                 {
@@ -302,72 +180,12 @@ public sealed class ViewerServer : IDisposable
                 return;
             }
 
-            res.StatusCode = 404;
-            await SendTextResponseAsync(res, "Not Found");
+            await TextAsync(res, 404, "Not Found");
         }
         catch (Exception ex)
         {
-            res.StatusCode = 500;
-            await SendTextResponseAsync(res, $"Internal Server Error: {ex.Message}");
+            await TextAsync(res, 500, $"Internal Server Error: {ex.Message}");
         }
-    }
-
-    private static async Task SendTextResponseAsync(HttpListenerResponse response, string text)
-    {
-        var buffer = System.Text.Encoding.UTF8.GetBytes(text);
-        response.ContentLength64 = buffer.Length;
-        response.ContentType = "text/plain";
-        await response.OutputStream.WriteAsync(buffer);
-    }
-
-    private static string GetContentType(string extension)
-    {
-        return extension switch
-        {
-            ".html" => "text/html; charset=utf-8",
-            ".htm" => "text/html; charset=utf-8",
-            ".css" => "text/css; charset=utf-8",
-            ".js" => "application/javascript; charset=utf-8",
-            ".json" => "application/json; charset=utf-8",
-            ".png" => "image/png",
-            ".jpg" => "image/jpeg",
-            ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".svg" => "image/svg+xml",
-            ".ico" => "image/x-icon",
-            ".woff" => "font/woff",
-            ".woff2" => "font/woff2",
-            ".ttf" => "font/ttf",
-            ".txt" => "text/plain; charset=utf-8",
-            ".xml" => "application/xml; charset=utf-8",
-            ".glb" => "model/gltf-binary",
-            ".gltf" => "model/gltf+json",
-            ".webp" => "image/webp",
-            _ => "application/octet-stream"
-        };
-    }
-
-    private static async Task JsonAsync(HttpListenerResponse res, object payload)
-    {
-        var json = JsonSerializer.Serialize(payload);
-        var data = Encoding.UTF8.GetBytes(json);
-        res.StatusCode = 200;
-        res.ContentType = "application/json";
-        res.ContentLength64 = data.Length;
-        await res.OutputStream.WriteAsync(data, 0, data.Length);
-    }
-
-    private static async Task SseAsync(HttpListenerResponse res, object payload)
-    {
-        var json = JsonSerializer.Serialize(payload);
-        await RawAsync(res, $"data: {json}\n\n");
-    }
-
-    private static async Task RawAsync(HttpListenerResponse res, string text)
-    {
-        var data = Encoding.UTF8.GetBytes(text);
-        await res.OutputStream.WriteAsync(data, 0, data.Length);
-        await res.OutputStream.FlushAsync();
     }
 
     private Job StartAlphaToLkJob(BuildRequest request)
@@ -481,6 +299,45 @@ public sealed class ViewerServer : IDisposable
         return string.Join(' ', args);
     }
 
+    private static async Task JsonAsync(HttpListenerResponse res, object payload)
+    {
+        var json = JsonSerializer.Serialize(payload);
+        var data = Encoding.UTF8.GetBytes(json);
+        res.StatusCode = 200;
+        res.ContentType = "application/json";
+        res.ContentLength64 = data.Length;
+        await res.OutputStream.WriteAsync(data, 0, data.Length);
+    }
+
+    private static async Task TextAsync(HttpListenerResponse res, int code, string text)
+    {
+        res.StatusCode = code;
+        res.ContentType = "text/plain";
+        var data = Encoding.UTF8.GetBytes(text);
+        res.ContentLength64 = data.Length;
+        await res.OutputStream.WriteAsync(data, 0, data.Length);
+    }
+
+    private static async Task SseAsync(HttpListenerResponse res, object payload)
+    {
+        var json = JsonSerializer.Serialize(payload);
+        await RawAsync(res, $"data: {json}\n\n");
+    }
+
+    private static async Task RawAsync(HttpListenerResponse res, string text)
+    {
+        var data = Encoding.UTF8.GetBytes(text);
+        await res.OutputStream.WriteAsync(data, 0, data.Length);
+        await res.OutputStream.FlushAsync();
+    }
+
+    private static void SetCors(HttpListenerResponse res)
+    {
+        res.Headers["Access-Control-Allow-Origin"] = "http://localhost:8080";
+        res.Headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS";
+        res.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+    }
+
     private static string? GuessMapNameFromWdt(string? wdtPath)
     {
         if (string.IsNullOrWhiteSpace(wdtPath)) return null;
@@ -585,29 +442,5 @@ public sealed class ViewerServer : IDisposable
         public sealed class TerrainModel { public bool FixHoles { get; set; } public bool DisableMcsh { get; set; } }
         public sealed class MappingModel { public bool StrictAreaId { get; set; } = true; public bool ChainVia060 { get; set; } }
         public sealed class PathsModel { public string? Wdt { get; set; } public string? CrosswalkDir { get; set; } public string? LkDbcDir { get; set; } public string? OutDir { get; set; } public string? LkOutDir { get; set; } }
-    }
-
-    public static void Serve(string viewerDir, int port = 8080, bool openBrowser = true)
-    {
-        using var server = new ViewerServer();
-        server.Start(viewerDir, port);
-
-        var url = $"http://localhost:{port}/";
-        Console.WriteLine($"Viewer running at {url}");
-
-        if (openBrowser)
-        {
-            try
-            {
-                var psi = new ProcessStartInfo { FileName = url, UseShellExecute = true };
-                Process.Start(psi);
-            }
-            catch { /* ignore */ }
-        }
-
-        var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (s, e) => { e.Cancel = true; cts.Cancel(); };
-        cts.Token.WaitHandle.WaitOne();
-        server.Stop();
     }
 }

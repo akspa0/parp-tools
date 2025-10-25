@@ -12,20 +12,9 @@
 ## Project Structure (Current)
 ```
 WoWRollback/
-├── WoWRollback.RollbackTool/       # NEW! Main CLI application
-│   ├── Commands/
-│   │   ├── AnalyzeCommand.cs       # Scan UniqueID ranges
-│   │   ├── GenerateOverlaysCommand.cs
-│   │   └── RollbackCommand.cs      # Core modification
-│   ├── Services/
-│   │   ├── WdtModifier.cs          # In-place WDT modification
-│   │   ├── McnkManager.cs          # Terrain hole operations
-│   │   ├── McshDisabler.cs         # Shadow removal
-│   │   └── OverlayGenerator.cs     # PNG generation
-│   └── Program.cs
-├── WoWDataPlot/                    # EXISTS - Refocus to viz only
-│   └── Program.cs                  # Currently has rollback code (temp)
-├── AlphaWDTAnalysisTool/           # EXISTS - Reuse for analysis
+├── WoWRollback.Cli/                # Primary CLI application
+├── WoWDataPlot/                    # Legacy (viz/demo), contains previous rollback code
+├── AlphaWDTAnalysisTool/           # Analysis module (reuse)
 └── memory-bank/                    # Project documentation
 ```
 

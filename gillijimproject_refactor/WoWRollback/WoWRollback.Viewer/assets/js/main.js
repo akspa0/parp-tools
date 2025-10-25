@@ -1,5 +1,6 @@
 // Main entry point for index.html - Leaflet Map Viewer
 import { state } from './state.js';
+import { initToolsPanel } from './tools.js';
 import { clearCache } from './overlayLoader.js';
 import { loadOverlay } from './overlayLoader.js';
 import { OverlayManager } from './overlays/overlayManager.js';
@@ -43,6 +44,7 @@ export async function init() {
         
         initializeMap();
         setupUI();
+        await initToolsPanel();
         setupOverview();
         state.subscribe(onStateChange);
         updateTileLayer();

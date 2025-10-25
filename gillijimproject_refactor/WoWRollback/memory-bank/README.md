@@ -1,7 +1,7 @@
 # Memory Bank - WoWRollback.RollbackTool
 
 ## Overview
-This memory bank contains complete documentation of the WoWRollback.RollbackTool project state as of **October 21, 2025**.
+This memory bank contains complete documentation of the WoWRollback.RollbackTool project state as of **October 25, 2025**.
 
 ## Core Achievement
 ✅ **PROVEN WORKING**: Core rollback functionality successfully tested on Alpha 0.5.3 WDT files!
@@ -74,11 +74,14 @@ When starting a new session, read these files in order:
 
 ## Key Locations in Code
 
-### Current Implementation (Temporary)
+### Entrypoints
 ```
-WoWRollback/WoWDataPlot/Program.cs
-  Lines ~1980-2180: Rollback command implementation
+WoWRollback/WoWRollback.Cli/Program.cs      # Primary CLI
+WoWRollback/WoWDataPlot/Program.cs          # Legacy rollback code (temporary)
 ```
+
+### Related Docs
+- docs/pipeline/alpha-to-lk-end-to-end.md
 
 ### Modified Library Files
 ```

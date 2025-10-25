@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -56,6 +57,8 @@ internal static class Program
                     return RunProbeArchive(opts);
                 case "probe-minimap":
                     return RunProbeMinimap(opts);
+                case "prepare-layers":
+                    return RunPrepareLayers(opts);
                 case "alpha-to-lk":
                     return RunAlphaToLk(opts);
                 case "lk-to-alpha":
@@ -286,6 +289,118 @@ internal static class Program
 
         Console.WriteLine($"[ok] Resolved {resolved}/{candidates.Count} tiles (no viewer changes).");
         return 0;
+    }
+
+    private static int RunPrepareLayers(Dictionary<string, string> opts)
+    {
+        var outRoot = GetOption(opts, "out") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "cache");
+        Directory.CreateDirectory(outRoot);
+
+        var gap = TryParseInt(opts, "gap-threshold") ?? 50;
+
+        // Mode A: explicit single WDT
+        var wdtPath = GetOption(opts, "wdt");
+        if (!string.IsNullOrWhiteSpace(wdtPath))
+        {
+            if (!File.Exists(wdtPath)) { Console.Error.WriteLine($"[error] --wdt not found: {wdtPath}"); return 1; }
+            var mapName = Path.GetFileNameWithoutExtension(wdtPath);
+            var outDir = Path.Combine(outRoot, mapName);
+            Directory.CreateDirectory(outDir);
+            return RunLayersUiGenerator(wdtPath, outDir, gap);
+        }
+
+        // Mode B: scan client-root for loose Alpha WDTs under World/Maps
+        var clientRoot = GetOption(opts, "client-root");
+        if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine("[error] Provide either --wdt <path> or --client-root <dir>");
+            return 2;
+        }
+
+        // Enumerate WDTs: <clientRoot>/World/Maps/<Map>/<Map>.wdt
+        var mapsDir = Path.Combine(clientRoot, "World", "Maps");
+        if (!Directory.Exists(mapsDir))
+        {
+            Console.Error.WriteLine($"[error] Not a valid client root (missing World/Maps): {clientRoot}");
+            return 2;
+        }
+
+        var requested = GetOption(opts, "maps"); // null|"all"|csv
+        var allowAll = string.IsNullOrWhiteSpace(requested) || string.Equals(requested, "all", StringComparison.OrdinalIgnoreCase);
+        var allowSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!allowAll)
+        {
+            foreach (var m in requested!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                allowSet.Add(m);
+        }
+
+        var wdtCandidates = new List<(string Map, string Path)>();
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(mapsDir))
+            {
+                var map = Path.GetFileName(dir);
+                if (!allowAll && !allowSet.Contains(map)) continue;
+                var wdt = Path.Combine(dir, map + ".wdt");
+                if (File.Exists(wdt)) wdtCandidates.Add((map, wdt));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[error] Scan failed: {ex.Message}");
+            return 2;
+        }
+
+        if (wdtCandidates.Count == 0)
+        {
+            Console.WriteLine("[info] No maps found to prepare.");
+            return 0;
+        }
+
+        Console.WriteLine($"[prepare] Building layer caches for {wdtCandidates.Count} map(s) → {outRoot}");
+        int ok = 0, fail = 0;
+        foreach (var (map, path) in wdtCandidates.OrderBy(t => t.Map, StringComparer.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"—— {map} ——");
+            var outDir = Path.Combine(outRoot, map);
+            Directory.CreateDirectory(outDir);
+            var code = RunLayersUiGenerator(path, outDir, gap);
+            if (code == 0) { ok++; Console.WriteLine($"[ok] {map}"); }
+            else { fail++; Console.WriteLine($"[fail] {map} (exit={code})"); }
+        }
+
+        Console.WriteLine($"[summary] success={ok}, failed={fail}");
+        return fail == 0 ? 0 : 1;
+    }
+
+    private static int RunLayersUiGenerator(string wdtPath, string outDir, int gap)
+    {
+        try
+        {
+            var proj = Path.Combine("WoWRollback", "WoWDataPlot");
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"run --project \"{proj}\" -- layers-ui --wdt \"{wdtPath}\" --output-dir \"{outDir}\" --gap-threshold {gap}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using var proc = new Process { StartInfo = psi };
+            proc.OutputDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) Console.WriteLine(e.Data); };
+            proc.ErrorDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) Console.WriteLine(e.Data); };
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            proc.WaitForExit();
+            return proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[error] layers-ui run failed: {ex.Message}");
+            return 1;
+        }
     }
 
     private static bool TryParseTileFromPath(string virtualPath, string mapName, out int x, out int y)
@@ -1288,6 +1403,10 @@ internal static class Program
         Console.WriteLine("WoWRollback CLI - Digital Archaeology of World of Warcraft Development");
         Console.WriteLine();
         Console.WriteLine("Commands:");
+        Console.WriteLine("  prepare-layers  [--wdt <WDT>] | [--client-root <dir> [--maps all|m1,m2]] [--out <dir>] [--gap-threshold <N>]");
+        Console.WriteLine("    Build per-map layer caches (placements, tile_layers.csv, layers.json) without patching");
+        Console.WriteLine("    Outputs under <out>/<map>/; usable by GUI and Layers UI");
+        Console.WriteLine();
         Console.WriteLine("  discover-maps  --client-path <dir> [--version <ver>] [--dbd-dir <path>] [--out <csv>]");
         Console.WriteLine("    Discover all maps from Map.dbc and analyze their WDT files");
         Console.WriteLine("    Shows terrain vs WMO-only maps, tile counts, and hybrid maps");
