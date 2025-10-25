@@ -36,16 +36,16 @@ LK ADTs dir + Threshold + Options → Bury placements → Selective hole clearin
 ```
 **Output**: Patched LK ADTs. Reverse LK→Alpha WDT conversion is considered later.
 
-## User Experience Flow
+## User Experience Flow (CLI-first → UI-runner)
 
-### Step 1: Alpha→LK one-liner (with crosswalks)
+### Step 1: Alpha→LK (with crosswalks, non-pivot default)
 ```powershell
 WoWRollback alpha-to-lk --input World/Maps/Kalimdor/Kalimdor.wdt --max-uniqueid 125000 \
   --fix-holes --disable-mcsh --out rollback_kl053 --export-lk-adts \
   --lk-out rollback_kl053/lk_adts/World/Maps/Kalimdor \
   --crosswalk-dir D:/crosswalks --lk-dbc-dir D:/lk_dbc
 ```
-**Result**: Patched Alpha WDT + Patched LK ADTs with AreaIds.
+**Result**: Patched Alpha WDT + Patched LK ADTs with AreaIds and `<Map>.wdt` emitted.
 
 ### Step 2: (Optional) LK patcher
 ```powershell
@@ -54,8 +54,12 @@ WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 
 ```
 **Result**: Patched LK ADTs written to output dir.
 
-### Optional: Overlays + Viewer (future)
-Analysis JSON → PNG overlays → HTML viewer.
+### Analysis + Viewer
+- Analyze LK ADTs to produce placements/terrain CSVs and viewer assets, then serve viewer.
+
+### Presets & Filters
+- Presets define global `uniqueId.max` and labeled ranges.
+- Future viewer UI will provide global/per-tile UniqueID controls and asset-type filters (trees, bushes, rocks, buildings, etc.) to visualize sub-layers.
 
 ## Technical Approach
 
@@ -86,13 +90,12 @@ Analysis JSON → PNG overlays → HTML viewer.
 - **Flexibility**: Try different thresholds without re-scanning
 - **Transparency**: See what will happen before doing it
 
-### Reuse Existing Infrastructure
+### Reuse Existing Infrastructure (Library-first)
 - **AlphaWDTAnalysisTool**: Already has complete ADT parsing
 - **gillijimproject-csharp**: Proven WoW file format library
 - **Don't Reinvent**: Build on what works
 
 ## Known Limitations
-
 - Only works on extracted WDT files (not in MPQs... yet)
 - Doesn't modify _obj0.adt or _obj1.adt files (terrain objects)
 - MCNK spatial calculation assumes flat terrain (good enough for most cases)

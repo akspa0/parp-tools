@@ -9,7 +9,7 @@
   - `System.Security.Cryptography` (MD5 checksums)
   - `System.Text.Json` (Analysis data, manifests)
 
-## Planned Project Structure
+## Project Structure (Current)
 ```
 WoWRollback/
 ├── WoWRollback.RollbackTool/       # NEW! Main CLI application
@@ -30,8 +30,7 @@ WoWRollback/
 ```
 
 ## Current Implementation Location
-**TEMPORARY**: Rollback logic currently in `WoWDataPlot/Program.cs` (lines ~1980-2180)
-**TARGET**: Extract to new `WoWRollback.RollbackTool` project
+CLI-first: `WoWRollback.Cli` is the primary entrypoint for Alpha→LK, analysis, and viewer serving. Orchestrator is legacy.
 
 ## Critical Dependencies (PROVEN WORKING)
 
@@ -77,19 +76,16 @@ WoWRollback/
 - Enumeration optional; we can read known paths directly
 
 ### CLI (WoWRollback.Cli)
-- `rollback` options implemented:
-  - `--max-uniqueid`, `--bury-depth`, `--fix-holes`, `--disable-mcsh`
-  - `--export-lk-adts`, `--lk-out` (directory root for LK ADTs)
-  - `--area-remap-json` (AlphaAreaId→LK AreaId mapping for `MCNK.AreaId`)
-  - `--lk-client-path` (MPQs access), `--lk-dbc-dir` (extracted DBCs for `Map.dbc` guard)
-  - `--crosswalk-dir` / `--crosswalk-file` (preferred), compatibility aliases: `--dbctool-patch-dir` / `--dbctool-patch-file`
-- Hole clearing logic:
-  - Build `mddfBuried[]`, `modfBuried[]`; per MCNK, parse `MCRF` and clear holes only if all referenced entries were buried
-- LK export:
-  - Re-open saved Alpha WDT, enumerate present tiles, convert with `AdtAlpha.ToAdtLk(mdnm, monm, areaRemap)`, then `AdtLk.ToFile(lkOutDir)`
-- In-place AreaID patching after write:
-  - Load CSV crosswalks; resolve `currentMapId` via `Map.dbc` (no DBCTool dependency)
-  - Patch `MCNK.AreaId` at `mcnkOffset + 8 + 0x34` using strict decision order and child-preference
+- Burial/terrain:
+  - `--max-uniqueid`, `--bury-depth`, `--fix-holes`, `--holes-scope`, `--holes-wmo-preserve`, `--disable-mcsh`
+- Crosswalks and mapping:
+  - `--auto-crosswalks`, `--copy-crosswalks`, `--report-areaid`, `--strict-areaid` (default strict), `--chain-via-060` (opt-in pivot)
+  - Inputs precedence: `--src-dbc-dir` / `--lk-dbc-dir` override `--src-client-path` / `--lk-client-path`
+- LK export and WDT:
+  - Convert Alpha ADTs → LK ADTs and always write `<Map>.wdt` into LK output folder
+- AreaID patching (in-place after write):
+  - Load CSV crosswalks; derive `currentMapId` via `Map.dbc` guard
+  - Patch `MCNK.AreaId` at `mcnkOffset + 8 + 0x34` using non-pivot order; drop cross-map results
 
 ### Planned Commands
 - `alpha-to-lk`: orchestrate rollback + area-map generation/usage + LK export
@@ -273,11 +269,9 @@ Azeroth 0.5.3:
 - Save as PNG per threshold
 - Generate manifest JSON
 
-### Lightweight Viewer - ⏳ PLANNED
-- HTML+JS slider UI
-- Load pre-generated overlays
-- Display statistics
-- Copy rollback command
+### Viewer (analyze + serve)
+- `analyze-map-adts --input-dir …` produces viewer artifacts (placements/terrain/meshes/overlays)
+- `serve-viewer [--viewer-dir … --port … --no-browser]` serves the viewer; auto-detects common locations
 
 ## Performance Characteristics
 

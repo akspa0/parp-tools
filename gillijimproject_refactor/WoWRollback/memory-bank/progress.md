@@ -1,5 +1,21 @@
 # Progress - WoWRollback.RollbackTool
 
+## ✅ Completed (2025-10-25)
+
+### CLI-first pipeline hardened and documented
+
+**Highlights:**
+- Strict non-pivot AreaID mapping order enforced; 0.6.0 pivot opt-in via `--chain-via-060`.
+- LK WDT is now emitted alongside LK ADTs and renamed to `<Map>.wdt`.
+- End-to-end docs added: `docs/pipeline/alpha-to-lk-end-to-end.md`.
+- Presets: schema docs and `presets/Westfall2001.json` sample added.
+- Asset taxonomy and LK→Alpha status docs added.
+- Main README refocused on `WoWRollback.Cli` (Orchestrator marked legacy).
+
+**Verified Run (Azeroth 0.5.3, 75k, auto-crosswalks with loose DBCs):**
+- ADTs exported (685/685), `<map>.wdt` written.
+- AreaIds summary: present=175,360, mapped=152,736, patched=152,992, unmatched=22,624.
+
 ## ✅ Completed (2025-10-22)
 
 ### Core Rollback Functionality - WORKING AND TESTED!

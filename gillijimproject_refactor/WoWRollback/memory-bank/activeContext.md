@@ -1,11 +1,11 @@
 # Active Context - WoWRollback.RollbackTool Development
 
-## Current Focus (2025-10-22)
-**Unify Alpha→LK pipeline (rollback + area map + export) and add LK patcher**
+## Current Focus (2025-10-25)
+**Run the Alpha→LK pipeline directly from the viewer UI**
 
-Successfully implemented and **TESTED** core rollback functionality that modifies Alpha 0.5.3 WDT files! Proven working on both Azeroth and Kalimdor. Now building terrain hole management and overlay generation to complete the tool.
+We now have a CLI-first, strict non-pivot AreaID mapping pipeline that emits LK ADTs and a fresh `<Map>.wdt`. Next, we will expose this pipeline through the viewer with a Tools panel and a small backend API.
 
-## What We Just Accomplished (2025-10-22)
+## What We Just Accomplished (2025-10-25)
 
 ### ✅ PROVEN: Core Rollback Works on Alpha 0.5.3!
 
@@ -33,7 +33,8 @@ Azeroth 0.5.3
 7. ✅ Selective hole clearing per MCNK using `MCRF` references (only if all referenced placements are buried)
 8. ✅ Optional MCSH zeroing
 9. ✅ LK export path via `--export-lk-adts` with `AdtAlpha.ToAdtLk(..., areaRemap)` and `AdtLk.ToFile(<dir>)`
-10. ✅ Area mapping hook + `--area-remap-json` loader
+10. ✅ Area mapping via CSV crosswalks with strict non-pivot decision order; pivot gated by `--chain-via-060`
+11. ✅ LK WDT emitted and renamed to `<Map>.wdt` in LK output folder
 
 ### ✅ Technical Breakthroughs
 
@@ -77,11 +78,11 @@ WDT File (Alpha 0.5.3):
     ...
 ```
 
-## Architecture Decision: New Project Structure
+## Architecture Decision: CLI-first with UI runner
 
 **Problem**: WoWDataPlot was being built as a hybrid analysis+modification+visualization tool, which violates separation of concerns.
 
-**Solution**: Split into three focused tools:
+**Solution**: Keep the CLI as the primary entrypoint, expose its logic as services callable by the viewer backend, and run jobs with live logs.
 
 ```
 AlphaWDTAnalysisTool/     (EXISTS - Analysis Phase)
@@ -102,35 +103,38 @@ WoWDataPlot/               (REFOCUS - Visualization Phase)
   └─> No modification, pure viz
 ```
 
-## Current Implementation Status:**
-- ✅ Rollback code working in `WoWDataPlot/Program.cs` (temporary location)
-- ⏳ Need to extract to new `WoWRollback.RollbackTool` project
-- ⏳ Need to add MCNK terrain hole management
-- ⏳ Need to add MCSH shadow disabling
-- ⏳ Need to add overlay generation
+## Current Implementation Status
+- ✅ `WoWRollback.Cli` provides Alpha→LK, LK analysis, and viewer serving
+- ✅ MCNK terrain hole management and MCSH zeroing in place
+- ✅ AreaID mapping patched using crosswalks with strict guards
+- ✅ LK WDT emitted alongside ADTs
 
-## Next Steps (For Fresh Session)
+## Next Steps
 
-### Phase 1: Unified Pipeline Command
-1. `alpha-to-lk` implemented (wrapper over rollback with `--export-lk-adts`):
-   - Rollback: bury + MCRF-gated hole clear + optional MCSH
-   - Area mapping: `--area-remap-json` or auto-fill via `--lk-client-path` (LK `AreaTable.dbc` IDs passthrough; unmapped→`--default-unmapped`)
-   - LK export: `AdtAlpha.ToAdtLk(..., areaRemap)` → `AdtLk.ToFile(lkOutDir)`
-2. CLI help updated. Added preferred crosswalk flags `--crosswalk-dir`/`--crosswalk-file` (kept legacy `dbctool-*` aliases).
+### Phase 1 (MVP): UI Tools panel + Alpha→LK job
+1. Add Tools panel in viewer to configure globals:
+   - UniqueID max, holes scope, preserve WMO holes, disable MCSH
+   - Crosswalk: auto, strict (default), optional 0.6.0 pivot
+   - Inputs: WDT path, DBC dirs/DBD dir, optional preset JSON
+2. Backend API (`ViewerModule`):
+   - POST `/api/build/alpha-to-lk` → returns job id
+   - GET `/api/jobs/{id}/events` (SSE) → live logs and progress
+3. Extract CLI logic into services (no shell): `AlphaToLkService`
+4. On completion, offer “Open in viewer” of LK analysis results
 
-### Phase 2: AreaTable Auto-Mapper
-1. Implement minimal `AreaTableDbcReader` (IDs only) via `PrioritizedArchiveSource`/`MpqArchiveSource`.
-2. Prefill AlphaAreaId→LKAreaId when IDs exist in LK; else map to `--default-unmapped`.
+### Phase 2: Per-tile overrides
+- Allow per-tile `maxUniqueId` overrides; accept `uniqueId.perTile[]` in payload
 
-### Phase 3: LK Patcher Command
-1. `lk-to-alpha` (v1) implemented: patches LK ADTs (bury/holes/mcsh) and writes to `--out`.
-2. Next: validate counts/logs on Kalimdor and Azeroth directories.
+### Phase 3: Asset taxonomy + filters
+- Add `asset_type` to CSVs; add viewer filters and preset integration
 
-## Git Status
-- **Branch**: `wrb-poc5`
-- **Last Commit**: `58d0aae` - "WoWDataPlot - now with Rollback support (Tested on 0.5.3, it works!)"
-- **Test Data**: `test_data/0.5.3/tree/World/Maps/`
-- **Output**: `WoWRollback/rollback_*` directories
+### Phase 4: Analyze + Serve from UI
+- POST `/api/analyze/lk-adts` and `/api/viewer/serve`; wire to existing modules
+
+## Constraints & Guards
+- Non-pivot mapping order with strict map guard; discard cross-map candidates
+- Prefer loose DBCs; `--src-dbc-dir`/`--lk-dbc-dir` override client-path
+- Always emit `<Map>.wdt` with LK ADTs
 
 ## Files Modified This Session (2025-10-21)
 - `WoWDataPlot/Program.cs` - Added complete rollback command

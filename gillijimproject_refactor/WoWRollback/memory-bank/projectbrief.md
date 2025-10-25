@@ -18,7 +18,12 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - **Stupid Easy UI** - Drag a slider, pick a version, click a button. Done.
 - **Unified Pipeline (Alpha→LK)** - One command: Alpha WDT → patched Alpha WDT → patched LK ADTs
 - **CSV Crosswalk AreaIDs** - Patch `MCNK.AreaId` using CSV crosswalks (`--crosswalk-dir|--crosswalk-file`). No DBCTool dependency at runtime.
-- **Mapping Fallbacks** - Support `--area-remap-json` or write 0 for unmapped; use `Map.dbc` only to resolve target map guard (no mapping heuristics).
+- **Mapping Fallbacks** - Support `--area-remap-json` or write 0 for unmapped; use `Map.dbc` only to resolve target map guard (no heuristics).
+
+### Latest Direction (2025-10-25)
+- **CLI-first**: `WoWRollback.Cli` is the primary entrypoint. Orchestrator is legacy.
+- **Strict AreaID mapping (non-pivot by default)**: map-locked numeric → target map name → per-source-map numeric → exact-by-src-number only if strict=false; 0.6.0 pivot opt-in via `--chain-via-060`.
+- **LK WDT emission**: Write `<Map>.wdt` alongside LK ADTs in the output folder.
 
 ## Use Cases
 - **Empty World Screenshots**: Remove all objects for terrain-only views
@@ -30,6 +35,11 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - ✅ Successfully bury objects in 0.5.3 WDT files (PROVEN - works on Kalimdor!)
 - ✅ Clear terrain holes conservatively (only chunks whose referenced objects were all buried)
 - ✅ Export LK ADTs with correct indices and AreaIDs via CSV crosswalks; explicitly write 0 when unmapped
+- ✅ Emit LK WDT (`<Map>.wdt`) together with LK ADTs
+- ✅ Enforce strict, non-pivot AreaID mapping order; pivot gated by `--chain-via-060`
 - ⏳ Generate pre-rendered overlay images for all UniqueID ranges
 - ⏳ Build lightweight HTML viewer with slider control
 - ⏳ One-button rollback with all options exposed
+
+## Next Milestone
+- Run the pipeline directly from the viewer UI (Tools panel): configure global/per-tile UniqueID ranges, terrain options, crosswalk rules; launch builds and stream logs; open results in viewer.
