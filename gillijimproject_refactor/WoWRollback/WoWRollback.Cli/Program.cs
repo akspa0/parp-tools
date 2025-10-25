@@ -17,6 +17,7 @@ using GillijimProject.WowFiles.Alpha;
 using AlphaWdtAnalyzer.Core.Export;
 using AlphaWdtAnalyzer.Core.Dbc;
 using WoWRollback.Core.Services.AreaMapping;
+using DBCTool.V2.Cli;
 
 namespace WoWRollback.Cli;
 
@@ -83,6 +84,64 @@ internal static class Program
             Console.Error.WriteLine($"[error] {ex.Message}");
             return 1;
         }
+    }
+
+    private static string? EnsureDbcDirFromClient(string alias, string? build, string? clientDir, string outRoot)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(clientDir) || !Directory.Exists(clientDir)) return null;
+            var mpqs = ArchiveLocator.LocateMpqs(clientDir);
+            if (mpqs.Count == 0) { Console.WriteLine($"[patchmap] no MPQs found under: {clientDir}"); return null; }
+            using var src = new MpqArchiveSource(mpqs);
+
+            var dest = Path.Combine(outRoot, "dbc_extract", (alias ?? "unknown").Replace('.', '_'));
+            Directory.CreateDirectory(dest);
+
+            bool okMap = TryExtractDbc(src, "DBFilesClient/Map.dbc", Path.Combine(dest, "Map.dbc"));
+            bool okArea = TryExtractDbc(src, "DBFilesClient/AreaTable.dbc", Path.Combine(dest, "AreaTable.dbc"));
+
+            if (!okMap || !okArea)
+            {
+                Console.WriteLine($"[patchmap] DBCs missing from MPQs (Map={okMap}, AreaTable={okArea}) under: {clientDir}");
+                return null;
+            }
+            return dest;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[patchmap] DBC extraction error: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static bool TryExtractDbc(WoWRollback.Core.Services.Archive.IArchiveSource src, string virtualPath, string destPath)
+    {
+        // Attempt common case and case-variants
+        var baseName = Path.GetFileName(virtualPath);
+        var candidates = new List<string>
+        {
+            virtualPath,
+            virtualPath.ToLowerInvariant(),
+            virtualPath.ToUpperInvariant(),
+            virtualPath.Replace("DBFilesClient", "dbfilesclient"),
+            virtualPath.Replace("DBFilesClient", "DBFILESCLIENT"),
+            baseName
+        };
+
+        foreach (var v in candidates)
+        {
+            try
+            {
+                if (!src.FileExists(v)) continue;
+                using var s = src.OpenFile(v);
+                using var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                s.CopyTo(fs);
+                return true;
+            }
+            catch { /* try next variant */ }
+        }
+        return false;
     }
 
     private static int RunProbeMinimap(Dictionary<string, string> opts)
@@ -749,6 +808,89 @@ internal static class Program
         return -1;
     }
 
+    private static string? GenerateCrosswalksIfNeeded(string alias, string inputPath, string? dbdDirOpt, string? srcDbcDirOpt, string lkDbcDir, string? pivot060DirOpt, bool chainVia060, string outRoot, string? srcClientDirOpt, string? lkClientDirOpt, string? pivot060ClientDirOpt)
+    {
+        try
+        {
+            // Ensure LK DBC dir (prefer provided, else extract from MPQs)
+            string? lkDbcResolved = null;
+            if (!string.IsNullOrWhiteSpace(lkDbcDir) && Directory.Exists(lkDbcDir)) lkDbcResolved = lkDbcDir;
+            else lkDbcResolved = EnsureDbcDirFromClient("3.3.5", null, lkClientDirOpt, outRoot);
+            if (string.IsNullOrWhiteSpace(lkDbcResolved)) { Console.WriteLine("[patchmap] generation requires LK DBCs via --lk-dbc-dir or --lk-client-path"); return null; }
+
+            string? dbdDir = null;
+            if (!string.IsNullOrWhiteSpace(dbdDirOpt) && Directory.Exists(dbdDirOpt)) dbdDir = dbdDirOpt;
+            else
+            {
+                var probes = new[]
+                {
+                    Path.Combine(Directory.GetCurrentDirectory(), "lib", "WoWDBDefs", "definitions"),
+                    Path.Combine(AppContext.BaseDirectory, "..","..","lib", "WoWDBDefs", "definitions"),
+                    Path.Combine(AppContext.BaseDirectory, "..","..","..", "lib", "WoWDBDefs", "definitions"),
+                };
+                foreach (var p in probes)
+                {
+                    var full = Path.GetFullPath(p);
+                    if (Directory.Exists(full)) { dbdDir = full; break; }
+                }
+            }
+            if (string.IsNullOrWhiteSpace(dbdDir))
+            {
+                Console.WriteLine("[patchmap] generation requires --dbd-dir (WoWDBDefs/definitions). Not found in common locations.");
+                return null;
+            }
+
+            // Ensure source DBC dir (prefer provided, else infer from input folder, else extract from MPQs)
+            string? srcDbcDir = null;
+            if (!string.IsNullOrWhiteSpace(srcDbcDirOpt) && Directory.Exists(srcDbcDirOpt)) srcDbcDir = srcDbcDirOpt;
+            if (string.IsNullOrWhiteSpace(srcDbcDir))
+            {
+                var wdtDir = Path.GetDirectoryName(Path.GetFullPath(inputPath)) ?? string.Empty;
+                var cur = new DirectoryInfo(wdtDir);
+                for (int i = 0; i < 8 && cur != null; i++)
+                {
+                    var cand = Path.Combine(cur.FullName, "DBFilesClient");
+                    if (Directory.Exists(cand)) { srcDbcDir = cand; break; }
+                    cur = cur.Parent;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(srcDbcDir))
+            {
+                srcDbcDir = EnsureDbcDirFromClient(alias, null, srcClientDirOpt, outRoot);
+            }
+            if (string.IsNullOrWhiteSpace(srcDbcDir)) { Console.WriteLine("[patchmap] generation requires source DBCs via --src-dbc-dir or --src-client-path"); return null; }
+
+            var inputs = new List<(string build, string dir)> { (alias, srcDbcDir), ("3.3.5", lkDbcResolved!) };
+            if (!string.IsNullOrWhiteSpace(pivot060DirOpt) && Directory.Exists(pivot060DirOpt))
+            {
+                inputs.Add(("0.6.0", pivot060DirOpt));
+            }
+            else if (!string.IsNullOrWhiteSpace(pivot060ClientDirOpt))
+            {
+                var pivot060 = EnsureDbcDirFromClient("0.6.0", null, pivot060ClientDirOpt, outRoot);
+                if (!string.IsNullOrWhiteSpace(pivot060)) inputs.Add(("0.6.0", pivot060));
+            }
+
+            var outBase = Path.Combine(outRoot, "dbctool_outputs");
+            Directory.CreateDirectory(outBase);
+            Console.WriteLine($"[patchmap] generating crosswalks -> {outBase} (alias={alias}, via060={(chainVia060 ? "on" : "off")})");
+            var cmd = new CompareAreaV2Command();
+            var rc = cmd.Run(dbdDir, outBase, "enUS", inputs, chainVia060);
+            if (rc != 0)
+            {
+                Console.WriteLine($"[patchmap] generation failed with exit code {rc}");
+                return null;
+            }
+            var compareV2 = Path.Combine(outBase, alias, "compare", "v2");
+            return compareV2;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[patchmap] generation error: {ex.Message}");
+            return null;
+        }
+    }
+
     private static int RunAnalyzeMapAdts(Dictionary<string, string> opts)
     {
         Require(opts, "map-dir");
@@ -1183,6 +1325,25 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
         Console.WriteLine("    One-shot: rollback + (optional) fix-holes/MCSH + LK export with AreaTable mapping");
+        Console.WriteLine("    Crosswalk mapping (strict, map-locked):");
+        Console.WriteLine("      --crosswalk-dir <dir>         Preferred per-run CSV directory (Area_patch_crosswalk_*.csv)");
+        Console.WriteLine("      --crosswalk-file <file>       Preferred specific CSV (resolved vs dir/out roots)");
+        Console.WriteLine("      --dbctool-out-root <root>     Root of crosswalk outputs (<alias>/compare/v2|v3)");
+        Console.WriteLine("      --dbctool-patch-dir <dir>     Legacy alias for --crosswalk-dir");
+        Console.WriteLine("      --dbctool-patch-file <file>   Legacy alias for --crosswalk-file");
+        Console.WriteLine("      --lk-dbc-dir <dir>            LK DBFilesClient (required for guard and auto-gen)");
+        Console.WriteLine("      --strict-areaid [true|false]  Strict map-locked patching (default true)");
+        Console.WriteLine("      --report-areaid               Write per-ADT and summary CSVs");
+        Console.WriteLine("      --copy-crosswalks             Copy used CSVs into <session>/reports/crosswalk");
+        Console.WriteLine("    Auto-generate crosswalks (default on when none found):");
+        Console.WriteLine("      --auto-crosswalks [true|false]  Enable CSV generation via DBCTool.V2 (default true)");
+        Console.WriteLine("      --dbd-dir <dir>                WoWDBDefs/definitions path (required if not probed)");
+        Console.WriteLine("      --src-dbc-dir <dir>            Source (Alpha) DBFilesClient directory");
+        Console.WriteLine("      --src-client-path <dir>        Source client root (MPQs); auto-extract DBCs when no --src-dbc-dir");
+        Console.WriteLine("      --lk-client-path <dir>         LK client root (MPQs); auto-extract DBCs when no --lk-dbc-dir");
+        Console.WriteLine("      --pivot-060-dbc-dir <dir>      Optional 0.6.0 DBFilesClient for pivot");
+        Console.WriteLine("      --pivot-060-client-path <dir>  Optional 0.6.0 client root (MPQs) for pivot extraction");
+        Console.WriteLine("      --chain-via-060                Force pivot chain resolution via 0.6.0");
         Console.WriteLine();
         Console.WriteLine("  lk-to-alpha  --lk-adts-dir <dir> --map <name> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh]");
         Console.WriteLine("    Patch existing LK ADTs: bury placements with UniqueID > N, optionally clear holes (MCRF-gated) and zero MCSH");
@@ -2524,13 +2685,22 @@ internal static class Program
         var lkOutDefault = Path.Combine(outRoot, "lk_adts", "World", "Maps", mapName);
         var lkOutDir = opts.GetValueOrDefault("lk-out", lkOutDefault);
         var lkClientPath = opts.GetValueOrDefault("lk-client-path", "");
+        var srcClientPath = opts.GetValueOrDefault("src-client-path", "");
         var areaRemapJsonPath = opts.GetValueOrDefault("area-remap-json", "");
         var defaultUnmapped = TryParseInt(opts, "default-unmapped") ?? 0;
         var dbctoolOutRoot = opts.GetValueOrDefault("dbctool-out-root", "");
+        var strictAreaId = !opts.TryGetValue("strict-areaid", out var strictStr) || !string.Equals(strictStr, "false", StringComparison.OrdinalIgnoreCase);
+        var reportAreaId = opts.ContainsKey("report-areaid");
+        var copyCrosswalks = opts.ContainsKey("copy-crosswalks");
+        var autoCrosswalks = !opts.TryGetValue("auto-crosswalks", out var autoX) || !string.Equals(autoX, "false", StringComparison.OrdinalIgnoreCase);
+        var chainVia060 = opts.ContainsKey("chain-via-060");
         // support preferred aliases --crosswalk-dir/--crosswalk-file while keeping legacy dbctool-* flags
         var dbctoolPatchDir = opts.ContainsKey("dbctool-patch-dir") ? opts["dbctool-patch-dir"] : opts.GetValueOrDefault("crosswalk-dir", "");
         var dbctoolPatchFile = opts.ContainsKey("dbctool-patch-file") ? opts["dbctool-patch-file"] : opts.GetValueOrDefault("crosswalk-file", "");
         var lkDbcDir = opts.GetValueOrDefault("lk-dbc-dir", "");
+        var dbdDirOpt = GetOption(opts, "dbd-dir");
+        var srcDbcDirOpt = GetOption(opts, "src-dbc-dir");
+        var pivot060DirOpt = GetOption(opts, "pivot-060-dbc-dir");
 
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
@@ -2559,6 +2729,8 @@ internal static class Program
             Console.WriteLine($"LK ADT Out:     {lkOutDir}");
             if (!string.IsNullOrWhiteSpace(lkClientPath)) Console.WriteLine($"LK Client:      {lkClientPath}");
             if (!string.IsNullOrWhiteSpace(areaRemapJsonPath)) Console.WriteLine($"Area Map JSON:  {areaRemapJsonPath}");
+            Console.WriteLine($"Strict AreaIDs: {(strictAreaId ? "true" : "false")}");
+            if (reportAreaId) Console.WriteLine("Option:         --report-areaid (write summary CSV)");
         }
         Console.WriteLine();
 
@@ -2855,15 +3027,76 @@ internal static class Program
 
                     // Load crosswalk patch mapping (CSV) and resolve current map id for guard
                     var aliasUsed = ResolveSrcAlias(GetOption(opts, "version"), inputPath);
-                    var patchMap = LoadPatchMapping(aliasUsed, dbctoolOutRoot, dbctoolPatchDir, dbctoolPatchFile);
+                    var (patchMap, loadedFiles) = LoadPatchMapping(aliasUsed, dbctoolOutRoot, dbctoolPatchDir, dbctoolPatchFile);
                     int currentMapId = ResolveMapIdFromOptions(dbctoolOutRoot, lkDbcDir, mapName);
                     if (patchMap != null)
                     {
-                        Console.WriteLine($"[patchmap] loaded crosswalks: per-map={patchMap.PerMapCount} global={patchMap.GlobalCount}");
+                        Console.WriteLine($"[patchmap] loaded crosswalks: per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} files={loadedFiles.Count}");
+                        if (copyCrosswalks && loadedFiles.Count > 0)
+                        {
+                            var cwOutDir = Path.Combine(outRoot, "reports", "crosswalk");
+                            Directory.CreateDirectory(cwOutDir);
+                            int copied = 0;
+                            foreach (var f in loadedFiles)
+                            {
+                                try
+                                {
+                                    var dest = Path.Combine(cwOutDir, Path.GetFileName(f));
+                                    File.Copy(f, dest, true);
+                                    copied++;
+                                }
+                                catch { }
+                            }
+                            Console.WriteLine($"[patchmap] copied {copied}/{loadedFiles.Count} CSVs to: {cwOutDir}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("[patchmap] no crosswalk CSVs resolved. Will attempt auto-generation if enabled.");
+                        if (autoCrosswalks)
+                        {
+                            var genDir = GenerateCrosswalksIfNeeded(aliasUsed, inputPath, dbdDirOpt, srcDbcDirOpt, lkDbcDir, pivot060DirOpt, chainVia060, outRoot, srcClientPath, lkClientPath, opts.GetValueOrDefault("pivot-060-client-path", ""));
+                            if (!string.IsNullOrWhiteSpace(genDir) && Directory.Exists(genDir!))
+                            {
+                                var genBase = Path.Combine(outRoot, "dbctool_outputs");
+                                var reload = LoadPatchMapping(aliasUsed, genBase, genDir!, "");
+                                patchMap = reload.Map; loadedFiles = reload.Files;
+                                if (patchMap != null)
+                                {
+                                    Console.WriteLine($"[patchmap] generated crosswalks at: {genDir}");
+                                    Console.WriteLine($"[patchmap] loaded crosswalks: per-map={patchMap.PerMapCount} global={patchMap.GlobalCount} files={loadedFiles.Count}");
+                                    if (copyCrosswalks && loadedFiles.Count > 0)
+                                    {
+                                        var cwOutDir = Path.Combine(outRoot, "reports", "crosswalk");
+                                        Directory.CreateDirectory(cwOutDir);
+                                        int copied = 0;
+                                        foreach (var f in loadedFiles)
+                                        {
+                                            try { File.Copy(f, Path.Combine(cwOutDir, Path.GetFileName(f)), true); copied++; } catch { }
+                                        }
+                                        Console.WriteLine($"[patchmap] copied {copied}/{loadedFiles.Count} CSVs to: {cwOutDir}");
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine("[patchmap] generation completed but mapping reload failed; AreaIDs will remain 0 in strict mode.");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("[patchmap] auto-generation failed or prerequisites missing. Provide --dbctool-patch-dir or fix inputs.");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("[patchmap] auto-generation disabled. Pass --auto-crosswalks (default) or provide --dbctool-patch-dir.");
+                        }
                     }
 
                     Directory.CreateDirectory(lkOutDir);
                     int written = 0;
+                    long totalAreaPresent = 0, totalAreaPatched = 0, totalAreaMapped = 0;
+                    var perAdtRows = new List<string>();
                     foreach (var adtNum2 in existingAfter)
                     {
                         int adtOff2 = adtOffsetsAfter[adtNum2];
@@ -2879,10 +3112,18 @@ internal static class Program
                             var outFile = Path.Combine(lkOutDir, $"{mapName}_{adtNum2 % 64}_{adtNum2 / 64}.adt");
                             try
                             {
-                                var (present, patched) = PatchMcnkAreaIdsOnDiskV2(outFile, mapName, alphaAreaIds, patchMap, currentMapId);
-                                if (present > 0 && patched >= 0 && written < 4)
+                                var (present, patched, mapped) = PatchMcnkAreaIdsOnDiskV2(outFile, mapName, alphaAreaIds, patchMap, currentMapId, strictAreaId, chainVia060);
+                                totalAreaPresent += present; totalAreaPatched += patched; totalAreaMapped += mapped;
+                                if (reportAreaId)
                                 {
-                                    Console.WriteLine($"  [AreaIds] {Path.GetFileName(outFile)} present={present} patched={patched}");
+                                    var fname = Path.GetFileName(outFile);
+                                    var unmatched = Math.Max(0, present - mapped);
+                                    perAdtRows.Add($"{fname},{present},{mapped},{patched},{unmatched}");
+                                }
+                                if (present > 0 && written < 4)
+                                {
+                                    var unmatched = Math.Max(0, present - mapped);
+                                    Console.WriteLine($"  [AreaIds] {Path.GetFileName(outFile)} present={present} mapped={mapped} patched={patched} unmatched={unmatched}");
                                 }
                             }
                             catch (Exception ex)
@@ -2894,6 +3135,36 @@ internal static class Program
                         if (written % 50 == 0) Console.WriteLine($"  [lk] Wrote {written}/{existingAfter.Count} ADTs...");
                     }
                     Console.WriteLine($"[ok] Exported {written}/{existingAfter.Count} LK ADTs to: {lkOutDir}");
+                    // Also emit LK WDT alongside LK ADTs: convert modified Alpha WDT -> LK WDT and place as <mapName>.wdt
+                    try
+                    {
+                        var wdtAlphaForLk = new WdtAlpha(outputPath);
+                        var wdtLk = wdtAlphaForLk.ToWdt();
+                        // Write using library's default naming (Azeroth.wdt_new), then rename to Azeroth.wdt
+                        wdtLk.ToFile(lkOutDir);
+                        var emitted = Path.Combine(lkOutDir, Path.GetFileName(outputPath) + "_new");
+                        var desired = Path.Combine(lkOutDir, mapName + ".wdt");
+                        try { if (File.Exists(desired)) File.Delete(desired); } catch { /* best-effort */ }
+                        if (File.Exists(emitted)) File.Move(emitted, desired, overwrite: true);
+                        Console.WriteLine($"[lk] Wrote LK WDT: {desired}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[warn] Failed to write LK WDT: {ex.Message}");
+                    }
+                    if (patchMap != null)
+                    {
+                        var totalUnmatched = Math.Max(0, totalAreaPresent - totalAreaMapped);
+                        Console.WriteLine($"[AreaIds] summary: present={totalAreaPresent} mapped={totalAreaMapped} patched={totalAreaPatched} unmatched={totalUnmatched}");
+                        if (reportAreaId)
+                        {
+                            var reportDir = Path.Combine(outRoot, "reports");
+                            Directory.CreateDirectory(reportDir);
+                            var reportPath = Path.Combine(reportDir, $"areaid_patch_summary_{mapName}.csv");
+                            File.WriteAllLines(reportPath, new[]{"file,present,mapped,patched,unmatched"}.Concat(perAdtRows));
+                            Console.WriteLine($"[AreaIds] report: {reportPath}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -2910,12 +3181,13 @@ internal static class Program
     }
 
     // === Crosswalk integration helpers ===
-    private static DbcPatchMapping? LoadPatchMapping(string alias, string dbctoolOutRoot, string patchDir, string patchFile)
+    private static (DbcPatchMapping? Map, List<string> Files) LoadPatchMapping(string alias, string dbctoolOutRoot, string patchDir, string patchFile)
     {
         try
         {
             bool any = false;
             var map = new DbcPatchMapping();
+            var loaded = new List<string>();
 
             IEnumerable<string> EnumerateCrosswalkCsvs(string dir)
             {
@@ -2936,44 +3208,43 @@ internal static class Program
                 // Resolve relative against patchDir or outRoot/<alias>/compare/v[3|2]
                 if (Path.IsPathFullyQualified(patchFile) && File.Exists(patchFile))
                 {
-                    map.LoadFile(patchFile); any = true;
+                    map.LoadFile(patchFile); any = true; loaded.Add(patchFile);
                 }
                 else
                 {
                     if (!string.IsNullOrWhiteSpace(patchDir))
                     {
                         var cand = Path.Combine(patchDir, patchFile);
-                        if (File.Exists(cand)) { map.LoadFile(cand); any = true; }
+                        if (File.Exists(cand)) { map.LoadFile(cand); any = true; loaded.Add(cand); }
                     }
                     if (!any && !string.IsNullOrWhiteSpace(dbctoolOutRoot) && !string.IsNullOrWhiteSpace(alias))
                     {
                         var v3 = Path.Combine(dbctoolOutRoot, alias, "compare", "v3", patchFile);
                         var v2 = Path.Combine(dbctoolOutRoot, alias, "compare", "v2", patchFile);
-                        if (File.Exists(v3)) { map.LoadFile(v3); any = true; }
-                        else if (File.Exists(v2)) { map.LoadFile(v2); any = true; }
+                        if (File.Exists(v3)) { map.LoadFile(v3); any = true; loaded.Add(v3); }
+                        else if (File.Exists(v2)) { map.LoadFile(v2); any = true; loaded.Add(v2); }
                     }
                 }
             }
 
             if (!any && !string.IsNullOrWhiteSpace(patchDir) && Directory.Exists(patchDir))
             {
-                foreach (var f in EnumerateCrosswalkCsvs(patchDir)) { map.LoadFile(f); any = true; }
+                foreach (var f in EnumerateCrosswalkCsvs(patchDir)) { map.LoadFile(f); any = true; loaded.Add(f); }
             }
 
             if (!any && !string.IsNullOrWhiteSpace(dbctoolOutRoot) && !string.IsNullOrWhiteSpace(alias))
             {
                 var v3Dir = Path.Combine(dbctoolOutRoot, alias, "compare", "v3");
                 var v2Dir = Path.Combine(dbctoolOutRoot, alias, "compare", "v2");
-                if (Directory.Exists(v3Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v3Dir)) { map.LoadFile(f); any = true; } }
-                if (Directory.Exists(v2Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v2Dir)) { map.LoadFile(f); any = true; } }
+                if (Directory.Exists(v3Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v3Dir)) { map.LoadFile(f); any = true; loaded.Add(f); } }
+                if (Directory.Exists(v2Dir)) { foreach (var f in EnumerateCrosswalkCsvs(v2Dir)) { map.LoadFile(f); any = true; loaded.Add(f); } }
             }
-
-            return any ? map : null;
+            return any ? (map, loaded) : (null, new List<string>());
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[warn] Failed to load crosswalk mapping: {ex.Message}");
-            return null;
+            return (null, new List<string>());
         }
     }
 
@@ -3084,7 +3355,7 @@ internal static class Program
         };
     }
 
-    private static (int present, int patched) PatchMcnkAreaIdsOnDiskV2(string filePath, string mapName, IReadOnlyList<int> alphaAreaIds, DbcPatchMapping patchMap, int currentMapId)
+    private static (int present, int patched, int mapped) PatchMcnkAreaIdsOnDiskV2(string filePath, string mapName, IReadOnlyList<int> alphaAreaIds, DbcPatchMapping patchMap, int currentMapId, bool strictMapLocked, bool chainVia060)
     {
         using var fs = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, bufferSize: 65536, options: FileOptions.RandomAccess);
         using var br = new BinaryReader(fs);
@@ -3103,7 +3374,7 @@ internal static class Program
             fs.Position = dpos + sz + ((sz & 1) == 1 ? 1 : 0);
         }
 
-        int present = 0, patched = 0;
+        int present = 0, patched = 0, mappedCount = 0;
         if (mcinDataPos >= 0 && mcinSize >= 16)
         {
             // Pre-read MCIN
@@ -3135,15 +3406,20 @@ internal static class Program
 
                 if (aIdNum > 0)
                 {
-                    if (subLo > 0 && patchMap.TryMapSubZone(zoneBase, subLo, currentMapId, out var idSub, out _)) { Accept(idSub); }
-                    if (!mapped && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var byName)) { Accept(byName); }
-                    if (!mapped && patchMap.TryMapBySrcAreaNumber(aIdNum, out var exactId, out _)) { Accept(exactId); }
-                    if (!mapped && patchMap.TryMapViaMid(currentMapId, aIdNum, out var midId, out _, out _)) { Accept(midId); }
-                    if (!mapped && currentMapId >= 0 && patchMap.TryMapByTargetViaFirst(currentMapId, aIdNum, out var numMap, out _)) { Accept(numMap); }
+                    if (currentMapId >= 0 && patchMap.TryMapByTarget(currentMapId, aIdNum, out var numMap)) { Accept(numMap); }
                     if (!mapped)
                     {
                         var tgtName = ResolveTargetMapNameFromId(currentMapId);
-                        if (!string.IsNullOrWhiteSpace(tgtName) && patchMap.TryMapByTargetNameViaFirst(tgtName!, aIdNum, out var numMapName, out _)) { Accept(numMapName); }
+                        if (!string.IsNullOrWhiteSpace(tgtName) && patchMap.TryMapByTargetName(tgtName!, aIdNum, out var numMapName)) { Accept(numMapName); }
+                    }
+                    if (!mapped && patchMap.TryMapBySrcAreaSimple(mapName, aIdNum, out var byName)) { Accept(byName); }
+                    if (!mapped && !strictMapLocked)
+                    {
+                        if (patchMap.TryMapBySrcAreaNumber(aIdNum, out var exactId, out _)) { Accept(exactId); }
+                    }
+                    if (!mapped && chainVia060)
+                    {
+                        if (patchMap.TryMapViaMid(currentMapId, aIdNum, out var midId, out _, out _)) { Accept(midId); }
                     }
                 }
 
@@ -3155,6 +3431,7 @@ internal static class Program
                     fs.Position = areaFieldPos;
                     uint existing = br.ReadUInt32();
                     int effective = mapped && lkAreaId > 0 ? lkAreaId : 0;
+                    if (mapped && lkAreaId > 0) mappedCount++;
                     if (existing != (uint)effective)
                     {
                         fs.Position = areaFieldPos;
@@ -3165,7 +3442,7 @@ internal static class Program
                 }
             }
         }
-        return (present, patched);
+        return (present, patched, mappedCount);
     }
 
     private static List<int> FindAllChunks(byte[] data, string chunkName)

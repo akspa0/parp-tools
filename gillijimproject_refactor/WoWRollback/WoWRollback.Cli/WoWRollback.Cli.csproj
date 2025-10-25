@@ -11,6 +11,7 @@
     <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
     <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\lib\WoWTools.Minimaps\StormLibWrapper\StormLib.dll">
