@@ -1,8 +1,11 @@
 # Product Context
 
-- Why: Modernize legacy tooling into a maintainable, reusable .NET library with a thin CLI, enabling safer and faster ADT writing.
-- Users: Internal devs converting WoW map assets (Alpha → Lich King).
-- UX:
-  - Library: documented public API, stable semantic versioning, clear exceptions.
-  - CLI: simple args, clear logging, stable outputs identical to parity phase.
-- Constraints: Maintain LK behavior and output compatibility; LK-only scope (Cataclysm excluded) until integration is stable.
+## Users
+- Technical artists and engineers maintaining Alpha-to-Lich King world data conversions.
+
+## Problem
+- RoundTrip CLI should validate byte-for-byte parity when converting Alpha ADTs through LK build pipelines, but current runs zero out `MCLY`/`MCAL` data, blocking verification.
+
+## Desired Experience
+- Engineers run automated tests that confirm extracts retain original Alpha chunk bytes before rebuilding LK ADTs.
+- RoundTrip CLI reports clean parity, enabling confident refactors without manual diffing.
