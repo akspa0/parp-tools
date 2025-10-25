@@ -11,6 +11,14 @@ dotnet run --project WoWDataPlot -- visualize \
   --wdt ..\test_data\0.5.3\tree\World\Maps\Kalidar\Kalidar.wdt \
   --output-dir .\Kalidar_output
 ```
+
+---
+
+## End-to-End Pipeline (Recommended Read)
+
+For a step-by-step guide from Alpha WDT → UniqueID CSVs → crosswalks → LK ADTs (+WDT) → Viewer, see:
+
+- `docs/pipeline/alpha-to-lk-end-to-end.md`
 See: `WoWDataPlot/README.md`.
 
 ### 2) Interactive Viewer (Analyze + Serve)
@@ -18,7 +26,7 @@ See: `WoWDataPlot/README.md`.
 ```powershell
 dotnet run --project WoWRollback.Cli -- analyze-map-adts \
   --map development \
-  --map-dir "..\test_data\development\World\Maps\development" \
+  --input-dir "..\test_data\development\World\Maps\development" \
   --out analysis_output
 
 dotnet run --project WoWRollback.Cli -- serve-viewer --viewer-dir analysis_output\viewer
@@ -96,7 +104,7 @@ cd WoWRollback
 # Step 1: Analyze ADT files
 dotnet run --project WoWRollback.Cli -- analyze-map-adts \
   --map development \
-  --map-dir "..\test_data\development\World\Maps\development\" \
+  --input-dir "..\test_data\development\World\Maps\development\" \
   --out "analysis_output"
 
 # Step 2: Start built-in web server (auto-detects viewer location)
@@ -346,7 +354,7 @@ WoWRollback/
 ```powershell
 dotnet run --project WoWRollback.Cli -- analyze-map-adts \
   --map <name> \
-  --map-dir <path> \
+  --input-dir <path> \
   [--out <dir>]
 ```
 
@@ -459,6 +467,7 @@ dotnet run -c Release --project WoWRollback.Cli -- \
 - **Burial:** `--max-uniqueid` removes later work; `--bury-depth` optional (default `-5000`).
 - **Terrain fixes:** `--fix-holes` clears MCNK hole flags around buried-placement neighborhoods. `--disable-mcsh` zeros baked shadows.
 - **LK output:** `--lk-out` root directory for converted ADTs.
+  - Also writes a fresh `<map>.wdt` in the same folder.
 - **Area IDs:**
   - If `--area-remap-json` provided, it is used verbatim (AlphaAreaId→LKAreaId).
   - Else, LK `AreaTable.dbc` is read from `--lk-client-path` and Alpha IDs passthrough if present; others become `--default-unmapped` (default `0`).
