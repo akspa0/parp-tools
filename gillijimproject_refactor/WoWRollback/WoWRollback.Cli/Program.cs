@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -450,24 +451,55 @@ internal static class Program
         Require(opts, "max-uniqueid");
 
         var mapName = opts.GetValueOrDefault("map", Path.GetFileName(Path.GetFullPath(inputDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
-        var outRoot = GetOption(opts, "out", Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputDir)) ?? ".", mapName + "_out"))!;
+        var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
+        var userOut = GetOption(opts, "out");
+        uint rangeMinLabel, rangeMaxLabel;
+        string outRoot;
+        if (string.IsNullOrWhiteSpace(userOut))
+        {
+            outRoot = ResolveSessionRoot(opts, mapName, maxUniqueId, out rangeMinLabel, out rangeMaxLabel);
+        }
+        else
+        {
+            outRoot = userOut!;
+            if (!TryComputeRangeFromPresetOption(opts, out rangeMinLabel, out var _presetMaxTmp))
+            {
+                rangeMinLabel = 0;
+            }
+            rangeMaxLabel = maxUniqueId;
+        }
         Directory.CreateDirectory(outRoot);
+        var lkAdtRoot = Path.Combine(outRoot, "lk_adts", "World", "Maps", mapName);
 
         var buryDepth = opts.TryGetValue("bury-depth", out var buryStr) && float.TryParse(buryStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var bd)
             ? bd : -5000.0f;
-        var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
         var fixHoles = opts.ContainsKey("fix-holes");
         var disableMcsh = opts.ContainsKey("disable-mcsh");
+        var holesScope = opts.TryGetValue("holes-scope", out var holesScopeStr) ? holesScopeStr.ToLowerInvariant() : "self";
+        var holesNeighbors = string.Equals(holesScope, "neighbors", StringComparison.OrdinalIgnoreCase);
+        var holesPreserveWmo = !(opts.TryGetValue("holes-wmo-preserve", out var preserveStr) && string.Equals(preserveStr, "false", StringComparison.OrdinalIgnoreCase));
 
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("          🎮 WoWRollback - LK PATCHER");
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine($"Map:            {mapName}");
         Console.WriteLine($"LK ADT Dir:     {inputDir}");
-        Console.WriteLine($"Output Dir:     {outRoot}");
+        Console.WriteLine($"Session Dir:    {outRoot}");
+        Console.WriteLine($"LK Output Dir:  {lkAdtRoot}");
         Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
         Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
-        if (fixHoles) Console.WriteLine("Option:         --fix-holes (clear terrain hole masks)");
+        // Display label range (no preset for LK patcher unless provided via opts)
+        uint presetMinTmp2, presetMaxTmp2;
+        if (TryComputeRangeFromPresetOption(opts, out presetMinTmp2, out presetMaxTmp2))
+        {
+            Console.WriteLine($"Preset Range:   {presetMinTmp2}-{presetMaxTmp2}");
+        }
+        Console.WriteLine($"Session Label:  {rangeMinLabel}-{rangeMaxLabel}");
+        Console.WriteLine($"Bury Threshold: UniqueID > {maxUniqueId:N0}");
+        if (fixHoles)
+        {
+            Console.WriteLine($"Option:         --fix-holes (scope={holesScope}, preserve-wmo={holesPreserveWmo.ToString().ToLowerInvariant()})");
+        }
         if (disableMcsh) Console.WriteLine("Option:         --disable-mcsh (zero baked shadows)");
         Console.WriteLine();
 
@@ -569,6 +601,7 @@ internal static class Program
                     var chunkHasHoles = new bool[256];
                     var holesOffsetByIdx = new int[256];
                     var chunkHasBuriedRef = new bool[256];
+                    var chunkHasKeepWmo = new bool[256];
                     Array.Fill(holesOffsetByIdx, -1);
 
                     // Pre-scan holes and buried references
@@ -611,12 +644,19 @@ internal static class Program
                                         if (idx >= 0 && idx < modfBuried.Length && modfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
                                     }
                                 }
+                                if (holesPreserveWmo && !chunkHasKeepWmo[i])
+                                {
+                                    foreach (var idx in wmoIdx)
+                                    {
+                                        if (idx >= 0 && idx < modfBuried.Length && !modfBuried[idx]) { chunkHasKeepWmo[i] = true; break; }
+                                    }
+                                }
                             }
                         }
                         catch { /* best-effort */ }
                     }
 
-                    // Clear holes in self + 8-neighbors of chunks that reference buried placements
+                    // Clear holes with scope and WMO-preserve guard
                     if (fixHoles)
                     {
                         var toClear = new bool[256];
@@ -628,10 +668,15 @@ internal static class Program
                             {
                                 for (int dx = -1; dx <= 1; dx++)
                                 {
+                                    if (!holesNeighbors && (dx != 0 || dy != 0)) continue;
                                     int nx = cx + dx, ny = cy + dy;
                                     if (nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
                                     int j = ny * 16 + nx;
-                                    if (chunkHasHoles[j]) toClear[j] = true;
+                                    if (chunkHasHoles[j])
+                                    {
+                                        if (!(holesPreserveWmo && chunkHasKeepWmo[j]))
+                                            toClear[j] = true;
+                                    }
                                 }
                             }
                         }
@@ -678,7 +723,7 @@ internal static class Program
 
             // Write output preserving relative structure
             var rel = Path.GetRelativePath(inputDir, inPath);
-            var outPath = Path.Combine(outRoot, rel);
+            var outPath = Path.Combine(lkAdtRoot, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
             File.WriteAllBytes(outPath, bytes);
             filesProcessed++;
@@ -1136,10 +1181,10 @@ internal static class Program
         Console.WriteLine("    --lk-dbc-dir Directory with extracted LK DBCs (Map.dbc/AreaTable.dbc), else read from --lk-client-path");
         Console.WriteLine("    Default bury-depth = -5000.0, default out dir = <input_basename>_out next to input");
         Console.WriteLine();
-        Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
+        Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
         Console.WriteLine("    One-shot: rollback + (optional) fix-holes/MCSH + LK export with AreaTable mapping");
         Console.WriteLine();
-        Console.WriteLine("  lk-to-alpha  --lk-adts-dir <dir> --map <name> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh]");
+        Console.WriteLine("  lk-to-alpha  --lk-adts-dir <dir> --map <name> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh]");
         Console.WriteLine("    Patch existing LK ADTs: bury placements with UniqueID > N, optionally clear holes (MCRF-gated) and zero MCSH");
         Console.WriteLine();
         Console.WriteLine("  probe-archive    --client-path <dir> [--map <name>] [--limit <n>]");
@@ -2081,6 +2126,100 @@ internal static class Program
     private static string? GetOption(Dictionary<string, string> opts, string key, string? fallback = null) =>
         opts.TryGetValue(key, out var value) ? value : fallback;
 
+    // Build an auto-named session root like: outputs/<prefix?>{Map}-{min}-{max}_timestamp
+    private static string ResolveSessionRoot(Dictionary<string, string> opts, string mapName, uint maxUniqueId, out uint rangeMin, out uint rangeMax)
+    {
+        var outputsRoot = opts.GetValueOrDefault("outputs-root", "outputs");
+        var prefix = opts.GetValueOrDefault("prefix", "");
+        var noTs = opts.ContainsKey("no-timestamp");
+        var tsFmt = opts.GetValueOrDefault("timestamp-format", "yyyyMMdd-HHmmss");
+
+        // Range label resolution precedence: --id-range > preset-json scan > 0-maxUniqueId
+        var idRangeSpec = GetOption(opts, "id-range");
+        if (!TryParseRangeOverride(idRangeSpec, out rangeMin, out rangeMax))
+        {
+            if (!TryComputeRangeFromPresetOption(opts, out rangeMin, out var presetMax))
+            {
+                rangeMin = 0; rangeMax = maxUniqueId;
+            }
+            else
+            {
+                // Label min from preset; label max must reflect the actual run ceiling
+                rangeMax = maxUniqueId;
+            }
+        }
+
+        var ts = noTs ? string.Empty : DateTime.UtcNow.ToString(tsFmt, CultureInfo.InvariantCulture);
+        var name = string.IsNullOrEmpty(ts)
+            ? $"{prefix}{mapName}-{rangeMin}-{rangeMax}"
+            : $"{prefix}{mapName}-{rangeMin}-{rangeMax}_{ts}";
+        return Path.Combine(outputsRoot, name);
+    }
+
+    private static bool TryParseRangeOverride(string? spec, out uint min, out uint max)
+    {
+        min = 0; max = 0;
+        if (string.IsNullOrWhiteSpace(spec)) return false;
+        var parts = spec.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2) return false;
+        if (!uint.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out min)) return false;
+        if (!uint.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out max)) return false;
+        if (max < min) { var t = min; min = max; max = t; }
+        return true;
+    }
+
+    private static bool TryComputeRangeFromPresetOption(Dictionary<string, string> opts, out uint min, out uint max)
+    {
+        min = 0; max = 0;
+        if (!opts.TryGetValue("preset-json", out var path) || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return false;
+        return TryComputeRangeFromPreset(path, out min, out max);
+    }
+
+    // Minimal scan of preset JSON to find enabled ranges with min/max fields
+    private static bool TryComputeRangeFromPreset(string presetPath, out uint min, out uint max)
+    {
+        uint accMin = uint.MaxValue; uint accMax = 0;
+        try
+        {
+            using var fs = File.OpenRead(presetPath);
+            using var doc = JsonDocument.Parse(fs);
+
+            void Scan(JsonElement el)
+            {
+                switch (el.ValueKind)
+                {
+                    case JsonValueKind.Object:
+                        bool enabled = true;
+                        if (el.TryGetProperty("enabled", out var enProp) && enProp.ValueKind == JsonValueKind.False)
+                            enabled = false;
+                        if (enabled && el.TryGetProperty("min", out var minProp) && el.TryGetProperty("max", out var maxProp))
+                        {
+                            if (minProp.TryGetInt64(out var mn) && maxProp.TryGetInt64(out var mx))
+                            {
+                                if (mn < 0) mn = 0;
+                                var umin = (uint)Math.Min(uint.MaxValue, (ulong)mn);
+                                var umax = (uint)Math.Min(uint.MaxValue, (ulong)mx);
+                                if (umin < accMin) accMin = umin;
+                                if (umax > accMax) accMax = umax;
+                            }
+                        }
+                        foreach (var prop in el.EnumerateObject()) Scan(prop.Value);
+                        break;
+                    case JsonValueKind.Array:
+                        foreach (var item in el.EnumerateArray()) Scan(item);
+                        break;
+                }
+            }
+
+            Scan(doc.RootElement);
+            if (accMax == 0 && accMin == uint.MaxValue) { min = 0; max = 0; return false; }
+            if (accMin == uint.MaxValue) accMin = 0;
+            min = accMin; max = accMax; return true;
+        }
+        catch { min = 0; max = 0; return false; }
+    }
+
     private static int RunFixMinimapWebp(Dictionary<string, string> opts)
     {
         var outputDir = GetOption(opts, "out");
@@ -2348,10 +2487,7 @@ internal static class Program
 
         var inputPath = opts["input"];
         var mapName = Path.GetFileNameWithoutExtension(inputPath);
-        var defaultOut = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(inputPath)) ?? ".", mapName + "_out");
-        var outRoot = GetOption(opts, "out", defaultOut)!;
-        Directory.CreateDirectory(outRoot);
-        var outputPath = Path.Combine(outRoot, Path.GetFileName(inputPath));
+        var userOut = GetOption(opts, "out");
 
         var buryDepth = opts.TryGetValue("bury-depth", out var buryStr) && float.TryParse(buryStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var bd)
             ? bd
@@ -2359,7 +2495,32 @@ internal static class Program
         var maxUniqueId = (uint)(TryParseInt(opts, "max-uniqueid") ?? throw new ArgumentException("Missing --max-uniqueid"));
         var fixHoles = opts.ContainsKey("fix-holes");
         var disableMcsh = opts.ContainsKey("disable-mcsh");
+        var holesScope = opts.TryGetValue("holes-scope", out var holesScopeStr) ? holesScopeStr.ToLowerInvariant() : "self";
+        var holesNeighbors = string.Equals(holesScope, "neighbors", StringComparison.OrdinalIgnoreCase);
+        var holesPreserveWmo = !(opts.TryGetValue("holes-wmo-preserve", out var preserveStr) && string.Equals(preserveStr, "false", StringComparison.OrdinalIgnoreCase));
         var exportLkAdts = opts.ContainsKey("export-lk-adts");
+
+        // Resolve session and primary output paths
+        uint rangeMinLabel, rangeMaxLabel;
+        string outRoot;
+        if (string.IsNullOrWhiteSpace(userOut))
+        {
+            outRoot = ResolveSessionRoot(opts, mapName, maxUniqueId, out rangeMinLabel, out rangeMaxLabel);
+        }
+        else
+        {
+            outRoot = userOut!;
+            if (!TryComputeRangeFromPresetOption(opts, out rangeMinLabel, out var _presetMaxTmp))
+            {
+                rangeMinLabel = 0;
+            }
+            rangeMaxLabel = maxUniqueId;
+        }
+        Directory.CreateDirectory(outRoot);
+        var alphaWdtDir = Path.Combine(outRoot, "alpha_wdt");
+        Directory.CreateDirectory(alphaWdtDir);
+        var outputPath = Path.Combine(alphaWdtDir, Path.GetFileName(inputPath));
+
         var lkOutDefault = Path.Combine(outRoot, "lk_adts", "World", "Maps", mapName);
         var lkOutDir = opts.GetValueOrDefault("lk-out", lkOutDefault);
         var lkClientPath = opts.GetValueOrDefault("lk-client-path", "");
@@ -2375,10 +2536,22 @@ internal static class Program
         Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine($"Input WDT:      {inputPath}");
-        Console.WriteLine($"Output WDT:     {outputPath}");
+        Console.WriteLine($"Session Dir:    {outRoot}");
+        Console.WriteLine($"Alpha Out Dir:  {alphaWdtDir}");
         Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
         Console.WriteLine($"Bury Depth:     {buryDepth:F1}");
-        if (fixHoles) Console.WriteLine("Option:         --fix-holes (clear terrain hole masks)");
+        // Display label range and preset range for clarity
+        uint presetMinTmp, presetMaxTmp;
+        if (TryComputeRangeFromPresetOption(opts, out presetMinTmp, out presetMaxTmp))
+        {
+            Console.WriteLine($"Preset Range:   {presetMinTmp}-{presetMaxTmp}");
+        }
+        Console.WriteLine($"Session Label:  {rangeMinLabel}-{rangeMaxLabel}");
+        Console.WriteLine($"Bury Threshold: UniqueID > {maxUniqueId:N0}");
+        if (fixHoles)
+        {
+            Console.WriteLine($"Option:         --fix-holes (scope={holesScope}, preserve-wmo={holesPreserveWmo.ToString().ToLowerInvariant()})");
+        }
         if (disableMcsh) Console.WriteLine("Option:         --disable-mcsh (zero baked shadows)");
         if (exportLkAdts)
         {
@@ -2454,11 +2627,14 @@ internal static class Program
                     int mcinChunkOffset = mhdrStart + mcinRel;
                     var mcin = new Mcin(wdtBytes, mcinChunkOffset);
                     var mcnkOffsets = mcin.GetMcnkOffsets();
+                    var localHolesNeighbors = holesNeighbors;
+                    var localHolesPreserveWmo = holesPreserveWmo;
 
                     // Pre-scan: which chunks currently have holes and which reference to-be-buried placements
                     var chunkHasHoles = new bool[256];
                     var holesOffsetByIdx = new int[256];
                     var chunkHasBuriedRef = new bool[256];
+                    var chunkHasKeepWmo = new bool[256];
                     Array.Fill(holesOffsetByIdx, -1);
 
                     for (int i = 0; i < mcnkOffsets.Count && i < 256; i++)
@@ -2503,12 +2679,20 @@ internal static class Program
                                         if (idx >= 0 && idx < modfBuried.Length && modfBuried[idx]) { chunkHasBuriedRef[i] = true; break; }
                                     }
                                 }
+                                if (localHolesPreserveWmo && !chunkHasKeepWmo[i])
+                                {
+                                    // If any unburied WMO is referenced by this chunk, preserve holes
+                                    foreach (var idx in wmoIdx)
+                                    {
+                                        if (idx >= 0 && idx < modfBuried.Length && !modfBuried[idx]) { chunkHasKeepWmo[i] = true; break; }
+                                    }
+                                }
                             }
                         }
                         catch { /* best-effort */ }
                     }
 
-                    // Neighborhood-based holes clearing: clear holes on self + 8-neighbors when chunk references buried placements
+                    // Holes clearing with scope and WMO-preserve guard
                     if (fixHoles)
                     {
                         var toClear = new bool[256];
@@ -2520,10 +2704,15 @@ internal static class Program
                             {
                                 for (int dx = -1; dx <= 1; dx++)
                                 {
+                                    if (!localHolesNeighbors && (dx != 0 || dy != 0)) continue; // self-only
                                     int nx = cx + dx, ny = cy + dy;
                                     if (nx < 0 || ny < 0 || nx >= 16 || ny >= 16) continue;
                                     int j = ny * 16 + nx;
-                                    if (chunkHasHoles[j]) toClear[j] = true;
+                                    if (chunkHasHoles[j])
+                                    {
+                                        if (!(localHolesPreserveWmo && chunkHasKeepWmo[j]))
+                                            toClear[j] = true;
+                                    }
                                 }
                             }
                         }
@@ -2596,7 +2785,7 @@ internal static class Program
             {
                 var hash = md5.ComputeHash(wdtBytes);
                 var hashString = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-                var md5FilePath = Path.Combine(outRoot, Path.GetFileNameWithoutExtension(outputPath) + ".md5");
+                var md5FilePath = Path.Combine(alphaWdtDir, Path.GetFileNameWithoutExtension(outputPath) + ".md5");
                 File.WriteAllText(md5FilePath, hashString);
                 Console.WriteLine($"[ok] MD5: {hashString}");
                 Console.WriteLine($"[ok] Saved: {md5FilePath}");
