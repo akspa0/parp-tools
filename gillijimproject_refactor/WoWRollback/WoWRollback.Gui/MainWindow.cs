@@ -64,6 +64,192 @@ public partial class MainWindow : Window
         if (openPresets != null) openPresets.Click += OpenPresetsBtn_Click;
         var openCache = this.FindControl<Button>("OpenCacheBtn");
         if (openCache != null) openCache.Click += OpenCacheBtn_Click;
+
+        // Build tab hookups
+        var buildOut = this.FindControl<TextBox>("BuildOutBox");
+        if (buildOut != null) buildOut.Text = Path.Combine(_cacheRoot, "..", "output");
+        var pickOut = this.FindControl<Button>("PickBuildOutBtn"); if (pickOut != null) pickOut.Click += PickBuildOutBtn_Click;
+        var saveSel = this.FindControl<Button>("SaveSelectionPresetBtn"); if (saveSel != null) saveSel.Click += SaveSelectionPresetBtn_Click;
+        var prep = this.FindControl<Button>("PrepareBtn"); if (prep != null) prep.Click += PrepareBtn_Click;
+        var openOut = this.FindControl<Button>("OpenOutBtn"); if (openOut != null) openOut.Click += OpenOutBtn_Click;
+        var genBaseline = this.FindControl<Button>("GenBaselineBtn"); if (genBaseline != null) genBaseline.Click += GenBaselineBtn_Click;
+
+        // Filters tab hookups
+        var analyzeBtn = this.FindControl<Button>("AnalyzeFiltersBtn"); if (analyzeBtn != null) analyzeBtn.Click += AnalyzeFiltersBtn_Click;
+        var whitelistBtn = this.FindControl<Button>("WhitelistBtn"); if (whitelistBtn != null) whitelistBtn.Click += (s,e)=>MarkFilters(true);
+        var blacklistBtn = this.FindControl<Button>("BlacklistBtn"); if (blacklistBtn != null) blacklistBtn.Click += (s,e)=>MarkFilters(false);
+        var clearSelBtn = this.FindControl<Button>("ClearFilterSelBtn"); if (clearSelBtn != null) clearSelBtn.Click += (s,e)=>{ var lb=this.FindControl<ListBox>("FiltersList"); if(lb?.SelectedItems is System.Collections.IList sel) sel.Clear(); else if(lb!=null) lb.SelectedIndex=-1; };
+        var saveFiltersBtn = this.FindControl<Button>("SaveFiltersBtn"); if (saveFiltersBtn != null) saveFiltersBtn.Click += SaveFiltersBtn_Click;
+    }
+
+    private async void PickBuildOutBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select Output Folder", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("BuildOutBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private void AppendBuildLog(string line)
+    {
+        var log = this.FindControl<TextBox>("BuildLogBox"); if (log == null) return;
+        log.Text += (string.IsNullOrEmpty(log.Text) ? string.Empty : Environment.NewLine) + line;
+    }
+
+    private async void SaveSelectionPresetBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var pBox = this.FindControl<TextBox>("PresetsBox");
+            var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
+            Directory.CreateDirectory(dir!);
+            var name = "selection-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".json";
+            var path = Path.Combine(dir!, name);
+
+            var map = _currentMap;
+            var selection = _selectedTiles.Count > 0 ? _selectedTiles.ToArray() : new[] { this.FindControl<ComboBox>("TileSelectBox")?.SelectedItem as string ?? "" };
+            var tilesObj = selection.Where(s => !string.IsNullOrWhiteSpace(s)).ToDictionary(k => k, k => new { custom = new { m2 = Array.Empty<object>(), wmo = Array.Empty<object>() } });
+            var preset = new
+            {
+                dataset = "default",
+                global = new { m2 = Array.Empty<object>(), wmo = Array.Empty<object>() },
+                maps = new Dictionary<string, object> { [map] = new { tiles = tilesObj } }
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(preset, new JsonSerializerOptions { WriteIndented = true }));
+            AppendBuildLog($"Saved selection preset: {path}");
+        }
+        catch (Exception ex) { await ShowMessage("Error", ex.Message); }
+    }
+
+    private void PrepareBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        AppendBuildLog("Prepare Layers: queued (placeholder). CLI integration to be wired.");
+    }
+
+    private void OpenOutBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var box = this.FindControl<TextBox>("BuildOutBox"); var path = box?.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                Directory.CreateDirectory(path);
+                var psi = new System.Diagnostics.ProcessStartInfo { FileName = Path.GetFullPath(path), UseShellExecute = true };
+                System.Diagnostics.Process.Start(psi);
+            }
+        }
+        catch { }
+    }
+
+    private static double Percentile(IReadOnlyList<int> sorted, double p)
+    {
+        if (sorted.Count == 0) return 0;
+        var pos = (sorted.Count - 1) * p;
+        var lo = (int)Math.Floor(pos); var hi = (int)Math.Ceiling(pos);
+        if (lo == hi) return sorted[lo];
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+    }
+
+    private void GenBaselineBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        EnsureMapLoaded(map);
+        var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
+        var byTL = rows.GroupBy(r => new { r.Type, r.Layer }).OrderBy(g=>g.Key.Type).ThenBy(g=>g.Key.Layer);
+        var baselineM2 = new List<object>(); var baselineWmo = new List<object>();
+        foreach (var g in byTL)
+        {
+            var starts = g.Select(x => x.Min).OrderBy(x => x).ToList();
+            var ends = g.Select(x => x.Max).OrderBy(x => x).ToList();
+            if (starts.Count < 5) continue;
+            var minB = (int)Math.Round(Percentile(starts, 0.10));
+            var maxB = (int)Math.Round(Percentile(ends, 0.90));
+            var obj = new { layer = g.Key.Layer, min = minB, max = maxB };
+            if (string.Equals(g.Key.Type, "M2", StringComparison.OrdinalIgnoreCase)) baselineM2.Add(obj); else baselineWmo.Add(obj);
+        }
+        var pBox = this.FindControl<TextBox>("PresetsBox"); var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
+        Directory.CreateDirectory(dir!);
+        var name = $"baseline-{map}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        var path = Path.Combine(dir!, name);
+        var preset = new
+        {
+            dataset = "default",
+            global = new { baseline = new { m2 = baselineM2, wmo = baselineWmo } },
+            maps = new Dictionary<string, object>()
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(preset, new JsonSerializerOptions { WriteIndented = true }));
+        AppendBuildLog($"Generated baseline preset: {path}");
+    }
+
+    private sealed class FilterItem
+    {
+        public string Prefix { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public string Label => $"{Prefix} ({Count})";
+        public bool Whitelisted { get; set; }
+        public bool Blacklisted { get; set; }
+    }
+
+    private List<FilterItem> _filterItems = new();
+
+    private void AnalyzeFiltersBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+            var cacheBox = this.FindControl<TextBox>("CacheBox"); var root = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(root)) root = _cacheRoot;
+            var placements = Path.Combine(root!, map, "placements.csv"); if (!File.Exists(placements)) { AppendBuildLog($"No placements.csv for {map}"); return; }
+            var counts = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in File.ReadLines(placements).Skip(1))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var parts = line.Split(',');
+                if (parts.Length < 5) continue;
+                var asset = parts[4];
+                var prefix = string.IsNullOrWhiteSpace(asset) ? "Unknown" : string.Join('/', (asset.Replace('\\','/').Split('/', StringSplitOptions.RemoveEmptyEntries).Take(2)));
+                if (string.IsNullOrWhiteSpace(prefix)) prefix = "Unknown";
+                counts[prefix] = counts.GetValueOrDefault(prefix) + 1;
+            }
+            _filterItems = counts.OrderByDescending(kv=>kv.Value).Select(kv => new FilterItem { Prefix = kv.Key, Count = kv.Value }).ToList();
+            var list = this.FindControl<ListBox>("FiltersList"); if (list != null) { list.ItemsSource = _filterItems.Select(i => i.Label).ToList(); }
+            AppendBuildLog($"Analyzed filters: {_filterItems.Count} categories");
+        }
+        catch (Exception ex) { AppendBuildLog($"Analyze failed: {ex.Message}"); }
+    }
+
+    private void MarkFilters(bool whitelist)
+    {
+        var lb = this.FindControl<ListBox>("FiltersList"); if (lb == null) return;
+        var selected = lb.SelectedItems?.Cast<string>().ToList() ?? new List<string>();
+        if (selected.Count == 0) return;
+        foreach (var s in selected)
+        {
+            var idx = _filterItems.FindIndex(i => i.Label == s);
+            if (idx >= 0)
+            {
+                if (whitelist) { _filterItems[idx].Whitelisted = true; _filterItems[idx].Blacklisted = false; }
+                else { _filterItems[idx].Blacklisted = true; _filterItems[idx].Whitelisted = false; }
+            }
+        }
+        AppendBuildLog($"Marked {selected.Count} {(whitelist?"whitelisted":"blacklisted")} categories");
+    }
+
+    private async void SaveFiltersBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var wl = _filterItems.Where(i=>i.Whitelisted).Select(i=>i.Prefix).ToArray();
+            var bl = _filterItems.Where(i=>i.Blacklisted).Select(i=>i.Prefix).ToArray();
+            var pBox = this.FindControl<TextBox>("PresetsBox"); var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
+            Directory.CreateDirectory(dir!);
+            var name = $"filters-{_currentMap}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            var path = Path.Combine(dir!, name);
+            var preset = new { dataset = "default", global = new { filters = new { whitelist = wl, blacklist = bl } }, maps = new Dictionary<string, object>() };
+            File.WriteAllText(path, JsonSerializer.Serialize(preset, new JsonSerializerOptions { WriteIndented = true }));
+            AppendBuildLog($"Saved filters preset: {path}");
+        }
+        catch (Exception ex) { await ShowMessage("Error", ex.Message); }
     }
 
     private void OnOpened(object? sender, EventArgs e)

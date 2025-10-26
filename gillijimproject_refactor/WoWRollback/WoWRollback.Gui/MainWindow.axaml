@@ -103,6 +103,61 @@
           </Grid>
         </Grid>
       </TabItem>
+      <TabItem Header="Build">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <!-- Output path row -->
+          <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Output:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="BuildOutBox" Watermark="Output folder for LK files"/>
+            <Button Grid.Column="2" x:Name="PickBuildOutBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+          </Grid>
+
+          <!-- Actions row -->
+          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
+            <Button x:Name="PrepareBtn" Content="Prepare Layers"/>
+            <Button x:Name="GenBaselineBtn" Content="Generate Baseline"/>
+            <Button x:Name="BuildBtn" Content="Build Selected" IsEnabled="False"/>
+            <Button x:Name="OpenOutBtn" Content="Open Output"/>
+          </StackPanel>
+
+          <!-- Log -->
+          <Border Grid.Row="2" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ScrollViewer>
+              <TextBox x:Name="BuildLogBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap"/>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Filters">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="AnalyzeFiltersBtn" Content="Analyze"/>
+            <Button x:Name="WhitelistBtn" Content="Whitelist Selected"/>
+            <Button x:Name="BlacklistBtn" Content="Blacklist Selected"/>
+            <Button x:Name="ClearFilterSelBtn" Content="Clear Selection"/>
+            <Button x:Name="SaveFiltersBtn" Content="Save Filters to Preset"/>
+          </StackPanel>
+          <Border Grid.Row="1" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ListBox x:Name="FiltersList" SelectionMode="Multiple"/>
+          </Border>
+        </Grid>
+      </TabItem>
     </TabControl>
   </DockPanel>
 </Window>
