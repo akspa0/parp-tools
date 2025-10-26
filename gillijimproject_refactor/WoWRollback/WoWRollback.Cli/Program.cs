@@ -70,6 +70,10 @@ internal static class Program
                 case "serve-viewer":
                 case "serve":
                     return RunServeViewer(opts);
+                case "gui":
+                    return RunGui(opts);
+                case "run-preset":
+                    return RunRunPreset(opts);
                 case "fix-minimap-webp":
                     return RunFixMinimapWebp(opts);
                 case "dry-run":
@@ -288,6 +292,88 @@ internal static class Program
         }
 
         Console.WriteLine($"[ok] Resolved {resolved}/{candidates.Count} tiles (no viewer changes).");
+        return 0;
+    }
+
+    private static int RunGui(Dictionary<string, string> opts)
+    {
+        var cache = GetOption(opts, "cache") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "cache");
+        var presets = GetOption(opts, "presets") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "presets");
+        Directory.CreateDirectory(cache);
+        Directory.CreateDirectory(presets);
+
+        try
+        {
+            var proj = Path.Combine("WoWRollback", "WoWRollback.Gui");
+            var args = $"run --project \"{proj}\" -- --cache \"{cache}\" --presets \"{presets}\"";
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = args,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = false
+            };
+            using var proc = new Process { StartInfo = psi };
+            proc.OutputDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) Console.WriteLine(e.Data); };
+            proc.ErrorDataReceived += (_, e) => { if (!string.IsNullOrEmpty(e.Data)) Console.WriteLine(e.Data); };
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            proc.WaitForExit();
+            return proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[error] GUI launch failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static int RunRunPreset(Dictionary<string, string> opts)
+    {
+        var presetPath = GetOption(opts, "preset");
+        if (string.IsNullOrWhiteSpace(presetPath) || !File.Exists(presetPath))
+        {
+            Console.Error.WriteLine("[error] --preset file not found");
+            return 2;
+        }
+        var mapsOpt = GetOption(opts, "maps") ?? "all";
+        var outRoot = GetOption(opts, "out-root") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "patches");
+        var lkOut = GetOption(opts, "lk-out") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "lk_adts");
+        var dryRun = opts.ContainsKey("dry-run");
+
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine("          🎮 WoWRollback - RUN PRESET (dry)");
+        Console.WriteLine("══════════════════════════════════════════");
+        Console.WriteLine($"Preset:      {presetPath}");
+        Console.WriteLine($"Maps:        {mapsOpt}");
+        Console.WriteLine($"Out Root:    {outRoot}");
+        Console.WriteLine($"LK Out:      {lkOut}");
+        Console.WriteLine($"Mode:        {(dryRun ? "dry-run" : "execute")}");
+
+        try
+        {
+            var json = File.ReadAllText(presetPath);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            int mapCount = 0;
+            if (root.TryGetProperty("maps", out var mapsEl) && mapsEl.ValueKind == JsonValueKind.Object)
+            {
+                mapCount = mapsEl.EnumerateObject().Count();
+            }
+            Console.WriteLine($"Preset contains {mapCount} map entries.");
+        }
+        catch { Console.WriteLine("[warn] Could not parse preset; proceeding"); }
+
+        if (dryRun)
+        {
+            Console.WriteLine("[dry-run] No actions taken");
+            return 0;
+        }
+
+        Console.WriteLine("[todo] Execution not implemented in this build. Use generated CLI commands from UI for now.");
         return 0;
     }
 
@@ -1403,6 +1489,12 @@ internal static class Program
         Console.WriteLine("WoWRollback CLI - Digital Archaeology of World of Warcraft Development");
         Console.WriteLine();
         Console.WriteLine("Commands:");
+        Console.WriteLine("  gui  [--cache <dir>] [--presets <dir>]");
+        Console.WriteLine("    Launch native GUI (Avalonia) to manage presets across ALL maps");
+        Console.WriteLine();
+        Console.WriteLine("  run-preset  --preset <file> [--maps all|m1,m2] [--out-root <dir>] [--lk-out <dir>] [--dry-run]");
+        Console.WriteLine("    Apply a preset to selected maps. Dry-run prints summary only in this build");
+        Console.WriteLine();
         Console.WriteLine("  prepare-layers  [--wdt <WDT>] | [--client-root <dir> [--maps all|m1,m2]] [--out <dir>] [--gap-threshold <N>]");
         Console.WriteLine("    Build per-map layer caches (placements, tile_layers.csv, layers.json) without patching");
         Console.WriteLine("    Outputs under <out>/<map>/; usable by GUI and Layers UI");
