@@ -153,33 +153,56 @@ public partial class MainWindow : Window
 
     private void GenBaselineBtn_Click(object? sender, RoutedEventArgs e)
     {
-        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
-        EnsureMapLoaded(map);
-        var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
-        var byTL = rows.GroupBy(r => new { r.Type, r.Layer }).OrderBy(g=>g.Key.Type).ThenBy(g=>g.Key.Layer);
-        var baselineM2 = new List<object>(); var baselineWmo = new List<object>();
-        foreach (var g in byTL)
+        var maps = GetMapDirs().Select(m => m.Map).ToList();
+        var mapsDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        List<object> curM2 = new List<object>();
+        List<object> curWmo = new List<object>();
+
+        foreach (var m in maps)
         {
-            var starts = g.Select(x => x.Min).OrderBy(x => x).ToList();
-            var ends = g.Select(x => x.Max).OrderBy(x => x).ToList();
-            if (starts.Count < 5) continue;
-            var minB = (int)Math.Round(Percentile(starts, 0.10));
-            var maxB = (int)Math.Round(Percentile(ends, 0.90));
-            var obj = new { layer = g.Key.Layer, min = minB, max = maxB };
-            if (string.Equals(g.Key.Type, "M2", StringComparison.OrdinalIgnoreCase)) baselineM2.Add(obj); else baselineWmo.Add(obj);
+            EnsureMapLoaded(m);
+            var mrows = _rowsByMap.GetValueOrDefault(m) ?? new List<TileLayerRow>();
+            if (mrows.Count == 0) continue;
+
+            List<object> BuildRankedFor(string type)
+            {
+                bool isM2 = string.Equals(type, "M2", StringComparison.OrdinalIgnoreCase);
+                var ranked = mrows
+                    .Where(r => isM2 ? string.Equals(r.Type, "M2", StringComparison.OrdinalIgnoreCase) : !string.Equals(r.Type, "M2", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(r => TileKey(r.TileX, r.TileY))
+                    .SelectMany(g => g.OrderBy(x => x.Min).Select((x, idx) => new { rank = idx, x.Min, x.Max }))
+                    .ToList();
+
+                var byRank = ranked
+                    .GroupBy(x => x.rank)
+                    .Select(g => new { layer = g.Key, min = (int)Math.Round(g.Average(z => (double)z.Min)), max = (int)Math.Round(g.Average(z => (double)z.Max)) })
+                    .OrderBy(o => o.layer)
+                    .Cast<object>()
+                    .ToList();
+                return byRank;
+            }
+
+            var m2 = BuildRankedFor("M2");
+            var wmo = BuildRankedFor("WMO");
+            if (string.Equals(m, _currentMap, StringComparison.OrdinalIgnoreCase)) { curM2 = m2; curWmo = wmo; }
+            mapsDict[m] = new { baseline = new { m2 = m2, wmo = wmo } };
         }
+
+        var baselineM2 = curM2;
+        var baselineWmo = curWmo;
         var pBox = this.FindControl<TextBox>("PresetsBox"); var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
         Directory.CreateDirectory(dir!);
-        var name = $"baseline-{map}-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+        var name = $"baseline-ranked-multi-{DateTime.Now:yyyyMMdd-HHmmss}.json";
         var path = Path.Combine(dir!, name);
         var preset = new
         {
             dataset = "default",
             global = new { baseline = new { m2 = baselineM2, wmo = baselineWmo } },
-            maps = new Dictionary<string, object>()
+            maps = mapsDict
         };
         File.WriteAllText(path, JsonSerializer.Serialize(preset, new JsonSerializerOptions { WriteIndented = true }));
-        AppendBuildLog($"Generated baseline preset: {path}");
+        AppendBuildLog($"Generated baseline preset for {mapsDict.Count} map(s): {path}");
     }
 
     private sealed class FilterItem
@@ -443,6 +466,12 @@ public partial class MainWindow : Window
             gridPanel.PointerMoved += TileGrid_PointerMoved;
             gridPanel.PointerReleased += TileGrid_PointerReleased;
         }
+        var heatToggle = this.FindControl<CheckBox>("HeatmapToggle");
+        if (heatToggle != null)
+        {
+            heatToggle.Checked += (_, __) => RenderTileGrid();
+            heatToggle.Unchecked += (_, __) => RenderTileGrid();
+        }
     }
 
     private void OnTileComboSelectionChanged()
@@ -704,16 +733,67 @@ public partial class MainWindow : Window
             catch { }
         }
 
+        // Heatmap setup
+        var heatToggle = this.FindControl<CheckBox>("HeatmapToggle");
+        bool heat = heatToggle?.IsChecked == true;
+        var earliestByTile = new Dictionary<(int x, int y), int>();
+        int gMin = 0, gMax = 0;
+        if (heat)
+        {
+            try
+            {
+                foreach (var g in rows.GroupBy(r => (r.TileX, r.TileY)))
+                {
+                    var earliest = g.Min(x => x.Min);
+                    earliestByTile[(g.Key.TileX, g.Key.TileY)] = earliest;
+                }
+                if (earliestByTile.Count > 0)
+                {
+                    gMin = earliestByTile.Values.Min();
+                    gMax = earliestByTile.Values.Max();
+                }
+            }
+            catch { heat = false; }
+        }
+
+        static Avalonia.Media.Color Lerp(Avalonia.Media.Color a, Avalonia.Media.Color b, double t)
+        {
+            if (t < 0) t = 0; if (t > 1) t = 1;
+            byte A = (byte)(a.A + (b.A - a.A) * t);
+            byte R = (byte)(a.R + (b.R - a.R) * t);
+            byte G = (byte)(a.G + (b.G - a.G) * t);
+            byte B = (byte)(a.B + (b.B - a.B) * t);
+            return new Avalonia.Media.Color(A, R, G, B);
+        }
+        static Avalonia.Media.Color HeatColor(double t)
+        {
+            // 0 -> blue, 0.5 -> yellow, 1 -> red
+            var blue = Avalonia.Media.Colors.DodgerBlue;
+            var yellow = Avalonia.Media.Colors.Gold;
+            var red = Avalonia.Media.Colors.Red;
+            return t < 0.5 ? Lerp(blue, yellow, t * 2) : Lerp(yellow, red, (t - 0.5) * 2);
+        }
+
         for (int y = 0; y < 64; y++)
         {
             for (int x = 0; x < 64; x++)
             {
                 var key = (x, y);
                 var has = present.Contains(key);
-                var color = has ? 0xFF2E7D32 : 0xFF2B2B2B;
+                Avalonia.Media.Color cellColor;
+                if (heat && has && earliestByTile.TryGetValue(key, out var val) && gMax > gMin)
+                {
+                    var t = (double)(val - gMin) / (double)(gMax - gMin);
+                    cellColor = HeatColor(t);
+                }
+                else
+                {
+                    var color = has ? 0xFF2E7D32 : 0xFF2B2B2B;
+                    cellColor = new Avalonia.Media.Color((byte)((color>>24)&0xFF),(byte)((color>>16)&0xFF),(byte)((color>>8)&0xFF),(byte)(color&0xFF));
+                }
                 var b = new Border
                 {
-                    Background = new Avalonia.Media.SolidColorBrush(new Avalonia.Media.Color((byte)((color>>24)&0xFF),(byte)((color>>16)&0xFF),(byte)((color>>8)&0xFF),(byte)(color&0xFF))),
+                    Background = new Avalonia.Media.SolidColorBrush(cellColor),
                     BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.Black),
                     BorderThickness = new Thickness(1),
                     Margin = new Thickness(0.5),

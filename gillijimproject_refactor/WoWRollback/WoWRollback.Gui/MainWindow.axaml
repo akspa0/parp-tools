@@ -58,6 +58,7 @@
             <ComboBox x:Name="LayersMapCombo" Width="220"/>
             <TextBlock Text="Tile:" VerticalAlignment="Center"/>
             <ComboBox x:Name="TileSelectBox" Width="120"/>
+            <CheckBox x:Name="HeatmapToggle" Content="Heatmap" VerticalAlignment="Center"/>
           </StackPanel>
 
           <!-- Body -->
@@ -87,16 +88,16 @@
               <ScrollViewer Height="260">
                 <StackPanel x:Name="TileLayersList"/>
               </ScrollViewer>
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID"/>
-                <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID"/>
-                <ComboBox x:Name="AddRangeTypeBox" Width="100">
+              <WrapPanel>
+                <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID" Margin="0,0,6,6"/>
+                <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID" Margin="0,0,6,6"/>
+                <ComboBox x:Name="AddRangeTypeBox" Width="100" Margin="0,0,6,6">
                   <ComboBoxItem Content="M2"/>
                   <ComboBoxItem Content="WMO"/>
                 </ComboBox>
-                <Button x:Name="AddRangeBtn" Content="Add Tile Range"/>
-                <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom"/>
-              </StackPanel>
+                <Button x:Name="AddRangeBtn" Content="Add Tile Range" Margin="0,0,6,6"/>
+                <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom" Margin="0,0,0,6"/>
+              </WrapPanel>
               <TextBlock Text="Custom Ranges" FontWeight="Bold"/>
               <StackPanel x:Name="TileCustomList"/>
             </StackPanel>

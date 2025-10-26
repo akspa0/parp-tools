@@ -304,7 +304,7 @@ internal static class Program
 
         try
         {
-            var proj = Path.Combine("WoWRollback", "WoWRollback.Gui");
+            var proj = ResolveProjectCsproj("WoWRollback", "WoWRollback.Gui");
             var args = $"run --project \"{proj}\" -- --cache \"{cache}\" --presets \"{presets}\"";
             var psi = new ProcessStartInfo
             {
@@ -463,7 +463,7 @@ internal static class Program
     {
         try
         {
-            var proj = Path.Combine("WoWRollback", "WoWDataPlot");
+            var proj = ResolveProjectCsproj("WoWRollback", "WoWDataPlot");
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
@@ -604,6 +604,21 @@ internal static class Program
         return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : null;
+    }
+
+    private static string ResolveProjectCsproj(string folder, string projectName)
+    {
+        try
+        {
+            var start = new DirectoryInfo(AppContext.BaseDirectory);
+            for (var dir = start; dir != null; dir = dir.Parent)
+            {
+                var csproj = Path.Combine(dir.FullName, folder, projectName, projectName + ".csproj");
+                if (File.Exists(csproj)) return csproj;
+            }
+        }
+        catch { }
+        return Path.Combine(folder, projectName);
     }
 
     private static int RunCompareVersions(Dictionary<string, string> opts)
