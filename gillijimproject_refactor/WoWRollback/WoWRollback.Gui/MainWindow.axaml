@@ -1,0 +1,108 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:primitives="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls"
+        x:Class="WoWRollback.Gui.MainWindow"
+        Width="1280" MinWidth="1000" Height="700"
+        Title="WoWRollback GUI">
+  <DockPanel>
+    <Grid DockPanel.Dock="Top" Margin="8" >
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- Cache row -->
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache:" VerticalAlignment="Center"/>
+      <TextBox Grid.Row="0" Grid.Column="1" x:Name="CacheBox" HorizontalAlignment="Stretch" ToolTip.Tip="Cache: per-map analysis outputs (tile_layers.csv, layers.json). Produced by prepare-layers."/>
+      <Button Grid.Row="0" Grid.Column="2" x:Name="RescanBtn" Content="Rescan" MinWidth="90" Margin="6,0,0,0"/>
+      <Button Grid.Row="0" Grid.Column="3" x:Name="OpenCacheBtn" Content="Open Cache Folder" MinWidth="150" Margin="6,0,0,0"/>
+
+      <!-- Presets row -->
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Presets:" VerticalAlignment="Center"/>
+      <TextBox Grid.Row="1" Grid.Column="1" x:Name="PresetsBox" HorizontalAlignment="Stretch" ToolTip.Tip="Presets: where the GUI saves/loads selection JSON that spans ALL maps."/>
+      <TextBox Grid.Row="1" Grid.Column="2" x:Name="PresetNameBox" Width="220" Watermark="Preset name" Margin="6,0,0,0"/>
+      <Button Grid.Row="1" Grid.Column="3" x:Name="SavePresetBtn" Content="Save" MinWidth="80" Margin="6,0,0,0"/>
+      <Button Grid.Row="1" Grid.Column="4" x:Name="LoadPresetBtn" Content="Load" MinWidth="80" Margin="6,0,0,0"/>
+      <Button Grid.Row="1" Grid.Column="5" x:Name="OpenPresetsBtn" Content="Open Presets Folder" MinWidth="170" Margin="6,0,0,0"/>
+    </Grid>
+
+    <DataGrid x:Name="MapsGrid" Margin="8" AutoGenerateColumns="False" IsReadOnly="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Map" Binding="{Binding Map}" Width="*"/>
+        <DataGridTextColumn Header="tile_layers.csv" Binding="{Binding HasTileLayers}" Width="120"/>
+        <DataGridTextColumn Header="layers.json" Binding="{Binding HasLayersJson}" Width="120"/>
+        <DataGridTextColumn Header="Rows" Binding="{Binding TileLayerRows}" Width="80"/>
+        <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="2*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <TabControl Margin="8">
+      <TabItem Header="Layers">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <!-- Selection row -->
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Map:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="LayersMapCombo" Width="220"/>
+            <TextBlock Text="Tile:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="TileSelectBox" Width="120"/>
+          </StackPanel>
+
+          <!-- Body -->
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="2*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left visuals: Tile grid + Minimap preview -->
+            <StackPanel Grid.Column="0" Margin="0,8,12,0" Spacing="8">
+              <!-- Compact 64x64 tile grid -->
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <ScrollViewer Width="540" Height="540">
+                  <primitives:UniformGrid x:Name="TileGridPanel" Rows="64" Columns="64" Width="512" Height="512"/>
+                </ScrollViewer>
+              </Border>
+              <!-- Selected tile minimap preview -->
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <Image x:Name="MinimapImage" Width="256" Height="256" Stretch="Uniform"/>
+              </Border>
+            </StackPanel>
+
+            <!-- Layers panel -->
+            <StackPanel Grid.Column="1" Margin="0,8,0,0" Spacing="8">
+              <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
+              <ScrollViewer Height="260">
+                <StackPanel x:Name="TileLayersList"/>
+              </ScrollViewer>
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID"/>
+                <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID"/>
+                <ComboBox x:Name="AddRangeTypeBox" Width="100">
+                  <ComboBoxItem Content="M2"/>
+                  <ComboBoxItem Content="WMO"/>
+                </ComboBox>
+                <Button x:Name="AddRangeBtn" Content="Add Tile Range"/>
+                <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom"/>
+              </StackPanel>
+              <TextBlock Text="Custom Ranges" FontWeight="Bold"/>
+              <StackPanel x:Name="TileCustomList"/>
+            </StackPanel>
+          </Grid>
+        </Grid>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>

@@ -25,6 +25,14 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, List<TileEntry>> _baseWmo = new();
     private readonly Dictionary<string, List<TileEntry>> _customM2 = new();
     private readonly Dictionary<string, List<TileEntry>> _customWmo = new();
+    private readonly HashSet<string> _selectedTiles = new(StringComparer.OrdinalIgnoreCase);
+    private string _focusedTileKey = string.Empty;
+    private bool _isDragging = false;
+    private (int x, int y) _dragStartCell;
+    private HashSet<string>? _dragBase;
+    private SelMode _dragMode = SelMode.Replace;
+
+    private enum SelMode { Replace, Add, Remove }
 
     private sealed class TileLayerRow
     {
@@ -236,12 +244,29 @@ public partial class MainWindow : Window
 
         var tileCombo = this.FindControl<ComboBox>("TileSelectBox");
         if (tileCombo != null)
-            tileCombo.SelectionChanged += (_, __) => { RenderTileLayers(); RenderMinimap(); RenderTileCustom(); };
+            tileCombo.SelectionChanged += (_, __) => { OnTileComboSelectionChanged(); };
 
         var addBtn = this.FindControl<Button>("AddRangeBtn");
         if (addBtn != null) addBtn.Click += AddRangeBtn_Click;
         var clearBtn = this.FindControl<Button>("ClearTileCustomBtn");
         if (clearBtn != null) clearBtn.Click += ClearTileCustomBtn_Click;
+        var gridPanel = this.FindControl<Panel>("TileGridPanel");
+        if (gridPanel != null)
+        {
+            gridPanel.PointerPressed += TileGrid_PointerPressed;
+            gridPanel.PointerMoved += TileGrid_PointerMoved;
+            gridPanel.PointerReleased += TileGrid_PointerReleased;
+        }
+    }
+
+    private void OnTileComboSelectionChanged()
+    {
+        var tileCombo = this.FindControl<ComboBox>("TileSelectBox"); if (tileCombo == null) return;
+        var val = tileCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(val)) return;
+        _focusedTileKey = val;
+        _selectedTiles.Clear();
+        _selectedTiles.Add(val);
+        RenderTileLayers(); RenderMinimap(); RenderTileCustom(); RenderTileGrid();
     }
 
     private void OnMapSelected()
@@ -326,14 +351,51 @@ public partial class MainWindow : Window
     private void RenderTileLayers()
     {
         var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        var header = this.FindControl<TextBlock>("LayersHeader");
+        var host = this.FindControl<StackPanel>("TileLayersList"); if (host == null) return;
+        host.Children.Clear();
+
+        if (_selectedTiles.Count > 1)
+        {
+            if (header != null) header.Text = $"Selection Layers ({_selectedTiles.Count})";
+            var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
+            var sel = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
+            var grouped = rows.Where(r => sel.Contains(TileKey(r.TileX, r.TileY)))
+                .GroupBy(r => new { r.Type, r.Layer })
+                .Select(g => new { g.Key.Type, g.Key.Layer, Min = g.Min(x => x.Min), Max = g.Max(x => x.Max), Avg = g.Average(x => (double)x.Count) })
+                .OrderBy(g => g.Type).ThenBy(g => g.Layer).ToList();
+            foreach (var g in grouped)
+            {
+                var btn = new Button { Content = $"[{g.Type}] L{g.Layer}: {g.Min}-{g.Max} (~{g.Avg:0.0})" };
+                btn.Margin = new Thickness(0, 2, 0, 2);
+                btn.Click += (_, __) =>
+                {
+                    var minBox = this.FindControl<TextBox>("AddRangeMinBox");
+                    var maxBox = this.FindControl<TextBox>("AddRangeMaxBox");
+                    var typeBox = this.FindControl<ComboBox>("AddRangeTypeBox");
+                    if (minBox != null) minBox.Text = g.Min.ToString();
+                    if (maxBox != null) maxBox.Text = g.Max.ToString();
+                    if (typeBox != null)
+                    {
+                        for (int i = 0; i < typeBox.ItemCount; i++)
+                        {
+                            if ((typeBox.Items![i] as ComboBoxItem)?.Content?.ToString().Equals(g.Type, StringComparison.OrdinalIgnoreCase) == true)
+                            { typeBox.SelectedIndex = i; break; }
+                        }
+                    }
+                };
+                host.Children.Add(btn);
+            }
+            return;
+        }
+
+        if (header != null) header.Text = "Per‑Tile Layers";
         var tileCombo = this.FindControl<ComboBox>("TileSelectBox"); if (tileCombo == null) return;
         var val = tileCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(val)) return;
         var parts = val.Split(','); if (parts.Length != 2) return;
         if (!int.TryParse(parts[0], out var x)) return; if (!int.TryParse(parts[1], out var y)) return;
         EnsureTileBaseState(map, x, y);
         var key = TileKey(x, y);
-        var host = this.FindControl<StackPanel>("TileLayersList"); if (host == null) return;
-        host.Children.Clear();
         void addRow(TileEntry r)
         {
             var cb = new CheckBox { IsChecked = r.Enabled, Content = $"[{r.Type}] L{r.Layer}: {r.Min}-{r.Max} ({r.Count})" };
@@ -471,39 +533,104 @@ public partial class MainWindow : Window
                     Margin = new Thickness(0.5),
                     Tag = $"{x},{y}"
                 };
-                b.PointerPressed += (s, e) =>
+                // selection border styling will be applied below
+                // no per-cell handlers; we handle selection on panel-level for marquee
+                if (!string.IsNullOrEmpty(_focusedTileKey) && string.Equals(b.Tag as string, _focusedTileKey, StringComparison.OrdinalIgnoreCase))
                 {
-                    var val = (s as Border)?.Tag as string; if (string.IsNullOrWhiteSpace(val)) return;
-                    var tileCombo = this.FindControl<ComboBox>("TileSelectBox"); if (tileCombo == null) return;
-                    // Set selection to the clicked tile
-                    var seq = (tileCombo.ItemsSource as System.Collections.IEnumerable) ?? Array.Empty<object>();
-                    int idx = 0; foreach (var it in seq)
-                    {
-                        var sv = it as string; if (sv == val) { tileCombo.SelectedIndex = idx; break; }
-                        idx++;
-                    }
-                    HighlightTile(val);
-                    RenderTileLayers(); RenderMinimap(); RenderTileCustom();
-                };
+                    b.BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.Yellow);
+                    b.BorderThickness = new Thickness(2);
+                }
+                else if (_selectedTiles.Contains(b.Tag as string ?? string.Empty))
+                {
+                    b.BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.DodgerBlue);
+                    b.BorderThickness = new Thickness(2);
+                }
                 panel.Children.Add(b);
             }
         }
         // Initial highlight
         var tileComboInit = this.FindControl<ComboBox>("TileSelectBox");
-        var valInit = tileComboInit?.SelectedItem as string; if (!string.IsNullOrWhiteSpace(valInit)) HighlightTile(valInit!);
+        var valInit = tileComboInit?.SelectedItem as string;
+        if (!string.IsNullOrWhiteSpace(valInit)) { _focusedTileKey = valInit!; _selectedTiles.Clear(); _selectedTiles.Add(valInit!); }
     }
 
     private void HighlightTile(string val)
     {
-        var panel = this.FindControl<Panel>("TileGridPanel"); if (panel == null) return;
-        foreach (var child in panel.Children)
+        _focusedTileKey = val;
+        _selectedTiles.Clear();
+        _selectedTiles.Add(val);
+        RenderTileGrid();
+    }
+
+    private (int x, int y) TileFromPointer(Panel panel, PointerEventArgs e)
+    {
+        var p = e.GetPosition(panel);
+        var cw = Math.Max(1.0, panel.Bounds.Width / 64.0);
+        var ch = Math.Max(1.0, panel.Bounds.Height / 64.0);
+        var xi = (int)(p.X / cw); var yi = (int)(p.Y / ch);
+        if (xi < 0) xi = 0; if (xi > 63) xi = 63; if (yi < 0) yi = 0; if (yi > 63) yi = 63;
+        return (xi, yi);
+    }
+
+    private void ApplySelectionRect((int x, int y) cur)
+    {
+        int minx = Math.Min(_dragStartCell.x, cur.x), maxx = Math.Max(_dragStartCell.x, cur.x);
+        int miny = Math.Min(_dragStartCell.y, cur.y), maxy = Math.Max(_dragStartCell.y, cur.y);
+        var rect = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int yy = miny; yy <= maxy; yy++)
+            for (int xx = minx; xx <= maxx; xx++)
+                rect.Add(TileKey(xx, yy));
+
+        HashSet<string> next;
+        if (_dragMode == SelMode.Replace)
+            next = rect;
+        else if (_dragMode == SelMode.Add)
+            next = new HashSet<string>((_dragBase ?? new HashSet<string>()), StringComparer.OrdinalIgnoreCase) { };
+        else
+            next = new HashSet<string>((_dragBase ?? new HashSet<string>()), StringComparer.OrdinalIgnoreCase);
+
+        if (_dragMode == SelMode.Add)
+            foreach (var k in rect) next.Add(k);
+        else if (_dragMode == SelMode.Remove)
+            foreach (var k in rect) next.Remove(k);
+
+        _selectedTiles.Clear(); foreach (var k in next) _selectedTiles.Add(k);
+        _focusedTileKey = TileKey(cur.x, cur.y);
+
+        // Sync dropdown
+        var tileCombo = this.FindControl<ComboBox>("TileSelectBox");
+        if (tileCombo != null)
         {
-            if (child is Border b)
-            {
-                var isSel = string.Equals(b.Tag as string, val, StringComparison.OrdinalIgnoreCase);
-                b.BorderBrush = new Avalonia.Media.SolidColorBrush(isSel ? Avalonia.Media.Colors.Yellow : Avalonia.Media.Colors.Black);
-                b.BorderThickness = new Thickness(isSel ? 2 : 1);
-            }
+            var seq = (tileCombo.ItemsSource as System.Collections.IEnumerable) ?? Array.Empty<object>();
+            int idx = 0; foreach (var it in seq) { if ((it as string) == _focusedTileKey) { tileCombo.SelectedIndex = idx; break; } idx++; }
         }
+
+        RenderTileGrid(); RenderTileLayers(); RenderMinimap(); RenderTileCustom();
+    }
+
+    private void TileGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var panel = sender as Panel; if (panel == null) return;
+        _isDragging = true;
+        _dragStartCell = TileFromPointer(panel, e);
+        _dragBase = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
+        _dragMode = (e.KeyModifiers & KeyModifiers.Control) != 0 ? SelMode.Add : (e.KeyModifiers & KeyModifiers.Shift) != 0 ? SelMode.Remove : SelMode.Replace;
+        e.Pointer.Capture(panel);
+        ApplySelectionRect(_dragStartCell);
+    }
+
+    private void TileGrid_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_isDragging) return;
+        var panel = sender as Panel; if (panel == null) return;
+        var cur = TileFromPointer(panel, e);
+        ApplySelectionRect(cur);
+    }
+
+    private void TileGrid_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_isDragging) return;
+        _isDragging = false;
+        e.Pointer.Capture(null);
     }
 }
