@@ -11,6 +11,8 @@ using WoWDataPlot.Services;
 using WoWRollback.AnalysisModule;
 using WoWDataPlot.Models;
 using WoWRollback.Core.Services.Viewer;
+using WoWRollback.Core.Services;
+using WoWRollback.DbcModule;
 using WoWFormatLib.FileReaders;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -116,19 +118,27 @@ class Program
         rollbackCommand.SetHandler(RollbackWdt, inputWdtOption, outputWdtOption, maxUniqueIdOption, buryDepthOption);
         
         // layers-ui command (lightweight per-tile layers UI generator)
-        var layersUiCommand = new Command("layers-ui", "Generate a simple per-tile layers UI (static HTML) from an Alpha WDT");
-        var wdtOpt = new Option<FileInfo>("--wdt", "Path to Alpha WDT file") { IsRequired = true };
+        var layersUiCommand = new Command("layers-ui", "Generate a simple per-tile layers UI (static HTML) from an Alpha/LK WDT");
+        var wdtOpt = new Option<FileInfo>("--wdt", "Path to WDT file") { IsRequired = true };
         var outDirOpt = new Option<DirectoryInfo>("--output-dir", "Output directory for all results") { IsRequired = true };
         var gapOpt = new Option<int>("--gap-threshold", () => 50, "UniqueID gap size to split layers per tile");
         var minimapOpt = new Option<DirectoryInfo?>("--minimap-dir", () => null, "Directory containing minimap PNGs for the map (optional)");
+        var dbdDirOpt = new Option<DirectoryInfo?>("--dbd-dir", () => null, "Path to WoWDBDefs directory (optional, enables area name enrichment)");
+        var dbcDirOpt = new Option<DirectoryInfo?>("--dbc-dir", () => null, "Path to DBFilesClient directory (optional; deduced if omitted)");
+        var buildOpt = new Option<string?>("--build", () => null, "Build version (optional; deduced if omitted)");
+        var areaAdtDirOpt = new Option<DirectoryInfo?>("--area-adt-dir", () => null, "Directory containing ADTs to read AreaIDs from (e.g., LK World/Maps/<map>)");
         layersUiCommand.AddOption(wdtOpt);
         layersUiCommand.AddOption(outDirOpt);
         layersUiCommand.AddOption(gapOpt);
         layersUiCommand.AddOption(minimapOpt);
-        layersUiCommand.SetHandler(async (FileInfo wdt, DirectoryInfo outDir, int gap, DirectoryInfo? minimaps) =>
+        layersUiCommand.AddOption(dbdDirOpt);
+        layersUiCommand.AddOption(dbcDirOpt);
+        layersUiCommand.AddOption(buildOpt);
+        layersUiCommand.AddOption(areaAdtDirOpt);
+        layersUiCommand.SetHandler(async (FileInfo wdt, DirectoryInfo outDir, int gap, DirectoryInfo? minimaps, DirectoryInfo? dbdDir, DirectoryInfo? dbcDir, string? build, DirectoryInfo? areaAdtDir) =>
         {
-            await GenerateLayersUi(wdt, outDir, gap, minimaps);
-        }, wdtOpt, outDirOpt, gapOpt, minimapOpt);
+            await GenerateLayersUi(wdt, outDir, gap, minimaps, dbdDir, dbcDir, build, areaAdtDir);
+        }, wdtOpt, outDirOpt, gapOpt, minimapOpt, dbdDirOpt, dbcDirOpt, buildOpt, areaAdtDirOpt);
         
         // layers-ui-serve command (optional HTTP hosting via ViewerModule)
         var serveCommand = new Command("layers-ui-serve", "Serve a Layers UI folder via embedded HTTP server (ViewerModule)");
@@ -161,7 +171,7 @@ class Program
     }
 
     // === layers-ui implementation ===
-    private static async Task GenerateLayersUi(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, DirectoryInfo? minimapDir)
+    private static async Task GenerateLayersUi(FileInfo wdtFile, DirectoryInfo outputDir, int gapThreshold, DirectoryInfo? minimapDir, DirectoryInfo? dbdDir, DirectoryInfo? dbcDir, string? build, DirectoryInfo? areaAdtDir)
     {
         Console.WriteLine($"=== WoWDataPlot - Layers UI (no server) ===");
         Console.WriteLine($"Input WDT:   {wdtFile.FullName}");
@@ -205,6 +215,18 @@ class Program
         {
             Console.WriteLine($"[ERROR] Analysis failed: {result.ErrorMessage}");
             return;
+        }
+
+        // 2b) Generate areas.csv (best-effort) by scanning ADTs for AreaID majority per tile
+        try
+        {
+            Console.WriteLine("[2b/5] Computing per-tile AreaIDs (areas.csv)...");
+            GenerateAreasCsvFromWdt(wdtFile.FullName, outputDir.FullName, areaAdtDir?.FullName);
+            TryEnrichAreasCsv(wdtFile.FullName, outputDir.FullName, dbdDir, dbcDir, build);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] areas.csv generation skipped or not enriched: {ex.Message}");
         }
 
         // 3) Normalize filenames to fixed names for the UI
@@ -494,6 +516,124 @@ h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;
             }
             return "[" + string.Join(',', list) + "]";
         }
+    }
+
+    private static void GenerateAreasCsvFromWdt(string wdtPath, string outDir, string? adtDirOpt)
+    {
+        var wdtDir = Path.GetDirectoryName(wdtPath) ?? string.Empty;
+        var mapName = Path.GetFileNameWithoutExtension(wdtPath);
+        var adtDir = !string.IsNullOrWhiteSpace(adtDirOpt) ? adtDirOpt! : wdtDir;
+        if (string.IsNullOrWhiteSpace(adtDir) || string.IsNullOrWhiteSpace(mapName)) return;
+
+        var results = new Dictionary<(int x, int y), int>();
+
+        // Prefer split ADT format (_obj0.adt); fall back to regular ADTs
+        var objAdtFiles = Directory.GetFiles(adtDir, $"{mapName}_*_obj0.adt", SearchOption.TopDirectoryOnly);
+        string[] adtFiles;
+        if (objAdtFiles.Length > 0)
+        {
+            adtFiles = objAdtFiles;
+        }
+        else
+        {
+            adtFiles = Directory.GetFiles(adtDir, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
+                .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase)
+                         && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase)
+                         && !f.Contains("_lgt", StringComparison.OrdinalIgnoreCase)
+                         && !f.Contains("_occ", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        foreach (var adtFile in adtFiles)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(adtFile);
+            var parts = fileName.Split('_');
+            if (parts.Length < 3) continue;
+            if (!int.TryParse(parts[^2], out var tx)) continue;
+            if (!int.TryParse(parts[^1], out var ty)) continue;
+            var area = LkAdtReader.ReadTileMajorAreaId(adtFile);
+            if (area.HasValue)
+            {
+                results[(tx, ty)] = area.Value;
+            }
+        }
+
+        Directory.CreateDirectory(outDir);
+        var path = Path.Combine(outDir, "areas.csv");
+        using var sw = new StreamWriter(path);
+        sw.WriteLine("tile_x,tile_y,area_id,area_name,parent_area_id,parent_area_name");
+        if (results.Count > 0)
+        {
+            foreach (var kv in results.OrderBy(k => k.Key.y).ThenBy(k => k.Key.x))
+            {
+                sw.WriteLine($"{kv.Key.x},{kv.Key.y},{kv.Value},,,");
+            }
+        }
+        Console.WriteLine($"[ok] Wrote areas: {path} ({results.Count} tiles)");
+    }
+
+    private static void TryEnrichAreasCsv(string wdtPath, string outDir, DirectoryInfo? dbdDir, DirectoryInfo? dbcDirOpt, string? buildOpt)
+    {
+        var csvPath = Path.Combine(outDir, "areas.csv");
+        if (!File.Exists(csvPath)) return;
+        if (dbdDir == null || !dbdDir.Exists) return;
+        var dbcDir = dbcDirOpt != null && dbcDirOpt.Exists ? dbcDirOpt.FullName : DeduceDbcDirFromWdt(wdtPath);
+        if (string.IsNullOrWhiteSpace(dbcDir) || !Directory.Exists(dbcDir)) return;
+        var build = !string.IsNullOrWhiteSpace(buildOpt) ? buildOpt! : GuessBuildFromPath(wdtPath) ?? "3.3.5.12340";
+
+        var dbdPath = dbdDir.FullName;
+        var defs = Path.Combine(dbdPath, "definitions");
+        if (Directory.Exists(defs)) dbdPath = defs;
+        var reader = new AreaDbcReader(dbdPath);
+        var data = reader.ReadAreas(build, dbcDir);
+        if (!data.Success) return;
+        var nameById = data.NameById;
+        var parentById = data.ParentById;
+
+        static string Esc(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return (s.Contains(',') || s.Contains('"')) ? '"' + s.Replace("\"", "\"\"") + '"' : s;
+        }
+
+        var lines = File.ReadAllLines(csvPath);
+        if (lines.Length == 0) return;
+        var outLines = new List<string>();
+        outLines.Add("tile_x,tile_y,area_id,area_name,parent_area_id,parent_area_name");
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var line = lines[i]; if (string.IsNullOrWhiteSpace(line)) continue;
+            var p = line.Split(','); if (p.Length < 3) continue;
+            if (!int.TryParse(p[0], out var tx)) continue;
+            if (!int.TryParse(p[1], out var ty)) continue;
+            if (!int.TryParse(p[2], out var aid)) continue;
+            var aname = nameById.TryGetValue(aid, out var n) ? n : "";
+            var pid = parentById.TryGetValue(aid, out var pidVal) ? pidVal : 0;
+            var pname = pid > 0 && nameById.TryGetValue(pid, out var pn) ? pn : "";
+            outLines.Add($"{tx},{ty},{aid},{Esc(aname)},{pid},{Esc(pname)}");
+        }
+        File.WriteAllLines(csvPath, outLines);
+        Console.WriteLine("[ok] Enriched areas.csv with names and parents");
+    }
+
+    private static string? DeduceDbcDirFromWdt(string wdtPath)
+    {
+        var dir = new DirectoryInfo(Path.GetDirectoryName(wdtPath) ?? ".");
+        for (var cur = dir; cur != null; cur = cur.Parent)
+        {
+            var dbc = Path.Combine(cur.FullName, "DBFilesClient");
+            if (Directory.Exists(dbc)) return dbc;
+        }
+        return null;
+    }
+
+    private static string? GuessBuildFromPath(string path)
+    {
+        var s = path.ToLowerInvariant();
+        if (s.Contains("3.3.5") || s.Contains("12340") || s.Contains("335")) return "3.3.5.12340";
+        if (s.Contains("0.5.3") || s.Contains("053") || s.Contains("3368")) return "0.5.3.3368";
+        if (s.Contains("0.6.0") || s.Contains("060") || s.Contains("3592")) return "0.6.0.3592";
+        return null;
     }
     
     static void PlotUniqueId(FileInfo wdtFile, FileInfo outputFile, int width, int height, string? typeFilter)

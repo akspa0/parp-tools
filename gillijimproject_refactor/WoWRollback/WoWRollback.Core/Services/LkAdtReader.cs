@@ -303,4 +303,39 @@ public class LkAdtReader
         
         return strings;
     }
+
+    public static int? ReadTileMajorAreaId(string adtPath)
+    {
+        try
+        {
+            if (!File.Exists(adtPath)) return null;
+            var bytes = File.ReadAllBytes(adtPath);
+            var mcin = FindChunk(bytes, "NICM");
+            if (mcin < 0) return null;
+            var size = BitConverter.ToInt32(bytes, mcin + 4);
+            var dataStart = mcin + 8;
+            var counts = new Dictionary<int, int>();
+            const int entrySize = 16;
+            int entries = Math.Min(256, size / entrySize);
+            for (int i = 0; i < entries; i++)
+            {
+                int ofs = BitConverter.ToInt32(bytes, dataStart + i * entrySize + 0);
+                if (ofs <= 0 || ofs + 8 + 0x80 >= bytes.Length) continue;
+                int areaId = BitConverter.ToInt32(bytes, ofs + 8 + 0x7C);
+                if (areaId <= 0) continue;
+                counts[areaId] = counts.GetValueOrDefault(areaId) + 1;
+            }
+            if (counts.Count == 0) return null;
+            int best = -1, bestC = -1;
+            foreach (var kv in counts)
+            {
+                if (kv.Value > bestC) { best = kv.Key; bestC = kv.Value; }
+            }
+            return best;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

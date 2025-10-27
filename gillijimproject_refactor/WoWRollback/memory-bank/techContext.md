@@ -239,18 +239,11 @@ Azeroth 0.5.3:
   - Result: SUCCESS ✅
 ```
 
+### Additional Completed Features
+- MCNK Hole Management — COMPLETE (MCRF-gated clearing of Holes only when all referenced placements are buried)
+- MCSH Shadow Disabling — COMPLETE (optional zeroing of MCSH payloads)
+
 ## Implementation Gaps (TO-DO)
-
-### MCNK Hole Management - ⏳ PLANNED
-- Calculate spatial overlap (placement → MCNK)
-- Locate MCNK headers via MHDR offsets
-- Clear Holes field for buried WMOs
-- Write modified headers back
-
-### MCSH Shadow Disabling - ⏳ PLANNED
-- Locate MCSH chunks via MCNK headers
-- Zero out shadow data
-- Optional feature (--disable-shadows flag)
 
 ### Overlay Generation - ⏳ PLANNED
 - Load minimap BLP tiles
@@ -278,6 +271,13 @@ Azeroth 0.5.3:
 - **Tested Maximum**: 951 tiles (Kalimdor)
 - **Expected Maximum**: ~1500 tiles (theoretical WDT limit)
 - **No Parallel Processing Needed**: Sequential is fast enough
+
+## CASC Asset Source (Planned)
+- Integration: WoWFormatLib/CascLib with listfile support
+- Priority: honor Loose > CASC > MPQ via a prioritized source wrapper
+- Build detection: infer from `.build.info` or install path; allow explicit override
+- DBCD enrichment: use wow.tools.local DBCD (ProjectReference) with provided DBD directory and DBC via DBFilesClient from CASC or loose files
+- Outputs: same cache schema as filesystem (placements.csv, tile_layers.csv, layers.json, areas.csv)
 
 ## MPQ Archive Infrastructure (Added 2025-10-12)
 

@@ -172,6 +172,6 @@ None (modifications only)
 | Alpha 0.5.3 Support | ✅ | ✅ | **ACHIEVED** |
 | Large Map Support (900+ tiles) | ✅ | ✅ | **ACHIEVED** |
 | MD5 Checksum | ✅ | ✅ | **ACHIEVED** |
-| Terrain Hole Fixing | ✅ | ⏳ | **PENDING** |
+| Terrain Hole Fixing | ✅ | ✅ | **ACHIEVED** |
 | Overlay Pre-generation | ✅ | ⏳ | **PENDING** |
 | Lightweight Viewer | ✅ | ⏳ | **PENDING** |

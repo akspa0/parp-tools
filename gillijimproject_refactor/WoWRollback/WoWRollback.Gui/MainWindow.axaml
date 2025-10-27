@@ -5,34 +5,6 @@
         Width="1280" MinWidth="1000" Height="700"
         Title="WoWRollback GUI">
   <DockPanel>
-    <Grid DockPanel.Dock="Top" Margin="8" >
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-      </Grid.RowDefinitions>
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="Auto"/>
-      </Grid.ColumnDefinitions>
-
-      <!-- Cache row -->
-      <TextBlock Grid.Row="0" Grid.Column="0" Text="Cache:" VerticalAlignment="Center"/>
-      <TextBox Grid.Row="0" Grid.Column="1" x:Name="CacheBox" HorizontalAlignment="Stretch" ToolTip.Tip="Cache: per-map analysis outputs (tile_layers.csv, layers.json). Produced by prepare-layers."/>
-      <Button Grid.Row="0" Grid.Column="2" x:Name="RescanBtn" Content="Rescan" MinWidth="90" Margin="6,0,0,0"/>
-      <Button Grid.Row="0" Grid.Column="3" x:Name="OpenCacheBtn" Content="Open Cache Folder" MinWidth="150" Margin="6,0,0,0"/>
-
-      <!-- Presets row -->
-      <TextBlock Grid.Row="1" Grid.Column="0" Text="Presets:" VerticalAlignment="Center"/>
-      <TextBox Grid.Row="1" Grid.Column="1" x:Name="PresetsBox" HorizontalAlignment="Stretch" ToolTip.Tip="Presets: where the GUI saves/loads selection JSON that spans ALL maps."/>
-      <TextBox Grid.Row="1" Grid.Column="2" x:Name="PresetNameBox" Width="220" Watermark="Preset name" Margin="6,0,0,0"/>
-      <Button Grid.Row="1" Grid.Column="3" x:Name="SavePresetBtn" Content="Save" MinWidth="80" Margin="6,0,0,0"/>
-      <Button Grid.Row="1" Grid.Column="4" x:Name="LoadPresetBtn" Content="Load" MinWidth="80" Margin="6,0,0,0"/>
-      <Button Grid.Row="1" Grid.Column="5" x:Name="OpenPresetsBtn" Content="Open Presets Folder" MinWidth="170" Margin="6,0,0,0"/>
-    </Grid>
 
     <DataGrid x:Name="MapsGrid" Margin="8" AutoGenerateColumns="False" IsReadOnly="True">
       <DataGrid.Columns>
@@ -85,6 +57,23 @@
             <!-- Layers panel -->
             <StackPanel Grid.Column="1" Margin="0,8,0,0" Spacing="8">
               <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
+              <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
+              <TextBlock Text="Area Groups" FontWeight="Bold"/>
+              <WrapPanel>
+                <ComboBox x:Name="ParentAreaCombo" Width="260" Margin="0,0,6,6"/>
+                <CheckBox x:Name="AreaAddModeBox" Content="Add to selection" Margin="0,0,6,6"/>
+                <Button x:Name="SelectParentBtn" Content="Select Parent Tiles" Margin="0,0,6,6"/>
+              </WrapPanel>
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <StackPanel>
+                  <TextBlock Text="Subzones"/>
+                  <ListBox x:Name="SubzonesList" SelectionMode="Multiple" Height="140"/>
+                  <WrapPanel>
+                    <Button x:Name="SelectSubzonesBtn" Content="Select Subzones" Margin="0,6,6,0"/>
+                    <Button x:Name="ClearAreaSelBtn" Content="Clear Area Selection" Margin="0,6,0,0"/>
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
               <ScrollViewer Height="260">
                 <StackPanel x:Name="TileLayersList"/>
               </ScrollViewer>
@@ -126,9 +115,7 @@
 
           <!-- Actions row -->
           <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
-            <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
             <Button x:Name="PrepareBtn" Content="Prepare Layers"/>
-            <Button x:Name="GenBaselineBtn" Content="Generate Baseline"/>
             <Button x:Name="BuildBtn" Content="Build Selected" IsEnabled="False"/>
             <Button x:Name="OpenOutBtn" Content="Open Output"/>
           </StackPanel>
@@ -140,6 +127,47 @@
             </ScrollViewer>
           </Border>
         </Grid>
+      </TabItem>
+      <TabItem Header="Presets">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="RefreshPresetsBtn" Content="Refresh"/>
+            <Button x:Name="LoadPresetBtn" Content="Load Preset"/>
+            <Button x:Name="GenBaselineBtn" Content="Generate Baseline"/>
+            <Button x:Name="OpenPresetsBtn" Content="Open Presets Folder"/>
+          </StackPanel>
+          <Border Grid.Row="1" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ListBox x:Name="PresetsList"/>
+          </Border>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Settings">
+        <StackPanel Margin="0,8,0,0" Spacing="12">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Cache:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="CacheBox" HorizontalAlignment="Stretch" ToolTip.Tip="Cache: per-map analysis outputs (tile_layers.csv, layers.json). Produced by prepare-layers."/>
+            <Button Grid.Column="2" x:Name="RescanBtn" Content="Rescan" MinWidth="90" Margin="6,0,0,0"/>
+            <Button Grid.Column="3" x:Name="OpenCacheBtn" Content="Open Cache Folder" MinWidth="150" Margin="6,0,0,0"/>
+          </Grid>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Presets:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="PresetsBox" HorizontalAlignment="Stretch" ToolTip.Tip="Presets: where the GUI saves/loads selection JSON."/>
+          </Grid>
+        </StackPanel>
       </TabItem>
       <TabItem Header="Filters">
         <Grid>

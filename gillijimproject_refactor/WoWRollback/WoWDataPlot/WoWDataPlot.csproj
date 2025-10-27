@@ -19,6 +19,7 @@
     <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
     <ProjectReference Include="..\WoWRollback.ViewerModule\WoWRollback.ViewerModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.DbcModule\WoWRollback.DbcModule.csproj" />
   </ItemGroup>
 
 </Project>

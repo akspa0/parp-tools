@@ -1,6 +1,40 @@
+# Active Context (2025-10-26)
+
+## Current Focus
+- Move preprocessing into the GUI so users don’t need separate CLI steps.
+- Support inputs from Loose files and CASC (MPQ later).
+- Provide two processing modes:
+  - Alpha-only: placements/tile_layers; Area Groups populated from selected DBC set (e.g., 0.5.3) even if per‑tile mapping is absent.
+  - LK-backed: compute per‑tile AreaIDs from LK ADTs (disk or CASC) and enrich with selected DBC; enables Area Groups tile selection.
+
+## Decisions
+- Keep CSV cache schema (placements.csv, tile_layers.csv, layers.json, areas.csv) for compatibility.
+- If areas.csv is missing/empty, GUI still shows Area Groups from DBC, but disables tile selection actions with a hint.
+- Prefer GUI-first experience: a new Data Sources tab will collect inputs (source type, DBD/DBC paths, build, outputs) and run a background pipeline.
+
+## Implementation Plan
+- New WoWRollback.Pipeline service consumed by GUI/CLI.
+- IAssetSource abstraction:
+  - FileSystemSource (loose)
+  - CascSource (WoWFormatLib/CascLib + listfile)
+  - MpqSource (phase 2)
+- Areas:
+  - Use LK ADTs via IAssetSource to compute per‑tile AreaIDs → areas.csv.
+  - Enrich with DBCD (DBD dir + DBC from DBFilesClient or CASC) when available.
+- Build detection: infer from paths or .build.info; allow override.
+
+## Next Steps
+- Implement GUI Data Sources tab and background runner.
+- Extract pipeline from WoWDataPlot into WoWRollback.Pipeline and reuse in CLI.
+- Add CascSource to read LK ADTs (and optionally DBC) directly.
+
+## Risks
+- CASC listfile coverage may vary; provide clear error messages and fallbacks.
+- Alpha-only per‑tile AreaIDs may not be derivable; keep LK path canonical.
+
 # Active Context - WoWRollback.RollbackTool Development
 
-## Current Focus (2025-10-25)
+## Recent Focus (2025-10-25)
 **Run the Alpha→LK pipeline directly from the viewer UI**
 
 We now have a CLI-first, strict non-pivot AreaID mapping pipeline that emits LK ADTs and a fresh `<Map>.wdt`. Next, we will expose this pipeline through the viewer with a Tools panel and a small backend API.

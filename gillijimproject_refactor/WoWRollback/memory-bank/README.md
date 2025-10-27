@@ -1,13 +1,14 @@
 # Memory Bank - WoWRollback.RollbackTool
 
 ## Overview
-This memory bank contains complete documentation of the WoWRollback.RollbackTool project state as of **October 25, 2025**.
+This memory bank contains complete documentation of the WoWRollback.RollbackTool project state as of **October 26, 2025**.
 
 ## Core Achievement
 ✅ **PROVEN WORKING**: Core rollback functionality successfully tested on Alpha 0.5.3 WDT files!
 - Kalimdor: 951 tiles, 126,297 placements modified
 - Azeroth: Multiple successful tests
 - MD5 checksum generation confirmed
+- Invariant: LK export always emits `<Map>.wdt` alongside LK ADTs
 
 ## Files in This Memory Bank
 
@@ -56,8 +57,8 @@ This memory bank contains complete documentation of the WoWRollback.RollbackTool
 **What it contains**: Completed work and to-do list
 - ✅ Core rollback functionality (TESTED!)
 - ✅ MD5 checksum generation
-- ⏳ MCNK terrain hole management
-- ⏳ MCSH shadow disabling
+- ✅ MCNK terrain hole management
+- ✅ MCSH shadow disabling
 - ⏳ Overlay generation
 - ⏳ Lightweight viewer
 - Test results and success metrics

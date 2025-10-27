@@ -32,6 +32,20 @@ public partial class MainWindow : Window
     private HashSet<string>? _dragBase;
     private SelMode _dragMode = SelMode.Replace;
 
+    // Area grouping state (per-map)
+    private sealed class AreaData
+    {
+        public Dictionary<string, int> AreaByTile { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<int, HashSet<string>> TilesByArea { get; } = new();
+        public Dictionary<int, HashSet<int>> ChildrenByParent { get; } = new();
+        public Dictionary<int, HashSet<string>> TilesByParent { get; } = new();
+        public Dictionary<int, string> AreaName { get; } = new();
+        public Dictionary<int, string> ParentName { get; } = new();
+        public SortedDictionary<int, string> ParentLabel { get; } = new();
+        public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
+    }
+    private readonly Dictionary<string, AreaData> _areasByMap = new(StringComparer.OrdinalIgnoreCase);
+
     private enum SelMode { Replace, Add, Remove }
 
     private sealed class TileLayerRow
@@ -62,8 +76,17 @@ public partial class MainWindow : Window
         if (load != null) load.Click += LoadPresetBtn_Click;
         var openPresets = this.FindControl<Button>("OpenPresetsBtn");
         if (openPresets != null) openPresets.Click += OpenPresetsBtn_Click;
+        var refreshPresets = this.FindControl<Button>("RefreshPresetsBtn");
+        if (refreshPresets != null) refreshPresets.Click += (_, __) => RefreshPresetsList();
         var openCache = this.FindControl<Button>("OpenCacheBtn");
         if (openCache != null) openCache.Click += OpenCacheBtn_Click;
+
+        // Area grouping controls
+        var parentAreaCombo = this.FindControl<ComboBox>("ParentAreaCombo");
+        if (parentAreaCombo != null) parentAreaCombo.SelectionChanged += (_, __) => OnParentAreaChanged();
+        var selParentBtn = this.FindControl<Button>("SelectParentBtn"); if (selParentBtn != null) selParentBtn.Click += SelectParentBtn_Click;
+        var selSubsBtn = this.FindControl<Button>("SelectSubzonesBtn"); if (selSubsBtn != null) selSubsBtn.Click += SelectSubzonesBtn_Click;
+        var clearAreaSelBtn = this.FindControl<Button>("ClearAreaSelBtn"); if (clearAreaSelBtn != null) clearAreaSelBtn.Click += (_, __) => { _selectedTiles.Clear(); RenderTileGrid(); RenderTileLayers(); RenderMinimap(); };
 
         // Build tab hookups
         var buildOut = this.FindControl<TextBox>("BuildOutBox");
@@ -109,7 +132,19 @@ public partial class MainWindow : Window
 
             var map = _currentMap;
             var selection = _selectedTiles.Count > 0 ? _selectedTiles.ToArray() : new[] { this.FindControl<ComboBox>("TileSelectBox")?.SelectedItem as string ?? "" };
-            var tilesObj = selection.Where(s => !string.IsNullOrWhiteSpace(s)).ToDictionary(k => k, k => new { custom = new { m2 = Array.Empty<object>(), wmo = Array.Empty<object>() } });
+            var tilesObj = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in selection.Where(s => !string.IsNullOrWhiteSpace(s)))
+            {
+                var m2 = (_customM2.GetValueOrDefault(key) ?? new List<TileEntry>())
+                    .Select(e => new { min = e.Min, max = e.Max })
+                    .Cast<object>()
+                    .ToList();
+                var wmo = (_customWmo.GetValueOrDefault(key) ?? new List<TileEntry>())
+                    .Select(e => new { min = e.Min, max = e.Max })
+                    .Cast<object>()
+                    .ToList();
+                tilesObj[key] = new { custom = new { m2 = m2, wmo = wmo } };
+            }
             var preset = new
             {
                 dataset = "default",
@@ -118,6 +153,7 @@ public partial class MainWindow : Window
             };
             File.WriteAllText(path, JsonSerializer.Serialize(preset, new JsonSerializerOptions { WriteIndented = true }));
             AppendBuildLog($"Saved selection preset: {path}");
+            RefreshPresetsList();
         }
         catch (Exception ex) { await ShowMessage("Error", ex.Message); }
     }
@@ -285,6 +321,7 @@ public partial class MainWindow : Window
         Directory.CreateDirectory(_presetsRoot);
         RefreshMaps();
         InitLayersTab();
+        RefreshPresetsList();
     }
 
     private void RescanBtn_Click(object? sender, RoutedEventArgs e)
@@ -330,23 +367,132 @@ public partial class MainWindow : Window
     {
         try
         {
-            var options = new FilePickerOpenOptions
+            string? path = null;
+            var list = this.FindControl<ListBox>("PresetsList");
+            var pBox = this.FindControl<TextBox>("PresetsBox");
+            var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
+            if (list != null && list.SelectedItem is string name && !string.IsNullOrWhiteSpace(name))
             {
-                Title = "Open Preset",
-                AllowMultiple = false,
-                FileTypeFilter = new List<FilePickerFileType>
+                path = Path.Combine(dir!, name);
+            }
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                var options = new FilePickerOpenOptions
                 {
-                    new FilePickerFileType("JSON") { Patterns = new List<string> { "*.json" } }
-                }
-            };
-            var results = await this.StorageProvider.OpenFilePickerAsync(options);
-            if (results == null || results.Count == 0) return;
-            var file = results[0];
-            await using var stream = await file.OpenReadAsync();
-            using var reader = new StreamReader(stream);
-            var json = await reader.ReadToEndAsync();
+                    Title = "Open Preset",
+                    AllowMultiple = false,
+                    FileTypeFilter = new List<FilePickerFileType>
+                    {
+                        new FilePickerFileType("JSON") { Patterns = new List<string> { "*.json" } }
+                    }
+                };
+                var results = await this.StorageProvider.OpenFilePickerAsync(options);
+                if (results == null || results.Count == 0) return;
+                var file = results[0];
+                path = file.Path.LocalPath;
+            }
+            var json = await System.IO.File.ReadAllTextAsync(path!);
             using var doc = JsonDocument.Parse(json);
-            await ShowMessage("Preset loaded", file.Name);
+            var root = doc.RootElement;
+            var map = _currentMap;
+            if (string.IsNullOrWhiteSpace(map)) { await ShowMessage("Info", "Select a map first."); return; }
+
+            // Apply tiles selection and custom ranges
+            if (root.TryGetProperty("maps", out var mapsEl) && mapsEl.ValueKind == JsonValueKind.Object && mapsEl.TryGetProperty(map, out var mapEl))
+            {
+                if (mapEl.TryGetProperty("tiles", out var tilesEl) && tilesEl.ValueKind == JsonValueKind.Object)
+                {
+                    _selectedTiles.Clear();
+                    foreach (var tileProp in tilesEl.EnumerateObject())
+                    {
+                        var key = tileProp.Name;
+                        _selectedTiles.Add(key);
+                        _customM2[key] = new List<TileEntry>();
+                        _customWmo[key] = new List<TileEntry>();
+                        if (tileProp.Value.ValueKind == JsonValueKind.Object && tileProp.Value.TryGetProperty("custom", out var customEl))
+                        {
+                            if (customEl.TryGetProperty("m2", out var m2El) && m2El.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var elem in m2El.EnumerateArray())
+                                {
+                                    if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max))
+                                        _customM2[key].Add(new TileEntry { Type = "M2", Layer = -1, Min = min, Max = max, Enabled = true });
+                                }
+                            }
+                            if (customEl.TryGetProperty("wmo", out var wmoEl) && wmoEl.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var elem in wmoEl.EnumerateArray())
+                                {
+                                    if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max))
+                                        _customWmo[key].Add(new TileEntry { Type = "WMO", Layer = -1, Min = min, Max = max, Enabled = true });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Apply baseline to selection (or all tiles if none selected)
+                if (mapEl.TryGetProperty("baseline", out var baselineEl) && baselineEl.ValueKind == JsonValueKind.Object)
+                {
+                    var targetKeys = _selectedTiles.Count > 0
+                        ? new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase)
+                        : new HashSet<string>(((IEnumerable<string>)((_rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>())
+                            .Select(r => TileKey(r.TileX, r.TileY)).Distinct())), StringComparer.OrdinalIgnoreCase);
+
+                    static bool Intersects(int a1, int a2, int b1, int b2) => Math.Max(a1, b1) <= Math.Min(a2, b2);
+                    var m2Ranges = new List<(int min, int max)>();
+                    var wmoRanges = new List<(int min, int max)>();
+                    if (baselineEl.TryGetProperty("m2", out var m2El) && m2El.ValueKind == JsonValueKind.Array)
+                        foreach (var elem in m2El.EnumerateArray()) if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max)) m2Ranges.Add((min, max));
+                    if (baselineEl.TryGetProperty("wmo", out var wmoEl) && wmoEl.ValueKind == JsonValueKind.Array)
+                        foreach (var elem in wmoEl.EnumerateArray()) if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max)) wmoRanges.Add((min, max));
+
+                    foreach (var key in targetKeys)
+                    {
+                        var parts = key.Split(','); if (parts.Length != 2) continue;
+                        if (!int.TryParse(parts[0], out var x)) continue; if (!int.TryParse(parts[1], out var y)) continue;
+                        EnsureTileBaseState(map, x, y);
+                        foreach (var r in _baseM2[key]) r.Enabled = m2Ranges.Any(b => Intersects(r.Min, r.Max, b.min, b.max));
+                        foreach (var r in _baseWmo[key]) r.Enabled = wmoRanges.Any(b => Intersects(r.Min, r.Max, b.min, b.max));
+                    }
+                }
+            }
+
+            // Fallback to global.baseline if no map baseline and selection exists
+            else if (root.TryGetProperty("global", out var globalEl)
+                     && globalEl.ValueKind == JsonValueKind.Object
+                     && globalEl.TryGetProperty("baseline", out var baselineEl)
+                     && baselineEl.ValueKind == JsonValueKind.Object)
+            {
+                var targetKeys = _selectedTiles.Count > 0
+                    ? new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>();
+                if (targetKeys.Count > 0)
+                {
+                    static bool Intersects(int a1, int a2, int b1, int b2) => Math.Max(a1, b1) <= Math.Min(a2, b2);
+                    var m2Ranges = new List<(int min, int max)>();
+                    var wmoRanges = new List<(int min, int max)>();
+                    if (baselineEl.TryGetProperty("m2", out var m2El) && m2El.ValueKind == JsonValueKind.Array)
+                        foreach (var elem in m2El.EnumerateArray()) if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max)) m2Ranges.Add((min, max));
+                    if (baselineEl.TryGetProperty("wmo", out var wmoEl) && wmoEl.ValueKind == JsonValueKind.Array)
+                        foreach (var elem in wmoEl.EnumerateArray()) if (elem.TryGetProperty("min", out var minEl) && elem.TryGetProperty("max", out var maxEl) && minEl.TryGetInt32(out var min) && maxEl.TryGetInt32(out var max)) wmoRanges.Add((min, max));
+
+                    foreach (var key in targetKeys)
+                    {
+                        var parts = key.Split(','); if (parts.Length != 2) continue;
+                        if (!int.TryParse(parts[0], out var x)) continue; if (!int.TryParse(parts[1], out var y)) continue;
+                        EnsureTileBaseState(map, x, y);
+                        foreach (var r in _baseM2[key]) r.Enabled = m2Ranges.Any(b => Intersects(r.Min, r.Max, b.min, b.max));
+                        foreach (var r in _baseWmo[key]) r.Enabled = wmoRanges.Any(b => Intersects(r.Min, r.Max, b.min, b.max));
+                    }
+                }
+            }
+
+            RenderTileGrid();
+            RenderTileLayers();
+            RenderTileCustom();
+            RenderMinimap();
+            await ShowMessage("Preset loaded", System.IO.Path.GetFileName(path));
         }
         catch (Exception ex)
         {
@@ -365,6 +511,24 @@ public partial class MainWindow : Window
             if (!Directory.Exists(path)) Directory.CreateDirectory(path);
             var psi = new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true };
             System.Diagnostics.Process.Start(psi);
+        }
+        catch { }
+    }
+
+    private void RefreshPresetsList()
+    {
+        try
+        {
+            var pBox = this.FindControl<TextBox>("PresetsBox");
+            var dir = pBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(dir)) dir = _presetsRoot;
+            Directory.CreateDirectory(dir!);
+            var files = Directory.EnumerateFiles(dir!, "*.json", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var lb = this.FindControl<ListBox>("PresetsList");
+            if (lb != null) lb.ItemsSource = files;
         }
         catch { }
     }
@@ -469,8 +633,7 @@ public partial class MainWindow : Window
         var heatToggle = this.FindControl<CheckBox>("HeatmapToggle");
         if (heatToggle != null)
         {
-            heatToggle.Checked += (_, __) => RenderTileGrid();
-            heatToggle.Unchecked += (_, __) => RenderTileGrid();
+            heatToggle.IsCheckedChanged += (_, __) => RenderTileGrid();
         }
     }
 
@@ -493,10 +656,163 @@ public partial class MainWindow : Window
         _currentMap = map;
         EnsureMapLoaded(map);
         PopulateTileCombo(map);
+        RefreshAreaUi(map);
         RenderTileGrid();
         RenderTileLayers();
         RenderMinimap();
         RenderTileCustom();
+    }
+
+    private void LoadAreasForMap(string map)
+    {
+        try
+        {
+            var cacheBox = this.FindControl<TextBox>("CacheBox");
+            var root = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(root)) root = _cacheRoot;
+            var areasCsv = Path.Combine(root!, map, "areas.csv");
+            if (!File.Exists(areasCsv)) { _areasByMap.Remove(map); return; }
+
+            var data = new AreaData();
+            foreach (var line in File.ReadLines(areasCsv).Skip(1))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var p = line.Split(','); if (p.Length < 6) continue;
+                if (!int.TryParse(p[0], out var tx)) continue;
+                if (!int.TryParse(p[1], out var ty)) continue;
+                if (!int.TryParse(p[2], out var aid)) continue;
+                var aname = p[3];
+                int.TryParse(p[4], out var pid);
+                var pname = p[5];
+                var key = TileKey(tx, ty);
+                data.AreaByTile[key] = aid;
+                if (!data.TilesByArea.TryGetValue(aid, out var setA)) data.TilesByArea[aid] = setA = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                setA.Add(key);
+                if (aid > 0 && !string.IsNullOrWhiteSpace(aname)) data.AreaName[aid] = aname;
+                if (pid > 0)
+                {
+                    if (!data.ChildrenByParent.TryGetValue(pid, out var kids)) data.ChildrenByParent[pid] = kids = new HashSet<int>();
+                    kids.Add(aid);
+                    if (!data.TilesByParent.TryGetValue(pid, out var setP)) data.TilesByParent[pid] = setP = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    setP.Add(key);
+                    if (!string.IsNullOrWhiteSpace(pname)) data.ParentName[pid] = pname;
+                }
+            }
+            // Build labels
+            foreach (var kv in data.ChildrenByParent)
+            {
+                var pid = kv.Key;
+                var plabel = (data.ParentName.GetValueOrDefault(pid) ?? $"Parent {pid}") + $" ({pid})";
+                data.ParentLabel[pid] = plabel;
+                var subDict = new SortedDictionary<int, string>();
+                foreach (var cid in kv.Value)
+                {
+                    var clabel = (data.AreaName.GetValueOrDefault(cid) ?? $"Area {cid}") + $" ({cid})";
+                    subDict[cid] = clabel;
+                }
+                data.SubzoneLabelByParent[pid] = subDict;
+            }
+
+            _areasByMap[map] = data;
+        }
+        catch { _areasByMap.Remove(map); }
+    }
+
+    private void RefreshAreaUi(string map)
+    {
+        var parentCombo = this.FindControl<ComboBox>("ParentAreaCombo");
+        var subsList = this.FindControl<ListBox>("SubzonesList");
+        var addBox = this.FindControl<CheckBox>("AreaAddModeBox");
+        var selParentBtn = this.FindControl<Button>("SelectParentBtn");
+        var selSubsBtn = this.FindControl<Button>("SelectSubzonesBtn");
+        var clearBtn = this.FindControl<Button>("ClearAreaSelBtn");
+        if (!_areasByMap.TryGetValue(map, out var data))
+        {
+            if (parentCombo != null) { parentCombo.ItemsSource = Array.Empty<string>(); parentCombo.IsEnabled = false; }
+            if (subsList != null) { subsList.ItemsSource = Array.Empty<string>(); subsList.IsEnabled = false; }
+            if (addBox != null) addBox.IsEnabled = false;
+            if (selParentBtn != null) selParentBtn.IsEnabled = false;
+            if (selSubsBtn != null) selSubsBtn.IsEnabled = false;
+            if (clearBtn != null) clearBtn.IsEnabled = false;
+            return;
+        }
+        if (parentCombo != null)
+        {
+            parentCombo.ItemsSource = data.ParentLabel.Values.ToList();
+            parentCombo.IsEnabled = data.ParentLabel.Count > 0;
+            if (parentCombo.ItemCount > 0 && parentCombo.SelectedIndex < 0) parentCombo.SelectedIndex = 0;
+        }
+        if (subsList != null) { subsList.ItemsSource = Array.Empty<string>(); subsList.IsEnabled = true; }
+        if (addBox != null) addBox.IsEnabled = true;
+        if (selParentBtn != null) selParentBtn.IsEnabled = true;
+        if (selSubsBtn != null) selSubsBtn.IsEnabled = true;
+        if (clearBtn != null) clearBtn.IsEnabled = true;
+        OnParentAreaChanged();
+    }
+
+    private void OnParentAreaChanged()
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        if (!_areasByMap.TryGetValue(map, out var data)) return;
+        var parentCombo = this.FindControl<ComboBox>("ParentAreaCombo");
+        var subsList = this.FindControl<ListBox>("SubzonesList");
+        if (parentCombo == null || subsList == null) return;
+        var sel = parentCombo.SelectedItem as string;
+        if (string.IsNullOrWhiteSpace(sel)) { subsList.ItemsSource = Array.Empty<string>(); return; }
+        // Extract parent id from label suffix " (id)"
+        int pid = -1; var idx = sel.LastIndexOf('('); var idx2 = sel.LastIndexOf(')');
+        if (idx >= 0 && idx2 > idx) int.TryParse(sel.Substring(idx + 1, idx2 - idx - 1), out pid);
+        if (pid <= 0) { subsList.ItemsSource = Array.Empty<string>(); return; }
+        var list = data.SubzoneLabelByParent.GetValueOrDefault(pid)?.Values?.ToList() ?? new List<string>();
+        subsList.ItemsSource = list;
+    }
+
+    private void SelectParentBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        if (!_areasByMap.TryGetValue(map, out var data)) return;
+        var parentCombo = this.FindControl<ComboBox>("ParentAreaCombo");
+        var addMode = this.FindControl<CheckBox>("AreaAddModeBox");
+        if (parentCombo == null) return;
+        var sel = parentCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(sel)) return;
+        int pid = -1; var idx = sel.LastIndexOf('('); var idx2 = sel.LastIndexOf(')');
+        if (idx >= 0 && idx2 > idx) int.TryParse(sel.Substring(idx + 1, idx2 - idx - 1), out pid);
+        if (pid <= 0) return;
+        var tiles = data.TilesByParent.GetValueOrDefault(pid) ?? new HashSet<string>();
+        if (addMode?.IsChecked != true) _selectedTiles.Clear();
+        foreach (var k in tiles) _selectedTiles.Add(k);
+        if (tiles.Count > 0) _focusedTileKey = tiles.First();
+        RenderTileGrid(); RenderTileLayers(); RenderMinimap();
+    }
+
+    private void SelectSubzonesBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        if (!_areasByMap.TryGetValue(map, out var data)) return;
+        var parentCombo = this.FindControl<ComboBox>("ParentAreaCombo");
+        var subsList = this.FindControl<ListBox>("SubzonesList");
+        var addMode = this.FindControl<CheckBox>("AreaAddModeBox");
+        if (parentCombo == null || subsList == null) return;
+        var sel = parentCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(sel)) return;
+        int pid = -1; var idx = sel.LastIndexOf('('); var idx2 = sel.LastIndexOf(')');
+        if (idx >= 0 && idx2 > idx) int.TryParse(sel.Substring(idx + 1, idx2 - idx - 1), out pid);
+        if (pid <= 0) return;
+        var chosen = subsList.SelectedItems?.Cast<string>().ToList() ?? new List<string>();
+        var wantAreas = new HashSet<int>();
+        foreach (var label in chosen)
+        {
+            int id = -1; var i1 = label.LastIndexOf('('); var i2 = label.LastIndexOf(')');
+            if (i1 >= 0 && i2 > i1) int.TryParse(label.Substring(i1 + 1, i2 - i1 - 1), out id);
+            if (id > 0) wantAreas.Add(id);
+        }
+        var tiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var aid in wantAreas)
+        {
+            foreach (var k in data.TilesByArea.GetValueOrDefault(aid) ?? new HashSet<string>()) tiles.Add(k);
+        }
+        if (addMode?.IsChecked != true) _selectedTiles.Clear();
+        foreach (var k in tiles) _selectedTiles.Add(k);
+        if (tiles.Count > 0) _focusedTileKey = tiles.First();
+        RenderTileGrid(); RenderTileLayers(); RenderMinimap();
     }
 
     private void EnsureMapLoaded(string map)
@@ -531,6 +847,9 @@ public partial class MainWindow : Window
         _rowsByMap[map] = rows;
         // Reset per-tile state caches
         _baseM2.Clear(); _baseWmo.Clear(); _customM2.Clear(); _customWmo.Clear();
+
+        // Load area group data if available
+        LoadAreasForMap(map);
     }
 
     private static string TileKey(int x, int y) => $"{x},{y}";
@@ -594,7 +913,7 @@ public partial class MainWindow : Window
                     {
                         for (int i = 0; i < typeBox.ItemCount; i++)
                         {
-                            if ((typeBox.Items![i] as ComboBoxItem)?.Content?.ToString().Equals(g.Type, StringComparison.OrdinalIgnoreCase) == true)
+                            if (string.Equals((typeBox.Items![i] as ComboBoxItem)?.Content?.ToString(), g.Type, StringComparison.OrdinalIgnoreCase))
                             { typeBox.SelectedIndex = i; break; }
                         }
                     }
@@ -635,14 +954,14 @@ public partial class MainWindow : Window
         var host = this.FindControl<StackPanel>("TileCustomList"); if (host == null) return;
         host.Children.Clear();
         int idx = 0;
-        foreach (var e in _customM2[key].Concat(_customWmo[key]))
+        foreach (var entry in _customM2[key].Concat(_customWmo[key]))
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            var cb = new CheckBox { IsChecked = e.Enabled, Content = $"[Custom {e.Type}] {e.Min}-{e.Max}" };
+            var cb = new CheckBox { IsChecked = entry.Enabled, Content = $"[Custom {entry.Type}] {entry.Min}-{entry.Max}" };
             var del = new Button { Content = "✕", Width = 24 };
             int localIdx = idx++;
-            del.Click += (_, __) => { if (e.Type == "M2") _customM2[key].Remove(e); else _customWmo[key].Remove(e); RenderTileCustom(); };
-            cb.Checked += (_, __) => e.Enabled = true; cb.Unchecked += (_, __) => e.Enabled = false;
+            del.Click += (_, __) => { if (entry.Type == "M2") _customM2[key].Remove(entry); else _customWmo[key].Remove(entry); RenderTileCustom(); };
+            cb.Checked += (_, __) => entry.Enabled = true; cb.Unchecked += (_, __) => entry.Enabled = false;
             panel.Children.Add(cb); panel.Children.Add(del);
             host.Children.Add(panel);
         }
@@ -653,10 +972,8 @@ public partial class MainWindow : Window
         var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
         var tileCombo = this.FindControl<ComboBox>("TileSelectBox"); if (tileCombo == null) return;
         var val = tileCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(val)) return;
-        var parts = val.Split(','); if (parts.Length != 2) return;
-        if (!int.TryParse(parts[0], out var x)) return; if (!int.TryParse(parts[1], out var y)) return;
-        EnsureTileBaseState(map, x, y);
-        var key = TileKey(x, y);
+        // Build target keys: all selected tiles if present, otherwise the focused one
+        var targets = _selectedTiles.Count > 0 ? _selectedTiles.ToArray() : new[] { val };
 
         var minBox = this.FindControl<TextBox>("AddRangeMinBox");
         var maxBox = this.FindControl<TextBox>("AddRangeMaxBox");
@@ -666,7 +983,17 @@ public partial class MainWindow : Window
         if (!int.TryParse(maxBox.Text?.Trim(), out var max)) return;
         var type = (typeBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "M2";
         var entry = new TileEntry { Type = type, Layer = -1, Min = min, Max = max, Count = 0, Enabled = true };
-        if (string.Equals(type, "M2", StringComparison.OrdinalIgnoreCase)) _customM2[key].Add(entry); else _customWmo[key].Add(entry);
+        foreach (var key in targets)
+        {
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            var parts = key.Split(','); if (parts.Length != 2) continue;
+            if (!int.TryParse(parts[0], out var tx)) continue; if (!int.TryParse(parts[1], out var ty)) continue;
+            EnsureTileBaseState(map, tx, ty);
+            if (string.Equals(type, "M2", StringComparison.OrdinalIgnoreCase))
+                _customM2[key].Add(new TileEntry { Type = entry.Type, Layer = entry.Layer, Min = entry.Min, Max = entry.Max, Count = 0, Enabled = true });
+            else
+                _customWmo[key].Add(new TileEntry { Type = entry.Type, Layer = entry.Layer, Min = entry.Min, Max = entry.Max, Count = 0, Enabled = true });
+        }
         RenderTileCustom();
     }
 
@@ -674,9 +1001,12 @@ public partial class MainWindow : Window
     {
         var tileCombo = this.FindControl<ComboBox>("TileSelectBox"); if (tileCombo == null) return;
         var val = tileCombo.SelectedItem as string; if (string.IsNullOrWhiteSpace(val)) return;
-        var key = val;
-        _customM2[key] = new List<TileEntry>();
-        _customWmo[key] = new List<TileEntry>();
+        var targets = _selectedTiles.Count > 0 ? _selectedTiles.ToArray() : new[] { val };
+        foreach (var key in targets)
+        {
+            _customM2[key] = new List<TileEntry>();
+            _customWmo[key] = new List<TileEntry>();
+        }
         RenderTileCustom();
     }
 
@@ -814,10 +1144,10 @@ public partial class MainWindow : Window
                 panel.Children.Add(b);
             }
         }
-        // Initial highlight
+        // Initial highlight (only if nothing selected yet)
         var tileComboInit = this.FindControl<ComboBox>("TileSelectBox");
         var valInit = tileComboInit?.SelectedItem as string;
-        if (!string.IsNullOrWhiteSpace(valInit)) { _focusedTileKey = valInit!; _selectedTiles.Clear(); _selectedTiles.Add(valInit!); }
+        if (_selectedTiles.Count == 0 && !string.IsNullOrWhiteSpace(valInit)) { _focusedTileKey = valInit!; _selectedTiles.Clear(); _selectedTiles.Add(valInit!); }
     }
 
     private void HighlightTile(string val)

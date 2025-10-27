@@ -60,6 +60,20 @@
 └─────────────────────────────┘
 ```
 
+## Asset Source Abstraction
+- `IAssetSource` contract for reading WoW data assets
+- Implementations:
+  - `FileSystemSource` (loose files)
+  - `CascSource` (WoWFormatLib/CascLib with listfile)
+  - `MpqSource` (phase 2)
+- Priority resolution: Loose > CASC > MPQ
+- Build detection: infer from `.build.info` or path; allow user override
+
+## Shared Pipeline Pattern
+- A single pipeline service orchestrates rollback + crosswalk mapping + LK export
+- CLI calls the pipeline directly; Viewer backend exposes endpoints that call the same service
+- Invariant: always emit `<Map>.wdt` alongside LK ADTs (see Invariants above)
+
 ## Core Rollback Architecture
 
 ### In-Memory Modification Pattern
