@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace WoWRollback.ViewerModule;
 
@@ -109,6 +110,26 @@ public sealed class ViewerApiServer : IDisposable
             {
                 var payload = BuildSeedPresets();
                 await JsonAsync(res, payload);
+                return;
+            }
+
+            if (req.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) && path.Equals("/api/data-sources/preview", StringComparison.OrdinalIgnoreCase))
+            {
+                using var sr = new StreamReader(req.InputStream, req.ContentEncoding);
+                var body = await sr.ReadToEndAsync();
+                var dsReq = JsonSerializer.Deserialize<DataSourceRequest>(body) ?? new DataSourceRequest();
+                var preview = BuildDataSourcePreview(dsReq);
+                await JsonAsync(res, preview);
+                return;
+            }
+
+            if (req.HttpMethod.Equals("POST", StringComparison.OrdinalIgnoreCase) && path.Equals("/api/data-sources/load", StringComparison.OrdinalIgnoreCase))
+            {
+                using var sr = new StreamReader(req.InputStream, req.ContentEncoding);
+                var body = await sr.ReadToEndAsync();
+                var dsReq = JsonSerializer.Deserialize<DataSourceRequest>(body) ?? new DataSourceRequest();
+                var job = StartDataSourceLoadJob(dsReq);
+                await JsonAsync(res, new { jobId = job.Id });
                 return;
             }
 
@@ -355,6 +376,139 @@ public sealed class ViewerApiServer : IDisposable
         catch { return null; }
     }
 
+    private static DataSourcePreview BuildDataSourcePreview(DataSourceRequest req)
+    {
+        var type = (req.Type ?? "loose").ToLowerInvariant();
+        string? inferredVersion = null;
+        int mapsCount = 0;
+        var notes = new List<string>();
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(req.Root))
+            {
+                inferredVersion = InferVersionFromPath(req.Root);
+                if (type == "loose" || type == "install")
+                {
+                    var mapsDir = FindMapsDir(req.Root);
+                    if (mapsDir != null && Directory.Exists(mapsDir))
+                    {
+                        mapsCount = Directory.EnumerateDirectories(mapsDir).Count();
+                    }
+                    else
+                    {
+                        notes.Add("World/Maps not found under root");
+                    }
+                }
+                else if (type == "casc")
+                {
+                    // CASC: rely on build.info or override; listfile is required for good coverage
+                    if (File.Exists(Path.Combine(req.Root, ".build.info")))
+                        notes.Add(".build.info detected");
+                    if (string.IsNullOrWhiteSpace(req.Listfile))
+                        notes.Add("CASC listfile not provided - using default may be required");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"Preview failed: {ex.Message}");
+        }
+
+        return new DataSourcePreview
+        {
+            Type = type,
+            InferredVersion = inferredVersion ?? req.Version,
+            Version = req.Version,
+            MapsCount = mapsCount,
+            Notes = notes
+        };
+    }
+
+    private static string? InferVersionFromPath(string path)
+    {
+        try
+        {
+            var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var seg in segments.Reverse())
+            {
+                var m = Regex.Match(seg, "^(?<ver>\\d+\\.\\d+(\\.\\d+)?)");
+                if (m.Success) return m.Groups["ver"].Value;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string? FindMapsDir(string root)
+    {
+        try
+        {
+            // common: <root>/World/Maps
+            var d1 = Path.Combine(root, "World", "Maps");
+            if (Directory.Exists(d1)) return d1;
+            // sometimes tree under test_data/<ver>/tree/World/Maps
+            var d2 = Path.Combine(root, "tree", "World", "Maps");
+            if (Directory.Exists(d2)) return d2;
+        }
+        catch { }
+        return null;
+    }
+
+    private Job StartDataSourceLoadJob(DataSourceRequest request)
+    {
+        var job = new Job
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            StartedAt = DateTimeOffset.UtcNow,
+            Status = JobStatus.Running,
+            OutputWdt = null,
+            OutputLkDir = request.OutputDir
+        };
+
+        lock (_jobsLock) _jobs[job.Id] = job;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                job.AddLog($"[DataSources] Type={request.Type}, Root={request.Root}");
+                if (!string.IsNullOrWhiteSpace(request.Version)) job.AddLog($"[DataSources] Version (user)={request.Version}");
+                var preview = BuildDataSourcePreview(request);
+                job.AddLog($"[DataSources] InferredVersion={preview.InferredVersion} MapsCount={preview.MapsCount}");
+                foreach (var note in preview.Notes) job.AddLog($"[DataSources] Note: {note}");
+
+                // Simulate minimal preprocessing (session folder + schema placeholders)
+                var outDir = request.OutputDir ?? Path.Combine(Directory.GetCurrentDirectory(), "dbctool_outputs", DateTime.UtcNow.ToString("yyyyMMdd_HHmmss"));
+                Directory.CreateDirectory(outDir);
+                job.AddLog($"[DataSources] Output: {outDir}");
+
+                // Placeholders for expected cache schema
+                var compareDir = Path.Combine(outDir, "compare");
+                Directory.CreateDirectory(compareDir);
+                File.WriteAllText(Path.Combine(compareDir, "placements.csv"), "map,tile_x,tile_y,type,uniqueId,nameId,x,y,z\n");
+                File.WriteAllText(Path.Combine(compareDir, "tile_layers.csv"), "map,tile_x,tile_y,layer,object_count\n");
+                File.WriteAllText(Path.Combine(compareDir, "areas.csv"), "map,tile_x,tile_y,area_id\n");
+                File.WriteAllText(Path.Combine(compareDir, "layers.json"), "{\n  \"layers\": []\n}\n");
+                job.AddLog("[DataSources] Wrote cache placeholders (placements.csv, tile_layers.csv, areas.csv, layers.json)");
+
+                await Task.Delay(300);
+                job.Status = JobStatus.Succeeded;
+                job.FinishedAt = DateTimeOffset.UtcNow;
+                job.SignalLogs();
+            }
+            catch (Exception ex)
+            {
+                job.AddLog($"[DataSources] ERROR: {ex.Message}");
+                job.Status = JobStatus.Failed;
+                job.FinishedAt = DateTimeOffset.UtcNow;
+                job.SignalLogs();
+            }
+        });
+
+        return job;
+    }
+
     private object BuildSeedPresets()
     {
         var d = DefaultPathsService.Discover();
@@ -442,5 +596,26 @@ public sealed class ViewerApiServer : IDisposable
         public sealed class TerrainModel { public bool FixHoles { get; set; } public bool DisableMcsh { get; set; } }
         public sealed class MappingModel { public bool StrictAreaId { get; set; } = true; public bool ChainVia060 { get; set; } }
         public sealed class PathsModel { public string? Wdt { get; set; } public string? CrosswalkDir { get; set; } public string? LkDbcDir { get; set; } public string? OutDir { get; set; } public string? LkOutDir { get; set; } }
+    }
+
+    // Data Sources DTOs
+    private sealed class DataSourceRequest
+    {
+        [JsonPropertyName("type")] public string? Type { get; set; } // loose | install | casc
+        [JsonPropertyName("root")] public string? Root { get; set; }
+        [JsonPropertyName("version")] public string? Version { get; set; }
+        [JsonPropertyName("dbdDir")] public string? DbdDir { get; set; }
+        [JsonPropertyName("dbcDir")] public string? DbcDir { get; set; }
+        [JsonPropertyName("listfile")] public string? Listfile { get; set; } // CASC only
+        [JsonPropertyName("outputDir")] public string? OutputDir { get; set; }
+    }
+
+    private sealed class DataSourcePreview
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = "loose";
+        [JsonPropertyName("inferredVersion")] public string? InferredVersion { get; set; }
+        [JsonPropertyName("version")] public string? Version { get; set; }
+        [JsonPropertyName("mapsCount")] public int MapsCount { get; set; }
+        [JsonPropertyName("notes")] public List<string> Notes { get; set; } = new();
     }
 }

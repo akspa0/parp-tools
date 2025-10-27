@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Text;
+using System.Diagnostics;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
@@ -11,6 +15,8 @@ using Avalonia.Media.Imaging;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Threading;
+using WoWRollback.DbcModule;
 
 namespace WoWRollback.Gui;
 
@@ -45,6 +51,7 @@ public partial class MainWindow : Window
         public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
     }
     private readonly Dictionary<string, AreaData> _areasByMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _wmoByMap = new(StringComparer.OrdinalIgnoreCase);
 
     private enum SelMode { Replace, Add, Remove }
 
@@ -97,6 +104,19 @@ public partial class MainWindow : Window
         var openOut = this.FindControl<Button>("OpenOutBtn"); if (openOut != null) openOut.Click += OpenOutBtn_Click;
         var genBaseline = this.FindControl<Button>("GenBaselineBtn"); if (genBaseline != null) genBaseline.Click += GenBaselineBtn_Click;
 
+        // Data Sources tab hookups
+        var dsLoose = this.FindControl<RadioButton>("DsTypeLoose"); if (dsLoose != null) dsLoose.IsCheckedChanged += (_, __) => UpdateCascVisibility();
+        var dsInstall = this.FindControl<RadioButton>("DsTypeInstall"); if (dsInstall != null) dsInstall.IsCheckedChanged += (_, __) => UpdateCascVisibility();
+        var dsCasc = this.FindControl<RadioButton>("DsTypeCasc"); if (dsCasc != null) dsCasc.IsCheckedChanged += (_, __) => UpdateCascVisibility();
+        var pickRoot = this.FindControl<Button>("PickDataRootBtn"); if (pickRoot != null) pickRoot.Click += PickDataRootBtn_Click;
+        var pickDbd = this.FindControl<Button>("PickDataDbdBtn"); if (pickDbd != null) pickDbd.Click += PickDataDbdBtn_Click;
+        var pickDbc = this.FindControl<Button>("PickDataDbcBtn"); if (pickDbc != null) pickDbc.Click += PickDataDbcBtn_Click;
+        var pickList = this.FindControl<Button>("PickDataListfileBtn"); if (pickList != null) pickList.Click += PickDataListfileBtn_Click;
+        var dsPrev = this.FindControl<Button>("DataPreviewBtn"); if (dsPrev != null) dsPrev.Click += DataPreviewBtn_Click;
+        var dsLoad = this.FindControl<Button>("DataLoadBtn"); if (dsLoad != null) dsLoad.Click += DataLoadBtn_Click;
+        var saveDefaults = this.FindControl<Button>("SaveDataDefaultsBtn"); if (saveDefaults != null) saveDefaults.Click += SaveDataDefaultsBtn_Click;
+        var loadDefaults = this.FindControl<Button>("LoadDataDefaultsBtn"); if (loadDefaults != null) loadDefaults.Click += LoadDataDefaultsBtn_Click;
+
         // Filters tab hookups
         var analyzeBtn = this.FindControl<Button>("AnalyzeFiltersBtn"); if (analyzeBtn != null) analyzeBtn.Click += AnalyzeFiltersBtn_Click;
         var whitelistBtn = this.FindControl<Button>("WhitelistBtn"); if (whitelistBtn != null) whitelistBtn.Click += (s,e)=>MarkFilters(true);
@@ -114,10 +134,55 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void PickDataRootBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select Data Root", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("DataRootBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickDataDbdBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select DBD Directory", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("DataDbdBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickDataDbcBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select DBC Directory", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("DataDbcBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickDataListfileBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select CASC Listfile",
+            AllowMultiple = false,
+            FileTypeFilter = new List<FilePickerFileType> { new FilePickerFileType("CSV / TXT") { Patterns = new List<string> { "*.csv", "*.txt" } } }
+        });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("DataListfileBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
     private void AppendBuildLog(string line)
     {
-        var log = this.FindControl<TextBox>("BuildLogBox"); if (log == null) return;
-        log.Text += (string.IsNullOrEmpty(log.Text) ? string.Empty : Environment.NewLine) + line;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var log = this.FindControl<TextBox>("BuildLogBox"); if (log == null) return;
+            log.Text += (string.IsNullOrEmpty(log.Text) ? string.Empty : Environment.NewLine) + line;
+            try { log.CaretIndex = log.Text?.Length ?? 0; } catch { }
+        });
     }
 
     private async void SaveSelectionPresetBtn_Click(object? sender, RoutedEventArgs e)
@@ -158,9 +223,88 @@ public partial class MainWindow : Window
         catch (Exception ex) { await ShowMessage("Error", ex.Message); }
     }
 
-    private void PrepareBtn_Click(object? sender, RoutedEventArgs e)
+    private async void PrepareBtn_Click(object? sender, RoutedEventArgs e)
     {
-        AppendBuildLog("Prepare Layers: queued (placeholder). CLI integration to be wired.");
+        try
+        {
+            var p = BuildDataSourcePayload();
+            var buildOutBox = this.FindControl<TextBox>("BuildOutBox");
+            var outRoot = this.FindControl<TextBox>("CacheBox")?.Text?.Trim();
+            var root = p.Root;
+            if (string.IsNullOrWhiteSpace(root)) { AppendBuildLog("[prepare] Please set Root."); return; }
+
+            if (string.Equals(p.Type, "casc", StringComparison.OrdinalIgnoreCase))
+            {
+                AppendBuildLog("[prepare] CASC pipeline not implemented yet in GUI.");
+                return;
+            }
+
+            var cliProj = ResolveProjectCsproj("WoWRollback", "WoWRollback.Cli");
+            if (string.IsNullOrWhiteSpace(cliProj) || !File.Exists(cliProj))
+            {
+                AppendBuildLog("[prepare] Could not locate WoWRollback.Cli.csproj.");
+                return;
+            }
+
+            var (_, method, resolvedVer, _) = DiscoverMapFolders(p);
+            // Ensure output root is version-scoped
+            if (string.IsNullOrWhiteSpace(outRoot))
+            {
+                var verLabel = string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer;
+                outRoot = Path.Combine(_cacheRoot, verLabel);
+                var cacheBox = this.FindControl<TextBox>("CacheBox"); if (cacheBox != null) cacheBox.Text = outRoot;
+            }
+            Directory.CreateDirectory(outRoot!);
+            var mapsArg = "all"; // process all Alpha WDTs discovered
+            AppendBuildLog($"[prepare] Processing all maps (discovery: {method}); out={outRoot}");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"run --project \"{cliProj}\" -- prepare-layers --client-root \"{root}\" --out \"{outRoot}\" --maps {mapsArg}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            proc.OutputDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
+            proc.ErrorDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
+            AppendBuildLog("[prepare] Starting CLI...");
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            await proc.WaitForExitAsync();
+            AppendBuildLog($"[prepare] Exit code: {proc.ExitCode}");
+
+            RefreshMaps();
+            InitLayersTab();
+            OnMapSelected();
+            if (proc.ExitCode == 0)
+            {
+                _ = ShowMessage("Prepare", "Prepare complete.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendBuildLog("[prepare] ERROR: " + ex.Message);
+        }
+    }
+
+    private static string ResolveProjectCsproj(string folder, string projectName)
+    {
+        try
+        {
+            var start = new DirectoryInfo(AppContext.BaseDirectory);
+            for (var dir = start; dir != null; dir = dir.Parent)
+            {
+                var csproj = Path.Combine(dir.FullName, folder, projectName, projectName + ".csproj");
+                if (File.Exists(csproj)) return csproj;
+            }
+        }
+        catch { }
+        return Path.Combine(folder, projectName);
     }
 
     private void OpenOutBtn_Click(object? sender, RoutedEventArgs e)
@@ -176,6 +320,477 @@ public partial class MainWindow : Window
             }
         }
         catch { }
+    }
+
+    // ===== Data Sources logic =====
+    private void PopulateDataVersions()
+    {
+        var combo = this.FindControl<ComboBox>("DataVersionCombo"); if (combo == null) return;
+        combo.ItemsSource = new[] { "(auto)", "0.5.3", "0.5.5", "0.6.0", "3.3.5.12340" };
+        if (combo.SelectedIndex < 0) combo.SelectedIndex = 0;
+    }
+
+    private void UpdateCascVisibility()
+    {
+        var row = this.FindControl<Grid>("CascListfileRow"); if (row == null) return;
+        var casc = this.FindControl<RadioButton>("DsTypeCasc");
+        row.IsVisible = casc?.IsChecked == true;
+    }
+
+    private sealed class DataSourcePayload
+    {
+        public string Type = "loose"; // loose | install | casc
+        public string? Root;
+        public string? Version;
+        public string? Build; // full build string for DBCD (e.g., 0.5.3.3368)
+        public string? DbdDir;
+        public string? DbcDir;
+        public string? Listfile;
+        public string? OutputDir;
+    }
+
+    private DataSourcePayload BuildDataSourcePayload()
+    {
+        var type = (this.FindControl<RadioButton>("DsTypeCasc")?.IsChecked == true) ? "casc" : (this.FindControl<RadioButton>("DsTypeInstall")?.IsChecked == true ? "install" : "loose");
+        var root = this.FindControl<TextBox>("DataRootBox")?.Text?.Trim();
+        var verSel = this.FindControl<ComboBox>("DataVersionCombo");
+        var ver = verSel?.SelectedItem as string;
+        if (!string.IsNullOrWhiteSpace(ver) && ver!.Equals("(auto)", StringComparison.OrdinalIgnoreCase)) ver = null;
+        var build = this.FindControl<TextBox>("DataBuildBox")?.Text?.Trim();
+        var dbd = this.FindControl<TextBox>("DataDbdBox")?.Text?.Trim();
+        var dbc = this.FindControl<TextBox>("DataDbcBox")?.Text?.Trim();
+        var list = this.FindControl<TextBox>("DataListfileBox")?.Text?.Trim();
+        var cacheBox = this.FindControl<TextBox>("CacheBox");
+        var outDir = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(outDir)) outDir = _cacheRoot;
+        return new DataSourcePayload { Type = type, Root = root, Version = ver, Build = build, DbdDir = dbd, DbcDir = dbc, Listfile = list, OutputDir = outDir };
+    }
+
+    private void DataPreviewBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var p = BuildDataSourcePayload();
+            var notes = new List<string>();
+            if (!string.IsNullOrWhiteSpace(p.Root) && p.Type == "casc")
+            {
+                if (File.Exists(Path.Combine(p.Root!, ".build.info"))) notes.Add(".build.info detected");
+                if (string.IsNullOrWhiteSpace(p.Listfile)) notes.Add("CASC listfile not set");
+            }
+
+            var (maps, method, resolvedVer, err) = DiscoverMapFolders(p);
+            if (!string.IsNullOrWhiteSpace(err)) notes.Add(err!);
+            var sample = maps.Take(10).ToList();
+            var buildUsed = ResolveBuildTag(resolvedVer ?? p.Version ?? string.Empty, p.Build, p.Root);
+            var obj = new { type = p.Type, version = p.Version, build = p.Build, buildUsed, resolvedVersion = resolvedVer, method, mapsCount = maps.Count, sampleMaps = sample, notes };
+            var box = this.FindControl<TextBox>("DataPreviewBox"); if (box != null) box.Text = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            var box = this.FindControl<TextBox>("DataPreviewBox"); if (box != null) box.Text = ex.Message;
+        }
+    }
+
+    private void AppendDataLoadLog(string line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var box = this.FindControl<TextBox>("DataLoadLogBox"); if (box == null) return;
+            box.Text += (string.IsNullOrEmpty(box.Text) ? string.Empty : Environment.NewLine) + line;
+            try { box.CaretIndex = box.Text?.Length ?? 0; } catch { }
+        });
+    }
+
+    private async void DataLoadBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var p = BuildDataSourcePayload();
+            AppendDataLoadLog($"[Load] Type={p.Type} Root={p.Root}");
+            if (string.IsNullOrWhiteSpace(p.OutputDir)) p.OutputDir = _cacheRoot;
+
+            var (mapFolders, method, resolvedVer, err) = DiscoverMapFolders(p);
+            if (!string.IsNullOrWhiteSpace(err)) AppendDataLoadLog($"[Load] Note: {err}");
+            if (mapFolders.Count == 0) { AppendDataLoadLog("[Load] No maps discovered"); return; }
+
+            // Use version-scoped cache directory
+            var verLabel = string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer;
+            p.OutputDir = Path.Combine(p.OutputDir!, verLabel);
+            var cacheBoxCtl = this.FindControl<TextBox>("CacheBox"); if (cacheBoxCtl != null) cacheBoxCtl.Text = p.OutputDir;
+            Directory.CreateDirectory(p.OutputDir!);
+            // If no explicit version was set, persist the resolved version into the manifest
+            if (string.IsNullOrWhiteSpace(p.Version)) p.Version = resolvedVer;
+            foreach (var map in mapFolders)
+            {
+                var outMap = Path.Combine(p.OutputDir!, map);
+                Directory.CreateDirectory(outMap);
+                File.WriteAllText(Path.Combine(outMap, "tile_layers.csv"), "tile_x,tile_y,type,layer,min,max,count\n");
+                File.WriteAllText(Path.Combine(outMap, "layers.json"), "{\n  \"layers\": []\n}\n");
+                AppendDataLoadLog($"[Load] Initialized cache for {map}");
+            }
+            WriteSourcesJson(p, method, resolvedVer, mapFolders);
+
+            AppendDataLoadLog("[Load] Done");
+            WriteDatasetManifest(p);
+            RefreshMaps();
+            InitLayersTab();
+            OnMapSelected();
+            await ShowMessage("Data Sources", "Load complete.");
+
+            // Auto-prepare if checked
+            var auto = this.FindControl<CheckBox>("AutoPrepareAfterLoadCheck");
+            if (auto?.IsChecked == true)
+            {
+                PrepareBtn_Click(null!, null!);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendDataLoadLog("ERROR: " + ex.Message);
+        }
+    }
+
+    private string GetGuiDefaultsPath()
+    {
+        try
+        {
+            var repo = Environment.CurrentDirectory;
+            var path = Path.Combine(repo, "WoWRollback", "work", "gui-data-sources.json");
+            return Path.GetFullPath(path);
+        }
+        catch { return Path.Combine(_cacheRoot, "..", "gui-data-sources.json"); }
+    }
+
+    private void SaveDataDefaultsBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var p = BuildDataSourcePayload();
+            var auto = this.FindControl<CheckBox>("AutoPrepareAfterLoadCheck");
+            var obj = new
+            {
+                type = p.Type,
+                root = p.Root,
+                version = p.Version,
+                build = p.Build,
+                dbdDir = p.DbdDir,
+                dbcDir = p.DbcDir,
+                listfile = p.Listfile,
+                autoPrepare = auto?.IsChecked == true
+            };
+            var json = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
+            var path = GetGuiDefaultsPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, json);
+            AppendDataLoadLog($"Saved defaults: {path}");
+        }
+        catch (Exception ex) { AppendDataLoadLog("Save defaults failed: " + ex.Message); }
+    }
+
+    private void LoadDataDefaultsBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        TryLoadGuiDefaults(showMessage: true);
+    }
+
+    private void TryLoadGuiDefaults(bool showMessage = false)
+    {
+        try
+        {
+            var path = GetGuiDefaultsPath();
+            if (!File.Exists(path)) { if (showMessage) AppendDataLoadLog("No saved defaults"); return; }
+            var json = File.ReadAllText(path);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var type = root.TryGetProperty("type", out var t) ? t.GetString() : "loose";
+            var r = root.TryGetProperty("root", out var rEl) ? rEl.GetString() : null;
+            var version = root.TryGetProperty("version", out var vEl) ? vEl.GetString() : null;
+            var build = root.TryGetProperty("build", out var bEl) ? bEl.GetString() : null;
+            var dbd = root.TryGetProperty("dbdDir", out var dEl) ? dEl.GetString() : null;
+            var dbc = root.TryGetProperty("dbcDir", out var cEl) ? cEl.GetString() : null;
+            var list = root.TryGetProperty("listfile", out var lEl) ? lEl.GetString() : null;
+            var auto = root.TryGetProperty("autoPrepare", out var aEl) && aEl.ValueKind == JsonValueKind.True;
+
+            var casc = this.FindControl<RadioButton>("DsTypeCasc");
+            var install = this.FindControl<RadioButton>("DsTypeInstall");
+            var loose = this.FindControl<RadioButton>("DsTypeLoose");
+            if (string.Equals(type, "casc", StringComparison.OrdinalIgnoreCase)) { if (casc != null) casc.IsChecked = true; }
+            else if (string.Equals(type, "install", StringComparison.OrdinalIgnoreCase)) { if (install != null) install.IsChecked = true; }
+            else { if (loose != null) loose.IsChecked = true; }
+
+            var rootBox = this.FindControl<TextBox>("DataRootBox"); if (rootBox != null) rootBox.Text = r ?? string.Empty;
+            var buildBox = this.FindControl<TextBox>("DataBuildBox"); if (buildBox != null) buildBox.Text = build ?? string.Empty;
+            var dbdBox = this.FindControl<TextBox>("DataDbdBox"); if (dbdBox != null) dbdBox.Text = dbd ?? string.Empty;
+            var dbcBox = this.FindControl<TextBox>("DataDbcBox"); if (dbcBox != null) dbcBox.Text = dbc ?? string.Empty;
+            var listBox = this.FindControl<TextBox>("DataListfileBox"); if (listBox != null) listBox.Text = list ?? string.Empty;
+            var autoChk = this.FindControl<CheckBox>("AutoPrepareAfterLoadCheck"); if (autoChk != null) autoChk.IsChecked = auto;
+
+            var combo = this.FindControl<ComboBox>("DataVersionCombo");
+            if (combo != null)
+            {
+                if (string.IsNullOrWhiteSpace(version)) combo.SelectedIndex = 0; // (auto)
+                else
+                {
+                    var items = combo.Items?.Cast<string>().ToList() ?? new List<string>();
+                    var idx = items.FindIndex(s => string.Equals(s, version, StringComparison.OrdinalIgnoreCase));
+                    if (idx >= 0) combo.SelectedIndex = idx; else combo.SelectedIndex = 0;
+                }
+            }
+
+            UpdateCascVisibility();
+            if (showMessage) AppendDataLoadLog($"Loaded defaults: {path}");
+        }
+        catch (Exception ex) { AppendDataLoadLog("Load defaults failed: " + ex.Message); }
+    }
+
+    private void WriteDatasetManifest(DataSourcePayload p)
+    {
+        try
+        {
+            var path = Path.Combine(p.OutputDir ?? _cacheRoot, ".dataset.json");
+            var obj = new
+            {
+                type = p.Type,
+                root = p.Root,
+                version = p.Version,
+                build = p.Build,
+                dbdDir = p.DbdDir,
+                dbcDir = p.DbcDir,
+                listfile = p.Listfile,
+                generatedAt = DateTimeOffset.UtcNow.ToString("o")
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch { }
+    }
+
+    private (List<string> Maps, string Method, string ResolvedVersion, string? Error) DiscoverMapFolders(DataSourcePayload p)
+    {
+        var maps = new List<string>();
+        string method = "none";
+        string? error = null;
+        var resolved = p.Version;
+        if (string.IsNullOrWhiteSpace(resolved) && !string.IsNullOrWhiteSpace(p.Root)) resolved = InferVersionFromPath(p.Root!);
+
+        // Try Map.dbc discovery when DBD + DBC + version available
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(p.DbdDir) && Directory.Exists(p.DbdDir!))
+            {
+                string? dbc = null;
+                if (!string.IsNullOrWhiteSpace(p.DbcDir) && Directory.Exists(p.DbcDir!)) dbc = p.DbcDir;
+                else if (!string.IsNullOrWhiteSpace(p.Root))
+                {
+                    var d1 = Path.Combine(p.Root!, "DBFilesClient"); if (Directory.Exists(d1)) dbc = d1;
+                    var d2 = Path.Combine(p.Root!, "dbc"); if (dbc == null && Directory.Exists(d2)) dbc = d2;
+                }
+                if (!string.IsNullOrWhiteSpace(dbc) && !string.IsNullOrWhiteSpace(resolved))
+                {
+                    var reader = new MapDbcReader(p.DbdDir!);
+                    // Resolve build tag: prefer user-provided, else detect from .build.info, else known fallback for version
+                    var buildTag = ResolveBuildTag(resolved!, p.Build, p.Root);
+                    var res = reader.ReadMaps(buildTag, dbc!);
+                    if (res.Success)
+                    {
+                        maps = res.Maps.Select(m => m.Folder).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        method = "Map.dbc";
+                        if (string.IsNullOrWhiteSpace(p.Build)) p.Build = buildTag; // persist auto-detected build for manifests/UI
+                        return (maps, method, resolved!, null);
+                    }
+                    else
+                    {
+                        error = res.ErrorMessage ?? "Map.dbc read failed";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        // Fallback: file system folder scan
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(p.Root))
+            {
+                var mapsDir = FindMapsDir(p.Root!);
+                if (mapsDir != null && Directory.Exists(mapsDir))
+                {
+                    maps = Directory.EnumerateDirectories(mapsDir).Select(Path.GetFileName).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    method = "folder-scan";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            error = error ?? ex.Message;
+        }
+
+        return (maps, method, resolved ?? string.Empty, error);
+    }
+
+    private static string ResolveBuildTag(string resolvedVersion, string? userBuild, string? root)
+    {
+        if (!string.IsNullOrWhiteSpace(userBuild))
+        {
+            var ub = userBuild!.Trim();
+            // If user typed just a numeric build ID, combine with version
+            if (Regex.IsMatch(ub, "^\\d{3,6}$")) return string.IsNullOrWhiteSpace(resolvedVersion) ? ub : (resolvedVersion + "." + ub);
+            // If user typed a full version or version.build, accept as-is
+            if (Regex.IsMatch(ub, "^\\d+\\.\\d+(\\.\\d+){0,2}$")) return ub;
+            // Otherwise, fall through to detection/fallback
+        }
+        var detected = TryDetectBuildFromRoot(root);
+        if (!string.IsNullOrWhiteSpace(detected)) return detected!;
+        var fallback = AutoBuildForVersion(resolvedVersion);
+        return string.IsNullOrWhiteSpace(fallback) ? resolvedVersion : fallback!;
+    }
+
+    private static string? TryDetectBuildFromRoot(string? root)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(root)) return null;
+            var candidates = new[]
+            {
+                Path.Combine(root!, ".build.info"),
+                Path.Combine(root!, "Data", ".build.info")
+            };
+            foreach (var p in candidates)
+            {
+                if (!File.Exists(p)) continue;
+                var lines = File.ReadAllLines(p);
+                if (lines.Length == 0) continue;
+                // Heuristic parse: try pipe/space/semicolon separated
+                var header = lines[0];
+                var delim = header.Contains('|') ? '|' : (header.Contains(';') ? ';' : ' ');
+                var cols = header.Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                int idxBuildId = Array.FindIndex(cols, c => c.Equals("BuildId", StringComparison.OrdinalIgnoreCase) || c.Equals("Build ID", StringComparison.OrdinalIgnoreCase) || c.Equals("BuildID", StringComparison.OrdinalIgnoreCase));
+                int idxVersion = Array.FindIndex(cols, c => c.Equals("Version", StringComparison.OrdinalIgnoreCase) || c.Equals("VersionsName", StringComparison.OrdinalIgnoreCase) || c.Equals("VersionName", StringComparison.OrdinalIgnoreCase));
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var parts = lines[i].Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (idxVersion >= 0 && idxVersion < parts.Length)
+                    {
+                        var ver = parts[idxVersion];
+                        // normalize (strip trailing letters like 'a')
+                        ver = Regex.Replace(ver, @"[^0-9\.]+$", "");
+                        string? buildId = null;
+                        if (idxBuildId >= 0 && idxBuildId < parts.Length) buildId = parts[idxBuildId];
+                        if (!string.IsNullOrWhiteSpace(ver))
+                        {
+                            if (!string.IsNullOrWhiteSpace(buildId) && Regex.IsMatch(buildId, "^\\d{4,6}$")) return ver + "." + buildId;
+                            return ver; // at least return version
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string? AutoBuildForVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version)) return null;
+        return version switch
+        {
+            "0.5.3" => "0.5.3.3368",
+            "0.5.5" => "0.5.5.3494",
+            "0.6.0" => "0.6.0.3694",
+            "3.3.5" => "3.3.5.12340",
+            _ => null
+        };
+    }
+
+    private void WriteSourcesJson(DataSourcePayload p, string method, string resolvedVersion, IReadOnlyList<string> folders)
+    {
+        try
+        {
+            var path = Path.Combine(p.OutputDir ?? _cacheRoot, "sources.json");
+            var obj = new { method, resolvedVersion, folders };
+            File.WriteAllText(path, JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch { }
+    }
+
+    private static string? InferVersionFromPath(string path)
+    {
+        try
+        {
+            var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var seg in segments.Reverse())
+            {
+                var m = Regex.Match(seg, "^(?<v>\\d+\\.\\d+(\\.\\d+)?)");
+                if (m.Success) return m.Groups["v"].Value;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string? FindMapsDir(string root)
+    {
+        try
+        {
+            var d1 = Path.Combine(root, "World", "Maps"); if (Directory.Exists(d1)) return d1;
+            var d2 = Path.Combine(root, "tree", "World", "Maps"); if (Directory.Exists(d2)) return d2;
+        }
+        catch { }
+        return null;
+    }
+
+    private static string? TryGetDatasetRootFromCache(string cacheRoot)
+    {
+        try
+        {
+            var path = Path.Combine(cacheRoot, ".dataset.json");
+            if (!File.Exists(path)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement;
+            var r = root.TryGetProperty("root", out var rEl) ? rEl.GetString() : null;
+            return string.IsNullOrWhiteSpace(r) ? null : r;
+        }
+        catch { return null; }
+    }
+
+    private static string? TryExtractGlobalWmo(string datasetRoot, string map)
+    {
+        try
+        {
+            var cands = new[]
+            {
+                Path.Combine(datasetRoot, "World", "Maps", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "tree", "World", "Maps", map, map + ".wdt")
+            };
+            string? wdt = cands.FirstOrDefault(File.Exists);
+            if (wdt == null) return null;
+            var bytes = File.ReadAllBytes(wdt);
+            // Heuristic: extract ASCII strings and find first path ending with .wmo
+            var list = new List<string>();
+            var sb = new StringBuilder();
+            void flush()
+            {
+                if (sb.Length >= 4) list.Add(sb.ToString());
+                sb.Clear();
+            }
+            foreach (var b in bytes)
+            {
+                if (b == 0) { flush(); continue; }
+                char ch = (char)b;
+                if (ch >= 32 && ch <= 126)
+                {
+                    sb.Append(ch);
+                }
+                else
+                {
+                    flush();
+                }
+            }
+            flush();
+            var wmo = list.FirstOrDefault(s => s.IndexOf(".wmo", StringComparison.OrdinalIgnoreCase) >= 0);
+            return wmo;
+        }
+        catch { return null; }
     }
 
     private static double Percentile(IReadOnlyList<int> sorted, double p)
@@ -322,6 +937,10 @@ public partial class MainWindow : Window
         RefreshMaps();
         InitLayersTab();
         RefreshPresetsList();
+        PopulateDataVersions();
+        UpdateCascVisibility();
+        // Auto-load saved defaults if present
+        TryLoadGuiDefaults();
     }
 
     private void RescanBtn_Click(object? sender, RoutedEventArgs e)
@@ -654,6 +1273,11 @@ public partial class MainWindow : Window
         var map = mapCombo.SelectedItem as string;
         if (string.IsNullOrWhiteSpace(map)) return;
         _currentMap = map;
+        // Force fresh reload when switching or re-selecting a map
+        _rowsByMap.Remove(map);
+        _areasByMap.Remove(map);
+        _wmoByMap.Remove(map);
+        _baseM2.Clear(); _baseWmo.Clear(); _customM2.Clear(); _customWmo.Clear();
         EnsureMapLoaded(map);
         PopulateTileCombo(map);
         RefreshAreaUi(map);
@@ -848,6 +1472,14 @@ public partial class MainWindow : Window
         // Reset per-tile state caches
         _baseM2.Clear(); _baseWmo.Clear(); _customM2.Clear(); _customWmo.Clear();
 
+        // If no tile rows, try to resolve global WMO from the map's WDT
+        if (rows.Count == 0)
+        {
+            var datasetRoot = TryGetDatasetRootFromCache(root!);
+            var wmo = datasetRoot != null ? TryExtractGlobalWmo(datasetRoot!, map) : null;
+            _wmoByMap[map] = wmo;
+        }
+
         // Load area group data if available
         LoadAreasForMap(map);
     }
@@ -889,10 +1521,19 @@ public partial class MainWindow : Window
         var host = this.FindControl<StackPanel>("TileLayersList"); if (host == null) return;
         host.Children.Clear();
 
+        var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
+        if (rows.Count == 0)
+        {
+            if (header != null) header.Text = "WMO Map";
+            var wmo = _wmoByMap.GetValueOrDefault(map) ?? "(no MWMO found)";
+            var tb = new TextBlock { Text = $"Global WMO: {System.IO.Path.GetFileName(wmo) ?? wmo}", Margin = new Thickness(0,2,0,2) };
+            host.Children.Add(tb);
+            return;
+        }
+
         if (_selectedTiles.Count > 1)
         {
             if (header != null) header.Text = $"Selection Layers ({_selectedTiles.Count})";
-            var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
             var sel = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
             var grouped = rows.Where(r => sel.Contains(TileKey(r.TileX, r.TileY)))
                 .GroupBy(r => new { r.Type, r.Layer })

@@ -17,6 +17,91 @@
     </DataGrid>
 
     <TabControl Margin="8">
+      <TabItem Header="Data Sources">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="Source:" VerticalAlignment="Center"/>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <RadioButton x:Name="DsTypeLoose" Content="Loose/Test Data" IsChecked="True"/>
+                <RadioButton x:Name="DsTypeInstall" Content="Game Install"/>
+                <RadioButton x:Name="DsTypeCasc" Content="CASC"/>
+              </StackPanel>
+            </StackPanel>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Root:" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataRootBox"/>
+              <Button Grid.Column="2" x:Name="PickDataRootBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="160"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Version:" VerticalAlignment="Center"/>
+              <ComboBox Grid.Column="1" x:Name="DataVersionCombo"/>
+              <TextBlock Grid.Column="2" Text="Build:" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBox Grid.Column="3" x:Name="DataBuildBox"/>
+              <TextBlock Grid.Column="4" Text="DBD:" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBox Grid.Column="5" x:Name="DataDbdBox"/>
+              <Button Grid.Column="6" x:Name="PickDataDbdBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="DBC (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataDbcBox"/>
+              <Button Grid.Column="2" x:Name="PickDataDbcBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid x:Name="CascListfileRow" IsVisible="False">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="CASC listfile:" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataListfileBox"/>
+              <Button Grid.Column="2" x:Name="PickDataListfileBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="DataPreviewBtn" Content="Preview" MinWidth="100"/>
+              <Button x:Name="DataLoadBtn" Content="Load" MinWidth="100"/>
+              <Button x:Name="SaveDataDefaultsBtn" Content="Save Defaults" MinWidth="120"/>
+              <Button x:Name="LoadDataDefaultsBtn" Content="Load Defaults" MinWidth="120"/>
+              <CheckBox x:Name="AutoPrepareAfterLoadCheck" Content="Auto‑Prepare after Load" VerticalAlignment="Center"/>
+            </StackPanel>
+          </StackPanel>
+          <Grid Grid.Row="1" ColumnDefinitions="*,*">
+            <Border BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,0,8,0" Grid.Column="0">
+              <ScrollViewer>
+                <TextBox x:Name="DataPreviewBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="160"/>
+              </ScrollViewer>
+            </Border>
+            <Border BorderBrush="#444" BorderThickness="1" Padding="4" Grid.Column="1">
+              <ScrollViewer>
+                <TextBox x:Name="DataLoadLogBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="160"/>
+              </ScrollViewer>
+            </Border>
+          </Grid>
+        </Grid>
+      </TabItem>
       <TabItem Header="Layers">
         <Grid>
           <Grid.RowDefinitions>
