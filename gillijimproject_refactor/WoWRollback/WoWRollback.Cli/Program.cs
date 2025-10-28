@@ -295,14 +295,14 @@ internal static class Program
         return 0;
     }
 
-    private static string BuildLayersUiArgs(string proj, string wdtPath, string outDir, int gap, string? dbdDirOpt, string? dbcDirOpt, string? buildOpt)
+    private static string BuildLayersUiArgs(string proj, string wdtPath, string outDir, int gap, string? dbdDirOpt, string? dbcDirOpt, string? buildOpt, string? lkDbcDirOpt)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append($"run --project \"{proj}\" -- layers-ui --wdt \"{wdtPath}\" --output-dir \"{outDir}\" --gap-threshold {gap}");
-        var adtDir = Path.Combine(outDir, "lk_adts", "World", "Maps", Path.GetFileNameWithoutExtension(wdtPath));
-        sb.Append($" --area-adt-dir \"{adtDir}\"");
         if (!string.IsNullOrWhiteSpace(dbdDirOpt)) sb.Append($" --dbd-dir \"{dbdDirOpt}\"");
-        if (!string.IsNullOrWhiteSpace(dbcDirOpt)) sb.Append($" --dbc-dir \"{dbcDirOpt}\"");
+        // Prefer explicit --dbc-dir, else fall back to --lk-dbc-dir when provided
+        var dbcEffective = !string.IsNullOrWhiteSpace(dbcDirOpt) ? dbcDirOpt : lkDbcDirOpt;
+        if (!string.IsNullOrWhiteSpace(dbcEffective)) sb.Append($" --dbc-dir \"{dbcEffective}\"");
         if (!string.IsNullOrWhiteSpace(buildOpt)) sb.Append($" --build \"{buildOpt}\"");
         return sb.ToString();
     }
@@ -490,7 +490,8 @@ internal static class Program
                     ["input"] = wdtPath,
                     ["out"] = outDir,
                     ["max-uniqueid"] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["export-lk-adts"] = "true"
+                    ["export-lk-adts"] = "true",
+                    ["force"] = "true"
                 };
                 if (!string.IsNullOrWhiteSpace(lkClientOpt)) rollOpts["lk-client-path"] = lkClientOpt!;
                 if (!string.IsNullOrWhiteSpace(lkDbcDirOpt)) rollOpts["lk-dbc-dir"] = lkDbcDirOpt!;
@@ -510,7 +511,7 @@ internal static class Program
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = BuildLayersUiArgs(proj, wdtPath, outDir, gap, dbdDirOpt, dbcDirOpt, buildOpt),
+                Arguments = BuildLayersUiArgs(proj, wdtPath, outDir, gap, dbdDirOpt, dbcDirOpt, buildOpt, lkDbcDirOpt),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

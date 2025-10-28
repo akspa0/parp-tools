@@ -1470,6 +1470,12 @@ public partial class MainWindow : Window
         {
             heatToggle.IsCheckedChanged += (_, __) => RenderTileGrid();
         }
+        var bandBox = this.FindControl<ComboBox>("BandSizeBox");
+        if (bandBox != null)
+        {
+            if (bandBox.ItemCount > 0 && bandBox.SelectedIndex < 0) bandBox.SelectedIndex = 1; // default 128
+            bandBox.SelectionChanged += (_, __) => RenderTileLayers();
+        }
     }
 
     private void OnTileComboSelectionChanged()
@@ -1573,6 +1579,7 @@ public partial class MainWindow : Window
             if (selParentBtn != null) selParentBtn.IsEnabled = false;
             if (selSubsBtn != null) selSubsBtn.IsEnabled = false;
             if (clearBtn != null) clearBtn.IsEnabled = false;
+            PopulateAreasLegend(map);
             return;
         }
         if (parentCombo != null)
@@ -1762,7 +1769,7 @@ public partial class MainWindow : Window
         var list = keys.ToList();
         tileCombo.ItemsSource = list;
         if (list.Count > 0) tileCombo.SelectedIndex = 0;
-        RenderTileGrid();
+        RenderTileGrid(); PopulateAreasLegend(map);
     }
 
     private void EnsureTileBaseState(string map, int x, int y)
@@ -1801,32 +1808,106 @@ public partial class MainWindow : Window
         {
             if (header != null) header.Text = $"Selection Layers ({_selectedTiles.Count})";
             var sel = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
-            var grouped = rows.Where(r => sel.Contains(TileKey(r.TileX, r.TileY)))
-                .GroupBy(r => new { r.Type, r.Layer })
-                .Select(g => new { g.Key.Type, g.Key.Layer, Min = g.Min(x => x.Min), Max = g.Max(x => x.Max), Avg = g.Average(x => (double)x.Count) })
-                .OrderBy(g => g.Type).ThenBy(g => g.Layer).ToList();
-            foreach (var g in grouped)
+            // Helper rounding for bands
+            static int RoundDown(int v, int step) => v - (v % step);
+            static int RoundUp(int v, int step) { var m = v % step; return m == 0 ? v : v + (step - m); }
+            int Band = 128; // configurable via BandSizeBox
+            try
             {
-                var btn = new Button { Content = $"[{g.Type}] L{g.Layer}: {g.Min}-{g.Max} (~{g.Avg:0.0})" };
-                btn.Margin = new Thickness(0, 2, 0, 2);
-                btn.Click += (_, __) =>
+                var bandBox2 = this.FindControl<ComboBox>("BandSizeBox");
+                var selItem = bandBox2?.SelectedItem as ComboBoxItem;
+                if (selItem != null && int.TryParse(selItem.Content?.ToString(), out var parsed) && parsed > 0) Band = parsed;
+            }
+            catch { Band = 128; }
+
+            // Build per-tile band summaries, then aggregate across selection
+            var tiles = sel.Select(k => k).ToList();
+            var bands = new Dictionary<(string Type, int BMin, int BMax), (double SumCount, int Samples, int TilesHave, int TilesEnabled)>(
+                StringComparer.OrdinalIgnoreCase as IEqualityComparer<(string,int,int)> ?? EqualityComparer<(string,int,int)>.Default);
+
+            foreach (var keyStr in tiles)
+            {
+                var partsSel = (keyStr ?? string.Empty).Split(',');
+                if (partsSel.Length != 2) continue;
+                if (!int.TryParse(partsSel[0], out var sx)) continue; if (!int.TryParse(partsSel[1], out var sy)) continue;
+                EnsureTileBaseState(map, sx, sy);
+                var k = TileKey(sx, sy);
+                var perTile = new Dictionary<(string Type, int BMin, int BMax), (double Sum, int Cnt, bool AnyEnabled)>(
+                    StringComparer.OrdinalIgnoreCase as IEqualityComparer<(string,int,int)> ?? EqualityComparer<(string,int,int)>.Default);
+
+                void Accum(List<TileEntry> list, string type)
                 {
-                    var minBox = this.FindControl<TextBox>("AddRangeMinBox");
-                    var maxBox = this.FindControl<TextBox>("AddRangeMaxBox");
-                    var typeBox = this.FindControl<ComboBox>("AddRangeTypeBox");
-                    if (minBox != null) minBox.Text = g.Min.ToString();
-                    if (maxBox != null) maxBox.Text = g.Max.ToString();
-                    if (typeBox != null)
+                    foreach (var e in list)
                     {
-                        for (int i = 0; i < typeBox.ItemCount; i++)
+                        var bmin = RoundDown(e.Min, Band);
+                        var bmax = RoundUp(e.Max, Band);
+                        var kk = (type, bmin, bmax);
+                        if (!perTile.TryGetValue(kk, out var v)) v = (0, 0, false);
+                        v.Sum += Math.Max(0, e.Count);
+                        v.Cnt += 1;
+                        v.AnyEnabled = v.AnyEnabled || e.Enabled;
+                        perTile[kk] = v;
+                    }
+                }
+
+                Accum(_baseM2.GetValueOrDefault(k) ?? new List<TileEntry>(), "M2");
+                Accum(_baseWmo.GetValueOrDefault(k) ?? new List<TileEntry>(), "WMO");
+
+                foreach (var kv in perTile)
+                {
+                    if (!bands.TryGetValue(kv.Key, out var g)) g = (0, 0, 0, 0);
+                    g.SumCount += kv.Value.Sum;
+                    g.Samples += kv.Value.Cnt;
+                    g.TilesHave += 1;
+                    if (kv.Value.AnyEnabled) g.TilesEnabled += 1;
+                    bands[kv.Key] = g;
+                }
+            }
+
+            foreach (var kv in bands.OrderBy(k => k.Key.Type).ThenBy(k => k.Key.BMin).ThenBy(k => k.Key.BMax))
+            {
+                var type = kv.Key.Type; var bmin = kv.Key.BMin; var bmax = kv.Key.BMax;
+                var avg = kv.Value.Samples > 0 ? kv.Value.SumCount / kv.Value.Samples : 0.0;
+                var allTiles = tiles.Count;
+                bool initiallyChecked = (kv.Value.TilesEnabled == allTiles); // strict: present and enabled in all tiles
+                var cb = new CheckBox { IsChecked = initiallyChecked, Content = $"[{type}] {bmin}-{bmax} (~{avg:0.0})" };
+                cb.Margin = new Thickness(0, 2, 0, 2);
+                cb.Checked += (_, __) => ApplyBand(true, type, bmin, bmax);
+                cb.Unchecked += (_, __) => ApplyBand(false, type, bmin, bmax);
+                host.Children.Add(cb);
+            }
+
+            void ApplyBand(bool on, string type, int bmin, int bmax)
+            {
+                foreach (var keyStr in tiles)
+                {
+                    var partsSel = (keyStr ?? string.Empty).Split(',');
+                    if (partsSel.Length != 2) continue;
+                    if (!int.TryParse(partsSel[0], out var sx)) continue; if (!int.TryParse(partsSel[1], out var sy)) continue;
+                    EnsureTileBaseState(map, sx, sy);
+                    var k = TileKey(sx, sy);
+                    var list = string.Equals(type, "M2", StringComparison.OrdinalIgnoreCase) ? _baseM2[k] : _baseWmo[k];
+                    bool found = false;
+                    foreach (var e in list)
+                    {
+                        // overlap with band
+                        if (e.Min <= bmax && e.Max >= bmin)
                         {
-                            if (string.Equals((typeBox.Items![i] as ComboBoxItem)?.Content?.ToString(), g.Type, StringComparison.OrdinalIgnoreCase))
-                            { typeBox.SelectedIndex = i; break; }
+                            e.Enabled = on;
+                            found = true;
                         }
                     }
-                };
-                host.Children.Add(btn);
+                    if (!found)
+                    {
+                        var cust = string.Equals(type, "M2", StringComparison.OrdinalIgnoreCase) ? _customM2[k] : _customWmo[k];
+                        var ex = cust.FirstOrDefault(c => c.Layer == -1 && c.Min == bmin && c.Max == bmax);
+                        if (ex != null) ex.Enabled = on;
+                        else cust.Add(new TileEntry { Type = type, Layer = -1, Min = bmin, Max = bmax, Count = 0, Enabled = on });
+                    }
+                }
+                RenderTileLayers(); RenderTileCustom();
             }
+
             return;
         }
 
@@ -2028,6 +2109,39 @@ public partial class MainWindow : Window
                     var color = has ? 0xFF2E7D32 : 0xFF2B2B2B;
                     cellColor = new Avalonia.Media.Color((byte)((color>>24)&0xFF),(byte)((color>>16)&0xFF),(byte)((color>>8)&0xFF),(byte)(color&0xFF));
                 }
+
+                // Areas overlay: blend parent area color if available
+                if (_areasByMap.TryGetValue(map, out var aData))
+                {
+                    var tkey = TileKey(key.x, key.y);
+                    // Resolve parent id for this tile if any
+                    int parentId = -1;
+                    foreach (var kv in aData.TilesByParent)
+                    {
+                        if (kv.Value.Contains(tkey)) { parentId = kv.Key; break; }
+                    }
+                    if (parentId > 0)
+                    {
+                        static Avalonia.Media.Color ColorFromParent(int pid)
+                        {
+                            // deterministic pastel palette from id bits
+                            byte r = (byte)(128 + ((pid * 73) & 0x7F));
+                            byte g = (byte)(128 + ((pid * 151) & 0x7F));
+                            byte b = (byte)(128 + ((pid * 197) & 0x7F));
+                            return new Avalonia.Media.Color(0xFF, r, g, b);
+                        }
+                        static Avalonia.Media.Color Blend(Avalonia.Media.Color baseC, Avalonia.Media.Color over, double alpha)
+                        {
+                            if (alpha < 0) alpha = 0; if (alpha > 1) alpha = 1;
+                            byte r = (byte)(baseC.R * (1 - alpha) + over.R * alpha);
+                            byte g = (byte)(baseC.G * (1 - alpha) + over.G * alpha);
+                            byte b = (byte)(baseC.B * (1 - alpha) + over.B * alpha);
+                            return new Avalonia.Media.Color(0xFF, r, g, b);
+                        }
+                        var over = ColorFromParent(parentId);
+                        cellColor = Blend(cellColor, over, 0.35);
+                    }
+                }
                 var b = new Border
                 {
                     Background = new Avalonia.Media.SolidColorBrush(cellColor),
@@ -2055,6 +2169,37 @@ public partial class MainWindow : Window
         var tileComboInit = this.FindControl<ComboBox>("TileSelectBox");
         var valInit = tileComboInit?.SelectedItem as string;
         if (_selectedTiles.Count == 0 && !string.IsNullOrWhiteSpace(valInit)) { _focusedTileKey = valInit!; _selectedTiles.Clear(); _selectedTiles.Add(valInit!); }
+    }
+
+    private void PopulateAreasLegend(string map)
+    {
+        var host = this.FindControl<StackPanel>("AreasLegend"); if (host == null) return;
+        host.Children.Clear();
+        if (!_areasByMap.TryGetValue(map, out var data)) return;
+        // Top 8 parents by tile count
+        var items = data.TilesByParent.Select(kv => new { Id = kv.Key, Count = kv.Value.Count, Name = data.ParentName.GetValueOrDefault(kv.Key) ?? ("Parent " + kv.Key) })
+            .OrderByDescending(x => x.Count).Take(8).ToList();
+        foreach (var it in items)
+        {
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            var swatch = new Border { Width = 14, Height = 14, BorderBrush = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.Black), BorderThickness = new Thickness(1) };
+            // same color function as grid overlay
+            byte r = (byte)(128 + ((it.Id * 73) & 0x7F));
+            byte g = (byte)(128 + ((it.Id * 151) & 0x7F));
+            byte b = (byte)(128 + ((it.Id * 197) & 0x7F));
+            swatch.Background = new Avalonia.Media.SolidColorBrush(new Avalonia.Media.Color(0xFF, r, g, b));
+            var btn = new Button { Content = $"{it.Name} ({it.Id}) · {it.Count}", Margin = new Thickness(4,0,0,0) };
+            btn.Click += (_, __) =>
+            {
+                var add = this.FindControl<CheckBox>("AreaAddModeBox");
+                if (add?.IsChecked != true) _selectedTiles.Clear();
+                foreach (var k in data.TilesByParent.GetValueOrDefault(it.Id) ?? new HashSet<string>()) _selectedTiles.Add(k);
+                if ((_selectedTiles?.Count ?? 0) > 0) _focusedTileKey = _selectedTiles.First();
+                RenderTileGrid(); RenderTileLayers(); RenderMinimap();
+            };
+            panel.Children.Add(swatch); panel.Children.Add(btn);
+            host.Children.Add(panel);
+        }
     }
 
     private void HighlightTile(string val)
@@ -2114,8 +2259,27 @@ public partial class MainWindow : Window
     private void TileGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var panel = sender as Panel; if (panel == null) return;
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        var cell = TileFromPointer(panel, e);
+        // Alt-click = select entire parent area of the clicked tile (if available)
+        if ((e.KeyModifiers & KeyModifiers.Alt) != 0 && _areasByMap.TryGetValue(map, out var data))
+        {
+            string tkey = TileKey(cell.x, cell.y);
+            int parentId = -1;
+            foreach (var kv in data.TilesByParent) { if (kv.Value.Contains(tkey)) { parentId = kv.Key; break; } }
+            if (parentId > 0)
+            {
+                var add = this.FindControl<CheckBox>("AreaAddModeBox");
+                if (add?.IsChecked != true) _selectedTiles.Clear();
+                foreach (var k in data.TilesByParent.GetValueOrDefault(parentId) ?? new HashSet<string>()) _selectedTiles.Add(k);
+                _focusedTileKey = tkey;
+                RenderTileGrid(); RenderTileLayers(); RenderMinimap();
+                return;
+            }
+        }
+
         _isDragging = true;
-        _dragStartCell = TileFromPointer(panel, e);
+        _dragStartCell = cell;
         _dragBase = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
         _dragMode = (e.KeyModifiers & KeyModifiers.Control) != 0 ? SelMode.Add : (e.KeyModifiers & KeyModifiers.Shift) != 0 ? SelMode.Remove : SelMode.Replace;
         e.Pointer.Capture(panel);

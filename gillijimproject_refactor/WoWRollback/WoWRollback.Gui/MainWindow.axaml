@@ -163,12 +163,26 @@
             <StackPanel Grid.Column="1" Margin="0,8,0,0" Spacing="8">
               <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
               <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
+              <WrapPanel>
+                <TextBlock Text="Band" VerticalAlignment="Center"/>
+                <ComboBox x:Name="BandSizeBox" Width="80" Margin="6,0,0,0">
+                  <ComboBoxItem Content="64"/>
+                  <ComboBoxItem Content="128"/>
+                  <ComboBoxItem Content="256"/>
+                </ComboBox>
+              </WrapPanel>
               <TextBlock Text="Area Groups" FontWeight="Bold"/>
               <WrapPanel>
                 <ComboBox x:Name="ParentAreaCombo" Width="260" Margin="0,0,6,6"/>
                 <CheckBox x:Name="AreaAddModeBox" Content="Add to selection" Margin="0,0,6,6"/>
                 <Button x:Name="SelectParentBtn" Content="Select Parent Tiles" Margin="0,0,6,6"/>
               </WrapPanel>
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <StackPanel>
+                  <TextBlock Text="Areas Legend"/>
+                  <StackPanel x:Name="AreasLegend"/>
+                </StackPanel>
+              </Border>
               <Border BorderBrush="#444" BorderThickness="1" Padding="4">
                 <StackPanel>
                   <TextBlock Text="Subzones"/>
