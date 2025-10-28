@@ -16,7 +16,7 @@
       </DataGrid.Columns>
     </DataGrid>
 
-    <TabControl Margin="8">
+    <TabControl x:Name="MainTabs" Margin="8">
       <TabItem Header="Data Sources">
         <Grid>
           <Grid.RowDefinitions>
@@ -70,6 +70,26 @@
               <TextBox Grid.Column="1" x:Name="DataDbcBox"/>
               <Button Grid.Column="2" x:Name="PickDataDbcBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
             </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="LK Client (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="LkClientBox"/>
+              <Button Grid.Column="2" x:Name="PickLkClientBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="LK DBC (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="LkDbcBox"/>
+              <Button Grid.Column="2" x:Name="PickLkDbcBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
             <Grid x:Name="CascListfileRow" IsVisible="False">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -82,10 +102,10 @@
             </Grid>
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button x:Name="DataPreviewBtn" Content="Preview" MinWidth="100"/>
-              <Button x:Name="DataLoadBtn" Content="Load" MinWidth="100"/>
+              <Button x:Name="DataLoadBtn" Content="Load" MinWidth="160" Background="#2563EB" Foreground="White" FontWeight="Bold"/>
               <Button x:Name="SaveDataDefaultsBtn" Content="Save Defaults" MinWidth="120"/>
               <Button x:Name="LoadDataDefaultsBtn" Content="Load Defaults" MinWidth="120"/>
-              <CheckBox x:Name="AutoPrepareAfterLoadCheck" Content="Auto‑Prepare after Load" VerticalAlignment="Center"/>
+              <CheckBox x:Name="AutoPrepareAfterLoadCheck" Content="Auto‑Prepare after Load" VerticalAlignment="Center" IsChecked="True"/>
             </StackPanel>
           </StackPanel>
           <Grid Grid.Row="1" ColumnDefinitions="*,*">
@@ -273,5 +293,11 @@
         </Grid>
       </TabItem>
     </TabControl>
+    <Border x:Name="LoadingOverlay" Background="#AA000000" IsVisible="False" ZIndex="9999">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+        <ProgressBar IsIndeterminate="True" Width="260"/>
+        <TextBlock x:Name="LoadingText" Text="Loading..." Foreground="White" FontSize="16" HorizontalAlignment="Center"/>
+      </StackPanel>
+    </Border>
   </DockPanel>
 </Window>

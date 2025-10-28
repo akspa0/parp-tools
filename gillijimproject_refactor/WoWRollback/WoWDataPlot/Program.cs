@@ -527,23 +527,31 @@ h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;
 
         var results = new Dictionary<(int x, int y), int>();
 
-        // Prefer split ADT format (_obj0.adt); fall back to regular ADTs
-        var objAdtFiles = Directory.GetFiles(adtDir, $"{mapName}_*_obj0.adt", SearchOption.TopDirectoryOnly);
-        string[] adtFiles;
-        if (objAdtFiles.Length > 0)
+        // Always use root ADTs. Exclude split files like _obj/_tex/_lgt/_occ.
+        var adtFiles = Directory.GetFiles(adtDir, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
+            .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase)
+                     && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase)
+                     && !f.Contains("_lgt", StringComparison.OrdinalIgnoreCase)
+                     && !f.Contains("_occ", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        // Fallback: autodetect exported LK ADTs under outDir/lk_adts/World/Maps/<map>
+        if (adtFiles.Length == 0)
         {
-            adtFiles = objAdtFiles;
-        }
-        else
-        {
-            adtFiles = Directory.GetFiles(adtDir, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
-                .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase)
-                         && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase)
-                         && !f.Contains("_lgt", StringComparison.OrdinalIgnoreCase)
-                         && !f.Contains("_occ", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            var candidate = Path.Combine(outDir, "lk_adts", "World", "Maps", mapName);
+            if (Directory.Exists(candidate))
+            {
+                adtFiles = Directory.GetFiles(candidate, $"{mapName}_*.adt", SearchOption.TopDirectoryOnly)
+                    .Where(f => !f.Contains("_obj", StringComparison.OrdinalIgnoreCase)
+                             && !f.Contains("_tex", StringComparison.OrdinalIgnoreCase)
+                             && !f.Contains("_lgt", StringComparison.OrdinalIgnoreCase)
+                             && !f.Contains("_occ", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (adtFiles.Length > 0) adtDir = candidate;
+            }
         }
 
+        Console.WriteLine($"[areas] Scanning {adtFiles.Length} LK ADTs from: {adtDir}");
+        int dbg = 0;
         foreach (var adtFile in adtFiles)
         {
             var fileName = Path.GetFileNameWithoutExtension(adtFile);
@@ -551,10 +559,12 @@ h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;
             if (parts.Length < 3) continue;
             if (!int.TryParse(parts[^2], out var tx)) continue;
             if (!int.TryParse(parts[^1], out var ty)) continue;
-            var area = LkAdtReader.ReadTileMajorAreaId(adtFile);
+            // Read tile's majority AreaID from LK ADT locally
+            var area = TryReadLkTileMajorAreaId_Local(adtFile);
             if (area.HasValue)
             {
                 results[(tx, ty)] = area.Value;
+                if (dbg < 3) { Console.WriteLine($"[areas] {Path.GetFileName(adtFile)} -> area {area.Value} at tile {tx},{ty}"); dbg++; }
             }
         }
 
@@ -572,23 +582,113 @@ h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;
         Console.WriteLine($"[ok] Wrote areas: {path} ({results.Count} tiles)");
     }
 
+    // Minimal LK ADT parser: read MCNK headers and compute majority AreaID
+    private static int? TryReadLkTileMajorAreaId_Local(string adtPath)
+    {
+        try
+        {
+            using var fs = new FileStream(adtPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var br = new BinaryReader(fs, System.Text.Encoding.ASCII, leaveOpen: false);
+            var counts = new Dictionary<int,int>();
+            int mcnkSeen = 0, areaHits = 0;
+            while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                var idBytes = br.ReadBytes(4);
+                if (idBytes.Length < 4) break;
+                var fourCC = System.Text.Encoding.ASCII.GetString(idBytes);
+                int size = br.ReadInt32();
+                if (size < 0 || br.BaseStream.Position + size > br.BaseStream.Length) break;
+
+                if (fourCC == "MCNK")
+                {
+                    long headerStart = br.BaseStream.Position; // MCNK header begins here
+                    // WotLK AreaID is at offset 0x34 in MCNK header (128 bytes total).
+                    // Some earlier variants used 0x2C; try 0x34 first, then 0x2C fallback.
+                    int areaId = 0;
+                    if (size >= 0x38 && headerStart + 0x38 <= br.BaseStream.Length)
+                    {
+                        br.BaseStream.Seek(headerStart + 0x34, SeekOrigin.Begin);
+                        areaId = br.ReadInt32();
+                    }
+                    if (areaId <= 0 && size >= 0x30 && headerStart + 0x30 <= br.BaseStream.Length)
+                    {
+                        br.BaseStream.Seek(headerStart + 0x2C, SeekOrigin.Begin);
+                        areaId = br.ReadInt32();
+                    }
+                    if (areaId > 0)
+                    {
+                        counts[areaId] = counts.TryGetValue(areaId, out var c) ? c + 1 : 1;
+                        areaHits++;
+                    }
+                    mcnkSeen++;
+                    // seek to end of MCNK chunk (header + payload) with 4-byte padding
+                    long after = headerStart + size;
+                    br.BaseStream.Seek(after, SeekOrigin.Begin);
+                    int pad = size & 3; if (pad != 0) br.BaseStream.Seek(4 - pad, SeekOrigin.Current);
+                    continue;
+                }
+
+                // skip other chunks with 4-byte padding
+                br.BaseStream.Seek(size, SeekOrigin.Current);
+                int pad2 = size & 3; if (pad2 != 0) br.BaseStream.Seek(4 - pad2, SeekOrigin.Current);
+            }
+            if (counts.Count == 0) return null;
+            // Light debug for early files
+            if (mcnkSeen > 0 && areaHits == 0)
+            {
+                Console.WriteLine($"[areas][debug] {Path.GetFileName(adtPath)}: MCNK={mcnkSeen}, no AreaIDs found (tried 0x34,0x2C)");
+            }
+            return counts.OrderByDescending(kv => kv.Value).First().Key;
+        }
+        catch { return null; }
+    }
+
     private static void TryEnrichAreasCsv(string wdtPath, string outDir, DirectoryInfo? dbdDir, DirectoryInfo? dbcDirOpt, string? buildOpt)
     {
         var csvPath = Path.Combine(outDir, "areas.csv");
         if (!File.Exists(csvPath)) return;
-        if (dbdDir == null || !dbdDir.Exists) return;
-        var dbcDir = dbcDirOpt != null && dbcDirOpt.Exists ? dbcDirOpt.FullName : DeduceDbcDirFromWdt(wdtPath);
-        if (string.IsNullOrWhiteSpace(dbcDir) || !Directory.Exists(dbcDir)) return;
-        var build = !string.IsNullOrWhiteSpace(buildOpt) ? buildOpt! : GuessBuildFromPath(wdtPath) ?? "3.3.5.12340";
+        var nameById = new Dictionary<int,string>();
+        var parentById = new Dictionary<int,int>();
 
-        var dbdPath = dbdDir.FullName;
-        var defs = Path.Combine(dbdPath, "definitions");
-        if (Directory.Exists(defs)) dbdPath = defs;
-        var reader = new AreaDbcReader(dbdPath);
-        var data = reader.ReadAreas(build, dbcDir);
-        if (!data.Success) return;
-        var nameById = data.NameById;
-        var parentById = data.ParentById;
+        // Prefer DBCTool dump if available: <outDir>/dbctool_outputs/<ver>/compare/v2/AreaTable_dump_3.3.5.csv
+        try
+        {
+            var verFolder = new DirectoryInfo(outDir).Parent?.Name ?? ""; // e.g., 0.5.3
+            var dumpPath = Path.Combine(outDir, "dbctool_outputs", verFolder, "compare", "v2", "AreaTable_dump_3.3.5.csv");
+            if (File.Exists(dumpPath))
+            {
+                // CSV header: row_key,id,parent,continentId,name
+                foreach (var line in File.ReadLines(dumpPath).Skip(1))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var p = line.Split(','); if (p.Length < 5) continue;
+                    if (!int.TryParse(p[1], out var id)) continue;
+                    int.TryParse(p[2], out var parent);
+                    var name = p[4];
+                    nameById[id] = name;
+                    if (parent > 0) parentById[id] = parent;
+                }
+            }
+        }
+        catch { }
+
+        // Fallback to DBC/DBD if DBCTool dump missing
+        if (nameById.Count == 0)
+        {
+            if (dbdDir == null || !dbdDir.Exists) return;
+            var dbcDir = dbcDirOpt != null && dbcDirOpt.Exists ? dbcDirOpt.FullName : DeduceDbcDirFromWdt(wdtPath);
+            if (string.IsNullOrWhiteSpace(dbcDir) || !Directory.Exists(dbcDir)) return;
+            var build = !string.IsNullOrWhiteSpace(buildOpt) ? buildOpt! : GuessBuildFromPath(wdtPath) ?? "3.3.5.12340";
+
+            var dbdPath = dbdDir.FullName;
+            var defs = Path.Combine(dbdPath, "definitions");
+            if (Directory.Exists(defs)) dbdPath = defs;
+            var reader = new AreaDbcReader(dbdPath);
+            var data = reader.ReadAreas(build, dbcDir);
+            if (!data.Success) return;
+            nameById = data.NameById;
+            parentById = data.ParentById;
+        }
 
         static string Esc(string s)
         {
@@ -613,7 +713,7 @@ h1{color:#4ec9b0} .panel,.col{background:#252526;border-radius:6px;padding:12px;
             outLines.Add($"{tx},{ty},{aid},{Esc(aname)},{pid},{Esc(pname)}");
         }
         File.WriteAllLines(csvPath, outLines);
-        Console.WriteLine("[ok] Enriched areas.csv with names and parents");
+        Console.WriteLine("[ok] Enriched areas.csv with names and parents (" + (nameById.Count>0?"dbctool":"dbc") + ")");
     }
 
     private static string? DeduceDbcDirFromWdt(string wdtPath)

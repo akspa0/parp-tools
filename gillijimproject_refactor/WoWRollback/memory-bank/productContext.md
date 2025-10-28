@@ -67,11 +67,18 @@ WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 
 ### Analysis + Viewer
 - Analyze LK ADTs to produce placements/terrain CSVs and viewer assets, then serve viewer.
 
-### Presets & Filters
-- Presets define global `uniqueId.max` and labeled ranges.
-- Future viewer UI will provide global/per-tile UniqueID controls and asset-type filters (trees, bushes, rocks, buildings, etc.) to visualize sub-layers.
+### Presets
+- Management lives in Settings (create/rename/delete; schema unchanged).
+- Load Preset control lives on the Load page (applies before Prepare).
+- BYOD: presets reference paths/aliases; no copyrighted assets included.
 
-## Technical Approach
+### UX Principles
+- No modal popups; use overlay + inline banners for status/errors.
+- Clear navigation: Load → Build (Prepare) → Layers; auto-switch on milestone.
+- Scroll-safe layouts; window opens maximized by default.
+- Energy-efficient preflight: reuse cache outputs and crosswalk CSVs when present; skip recomputation.
+
+### Technical Approach
 
 ### Object Burial Strategy
 - Modify Z coordinate in MDDF/MODF chunks

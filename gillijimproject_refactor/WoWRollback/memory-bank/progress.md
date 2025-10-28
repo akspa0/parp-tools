@@ -1,5 +1,12 @@
 # Progress - WoWRollback.RollbackTool
 
+## ✅ Completed (2025-10-27)
+- GUI loading overlay added; wired around Load/Prepare.
+- Load UX: prominent button; auto-switch to Build; Auto‑Prepare default ON.
+- Prepare UX: auto-switch to Layers; removed success/info modals.
+- Tiles: fallback to `<map>_tile_layers.csv` when `tile_layers.csv` empty; normalization + logs.
+- Map discovery: version folder handled correctly; only real maps listed.
+
 ## ✅ Completed (2025-10-25)
 
 ### CLI-first pipeline hardened and documented

@@ -22,6 +22,22 @@
 ### Invariants
 - Always emit `<Map>.wdt` alongside LK ADTs in the LK output folder
 
+## Energy-Efficient Preflight Pattern
+- Before Prepare, check per-map outputs and skip redundant steps:
+  - Skip LK ADT export if `lk_adts/World/Maps/<map>` exists and is complete.
+  - Skip crosswalk generation if DBCTool `compare/v2` CSVs exist for the map.
+  - Skip tile layer analysis if `tile_layers.csv` and `layers.json` exist.
+  - Always log “SKIP <step> (reason)” for transparency; provide a “Force rebuild” override.
+
+## GUI Runner Pattern
+- GUI orchestrates CLI services with overlay + inline logs.
+- Auto-navigation: Load → Build on completion; Build → Layers after Prepare success.
+- Feature gating: hide data-dependent panels (e.g., Area Groups) until required artifacts exist.
+
+## CSV Parsing Pattern
+- Use CsvHelper with ClassMaps for `tile_layers.csv` and `areas.csv`.
+- Tolerate header variants and 7/8-column tile CSVs; avoid brittle string.Split.
+
 # System Patterns - WoWRollback.RollbackTool Architecture
 
 ## Three-Tool Separation of Concerns

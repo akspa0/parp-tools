@@ -8,6 +8,7 @@
   - `GillijimProject.WowFiles` (Alpha/LK ADT parsing) - **CRITICAL DEPENDENCY**
   - `System.Security.Cryptography` (MD5 checksums)
   - `System.Text.Json` (Analysis data, manifests)
+  - `CsvHelper` (robust CSV parsing in GUI)
 
 ## Project Structure (Current)
 ```
@@ -271,6 +272,13 @@ Azeroth 0.5.3:
 - **Tested Maximum**: 951 tiles (Kalimdor)
 - **Expected Maximum**: ~1500 tiles (theoretical WDT limit)
 - **No Parallel Processing Needed**: Sequential is fast enough
+
+## Cache Reuse & BYOD Policy (Added 2025-10-27)
+- Preflight cache checks and skip-if-exists behavior are first-class:
+  - Reuse LK ADTs if present and complete; allow “Force rebuild” when necessary.
+  - Reuse DBCTool crosswalks (`compare/v2`) when present; they are static.
+  - Reuse `tile_layers.csv` and `layers.json` when present; GUI supports fallback from `<map>_tile_layers.csv`.
+- BYOD: tooling must not include copyrighted game assets; all DBC/DBD/client paths are user-supplied.
 
 ## CASC Asset Source (Planned)
 - Integration: WoWFormatLib/CascLib with listfile support

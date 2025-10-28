@@ -295,6 +295,18 @@ internal static class Program
         return 0;
     }
 
+    private static string BuildLayersUiArgs(string proj, string wdtPath, string outDir, int gap, string? dbdDirOpt, string? dbcDirOpt, string? buildOpt)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"run --project \"{proj}\" -- layers-ui --wdt \"{wdtPath}\" --output-dir \"{outDir}\" --gap-threshold {gap}");
+        var adtDir = Path.Combine(outDir, "lk_adts", "World", "Maps", Path.GetFileNameWithoutExtension(wdtPath));
+        sb.Append($" --area-adt-dir \"{adtDir}\"");
+        if (!string.IsNullOrWhiteSpace(dbdDirOpt)) sb.Append($" --dbd-dir \"{dbdDirOpt}\"");
+        if (!string.IsNullOrWhiteSpace(dbcDirOpt)) sb.Append($" --dbc-dir \"{dbcDirOpt}\"");
+        if (!string.IsNullOrWhiteSpace(buildOpt)) sb.Append($" --build \"{buildOpt}\"");
+        return sb.ToString();
+    }
+
     private static int RunGui(Dictionary<string, string> opts)
     {
         var cache = GetOption(opts, "cache") ?? Path.Combine(Directory.GetCurrentDirectory(), "work", "cache");
@@ -383,6 +395,11 @@ internal static class Program
         Directory.CreateDirectory(outRoot);
 
         var gap = TryParseInt(opts, "gap-threshold") ?? 50;
+        var dbdDirOpt = GetOption(opts, "dbd-dir");
+        var dbcDirOpt = GetOption(opts, "dbc-dir");
+        var buildOpt = GetOption(opts, "build");
+        var lkDbcDirOpt = GetOption(opts, "lk-dbc-dir");
+        var lkClientOpt = GetOption(opts, "lk-client-path");
 
         // Mode A: explicit single WDT
         var wdtPath = GetOption(opts, "wdt");
@@ -392,7 +409,7 @@ internal static class Program
             var mapName = Path.GetFileNameWithoutExtension(wdtPath);
             var outDir = Path.Combine(outRoot, mapName);
             Directory.CreateDirectory(outDir);
-            return RunLayersUiGenerator(wdtPath, outDir, gap);
+            return RunLayersUiGenerator(wdtPath, outDir, gap, dbdDirOpt, dbcDirOpt, buildOpt, lkDbcDirOpt, lkClientOpt);
         }
 
         // Mode B: scan client-root for loose Alpha WDTs under World/Maps
@@ -450,7 +467,7 @@ internal static class Program
             Console.WriteLine($"—— {map} ——");
             var outDir = Path.Combine(outRoot, map);
             Directory.CreateDirectory(outDir);
-            var code = RunLayersUiGenerator(path, outDir, gap);
+            var code = RunLayersUiGenerator(path, outDir, gap, dbdDirOpt, dbcDirOpt, buildOpt, lkDbcDirOpt, lkClientOpt);
             if (code == 0) { ok++; Console.WriteLine($"[ok] {map}"); }
             else { fail++; Console.WriteLine($"[fail] {map} (exit={code})"); }
         }
@@ -459,15 +476,41 @@ internal static class Program
         return fail == 0 ? 0 : 1;
     }
 
-    private static int RunLayersUiGenerator(string wdtPath, string outDir, int gap)
+    private static int RunLayersUiGenerator(string wdtPath, string outDir, int gap, string? dbdDirOpt, string? dbcDirOpt, string? buildOpt, string? lkDbcDirOpt, string? lkClientOpt)
     {
         try
         {
             var proj = ResolveProjectCsproj("WoWRollback", "WoWDataPlot");
+            // Pre-step: generate LK ADTs from Alpha WDT (mock run, keep everything)
+            try
+            {
+                var mapName = Path.GetFileNameWithoutExtension(wdtPath);
+                var rollOpts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["input"] = wdtPath,
+                    ["out"] = outDir,
+                    ["max-uniqueid"] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["export-lk-adts"] = "true"
+                };
+                if (!string.IsNullOrWhiteSpace(lkClientOpt)) rollOpts["lk-client-path"] = lkClientOpt!;
+                if (!string.IsNullOrWhiteSpace(lkDbcDirOpt)) rollOpts["lk-dbc-dir"] = lkDbcDirOpt!;
+                if (!string.IsNullOrWhiteSpace(dbdDirOpt)) rollOpts["dbd-dir"] = dbdDirOpt!;
+                Console.WriteLine($"[info] Preparing LK ADTs for AreaIDs: {mapName}");
+                var code = RunRollback(rollOpts);
+                if (code != 0)
+                {
+                    Console.WriteLine($"[warn] Mock rollback (LK export) failed for {mapName} (exit={code}); areas.csv enrichment may be empty.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[warn] Mock rollback (LK export) error: {ex.Message}");
+            }
+
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"run --project \"{proj}\" -- layers-ui --wdt \"{wdtPath}\" --output-dir \"{outDir}\" --gap-threshold {gap}",
+                Arguments = BuildLayersUiArgs(proj, wdtPath, outDir, gap, dbdDirOpt, dbcDirOpt, buildOpt),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -1532,12 +1575,13 @@ internal static class Program
         Console.WriteLine("  analyze-alpha-wdt --wdt-file <path> [--out <dir>]");
         Console.WriteLine("    Extract UniqueID ranges from Alpha WDT files (archaeological excavation)");
         Console.WriteLine();
-        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--export-lk-adts] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
+        Console.WriteLine("  rollback  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--disable-mcsh] [--export-lk-adts] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>] [--force]");
         Console.WriteLine("    Modify Alpha WDT by burying placements with UniqueID > N, then write output + MD5");
         Console.WriteLine("    --fix-holes        Clear MCNK Holes flags across all chunks (terrain hole masks)");
         Console.WriteLine("    --disable-mcsh     Zero MCSH subchunk payloads (remove baked shadows)");
         Console.WriteLine("    --export-lk-adts   After writing modified WDT, convert present tiles to LK ADT files");
         Console.WriteLine("    --lk-out <dir>     Output directory root for LK ADTs (default: <out>/lk_adts/World/Maps/<map>)");
+        Console.WriteLine("    --force            Rebuild even if LK ADTs appear complete (disables preflight skip)");
         Console.WriteLine("    --lk-client-path   LK client folder with MPQs (used for AreaTable auto-mapping)");
         Console.WriteLine("    --area-remap-json  JSON file mapping AlphaAreaId->LKAreaId to set MCNK.AreaId");
         Console.WriteLine("    --default-unmapped AreaId to use when no mapping/ID exists in LK (default 0)");
@@ -1549,7 +1593,7 @@ internal static class Program
         Console.WriteLine("    --lk-dbc-dir Directory with extracted LK DBCs (Map.dbc/AreaTable.dbc), else read from --lk-client-path");
         Console.WriteLine("    Default bury-depth = -5000.0, default out dir = <input_basename>_out next to input");
         Console.WriteLine();
-        Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>]");
+        Console.WriteLine("  alpha-to-lk  --input <WDT> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh] [--lk-out <dir>] [--lk-client-path <dir>] [--area-remap-json <path>] [--default-unmapped <id>] [--force]");
         Console.WriteLine("    One-shot: rollback + (optional) fix-holes/MCSH + LK export with AreaTable mapping");
         Console.WriteLine("    Crosswalk mapping (strict, map-locked):");
         Console.WriteLine("      --crosswalk-dir <dir>         Preferred per-run CSV directory (Area_patch_crosswalk_*.csv)");
@@ -1561,6 +1605,8 @@ internal static class Program
         Console.WriteLine("      --strict-areaid [true|false]  Strict map-locked patching (default true)");
         Console.WriteLine("      --report-areaid               Write per-ADT and summary CSVs");
         Console.WriteLine("      --copy-crosswalks             Copy used CSVs into <session>/reports/crosswalk");
+        Console.WriteLine("    Preflight (skip-if-exists):");
+        Console.WriteLine("      LK export is skipped when <map>.wdt and all ADTs already exist in --lk-out; pass --force to rebuild");
         Console.WriteLine("    Auto-generate crosswalks (default on when none found):");
         Console.WriteLine("      --auto-crosswalks [true|false]  Enable CSV generation via DBCTool.V2 (default true)");
         Console.WriteLine("      --dbd-dir <dir>                WoWDBDefs/definitions path (required if not probed)");
@@ -2886,6 +2932,7 @@ internal static class Program
         var holesNeighbors = string.Equals(holesScope, "neighbors", StringComparison.OrdinalIgnoreCase);
         var holesPreserveWmo = !(opts.TryGetValue("holes-wmo-preserve", out var preserveStr) && string.Equals(preserveStr, "false", StringComparison.OrdinalIgnoreCase));
         var exportLkAdts = opts.ContainsKey("export-lk-adts");
+        var force = opts.ContainsKey("force");
 
         // Resolve session and primary output paths
         uint rangeMinLabel, rangeMaxLabel;
@@ -2966,6 +3013,7 @@ internal static class Program
             var existingAdts = wdt.GetExistingAdtsNumbers();
             var adtOffsets = wdt.GetAdtOffsetsInMain();
             Console.WriteLine($"[info] Tiles detected: {existingAdts.Count}");
+            var expectedAdtCount = existingAdts.Count;
 
             var wdtBytes = File.ReadAllBytes(inputPath);
             int totalPlacements = 0, removed = 0, tilesProcessed = 0;
@@ -3192,8 +3240,12 @@ internal static class Program
             Console.WriteLine($"Total Placements:  {totalPlacements:N0}");
             Console.WriteLine($"  Removed:          {removed:N0}");
 
-            // Optional: Export LK ADTs from modified Alpha WDT
-            if (exportLkAdts)
+            // Optional: Export LK ADTs from modified Alpha WDT (with preflight skip)
+            if (exportLkAdts && !force && PreflightChecks.HasCompleteLkAdts(mapName, lkOutDir, expectedAdtCount))
+            {
+                Console.WriteLine($"[preflight] SKIP LK export (already complete): {lkOutDir}");
+            }
+            else if (exportLkAdts)
             {
                 try
                 {

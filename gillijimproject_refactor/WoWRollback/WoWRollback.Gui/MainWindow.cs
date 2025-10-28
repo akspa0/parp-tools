@@ -50,8 +50,21 @@ public partial class MainWindow : Window
         public SortedDictionary<int, string> ParentLabel { get; } = new();
         public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
     }
+
+    private static string BuildPrepareLayersArgs(string cliProj, string clientRoot, string outRoot, string mapsArg, DataSourcePayload p)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"run --project \"{cliProj}\" -- prepare-layers --client-root \"{clientRoot}\" --out \"{outRoot}\" --maps {mapsArg}");
+        if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
+        if (!string.IsNullOrWhiteSpace(p.DbcDir)) sb.Append($" --dbc-dir \"{p.DbcDir}\"");
+        if (!string.IsNullOrWhiteSpace(p.Build)) sb.Append($" --build \"{p.Build}\"");
+        if (!string.IsNullOrWhiteSpace(p.LkClient)) sb.Append($" --lk-client-path \"{p.LkClient}\"");
+        if (!string.IsNullOrWhiteSpace(p.LkDbcDir)) sb.Append($" --lk-dbc-dir \"{p.LkDbcDir}\"");
+        return sb.ToString();
+    }
     private readonly Dictionary<string, AreaData> _areasByMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string?> _wmoByMap = new(StringComparer.OrdinalIgnoreCase);
+    private static string _lastWmoDebug = string.Empty;
 
     private enum SelMode { Replace, Add, Remove }
 
@@ -112,6 +125,8 @@ public partial class MainWindow : Window
         var pickDbd = this.FindControl<Button>("PickDataDbdBtn"); if (pickDbd != null) pickDbd.Click += PickDataDbdBtn_Click;
         var pickDbc = this.FindControl<Button>("PickDataDbcBtn"); if (pickDbc != null) pickDbc.Click += PickDataDbcBtn_Click;
         var pickList = this.FindControl<Button>("PickDataListfileBtn"); if (pickList != null) pickList.Click += PickDataListfileBtn_Click;
+        var pickLkClient = this.FindControl<Button>("PickLkClientBtn"); if (pickLkClient != null) pickLkClient.Click += PickLkClientBtn_Click;
+        var pickLkDbc = this.FindControl<Button>("PickLkDbcBtn"); if (pickLkDbc != null) pickLkDbc.Click += PickLkDbcBtn_Click;
         var dsPrev = this.FindControl<Button>("DataPreviewBtn"); if (dsPrev != null) dsPrev.Click += DataPreviewBtn_Click;
         var dsLoad = this.FindControl<Button>("DataLoadBtn"); if (dsLoad != null) dsLoad.Click += DataLoadBtn_Click;
         var saveDefaults = this.FindControl<Button>("SaveDataDefaultsBtn"); if (saveDefaults != null) saveDefaults.Click += SaveDataDefaultsBtn_Click;
@@ -175,6 +190,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void PickLkClientBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select LK Client Root", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("LkClientBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickLkDbcBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select LK DBFilesClient Directory", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("LkDbcBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
     private void AppendBuildLog(string line)
     {
         Dispatcher.UIThread.Post(() =>
@@ -227,6 +260,7 @@ public partial class MainWindow : Window
     {
         try
         {
+            ShowLoading("Preparing per-map layers (this may take a while)...");
             var p = BuildDataSourcePayload();
             var buildOutBox = this.FindControl<TextBox>("BuildOutBox");
             var outRoot = this.FindControl<TextBox>("CacheBox")?.Text?.Trim();
@@ -261,7 +295,7 @@ public partial class MainWindow : Window
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"run --project \"{cliProj}\" -- prepare-layers --client-root \"{root}\" --out \"{outRoot}\" --maps {mapsArg}",
+                Arguments = BuildPrepareLayersArgs(cliProj, root!, outRoot!, mapsArg, p),
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -283,13 +317,16 @@ public partial class MainWindow : Window
             OnMapSelected();
             if (proc.ExitCode == 0)
             {
-                _ = ShowMessage("Prepare", "Prepare complete.");
+                AppendBuildLog("[prepare] Prepare complete.");
+                var tabs = this.FindControl<TabControl>("MainTabs");
+                if (tabs != null) tabs.SelectedIndex = 1; // Layers
             }
         }
         catch (Exception ex)
         {
             AppendBuildLog("[prepare] ERROR: " + ex.Message);
         }
+        finally { HideLoading(); }
     }
 
     private static string ResolveProjectCsproj(string folder, string projectName)
@@ -347,6 +384,8 @@ public partial class MainWindow : Window
         public string? DbcDir;
         public string? Listfile;
         public string? OutputDir;
+        public string? LkClient;
+        public string? LkDbcDir;
     }
 
     private DataSourcePayload BuildDataSourcePayload()
@@ -360,9 +399,11 @@ public partial class MainWindow : Window
         var dbd = this.FindControl<TextBox>("DataDbdBox")?.Text?.Trim();
         var dbc = this.FindControl<TextBox>("DataDbcBox")?.Text?.Trim();
         var list = this.FindControl<TextBox>("DataListfileBox")?.Text?.Trim();
+        var lkClient = this.FindControl<TextBox>("LkClientBox")?.Text?.Trim();
+        var lkDbc = this.FindControl<TextBox>("LkDbcBox")?.Text?.Trim();
         var cacheBox = this.FindControl<TextBox>("CacheBox");
         var outDir = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(outDir)) outDir = _cacheRoot;
-        return new DataSourcePayload { Type = type, Root = root, Version = ver, Build = build, DbdDir = dbd, DbcDir = dbc, Listfile = list, OutputDir = outDir };
+        return new DataSourcePayload { Type = type, Root = root, Version = ver, Build = build, DbdDir = dbd, DbcDir = dbc, Listfile = list, OutputDir = outDir, LkClient = lkClient, LkDbcDir = lkDbc };
     }
 
     private void DataPreviewBtn_Click(object? sender, RoutedEventArgs e)
@@ -400,10 +441,31 @@ public partial class MainWindow : Window
         });
     }
 
+    private void ShowLoading(string message)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var overlay = this.FindControl<Border>("LoadingOverlay");
+            var text = this.FindControl<TextBlock>("LoadingText");
+            if (text != null) text.Text = message;
+            if (overlay != null) overlay.IsVisible = true;
+        });
+    }
+
+    private void HideLoading()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var overlay = this.FindControl<Border>("LoadingOverlay");
+            if (overlay != null) overlay.IsVisible = false;
+        });
+    }
+
     private async void DataLoadBtn_Click(object? sender, RoutedEventArgs e)
     {
         try
         {
+            ShowLoading("Discovering maps and initializing cache...");
             var p = BuildDataSourcePayload();
             AppendDataLoadLog($"[Load] Type={p.Type} Root={p.Root}");
             if (string.IsNullOrWhiteSpace(p.OutputDir)) p.OutputDir = _cacheRoot;
@@ -434,7 +496,9 @@ public partial class MainWindow : Window
             RefreshMaps();
             InitLayersTab();
             OnMapSelected();
-            await ShowMessage("Data Sources", "Load complete.");
+            // Move to Build tab for the next step in the flow
+            var tabs = this.FindControl<TabControl>("MainTabs");
+            if (tabs != null) tabs.SelectedIndex = 2; // Build
 
             // Auto-prepare if checked
             var auto = this.FindControl<CheckBox>("AutoPrepareAfterLoadCheck");
@@ -447,6 +511,7 @@ public partial class MainWindow : Window
         {
             AppendDataLoadLog("ERROR: " + ex.Message);
         }
+        finally { HideLoading(); }
     }
 
     private string GetGuiDefaultsPath()
@@ -475,6 +540,8 @@ public partial class MainWindow : Window
                 dbdDir = p.DbdDir,
                 dbcDir = p.DbcDir,
                 listfile = p.Listfile,
+                lkClient = p.LkClient,
+                lkDbcDir = p.LkDbcDir,
                 autoPrepare = auto?.IsChecked == true
             };
             var json = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
@@ -507,6 +574,8 @@ public partial class MainWindow : Window
             var dbd = root.TryGetProperty("dbdDir", out var dEl) ? dEl.GetString() : null;
             var dbc = root.TryGetProperty("dbcDir", out var cEl) ? cEl.GetString() : null;
             var list = root.TryGetProperty("listfile", out var lEl) ? lEl.GetString() : null;
+            var lkClient = root.TryGetProperty("lkClient", out var lcEl) ? lcEl.GetString() : null;
+            var lkDbc = root.TryGetProperty("lkDbcDir", out var ldEl) ? ldEl.GetString() : null;
             var auto = root.TryGetProperty("autoPrepare", out var aEl) && aEl.ValueKind == JsonValueKind.True;
 
             var casc = this.FindControl<RadioButton>("DsTypeCasc");
@@ -521,6 +590,8 @@ public partial class MainWindow : Window
             var dbdBox = this.FindControl<TextBox>("DataDbdBox"); if (dbdBox != null) dbdBox.Text = dbd ?? string.Empty;
             var dbcBox = this.FindControl<TextBox>("DataDbcBox"); if (dbcBox != null) dbcBox.Text = dbc ?? string.Empty;
             var listBox = this.FindControl<TextBox>("DataListfileBox"); if (listBox != null) listBox.Text = list ?? string.Empty;
+            var lkClientBox = this.FindControl<TextBox>("LkClientBox"); if (lkClientBox != null) lkClientBox.Text = lkClient ?? string.Empty;
+            var lkDbcBox = this.FindControl<TextBox>("LkDbcBox"); if (lkDbcBox != null) lkDbcBox.Text = lkDbc ?? string.Empty;
             var autoChk = this.FindControl<CheckBox>("AutoPrepareAfterLoadCheck"); if (autoChk != null) autoChk.IsChecked = auto;
 
             var combo = this.FindControl<ComboBox>("DataVersionCombo");
@@ -757,15 +828,39 @@ public partial class MainWindow : Window
     {
         try
         {
+            var dbg = new StringBuilder();
+            dbg.AppendLine($"datasetRoot={datasetRoot}");
+            dbg.AppendLine($"map={map}");
             var cands = new[]
             {
                 Path.Combine(datasetRoot, "World", "Maps", map, map + ".wdt"),
-                Path.Combine(datasetRoot, "tree", "World", "Maps", map, map + ".wdt")
+                Path.Combine(datasetRoot, "tree", "World", "Maps", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "World", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "tree", "World", map, map + ".wdt")
             };
             string? wdt = cands.FirstOrDefault(File.Exists);
-            if (wdt == null) return null;
+            if (wdt == null)
+            {
+                // Last resort: search recursively for <map>.wdt anywhere under dataset root
+                try
+                {
+                    var candidates = Directory.EnumerateFiles(datasetRoot, map + ".wdt", SearchOption.AllDirectories)
+                        .Where(p => p.EndsWith(Path.DirectorySeparatorChar + map + ".wdt", StringComparison.OrdinalIgnoreCase))
+                        .Take(1)
+                        .ToList();
+                    if (candidates.Count > 0) wdt = candidates[0];
+                }
+                catch { }
+                if (wdt == null) { _lastWmoDebug = dbg.AppendLine("wdt=(not found)").ToString(); return null; }
+            }
+            dbg.AppendLine($"wdt={wdt}");
+
+            // Preferred: proper chunk parse (supports Alpha MONM and retail MWMO)
+            var parsed = TryParseWdtGlobalWmo(wdt, dbg);
+            if (!string.IsNullOrWhiteSpace(parsed)) { _lastWmoDebug = dbg.AppendLine($"wmo={parsed}").ToString(); return parsed; }
+
+            // Fallback: heuristic ASCII scan
             var bytes = File.ReadAllBytes(wdt);
-            // Heuristic: extract ASCII strings and find first path ending with .wmo
             var list = new List<string>();
             var sb = new StringBuilder();
             void flush()
@@ -787,10 +882,79 @@ public partial class MainWindow : Window
                 }
             }
             flush();
-            var wmo = list.FirstOrDefault(s => s.IndexOf(".wmo", StringComparison.OrdinalIgnoreCase) >= 0);
-            return wmo;
+            var wmoFallback = list.FirstOrDefault(s => s.IndexOf(".wmo", StringComparison.OrdinalIgnoreCase) >= 0) ?? list.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
+            _lastWmoDebug = dbg.AppendLine($"fallback-strings={list.Count}").AppendLine($"wmo={wmoFallback ?? "(none)"}").ToString();
+            return wmoFallback;
         }
         catch { return null; }
+    }
+
+    private static string? TryParseWdtGlobalWmo(string wdtPath, StringBuilder dbg)
+    {
+        try
+        {
+            using var fs = new FileStream(wdtPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var br = new BinaryReader(fs, Encoding.ASCII, leaveOpen: false);
+            string? firstName = null;
+            var chunks = new List<string>();
+            while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                var idBytes = br.ReadBytes(4);
+                if (idBytes.Length < 4) break;
+                var fourCC = Encoding.ASCII.GetString(idBytes).ToUpperInvariant();
+                int size = br.ReadInt32(); // little-endian
+                if (size < 0 || br.BaseStream.Position + size > br.BaseStream.Length) return null;
+                if (chunks.Count < 12) chunks.Add(fourCC + ":" + size);
+
+                bool isWmoNames = fourCC == "MWMO" || fourCC == "MONM" || fourCC == "OMWM" || fourCC == "MNOM"; // include reversed aliases defensively
+                if (!isWmoNames)
+                {
+                    // skip payload + padding to 4-byte boundary
+                    long skip = size;
+                    int pad = size & 3;
+                    if (pad != 0) skip += (4 - pad);
+                    br.BaseStream.Seek(skip, SeekOrigin.Current);
+                    continue;
+                }
+
+                var payload = br.ReadBytes(size);
+                // Split zero-terminated ASCII strings
+                int start = 0;
+                for (int i = 0; i <= payload.Length; i++)
+                {
+                    bool isEnd = (i == payload.Length) || payload[i] == 0;
+                    if (isEnd)
+                    {
+                        if (i > start)
+                        {
+                            var s = Encoding.ASCII.GetString(payload, start, i - start);
+                            if (!string.IsNullOrWhiteSpace(s))
+                            {
+                                if (firstName == null) firstName = s;
+                                if (s.IndexOf(".wmo", StringComparison.OrdinalIgnoreCase) >= 0)
+                                    return s;
+                            }
+                        }
+                        start = i + 1;
+                    }
+                }
+
+                // align to 4-byte boundary after payload
+                int padAfter = size & 3;
+                if (padAfter != 0)
+                {
+                    br.BaseStream.Seek(4 - padAfter, SeekOrigin.Current);
+                }
+
+                // If we didn't return, continue scanning
+            }
+            if (chunks.Count > 0) dbg.AppendLine($"chunks={string.Join(", ", chunks)}");
+            if (!string.IsNullOrWhiteSpace(firstName)) dbg.AppendLine($"firstName={firstName}");
+            else dbg.AppendLine("firstName=(none)");
+            if (!string.IsNullOrWhiteSpace(firstName)) return firstName;
+        }
+        catch { }
+        return null;
     }
 
     private static double Percentile(IReadOnlyList<int> sorted, double p)
@@ -1193,7 +1357,34 @@ public partial class MainWindow : Window
         var root = string.IsNullOrWhiteSpace(cache) ? _cacheRoot : cache;
         var result = new List<MapRow>();
         if (!Directory.Exists(root)) return result;
-        foreach (var dir in Directory.EnumerateDirectories(root))
+        var datasetRoot = TryGetDatasetRootFromCache(root);
+
+        static bool IsMapDir(string d)
+        {
+            return File.Exists(Path.Combine(d, "tile_layers.csv")) || File.Exists(Path.Combine(d, "layers.json"));
+        }
+
+        // First pass: collect immediate map directories
+        var immediate = Directory.EnumerateDirectories(root).ToList();
+        var mapsHere = new List<string>();
+        foreach (var dir in immediate)
+        {
+            if (IsMapDir(dir)) mapsHere.Add(dir);
+        }
+
+        // If no direct map outputs found, look one level deeper (handles version folder like "0.5.3")
+        if (mapsHere.Count == 0)
+        {
+            foreach (var dir in immediate)
+            {
+                foreach (var sub in Directory.EnumerateDirectories(dir))
+                {
+                    if (IsMapDir(sub)) mapsHere.Add(sub);
+                }
+            }
+        }
+
+        foreach (var dir in mapsHere)
         {
             var map = Path.GetFileName(dir);
             var tileCsv = Path.Combine(dir, "tile_layers.csv");
@@ -1203,6 +1394,30 @@ public partial class MainWindow : Window
             {
                 try { rows = File.ReadLines(tileCsv).Skip(1).Count(); } catch { rows = 0; }
             }
+
+            if (rows == 0 && !string.IsNullOrWhiteSpace(datasetRoot))
+            {
+                var c1 = Path.Combine(datasetRoot!, "World", "Maps", map, map + ".wdt");
+                var c2 = Path.Combine(datasetRoot!, "tree", "World", "Maps", map, map + ".wdt");
+                var c3 = Path.Combine(datasetRoot!, "World", map, map + ".wdt");
+                var c4 = Path.Combine(datasetRoot!, "tree", "World", map, map + ".wdt");
+                var hasWdt = File.Exists(c1) || File.Exists(c2) || File.Exists(c3) || File.Exists(c4);
+                if (!hasWdt)
+                {
+                    try
+                    {
+                        hasWdt = Directory.EnumerateFiles(datasetRoot!, map + ".wdt", SearchOption.AllDirectories)
+                            .Any(p => p.EndsWith(Path.DirectorySeparatorChar + map + ".wdt", StringComparison.OrdinalIgnoreCase));
+                    }
+                    catch { }
+                }
+                if (!hasWdt)
+                {
+                    AppendBuildLog($"[maps] Excluding {map}: no WDT found under dataset root");
+                    continue;
+                }
+            }
+
             result.Add(new MapRow
             {
                 Map = map,
@@ -1212,6 +1427,7 @@ public partial class MainWindow : Window
                 TileLayerRows = rows
             });
         }
+
         return result.OrderBy(r => r.Map, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -1468,6 +1684,39 @@ public partial class MainWindow : Window
                 rows.Add(new TileLayerRow { TileX = tx, TileY = ty, Type = type, Layer = layer, Min = min, Max = max, Count = count });
             }
         }
+
+        // Fallback: if no tile rows, try <map>_tile_layers.csv and normalize
+        if (rows.Count == 0)
+        {
+            var mapCsv = Path.Combine(dir, map + "_tile_layers.csv");
+            if (File.Exists(mapCsv))
+            {
+                var fb = new List<TileLayerRow>();
+                foreach (var line in File.ReadLines(mapCsv).Skip(1))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Split(',');
+                    if (parts.Length < 7) continue;
+                    int off = parts.Length - 7;
+                    int.TryParse(parts[off + 0], out var tx);
+                    int.TryParse(parts[off + 1], out var ty);
+                    var type = parts[off + 2].Trim();
+                    int.TryParse(parts[off + 3], out var layer);
+                    int.TryParse(parts[off + 4], out var min);
+                    int.TryParse(parts[off + 5], out var max);
+                    int.TryParse(parts[off + 6], out var count);
+                    fb.Add(new TileLayerRow { TileX = tx, TileY = ty, Type = type, Layer = layer, Min = min, Max = max, Count = count });
+                }
+                if (fb.Count > 0)
+                {
+                    rows = fb;
+                    try { File.Copy(mapCsv, csv, overwrite: true); } catch { }
+                    AppendBuildLog($"[layers] Using fallback {Path.GetFileName(mapCsv)} ({fb.Count} rows)");
+                }
+            }
+        }
+
+        AppendBuildLog($"[layers] Loaded {rows.Count} tile rows for {map}");
         _rowsByMap[map] = rows;
         // Reset per-tile state caches
         _baseM2.Clear(); _baseWmo.Clear(); _customM2.Clear(); _customWmo.Clear();
@@ -1478,6 +1727,23 @@ public partial class MainWindow : Window
             var datasetRoot = TryGetDatasetRootFromCache(root!);
             var wmo = datasetRoot != null ? TryExtractGlobalWmo(datasetRoot!, map) : null;
             _wmoByMap[map] = wmo;
+            // Emit debug if available
+            if (!string.IsNullOrWhiteSpace(_lastWmoDebug))
+            {
+                foreach (var line in _lastWmoDebug.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                    AppendBuildLog("[WDT] " + line);
+            }
+            else
+            {
+                if (datasetRoot == null)
+                {
+                    AppendBuildLog($"[WDT] Dataset root unknown for cache '{root}'. Cannot verify {map}.wdt; layers are empty");
+                }
+                else if (string.IsNullOrWhiteSpace(wmo))
+                {
+                    AppendBuildLog($"[WDT] {map}: No WDT or no MWMO names found; treating as empty");
+                }
+            }
         }
 
         // Load area group data if available

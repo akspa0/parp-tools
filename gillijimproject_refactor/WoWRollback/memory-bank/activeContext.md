@@ -1,16 +1,26 @@
-# Active Context (2025-10-26)
+# Active Context (2025-10-27)
 
 ## Current Focus
-- Move preprocessing into the GUI so users don’t need separate CLI steps.
-- Support inputs from Loose files and CASC (MPQ later).
-- Provide two processing modes:
-  - Alpha-only: placements/tile_layers; Area Groups populated from selected DBC set (e.g., 0.5.3) even if per‑tile mapping is absent.
-  - LK-backed: compute per‑tile AreaIDs from LK ADTs (disk or CASC) and enrich with selected DBC; enables Area Groups tile selection.
+- CLI-first pipeline; GUI acts as a runner for Load → Prepare → Layers (no modal popups; overlay + inline logs).
+- Energy-efficient preflight: skip work when cache outputs already exist (LK ADTs, tile_layers.csv, layers.json, areas.csv, DBCTool crosswalks).
+- Presets: management in Settings; add “Load Preset” on the Load page.
+- Adopt CsvHelper in GUI for robust CSV parsing (tolerant headers, 7/8-col variants).
+- Gate Area Groups unless areas.csv is present and non-empty (show inline note otherwise).
+- BYOD: never bundle copyrighted data; resolve from user-provided locations only.
 
 ## Decisions
-- Keep CSV cache schema (placements.csv, tile_layers.csv, layers.json, areas.csv) for compatibility.
-- If areas.csv is missing/empty, GUI still shows Area Groups from DBC, but disables tile selection actions with a hint.
-- Prefer GUI-first experience: a new Data Sources tab will collect inputs (source type, DBD/DBC paths, build, outputs) and run a background pipeline.
+- CLI-first with GUI runner and overlay; auto-tab navigation (Load→Build, Prepare→Layers); remove success/info modals.
+- Keep CSV cache schema stable; normalize `tile_layers.csv` naming; GUI may fall back to `<map>_tile_layers.csv` and normalize.
+- Feature gating: Area Groups UI only when areas.csv has data; do not synthesize from DBC alone.
+- Energy efficiency: preflight/skip-if-exists for LK ADTs, crosswalks, tile layers, and layers.json.
+- BYOD: tooling must not include copyrighted game data anywhere in repo/binaries.
+
+## Completed (2025-10-27)
+- Added loading overlay; wired ShowLoading/HideLoading around Load and Prepare.
+- Load UX: prominent button, auto-switch to Build; Auto‑Prepare default ON.
+- Prepare UX: auto-switch to Layers on success (no modal).
+- Tiles: GUI fallback to `<map>_tile_layers.csv` when `tile_layers.csv` empty; copies to normalize; added load counts in logs.
+- Map discovery: treat version folder (e.g., 0.5.3) as container; list actual map subfolders (no more version-as-map).
 
 ## Implementation Plan
 - New WoWRollback.Pipeline service consumed by GUI/CLI.
@@ -19,14 +29,15 @@
   - CascSource (WoWFormatLib/CascLib + listfile)
   - MpqSource (phase 2)
 - Areas:
-  - Use LK ADTs via IAssetSource to compute per‑tile AreaIDs → areas.csv.
-  - Enrich with DBCD (DBD dir + DBC from DBFilesClient or CASC) when available.
+  - Prefer DBCTool crosswalks (compare/v2) to enrich per‑tile AreaIDs → areas.csv; fallback to LK ADT read; optional DBCD enrichment when available.
 - Build detection: infer from paths or .build.info; allow override.
 
 ## Next Steps
-- Implement GUI Data Sources tab and background runner.
-- Extract pipeline from WoWDataPlot into WoWRollback.Pipeline and reuse in CLI.
-- Add CascSource to read LK ADTs (and optionally DBC) directly.
+- Integrate CsvHelper in GUI; refactor CSV reads (tile_layers.csv, areas.csv) to POCOs.
+- Implement preflight cache checks and CLI skip-if-exists flags.
+- Restructure tabs: Load (with Load Preset), Build, Layers, Settings (Presets management).
+- Gate Area Groups UI; add inline note when areas.csv absent.
+- WoWDataPlot: generate non-empty areas.csv via DBCTool crosswalks; keep LK ADT/DBC fallback.
 
 ## Risks
 - CASC listfile coverage may vary; provide clear error messages and fallbacks.
