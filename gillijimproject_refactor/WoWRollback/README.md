@@ -4,20 +4,41 @@
 
 ## Concise Guide
 
+### Quick Start (GUI)
+- Open `WoWRollback.Gui`.
+- Data Sources tab:
+  - Set Root (Alpha tree), optional LK client/DBC.
+  - Click Load, then Prepare Layers.
+- Layers tab:
+  - Pick Map and any tiles you care about.
+  - Set Start and End UniqueID.
+  - Optional: click "Only Range" to preview baseline visibility.
+  - Options before building:
+    - Fix terrain holes (default on)
+    - Scope: neighbors/self (default neighbors)
+    - Preserve WMO holes (default on)
+    - Disable MCSH (optional)
+  - Click "RECOMPILE MAP".
+
+Outputs go to `WoWRollback/work/output/<Map>/<yyyyMMdd-HHmmss>/` with:
+- `alpha_out/` (patched Alpha snapshot)
+- `lk_adts/` (converted LK WDT + ADTs)
+- `session.json` (records start/end and options)
+- `commands.txt` (exact CLI invocation)
+
+Note: The Presets UI is currently not supported. The Start/End range + Recompile covers the main workflow.
+
 ### Quick Start (CLI-first)
 - Use `WoWRollback.Cli` as the primary entrypoint. The Orchestrator is considered legacy (see note below).
 
 ```powershell
 dotnet run --project WoWRollback.Cli -- alpha-to-lk `
   --input "..\test_data\0.5.3\tree\World\Maps\Azeroth\Azeroth.wdt" `
-  --preset-json ".\Westfall2001.json" `
   --max-uniqueid 75000 `
-  --fix-holes --holes-scope self --holes-wmo-preserve true `
-  --report-areaid `
-  --dbd-dir ..\lib\WoWDBDefs\definitions\ `
-  --src-dbc-dir ..\test_data\0.5.3\tree\DBFilesClient\ `
-  --lk-dbc-dir  ..\test_data\3.3.5\tree\DBFilesClient\ `
-  --auto-crosswalks
+  --fix-holes --holes-scope neighbors --holes-wmo-preserve true `
+  --out wrb_out `
+  --lk-out wrb_out\lk_adts\World\Maps\Azeroth `
+  --lk-client-path "J:\\wowDev\\modernwow"
 ```
 
 Outputs: `lk_adts/World/Maps/<Map>/` with `<Map>.wdt` + ADTs, and `reports/areaid_patch_summary_<Map>.csv`.
