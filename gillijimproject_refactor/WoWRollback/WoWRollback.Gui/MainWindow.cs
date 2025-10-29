@@ -39,8 +39,8 @@ public partial class MainWindow : Window
     private HashSet<string>? _dragBase;
     private SelMode _dragMode = SelMode.Replace;
     private const bool _areasUiEnabled = false; // TEMP: disable AreaID UI/overlay
-    private int _timeCenter = 0; // current time slider center
-    private int _globalSliceMin = 0, _globalSliceMax = 0; // global time slice
+    private int _rangeStart = 0, _rangeEnd = 0; // explicit range
+    private int _domainMin = 0, _domainMax = 0; // bounds for sliders
 
     // Area grouping state (per-map)
     private sealed class AreaData
@@ -55,26 +55,22 @@ public partial class MainWindow : Window
         public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
     }
 
-    private void UpdateTimeLabel()
+    private void UpdateRangeLabel()
     {
-        var bandBox = this.FindControl<ComboBox>("BandSizeBox");
-        int band = 128;
-        var selItem = bandBox?.SelectedItem as ComboBoxItem;
-        if (selItem != null && int.TryParse(selItem.Content?.ToString(), out var parsed) && parsed > 0) band = parsed;
-        int half = band / 2;
-        _globalSliceMin = _timeCenter - half;
-        _globalSliceMax = _timeCenter + half;
-        var label = this.FindControl<TextBlock>("TimeLabel");
-        if (label != null) label.Text = $"Range: {_globalSliceMin}–{_globalSliceMax}";
+        if (_rangeStart > _rangeEnd) { var t = _rangeStart; _rangeStart = _rangeEnd; _rangeEnd = t; }
+        var label = this.FindControl<TextBlock>("RangeLabel");
+        if (label != null) label.Text = $"Range: {_rangeStart}–{_rangeEnd}";
         var btn = this.FindControl<Button>("BaselineTimeSliceBtn");
-        if (btn != null) btn.Content = $"Only Range: {_globalSliceMin}–{_globalSliceMax}";
+        if (btn != null) btn.Content = $"Only Range: {_rangeStart}–{_rangeEnd}";
     }
 
     private void UpdateTimeRangeFromSelection()
     {
-        var tSlider = this.FindControl<Slider>("TimeSlider"); if (tSlider == null) return;
+        var sSlider = this.FindControl<Slider>("StartSlider");
+        var eSlider = this.FindControl<Slider>("EndSlider");
+        if (sSlider == null || eSlider == null) return;
         var stats = this.FindControl<TextBlock>("TimeStats");
-        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
         var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
         IEnumerable<TileLayerRow> scope;
         if (_selectedTiles.Count > 0)
@@ -83,19 +79,24 @@ public partial class MainWindow : Window
             scope = rows.Where(r => sel.Contains(TileKey(r.TileX, r.TileY)));
         }
         else scope = rows;
-        if (!scope.Any()) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        if (!scope.Any()) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
         int min = scope.Min(r => r.Min);
         int max = scope.Max(r => r.Max);
-        if (min >= max) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
-        tSlider.IsEnabled = true;
-        tSlider.Minimum = min;
-        tSlider.Maximum = max;
-        // keep value within bounds
-        if (tSlider.Value < tSlider.Minimum || tSlider.Value > tSlider.Maximum)
-            tSlider.Value = Math.Clamp(_timeCenter == 0 ? min : _timeCenter, (int)tSlider.Minimum, (int)tSlider.Maximum);
-        _timeCenter = (int)Math.Round(tSlider.Value);
-        UpdateTimeLabel();
-        // Removed: ApplyTimeBandForCurrent();
+        if (min >= max) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        sSlider.IsEnabled = eSlider.IsEnabled = true;
+        sSlider.Minimum = min; sSlider.Maximum = max;
+        eSlider.Minimum = min; eSlider.Maximum = max;
+        _domainMin = min; _domainMax = max;
+        // initialize or clamp
+        if (_rangeStart == 0 && _rangeEnd == 0) { _rangeStart = min; _rangeEnd = max; }
+        _rangeStart = Math.Clamp(_rangeStart, _domainMin, _domainMax);
+        _rangeEnd = Math.Clamp(_rangeEnd, _domainMin, _domainMax);
+        if (_rangeStart > _rangeEnd) _rangeStart = _rangeEnd;
+        sSlider.Value = _rangeStart;
+        eSlider.Value = _rangeEnd;
+        var sBox = this.FindControl<TextBox>("StartBox"); if (sBox != null) sBox.Text = _rangeStart.ToString();
+        var eBox = this.FindControl<TextBox>("EndBox"); if (eBox != null) eBox.Text = _rangeEnd.ToString();
+        UpdateRangeLabel();
     }
 
 
@@ -149,12 +150,12 @@ public partial class MainWindow : Window
             EnsureTileBaseState(map, x, y);
             var k = TileKey(x, y);
             bool anyOverlapM2 = false, anyOverlapWmo = false;
-            foreach (var e in _baseM2[k]) { bool hit = e.Min <= _globalSliceMax && e.Max >= _globalSliceMin; e.Enabled = hit; anyOverlapM2 |= hit; }
-            foreach (var e in _baseWmo[k]) { bool hit = e.Min <= _globalSliceMax && e.Max >= _globalSliceMin; e.Enabled = hit; anyOverlapWmo |= hit; }
+            foreach (var e in _baseM2[k]) { bool hit = e.Min <= _rangeEnd && e.Max >= _rangeStart; e.Enabled = hit; anyOverlapM2 |= hit; }
+            foreach (var e in _baseWmo[k]) { bool hit = e.Min <= _rangeEnd && e.Max >= _rangeStart; e.Enabled = hit; anyOverlapWmo |= hit; }
             if (anyOverlapM2 || anyOverlapWmo) tilesInSlice++;
             if (!anyOverlapM2 && !anyOverlapWmo) sinks++;
         }
-        if (stats != null) stats.Text = $"Applied {_globalSliceMin}–{_globalSliceMax} · tiles in slice: {tilesInSlice} · sinks: {sinks}";
+        if (stats != null) stats.Text = $"Applied {_rangeStart}–{_rangeEnd} · tiles in slice: {tilesInSlice} · sinks: {sinks}";
         // RenderTileLayers(); // Hidden
     }
 
@@ -170,13 +171,17 @@ public partial class MainWindow : Window
         return sb.ToString();
     }
 
-    private static string BuildAlphaToLkArgs(string cliProj, string wdtPath, int maxUniqueId, string alphaOut, string lkOut, string? lkClient, string? lkDbcDir)
+    private static string BuildAlphaToLkArgs(string cliProj, string wdtPath, int maxUniqueId, string alphaOut, string lkOut, string? lkClient, string? lkDbcDir, bool fixHoles, string scope, bool preserveWmo, bool disableMcsh)
     {
         var sb = new StringBuilder();
         sb.Append($"run --project \"{cliProj}\" -- alpha-to-lk --input \"{wdtPath}\" --max-uniqueid {maxUniqueId} --bury-depth -5000.0 --out \"{alphaOut}\"");
         if (!string.IsNullOrWhiteSpace(lkOut)) sb.Append($" --lk-out \"{lkOut}\"");
         if (!string.IsNullOrWhiteSpace(lkClient)) sb.Append($" --lk-client-path \"{lkClient}\"");
         if (!string.IsNullOrWhiteSpace(lkDbcDir)) sb.Append($" --lk-dbc-dir \"{lkDbcDir}\"");
+        if (fixHoles) sb.Append(" --fix-holes");
+        if (!string.IsNullOrWhiteSpace(scope)) sb.Append($" --holes-scope {scope}");
+        sb.Append($" --holes-wmo-preserve {(preserveWmo ? "true" : "false")}");
+        if (disableMcsh) sb.Append(" --disable-mcsh");
         return sb.ToString();
     }
 
@@ -222,7 +227,7 @@ public partial class MainWindow : Window
             var wdt = TryFindWdtPath(datasetRoot!, map);
             if (string.IsNullOrWhiteSpace(wdt) || !File.Exists(wdt!)) { await ShowMessage("Error", "Could not locate WDT for map."); return; }
 
-            var threshold = _globalSliceMax;
+            var threshold = _rangeEnd;
             var outRoot = Path.GetFullPath(Path.Combine(_cacheRoot, "..", "output", map, DateTime.Now.ToString("yyyyMMdd-HHmmss")));
             var alphaOut = Path.Combine(outRoot, "alpha_out");
             var lkOut = Path.Combine(outRoot, "lk_adts");
@@ -237,17 +242,23 @@ public partial class MainWindow : Window
             {
                 map,
                 wdt = wdt,
-                sliceCenter = _timeCenter,
-                sliceWidth = (this.FindControl<ComboBox>("BandSizeBox")?.SelectedItem as ComboBoxItem)?.Content?.ToString(),
-                rangeMin = _globalSliceMin,
-                rangeMax = _globalSliceMax,
+                rangeStart = _rangeStart,
+                rangeEnd = _rangeEnd,
                 threshold = threshold,
+                fixHoles = (this.FindControl<CheckBox>("FixHolesCheck")?.IsChecked == true),
+                holesScope = (this.FindControl<ComboBox>("HolesScopeBox")?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "neighbors",
+                preserveWmoHoles = (this.FindControl<CheckBox>("PreserveWmoHolesCheck")?.IsChecked != false),
+                disableMcsh = (this.FindControl<CheckBox>("DisableMcshCheck")?.IsChecked == true),
                 lkClient = p.LkClient,
                 lkDbcDir = p.LkDbcDir
             };
             File.WriteAllText(Path.Combine(outRoot, "session.json"), JsonSerializer.Serialize(sessionObj, new JsonSerializerOptions { WriteIndented = true }));
 
-            var args = BuildAlphaToLkArgs(cliProj, wdt!, threshold, alphaOut, lkOut, p.LkClient, p.LkDbcDir);
+            var fixHoles = this.FindControl<CheckBox>("FixHolesCheck")?.IsChecked == true;
+            var scope = (this.FindControl<ComboBox>("HolesScopeBox")?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "neighbors";
+            var preserve = this.FindControl<CheckBox>("PreserveWmoHolesCheck")?.IsChecked != false;
+            var disable = this.FindControl<CheckBox>("DisableMcshCheck")?.IsChecked == true;
+            var args = BuildAlphaToLkArgs(cliProj, wdt!, threshold, alphaOut, lkOut, p.LkClient, p.LkDbcDir, fixHoles, scope, preserve, disable);
             File.WriteAllText(Path.Combine(outRoot, "commands.txt"), args);
 
             ShowLoading("Recompiling map...");
@@ -1690,24 +1701,54 @@ public partial class MainWindow : Window
         {
             heatToggle.IsCheckedChanged += (_, __) => RenderTileGrid();
         }
-        var bandBox = this.FindControl<ComboBox>("BandSizeBox");
-        if (bandBox != null)
+        // Range sliders
+        var sSlider = this.FindControl<Slider>("StartSlider");
+        var eSlider = this.FindControl<Slider>("EndSlider");
+        if (sSlider != null)
         {
-            if (bandBox.ItemCount > 0 && bandBox.SelectedIndex < 0) bandBox.SelectedIndex = 1; // default 128
-            bandBox.SelectionChanged += (_, __) => UpdateTimeLabel();
-        }
-        var tSlider = this.FindControl<Slider>("TimeSlider");
-        if (tSlider != null)
-        {
-            tSlider.PropertyChanged += (s, e) =>
+            sSlider.PropertyChanged += (s, e) =>
             {
                 if (e.Property == RangeBase.ValueProperty)
                 {
-                    _timeCenter = (int)Math.Round(tSlider.Value);
-                    UpdateTimeLabel();
+                    _rangeStart = (int)Math.Round(sSlider.Value);
+                    if (eSlider != null && _rangeStart > eSlider.Value) { eSlider.Value = _rangeStart; _rangeEnd = _rangeStart; }
+                    var sBox = this.FindControl<TextBox>("StartBox"); if (sBox != null) sBox.Text = _rangeStart.ToString();
+                    UpdateRangeLabel();
                 }
             };
         }
+        if (eSlider != null)
+        {
+            eSlider.PropertyChanged += (s, e) =>
+            {
+                if (e.Property == RangeBase.ValueProperty)
+                {
+                    _rangeEnd = (int)Math.Round(eSlider.Value);
+                    if (sSlider != null && _rangeEnd < sSlider.Value) { sSlider.Value = _rangeEnd; _rangeStart = _rangeEnd; }
+                    var eBox = this.FindControl<TextBox>("EndBox"); if (eBox != null) eBox.Text = _rangeEnd.ToString();
+                    UpdateRangeLabel();
+                }
+            };
+        }
+        // Start/End boxes
+        var sBoxCtl = this.FindControl<TextBox>("StartBox");
+        if (sBoxCtl != null) sBoxCtl.LostFocus += (_, __) =>
+        {
+            if (!int.TryParse(sBoxCtl.Text?.Trim(), out var v)) return;
+            v = Math.Clamp(v, _domainMin, _domainMax); _rangeStart = v;
+            if (_rangeStart > _rangeEnd) { _rangeEnd = _rangeStart; if (eSlider != null) eSlider.Value = _rangeEnd; var eBox2 = this.FindControl<TextBox>("EndBox"); if (eBox2 != null) eBox2.Text = _rangeEnd.ToString(); }
+            if (sSlider != null) sSlider.Value = _rangeStart;
+            UpdateRangeLabel();
+        };
+        var eBoxCtl = this.FindControl<TextBox>("EndBox");
+        if (eBoxCtl != null) eBoxCtl.LostFocus += (_, __) =>
+        {
+            if (!int.TryParse(eBoxCtl.Text?.Trim(), out var v)) return;
+            v = Math.Clamp(v, _domainMin, _domainMax); _rangeEnd = v;
+            if (_rangeEnd < _rangeStart) { _rangeStart = _rangeEnd; if (sSlider != null) sSlider.Value = _rangeStart; var sBox2 = this.FindControl<TextBox>("StartBox"); if (sBox2 != null) sBox2.Text = _rangeStart.ToString(); }
+            if (eSlider != null) eSlider.Value = _rangeEnd;
+            UpdateRangeLabel();
+        };
         var blAll = this.FindControl<Button>("BaselineEnableAllBtn"); if (blAll != null) blAll.Click += BaselineEnableAllBtn_Click;
         var blNone = this.FindControl<Button>("BaselineDisableAllBtn"); if (blNone != null) blNone.Click += BaselineDisableAllBtn_Click;
         var blSlice = this.FindControl<Button>("BaselineTimeSliceBtn"); if (blSlice != null) blSlice.Click += BaselineTimeSliceBtn_Click;

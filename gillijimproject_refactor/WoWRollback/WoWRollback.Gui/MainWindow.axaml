@@ -169,17 +169,17 @@
                 <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
                 <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
                 <WrapPanel>
-                  <TextBlock Text="Slice width" VerticalAlignment="Center"/>
-                  <ComboBox x:Name="BandSizeBox" Width="80" Margin="6,0,0,0">
-                    <ComboBoxItem Content="64"/>
-                    <ComboBoxItem Content="128"/>
-                    <ComboBoxItem Content="256"/>
-                  </ComboBox>
+                  <TextBlock Text="Start" VerticalAlignment="Center"/>
+                  <Slider x:Name="StartSlider" Width="220" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                  <TextBox x:Name="StartBox" Width="90" Margin="6,0,0,0"/>
                 </WrapPanel>
                 <WrapPanel>
-                  <TextBlock Text="Slice center" VerticalAlignment="Center"/>
-                  <Slider x:Name="TimeSlider" Width="260" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
-                  <TextBlock x:Name="TimeLabel" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                  <TextBlock Text="End" VerticalAlignment="Center"/>
+                  <Slider x:Name="EndSlider" Width="220" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                  <TextBox x:Name="EndBox" Width="90" Margin="6,0,0,0"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <TextBlock x:Name="RangeLabel" VerticalAlignment="Center"/>
                 </WrapPanel>
                 <TextBlock x:Name="TimeStats"/>
                 <TextBlock Text="Baseline" FontWeight="Bold"/>
@@ -187,6 +187,16 @@
                   <Button x:Name="BaselineEnableAllBtn" Content="Enable All Baseline" Margin="0,0,6,6"/>
                   <Button x:Name="BaselineDisableAllBtn" Content="Disable All Baseline" Margin="0,0,6,6"/>
                   <Button x:Name="BaselineTimeSliceBtn" Content="Only Range" Margin="0,0,6,6"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <CheckBox x:Name="FixHolesCheck" Content="Fix terrain holes" IsChecked="True" Margin="0,0,12,6"/>
+                  <TextBlock Text="Scope:" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="HolesScopeBox" Width="140" Margin="6,0,12,6">
+                    <ComboBoxItem Content="neighbors"/>
+                    <ComboBoxItem Content="self"/>
+                  </ComboBox>
+                  <CheckBox x:Name="PreserveWmoHolesCheck" Content="Preserve WMO holes" IsChecked="True" Margin="0,0,12,6"/>
+                  <CheckBox x:Name="DisableMcshCheck" Content="Disable MCSH" Margin="0,0,12,6"/>
                 </WrapPanel>
                 <WrapPanel>
                   <Button x:Name="RecompileMapBtn" Content="RECOMPILE MAP" Margin="0,0,6,6" Background="#8B0000" Foreground="White" FontWeight="Bold"/>
