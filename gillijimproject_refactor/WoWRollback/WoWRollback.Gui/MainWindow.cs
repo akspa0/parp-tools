@@ -15,6 +15,7 @@ using Avalonia.Media.Imaging;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using WoWRollback.DbcModule;
 
@@ -37,6 +38,9 @@ public partial class MainWindow : Window
     private (int x, int y) _dragStartCell;
     private HashSet<string>? _dragBase;
     private SelMode _dragMode = SelMode.Replace;
+    private const bool _areasUiEnabled = false; // TEMP: disable AreaID UI/overlay
+    private int _timeCenter = 0; // current time slider center
+    private int _globalSliceMin = 0, _globalSliceMax = 0; // global time slice
 
     // Area grouping state (per-map)
     private sealed class AreaData
@@ -51,6 +55,109 @@ public partial class MainWindow : Window
         public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
     }
 
+    private void UpdateTimeLabel()
+    {
+        var bandBox = this.FindControl<ComboBox>("BandSizeBox");
+        int band = 128;
+        var selItem = bandBox?.SelectedItem as ComboBoxItem;
+        if (selItem != null && int.TryParse(selItem.Content?.ToString(), out var parsed) && parsed > 0) band = parsed;
+        int half = band / 2;
+        _globalSliceMin = _timeCenter - half;
+        _globalSliceMax = _timeCenter + half;
+        var label = this.FindControl<TextBlock>("TimeLabel");
+        if (label != null) label.Text = $"Range: {_globalSliceMin}–{_globalSliceMax}";
+        var btn = this.FindControl<Button>("BaselineTimeSliceBtn");
+        if (btn != null) btn.Content = $"Only Range: {_globalSliceMin}–{_globalSliceMax}";
+    }
+
+    private void UpdateTimeRangeFromSelection()
+    {
+        var tSlider = this.FindControl<Slider>("TimeSlider"); if (tSlider == null) return;
+        var stats = this.FindControl<TextBlock>("TimeStats");
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
+        IEnumerable<TileLayerRow> scope;
+        if (_selectedTiles.Count > 0)
+        {
+            var sel = new HashSet<string>(_selectedTiles, StringComparer.OrdinalIgnoreCase);
+            scope = rows.Where(r => sel.Contains(TileKey(r.TileX, r.TileY)));
+        }
+        else scope = rows;
+        if (!scope.Any()) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        int min = scope.Min(r => r.Min);
+        int max = scope.Max(r => r.Max);
+        if (min >= max) { tSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        tSlider.IsEnabled = true;
+        tSlider.Minimum = min;
+        tSlider.Maximum = max;
+        // keep value within bounds
+        if (tSlider.Value < tSlider.Minimum || tSlider.Value > tSlider.Maximum)
+            tSlider.Value = Math.Clamp(_timeCenter == 0 ? min : _timeCenter, (int)tSlider.Minimum, (int)tSlider.Maximum);
+        _timeCenter = (int)Math.Round(tSlider.Value);
+        UpdateTimeLabel();
+        // Removed: ApplyTimeBandForCurrent();
+    }
+
+
+
+    private void BaselineEnableAllBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        foreach (var kstr in _selectedTiles.ToArray())
+        {
+            var parts = kstr.Split(','); if (parts.Length != 2) continue;
+            if (!int.TryParse(parts[0], out var x)) continue; if (!int.TryParse(parts[1], out var y)) continue;
+            EnsureTileBaseState(map, x, y);
+            var key = TileKey(x, y);
+            foreach (var e2 in _baseM2[key]) e2.Enabled = true;
+            foreach (var e2 in _baseWmo[key]) e2.Enabled = true;
+        }
+        RenderTileLayers();
+    }
+
+    private void BaselineDisableAllBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
+        foreach (var kstr in _selectedTiles.ToArray())
+        {
+            var parts = kstr.Split(','); if (parts.Length != 2) continue;
+            if (!int.TryParse(parts[0], out var x)) continue; if (!int.TryParse(parts[1], out var y)) continue;
+            EnsureTileBaseState(map, x, y);
+            var key = TileKey(x, y);
+            foreach (var e2 in _baseM2[key]) e2.Enabled = false;
+            foreach (var e2 in _baseWmo[key]) e2.Enabled = false;
+        }
+        RenderTileLayers();
+    }
+
+    private void BaselineTimeSliceBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        ApplyGlobalSlice();
+    }
+
+    private void ApplyGlobalSlice()
+    {
+        var stats = this.FindControl<TextBlock>("TimeStats");
+        var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { if (stats != null) stats.Text = string.Empty; return; }
+        if (_selectedTiles.Count == 0) { if (stats != null) stats.Text = string.Empty; return; }
+        int tilesInSlice = 0, sinks = 0;
+
+        foreach (var kstr in _selectedTiles.ToArray())
+        {
+            var parts = kstr.Split(','); if (parts.Length != 2) continue;
+            if (!int.TryParse(parts[0], out var x)) continue; if (!int.TryParse(parts[1], out var y)) continue;
+            EnsureTileBaseState(map, x, y);
+            var k = TileKey(x, y);
+            bool anyOverlapM2 = false, anyOverlapWmo = false;
+            foreach (var e in _baseM2[k]) { bool hit = e.Min <= _globalSliceMax && e.Max >= _globalSliceMin; e.Enabled = hit; anyOverlapM2 |= hit; }
+            foreach (var e in _baseWmo[k]) { bool hit = e.Min <= _globalSliceMax && e.Max >= _globalSliceMin; e.Enabled = hit; anyOverlapWmo |= hit; }
+            if (anyOverlapM2 || anyOverlapWmo) tilesInSlice++;
+            if (!anyOverlapM2 && !anyOverlapWmo) sinks++;
+        }
+        if (stats != null) stats.Text = $"Applied {_globalSliceMin}–{_globalSliceMax} · tiles in slice: {tilesInSlice} · sinks: {sinks}";
+        // RenderTileLayers(); // Hidden
+    }
+
     private static string BuildPrepareLayersArgs(string cliProj, string clientRoot, string outRoot, string mapsArg, DataSourcePayload p)
     {
         var sb = new StringBuilder();
@@ -61,6 +168,119 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(p.LkClient)) sb.Append($" --lk-client-path \"{p.LkClient}\"");
         if (!string.IsNullOrWhiteSpace(p.LkDbcDir)) sb.Append($" --lk-dbc-dir \"{p.LkDbcDir}\"");
         return sb.ToString();
+    }
+
+    private static string BuildAlphaToLkArgs(string cliProj, string wdtPath, int maxUniqueId, string alphaOut, string lkOut, string? lkClient, string? lkDbcDir)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"run --project \"{cliProj}\" -- alpha-to-lk --input \"{wdtPath}\" --max-uniqueid {maxUniqueId} --bury-depth -5000.0 --out \"{alphaOut}\"");
+        if (!string.IsNullOrWhiteSpace(lkOut)) sb.Append($" --lk-out \"{lkOut}\"");
+        if (!string.IsNullOrWhiteSpace(lkClient)) sb.Append($" --lk-client-path \"{lkClient}\"");
+        if (!string.IsNullOrWhiteSpace(lkDbcDir)) sb.Append($" --lk-dbc-dir \"{lkDbcDir}\"");
+        return sb.ToString();
+    }
+
+    private static string? TryFindWdtPath(string datasetRoot, string map)
+    {
+        try
+        {
+            var cands = new[]
+            {
+                Path.Combine(datasetRoot, "World", "Maps", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "tree", "World", "Maps", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "World", map, map + ".wdt"),
+                Path.Combine(datasetRoot, "tree", "World", map, map + ".wdt")
+            };
+            foreach (var p in cands) if (File.Exists(p)) return p;
+            try
+            {
+                var found = Directory.EnumerateFiles(datasetRoot, map + ".wdt", SearchOption.AllDirectories)
+                    .Where(p => p.EndsWith(Path.DirectorySeparatorChar + map + ".wdt", StringComparison.OrdinalIgnoreCase))
+                    .Take(1).ToList();
+                if (found.Count > 0) return found[0];
+            }
+            catch { }
+        }
+        catch { }
+        return null;
+    }
+
+    private async void RecompileMapBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { await ShowMessage("Info", "Select a map first."); return; }
+            var cacheBox = this.FindControl<TextBox>("CacheBox"); var cacheRoot = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(cacheRoot)) cacheRoot = _cacheRoot;
+            var datasetRoot = TryGetDatasetRootFromCache(cacheRoot!);
+            if (string.IsNullOrWhiteSpace(datasetRoot))
+            {
+                var rootBox = this.FindControl<TextBox>("DataRootBox"); var fallback = rootBox?.Text?.Trim();
+                if (!string.IsNullOrWhiteSpace(fallback)) datasetRoot = fallback;
+            }
+            if (string.IsNullOrWhiteSpace(datasetRoot)) { await ShowMessage("Info", "Set Data Sources root and build cache first."); return; }
+
+            var wdt = TryFindWdtPath(datasetRoot!, map);
+            if (string.IsNullOrWhiteSpace(wdt) || !File.Exists(wdt!)) { await ShowMessage("Error", "Could not locate WDT for map."); return; }
+
+            var threshold = _globalSliceMax;
+            var outRoot = Path.GetFullPath(Path.Combine(_cacheRoot, "..", "output", map, DateTime.Now.ToString("yyyyMMdd-HHmmss")));
+            var alphaOut = Path.Combine(outRoot, "alpha_out");
+            var lkOut = Path.Combine(outRoot, "lk_adts");
+            Directory.CreateDirectory(alphaOut);
+            Directory.CreateDirectory(lkOut);
+
+            var p = BuildDataSourcePayload();
+            var cliProj = ResolveProjectCsproj("WoWRollback", "WoWRollback.Cli");
+            if (string.IsNullOrWhiteSpace(cliProj) || !File.Exists(cliProj)) { await ShowMessage("Error", "CLI project not found."); return; }
+
+            var sessionObj = new
+            {
+                map,
+                wdt = wdt,
+                sliceCenter = _timeCenter,
+                sliceWidth = (this.FindControl<ComboBox>("BandSizeBox")?.SelectedItem as ComboBoxItem)?.Content?.ToString(),
+                rangeMin = _globalSliceMin,
+                rangeMax = _globalSliceMax,
+                threshold = threshold,
+                lkClient = p.LkClient,
+                lkDbcDir = p.LkDbcDir
+            };
+            File.WriteAllText(Path.Combine(outRoot, "session.json"), JsonSerializer.Serialize(sessionObj, new JsonSerializerOptions { WriteIndented = true }));
+
+            var args = BuildAlphaToLkArgs(cliProj, wdt!, threshold, alphaOut, lkOut, p.LkClient, p.LkDbcDir);
+            File.WriteAllText(Path.Combine(outRoot, "commands.txt"), args);
+
+            ShowLoading("Recompiling map...");
+            var psi = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = args,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            proc.OutputDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
+            proc.ErrorDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
+            AppendBuildLog($"[recompile] Starting: {args}");
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            await proc.WaitForExitAsync();
+            AppendBuildLog($"[recompile] Exit code: {proc.ExitCode}");
+            HideLoading();
+            if (proc.ExitCode == 0)
+            {
+                try { var psiOpen = new System.Diagnostics.ProcessStartInfo { FileName = outRoot, UseShellExecute = true }; System.Diagnostics.Process.Start(psiOpen); } catch { }
+                await ShowMessage("Done", outRoot);
+            }
+            else
+            {
+                await ShowMessage("Recompile failed", $"Exit code: {proc.ExitCode}");
+            }
+        }
+        catch (Exception ex) { HideLoading(); await ShowMessage("Error", ex.Message); }
     }
     private readonly Dictionary<string, AreaData> _areasByMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string?> _wmoByMap = new(StringComparer.OrdinalIgnoreCase);
@@ -1474,8 +1694,24 @@ public partial class MainWindow : Window
         if (bandBox != null)
         {
             if (bandBox.ItemCount > 0 && bandBox.SelectedIndex < 0) bandBox.SelectedIndex = 1; // default 128
-            bandBox.SelectionChanged += (_, __) => RenderTileLayers();
+            bandBox.SelectionChanged += (_, __) => UpdateTimeLabel();
         }
+        var tSlider = this.FindControl<Slider>("TimeSlider");
+        if (tSlider != null)
+        {
+            tSlider.PropertyChanged += (s, e) =>
+            {
+                if (e.Property == RangeBase.ValueProperty)
+                {
+                    _timeCenter = (int)Math.Round(tSlider.Value);
+                    UpdateTimeLabel();
+                }
+            };
+        }
+        var blAll = this.FindControl<Button>("BaselineEnableAllBtn"); if (blAll != null) blAll.Click += BaselineEnableAllBtn_Click;
+        var blNone = this.FindControl<Button>("BaselineDisableAllBtn"); if (blNone != null) blNone.Click += BaselineDisableAllBtn_Click;
+        var blSlice = this.FindControl<Button>("BaselineTimeSliceBtn"); if (blSlice != null) blSlice.Click += BaselineTimeSliceBtn_Click;
+        var recompile = this.FindControl<Button>("RecompileMapBtn"); if (recompile != null) recompile.Click += RecompileMapBtn_Click;
     }
 
     private void OnTileComboSelectionChanged()
@@ -1580,6 +1816,7 @@ public partial class MainWindow : Window
             if (selSubsBtn != null) selSubsBtn.IsEnabled = false;
             if (clearBtn != null) clearBtn.IsEnabled = false;
             PopulateAreasLegend(map);
+            UpdateTimeRangeFromSelection();
             return;
         }
         if (parentCombo != null)
@@ -1769,7 +2006,7 @@ public partial class MainWindow : Window
         var list = keys.ToList();
         tileCombo.ItemsSource = list;
         if (list.Count > 0) tileCombo.SelectedIndex = 0;
-        RenderTileGrid(); PopulateAreasLegend(map);
+        RenderTileGrid(); PopulateAreasLegend(map); UpdateTimeRangeFromSelection();
     }
 
     private void EnsureTileBaseState(string map, int x, int y)
@@ -2110,8 +2347,8 @@ public partial class MainWindow : Window
                     cellColor = new Avalonia.Media.Color((byte)((color>>24)&0xFF),(byte)((color>>16)&0xFF),(byte)((color>>8)&0xFF),(byte)(color&0xFF));
                 }
 
-                // Areas overlay: blend parent area color if available
-                if (_areasByMap.TryGetValue(map, out var aData))
+                // Areas overlay: blend parent area color if available (disabled via flag)
+                if (_areasUiEnabled && _areasByMap.TryGetValue(map, out var aData))
                 {
                     var tkey = TileKey(key.x, key.y);
                     // Resolve parent id for this tile if any
@@ -2173,6 +2410,7 @@ public partial class MainWindow : Window
 
     private void PopulateAreasLegend(string map)
     {
+        if (!_areasUiEnabled) return;
         var host = this.FindControl<StackPanel>("AreasLegend"); if (host == null) return;
         host.Children.Clear();
         if (!_areasByMap.TryGetValue(map, out var data)) return;
@@ -2207,7 +2445,7 @@ public partial class MainWindow : Window
         _focusedTileKey = val;
         _selectedTiles.Clear();
         _selectedTiles.Add(val);
-        RenderTileGrid();
+        RenderTileGrid(); UpdateTimeRangeFromSelection();
     }
 
     private (int x, int y) TileFromPointer(Panel panel, PointerEventArgs e)
@@ -2253,7 +2491,7 @@ public partial class MainWindow : Window
             int idx = 0; foreach (var it in seq) { if ((it as string) == _focusedTileKey) { tileCombo.SelectedIndex = idx; break; } idx++; }
         }
 
-        RenderTileGrid(); RenderTileLayers(); RenderMinimap(); RenderTileCustom();
+        RenderTileGrid(); RenderTileLayers(); RenderMinimap(); RenderTileCustom(); UpdateTimeRangeFromSelection();
     }
 
     private void TileGrid_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -2262,7 +2500,7 @@ public partial class MainWindow : Window
         var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) return;
         var cell = TileFromPointer(panel, e);
         // Alt-click = select entire parent area of the clicked tile (if available)
-        if ((e.KeyModifiers & KeyModifiers.Alt) != 0 && _areasByMap.TryGetValue(map, out var data))
+        if (_areasUiEnabled && (e.KeyModifiers & KeyModifiers.Alt) != 0 && _areasByMap.TryGetValue(map, out var data))
         {
             string tkey = TileKey(cell.x, cell.y);
             int parentId = -1;

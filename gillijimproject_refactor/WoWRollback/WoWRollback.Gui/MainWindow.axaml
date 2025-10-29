@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:primitives="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls"
         x:Class="WoWRollback.Gui.MainWindow"
-        Width="1280" MinWidth="1000" Height="700"
+        Width="1600" MinWidth="1280" Height="950" MinHeight="800"
         Title="WoWRollback GUI">
   <DockPanel>
 
@@ -149,8 +149,8 @@
             <StackPanel Grid.Column="0" Margin="0,8,12,0" Spacing="8">
               <!-- Compact 64x64 tile grid -->
               <Border BorderBrush="#444" BorderThickness="1" Padding="4">
-                <ScrollViewer Width="540" Height="540">
-                  <primitives:UniformGrid x:Name="TileGridPanel" Rows="64" Columns="64" Width="512" Height="512"/>
+                <ScrollViewer Width="820" Height="820">
+                  <primitives:UniformGrid x:Name="TileGridPanel" Rows="64" Columns="64" Width="768" Height="768"/>
                 </ScrollViewer>
               </Border>
               <!-- Selected tile minimap preview -->
@@ -159,56 +159,75 @@
               </Border>
             </StackPanel>
 
-            <!-- Layers panel -->
-            <StackPanel Grid.Column="1" Margin="0,8,0,0" Spacing="8">
-              <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
-              <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
-              <WrapPanel>
-                <TextBlock Text="Band" VerticalAlignment="Center"/>
-                <ComboBox x:Name="BandSizeBox" Width="80" Margin="6,0,0,0">
-                  <ComboBoxItem Content="64"/>
-                  <ComboBoxItem Content="128"/>
-                  <ComboBoxItem Content="256"/>
-                </ComboBox>
-              </WrapPanel>
-              <TextBlock Text="Area Groups" FontWeight="Bold"/>
-              <WrapPanel>
-                <ComboBox x:Name="ParentAreaCombo" Width="260" Margin="0,0,6,6"/>
-                <CheckBox x:Name="AreaAddModeBox" Content="Add to selection" Margin="0,0,6,6"/>
-                <Button x:Name="SelectParentBtn" Content="Select Parent Tiles" Margin="0,0,6,6"/>
-              </WrapPanel>
-              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
-                <StackPanel>
-                  <TextBlock Text="Areas Legend"/>
-                  <StackPanel x:Name="AreasLegend"/>
-                </StackPanel>
-              </Border>
-              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
-                <StackPanel>
-                  <TextBlock Text="Subzones"/>
-                  <ListBox x:Name="SubzonesList" SelectionMode="Multiple" Height="140"/>
-                  <WrapPanel>
-                    <Button x:Name="SelectSubzonesBtn" Content="Select Subzones" Margin="0,6,6,0"/>
-                    <Button x:Name="ClearAreaSelBtn" Content="Clear Area Selection" Margin="0,6,0,0"/>
+            <!-- Column splitter -->
+            <GridSplitter Grid.Column="0" Width="6" Background="#333" HorizontalAlignment="Right"/>
+
+            <!-- Layers panel (Docked: header pinned, lists scroll) -->
+            <DockPanel Grid.Column="1" Margin="0,8,0,0" LastChildFill="True">
+              <!-- Pinned header controls -->
+              <StackPanel DockPanel.Dock="Top" Spacing="8">
+                <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
+                <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
+                <WrapPanel>
+                  <TextBlock Text="Slice width" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="BandSizeBox" Width="80" Margin="6,0,0,0">
+                    <ComboBoxItem Content="64"/>
+                    <ComboBoxItem Content="128"/>
+                    <ComboBoxItem Content="256"/>
+                  </ComboBox>
+                </WrapPanel>
+                <WrapPanel>
+                  <TextBlock Text="Slice center" VerticalAlignment="Center"/>
+                  <Slider x:Name="TimeSlider" Width="260" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                  <TextBlock x:Name="TimeLabel" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </WrapPanel>
+                <TextBlock x:Name="TimeStats"/>
+                <TextBlock Text="Baseline" FontWeight="Bold"/>
+                <WrapPanel>
+                  <Button x:Name="BaselineEnableAllBtn" Content="Enable All Baseline" Margin="0,0,6,6"/>
+                  <Button x:Name="BaselineDisableAllBtn" Content="Disable All Baseline" Margin="0,0,6,6"/>
+                  <Button x:Name="BaselineTimeSliceBtn" Content="Only Range" Margin="0,0,6,6"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <Button x:Name="RecompileMapBtn" Content="RECOMPILE MAP" Margin="0,0,6,6" Background="#8B0000" Foreground="White" FontWeight="Bold"/>
+                </WrapPanel>
+                <!-- Area controls are temporarily hidden -->
+                <TextBlock Text="Area Groups" FontWeight="Bold" IsVisible="False"/>
+                <WrapPanel IsVisible="False">
+                  <ComboBox x:Name="ParentAreaCombo" Width="260" Margin="0,0,6,6"/>
+                  <CheckBox x:Name="AreaAddModeBox" Content="Add to selection" Margin="0,0,6,6"/>
+                  <Button x:Name="SelectParentBtn" Content="Select Parent Tiles" Margin="0,0,6,6"/>
+                </WrapPanel>
+                <Border BorderBrush="#444" BorderThickness="1" Padding="4" IsVisible="False">
+                  <StackPanel>
+                    <TextBlock Text="Areas Legend"/>
+                    <StackPanel x:Name="AreasLegend"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <!-- Scrollable lists -->
+              <ScrollViewer>
+                <StackPanel Spacing="8">
+<!-- Aggregated Bands hidden -->
+                  <StackPanel x:Name="TileLayersList" IsVisible="False"/>
+<!-- AddRange controls hidden -->
+                  <WrapPanel IsVisible="False">
+                    <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID" Margin="0,0,6,6"/>
+                    <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID" Margin="0,0,6,6"/>
+                    <ComboBox x:Name="AddRangeTypeBox" Width="100" Margin="0,0,6,6">
+                      <ComboBoxItem Content="M2"/>
+                      <ComboBoxItem Content="WMO"/>
+                    </ComboBox>
+                    <Button x:Name="AddRangeBtn" Content="Add Tile Range" Margin="0,0,6,6"/>
+                    <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom" Margin="0,0,0,6"/>
                   </WrapPanel>
+<!-- Custom Ranges hidden -->
+                  <TextBlock Text="Custom Ranges" FontWeight="Bold" IsVisible="False"/>
+                  <StackPanel x:Name="TileCustomList" IsVisible="False"/>
                 </StackPanel>
-              </Border>
-              <ScrollViewer Height="260">
-                <StackPanel x:Name="TileLayersList"/>
               </ScrollViewer>
-              <WrapPanel>
-                <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID" Margin="0,0,6,6"/>
-                <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID" Margin="0,0,6,6"/>
-                <ComboBox x:Name="AddRangeTypeBox" Width="100" Margin="0,0,6,6">
-                  <ComboBoxItem Content="M2"/>
-                  <ComboBoxItem Content="WMO"/>
-                </ComboBox>
-                <Button x:Name="AddRangeBtn" Content="Add Tile Range" Margin="0,0,6,6"/>
-                <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom" Margin="0,0,0,6"/>
-              </WrapPanel>
-              <TextBlock Text="Custom Ranges" FontWeight="Bold"/>
-              <StackPanel x:Name="TileCustomList"/>
-            </StackPanel>
+            </DockPanel>
           </Grid>
         </Grid>
       </TabItem>
