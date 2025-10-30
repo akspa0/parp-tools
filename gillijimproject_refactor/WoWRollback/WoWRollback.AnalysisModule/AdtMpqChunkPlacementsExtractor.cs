@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using WoWRollback.Core.Services.Archive;
-using Warcraft.NET.Files.ADT.Terrain.Wotlk;
-using Warcraft.NET.Files.ADT.TerrainObject.Zero;
+using WoWFormatLib.FileReaders;
+using WoWFormatLib.Structs.ADT;
+using WoWFormatLib.Structs.WDT;
+using WoWFormatLib.Utils;
 
 namespace WoWRollback.AnalysisModule;
 
@@ -25,7 +27,7 @@ public sealed class AdtMpqChunkPlacementsExtractor
             }
 
             var csv = new StringBuilder();
-            csv.AppendLine("map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set,source_file");
+            csv.AppendLine("map,tile_x,tile_y,type,asset_path,unique_id,world_x,world_y,world_z,rot_x,rot_y,rot_z,scale,doodad_set,name_set,source_file,fdid");
 
             int m2Count = 0;
             int mdxCount = 0;
@@ -48,7 +50,13 @@ public sealed class AdtMpqChunkPlacementsExtractor
                     var rows = ExtractPlacementsFromAdt(source, virtualPath, mapName, tileX, tileY);
                     foreach (var p in rows)
                     {
-                        csv.AppendLine(FormatPlacementCsv(p, Path.GetFileName(virtualPath)));
+                        int fdid = 0;
+                        if (source is WoWRollback.Core.Services.Archive.CascArchiveSource casc)
+                        {
+                            var normPath = (p.AssetPath ?? string.Empty).Replace('\\','/').ToLowerInvariant();
+                            if (casc.TryGetFileDataId(normPath, out var id)) fdid = id;
+                        }
+                        csv.AppendLine(FormatPlacementCsv(p, Path.GetFileName(virtualPath), fdid));
                         if (p.Type == "M2") m2Count++;
                         else if (p.Type == "MDX") mdxCount++;
                         else wmoCount++;
@@ -80,12 +88,25 @@ public sealed class AdtMpqChunkPlacementsExtractor
         var tiles = new List<(int, int, bool, string)>();
         var basePath = $"world/maps/{map}";
 
-        Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Scanning for {map} ADT tiles (0-63 grid)...");
-        
+        // Prefer listfile enumeration for Cataclysm+ _obj0 tiles
+        var objMatches = src.EnumerateFiles($"{basePath}/{map}_*_obj0.adt").ToList();
+        if (objMatches.Count > 0)
+        {
+            foreach (var vp in objMatches)
+            {
+                if (TryParseTile(vp, map, out var x, out var y, out var isCata))
+                {
+                    tiles.Add((x, y, isCata, vp));
+                }
+            }
+            tiles.Sort((a,b) => a.Item1 != b.Item1 ? a.Item1.CompareTo(b.Item1) : a.Item2.CompareTo(b.Item2));
+            Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Found {tiles.Count} _obj0 tiles via listfile");
+            return tiles;
+        }
+
+        Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Falling back to per-tile existence scan (0-63 grid)...");
         var chosen = new Dictionary<(int X,int Y), (bool IsCata, string Path)>();
         int foundCount = 0;
-        
-        // Parallel scan for better performance
         var lockObj = new object();
         System.Threading.Tasks.Parallel.For(0, 64, x =>
         {
@@ -101,7 +122,6 @@ public sealed class AdtMpqChunkPlacementsExtractor
                     }
                     continue;
                 }
-                
                 var pre = $"{basePath}/{map}_{x}_{y}.adt";
                 if (src.FileExists(pre))
                 {
@@ -112,24 +132,13 @@ public sealed class AdtMpqChunkPlacementsExtractor
                     }
                 }
             }
-            
-            // Progress every 8 rows
-            if (x % 8 == 0)
-            {
-                lock (lockObj)
-                {
-                    Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Scanned row {x}/64... ({foundCount} tiles found)");
-                }
-            }
         });
-        
-        Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Scan complete: found {foundCount} tiles");
-        
+
         foreach (var kv in chosen.OrderBy(k => k.Key.X).ThenBy(k => k.Key.Y))
         {
             tiles.Add((kv.Key.X, kv.Key.Y, kv.Value.IsCata, kv.Value.Path));
         }
-        
+        Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Scan complete: found {tiles.Count} tiles");
         return tiles;
     }
 
@@ -148,148 +157,138 @@ public sealed class AdtMpqChunkPlacementsExtractor
         return false;
     }
 
-    // Core extractor: use Warcraft.NET parser instead of manual chunk walking
+    // Core extractor: use our WoWFormatLib-based reader to preserve UniqueID semantics
     private static List<PlacementRow> ExtractPlacementsFromAdt(IArchiveSource src, string virtualPath, string map, int x, int y)
     {
-        using var stream = src.OpenFile(virtualPath);
-        using var ms = new MemoryStream();
-        stream.CopyTo(ms);
-        var data = ms.ToArray();
-        
-        // Determine if this is a Cata-split _obj0 file or pre-Cata terrain file
-        bool isCataSplit = virtualPath.Contains("_obj0.adt", StringComparison.OrdinalIgnoreCase);
-        
         var rows = new List<PlacementRow>();
-        
+
+        bool isCataSplit = virtualPath.Contains("_obj0.adt", StringComparison.OrdinalIgnoreCase);
+
         try
         {
+            var reader = new ADTReader();
+
             if (isCataSplit)
             {
-                // Cata+ split format: _obj0.adt contains placements
-                var objFile = new TerrainObjectZero(data);
-                rows.AddRange(ExtractFromCataObj(objFile, map, x, y));
+                // Cata+ split: _obj0 carries MDDF/MODF
+                using var obj = src.OpenFile(virtualPath);
+                reader.ReadObjFile(obj);
+
+                // MDDF (M2/MDX)
+                if (reader.adtfile.objects.models.entries != null && reader.adtfile.objects.models.entries.Length > 0)
+                {
+                    foreach (var m2 in reader.adtfile.objects.models.entries)
+                    {
+                        var path = ResolveM2Path(reader.adtfile, m2.mmidEntry) ?? $"<MMID:{m2.mmidEntry}>";
+                        var modelType = path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) ? "MDX" : "M2";
+                        rows.Add(new PlacementRow(map, x, y, modelType, path, (int)m2.uniqueId,
+                            m2.position.X, m2.position.Y, m2.position.Z,
+                            m2.rotation.X, m2.rotation.Y, m2.rotation.Z,
+                            m2.scale, null, null));
+                    }
+                }
+
+                // MODF (WMO)
+                if (reader.adtfile.objects.worldModels.entries != null && reader.adtfile.objects.worldModels.entries.Length > 0)
+                {
+                    foreach (var wmo in reader.adtfile.objects.worldModels.entries)
+                    {
+                        var path = ResolveWmoPath(reader.adtfile, wmo.mwidEntry) ?? $"<MWID:{wmo.mwidEntry}>";
+                        rows.Add(new PlacementRow(map, x, y, "WMO", path, (int)wmo.uniqueId,
+                            wmo.position.X, wmo.position.Y, wmo.position.Z,
+                            wmo.rotation.X, wmo.rotation.Y, wmo.rotation.Z,
+                            wmo.scale, wmo.doodadSet, wmo.nameSet));
+                    }
+                }
             }
             else
             {
-                // Pre-Cata format: terrain ADT contains everything
-                var terrain = new Terrain(data);
-                rows.AddRange(ExtractFromPreCataTerrain(terrain, map, x, y));
+                // Pre-Cata: MDDF/MODF live in root ADT
+                // Force WotLK mode to make the reader walk MDDF/MODF in root files
+                VersionManager.CurrentVersion = VersionManager.FileVersion.WotLK;
+                using var root = src.OpenFile(virtualPath);
+                reader.ReadRootFile(root, MPHDFlags.wdt_has_maid);
+
+                if (reader.adtfile.objects.models.entries != null)
+                {
+                    foreach (var m2 in reader.adtfile.objects.models.entries)
+                    {
+                        var path = ResolveM2Path(reader.adtfile, m2.mmidEntry) ?? $"<MMID:{m2.mmidEntry}>";
+                        var modelType = path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) ? "MDX" : "M2";
+                        rows.Add(new PlacementRow(map, x, y, modelType, path, (int)m2.uniqueId,
+                            m2.position.X, m2.position.Y, m2.position.Z,
+                            m2.rotation.X, m2.rotation.Y, m2.rotation.Z,
+                            m2.scale, null, null));
+                    }
+                }
+
+                if (reader.adtfile.objects.worldModels.entries != null)
+                {
+                    foreach (var wmo in reader.adtfile.objects.worldModels.entries)
+                    {
+                        var path = ResolveWmoPath(reader.adtfile, wmo.mwidEntry) ?? $"<MWID:{wmo.mwidEntry}>";
+                        rows.Add(new PlacementRow(map, x, y, "WMO", path, (int)wmo.uniqueId,
+                            wmo.position.X, wmo.position.Y, wmo.position.Z,
+                            wmo.rotation.X, wmo.rotation.Y, wmo.rotation.Z,
+                            wmo.scale, wmo.doodadSet, wmo.nameSet));
+                    }
+                }
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Warning: Failed to parse {virtualPath}: {ex.Message}");
         }
-        
+
         return rows;
     }
-    
-    private static IEnumerable<PlacementRow> ExtractFromCataObj(TerrainObjectZero objFile, string map, int x, int y)
+    private static string? ResolveM2Path(ADT adt, uint mmidEntry)
     {
-        var m2Paths = BuildM2PathLookup(objFile.Models, objFile.ModelIndices);
-        var wmoPaths = BuildWmoPathLookup(objFile.WorldModelObjects, objFile.WorldModelObjectIndices);
-        
-        // Extract M2 placements from MDDF
-        if (objFile.ModelPlacementInfo?.MDDFEntries != null)
+        try
         {
-            foreach (var m2 in objFile.ModelPlacementInfo.MDDFEntries)
+            var names = adt.objects.m2Names.filenames;
+            var nameOffsets = adt.objects.m2Names.offsets;
+            var mmid = adt.objects.m2NameOffsets.offsets;
+            if (names == null) return null;
+            if (mmid != null && mmidEntry < mmid.Length && nameOffsets != null)
             {
-                if (m2Paths.TryGetValue(m2.NameId, out var path))
-                {
-                    var modelType = path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) ? "MDX" : "M2";
-                    yield return new PlacementRow(map, x, y, modelType, path, (int)m2.UniqueID,
-                        m2.Position.X, m2.Position.Y, m2.Position.Z,
-                        m2.Rotation.Pitch, m2.Rotation.Yaw, m2.Rotation.Roll,
-                        m2.ScalingFactor, null, null);
-                }
+                var offset = mmid[mmidEntry];
+                var idx = Array.IndexOf(nameOffsets, offset);
+                if (idx >= 0 && idx < names.Length) return names[idx];
             }
+            // Fallback: direct index
+            if (mmidEntry < names.Length) return names[mmidEntry];
+            return null;
         }
-        
-        // Extract WMO placements from MODF
-        if (objFile.WorldModelObjectPlacementInfo?.MODFEntries != null)
+        catch { return null; }
+    }
+
+    private static string? ResolveWmoPath(ADT adt, uint mwidEntry)
+    {
+        try
         {
-            foreach (var wmo in objFile.WorldModelObjectPlacementInfo.MODFEntries)
+            var names = adt.objects.wmoNames.filenames;
+            var nameOffsets = adt.objects.wmoNames.offsets;
+            var mwid = adt.objects.wmoNameOffsets.offsets;
+            if (names == null) return null;
+            if (mwid != null && mwidEntry < mwid.Length && nameOffsets != null)
             {
-                if (wmoPaths.TryGetValue(wmo.NameId, out var path))
-                {
-                    yield return new PlacementRow(map, x, y, "WMO", path, (int)wmo.UniqueId,
-                        wmo.Position.X, wmo.Position.Y, wmo.Position.Z,
-                        wmo.Rotation.Pitch, wmo.Rotation.Yaw, wmo.Rotation.Roll,
-                        wmo.Scale, wmo.DoodadSet, wmo.NameSet);
-                }
+                var offset = mwid[mwidEntry];
+                var idx = Array.IndexOf(nameOffsets, offset);
+                if (idx >= 0 && idx < names.Length) return names[idx];
             }
+            if (mwidEntry < names.Length) return names[mwidEntry];
+            return null;
         }
+        catch { return null; }
     }
     
-    private static IEnumerable<PlacementRow> ExtractFromPreCataTerrain(Terrain terrain, string map, int x, int y)
-    {
-        var m2Paths = BuildM2PathLookup(terrain.Models, terrain.ModelIndices);
-        var wmoPaths = BuildWmoPathLookup(terrain.WorldModelObjects, terrain.WorldModelObjectIndices);
-        
-        // Extract M2 placements from MDDF
-        if (terrain.ModelPlacementInfo?.MDDFEntries != null)
-        {
-            foreach (var m2 in terrain.ModelPlacementInfo.MDDFEntries)
-            {
-                if (m2Paths.TryGetValue(m2.NameId, out var path))
-                {
-                    var modelType = path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) ? "MDX" : "M2";
-                    yield return new PlacementRow(map, x, y, modelType, path, (int)m2.UniqueID,
-                        m2.Position.X, m2.Position.Y, m2.Position.Z,
-                        m2.Rotation.Pitch, m2.Rotation.Yaw, m2.Rotation.Roll,
-                        m2.ScalingFactor, null, null);
-                }
-            }
-        }
-        
-        // Extract WMO placements from MODF
-        if (terrain.WorldModelObjectPlacementInfo?.MODFEntries != null)
-        {
-            foreach (var wmo in terrain.WorldModelObjectPlacementInfo.MODFEntries)
-            {
-                if (wmoPaths.TryGetValue(wmo.NameId, out var path))
-                {
-                    yield return new PlacementRow(map, x, y, "WMO", path, (int)wmo.UniqueId,
-                        wmo.Position.X, wmo.Position.Y, wmo.Position.Z,
-                        wmo.Rotation.Pitch, wmo.Rotation.Yaw, wmo.Rotation.Roll,
-                        wmo.Scale, wmo.DoodadSet, wmo.NameSet);
-                }
-            }
-        }
-    }
-    
-    private static Dictionary<uint, string> BuildM2PathLookup(Warcraft.NET.Files.ADT.Chunks.MMDX? mmdx, Warcraft.NET.Files.ADT.Chunks.MMID? mmid)
-    {
-        var lookup = new Dictionary<uint, string>();
-        if (mmdx == null || mmid == null || mmdx.Filenames.Count == 0 || mmid.ModelFilenameOffsets.Count == 0)
-            return lookup;
-        
-        for (int i = 0; i < mmdx.Filenames.Count; i++)
-        {
-            lookup[(uint)i] = mmdx.Filenames[i];
-        }
-        return lookup;
-    }
-    
-    private static Dictionary<uint, string> BuildWmoPathLookup(Warcraft.NET.Files.ADT.Chunks.MWMO? mwmo, Warcraft.NET.Files.ADT.Chunks.MWID? mwid)
-    {
-        var lookup = new Dictionary<uint, string>();
-        if (mwmo == null || mwid == null || mwmo.Filenames.Count == 0 || mwid.ModelFilenameOffsets.Count == 0)
-            return lookup;
-        
-        for (int i = 0; i < mwmo.Filenames.Count; i++)
-        {
-            lookup[(uint)i] = mwmo.Filenames[i];
-        }
-        return lookup;
-    }
-    
-    private static string FormatPlacementCsv(PlacementRow p, string sourceFile)
+    private static string FormatPlacementCsv(PlacementRow p, string sourceFile, int fdid)
     {
         return $"{p.Map},{p.TileX},{p.TileY},{p.Type},{p.AssetPath},{p.UniqueId}," +
                $"{p.WorldX:F3},{p.WorldY:F3},{p.WorldZ:F3}," +
                $"{p.RotX:F6},{p.RotY:F6},{p.RotZ:F6}," +
-               $"{p.Scale},{p.DoodadSet?.ToString() ?? ""},{p.NameSet?.ToString() ?? ""},{sourceFile}";
+               $"{p.Scale},{p.DoodadSet?.ToString() ?? ""},{p.NameSet?.ToString() ?? ""},{sourceFile},{(fdid > 0 ? fdid.ToString() : "")}";
     }
 }
 

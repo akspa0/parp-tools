@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private const bool _areasUiEnabled = false; // TEMP: disable AreaID UI/overlay
     private int _rangeStart = 0, _rangeEnd = 0; // explicit range
     private int _domainMin = 0, _domainMax = 0; // bounds for sliders
+    private bool _isRunningCli = false; // prevent repeated runs (e.g., spacebar triggering button)
 
     // Area grouping state (per-map)
     private sealed class AreaData
@@ -491,6 +492,10 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (_isRunningCli) return;
+            _isRunningCli = true;
+            var prepBtn = this.FindControl<Button>("PrepareBtn"); if (prepBtn != null) prepBtn.IsEnabled = false;
+            var layersMapCombo = this.FindControl<ComboBox>("LayersMapCombo"); if (layersMapCombo != null) layersMapCombo.IsEnabled = false;
             ShowLoading("Preparing per-map layers (this may take a while)...");
             var p = BuildDataSourcePayload();
             var buildOutBox = this.FindControl<TextBox>("BuildOutBox");
@@ -509,7 +514,8 @@ public partial class MainWindow : Window
             // Ensure output root is version-scoped
             if (string.IsNullOrWhiteSpace(outRoot))
             {
-                var verLabel = string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer;
+                var detected = TryDetectBuildFromRoot(p.Root);
+                var verLabel = !string.IsNullOrWhiteSpace(resolvedVer) ? resolvedVer : (!string.IsNullOrWhiteSpace(detected) ? detected! : "unknown");
                 outRoot = Path.Combine(_cacheRoot, verLabel);
                 var cacheBox = this.FindControl<TextBox>("CacheBox"); if (cacheBox != null) cacheBox.Text = outRoot;
             }
@@ -521,7 +527,7 @@ public partial class MainWindow : Window
             if (string.Equals(p.Type, "casc", StringComparison.OrdinalIgnoreCase))
             {
                 var sb = new StringBuilder();
-                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-casc --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-casc --client-path \"{root}\" --all-maps --out \"{outRoot}\" --placements-only");
                 if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
                 if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
                 if (!string.IsNullOrWhiteSpace(p.Listfile)) sb.Append($" --listfile \"{p.Listfile}\"");
@@ -530,7 +536,7 @@ public partial class MainWindow : Window
             else if (string.Equals(p.Type, "install", StringComparison.OrdinalIgnoreCase))
             {
                 var sb = new StringBuilder();
-                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-mpq --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-mpq --client-path \"{root}\" --all-maps --out \"{outRoot}\" --placements-only");
                 if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
                 if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
                 args = sb.ToString();
@@ -564,19 +570,22 @@ public partial class MainWindow : Window
 
             RefreshMaps();
             InitLayersTab();
-            OnMapSelected();
             if (proc.ExitCode == 0)
             {
-                AppendBuildLog("[prepare] Prepare complete.");
-                var tabs = this.FindControl<TabControl>("MainTabs");
-                if (tabs != null) tabs.SelectedIndex = 1; // Layers
+                AppendBuildLog("[prepare] Prepare complete. Open the Layers tab to view results.");
             }
         }
         catch (Exception ex)
         {
             AppendBuildLog("[prepare] ERROR: " + ex.Message);
         }
-        finally { HideLoading(); }
+        finally 
+        { 
+            HideLoading(); 
+            _isRunningCli = false; 
+            var prepBtn = this.FindControl<Button>("PrepareBtn"); if (prepBtn != null) prepBtn.IsEnabled = true; 
+            var layersMapCombo = this.FindControl<ComboBox>("LayersMapCombo"); if (layersMapCombo != null) layersMapCombo.IsEnabled = true;
+        }
     }
 
     private static string ResolveProjectCsproj(string folder, string projectName)
@@ -672,6 +681,11 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(err)) notes.Add(err!);
             var sample = maps.Take(10).ToList();
             var buildUsed = ResolveBuildTag(resolvedVer ?? p.Version ?? string.Empty, p.Build, p.Root);
+            if (string.IsNullOrWhiteSpace(buildUsed))
+            {
+                var detected = TryDetectBuildFromRoot(p.Root);
+                if (!string.IsNullOrWhiteSpace(detected)) buildUsed = detected!;
+            }
             var obj = new { type = p.Type, version = p.Version, build = p.Build, buildUsed, resolvedVersion = resolvedVer, method, mapsCount = maps.Count, sampleMaps = sample, notes };
             var box = this.FindControl<TextBox>("DataPreviewBox"); if (box != null) box.Text = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
         }
@@ -733,8 +747,12 @@ public partial class MainWindow : Window
                 AppendDataLoadLog("[Load] No maps discovered via filesystem. For CASC/Install, discovery will occur during Prepare.");
             }
 
-            // Use version-scoped cache directory
-            var verLabel = string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer;
+            // Use build-scoped cache directory when possible (e.g., 0.5.3.3368), else version, else unknown
+            var buildUsed = ResolveBuildTag(resolvedVer ?? p.Version ?? string.Empty, p.Build, p.Root);
+            if (string.IsNullOrWhiteSpace(p.Build) && !string.IsNullOrWhiteSpace(buildUsed)) p.Build = buildUsed;
+            var verLabel = !string.IsNullOrWhiteSpace(buildUsed)
+                ? buildUsed!
+                : (string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer);
             p.OutputDir = Path.Combine(p.OutputDir!, verLabel);
             var cacheBoxCtl = this.FindControl<TextBox>("CacheBox"); if (cacheBoxCtl != null) cacheBoxCtl.Text = p.OutputDir;
             Directory.CreateDirectory(p.OutputDir!);
@@ -1082,6 +1100,20 @@ public partial class MainWindow : Window
             var root = doc.RootElement;
             var r = root.TryGetProperty("root", out var rEl) ? rEl.GetString() : null;
             return string.IsNullOrWhiteSpace(r) ? null : r;
+        }
+        catch { return null; }
+    }
+
+    private static string? TryGetDatasetTypeFromCache(string cacheRoot)
+    {
+        try
+        {
+            var path = Path.Combine(cacheRoot, ".dataset.json");
+            if (!File.Exists(path)) return null;
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var root = doc.RootElement;
+            var t = root.TryGetProperty("type", out var tEl) ? tEl.GetString() : null;
+            return string.IsNullOrWhiteSpace(t) ? null : t;
         }
         catch { return null; }
     }
@@ -1620,6 +1652,7 @@ public partial class MainWindow : Window
         var result = new List<MapRow>();
         if (!Directory.Exists(root)) return result;
         var datasetRoot = TryGetDatasetRootFromCache(root);
+        var datasetType = TryGetDatasetTypeFromCache(root);
 
         static bool IsMapDir(string d)
         {
@@ -1631,6 +1664,23 @@ public partial class MainWindow : Window
         var mapsHere = new List<string>();
         foreach (var dir in immediate)
         {
+            // Flatten nested <map>/<map> if present
+            try
+            {
+                var baseName = Path.GetFileName(dir);
+                var nested = Path.Combine(dir, baseName);
+                if (Directory.Exists(nested))
+                {
+                    var nestCsv = Path.Combine(nested, "tile_layers.csv");
+                    var nestJson = Path.Combine(nested, "layers.json");
+                    var baseCsv = Path.Combine(dir, "tile_layers.csv");
+                    var baseJson = Path.Combine(dir, "layers.json");
+                    if (File.Exists(nestCsv) && !File.Exists(baseCsv)) { try { File.Copy(nestCsv, baseCsv, overwrite: false); } catch { } }
+                    if (File.Exists(nestJson) && !File.Exists(baseJson)) { try { File.Copy(nestJson, baseJson, overwrite: false); } catch { } }
+                }
+            }
+            catch { }
+
             if (IsMapDir(dir)) mapsHere.Add(dir);
         }
 
@@ -1643,8 +1693,124 @@ public partial class MainWindow : Window
                 {
                     if (IsMapDir(sub)) mapsHere.Add(sub);
                 }
+                // Also normalize flat outputs inside version folders (e.g., unknown/<map>_tile_layers.csv)
+                try
+                {
+                    // Normalize tile_layers
+                    foreach (var flat in Directory.EnumerateFiles(dir, "*_tile_layers.csv", SearchOption.TopDirectoryOnly))
+                    {
+                        var name = Path.GetFileName(flat);
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var map = name[..Math.Max(0, name.Length - "_tile_layers.csv".Length)];
+                        if (string.IsNullOrWhiteSpace(map)) continue;
+                        var dirName = Path.GetFileName(dir);
+                        var mapDir = string.Equals(dirName, map, StringComparison.OrdinalIgnoreCase) ? dir : Path.Combine(dir, map);
+                        Directory.CreateDirectory(mapDir);
+                        var normCsv = Path.Combine(mapDir, "tile_layers.csv");
+                        if (!File.Exists(normCsv))
+                        {
+                            try { File.Copy(flat, normCsv, overwrite: false); } catch { }
+                        }
+                        if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+                    }
+                    // Normalize layers.json sidecar if present
+                    foreach (var flat in Directory.EnumerateFiles(dir, "*_layers.json", SearchOption.TopDirectoryOnly))
+                    {
+                        var name = Path.GetFileName(flat);
+                        if (string.IsNullOrWhiteSpace(name)) continue;
+                        var map = name[..Math.Max(0, name.Length - "_layers.json".Length)];
+                        if (string.IsNullOrWhiteSpace(map)) continue;
+                        var dirName = Path.GetFileName(dir);
+                        var mapDir = string.Equals(dirName, map, StringComparison.OrdinalIgnoreCase) ? dir : Path.Combine(dir, map);
+                        Directory.CreateDirectory(mapDir);
+                        var normJson = Path.Combine(mapDir, "layers.json");
+                        if (!File.Exists(normJson))
+                        {
+                            try { File.Copy(flat, normJson, overwrite: false); } catch { }
+                        }
+                        if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+                    }
+                }
+                catch { }
             }
         }
+
+        // Always normalize flat outputs at the selected cache root itself
+        try
+        {
+            foreach (var flat in Directory.EnumerateFiles(root, "*_tile_layers.csv", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(flat);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var map = name[..Math.Max(0, name.Length - "_tile_layers.csv".Length)];
+                if (string.IsNullOrWhiteSpace(map)) continue;
+                var mapDir = Path.Combine(root, map);
+                Directory.CreateDirectory(mapDir);
+                var normCsv = Path.Combine(mapDir, "tile_layers.csv");
+                if (!File.Exists(normCsv))
+                {
+                    try { File.Copy(flat, normCsv, overwrite: false); } catch { }
+                }
+                if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+            }
+            foreach (var flat in Directory.EnumerateFiles(root, "*_layers.json", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(flat);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var map = name[..Math.Max(0, name.Length - "_layers.json".Length)];
+                if (string.IsNullOrWhiteSpace(map)) continue;
+                var mapDir = Path.Combine(root, map);
+                Directory.CreateDirectory(mapDir);
+                var normJson = Path.Combine(mapDir, "layers.json");
+                if (!File.Exists(normJson))
+                {
+                    try { File.Copy(flat, normJson, overwrite: false); } catch { }
+                }
+                if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+            }
+        }
+        catch { }
+
+        // Also normalize flat outputs one level down regardless of initial findings (handles mixed states)
+        try
+        {
+            foreach (var dir in immediate)
+            {
+                foreach (var flat in Directory.EnumerateFiles(dir, "*_tile_layers.csv", SearchOption.TopDirectoryOnly))
+                {
+                    var name = Path.GetFileName(flat);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var map = name[..Math.Max(0, name.Length - "_tile_layers.csv".Length)];
+                    if (string.IsNullOrWhiteSpace(map)) continue;
+                    var dirName = Path.GetFileName(dir);
+                    var mapDir = string.Equals(dirName, map, StringComparison.OrdinalIgnoreCase) ? dir : Path.Combine(dir, map);
+                    Directory.CreateDirectory(mapDir);
+                    var normCsv = Path.Combine(mapDir, "tile_layers.csv");
+                    if (!File.Exists(normCsv))
+                    {
+                        try { File.Copy(flat, normCsv, overwrite: false); } catch { }
+                    }
+                    if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+                }
+                foreach (var flat in Directory.EnumerateFiles(dir, "*_layers.json", SearchOption.TopDirectoryOnly))
+                {
+                    var name = Path.GetFileName(flat);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var map = name[..Math.Max(0, name.Length - "_layers.json".Length)];
+                    if (string.IsNullOrWhiteSpace(map)) continue;
+                    var dirName = Path.GetFileName(dir);
+                    var mapDir = string.Equals(dirName, map, StringComparison.OrdinalIgnoreCase) ? dir : Path.Combine(dir, map);
+                    Directory.CreateDirectory(mapDir);
+                    var normJson = Path.Combine(mapDir, "layers.json");
+                    if (!File.Exists(normJson))
+                    {
+                        try { File.Copy(flat, normJson, overwrite: false); } catch { }
+                    }
+                    if (IsMapDir(mapDir) && !mapsHere.Contains(mapDir)) mapsHere.Add(mapDir);
+                }
+            }
+        }
+        catch { }
 
         foreach (var dir in mapsHere)
         {
@@ -1657,7 +1823,8 @@ public partial class MainWindow : Window
                 try { rows = File.ReadLines(tileCsv).Skip(1).Count(); } catch { rows = 0; }
             }
 
-            if (rows == 0 && !string.IsNullOrWhiteSpace(datasetRoot))
+            // Only gate by WDT if dataset is not CASC (CASC doesn't have WDT on disk)
+            if (rows == 0 && !string.Equals(datasetType, "casc", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(datasetRoot))
             {
                 var c1 = Path.Combine(datasetRoot!, "World", "Maps", map, map + ".wdt");
                 var c2 = Path.Combine(datasetRoot!, "tree", "World", "Maps", map, map + ".wdt");

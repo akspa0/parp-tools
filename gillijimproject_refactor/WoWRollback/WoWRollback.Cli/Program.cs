@@ -84,6 +84,9 @@ internal static class Program
                     return RunPackMonolithicAlphaWdt(opts);
                 case "gui":
                     return RunGui(opts);
+                case "regen-layers":
+                case "analyze-layers-from-placements":
+                    return RunRegenLayers(opts);
                 case "run-preset":
                     return RunRunPreset(opts);
                 case "fix-minimap-webp":
@@ -320,6 +323,78 @@ internal static class Program
         {
             return (s.Contains(',') || s.Contains('"')) ? '"' + s.Replace("\"", "\"\"") + '"' : s;
         }
+    }
+
+    private static int RunRegenLayers(Dictionary<string, string> opts)
+    {
+        var inDir = opts.GetValueOrDefault("in", opts.GetValueOrDefault("dir", opts.GetValueOrDefault("out", "analysis_output")));
+        if (string.IsNullOrWhiteSpace(inDir) || !Directory.Exists(inDir))
+        {
+            Console.Error.WriteLine($"[error] input directory not found: {inDir}");
+            return 1;
+        }
+
+        var mapsCsv = opts.GetValueOrDefault("maps");
+        HashSet<string>? only = null;
+        if (!string.IsNullOrWhiteSpace(mapsCsv))
+        {
+            only = new HashSet<string>(mapsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+        }
+
+        var force = opts.ContainsKey("force");
+        var placements = Directory.EnumerateFiles(inDir, "*_placements.csv", SearchOption.AllDirectories).ToList();
+        if (placements.Count == 0)
+        {
+            Console.WriteLine("[info] no placements found to regenerate layers");
+            return 0;
+        }
+
+        int ok = 0, skipped = 0, failed = 0;
+        foreach (var file in placements)
+        {
+            try
+            {
+                var name = Path.GetFileName(file);
+                var map = name.EndsWith("_placements.csv", StringComparison.OrdinalIgnoreCase)
+                    ? name.Substring(0, name.Length - "_placements.csv".Length)
+                    : Path.GetFileName(Path.GetDirectoryName(file) ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(map)) { skipped++; continue; }
+                if (only != null && !only.Contains(map)) { skipped++; continue; }
+
+                var parent = Path.GetDirectoryName(file)!;
+                var mapDir = Path.GetFileName(parent).Equals(map, StringComparison.OrdinalIgnoreCase) ? parent : Path.Combine(parent, map);
+                Directory.CreateDirectory(mapDir);
+                var layersCsv = Path.Combine(mapDir, "tile_layers.csv");
+                if (!force && File.Exists(layersCsv) && new FileInfo(layersCsv).Length > 0)
+                {
+                    Console.WriteLine($"[skip] {map}: tile_layers.csv already exists (use --force to overwrite)");
+                    skipped++;
+                    continue;
+                }
+
+                Console.WriteLine($"[regen] {map}: analyzing {Path.GetFileName(file)} -> {mapDir}");
+                var analyzer = new UniqueIdAnalyzer(gapThreshold: 100);
+                var res = analyzer.AnalyzeFromPlacementsCsv(file, map, mapDir);
+                if (!res.Success)
+                {
+                    Console.WriteLine($"[warn] {map}: analysis failed: {res.ErrorMessage}");
+                    failed++;
+                }
+                else
+                {
+                    Console.WriteLine($"[ok] {map}: layers written");
+                    ok++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[error] {file}: {ex.Message}");
+                failed++;
+            }
+        }
+
+        Console.WriteLine($"[done] regen-layers ok={ok} skipped={skipped} failed={failed}");
+        return failed > 0 ? 1 : 0;
     }
 
     private static string NormalizeAssetPath(string p)
@@ -1418,25 +1493,32 @@ internal static class Program
         Console.WriteLine($"[ok] Processed {extractResult.TilesProcessed} tiles");
         Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
 
-        // Step 1.5: Process minimap tiles
-        Console.WriteLine("\n=== Processing minimap tiles ===");
-        var minimapHandler = new MinimapHandler();
-        var minimapResult = minimapHandler.ProcessMinimaps(mapDir, mapName, outDir);
-
-        if (minimapResult.Success && minimapResult.TilesCopied > 0)
+        // Step 1.5: Process minimap tiles (disabled by default)
+        string? minimapDir = null;
+        if (opts.ContainsKey("export-minimaps"))
         {
-            Console.WriteLine($"[ok] Copied {minimapResult.TilesCopied} minimap tiles");
-            Console.WriteLine($"[ok] Minimap directory: {minimapResult.MinimapDir}");
-        }
-        else if (minimapResult.Success)
-        {
-            Console.WriteLine($"[info] No minimap PNG files found");
-            Console.WriteLine($"[info] Expected location: World\\Textures\\Minimap\\ or World\\Textures\\Minimap\\{mapName}\\");
-            Console.WriteLine($"[info] Place PNGs named {mapName}_X_Y.png or mapX_Y.png for minimap support");
+            Console.WriteLine("\n=== Processing minimap tiles ===");
+            var minimapHandler = new MinimapHandler();
+            var minimapResult = minimapHandler.ProcessMinimaps(mapDir, mapName, outDir);
+            if (minimapResult.Success && minimapResult.TilesCopied > 0)
+            {
+                Console.WriteLine($"[ok] Copied {minimapResult.TilesCopied} minimap tiles");
+                Console.WriteLine($"[ok] Minimap directory: {minimapResult.MinimapDir}");
+                minimapDir = minimapResult.MinimapDir;
+            }
+            else if (minimapResult.Success)
+            {
+                Console.WriteLine($"[info] No minimap PNG files found");
+                minimapDir = minimapResult.MinimapDir;
+            }
+            else
+            {
+                Console.WriteLine($"[warn] Minimap processing failed: {minimapResult.ErrorMessage}");
+            }
         }
         else
         {
-            Console.WriteLine($"[warn] Minimap processing failed: {minimapResult.ErrorMessage}");
+            Console.WriteLine("\n=== Skipping minimap tiles (enable with --export-minimaps) ===");
         }
 
         // Step 1.75: Extract terrain data (MCNK chunks) for terrain overlays
@@ -1469,6 +1551,13 @@ internal static class Program
         Console.WriteLine($"[ok] UniqueID analysis CSV: {analysisResult.CsvPath}");
         Console.WriteLine($"[ok] Layers JSON: {analysisResult.LayersJsonPath}");
 
+        // Placements-only: short-circuit after UniqueID analysis (layers written)
+        if (opts.ContainsKey("placements-only"))
+        {
+            Console.WriteLine("[info] placements-only: skipping clusters, terrain, mesh, and viewer");
+            return 0;
+        }
+
         // Step 3: Detect spatial clusters and patterns (prefabs/brushes)
         Console.WriteLine("\n=== Step 3: Detecting spatial clusters and patterns ===");
         var clusterAnalyzer = new ClusterAnalyzer(proximityThreshold: 50.0f, minClusterSize: 3);
@@ -1490,7 +1579,7 @@ internal static class Program
         // Step 4: Generate viewer using existing infrastructure
         Console.WriteLine("\n=== Step 4: Generating viewer ===");
         var viewerAdapter = new AnalysisViewerAdapter();
-        var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapResult.MinimapDir);
+        var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapDir);
 
         if (!string.IsNullOrEmpty(viewerRoot))
         {
@@ -1639,6 +1728,12 @@ internal static class Program
             else
             {
                 Console.WriteLine($"[info] No md5translate file found, using direct BLP paths");
+                // On CASC (retail) builds, minimaps are typically FDID-only; skip to avoid long scans/decode
+                if (src is WoWRollback.Core.Services.Archive.CascArchiveSource)
+                {
+                    Console.WriteLine("[info] CASC build without md5translate: skipping minimap extraction (FDID-only). Continuing.");
+                    return null;
+                }
             }
 
             var resolver = new MinimapFileResolver(src, index);
@@ -1830,6 +1925,14 @@ internal static class Program
         Console.WriteLine("    Discover all maps from Map.dbc and analyze their WDT files");
         Console.WriteLine("    Shows terrain vs WMO-only maps, tile counts, and hybrid maps");
         Console.WriteLine("    Version auto-detected from path or use --version (e.g., 0.6.0.3592)");
+        Console.WriteLine();
+        Console.WriteLine("Common analyze flags:");
+        Console.WriteLine("  --maps <m1,m2>        Limit to specific maps by name/folder");
+        Console.WriteLine("  --map-ids <ids>       Limit to specific Map.dbc IDs");
+        Console.WriteLine("  --max-maps <N>        Process at most N maps (batch mode)");
+        Console.WriteLine("  --max-tiles <N>       Limit mesh export tiles (when --export-mesh)");
+        Console.WriteLine("  --export-minimaps     Enable minimap extraction (disabled by default)");
+        Console.WriteLine("  --export-mesh         Enable GLB/OBJ mesh export (disabled by default)");
         Console.WriteLine();
         Console.WriteLine("  analyze-map-adts-mpq  --client-path <dir> (--map <name> | --all-maps) [--out <dir>] [--version <ver>]");
         Console.WriteLine("                        [--serve] [--port <port>]");
@@ -2194,6 +2297,28 @@ internal static class Program
 
         // Filter to terrain maps only (skip WMO-only for now)
         var terrainMaps = result.Maps.Where(m => m.HasTerrain && m.TileCount > 0).ToList();
+
+        // Apply selection filters: --maps (csv of names/folders) and --map-ids (csv)
+        var mapsCsv = opts.GetValueOrDefault("maps");
+        var idsCsv = opts.GetValueOrDefault("map-ids");
+        if (!string.IsNullOrWhiteSpace(mapsCsv))
+        {
+            var set = new HashSet<string>(mapsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+            terrainMaps = terrainMaps.Where(m => set.Contains(m.Name) || set.Contains(m.Folder)).ToList();
+        }
+        if (!string.IsNullOrWhiteSpace(idsCsv))
+        {
+            var idSet = new HashSet<int>(idsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, out var v) ? v : int.MinValue));
+            terrainMaps = terrainMaps.Where(m => idSet.Contains(m.Id)).ToList();
+        }
+
+        // Limit number of maps processed
+        var maxMaps = TryParseInt(opts, "max-maps");
+        if (maxMaps.HasValue && maxMaps.Value > 0)
+        {
+            terrainMaps = terrainMaps.Take(maxMaps.Value).ToList();
+        }
         
         Console.WriteLine($"[ok] Discovered {result.Maps.Length} total maps");
         Console.WriteLine($"[info] Analyzing {terrainMaps.Count} terrain maps (skipping WMO-only maps)");
@@ -2211,7 +2336,7 @@ internal static class Program
             try
             {
                 var mapOutDir = Path.Combine(baseOutDir, map.Folder);
-                var exitCode = AnalyzeSingleMapNoViewer(src, clientRoot, map.Folder, mapOutDir, out var placementsCsv, out var minimapDir);
+                var exitCode = AnalyzeSingleMapNoViewer(src, clientRoot, map.Folder, mapOutDir, opts, out var placementsCsv, out var minimapDir);
                 
                 if (exitCode == 0 && !string.IsNullOrEmpty(placementsCsv))
                 {
@@ -2239,37 +2364,40 @@ internal static class Program
             }
         }
 
-        // Phase 2: Generate unified viewer for all processed maps
+        // Phase 2: Generate unified viewer for all processed maps (skip if placements-only)
         if (processedMaps.Count > 0)
         {
-            Console.WriteLine($"\n=== Generating Unified Viewer ===");
-            Console.WriteLine($"[info] Creating viewer for {processedMaps.Count} maps...");
-            
-            try
+            if (opts.ContainsKey("placements-only"))
             {
-                var viewerAdapter = new AnalysisViewerAdapter();
-                var viewerRoot = viewerAdapter.GenerateUnifiedViewer(processedMaps, baseOutDir, versionLabel);
-                
-                if (!string.IsNullOrEmpty(viewerRoot))
+                Console.WriteLine("[info] placements-only: skipping unified viewer generation");
+            }
+            else
+            {
+                Console.WriteLine($"\n=== Generating Unified Viewer ===");
+                Console.WriteLine($"[info] Creating viewer for {processedMaps.Count} maps...");
+                try
                 {
-                    Console.WriteLine($"[ok] Unified viewer generated: {viewerRoot}");
-                    Console.WriteLine($"[info] Open: {Path.Combine(viewerRoot, "index.html")}");
-                    
-                    // Auto-serve if requested
-                    if (opts.ContainsKey("serve"))
+                    var viewerAdapter = new AnalysisViewerAdapter();
+                    var viewerRoot = viewerAdapter.GenerateUnifiedViewer(processedMaps, baseOutDir, versionLabel);
+                    if (!string.IsNullOrEmpty(viewerRoot))
                     {
-                        var port = 8080;
-                        if (opts.TryGetValue("port", out var portStr) && int.TryParse(portStr, out var parsedPort))
+                        Console.WriteLine($"[ok] Unified viewer generated: {viewerRoot}");
+                        Console.WriteLine($"[info] Open: {Path.Combine(viewerRoot, "index.html")}");
+                        if (opts.ContainsKey("serve"))
                         {
-                            port = parsedPort;
+                            var port = 8080;
+                            if (opts.TryGetValue("port", out var portStr) && int.TryParse(portStr, out var parsedPort))
+                            {
+                                port = parsedPort;
+                            }
+                            ViewerServer.Serve(viewerRoot, port, openBrowser: !opts.ContainsKey("no-browser"));
                         }
-                        ViewerServer.Serve(viewerRoot, port, openBrowser: !opts.ContainsKey("no-browser"));
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[error] Unified viewer generation failed: {ex.Message}");
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[error] Unified viewer generation failed: {ex.Message}");
+                }
             }
         }
 
@@ -2287,7 +2415,7 @@ internal static class Program
         return failCount > 0 ? 1 : 0;
     }
 
-    private static int AnalyzeSingleMapNoViewer(IArchiveSource src, string clientRoot, string mapName, string outDir, out string? placementsCsv, out string? minimapDir)
+    private static int AnalyzeSingleMapNoViewer(IArchiveSource src, string clientRoot, string mapName, string outDir, Dictionary<string, string> opts, out string? placementsCsv, out string? minimapDir)
     {
         placementsCsv = null;
         minimapDir = null;
@@ -2304,10 +2432,24 @@ internal static class Program
             return 2; // Non-fatal error code
         }
         
+        // Step 0: Reuse cached placements if available (unless --force)
+        var cachedCsv = Path.Combine(outDir, $"{mapName}_placements.csv");
+        if (File.Exists(cachedCsv) && !opts.ContainsKey("force"))
+        {
+            Console.WriteLine("  [info] Reusing cached placements CSV (use --force to reprocess)");
+            placementsCsv = cachedCsv;
+            // Placements-only mode can return now
+            if (opts.ContainsKey("placements-only"))
+            {
+                Console.WriteLine("  [info] placements-only: skipping remaining steps");
+                return 0;
+            }
+        }
+
         // Step 1: Extract placements
         Console.WriteLine("  Step 1: Extracting placements...");
         var extractor = new AdtMpqChunkPlacementsExtractor();
-        placementsCsv = Path.Combine(outDir, $"{mapName}_placements.csv");
+        placementsCsv = cachedCsv;
         var extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsv);
 
         if (!extractResult.Success)
@@ -2327,13 +2469,21 @@ internal static class Program
 
         Console.WriteLine($"  [ok] Extracted {extractResult.M2Count} M2 + {extractResult.WmoCount} WMO placements");
 
-        // Step 2: Extract minimaps
-        Console.WriteLine("  Step 2: Extracting minimaps...");
-        minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
-        if (!string.IsNullOrEmpty(minimapDir))
+        // Step 2: Extract minimaps (disabled by default)
+        if (opts.ContainsKey("export-minimaps"))
         {
-            var count = Directory.GetFiles(minimapDir, "*.jpg").Length;
-            Console.WriteLine($"  [ok] Extracted {count} minimap tiles");
+            Console.WriteLine("  Step 2: Extracting minimaps...");
+            minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
+            if (!string.IsNullOrEmpty(minimapDir))
+            {
+                var count = Directory.GetFiles(minimapDir, "*.jpg").Length;
+                Console.WriteLine($"  [ok] Extracted {count} minimap tiles");
+            }
+        }
+        else
+        {
+            minimapDir = null;
+            Console.WriteLine("  Step 2: Skipped minimaps (enable with --export-minimaps)");
         }
 
         // Step 3: Analyze UniqueIDs
@@ -2348,6 +2498,13 @@ internal static class Program
         else
         {
             Console.WriteLine($"  [ok] Analyzed {analysisResult.TileCount} tiles");
+        }
+
+        // Placements-only: short-circuit after UniqueID analysis (layers written)
+        if (opts.ContainsKey("placements-only"))
+        {
+            Console.WriteLine("  [info] placements-only: skipping clusters, terrain, mesh");
+            return 0;
         }
 
         // Step 4: Detect clusters
@@ -2390,33 +2547,40 @@ internal static class Program
             Console.WriteLine($"  [warn] Terrain extraction error: {ex.Message}");
         }
 
-        // Step 6: Extract terrain meshes (GLB + OBJ) for 3D visualization
-        Console.WriteLine("  Step 6: Extracting terrain meshes (GLB + OBJ)...");
-        try
+        // Step 6: Extract terrain meshes (GLB + OBJ) - disabled by default
+        if (opts.ContainsKey("export-mesh"))
         {
-            var meshExtractor = new AdtMeshExtractor();
-            var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, exportObj: true, maxTiles: 0);
-            
-            if (meshResult.Success && meshResult.TilesProcessed > 0)
+            Console.WriteLine("  Step 6: Extracting terrain meshes (GLB + OBJ)...");
+            try
             {
-                Console.WriteLine($"  [ok] Extracted {meshResult.TilesProcessed} tile meshes to {meshResult.MeshDirectory}");
-                if (!string.IsNullOrEmpty(meshResult.ManifestPath))
+                var meshExtractor = new AdtMeshExtractor();
+                var maxTiles = TryParseInt(opts, "max-tiles") ?? 0;
+                var meshResult = meshExtractor.ExtractFromArchive(src, mapName, outDir, exportGlb: true, exportObj: true, maxTiles: maxTiles);
+                if (meshResult.Success && meshResult.TilesProcessed > 0)
                 {
-                    Console.WriteLine($"  [ok] Mesh manifest: {Path.GetFileName(meshResult.ManifestPath)}");
+                    Console.WriteLine($"  [ok] Extracted {meshResult.TilesProcessed} tile meshes to {meshResult.MeshDirectory}");
+                    if (!string.IsNullOrEmpty(meshResult.ManifestPath))
+                    {
+                        Console.WriteLine($"  [ok] Mesh manifest: {Path.GetFileName(meshResult.ManifestPath)}");
+                    }
+                }
+                else if (meshResult.Success && meshResult.TilesProcessed == 0)
+                {
+                    Console.WriteLine($"  [info] No mesh data extracted (map may be WMO-only)");
+                }
+                else
+                {
+                    Console.WriteLine($"  [warn] Mesh extraction failed");
                 }
             }
-            else if (meshResult.Success && meshResult.TilesProcessed == 0)
+            catch (Exception ex)
             {
-                Console.WriteLine($"  [info] No mesh data extracted (map may be WMO-only)");
-            }
-            else
-            {
-                Console.WriteLine($"  [warn] Mesh extraction failed");
+                Console.WriteLine($"  [warn] Mesh extraction error: {ex.Message}");
             }
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine($"  [warn] Mesh extraction error: {ex.Message}");
+            Console.WriteLine("  Step 6: Skipping mesh export (enable with --export-mesh)");
         }
 
         return 0;
@@ -2440,19 +2604,28 @@ internal static class Program
             return 2; // Non-fatal error code
         }
         
-        var extractor = new AdtMpqChunkPlacementsExtractor();
         var placementsCsvPath = Path.Combine(outDir, $"{mapName}_placements.csv");
-        var extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
-
-        if (!extractResult.Success)
+        bool reused = false;
+        PlacementsExtractionResult? extractResult = null;
+        if (File.Exists(placementsCsvPath) && !opts.ContainsKey("force"))
         {
-            Console.WriteLine($"[warn] {extractResult.ErrorMessage}");
-            Console.WriteLine($"[info] Skipping map (extraction failed)");
-            return 2; // Non-fatal error code
+            Console.WriteLine("[info] Reusing cached placements CSV (use --force to reprocess)");
+            reused = true;
+        }
+        else
+        {
+            var extractor = new AdtMpqChunkPlacementsExtractor();
+            extractResult = extractor.ExtractFromArchive(src, mapName, placementsCsvPath);
+            if (!extractResult.Success)
+            {
+                Console.WriteLine($"[warn] {extractResult.ErrorMessage}");
+                Console.WriteLine($"[info] Skipping map (extraction failed)");
+                return 2; // Non-fatal error code
+            }
         }
 
-        // Check if any placements were found
-        var totalPlacements = extractResult.M2Count + extractResult.WmoCount;
+        // Check if any placements were found (when freshly extracted). If reused, assume non-empty.
+        var totalPlacements = reused ? 1 : (extractResult!.M2Count + extractResult.WmoCount);
         if (totalPlacements == 0)
         {
             Console.WriteLine($"[info] No placements found for map: {mapName}");
@@ -2460,7 +2633,7 @@ internal static class Program
             return 0; // Success but no data
         }
 
-        Console.WriteLine($"[ok] {extractResult.ErrorMessage}");
+        if (!reused) Console.WriteLine($"[ok] {extractResult!.ErrorMessage}");
         Console.WriteLine($"[ok] Placements CSV: {placementsCsvPath}");
 
         // Step 1.5: Extract minimaps from MPQ
@@ -2589,7 +2762,7 @@ internal static class Program
         // Step 6: Generate viewer
         Console.WriteLine("\n=== Step 6: Generating viewer ===");
         var viewerAdapter = new AnalysisViewerAdapter();
-        var versionLabel = ExtractVersionFromPath(clientRoot) ?? "mpq-analysis";
+        var versionLabel = ExtractVersionFromBuildInfo(clientRoot) ?? ExtractVersionFromPath(clientRoot) ?? "analysis";
         var viewerRoot = viewerAdapter.GenerateViewer(placementsCsvPath, mapName, outDir, minimapDir: minimapDir, versionLabel: versionLabel);
 
         if (!string.IsNullOrEmpty(viewerRoot))

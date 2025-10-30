@@ -57,7 +57,7 @@ namespace WoWRollback.Core.Services.Archive
                     }
 
                     if (string.IsNullOrWhiteSpace(path)) continue;
-                    var norm = PathUtils.NormalizeVirtual(path);
+                    var norm = PathUtils.NormalizeVirtual(path).ToLowerInvariant();
                     if (_pathSet.Add(norm)) _paths.Add(norm);
                     if (fdid.HasValue && !_fdidByPath.ContainsKey(norm)) _fdidByPath[norm] = fdid.Value;
                 }
@@ -66,7 +66,7 @@ namespace WoWRollback.Core.Services.Archive
 
         public bool FileExists(string virtualPath)
         {
-            var norm = PathUtils.NormalizeVirtual(virtualPath);
+            var norm = PathUtils.NormalizeVirtual(virtualPath).ToLowerInvariant();
             try
             {
                 if (_casc.FileExists(norm)) return true;
@@ -81,7 +81,7 @@ namespace WoWRollback.Core.Services.Archive
 
         public Stream OpenFile(string virtualPath)
         {
-            var norm = PathUtils.NormalizeVirtual(virtualPath);
+            var norm = PathUtils.NormalizeVirtual(virtualPath).ToLowerInvariant();
             var s = _casc.OpenFile(norm);
             if (s != null) return s;
             if (_fdidByPath.TryGetValue(norm, out var id))
@@ -95,7 +95,7 @@ namespace WoWRollback.Core.Services.Archive
         public IEnumerable<string> EnumerateFiles(string pattern = "*")
         {
             if (_paths.Count == 0) yield break;
-            var normPattern = PathUtils.NormalizeVirtual(pattern);
+            var normPattern = PathUtils.NormalizeVirtual(pattern).ToLowerInvariant();
             var regex = GlobToRegex(normPattern);
             foreach (var p in _paths)
             {
@@ -106,6 +106,13 @@ namespace WoWRollback.Core.Services.Archive
         public void Dispose()
         {
             _casc?.Clear();
+        }
+
+        public bool TryGetFileDataId(string virtualPath, out int fileDataId)
+        {
+            var norm = PathUtils.NormalizeVirtual(virtualPath).ToLowerInvariant();
+            if (_fdidByPath.TryGetValue(norm, out var id)) { fileDataId = id; return true; }
+            fileDataId = 0; return false;
         }
 
         private static Regex GlobToRegex(string pattern)

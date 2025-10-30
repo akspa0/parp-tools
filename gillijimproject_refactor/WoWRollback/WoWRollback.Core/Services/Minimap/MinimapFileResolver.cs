@@ -15,11 +15,20 @@ namespace WoWRollback.Core.Services.Minimap
     {
         private readonly IArchiveSource _source;
         private readonly Md5TranslateIndex? _index;
+        private readonly Dictionary<string, List<string>> _globCache = new(StringComparer.OrdinalIgnoreCase);
 
         public MinimapFileResolver(IArchiveSource source, Md5TranslateIndex? index)
         {
             _source = source;
             _index = index;
+        }
+
+        private IEnumerable<string> EnumerateCached(string pattern)
+        {
+            if (_globCache.TryGetValue(pattern, out var cached)) return cached;
+            var list = _source.EnumerateFiles(pattern).ToList();
+            _globCache[pattern] = list;
+            return list;
         }
 
         public bool TryResolveTile(string mapName, int tileX, int tileY, out string? blpVirtualPath)
@@ -55,7 +64,7 @@ namespace WoWRollback.Core.Services.Minimap
 
             // 3) Fallback scan under Textures/Minimap/<map>
             var dirPattern = $"textures/Minimap/{mapName}/*.blp";
-            var entries = _source.EnumerateFiles(dirPattern)
+            var entries = EnumerateCached(dirPattern)
                 .Where(p => p.EndsWith($"_{tileX}_{tileY}.blp", StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (entries.Count > 0)
@@ -65,7 +74,7 @@ namespace WoWRollback.Core.Services.Minimap
             }
 
             // 4) Fallback scan under Textures/Minimap root (some clients flatten tiles)
-            var rootEntries = _source.EnumerateFiles("textures/Minimap/*.blp")
+            var rootEntries = EnumerateCached("textures/Minimap/*.blp")
                 .Where(p => p.EndsWith($"{mapName}_{tileX}_{tileY}.blp", StringComparison.OrdinalIgnoreCase)
                          || p.EndsWith($"map{tileX}_{tileY}.blp", StringComparison.OrdinalIgnoreCase))
                 .ToList();
