@@ -136,3 +136,24 @@ WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 
 - Batch processing (all maps at once)
 - Diff mode (compare two rollback points)
 - 3D preview (Three.js viewer with terrain mesh)
+
+## 2025-10-30 – UX Enhancements Roadmap
+
+### Heatmap
+- Add Heatmap Scope toggle: Local (per‑map) | Global (per build) | Global (per epoch).
+- Persist build‑level stats in `heatmap_stats.json` and scale colors consistently across maps.
+
+### Layers Panel
+- Add explicit Layer Scope: Tile | Selection | Map.
+- Restore per‑tile layer lists deterministically regardless of selection state.
+
+### Overlays & Presence
+- Show Empty Tiles: gray gridlines for tiles that exist but have no placement rows.
+- MCCV overlay: detect and decode MCCV (BGRA) into per‑tile PNGs; toggle overlay visibility.
+
+### Recompile
+- For CASC datasets, prefer LK Client folder for WDT lookup; provide manual WDT picker fallback.
+
+### FDID Coverage
+- Integrate FdidResolver to enrich CSVs with `fdid` and canonical paths.
+- Emit `unresolved_paths.csv` for diagnostics.

@@ -408,3 +408,31 @@ New module `WoWRollback.DetailedAnalysisModule` will extract full MCNK data for:
 - **Console Output**: Uses archaeological language ("excavation", "preservation", "artifacts")
 - **Variable Naming**: "sedimentary layers", "volumes of work", "ancient developers"
 - **Documentation**: Consistently applies archaeological metaphor
+
+---
+
+## 2025-10-30 – New Services & Commands
+
+### StatsService (Global Heatmap)
+- Scans `<cacheBuild>/*/tile_layers.csv` to compute global min/max UniqueIDs.
+- Writes `heatmap_stats.json` at the build root with `{ minUnique, maxUnique, perMap:{...}, generatedAt }`.
+- GUI reads this when Heatmap Scope = Global.
+
+### FdidResolver
+- Loads community listfile (CSV) and JSON snapshots from `snapshot-listfile`.
+- Normalizes paths; maps path↔FDID; exposes resolver APIs.
+- CSV enrichment: add `fdid` and canonical `asset_path` to placements/layers CSVs.
+- Diagnostics: emit `unresolved_paths.csv`.
+
+### MCCV Analyzer
+- New CLI `analyze-mccv --client-path <dir> (--map <m>|--all-maps) --out <dir>`.
+- Outputs `mccv_presence.csv` and optional per-tile PNGs under `<map>/mccv/`.
+- PNGs are decoded from MCCV BGRA entries (9*9 + 8*8) into a stitched 256‑chunk image.
+
+### Tile Presence CSV
+- `tile_presence.csv` summarizing: `has_minimap, has_placements, has_terrain, has_mccv`.
+- Drives GUI empty‑tile gridlines when no placements exist.
+
+### GUI WDT Handling for CASC
+- CASC dataset: prefer `LkClient` for WDT lookup; if missing, show file picker.
+- Loose/Install: use dataset root WDT scan as before.

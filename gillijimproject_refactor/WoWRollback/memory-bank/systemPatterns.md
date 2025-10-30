@@ -268,3 +268,35 @@ Array.Copy(chunk.Data, 0, wdtBytes, fileOffset, chunk.Data.Length);
 4. Modified placements have Z = -5000.0
 5. Unmodified placements unchanged
 6. File loadable in WoW client (manual test)
+
+---
+
+# New Patterns (2025-10-30)
+
+## StatsService (Global Heatmap)
+- Purpose: compute dataset‑wide UniqueID min/max across `<build>/*/tile_layers.csv`.
+- Output: `heatmap_stats.json` at build root `{ minUnique, maxUnique, perMap: {map: {min,max}}, generatedAt }`.
+- Triggers: recompute when any `tile_layers.csv` newer than stats file; lazy on demand.
+
+## FdidResolver
+- Inputs: community listfile (CSV), JSON snapshots (from `snapshot-listfile`).
+- Normalization: lowercased, forward slashes, DBFilesClient case variants.
+- APIs: `ResolvePathToFdid(path)`, `ResolveFdidToPath(fdid)`.
+- Diagnostics: write `unresolved_paths.csv` with reason categories.
+
+## MCCV Analyzer
+- Reads ADTs (MPQ/CASC or loose) and checks per MCNK:
+  - presence of MCCV, HOLES flag state, “hidden by holes”.
+- Outputs:
+  - `<map>/mccv_presence.csv` (tile_x,tile_y,chunk_idx,has_mccv,holes_set)
+  - Optional `<map>/mccv/<map>_<x>_<y>.png` (decoded BGRA to PNG)
+
+## Tile Presence CSV
+- Aggregates tile existence from: minimaps, placements (tile_layers.csv), terrain scan, MCCV analyzer.
+- Output: `<map>/tile_presence.csv` with booleans per tile.
+- GUI uses this to draw gray gridlines for tiles that exist without placements.
+
+## UI Scopes and Overlays
+- Heatmap Scope: Local | Global (build) | Global (epoch).
+- Layer Scope: Tile | Selection | Map.
+- Overlays: Show Empty Tiles, Show MCCV.

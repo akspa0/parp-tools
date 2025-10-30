@@ -217,16 +217,75 @@ public partial class MainWindow : Window
         {
             var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { await ShowMessage("Info", "Select a map first."); return; }
             var cacheBox = this.FindControl<TextBox>("CacheBox"); var cacheRoot = cacheBox?.Text?.Trim(); if (string.IsNullOrWhiteSpace(cacheRoot)) cacheRoot = _cacheRoot;
-            var datasetRoot = TryGetDatasetRootFromCache(cacheRoot!);
-            if (string.IsNullOrWhiteSpace(datasetRoot))
-            {
-                var rootBox = this.FindControl<TextBox>("DataRootBox"); var fallback = rootBox?.Text?.Trim();
-                if (!string.IsNullOrWhiteSpace(fallback)) datasetRoot = fallback;
-            }
-            if (string.IsNullOrWhiteSpace(datasetRoot)) { await ShowMessage("Info", "Set Data Sources root and build cache first."); return; }
+            var dsType = TryGetDatasetTypeFromCache(cacheRoot!);
 
-            var wdt = TryFindWdtPath(datasetRoot!, map);
-            if (string.IsNullOrWhiteSpace(wdt) || !File.Exists(wdt!)) { await ShowMessage("Error", "Could not locate WDT for map."); return; }
+            var p = BuildDataSourcePayload();
+
+            // Build candidate roots to search for WDT depending on dataset type
+            var candidateRoots = new List<string>();
+            if (string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(p.LkClient) && Directory.Exists(p.LkClient!))
+                {
+                    candidateRoots.Add(p.LkClient!);
+                }
+                else
+                {
+                    // As a last resort, consider DataRootBox if it points to a loose tree
+                    var rootBox = this.FindControl<TextBox>("DataRootBox"); var maybeLoose = rootBox?.Text?.Trim();
+                    if (!string.IsNullOrWhiteSpace(maybeLoose) && Directory.Exists(maybeLoose)) candidateRoots.Add(maybeLoose);
+                }
+            }
+            else
+            {
+                var datasetRoot = TryGetDatasetRootFromCache(cacheRoot!);
+                if (string.IsNullOrWhiteSpace(datasetRoot))
+                {
+                    var rootBox = this.FindControl<TextBox>("DataRootBox"); var fallback = rootBox?.Text?.Trim();
+                    if (!string.IsNullOrWhiteSpace(fallback)) datasetRoot = fallback;
+                }
+                if (!string.IsNullOrWhiteSpace(datasetRoot) && Directory.Exists(datasetRoot!)) candidateRoots.Add(datasetRoot!);
+            }
+
+            // Resolve WDT file
+            string? wdt = null; var tried = new List<string>();
+            foreach (var root in candidateRoots)
+            {
+                tried.Add(root);
+                wdt = TryFindWdtPath(root, map);
+                if (!string.IsNullOrWhiteSpace(wdt) && File.Exists(wdt)) break;
+                wdt = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(wdt))
+            {
+                var hint = string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase)
+                    ? "Set LK Client path on Data Sources (it should contain World/Maps) or provide a loose dataset root."
+                    : "Ensure your Data Root points to a folder with World/Maps.";
+                var triedMsg = tried.Count > 0 ? ("\nTried roots:\n - " + string.Join("\n - ", tried)) : string.Empty;
+
+                // Offer to pick a WDT manually
+                var pick = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = $"Select WDT for map '{map}'",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[] { new FilePickerFileType("WDT files") { Patterns = new[] { "*.wdt" } } }
+                });
+                if (pick != null && pick.Count > 0)
+                {
+                    var path = pick[0].Path.LocalPath;
+                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    {
+                        wdt = path;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(wdt))
+                {
+                    await ShowMessage("Error", "Could not locate WDT for map." + triedMsg + "\n" + hint);
+                    return;
+                }
+            }
 
             var threshold = _rangeEnd;
             var outRoot = Path.GetFullPath(Path.Combine(_cacheRoot, "..", "output", map, DateTime.Now.ToString("yyyyMMdd-HHmmss")));
@@ -235,7 +294,7 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(alphaOut);
             Directory.CreateDirectory(lkOut);
 
-            var p = BuildDataSourcePayload();
+            // p already built above to fetch LK Client/DBC settings
             var cliProj = ResolveProjectCsproj("WoWRollback", "WoWRollback.Cli");
             if (string.IsNullOrWhiteSpace(cliProj) || !File.Exists(cliProj)) { await ShowMessage("Error", "CLI project not found."); return; }
 

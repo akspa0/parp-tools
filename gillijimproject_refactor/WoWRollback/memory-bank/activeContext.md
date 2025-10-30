@@ -15,6 +15,23 @@
 - Energy efficiency: preflight/skip-if-exists for LK ADTs, crosswalks, tile layers, and layers.json.
 - BYOD: tooling must not include copyrighted game data anywhere in repo/binaries.
 
+## Hot Update (2025-10-30) – Build cache, discovery, recompile, layers roadmap
+
+### What changed
+- Build detection now used in GUI Data Preview/Load; cache path becomes `<cacheRoot>/<build>` instead of `unknown` when `.build.info` is present.
+- Map discovery hardened:
+  - Normalize flat outputs at cache root and version folders (`<map>_tile_layers.csv` → `<map>/tile_layers.csv`; same for `*_layers.json`).
+  - Flatten accidental `<map>/<map>/tile_layers.csv` nests.
+  - Do not WDT‑gate maps for CASC datasets (WDTs aren’t on disk); keep WDT gate for loose/install only.
+- Recompile (GUI): for CASC datasets prefer LK Client folder for locating `<map>.wdt`; otherwise offer a file picker. Logs include attempted roots.
+
+### In flight / next
+- Global heatmap toggle (Local vs Global‑per‑build; epoch option next) with `heatmap_stats.json` persisted at build root.
+- Layers scope control: Tile | Selection | Map; restore per‑tile lists deterministically.
+- FDID pipeline: resolver (community listfile + snapshots), CSV enrichment (`fdid`, canonical path), unresolved diagnostics.
+- MCCV analyzer and overlay: detect MCCV per MCNK, flag "hidden by holes", export PNGs; UI overlay toggle.
+
+---
 ## Hot Update (2025-10-29) – CASC/DB2 + GUI + Asset Gate
 
 ### What works now

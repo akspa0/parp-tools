@@ -42,6 +42,16 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - **Strict AreaID mapping (non-pivot by default)**: map-locked numeric → target map name → per-source-map numeric → exact-by-src-number only if strict=false; 0.6.0 pivot opt-in via `--chain-via-060`.
 - **LK WDT emission**: Write `<Map>.wdt` alongside LK ADTs in the output folder.
 
+### Latest Direction (2025-10-30)
+- Cache versioning via `.build.info` in GUI Load/Preview; outputs routed to `<cache>/<build>` instead of `unknown`.
+- Map discovery normalization at cache root and version folders; flatten nested `<map>/<map>`; CASC datasets are not WDT‑gated.
+- Global Heatmap: dataset‑wide min/max (and future epoch mode) with `heatmap_stats.json`; UI toggle Local/Global.
+- Layers Scope: Tile | Selection | Map; deterministic per‑tile lists.
+- FDID Pipeline: resolver (community listfile + JSON snapshots) to enrich CSVs with `fdid` + canonical path; unresolved diagnostics CSV.
+- MCCV Analyzer & Overlay: detect MCCV per MCNK, flag "hidden by holes", export MCCV PNGs; UI overlay toggle.
+- Empty Tiles Visualization: gray gridlines for tiles that exist but have no placements/minimap.
+- Recompile Modes: prefer LK client for WDT with CASC; manual WDT picker fallback; plan synthetic Alpha WDT from tiles when no LK WDT exists.
+
 ## Use Cases
 - **Empty World Screenshots**: Remove all objects for terrain-only views
 - **Historical Comparisons**: See what Azeroth looked like in patch 0.5.3 vs 1.0 vs 3.3.5
