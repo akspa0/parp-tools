@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
   </ItemGroup>
 </Project>

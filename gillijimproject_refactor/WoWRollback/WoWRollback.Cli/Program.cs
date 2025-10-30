@@ -19,6 +19,10 @@ using AlphaWdtAnalyzer.Core.Export;
 using AlphaWdtAnalyzer.Core.Dbc;
 using WoWRollback.Core.Services.AreaMapping;
 using DBCTool.V2.Cli;
+using WoWRollback.LkToAlphaModule;
+using WoWRollback.LkToAlphaModule.Writers;
+using MPQToTACT.MPQ;
+using WoWRollback.Core.Services.Assets;
 
 namespace WoWRollback.Cli;
 
@@ -49,6 +53,8 @@ internal static class Program
                     return RunAnalyzeMapAdts(opts);
                 case "analyze-map-adts-mpq":
                     return RunAnalyzeMapAdtsMpq(opts);
+                case "analyze-map-adts-casc":
+                    return RunAnalyzeMapAdtsCasc(opts);
                 case "debug-single-adt":
                     return RunDebugSingleAdt(opts);
                 case "discover-maps":
@@ -70,6 +76,12 @@ internal static class Program
                 case "serve-viewer":
                 case "serve":
                     return RunServeViewer(opts);
+                case "snapshot-listfile":
+                    return RunSnapshotListfile(opts);
+                case "diff-listfiles":
+                    return RunDiffListfiles(opts);
+                case "pack-monolithic-alpha-wdt":
+                    return RunPackMonolithicAlphaWdt(opts);
                 case "gui":
                     return RunGui(opts);
                 case "run-preset":
@@ -92,6 +104,231 @@ internal static class Program
             return 1;
         }
     }
+
+    private static int RunPackMonolithicAlphaWdt(Dictionary<string, string> opts)
+    {
+        Require(opts, "lk-wdt");
+        Require(opts, "out");
+
+        var lkWdt = opts["lk-wdt"];
+        var outWdt = opts["out"];
+        var lkMapDir = opts.GetValueOrDefault("lk-map-dir", Path.GetDirectoryName(lkWdt) ?? ".");
+
+        var targetListfile = GetOption(opts, "target-listfile");
+        var modernListfile = GetOption(opts, "modern-listfile");
+        var strict = !opts.TryGetValue("strict-target-assets", out var strictStr) || !string.Equals(strictStr, "false", StringComparison.OrdinalIgnoreCase);
+
+        var options = new LkToAlphaOptions
+        {
+            TargetListfilePath = targetListfile,
+            ModernListfilePath = modernListfile,
+            StrictTargetAssets = strict
+        };
+
+        Console.WriteLine("[pack] Building monolithic Alpha WDT from LK inputs...");
+        Console.WriteLine($"[pack] LK WDT: {lkWdt}");
+        Console.WriteLine($"[pack] LK Map Dir: {lkMapDir}");
+        if (!string.IsNullOrWhiteSpace(targetListfile)) Console.WriteLine($"[pack] Target listfile: {targetListfile}");
+        Console.WriteLine($"[pack] Strict target assets: {options.StrictTargetAssets.ToString().ToLowerInvariant()}");
+
+        AlphaWdtMonolithicWriter.WriteMonolithic(lkWdt, lkMapDir, outWdt, options);
+        Console.WriteLine($"[ok] WDT written: {outWdt}");
+        return 0;
+    }
+
+    private static int RunSnapshotListfile(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        Require(opts, "alias");
+        Require(opts, "out");
+
+        var clientPath = opts["client-path"]; // game root
+        var alias = opts["alias"];            // full build string
+        var outPath = opts["out"];            // json file
+
+        if (!Directory.Exists(clientPath)) throw new DirectoryNotFoundException(clientPath);
+
+        var snapshot = new ListfileSnapshot
+        {
+            Source = "mpq-scan",
+            ClientRoot = Path.GetFullPath(clientPath),
+            Version = alias,
+            GeneratedAt = DateTime.UtcNow,
+            Entries = new List<ListfileSnapshot.Entry>()
+        };
+
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1) Pull from MPQ embedded (listfile) where available (0.6.0+)
+        var mpqs = ArchiveLocator.LocateMpqs(clientPath);
+        foreach (var mpqPath in mpqs)
+        {
+            try
+            {
+                using var mpq = new MpqArchive(mpqPath, FileAccess.Read);
+                const string LISTFILE = "(listfile)";
+                if (mpq.HasFile(LISTFILE))
+                {
+                    using var fs = mpq.OpenFile(LISTFILE);
+                    if (fs != null && fs.CanRead && fs.Length > 0)
+                    {
+                        using var sr = new StreamReader(fs);
+                        while (!sr.EndOfStream)
+                        {
+                            var line = sr.ReadLine();
+                            if (string.IsNullOrWhiteSpace(line)) continue;
+                            var norm = NormalizeAssetPath(line);
+                            paths.Add(norm);
+                        }
+                    }
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        // 2) Scan loose files under client root (prefer relative under Data/ if present)
+        foreach (var file in Directory.EnumerateFiles(clientPath, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var rel = GetRelativeUnderDataOrRoot(clientPath, file);
+                var norm = NormalizeAssetPath(rel);
+                if (!string.IsNullOrEmpty(norm)) paths.Add(norm);
+            }
+            catch { }
+        }
+
+        foreach (var p in paths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            snapshot.Entries.Add(new ListfileSnapshot.Entry { Path = p });
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? ".");
+        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(outPath, json);
+        Console.WriteLine($"[ok] Snapshot written: {outPath} (paths={paths.Count})");
+        return 0;
+
+        static string GetRelativeUnderDataOrRoot(string root, string fullPath)
+        {
+            var rel = Path.GetRelativePath(root, fullPath);
+            var parts = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (string.Equals(parts[i], "data", StringComparison.OrdinalIgnoreCase))
+                {
+                    var sub = string.Join(Path.DirectorySeparatorChar, parts.Skip(i + 1));
+                    return sub;
+                }
+            }
+            return rel;
+        }
+    }
+
+    private static int RunDiffListfiles(Dictionary<string, string> opts)
+    {
+        Require(opts, "a");
+        Require(opts, "b");
+        Require(opts, "out");
+
+        var fileA = opts["a"]; var fileB = opts["b"]; var outDir = opts["out"]; Directory.CreateDirectory(outDir);
+
+        var a = LoadGeneric(fileA);
+        var b = LoadGeneric(fileB);
+
+        var pathsA = new HashSet<string>(a.Keys, StringComparer.OrdinalIgnoreCase);
+        var pathsB = new HashSet<string>(b.Keys, StringComparer.OrdinalIgnoreCase);
+
+        // added (in B not in A)
+        var added = pathsB.Except(pathsA, StringComparer.OrdinalIgnoreCase).OrderBy(p => p).ToList();
+        // removed (in A not in B)
+        var removed = pathsA.Except(pathsB, StringComparer.OrdinalIgnoreCase).OrderBy(p => p).ToList();
+        // changed FDIDs (same path present in both and both have fdid known but differ)
+        var changed = new List<(string Path, uint? OldId, uint? NewId)>();
+        foreach (var path in pathsA.Intersect(pathsB, StringComparer.OrdinalIgnoreCase))
+        {
+            var oldId = a[path]; var newId = b[path];
+            if (oldId.HasValue && newId.HasValue && oldId.Value != newId.Value)
+            {
+                changed.Add((path, oldId, newId));
+            }
+        }
+
+        // write CSVs
+        File.WriteAllText(Path.Combine(outDir, "added_paths.csv"), "path\n" + string.Join("\n", added));
+        File.WriteAllText(Path.Combine(outDir, "removed_paths.csv"), "path\n" + string.Join("\n", removed));
+        using (var sw = new StreamWriter(Path.Combine(outDir, "changed_fdid.csv")))
+        {
+            sw.WriteLine("path,old_fdid,new_fdid");
+            foreach (var c in changed)
+            {
+                sw.WriteLine($"{EscapeCsv(c.Path)},{c.OldId},{c.NewId}");
+            }
+        }
+
+        Console.WriteLine($"[ok] Diff written to: {outDir} (added={added.Count}, removed={removed.Count}, changed={changed.Count})");
+        return 0;
+
+        static Dictionary<string, uint?> LoadGeneric(string path)
+        {
+            if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                var snap = JsonSerializer.Deserialize<ListfileSnapshot>(File.ReadAllText(path));
+                var dict = new Dictionary<string, uint?>(StringComparer.OrdinalIgnoreCase);
+                if (snap?.Entries != null)
+                {
+                    foreach (var e in snap.Entries)
+                    {
+                        if (string.IsNullOrWhiteSpace(e.Path)) continue;
+                        var norm = NormalizeAssetPath(e.Path);
+                        uint? id = e.FileDataId.HasValue ? e.FileDataId.Value : (uint?)null;
+                        dict[norm] = id;
+                    }
+                }
+                return dict;
+            }
+            else
+            {
+                // CSV or plain listfile format
+                var dict = new Dictionary<string, uint?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var raw in File.ReadLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+                    var line = raw.Trim();
+                    if (line.StartsWith("#") || line.StartsWith("//")) continue;
+                    string[] parts = line.Split(';');
+                    if (parts.Length < 2) parts = line.Split(',');
+                    if (parts.Length < 2) parts = line.Split('\t');
+                    if (parts.Length >= 2 && uint.TryParse(parts[0].Trim(), out var fdid))
+                    {
+                        var pathPart = NormalizeAssetPath(parts[1]);
+                        if (pathPart.Length == 0) continue;
+                        dict[pathPart] = fdid;
+                    }
+                    else
+                    {
+                        var onlyPath = NormalizeAssetPath(line);
+                        if (onlyPath.Length == 0) continue;
+                        if (!dict.ContainsKey(onlyPath)) dict[onlyPath] = null;
+                    }
+                }
+                return dict;
+            }
+        }
+
+        static string EscapeCsv(string s)
+        {
+            return (s.Contains(',') || s.Contains('"')) ? '"' + s.Replace("\"", "\"\"") + '"' : s;
+        }
+    }
+
+    private static string NormalizeAssetPath(string p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return string.Empty;
+        var t = p.Trim().Replace('\\', '/');
+        return t;
+    }
+
 
     private static string? EnsureDbcDirFromClient(string alias, string? build, string? clientDir, string outRoot)
     {
@@ -1411,10 +1648,12 @@ internal static class Program
             // Scan for all tiles (0-63 grid)
             int extracted = 0;
             int failed = 0;
+            int attempts = 0;
             for (int x = 0; x < 64; x++)
             {
                 for (int y = 0; y < 64; y++)
                 {
+                    attempts++;
                     if (resolver.TryResolveTile(mapName, x, y, out var virtualPath) && !string.IsNullOrEmpty(virtualPath))
                     {
                         try
@@ -1526,6 +1765,35 @@ internal static class Program
         return null;
     }
 
+    private static string? ExtractVersionFromBuildInfo(string clientRoot)
+    {
+        try
+        {
+            string? dir = clientRoot;
+            for (int i = 0; i < 4 && !string.IsNullOrEmpty(dir); i++, dir = Path.GetDirectoryName(dir))
+            {
+                var path = Path.Combine(dir!, ".build.info");
+                if (!File.Exists(path)) continue;
+                var lines = File.ReadAllLines(path);
+                if (lines.Length < 2) return null;
+                var header = lines[0];
+                var delim = header.Contains('|') ? '|' : (header.Contains(';') ? ';' : ' ');
+                var cols = header.Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                int idxVersion = Array.FindIndex(cols, c => c.StartsWith("Version", StringComparison.OrdinalIgnoreCase));
+                if (idxVersion < 0) return null;
+                for (int j = 1; j < lines.Length; j++)
+                {
+                    var parts = lines[j].Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (idxVersion >= parts.Length) continue;
+                    var ver = parts[idxVersion];
+                    if (!string.IsNullOrWhiteSpace(ver)) return ver;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
     private static Dictionary<string, string> ParseArgs(string[] args)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1568,6 +1836,19 @@ internal static class Program
         Console.WriteLine("    Analyze ADT files directly from MPQs (patched view), detect layers/clusters, and generate viewer");
         Console.WriteLine("    Use --all-maps to discover and analyze all maps from Map.dbc");
         Console.WriteLine("    Version auto-detected from path or use --version (e.g., 0.6.0.3592)");
+        Console.WriteLine();
+        Console.WriteLine("  analyze-map-adts-casc  --client-path <dir> (--map <name> | --all-maps) [--product wow|wowt] [--locale enUS]");
+        Console.WriteLine("                         [--listfile <path>] [--out <dir>] [--version <ver>] [--serve] [--port <port>]");
+        Console.WriteLine("    Analyze ADTs from CASC depots. Requires a listfile to enumerate named paths reliably.");
+        Console.WriteLine();
+        Console.WriteLine("  pack-monolithic-alpha-wdt  --lk-wdt <file> [--lk-map-dir <dir>] --out <wdt> [--target-listfile <335.csv>] [--strict-target-assets true|false]");
+        Console.WriteLine("    Pack alpha WDT (monolithic) from LK inputs. Optionally gate MDNM/MONM assets to 3.3.5 listfile.");
+        Console.WriteLine();
+        Console.WriteLine("  snapshot-listfile  --client-path <dir> --alias <name> --out <json>");
+        Console.WriteLine("    Build a JSON listfile snapshot from MPQs (reads (listfile) entries) and loose files under Data.");
+        Console.WriteLine();
+        Console.WriteLine("  diff-listfiles  --a <listfileA> --b <listfileB> --out <dir>");
+        Console.WriteLine("    Produce CSVs of added/removed paths and FDID changes between two listfiles.");
         Console.WriteLine();
         Console.WriteLine("  analyze-map-adts  --map <name> --map-dir <dir> [--out <dir>] [--serve] [--port <port>]");
         Console.WriteLine("    Analyze ADT files (pre-Cata or Cata+ split) from loose files");
@@ -1760,10 +2041,86 @@ internal static class Program
         return AnalyzeSingleMap(src, clientRoot, mapName, outDir, opts);
     }
 
+    private static string? GuessProductFromPath(string clientRoot)
+    {
+        try
+        {
+            var lower = clientRoot.ToLowerInvariant();
+            if (lower.Contains("beta")) return "wow_beta";
+            if (lower.Contains("ptr") || lower.Contains("wowt")) return "wowt";
+            return "wow";
+        }
+        catch { return null; }
+    }
+
+    private static string? ExtractProductFromBuildInfo(string clientRoot)
+    {
+        try
+        {
+            string? dir = clientRoot;
+            for (int i = 0; i < 4 && !string.IsNullOrEmpty(dir); i++, dir = Path.GetDirectoryName(dir))
+            {
+                var path = Path.Combine(dir!, ".build.info");
+                if (!File.Exists(path)) continue;
+                var lines = File.ReadAllLines(path);
+                if (lines.Length < 2) return null;
+                var header = lines[0];
+                var delim = header.Contains('|') ? '|' : (header.Contains(';') ? ';' : ' ');
+                var cols = header.Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                int idxProduct = Array.FindIndex(cols, c => c.StartsWith("Product", StringComparison.OrdinalIgnoreCase));
+                if (idxProduct < 0) return null;
+                for (int j = 1; j < lines.Length; j++)
+                {
+                    var parts = lines[j].Split(delim, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (idxProduct >= parts.Length) continue;
+                    var prod = parts[idxProduct];
+                    if (!string.IsNullOrWhiteSpace(prod)) return prod;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static int RunAnalyzeMapAdtsCasc(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        var clientRoot = opts["client-path"];
+        var allMaps = opts.ContainsKey("all-maps");
+        var mapName = opts.GetValueOrDefault("map", "");
+        var product = opts.GetValueOrDefault("product", ExtractProductFromBuildInfo(clientRoot) ?? GuessProductFromPath(clientRoot) ?? "wow");
+        var listfile = opts.GetValueOrDefault("listfile", "");
+
+        if (!allMaps && string.IsNullOrWhiteSpace(mapName))
+        {
+            Console.Error.WriteLine("[error] Either --map <name> or --all-maps is required");
+            return 1;
+        }
+
+        if (!Directory.Exists(clientRoot))
+        {
+            Console.Error.WriteLine($"[error] client path not found: {clientRoot}");
+            return 1;
+        }
+
+        // Initialize CASC-backed archive source (local storage via .build.info)
+        using var src = new WoWRollback.Core.Services.Archive.CascArchiveSource(clientRoot, product, string.IsNullOrWhiteSpace(listfile) ? null : listfile);
+
+        // Batch: discover from Map.dbc and analyze
+        if (allMaps)
+        {
+            return RunBatchAnalysis(src, clientRoot, opts);
+        }
+
+        // Single map
+        var outDir = opts.GetValueOrDefault("out", Path.Combine("analysis_output", mapName));
+        return AnalyzeSingleMap(src, clientRoot, mapName, outDir, opts);
+    }
+
     private static int RunBatchAnalysis(IArchiveSource src, string clientRoot, Dictionary<string, string> opts)
     {
         // Try auto-detection first, then check both --version and --build parameters
-        var detectedVersion = ExtractVersionFromPath(clientRoot);
+        var detectedVersion = ExtractVersionFromBuildInfo(clientRoot) ?? ExtractVersionFromPath(clientRoot);
         var buildVersion = opts.GetValueOrDefault("version", 
                           opts.GetValueOrDefault("build", 
                           detectedVersion ?? "0.6.0"));
@@ -1775,22 +2132,64 @@ internal static class Program
         Console.WriteLine($"[info] === Batch Analysis Mode ===");
         Console.WriteLine($"[info] Discovering maps from Map.dbc...");
 
-        // Extract Map.dbc and discover maps
+        // Extract Map.dbc and discover maps (preferred for MPQ/LK)
         var tempDir = Path.Combine(Path.GetTempPath(), "wowrollback_dbc_" + Guid.NewGuid().ToString("N"));
         var discoveryService = new MapDiscoveryService(dbdDir);
         
+        MapDiscoveryResult? result = null;
         var dbcDir = discoveryService.ExtractMapDbc(src, tempDir);
-        if (string.IsNullOrEmpty(dbcDir))
+        if (!string.IsNullOrEmpty(dbcDir))
         {
-            Console.Error.WriteLine($"[error] Failed to extract Map.dbc from MPQ");
-            return 1;
+            var res = discoveryService.DiscoverMaps(src, buildVersion, Path.GetDirectoryName(dbcDir)!);
+            if (res.Success) result = res; else Console.WriteLine($"[warn] Map.dbc discovery failed: {res.ErrorMessage}");
         }
-
-        var result = discoveryService.DiscoverMaps(src, buildVersion, Path.GetDirectoryName(dbcDir)!);
-        if (!result.Success)
+        
+        // If Map.dbc not available or failed, attempt CASC DB2 discovery
+        if (result is null)
         {
-            Console.Error.WriteLine($"[error] {result.ErrorMessage}");
-            return 1;
+            var resDb2 = discoveryService.DiscoverMapsFromCasc(src, buildVersion);
+            if (resDb2.Success) result = resDb2; else Console.WriteLine($"[warn] Map.db2 discovery failed: {resDb2.ErrorMessage}");
+        }
+        
+        // Fallback for CASC or missing DBC: scan world/maps/*/*.wdt
+        if (result is null)
+        {
+            Console.WriteLine("[info] Falling back to WDT scan (CASC/DB2 builds)");
+            var wdtPaths = src.EnumerateFiles("world/maps/*/*.wdt").ToList();
+            if (wdtPaths.Count == 0)
+            {
+                Console.Error.WriteLine("[error] No WDT files found via archive enumeration");
+                return 1;
+            }
+            var byMap = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var vp in wdtPaths)
+            {
+                var norm = vp.Replace('\\','/');
+                var parts = norm.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                // Expect world/maps/<map>/<map>.wdt
+                if (parts.Length >= 4 && parts[0].Equals("world", StringComparison.OrdinalIgnoreCase) && parts[1].Equals("maps", StringComparison.OrdinalIgnoreCase))
+                {
+                    var map = parts[2];
+                    if (!byMap.ContainsKey(map)) byMap[map] = norm;
+                }
+            }
+            var wdtAnalyzer = new WdtAnalyzer();
+            var discovered = new List<DiscoveredMap>();
+            foreach (var map in byMap.Keys)
+            {
+                var w = wdtAnalyzer.Analyze(src, map);
+                discovered.Add(new DiscoveredMap(
+                    Id: -1,
+                    Name: map,
+                    Folder: map,
+                    WdtExists: w.Success,
+                    HasTerrain: w.HasTerrain,
+                    IsWmoOnly: w.IsWmoOnly,
+                    TileCount: w.TileCount,
+                    WmoPlacement: w.WmoPlacement
+                ));
+            }
+            result = new MapDiscoveryResult(true, null, discovered.ToArray());
         }
 
         // Filter to terrain maps only (skip WMO-only for now)

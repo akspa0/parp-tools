@@ -64,6 +64,18 @@ WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 
 ```
 **Result**: Patched LK ADTs written to output dir.
 
+### 2025-10-29: Versioned listfiles and asset gating
+- Two listfiles used during conversions:
+  - 3.3.5 target allowlist (path-only): authoritative set for outputs
+  - Modern community listfile (FDID-aware): broad discovery and rename detection
+- JSON snapshots: `snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>`
+  - Entries: `{ path, fdid? }`, metadata includes alias (full build string)
+- Asset Gate: recompile/pack pipelines reference only assets present in the 3.3.5 listfile
+  - Names not present are dropped and reported in `dropped_assets.csv`
+- New CLI utilities:
+  - `snapshot-listfile`, `diff-listfiles`, `pack-monolithic-alpha-wdt` (supports `--target-listfile`, `--strict-target-assets`)
+- Alias policy: full build strings derived from `.build.info`, DBD definitions, or path heuristics
+
 ### Analysis + Viewer
 - Analyze LK ADTs to produce placements/terrain CSVs and viewer assets, then serve viewer.
 

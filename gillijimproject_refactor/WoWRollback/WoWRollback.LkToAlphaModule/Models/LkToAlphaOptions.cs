@@ -16,4 +16,8 @@ public sealed record LkToAlphaOptions
     /// Use inspector to determine correct behavior for target client.
     /// </summary>
     public bool MainPointToMhdrData { get; init; } = false;
+    // Asset gating: target listfile (e.g., 3.3.5) and optional modern listfile for diffing/reporting
+    public string? TargetListfilePath { get; init; }
+    public bool StrictTargetAssets { get; init; } = true;
+    public string? ModernListfilePath { get; init; }
 }

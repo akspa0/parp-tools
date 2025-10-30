@@ -498,12 +498,6 @@ public partial class MainWindow : Window
             var root = p.Root;
             if (string.IsNullOrWhiteSpace(root)) { AppendBuildLog("[prepare] Please set Root."); return; }
 
-            if (string.Equals(p.Type, "casc", StringComparison.OrdinalIgnoreCase))
-            {
-                AppendBuildLog("[prepare] CASC pipeline not implemented yet in GUI.");
-                return;
-            }
-
             var cliProj = ResolveProjectCsproj("WoWRollback", "WoWRollback.Cli");
             if (string.IsNullOrWhiteSpace(cliProj) || !File.Exists(cliProj))
             {
@@ -520,13 +514,38 @@ public partial class MainWindow : Window
                 var cacheBox = this.FindControl<TextBox>("CacheBox"); if (cacheBox != null) cacheBox.Text = outRoot;
             }
             Directory.CreateDirectory(outRoot!);
-            var mapsArg = "all"; // process all Alpha WDTs discovered
-            AppendBuildLog($"[prepare] Processing all maps (discovery: {method}); out={outRoot}");
+            AppendBuildLog($"[prepare] Processing all maps (type={p.Type}, discovery={method}); out={outRoot}");
+
+            // Build CLI arguments per data source type
+            string args;
+            if (string.Equals(p.Type, "casc", StringComparison.OrdinalIgnoreCase))
+            {
+                var sb = new StringBuilder();
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-casc --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
+                if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
+                if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
+                if (!string.IsNullOrWhiteSpace(p.Listfile)) sb.Append($" --listfile \"{p.Listfile}\"");
+                args = sb.ToString();
+            }
+            else if (string.Equals(p.Type, "install", StringComparison.OrdinalIgnoreCase))
+            {
+                var sb = new StringBuilder();
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-mpq --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
+                if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
+                if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
+                args = sb.ToString();
+            }
+            else
+            {
+                // Loose/Test Data (Alpha WDTs) - keep existing prepare-layers path
+                var mapsArg = "all";
+                args = BuildPrepareLayersArgs(cliProj, root!, outRoot!, mapsArg, p);
+            }
 
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = BuildPrepareLayersArgs(cliProj, root!, outRoot!, mapsArg, p),
+                Arguments = args,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -703,7 +722,16 @@ public partial class MainWindow : Window
 
             var (mapFolders, method, resolvedVer, err) = DiscoverMapFolders(p);
             if (!string.IsNullOrWhiteSpace(err)) AppendDataLoadLog($"[Load] Note: {err}");
-            if (mapFolders.Count == 0) { AppendDataLoadLog("[Load] No maps discovered"); return; }
+            if (mapFolders.Count == 0)
+            {
+                if (string.Equals(p.Type, "loose", StringComparison.OrdinalIgnoreCase))
+                {
+                    AppendDataLoadLog("[Load] No maps discovered (filesystem). For Loose/Test Data, set Root to an Alpha tree with World/Maps.");
+                    return;
+                }
+                // CASC / Install: discovery happens during Prepare; proceed to create cache and allow analysis to populate outputs.
+                AppendDataLoadLog("[Load] No maps discovered via filesystem. For CASC/Install, discovery will occur during Prepare.");
+            }
 
             // Use version-scoped cache directory
             var verLabel = string.IsNullOrWhiteSpace(resolvedVer) ? "unknown" : resolvedVer;
@@ -712,13 +740,16 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(p.OutputDir!);
             // If no explicit version was set, persist the resolved version into the manifest
             if (string.IsNullOrWhiteSpace(p.Version)) p.Version = resolvedVer;
-            foreach (var map in mapFolders)
+            if (mapFolders.Count > 0)
             {
-                var outMap = Path.Combine(p.OutputDir!, map);
-                Directory.CreateDirectory(outMap);
-                File.WriteAllText(Path.Combine(outMap, "tile_layers.csv"), "tile_x,tile_y,type,layer,min,max,count\n");
-                File.WriteAllText(Path.Combine(outMap, "layers.json"), "{\n  \"layers\": []\n}\n");
-                AppendDataLoadLog($"[Load] Initialized cache for {map}");
+                foreach (var map in mapFolders)
+                {
+                    var outMap = Path.Combine(p.OutputDir!, map);
+                    Directory.CreateDirectory(outMap);
+                    File.WriteAllText(Path.Combine(outMap, "tile_layers.csv"), "tile_x,tile_y,type,layer,min,max,count\n");
+                    File.WriteAllText(Path.Combine(outMap, "layers.json"), "{\n  \"layers\": []\n}\n");
+                    AppendDataLoadLog($"[Load] Initialized cache for {map}");
+                }
             }
             WriteSourcesJson(p, method, resolvedVer, mapFolders);
 

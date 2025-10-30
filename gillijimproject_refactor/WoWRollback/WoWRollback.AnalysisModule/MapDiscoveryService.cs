@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using WoWRollback.DbcModule;
 using WoWRollback.Core.Services.Archive;
+using DBCD;
+using DBCD.Providers;
 
 namespace WoWRollback.AnalysisModule;
 
@@ -42,6 +44,7 @@ public sealed class MapDiscoveryService
                     Maps: Array.Empty<DiscoveredMap>());
             }
 
+
             // Analyze WDT for each map
             var wdtAnalyzer = new WdtAnalyzer();
             var discoveredMaps = new List<DiscoveredMap>();
@@ -73,6 +76,90 @@ public sealed class MapDiscoveryService
                 Success: false,
                 ErrorMessage: $"Map discovery failed: {ex.Message}",
                 Maps: Array.Empty<DiscoveredMap>());
+        }
+    }
+
+    /// <summary>
+    /// Discovers maps from CASC by reading Map.db2 directly via DBCD using a CASC-backed provider.
+    /// </summary>
+    public MapDiscoveryResult DiscoverMapsFromCasc(IArchiveSource src, string buildVersion)
+    {
+        try
+        {
+            var dbdProvider = new FilesystemDBDProvider(_dbdDir);
+            var dbcProvider = new CascDbcProvider(src);
+            var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+
+            IDBCDStorage storage;
+            try { storage = dbcd.Load("Map", buildVersion, Locale.EnUS); }
+            catch { storage = dbcd.Load("Map", buildVersion, Locale.None); }
+
+            var entries = new List<WoWRollback.DbcModule.MapEntry>();
+            foreach (var row in storage.Values)
+            {
+                try
+                {
+                    var id = SafeField<int>(row, "ID");
+                    var mapName = FirstNonEmpty(
+                        SafeField<string>(row, "MapName_lang"),
+                        SafeField<string>(row, "MapName"),
+                        SafeField<string>(row, "InternalName"),
+                        string.Empty
+                    );
+                    var folder = FirstNonEmpty(
+                        SafeField<string>(row, "Directory"),
+                        SafeField<string>(row, "Folder"),
+                        SafeField<string>(row, "FolderName"),
+                        string.Empty
+                    );
+                    if (string.IsNullOrWhiteSpace(folder)) continue;
+                    entries.Add(new WoWRollback.DbcModule.MapEntry(id, mapName ?? string.Empty, folder));
+                }
+                catch { }
+            }
+
+            // Analyze WDTs with the archive source
+            var wdtAnalyzer = new WdtAnalyzer();
+            var discoveredMaps = new List<DiscoveredMap>();
+            foreach (var m in entries)
+            {
+                var w = wdtAnalyzer.Analyze(src, m.Folder);
+                discoveredMaps.Add(new DiscoveredMap(
+                    Id: m.Id,
+                    Name: m.MapName,
+                    Folder: m.Folder,
+                    WdtExists: w.Success,
+                    HasTerrain: w.HasTerrain,
+                    IsWmoOnly: w.IsWmoOnly,
+                    TileCount: w.TileCount,
+                    WmoPlacement: w.WmoPlacement
+                ));
+            }
+
+            return new MapDiscoveryResult(true, null, discoveredMaps.ToArray());
+        }
+        catch (Exception ex)
+        {
+            return new MapDiscoveryResult(false, $"Map.db2 discovery failed: {ex.Message}", Array.Empty<DiscoveredMap>());
+        }
+
+        static T? SafeField<T>(DBCDRow row, string name)
+        {
+            try
+            {
+                var v = row[name];
+                if (v is T tv) return tv;
+                if (typeof(T) == typeof(string)) return (T)(object)(v?.ToString() ?? "");
+                if (v != null) return (T)Convert.ChangeType(v, typeof(T));
+            }
+            catch { }
+            return default;
+        }
+
+        static string FirstNonEmpty(params string[] vals)
+        {
+            foreach (var v in vals) if (!string.IsNullOrWhiteSpace(v)) return v;
+            return string.Empty;
         }
     }
 

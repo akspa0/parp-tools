@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
     <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
   </ItemGroup>
 
 </Project>

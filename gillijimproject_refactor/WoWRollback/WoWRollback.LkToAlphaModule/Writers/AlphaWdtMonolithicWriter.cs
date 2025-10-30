@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Security.Cryptography;
 using WoWRollback.LkToAlphaModule;
+using WoWRollback.Core.Services.Assets;
 using WoWRollback.LkToAlphaModule.Readers;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
@@ -100,6 +101,35 @@ public sealed class AlphaWdtMonolithicWriter
         if (verbose)
         {
             Console.WriteLine($"[pack] Collected {m2Names.Count} unique M2 names from {rootAdts.Count} tiles");
+        }
+
+        // Asset gating against target listfile (e.g., 3.3.5)
+        if (!string.IsNullOrWhiteSpace(opts?.TargetListfilePath) && File.Exists(opts!.TargetListfilePath))
+        {
+            try
+            {
+                var idx = ListfileIndex.Load(opts.TargetListfilePath!);
+                var gate = new AssetGate(idx);
+                var keptM2 = gate.FilterNames(m2Names, out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoNames, out var droppedWmo);
+
+                if (opts.StrictTargetAssets)
+                {
+                    m2Names = keptM2.ToList();
+                    wmoNames = keptWmo.ToList();
+                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
+                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                    Console.WriteLine($"[gate] Target listfile: kept M2={m2Names.Count}, dropped={droppedM2.Count}; kept WMO={wmoNames.Count}, dropped={droppedWmo.Count}");
+                }
+                else
+                {
+                    Console.WriteLine("[gate] StrictTargetAssets=false; gating report only (no drops)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[warn] Asset gating failed: {ex.Message}");
+            }
         }
 
         using var ms = new MemoryStream();

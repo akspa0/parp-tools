@@ -280,6 +280,24 @@ Azeroth 0.5.3:
   - Reuse `tile_layers.csv` and `layers.json` when present; GUI supports fallback from `<map>_tile_layers.csv`.
 - BYOD: tooling must not include copyrighted game assets; all DBC/DBD/client paths are user-supplied.
 
+## CASC/DB2 Integration (2025-10-29) — Implemented
+- CASC reader: `CascArchiveSource` parses community listfiles (delims: `;`, `,`, `\t`), normalizes case, and supports FDID lookups.
+- Map discovery: use DBCD with a CASC-backed provider to load `Map.db2`; fallback to WDT scan via `EnumerateFiles("world/maps/*/*.wdt")`.
+- Product detection: `.build.info` parsing (wow, wowt, wow_beta) when not explicitly provided.
+
+## Listfile Services (2025-10-29)
+- `ListfileIndex` / `ListfileCatalog`: in-memory indices (path↔FDID) and multi-alias registry.
+- `ListfileSnapshot` (JSON): persisted snapshots with `{ path, fdid? }` entries and metadata.
+- `AssetGate`: filters asset names against a target (e.g., 3.3.5) listfile; writes `dropped_assets.csv`.
+- CLI utilities:
+  - `snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>`
+  - `diff-listfiles --a <fileA> --b <fileB> --out <dir>`
+  - `pack-monolithic-alpha-wdt --lk-wdt <file> --out <wdt> [--target-listfile <335>] [--strict-target-assets true|false]`
+
+## Alias Policy (2025-10-29)
+- Aliases are the full build string `major.minor.patch.build`.
+- Sources: CASC `.build.info`, DBD definitions, or path heuristics.
+
 ## CASC Asset Source (Planned)
 - Integration: WoWFormatLib/CascLib with listfile support
 - Priority: honor Loose > CASC > MPQ via a prioritized source wrapper

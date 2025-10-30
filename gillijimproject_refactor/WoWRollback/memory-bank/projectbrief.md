@@ -27,6 +27,16 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - CSV handling: adopt CsvHelper in GUI for robust parsing; keep CSV schemas stable.
 - BYOD: do not include copyrighted game data; rely on user-provided sources.
 
+### Latest Direction (2025-10-29)
+- CASC/DB2 discovery: when Map.dbc is unavailable, read Map.db2 via DBCD over CASC with FDID listfile; fallback to WDT scan using listfile enumeration.
+- Versioned listfiles:
+  - JSON snapshots per client (`snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>`)
+  - Diff utilities (`diff-listfiles --a <fileA> --b <fileB> --out <dir>`) for added/removed/changed FDIDs
+- Asset gating for recompile/export:
+  - Outputs must reference assets present in the 3.3.5 target listfile; non-present assets are dropped and reported
+  - Integrated in `pack-monolithic-alpha-wdt` for MDNM/MONM; placements to follow
+- Alias policy: use full build strings (major.minor.patch.build) from .build.info/DBD/path heuristics
+
 ### Latest Direction (2025-10-25)
 - **CLI-first**: `WoWRollback.Cli` is the primary entrypoint. Orchestrator is legacy.
 - **Strict AreaID mapping (non-pivot by default)**: map-locked numeric → target map name → per-source-map numeric → exact-by-src-number only if strict=false; 0.6.0 pivot opt-in via `--chain-via-060`.

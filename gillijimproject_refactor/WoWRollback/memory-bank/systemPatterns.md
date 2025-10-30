@@ -38,6 +38,27 @@
 - Use CsvHelper with ClassMaps for `tile_layers.csv` and `areas.csv`.
 - Tolerate header variants and 7/8-column tile CSVs; avoid brittle string.Split.
 
+# Listfile Management Pattern (2025-10-29)
+
+## Two-Listfile Strategy
+- Target allowlist (3.3.5): authoritative set of asset paths used in outputs (path-only).
+- Modern community listfile: FDID-aware superset for discovery/renames.
+
+## JSON Snapshots
+- `snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>`
+- Snapshot schema: entries `{ path, fdid? }` with metadata (source, clientRoot, version alias, generatedAt).
+- Aliases are full build strings; derive from `.build.info`, DBD, or path heuristics.
+
+## Diff Utilities
+- `diff-listfiles --a <fileA> --b <fileB> --out <dir>`
+- Outputs added_paths.csv, removed_paths.csv, changed_fdid.csv.
+
+## Asset Gate
+- Apply before writing outputs (name tables first, placements next):
+  - Accept asset only if present in target (3.3.5) listfile; otherwise drop.
+  - Emit `dropped_assets.csv` with type and path.
+- Current integration: `pack-monolithic-alpha-wdt` gates MDNM/MONM.
+
 # System Patterns - WoWRollback.RollbackTool Architecture
 
 ## Three-Tool Separation of Concerns

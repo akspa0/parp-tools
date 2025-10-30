@@ -15,6 +15,33 @@
 - Energy efficiency: preflight/skip-if-exists for LK ADTs, crosswalks, tile layers, and layers.json.
 - BYOD: tooling must not include copyrighted game data anywhere in repo/binaries.
 
+## Hot Update (2025-10-29) – CASC/DB2 + GUI + Asset Gate
+
+### What works now
+- CLI: `analyze-map-adts-casc` reads ADTs from CASC via `CascArchiveSource` with FDID listfile support.
+- Discovery: If Map.dbc can’t be extracted, we read Map.db2 directly using DBCD over CASC; else fallback to WDT scan via listfile.
+- GUI: Prepare routes by source
+  - CASC → `analyze-map-adts-casc --all-maps`
+  - Install → `analyze-map-adts-mpq --all-maps`
+  - Loose → existing prepare‑layers
+- Product auto‑detect from `.build.info`; no manual `--product` needed.
+
+### Utilities for conversions
+- New CLI:
+  - `snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>` → JSON listfile snapshots (MPQ listfile + loose files).
+  - `diff-listfiles --a <listA> --b <listB> --out <dir>` → added/removed/changed FDIDs.
+  - `pack-monolithic-alpha-wdt --lk-wdt <file> --out <wdt> [--target-listfile <335>] [--strict-target-assets]` → MDNM/MONM gated by 3.3.5 listfile.
+  - Aliases use full build strings.
+
+### Known constraints
+- CASC requires a listfile; discovery relies on FDID→path from the community listfile.
+- Map list “Load” does not show CASC maps (they appear after Prepare).
+
+### Next steps (in progress)
+- Implement ListfileIndex/ListfileCatalog and AssetGate.
+- Strict target assets: only reference assets present in a trusted 3.3.5 listfile during recompile/export; emit dropped_assets.csv.
+- GUI: add Target Listfile picker and toggle for strict mode; pass to CLI.
+
 ## Completed (2025-10-27)
 - Added loading overlay; wired ShowLoading/HideLoading around Load and Prepare.
 - Load UX: prominent button, auto-switch to Build; Auto‑Prepare default ON.

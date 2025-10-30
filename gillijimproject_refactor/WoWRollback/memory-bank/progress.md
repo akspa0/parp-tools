@@ -1,5 +1,15 @@
 # Progress - WoWRollback.RollbackTool
 
+## ✅ Completed (2025-10-29)
+- CASC: Added `analyze-map-adts-casc` (CLI) using `CascArchiveSource` with FDID listfile support; listfile parsing accepts `;`, `,`, and tab delimiters; case-insensitive matching.
+- Discovery: If `Map.dbc` is unavailable, read `Map.db2` directly via DBCD over CASC; if that fails, fall back to WDT scan using listfile enumeration.
+- Product auto-detection: Extracted from `.build.info` (e.g., wow, wowt, wow_beta) when not explicitly provided.
+- GUI Prepare routing: CASC → `analyze-map-adts-casc --all-maps`; Install → `analyze-map-adts-mpq --all-maps`; Loose → existing `prepare-layers`.
+- GUI Load behavior: For CASC/Install, do not abort when no filesystem maps are found; proceed so Prepare can populate outputs.
+- Listfile utilities: `snapshot-listfile` (JSON snapshots, full build aliases) and `diff-listfiles` (added/removed/changed FDIDs) implemented.
+- Asset gating: `pack-monolithic-alpha-wdt` now supports `--target-listfile` and `--strict-target-assets`; writes `dropped_assets.csv`.
+- Core services added: `ListfileIndex`, `ListfileCatalog`, `ListfileSnapshot`, `AssetGate` (under Core/Services/Assets).
+
 ## ✅ Completed (2025-10-27)
 - GUI loading overlay added; wired around Load/Prepare.
 - Load UX: prominent button; auto-switch to Build; Auto‑Prepare default ON.

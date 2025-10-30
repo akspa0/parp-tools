@@ -11,6 +11,7 @@
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
     <ProjectReference Include="..\..\lib\WoWTools.Minimaps\StormLibWrapper\StormLibWrapper.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\CascLib\CascLib\CascLib.csproj" />
   </ItemGroup>
 
   <ItemGroup>
