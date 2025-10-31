@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using WoWRollback.AnalysisModule;
@@ -29,6 +30,44 @@ namespace WoWRollback.Cli;
 internal static class Program
 {
     private static readonly Dictionary<(string Version, string Map), string?> AlphaWdtCache = new(new TupleComparer());
+    
+    private static bool TryIsAlphaV18Wdt(byte[] buf, out string reason)
+    {
+        reason = string.Empty;
+        try
+        {
+            if (buf == null || buf.Length < 24) { reason = "buffer too small"; return false; }
+            static int Next(int start, int size) => start + 8 + size + ((size & 1) == 1 ? 1 : 0);
+
+            // Chunk 0: MVER (on-disk letters reversed: REVM)
+            var c0 = Encoding.ASCII.GetString(buf, 0, 4);
+            if (!string.Equals(c0, "REVM", StringComparison.Ordinal)) { reason = $"first FourCC not MVER (got {c0})"; return false; }
+            int sz0 = BitConverter.ToInt32(buf, 4);
+            if (8 + sz0 > buf.Length) { reason = "MVER size out of range"; return false; }
+            int ver = BitConverter.ToInt32(buf, 8);
+            if (ver != 18) { reason = $"MVER version {ver} (expected 18)"; return false; }
+            int off1 = Next(0, sz0);
+            if (off1 + 8 > buf.Length) { reason = "missing MPHD"; return false; }
+
+            // Chunk 1: MPHD (on-disk DHPM), size 128 in Alpha
+            var c1 = Encoding.ASCII.GetString(buf, off1, 4);
+            if (!string.Equals(c1, "DHPM", StringComparison.Ordinal)) { reason = $"second FourCC not MPHD (got {c1})"; return false; }
+            int sz1 = BitConverter.ToInt32(buf, off1 + 4);
+            if (sz1 != 128) { reason = $"MPHD size {sz1} (expected 128)"; return false; }
+            int off2 = Next(off1, sz1);
+            if (off2 + 8 > buf.Length) { reason = "missing MAIN"; return false; }
+
+            // Chunk 2: MAIN (on-disk NIAM)
+            var c2 = Encoding.ASCII.GetString(buf, off2, 4);
+            if (!string.Equals(c2, "NIAM", StringComparison.Ordinal)) { reason = $"third FourCC not MAIN (got {c2})"; return false; }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            reason = ex.Message;
+            return false;
+        }
+    }
 
     private static int Main(string[] args)
     {
@@ -37,6 +76,7 @@ internal static class Program
             PrintHelp();
             return 0;
         }
+
         var cmd = args[0].ToLowerInvariant();
         var opts = ParseArgs(args.Skip(1).ToArray());
 
@@ -95,6 +135,9 @@ internal static class Program
                     return RunDryRun(opts);
                 case "compare-versions":
                     return RunCompareVersions(opts);
+                case "compute-heatmap-stats":
+                case "heatmap-stats":
+                    return RunComputeHeatmapStats(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -127,6 +170,9 @@ internal static class Program
             ModernListfilePath = modernListfile,
             StrictTargetAssets = strict
         };
+
+        var exportMccv = GetOption(opts, "export-mccv");
+        if (!string.IsNullOrWhiteSpace(exportMccv)) options = options with { ExportMccvDir = exportMccv };
 
         Console.WriteLine("[pack] Building monolithic Alpha WDT from LK inputs...");
         Console.WriteLine($"[pack] LK WDT: {lkWdt}");
@@ -395,6 +441,32 @@ internal static class Program
 
         Console.WriteLine($"[done] regen-layers ok={ok} skipped={skipped} failed={failed}");
         return failed > 0 ? 1 : 0;
+    }
+
+    private static int RunComputeHeatmapStats(Dictionary<string, string> opts)
+    {
+        var buildRoot = GetOption(opts, "build-root");
+        if (string.IsNullOrWhiteSpace(buildRoot))
+        {
+            var cache = GetOption(opts, "cache");
+            var build = GetOption(opts, "build");
+            if (!string.IsNullOrWhiteSpace(cache) && !string.IsNullOrWhiteSpace(build))
+            {
+                buildRoot = Path.Combine(cache!, build!);
+            }
+        }
+        if (string.IsNullOrWhiteSpace(buildRoot) || !Directory.Exists(buildRoot!))
+        {
+            Console.Error.WriteLine("[error] Provide --build-root <dir> or both --cache <dir> and --build <label>");
+            return 2;
+        }
+        var force = opts.ContainsKey("force");
+        Console.WriteLine($"[stats] Scanning build root: {buildRoot}");
+        var res = StatsService.GenerateHeatmapStats(buildRoot!, force);
+        Console.WriteLine(res.Skipped
+            ? $"[skip] Up-to-date: {res.OutputPath} (min={res.MinUnique}, max={res.MaxUnique}, maps={res.PerMapCount})"
+            : $"[ok] heatmap_stats.json written: {res.OutputPath} (min={res.MinUnique}, max={res.MaxUnique}, maps={res.PerMapCount})");
+        return 0;
     }
 
     private static string NormalizeAssetPath(string p)
@@ -1920,6 +1992,10 @@ internal static class Program
         Console.WriteLine("  prepare-layers  [--wdt <WDT>] | [--client-root <dir> [--maps all|m1,m2]] [--out <dir>] [--gap-threshold <N>]");
         Console.WriteLine("    Build per-map layer caches (placements, tile_layers.csv, layers.json) without patching");
         Console.WriteLine("    Outputs under <out>/<map>/; usable by GUI and Layers UI");
+        Console.WriteLine();
+        Console.WriteLine("  compute-heatmap-stats  --build-root <dir> [--force]");
+        Console.WriteLine("    Compute global heatmap stats (min/max per build, per-map ranges) from tile_layers.csv under build root.");
+        Console.WriteLine("    Alternatively: provide --cache <dir> and --build <label> (e.g., 0.5.3) to compose the build root.");
         Console.WriteLine();
         Console.WriteLine("  discover-maps  --client-path <dir> [--version <ver>] [--dbd-dir <path>] [--out <csv>]");
         Console.WriteLine("    Discover all maps from Map.dbc and analyze their WDT files");
@@ -3475,7 +3551,14 @@ internal static class Program
     private static int RunAlphaToLk(Dictionary<string, string> opts)
     {
         // Compose rollback with LK export enabled
-        Require(opts, "input");
+        if (!opts.ContainsKey("input"))
+        {
+            if (!(opts.ContainsKey("client-path") && opts.ContainsKey("map")))
+            {
+                Console.Error.WriteLine("[error] Provide --input <WDT> or for CASC: --client-path <dir> --map <name> [--listfile <file>] [--product wow|wowt]");
+                return 2;
+            }
+        }
         Require(opts, "max-uniqueid");
 
         var merged = new Dictionary<string, string>(opts, StringComparer.OrdinalIgnoreCase)
@@ -3488,11 +3571,17 @@ internal static class Program
 
     private static int RunRollback(Dictionary<string, string> opts)
     {
-        Require(opts, "input");
+        var hasInputPath = opts.ContainsKey("input");
+        var cascMode = !hasInputPath && opts.ContainsKey("client-path") && opts.ContainsKey("map");
+        if (!hasInputPath && !cascMode)
+        {
+            Console.Error.WriteLine("[error] Provide --input <WDT> or for CASC: --client-path <dir> --map <name>");
+            return 2;
+        }
         Require(opts, "max-uniqueid");
 
-        var inputPath = opts["input"];
-        var mapName = Path.GetFileNameWithoutExtension(inputPath);
+        var inputPath = hasInputPath ? opts["input"] : string.Empty;
+        var mapName = cascMode ? opts["map"] : Path.GetFileNameWithoutExtension(inputPath);
         var userOut = GetOption(opts, "out");
 
         var buryDepth = opts.TryGetValue("bury-depth", out var buryStr) && float.TryParse(buryStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var bd)
@@ -3526,7 +3615,7 @@ internal static class Program
         Directory.CreateDirectory(outRoot);
         var alphaWdtDir = Path.Combine(outRoot, "alpha_wdt");
         Directory.CreateDirectory(alphaWdtDir);
-        var outputPath = Path.Combine(alphaWdtDir, Path.GetFileName(inputPath));
+        var outputPath = Path.Combine(alphaWdtDir, cascMode ? (mapName + ".wdt") : Path.GetFileName(inputPath));
 
         var lkOutDefault = Path.Combine(outRoot, "lk_adts", "World", "Maps", mapName);
         var lkOutDir = opts.GetValueOrDefault("lk-out", lkOutDefault);
@@ -3551,7 +3640,9 @@ internal static class Program
         Console.WriteLine("══════════════════════════════════════════");
         Console.WriteLine("          🎮 WoWRollback - ROLLBACK");
         Console.WriteLine("══════════════════════════════════════════");
-        Console.WriteLine($"Input WDT:      {inputPath}");
+        Console.WriteLine(cascMode
+            ? $"Input WDT:      cas://world/maps/{mapName}/{mapName}.wdt"
+            : $"Input WDT:      {inputPath}");
         Console.WriteLine($"Session Dir:    {outRoot}");
         Console.WriteLine($"Alpha Out Dir:  {alphaWdtDir}");
         Console.WriteLine($"Max UniqueID:   {maxUniqueId:N0}");
@@ -3582,13 +3673,42 @@ internal static class Program
 
         try
         {
-            var wdt = new WdtAlpha(inputPath);
-            var existingAdts = wdt.GetExistingAdtsNumbers();
-            var adtOffsets = wdt.GetAdtOffsetsInMain();
+            byte[] wdtBytes;
+            List<int> existingAdts;
+            List<int> adtOffsets;
+            if (cascMode)
+            {
+                var clientRoot = opts["client-path"];
+                var product = GetOption(opts, "product") ?? (ExtractProductFromBuildInfo(clientRoot) ?? GuessProductFromPath(clientRoot) ?? "wow");
+                var listfile = GetOption(opts, "listfile");
+                using var src = new WoWRollback.Core.Services.Archive.CascArchiveSource(clientRoot, product, listfile);
+                var vpath = $"world/maps/{mapName}/{mapName}.wdt";
+                if (!src.FileExists(vpath)) { Console.Error.WriteLine($"[error] CASC WDT not found: {vpath}"); return 1; }
+                using (var s = src.OpenFile(vpath))
+                {
+                    using var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    wdtBytes = ms.ToArray();
+                }
+                if (!TryIsAlphaV18Wdt(wdtBytes, out var reason))
+                {
+                    Console.Error.WriteLine($"[error] Provided WDT does not appear to be Alpha v18: {reason}");
+                    Console.Error.WriteLine("[hint] Use 'pack-monolithic-alpha-wdt' to generate an Alpha WDT from LK/modern inputs, then pass it via --input.");
+                    return 2;
+                }
+                var wdt = new WdtAlpha(wdtBytes, mapName + ".wdt");
+                existingAdts = wdt.GetExistingAdtsNumbers();
+                adtOffsets = wdt.GetAdtOffsetsInMain();
+            }
+            else
+            {
+                var wdt = new WdtAlpha(inputPath);
+                existingAdts = wdt.GetExistingAdtsNumbers();
+                adtOffsets = wdt.GetAdtOffsetsInMain();
+                wdtBytes = File.ReadAllBytes(inputPath);
+            }
             Console.WriteLine($"[info] Tiles detected: {existingAdts.Count}");
             var expectedAdtCount = existingAdts.Count;
-
-            var wdtBytes = File.ReadAllBytes(inputPath);
             int totalPlacements = 0, removed = 0, tilesProcessed = 0;
             int holesCleared = 0, mcshZeroed = 0;
             var processedMcnk = new HashSet<int>();
@@ -3598,7 +3718,7 @@ internal static class Program
                 int adtOffset = adtOffsets[adtNum];
                 if (adtOffset == 0) continue;
 
-                var adt = new AdtAlpha(inputPath, adtOffset, adtNum);
+                var adt = cascMode ? new AdtAlpha(wdtBytes, adtOffset, adtNum) : new AdtAlpha(inputPath, adtOffset, adtNum);
                 var mddf = adt.GetMddf();
                 var modf = adt.GetModf();
 

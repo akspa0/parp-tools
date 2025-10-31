@@ -7,6 +7,11 @@
 - Adopt CsvHelper in GUI for robust CSV parsing (tolerant headers, 7/8-col variants).
 - Gate Area Groups unless areas.csv is present and non-empty (show inline note otherwise).
 - BYOD: never bundle copyrighted data; resolve from user-provided locations only.
+- Global heatmap (build scope) with `heatmap_stats.json` persisted at build root.
+- Layers scope control: Tile | Selection | Map; restore per‑tile lists deterministically.
+- FDID pipeline: resolver + CSV enrichment (`fdid`, `asset_path`) + unresolved diagnostics.
+- MCCV analyzer and overlay: detect “hidden by holes” and export per‑tile PNGs.
+- CASC recompile routing: prefer LK client for WDT lookup; fall back to manual file picker.
 
 ## Decisions
 - CLI-first with GUI runner and overlay; auto-tab navigation (Load→Build, Prepare→Layers); remove success/info modals.
@@ -24,6 +29,8 @@
   - Flatten accidental `<map>/<map>/tile_layers.csv` nests.
   - Do not WDT‑gate maps for CASC datasets (WDTs aren’t on disk); keep WDT gate for loose/install only.
 - Recompile (GUI): for CASC datasets prefer LK Client folder for locating `<map>.wdt`; otherwise offer a file picker. Logs include attempted roots.
+ - Recompile (GUI) logging: stream STDOUT/STDERR live to Build Log; log CWD and exact `dotnet` command; log exit code; persist full session to `<outRoot>/session.log`; show log path on completion/failure.
+ - LK→Alpha textures: implemented MCAL 8‑bit→4‑bit packing (64×64 → 2048 bytes per layer), updated MCLY flags/offsets; emit MCAL as raw (no chunk header) per Alpha v18.
 
 ### In flight / next
 - Global heatmap toggle (Local vs Global‑per‑build; epoch option next) with `heatmap_stats.json` persisted at build root.
@@ -87,7 +94,7 @@
 - CASC listfile coverage may vary; provide clear error messages and fallbacks.
 - Alpha-only per‑tile AreaIDs may not be derivable; keep LK path canonical.
 
-# Active Context - WoWRollback.RollbackTool Development
+## History (2025-10-25) – Viewer Tools & Pipeline
 
 ## Recent Focus (2025-10-25)
 **Run the Alpha→LK pipeline directly from the viewer UI**

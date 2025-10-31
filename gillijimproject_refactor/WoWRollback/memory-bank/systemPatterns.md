@@ -33,6 +33,7 @@
 - GUI orchestrates CLI services with overlay + inline logs.
 - Auto-navigation: Load → Build on completion; Build → Layers after Prepare success.
 - Feature gating: hide data-dependent panels (e.g., Area Groups) until required artifacts exist.
+ - CASC datasets: do not WDT‑gate; prefer LK client for `<map>.wdt` lookup; else prompt user with a file picker.
 
 ## CSV Parsing Pattern
 - Use CsvHelper with ClassMaps for `tile_layers.csv` and `areas.csv`.

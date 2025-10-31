@@ -18,6 +18,7 @@ using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using WoWRollback.DbcModule;
+using WoWRollback.Core.Services;
 
 namespace WoWRollback.Gui;
 
@@ -41,6 +42,9 @@ public partial class MainWindow : Window
     private const bool _areasUiEnabled = false; // TEMP: disable AreaID UI/overlay
     private int _rangeStart = 0, _rangeEnd = 0; // explicit range
     private int _domainMin = 0, _domainMax = 0; // bounds for sliders
+    private HeatmapStats? _globalStats;
+    private string? _globalStatsPath;
+    private DateTime _globalStatsMtimeUtc = DateTime.MinValue;
     private bool _isRunningCli = false; // prevent repeated runs (e.g., spacebar triggering button)
 
     // Area grouping state (per-map)
@@ -54,6 +58,13 @@ public partial class MainWindow : Window
         public Dictionary<int, string> ParentName { get; } = new();
         public SortedDictionary<int, string> ParentLabel { get; } = new();
         public Dictionary<int, SortedDictionary<int, string>> SubzoneLabelByParent { get; } = new();
+    }
+    private sealed class MapRange { public int Min { get; set; } public int Max { get; set; } }
+    private sealed class HeatmapStats
+    {
+        public int MinUnique { get; set; }
+        public int MaxUnique { get; set; }
+        public Dictionary<string, MapRange>? PerMap { get; set; }
     }
 
     private void UpdateRangeLabel()
@@ -72,6 +83,35 @@ public partial class MainWindow : Window
         if (sSlider == null || eSlider == null) return;
         var stats = this.FindControl<TextBlock>("TimeStats");
         var map = _currentMap; if (string.IsNullOrWhiteSpace(map)) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        // Prefer global heatmap_stats.json if available; fallback to local scope
+        if (TryLoadGlobalStats() && _globalStats != null)
+        {
+            int min = _globalStats.MinUnique;
+            int max = _globalStats.MaxUnique;
+            if (_globalStats.PerMap != null && _globalStats.PerMap.TryGetValue(map, out var mr))
+            {
+                min = mr.Min; max = mr.Max;
+            }
+            if (min < max)
+            {
+                sSlider.IsEnabled = eSlider.IsEnabled = true;
+                sSlider.Minimum = min; sSlider.Maximum = max;
+                eSlider.Minimum = min; eSlider.Maximum = max;
+                _domainMin = min; _domainMax = max;
+                if (_rangeStart == 0 && _rangeEnd == 0) { _rangeStart = min; _rangeEnd = max; }
+                _rangeStart = Math.Clamp(_rangeStart, _domainMin, _domainMax);
+                _rangeEnd = Math.Clamp(_rangeEnd, _domainMin, _domainMax);
+                if (_rangeStart > _rangeEnd) _rangeStart = _rangeEnd;
+                sSlider.Value = _rangeStart;
+                eSlider.Value = _rangeEnd;
+                var sBoxG = this.FindControl<TextBox>("StartBox"); if (sBoxG != null) sBoxG.Text = _rangeStart.ToString();
+                var eBoxG = this.FindControl<TextBox>("EndBox"); if (eBoxG != null) eBoxG.Text = _rangeEnd.ToString();
+                UpdateRangeLabel();
+                if (stats != null) stats.Text = $"Global range {min}–{max}";
+                return;
+            }
+        }
+        // Local fallback: compute from current tile scope
         var rows = _rowsByMap.GetValueOrDefault(map) ?? new List<TileLayerRow>();
         IEnumerable<TileLayerRow> scope;
         if (_selectedTiles.Count > 0)
@@ -81,15 +121,15 @@ public partial class MainWindow : Window
         }
         else scope = rows;
         if (!scope.Any()) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
-        int min = scope.Min(r => r.Min);
-        int max = scope.Max(r => r.Max);
-        if (min >= max) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
+        int minLocal = scope.Min(r => r.Min);
+        int maxLocal = scope.Max(r => r.Max);
+        if (minLocal >= maxLocal) { sSlider.IsEnabled = eSlider.IsEnabled = false; if (stats!=null) stats.Text = string.Empty; return; }
         sSlider.IsEnabled = eSlider.IsEnabled = true;
-        sSlider.Minimum = min; sSlider.Maximum = max;
-        eSlider.Minimum = min; eSlider.Maximum = max;
-        _domainMin = min; _domainMax = max;
+        sSlider.Minimum = minLocal; sSlider.Maximum = maxLocal;
+        eSlider.Minimum = minLocal; eSlider.Maximum = maxLocal;
+        _domainMin = minLocal; _domainMax = maxLocal;
         // initialize or clamp
-        if (_rangeStart == 0 && _rangeEnd == 0) { _rangeStart = min; _rangeEnd = max; }
+        if (_rangeStart == 0 && _rangeEnd == 0) { _rangeStart = minLocal; _rangeEnd = maxLocal; }
         _rangeStart = Math.Clamp(_rangeStart, _domainMin, _domainMax);
         _rangeEnd = Math.Clamp(_rangeEnd, _domainMin, _domainMax);
         if (_rangeStart > _rangeEnd) _rangeStart = _rangeEnd;
@@ -98,6 +138,31 @@ public partial class MainWindow : Window
         var sBox = this.FindControl<TextBox>("StartBox"); if (sBox != null) sBox.Text = _rangeStart.ToString();
         var eBox = this.FindControl<TextBox>("EndBox"); if (eBox != null) eBox.Text = _rangeEnd.ToString();
         UpdateRangeLabel();
+    }
+
+    private bool TryLoadGlobalStats()
+    {
+        try
+        {
+            var cacheBox = this.FindControl<TextBox>("CacheBox");
+            var root = cacheBox?.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(root)) return false;
+            var path = Path.Combine(root!, "heatmap_stats.json");
+            var fi = new FileInfo(path);
+            if (!fi.Exists) { _globalStats = null; return false; }
+            if (_globalStats != null && string.Equals(_globalStatsPath, path, StringComparison.OrdinalIgnoreCase) && fi.LastWriteTimeUtc <= _globalStatsMtimeUtc)
+            {
+                return true;
+            }
+            var json = File.ReadAllText(path);
+            var parsed = JsonSerializer.Deserialize<HeatmapStats>(json);
+            if (parsed == null) { _globalStats = null; return false; }
+            _globalStats = parsed;
+            _globalStatsPath = path;
+            _globalStatsMtimeUtc = fi.LastWriteTimeUtc;
+            return true;
+        }
+        catch { _globalStats = null; return false; }
     }
 
 
@@ -186,6 +251,21 @@ public partial class MainWindow : Window
         return sb.ToString();
     }
 
+    private static string BuildAlphaToLkArgsCasc(string cliProj, string clientRoot, string mapName, int maxUniqueId, string alphaOut, string lkOut, string? listfile, string? product, string? lkDbcDir, bool fixHoles, string scope, bool preserveWmo, bool disableMcsh)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"run --project \"{cliProj}\" -- alpha-to-lk --client-path \"{clientRoot}\" --map \"{mapName}\" --max-uniqueid {maxUniqueId} --bury-depth -5000.0 --out \"{alphaOut}\"");
+        if (!string.IsNullOrWhiteSpace(lkOut)) sb.Append($" --lk-out \"{lkOut}\"");
+        if (!string.IsNullOrWhiteSpace(listfile)) sb.Append($" --listfile \"{listfile}\"");
+        if (!string.IsNullOrWhiteSpace(product)) sb.Append($" --product {product}");
+        if (!string.IsNullOrWhiteSpace(lkDbcDir)) sb.Append($" --lk-dbc-dir \"{lkDbcDir}\"");
+        if (fixHoles) sb.Append(" --fix-holes");
+        if (!string.IsNullOrWhiteSpace(scope)) sb.Append($" --holes-scope {scope}");
+        sb.Append($" --holes-wmo-preserve {(preserveWmo ? "true" : "false")}");
+        if (disableMcsh) sb.Append(" --disable-mcsh");
+        return sb.ToString();
+    }
+
     private static string? TryFindWdtPath(string datasetRoot, string map)
     {
         try
@@ -221,23 +301,12 @@ public partial class MainWindow : Window
 
             var p = BuildDataSourcePayload();
 
-            // Build candidate roots to search for WDT depending on dataset type
-            var candidateRoots = new List<string>();
-            if (string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase))
+            // CASC uses virtual WDT from depot; avoid any filesystem WDT resolution or picker.
+            string? wdt = null;
+            if (!string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase))
             {
-                if (!string.IsNullOrWhiteSpace(p.LkClient) && Directory.Exists(p.LkClient!))
-                {
-                    candidateRoots.Add(p.LkClient!);
-                }
-                else
-                {
-                    // As a last resort, consider DataRootBox if it points to a loose tree
-                    var rootBox = this.FindControl<TextBox>("DataRootBox"); var maybeLoose = rootBox?.Text?.Trim();
-                    if (!string.IsNullOrWhiteSpace(maybeLoose) && Directory.Exists(maybeLoose)) candidateRoots.Add(maybeLoose);
-                }
-            }
-            else
-            {
+                // Build candidate roots to search for WDT depending on dataset type
+                var candidateRoots = new List<string>();
                 var datasetRoot = TryGetDatasetRootFromCache(cacheRoot!);
                 if (string.IsNullOrWhiteSpace(datasetRoot))
                 {
@@ -245,46 +314,40 @@ public partial class MainWindow : Window
                     if (!string.IsNullOrWhiteSpace(fallback)) datasetRoot = fallback;
                 }
                 if (!string.IsNullOrWhiteSpace(datasetRoot) && Directory.Exists(datasetRoot!)) candidateRoots.Add(datasetRoot!);
-            }
 
-            // Resolve WDT file
-            string? wdt = null; var tried = new List<string>();
-            foreach (var root in candidateRoots)
-            {
-                tried.Add(root);
-                wdt = TryFindWdtPath(root, map);
-                if (!string.IsNullOrWhiteSpace(wdt) && File.Exists(wdt)) break;
-                wdt = null;
-            }
-
-            if (string.IsNullOrWhiteSpace(wdt))
-            {
-                var hint = string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase)
-                    ? "Set LK Client path on Data Sources (it should contain World/Maps) or provide a loose dataset root."
-                    : "Ensure your Data Root points to a folder with World/Maps.";
-                var triedMsg = tried.Count > 0 ? ("\nTried roots:\n - " + string.Join("\n - ", tried)) : string.Empty;
-
-                // Offer to pick a WDT manually
-                var pick = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                // Resolve WDT file
+                var tried = new List<string>();
+                foreach (var root in candidateRoots)
                 {
-                    Title = $"Select WDT for map '{map}'",
-                    AllowMultiple = false,
-                    FileTypeFilter = new[] { new FilePickerFileType("WDT files") { Patterns = new[] { "*.wdt" } } }
-                });
-                if (pick != null && pick.Count > 0)
-                {
-                    var path = pick[0].Path.LocalPath;
-                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                    {
-                        wdt = path;
-                    }
+                    tried.Add(root);
+                    wdt = TryFindWdtPath(root, map);
+                    if (!string.IsNullOrWhiteSpace(wdt) && File.Exists(wdt)) break;
+                    wdt = null;
                 }
-
                 if (string.IsNullOrWhiteSpace(wdt))
                 {
-                    await ShowMessage("Error", "Could not locate WDT for map." + triedMsg + "\n" + hint);
-                    return;
+                    var triedMsg = tried.Count > 0 ? ("\nTried roots:\n - " + string.Join("\n - ", tried)) : string.Empty;
+                    var pick = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                    {
+                        Title = $"Select WDT for map '{map}'",
+                        AllowMultiple = false,
+                        FileTypeFilter = new[] { new FilePickerFileType("WDT files") { Patterns = new[] { "*.wdt" } } }
+                    });
+                    if (pick != null && pick.Count > 0)
+                    {
+                        var path = pick[0].Path.LocalPath;
+                        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                        {
+                            wdt = path;
+                        }
+                    }
+                    if (string.IsNullOrWhiteSpace(wdt)) { await ShowMessage("Error", "Could not locate WDT for map." + triedMsg); return; }
                 }
+            }
+            else
+            {
+                // Virtual path for session logging; CLI will fetch from CASC
+                wdt = $"cas://world/maps/{map}/{map}.wdt";
             }
 
             var threshold = _rangeEnd;
@@ -318,10 +381,21 @@ public partial class MainWindow : Window
             var scope = (this.FindControl<ComboBox>("HolesScopeBox")?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "neighbors";
             var preserve = this.FindControl<CheckBox>("PreserveWmoHolesCheck")?.IsChecked != false;
             var disable = this.FindControl<CheckBox>("DisableMcshCheck")?.IsChecked == true;
-            var args = BuildAlphaToLkArgs(cliProj, wdt!, threshold, alphaOut, lkOut, p.LkClient, p.LkDbcDir, fixHoles, scope, preserve, disable);
-            File.WriteAllText(Path.Combine(outRoot, "commands.txt"), args);
+            string args;
+            if (string.Equals(dsType, "casc", StringComparison.OrdinalIgnoreCase))
+            {
+                args = BuildAlphaToLkArgsCasc(cliProj, p.Root!, map, threshold, alphaOut, lkOut, p.Listfile, null, p.LkDbcDir, fixHoles, scope, preserve, disable);
+            }
+            else
+            {
+                args = BuildAlphaToLkArgs(cliProj, wdt!, threshold, alphaOut, lkOut, p.LkClient, p.LkDbcDir, fixHoles, scope, preserve, disable);
+            }
+            var cmdFile = Path.Combine(outRoot, "commands.txt");
+            File.WriteAllText(cmdFile, args);
 
             ShowLoading("Recompiling map...");
+            var logSb = new StringBuilder();
+            var errTail = new System.Collections.Generic.Queue<string>(128);
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
@@ -332,23 +406,39 @@ public partial class MainWindow : Window
                 CreateNoWindow = true
             };
             using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            proc.OutputDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
-            proc.ErrorDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) AppendBuildLog(ev.Data!); };
-            AppendBuildLog($"[recompile] Starting: {args}");
+            proc.OutputDataReceived += (_, ev) => { if (!string.IsNullOrEmpty(ev.Data)) { logSb.AppendLine(ev.Data); AppendBuildLog(ev.Data!); } };
+            proc.ErrorDataReceived += (_, ev) => {
+                if (!string.IsNullOrEmpty(ev.Data)) {
+                    logSb.AppendLine(ev.Data);
+                    AppendBuildLog(ev.Data!);
+                    if (errTail.Count >= 100) errTail.Dequeue();
+                    errTail.Enqueue(ev.Data!);
+                }
+            };
+            AppendBuildLog($"[recompile] CWD: {Environment.CurrentDirectory}");
+            AppendBuildLog($"[recompile] Starting: dotnet {args}");
+            AppendBuildLog($"[recompile] Commands file: {cmdFile}");
             proc.Start();
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
             await proc.WaitForExitAsync();
+            var logPath = Path.Combine(outRoot, "session.log");
+            try { File.WriteAllText(logPath, logSb.ToString()); } catch { }
             AppendBuildLog($"[recompile] Exit code: {proc.ExitCode}");
             HideLoading();
             if (proc.ExitCode == 0)
             {
                 try { var psiOpen = new System.Diagnostics.ProcessStartInfo { FileName = outRoot, UseShellExecute = true }; System.Diagnostics.Process.Start(psiOpen); } catch { }
-                await ShowMessage("Done", outRoot);
+                await ShowMessage("Done", $"Output: {outRoot}\nLog: {logPath}");
             }
             else
             {
-                await ShowMessage("Recompile failed", $"Exit code: {proc.ExitCode}");
+                if (errTail.Count > 0)
+                {
+                    AppendBuildLog("[recompile] ---- STDERR tail (last 100 lines) ----");
+                    foreach (var line in errTail) AppendBuildLog(line);
+                }
+                await ShowMessage("Recompile failed", $"Exit code: {proc.ExitCode}\nSee log: {logPath}");
             }
         }
         catch (Exception ex) { HideLoading(); await ShowMessage("Error", ex.Message); }

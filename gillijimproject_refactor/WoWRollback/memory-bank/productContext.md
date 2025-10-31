@@ -30,7 +30,7 @@ Patched Alpha WDT + AreaMap → Convert to LK ADTs (indices remapped, AreaId app
 ```
 **Output**: LK ADTs written under lk_out/World/Maps/<map>/<map>_x_y.adt
 
-### Symmetric LK→LK Patcher
+### LK Patcher
 ```
 LK ADTs dir + Threshold + Options → Bury placements → Selective hole clearing → Zero MCSH → Write to out
 ```
@@ -108,6 +108,9 @@ WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 
 - Option to zero out MCSH data
 
 ## Why This Architecture?
+
+### GUI Runner
+- The GUI acts as a runner for the CLI with overlay + inline logs (no modals), matching the CLI-first approach.
 
 ### Pre-generated Overlays (Not On-the-Fly)
 - **Performance**: No processing during viewing

@@ -20,4 +20,5 @@ public sealed record LkToAlphaOptions
     public string? TargetListfilePath { get; init; }
     public bool StrictTargetAssets { get; init; } = true;
     public string? ModernListfilePath { get; init; }
+    public string? ExportMccvDir { get; init; }
 }

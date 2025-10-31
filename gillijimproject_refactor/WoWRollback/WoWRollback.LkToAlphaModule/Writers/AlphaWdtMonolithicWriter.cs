@@ -224,6 +224,15 @@ public sealed class AlphaWdtMonolithicWriter
                 {
                     alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts);
                     presentIndices.Add(i);
+
+                    if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
+                    {
+                        try
+                        {
+                            ExportMccvIfPresent(bytes, off, Path.Combine(opts!.ExportMccvDir!, mapName), yy, xx, i);
+                        }
+                        catch { }
+                    }
                 }
                 else
                 {
@@ -508,5 +517,124 @@ public sealed class AlphaWdtMonolithicWriter
             i = next;
         }
         return -1;
+    }
+
+    // --- MCCV Export (optional debug) ---
+    private static void ExportMccvIfPresent(byte[] adtBytes, int mcnkOffset, string baseOutDir, int tileY, int tileX, int chunkIdx)
+    {
+        const int ChunkLettersAndSize = 8;
+        const int McnkHeaderSize = 0x80;
+        if (mcnkOffset < 0 || mcnkOffset + ChunkLettersAndSize + McnkHeaderSize > adtBytes.Length) return;
+
+        // MccvOffset is at byte 116 within the LK MCNK header
+        int mccvOffsetInHeader = 116;
+        int headerStart = mcnkOffset + ChunkLettersAndSize;
+        int mccvRel = BitConverter.ToInt32(adtBytes, headerStart + mccvOffsetInHeader);
+        if (mccvRel <= 0) return;
+
+        int mccvChunkOffset = mcnkOffset + mccvRel;
+        if (mccvChunkOffset < 0 || mccvChunkOffset + 8 > adtBytes.Length) return;
+
+        Chunk mccvChunk;
+        try { mccvChunk = new Chunk(adtBytes, mccvChunkOffset); }
+        catch { return; }
+        if (mccvChunk.GivenSize <= 0 || mccvChunk.Data.Length <= 0) return;
+
+        // Build a 64x64 BGR image from MCCV vertex shading (use 9x9 outer grid, bilinear upsample)
+        var bgr = BuildMccvBgrImage(mccvChunk.Data, 64, 64);
+        if (bgr.Length == 0) return;
+
+        var outDir = Path.Combine(baseOutDir, $"{tileY:D2}_{tileX:D2}");
+        Directory.CreateDirectory(outDir);
+        var outPath = Path.Combine(outDir, $"{tileY:D2}_{tileX:D2}_mcnk_{chunkIdx:D3}_mccv.bmp");
+        try { SaveBmp24(outPath, 64, 64, bgr); } catch { }
+    }
+
+    private static byte[] BuildMccvBgrImage(byte[] mccvData, int width, int height)
+    {
+        // Expect 145 RGBA entries interleaved as rows: 9,8,9,8,... (like MCNR/MCVT)
+        int expected = 145 * 4;
+        if (mccvData == null || mccvData.Length < 9 * 9 * 4) return Array.Empty<byte>();
+
+        var outer = new (byte r, byte g, byte b)[9,9];
+        int src = 0;
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+            {
+                if (src + 4 > mccvData.Length) return Array.Empty<byte>();
+                byte r = mccvData[src + 0]; byte g = mccvData[src + 1]; byte b = mccvData[src + 2];
+                outer[i, j] = (r, g, b);
+            }
+            src += 9 * 4;
+            if (i < 8)
+            {
+                // skip inner row (8 vertices) to keep outer-only for simple bilinear
+                src += 8 * 4;
+                if (src > mccvData.Length) return Array.Empty<byte>();
+            }
+        }
+
+        var bgr = new byte[width * height * 3];
+        for (int y = 0; y < height; y++)
+        {
+            double v = (double)y * 8.0 / (height - 1);
+            int v0 = (int)Math.Floor(v);
+            int v1 = Math.Min(8, v0 + 1);
+            double ty = v - v0;
+            for (int x = 0; x < width; x++)
+            {
+                double u = (double)x * 8.0 / (width - 1);
+                int u0 = (int)Math.Floor(u);
+                int u1 = Math.Min(8, u0 + 1);
+                double tx = u - u0;
+
+                var c00 = outer[v0, u0];
+                var c10 = outer[v0, u1];
+                var c01 = outer[v1, u0];
+                var c11 = outer[v1, u1];
+
+                double w00 = (1 - tx) * (1 - ty);
+                double w10 = tx * (1 - ty);
+                double w01 = (1 - tx) * ty;
+                double w11 = tx * ty;
+
+                int r = (int)(c00.r * w00 + c10.r * w10 + c01.r * w01 + c11.r * w11 + 0.5);
+                int g = (int)(c00.g * w00 + c10.g * w10 + c01.g * w01 + c11.g * w11 + 0.5);
+                int b = (int)(c00.b * w00 + c10.b * w10 + c01.b * w01 + c11.b * w11 + 0.5);
+
+                int idx = (y * width + x) * 3;
+                bgr[idx + 0] = (byte)Math.Clamp(b, 0, 255);
+                bgr[idx + 1] = (byte)Math.Clamp(g, 0, 255);
+                bgr[idx + 2] = (byte)Math.Clamp(r, 0, 255);
+            }
+        }
+        return bgr;
+    }
+
+    private static void SaveBmp24(string path, int width, int height, byte[] bgrTopDown)
+    {
+        // 24bpp BMP with BITMAPINFOHEADER; use negative height for top-down rows
+        int stride = width * 3;
+        int imageSize = stride * height;
+        int fileSize = 54 + imageSize;
+        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        Span<byte> header = stackalloc byte[54];
+        // BITMAPFILEHEADER
+        header[0] = (byte)'B'; header[1] = (byte)'M';
+        BitConverter.GetBytes(fileSize).CopyTo(header.Slice(2));
+        // reserved 4 bytes at 6..9 are zero
+        BitConverter.GetBytes(54).CopyTo(header.Slice(10)); // pixel data offset
+        // BITMAPINFOHEADER
+        BitConverter.GetBytes(40).CopyTo(header.Slice(14)); // info header size
+        BitConverter.GetBytes(width).CopyTo(header.Slice(18));
+        BitConverter.GetBytes(-height).CopyTo(header.Slice(22)); // negative for top-down
+        BitConverter.GetBytes((ushort)1).CopyTo(header.Slice(26)); // planes
+        BitConverter.GetBytes((ushort)24).CopyTo(header.Slice(28)); // bpp
+        // compression 0 at 30..33
+        BitConverter.GetBytes(imageSize).CopyTo(header.Slice(34));
+        // xppm/yppm and palette fields left zero
+        fs.Write(header);
+        fs.Write(bgrTopDown, 0, bgrTopDown.Length);
     }
 }

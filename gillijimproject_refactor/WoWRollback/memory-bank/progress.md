@@ -1,5 +1,11 @@
 # Progress - WoWRollback.RollbackTool
 
+## ✅ Completed (2025-10-30)
+- GUI: Fixed `MainWindow.cs` compile errors (`CS0136`, `CS0103`) in time range/global stats logic.
+- GUI Recompile: Live STDOUT/STDERR streaming to Build Log; log CWD and full `dotnet` command; exit code; persist `<outRoot>/session.log`; show log path.
+- GUI: Global heatmap stats integration for slider domain using `heatmap_stats.json` with per-map overrides.
+- LkToAlpha: Implemented MCAL 8‑bit→4‑bit conversion (64×64 → 2048 bytes/layer), updated MCLY flags/offsets; emit Alpha MCAL raw (no chunk header).
+
 ## ✅ Completed (2025-10-29)
 - CASC: Added `analyze-map-adts-casc` (CLI) using `CascArchiveSource` with FDID listfile support; listfile parsing accepts `;`, `,`, and tab delimiters; case-insensitive matching.
 - Discovery: If `Map.dbc` is unavailable, read `Map.db2` directly via DBCD over CASC; if that fails, fall back to WDT scan using listfile enumeration.
@@ -9,6 +15,8 @@
 - Listfile utilities: `snapshot-listfile` (JSON snapshots, full build aliases) and `diff-listfiles` (added/removed/changed FDIDs) implemented.
 - Asset gating: `pack-monolithic-alpha-wdt` now supports `--target-listfile` and `--strict-target-assets`; writes `dropped_assets.csv`.
 - Core services added: `ListfileIndex`, `ListfileCatalog`, `ListfileSnapshot`, `AssetGate` (under Core/Services/Assets).
+ - Unified command: `alpha-to-lk` orchestrates rollback + AreaID mapping (CSV crosswalks) + LK ADT export.
+ - CASC WDT handling: CASC datasets are not WDT‑gated; prefer LK client for `<map>.wdt` lookup; otherwise prompt via file picker in GUI.
 
 ## ✅ Completed (2025-10-27)
 - GUI loading overlay added; wired around Load/Prepare.
@@ -91,16 +99,12 @@ MODF Entry (64 bytes):
 
 ## ⏳ In Progress
 
-### Pipeline Integration
-- Unifying Alpha→LK pipeline under a single command (`alpha-to-lk`): rollback + area map + export
-- Adding LK ADT patcher command (`lk-to-alpha`, v1): bury/holes/mcsh on LK ADTs
-- Implementing minimal LK `AreaTable.dbc` ID reader to auto-fill area mappings from MPQs
 
 ## 🎯 Next Steps
 
-### Phase 1: Unified Pipeline Command
-1. Add `alpha-to-lk` that composes rollback (bury + MCRF-gated hole clear + optional MCSH), area map (JSON or LK MPQs), and LK export
-2. Update `PrintHelp()` and logs with examples
+### Phase 1: CLI Polish for Unified Pipeline
+1. Ensure `alpha-to-lk` help text shows end-to-end examples and flags clearly
+2. Verify logs reflect crosswalk usage, strict mapping guards, and `<Map>.wdt` emission
 
 ### Phase 2: AreaTable Auto-Mapper
 1. Implement `AreaTableDbcReader` (IDs only) opened via `PrioritizedArchiveSource`/`MpqArchiveSource`

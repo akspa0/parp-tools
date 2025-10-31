@@ -217,18 +217,96 @@ public static class AlphaMcnkBuilder
             // all zeros is acceptable minimal layer
         }
         
-        // Build MCAL raw - use extracted LK data or create empty fallback
+        // Build MCAL raw - convert LK 8-bit (4096 bytes per layer) to Alpha 4-bit packed (2048 bytes per layer)
         byte[] mcalRaw;
-        if (mcalLkWhole != null && mcalLkWhole.Length > 8)
         {
-            int sz = BitConverter.ToInt32(mcalLkWhole, 4);
-            mcalRaw = new byte[sz];
-            Buffer.BlockCopy(mcalLkWhole, 8, mcalRaw, 0, sz);
-            DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
-        }
-        else
-        {
-            mcalRaw = Array.Empty<byte>();
+            // Extract LK MCAL payload (strip chunk header)
+            byte[] mcalLkRaw = Array.Empty<byte>();
+            if (mcalLkWhole != null && mcalLkWhole.Length > 8)
+            {
+                int sz = BitConverter.ToInt32(mcalLkWhole, 4);
+                if (sz > 0)
+                {
+                    mcalLkRaw = new byte[sz];
+                    Buffer.BlockCopy(mcalLkWhole, 8, mcalLkRaw, 0, sz);
+                    DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalLkRaw, opts);
+                }
+            }
+
+            // Prepare updated MCLY table and new Alpha MCAL stream
+            int numLayers = mclyRaw.Length / 16;
+            var mclyOut = new byte[mclyRaw.Length];
+            Buffer.BlockCopy(mclyRaw, 0, mclyOut, 0, mclyRaw.Length);
+            const uint FLAG_USE_ALPHA = 0x100;
+            const uint FLAG_ALPHA_COMP = 0x200;
+
+            // Ensure base layer (0) has no alpha
+            if (numLayers > 0)
+            {
+                uint flags0 = BitConverter.ToUInt32(mclyOut, 4);
+                flags0 &= ~FLAG_USE_ALPHA;
+                flags0 &= ~FLAG_ALPHA_COMP;
+                Buffer.BlockCopy(BitConverter.GetBytes(flags0), 0, mclyOut, 4, 4);
+                Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, 8, 4);
+            }
+
+            // Collect LK offsets (relative to MCAL data start) for layers > 0
+            var entries = new System.Collections.Generic.List<(int idx, int offs)>();
+            for (int i = 1; i < numLayers; i++)
+            {
+                int baseOff = i * 16;
+                uint off = BitConverter.ToUInt32(mclyRaw, baseOff + 8);
+                if (off > 0) entries.Add((i, (int)off));
+            }
+            entries.Sort((a, b) => a.offs.CompareTo(b.offs));
+
+            using var msAlpha = new MemoryStream();
+            for (int k = 0; k < entries.Count; k++)
+            {
+                int idx = entries[k].idx;
+                int off = entries[k].offs;
+                int nextOff = (k + 1 < entries.Count) ? entries[k + 1].offs : mcalLkRaw.Length;
+                int available = Math.Max(0, nextOff - off);
+
+                // Use first 4096 bytes when available (8-bit 64x64)
+                bool canUse = (mcalLkRaw.Length >= off + 4096);
+                int outOffset = (int)msAlpha.Length;
+                int layerBase = idx * 16;
+                if (canUse)
+                {
+                    // Pack two 4-bit pixels per byte with rounding
+                    var packed = new byte[2048];
+                    int pi = 0;
+                    for (int p = 0; p < 4096; p += 2)
+                    {
+                        int a = mcalLkRaw[off + p];
+                        int b = mcalLkRaw[off + p + 1];
+                        byte a4 = (byte)((a + 8) >> 4);
+                        byte b4 = (byte)((b + 8) >> 4);
+                        packed[pi++] = (byte)((a4 << 4) | (b4 & 0x0F));
+                    }
+                    msAlpha.Write(packed, 0, packed.Length);
+
+                    uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
+                    flags |= FLAG_USE_ALPHA;
+                    flags &= ~FLAG_ALPHA_COMP; // start uncompressed path
+                    Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
+                    Buffer.BlockCopy(BitConverter.GetBytes((uint)outOffset), 0, mclyOut, layerBase + 8, 4);
+                }
+                else
+                {
+                    // No valid alpha payload -> clear flags and offset
+                    uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
+                    flags &= ~FLAG_USE_ALPHA;
+                    flags &= ~FLAG_ALPHA_COMP;
+                    Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
+                    Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, layerBase + 8, 4);
+                }
+            }
+
+            mcalRaw = msAlpha.ToArray();
+            mclyRaw = mclyOut;
+            DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
         }
         
         // Build MCSH raw - use extracted LK data or create empty fallback
@@ -268,9 +346,7 @@ public static class AlphaMcnkBuilder
         byte[] mclyWhole = mclyChunk.GetWholeChunk();  // Has header (FourCC+size)
         byte[] mcrfWhole = mcrfChunk.GetWholeChunk();  // Has header (FourCC+size)
         // mcshRaw, mcalRaw, mcseRaw used directly - NO headers!
-        
-        DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
-        
+
         // Validate MCLY/MCAL integrity to catch offset corruption bugs
         ValidateMclyMcalIntegrity(mclyRaw, mcalRaw, lkHeader.IndexX, lkHeader.IndexY, opts);
 
