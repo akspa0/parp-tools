@@ -87,8 +87,8 @@ namespace WmoBspConverter.Wmo
                 var chunk = ReadChunk(reader);
                 if (chunk.Id == "MOMO")
                 {
-                    // Parse sub-chunks inside MOMO container
-                    ParseMomoContainer(chunk.Data, wmoData);
+                    // Parse sub-chunks inside MOMO container with absolute base offset
+                    ParseMomoContainer(chunk.Data, chunk.Offset, wmoData);
                 }
                 else
                 {
@@ -121,7 +121,7 @@ namespace WmoBspConverter.Wmo
             };
         }
 
-        private void ParseMomoContainer(byte[] momoData, WmoV14Data wmoData)
+        private void ParseMomoContainer(byte[] momoData, uint baseOffset, WmoV14Data wmoData)
         {
             using var momoStream = new MemoryStream(momoData);
             var momoReader = new BinaryReader(momoStream, Encoding.ASCII, leaveOpen: true);
@@ -142,7 +142,8 @@ namespace WmoBspConverter.Wmo
                 wmoData.Chunks.Add(new ChunkInfo
                 {
                     Id = chunkId,
-                    Offset = (uint)dataStart,
+                    // Absolute offset to subchunk header (ID field) within full file
+                    Offset = baseOffset + (uint)(dataStart - 8),
                     Size = chunkSize,
                     Data = data
                 });
@@ -268,13 +269,6 @@ namespace WmoBspConverter.Wmo
                     Flags = flags
                 };
 
-                // Process MOGP chunk data for this group if available
-                var mogpChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOGP");
-                if (mogpChunk?.Data != null)
-                {
-                    ProcessMogpChunk(mogpChunk.Data, groupData);
-                }
-
                 wmoData.Groups.Add(groupData);
             }
 
@@ -305,36 +299,58 @@ namespace WmoBspConverter.Wmo
                 Console.WriteLine($"[DEBUG] Processing group: {group.Name}");
                 Console.WriteLine($"[DEBUG] Group has {group.Vertices.Count} vertices, {group.Indices.Count} indices");
 
-                // For each triangle, duplicate its three vertices into the BSP Vertices list
-                for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+                // Determine triangle indices: use MOVI if present; otherwise fall back to sequential triples using MOPY face count
+                List<(ushort a, ushort b, ushort c)> tris = new List<(ushort, ushort, ushort)>();
+                if (group.Indices.Count >= 3)
                 {
-                    var idx0 = group.Indices[i];
-                    var idx1 = group.Indices[i + 1];
-                    var idx2 = group.Indices[i + 2];
+                    for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+                    {
+                        tris.Add((group.Indices[i], group.Indices[i + 1], group.Indices[i + 2]));
+                    }
+                }
+                else if (group.FaceMaterials.Count > 0 && group.Vertices.Count >= 3)
+                {
+                    int faceCount = group.FaceMaterials.Count; // already parsed as faces, not bytes
+                    int maxTris = Math.Min(faceCount, group.Vertices.Count / 3);
+                    for (int t = 0; t < maxTris; t++)
+                    {
+                        int baseIdx = t * 3;
+                        tris.Add(((ushort)baseIdx, (ushort)(baseIdx + 1), (ushort)(baseIdx + 2)));
+                    }
+                    Console.WriteLine($"[DEBUG] Fallback triangles assembled from sequential triples: {tris.Count}");
+                }
 
-                    if (idx0 >= group.Vertices.Count || idx1 >= group.Vertices.Count || idx2 >= group.Vertices.Count)
+                // For each triangle, duplicate its three vertices into the BSP Vertices list and fill MeshVertices
+                foreach (var (a, b, c) in tris)
+                {
+                    if (a >= group.Vertices.Count || b >= group.Vertices.Count || c >= group.Vertices.Count)
                         continue;
 
                     var start = bspFile.Vertices.Count;
 
-                    // Duplicate three vertices for this face
-                    var p0 = group.Vertices[idx0];
-                    var p1 = group.Vertices[idx1];
-                    var p2 = group.Vertices[idx2];
+                    var p0 = group.Vertices[a];
+                    var p1 = group.Vertices[b];
+                    var p2 = group.Vertices[c];
 
                     bspFile.Vertices.Add(new BspVertex { Position = p0, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = Vector3.UnitY, Color = new byte[] { 255, 255, 255, 255 } });
                     bspFile.Vertices.Add(new BspVertex { Position = p1, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = Vector3.UnitY, Color = new byte[] { 255, 255, 255, 255 } });
                     bspFile.Vertices.Add(new BspVertex { Position = p2, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = Vector3.UnitY, Color = new byte[] { 255, 255, 255, 255 } });
 
+                    // Mesh indices for this triangle (relative to FirstVertex)
+                    int meshStart = bspFile.MeshVertices.Count;
+                    bspFile.MeshVertices.Add(0);
+                    bspFile.MeshVertices.Add(1);
+                    bspFile.MeshVertices.Add(2);
+
                     bspFile.Faces.Add(new BspFace
                     {
                         Texture = 0,
                         Effect = -1,
-                        Type = 1, // polygon
+                        Type = 3, // mesh with MeshVertices
                         FirstVertex = start,
                         NumVertices = 3,
-                        FirstMeshVertex = 0,
-                        NumMeshVertices = 0,
+                        FirstMeshVertex = meshStart,
+                        NumMeshVertices = 3,
                         Lightmap = -1
                     });
                 }
@@ -354,6 +370,20 @@ namespace WmoBspConverter.Wmo
             const int MOGP_HEADER_SIZE = 0x40;
             if (ms.Length < MOGP_HEADER_SIZE) return;
             ms.Position = MOGP_HEADER_SIZE;
+
+            // Scan forward for first valid subchunk header after MOGP header
+            string[] valid = new[] { "MOPY", "MOVT", "MOVI", "MONR", "MOTV", "MOBA", "MOBN", "MOBR" };
+            long firstPos = -1;
+            for (long off = MOGP_HEADER_SIZE; off + 4 <= ms.Length; off++)
+            {
+                ms.Position = off;
+                var idBytes = br.ReadBytes(4);
+                if (idBytes.Length < 4) break;
+                var id = Encoding.ASCII.GetString(idBytes.Reverse().ToArray());
+                if (valid.Contains(id)) { firstPos = off; break; }
+            }
+            if (firstPos == -1) return;
+            ms.Position = firstPos;
 
             while (ms.Position + 8 <= ms.Length)
             {
@@ -375,20 +405,26 @@ namespace WmoBspConverter.Wmo
                 }
                 ms.Position = subEnd;
 
-                // Optional padding skip: if next 4 bytes are zero/non-printable, skip 4
+                // Realign to next valid subchunk header if necessary (scan up to 16 bytes)
                 if (ms.Position + 4 <= ms.Length)
                 {
-                    var peek = br.ReadBytes(4);
-                    bool allZero = peek.All(b => b == 0);
-                    bool nonPrintable = peek.All(b => b < 0x20 || b > 0x7E);
-                    if (allZero || nonPrintable)
+                    long searchStart = ms.Position;
+                    ms.Position = searchStart;
+                    var nextBytes = br.ReadBytes(4);
+                    ms.Position = searchStart;
+                    var nextId = nextBytes.Length == 4 ? Encoding.ASCII.GetString(nextBytes.Reverse().ToArray()) : string.Empty;
+                    if (!valid.Contains(nextId))
                     {
-                        // skip
-                    }
-                    else
-                    {
-                        // rewind if actually the next id
-                        ms.Position -= 4;
+                        bool found = false;
+                        for (int s = 1; s <= 16 && searchStart + s + 4 <= ms.Length; s++)
+                        {
+                            ms.Position = searchStart + s;
+                            var scanBytes = br.ReadBytes(4);
+                            ms.Position = searchStart + s;
+                            var scanId = scanBytes.Length == 4 ? Encoding.ASCII.GetString(scanBytes.Reverse().ToArray()) : string.Empty;
+                            if (valid.Contains(scanId)) { found = true; break; }
+                        }
+                        if (!found) ms.Position = searchStart; // continue sequentially
                     }
                 }
             }
@@ -405,10 +441,10 @@ namespace WmoBspConverter.Wmo
             for (int i = 0; i < vertexCount; i++)
             {
                 var offset = i * VERTEX_SIZE;
+                // v14 axis mapping aligned with PoC: x, z, -y
                 var x = BitConverter.ToSingle(movtData, offset);
-                var y = BitConverter.ToSingle(movtData, offset + 4);
-                var z = BitConverter.ToSingle(movtData, offset + 8);
-                
+                var z = BitConverter.ToSingle(movtData, offset + 4);
+                var y = -BitConverter.ToSingle(movtData, offset + 8);
                 groupData.Vertices.Add(new Vector3(x, y, z));
             }
             
@@ -434,16 +470,16 @@ namespace WmoBspConverter.Wmo
 
         private void ProcessMopyChunk(byte[] mopyData, WmoGroupData groupData)
         {
-            // MOPY: Face material assignments (1 byte per face)
-            var faceCount = mopyData.Length;
-            
+            // MOPY: 2 bytes per face: flags, materialId
+            int faceCount = mopyData.Length / 2;
             groupData.FaceMaterials.Clear();
             for (int i = 0; i < faceCount; i++)
             {
-                groupData.FaceMaterials.Add(mopyData[i]);
+                byte flags = mopyData[i * 2 + 0];
+                byte matId = mopyData[i * 2 + 1];
+                groupData.FaceMaterials.Add(matId);
             }
-            
-            Console.WriteLine($"[DEBUG] Extracted {faceCount} face materials from MOPY");
+            Console.WriteLine($"[DEBUG] Extracted {faceCount} faces from MOPY");
         }
         private void ProcessTopLevelMovtChunk(byte[] movtData, WmoGroupData? groupData)
         {

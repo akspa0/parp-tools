@@ -534,6 +534,14 @@ WmoBspConverter/
 - **Logging**: Use appropriate log levels (Info/Warn/Error)
 - **Testing**: Include test cases for new features
 
+## 📄 Documentation
+
+- IBSP v46 writer notes: `docs/ibsp-v46-writer.md`
+- WMO v14 parsing notes: `docs/wmo-v14-parse.md`
+- Conversion pipeline: `docs/conversion-pipeline.md`
+- Quake 3 loading tips: `docs/q3-loading.md`
+- Memory Bank (project context): `memory-bank/`
+
 ## 📚 Additional Resources
 
 ### Documentation Links

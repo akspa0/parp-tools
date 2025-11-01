@@ -139,10 +139,17 @@ namespace WmoBspConverter
                 // Create converter with enhanced features
                 var converter = new WmoV14ToBspConverter(outputDirectory, extractTextures);
 
-                // Run enhanced conversion (handles WMOReader geometry and saving internally)
+                // Run enhanced conversion (uses v14 parser path)
                 var result = await converter.ConvertAsync(inputFile, outputDirectory, System.Threading.CancellationToken.None);
 
-                // Display conversion statistics
+                if (!result.Success)
+                {
+                    Console.WriteLine("✗ Conversion failed. See details above.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                // Display conversion statistics (success)
                 Console.WriteLine("✓ Conversion completed successfully!");
                 Console.WriteLine($"  ⏱️  Time: {result.ConversionTime.TotalMilliseconds:N0}ms");
                 Console.WriteLine($"  📐 Vertices: {result.TotalVertices:N0}");
@@ -173,7 +180,7 @@ namespace WmoBspConverter
                 // Success message for Quake 3 usage
                 Console.WriteLine();
                 Console.WriteLine("💡 The BSP file is ready for use in Quake 3 mapping tools:");
-                Console.WriteLine($"   • GtkRadiant: Load {Path.GetFileName(outputFile)}");
+                Console.WriteLine($"   • GtkRadiant: Load {Path.GetFileName(outBsp)}");
                 Console.WriteLine($"   • ioquake3: Copy to baseq3/maps/ directory");
                 
                 if (extractTextures)

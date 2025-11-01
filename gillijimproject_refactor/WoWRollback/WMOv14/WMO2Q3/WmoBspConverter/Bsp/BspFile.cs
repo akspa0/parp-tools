@@ -40,7 +40,9 @@ namespace WmoBspConverter.Bsp
 
             // Prepare lump data buffers
             var lumpData = new Dictionary<BspLumpType, byte[]>();
-            lumpData[BspLumpType.Entities] = string.Join("\n", Entities).Select(c => (byte)c).ToArray();
+            var entitiesText = string.Join("\n", Entities);
+            if (!entitiesText.EndsWith("\0")) entitiesText += "\0"; // Q3 expects null-terminated entities
+            lumpData[BspLumpType.Entities] = System.Text.Encoding.UTF8.GetBytes(entitiesText);
             lumpData[BspLumpType.Textures] = Textures.SelectMany(t => t.ToByteArray()).ToArray();
             lumpData[BspLumpType.Planes] = Planes.SelectMany(p => p.ToByteArray()).ToArray();
             lumpData[BspLumpType.Nodes] = Nodes.SelectMany(n => n.ToByteArray()).ToArray();
@@ -167,8 +169,8 @@ namespace WmoBspConverter.Bsp
         Effects = 12,
         FaceIndex = 13,
         Lightmaps = 14,
-        VisData = 15,
-        LightGrid = 16
+        LightGrid = 15,
+        VisData = 16
     }
 
     public class BspVertex
@@ -335,16 +337,17 @@ namespace WmoBspConverter.Bsp
             result.AddRange(BitConverter.GetBytes(Plane));
             result.AddRange(BitConverter.GetBytes(Children[0]));
             result.AddRange(BitConverter.GetBytes(Children[1]));
-            result.AddRange(BitConverter.GetBytes(Min.X));
-            result.AddRange(BitConverter.GetBytes(Min.Y));
-            result.AddRange(BitConverter.GetBytes(Min.Z));
-            result.AddRange(BitConverter.GetBytes(Max.X));
-            result.AddRange(BitConverter.GetBytes(Max.Y));
-            result.AddRange(BitConverter.GetBytes(Max.Z));
+            // Quake 3 stores node AABB as int32s
+            result.AddRange(BitConverter.GetBytes((int)Min.X));
+            result.AddRange(BitConverter.GetBytes((int)Min.Y));
+            result.AddRange(BitConverter.GetBytes((int)Min.Z));
+            result.AddRange(BitConverter.GetBytes((int)Max.X));
+            result.AddRange(BitConverter.GetBytes((int)Max.Y));
+            result.AddRange(BitConverter.GetBytes((int)Max.Z));
             return result.ToArray();
         }
 
-        public static int Size => 32;
+        public static int Size => 36;
     }
 
     public class BspLeaf
@@ -363,12 +366,13 @@ namespace WmoBspConverter.Bsp
             var result = new List<byte>();
             result.AddRange(BitConverter.GetBytes(Cluster));
             result.AddRange(BitConverter.GetBytes(Area));
-            result.AddRange(BitConverter.GetBytes(Min.X));
-            result.AddRange(BitConverter.GetBytes(Min.Y));
-            result.AddRange(BitConverter.GetBytes(Min.Z));
-            result.AddRange(BitConverter.GetBytes(Max.X));
-            result.AddRange(BitConverter.GetBytes(Max.Y));
-            result.AddRange(BitConverter.GetBytes(Max.Z));
+            // Quake 3 stores leaf AABB as int32s
+            result.AddRange(BitConverter.GetBytes((int)Min.X));
+            result.AddRange(BitConverter.GetBytes((int)Min.Y));
+            result.AddRange(BitConverter.GetBytes((int)Min.Z));
+            result.AddRange(BitConverter.GetBytes((int)Max.X));
+            result.AddRange(BitConverter.GetBytes((int)Max.Y));
+            result.AddRange(BitConverter.GetBytes((int)Max.Z));
             result.AddRange(BitConverter.GetBytes(FirstFace));
             result.AddRange(BitConverter.GetBytes(NumFaces));
             result.AddRange(BitConverter.GetBytes(FirstBrush));
