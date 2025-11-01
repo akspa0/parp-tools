@@ -51,7 +51,7 @@ This tool converts **World of Warcraft Alpha** (version 0.5.5.3494 and earlier) 
 
 ### Why This Matters
 
-In 1999, id Software's John Carmack mentioned in his WoW Diary that WoW alpha content appeared "dark" when loaded in Quake 3 engines. This converter demonstrates why - WoW used complex WMO files with lighting data that wasn't being properly interpreted. This tool recreates that historical phenomenon while providing a practical conversion utility.
+The WoW Diary by John Staats mentions loading interiors up in Quake 3 as maps, instead of inside of the WoW engine. The WMO format may be closer to the Quake 3 map format than one would believe. We have early WMO assets in the alpha version of the game, so we might as well see just how far off WMOv14 is from Quake 3.
 
 ## 🚀 Quick Start Guide
 
