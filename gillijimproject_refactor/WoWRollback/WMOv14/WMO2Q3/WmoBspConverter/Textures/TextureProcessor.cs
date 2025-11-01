@@ -3,6 +3,8 @@ using System.IO;
 using System.Threading.Tasks;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Formats.Tga;
+
 using System.Collections.Generic;
 using System.Linq;
 using WoWFormatLib.FileReaders;
@@ -109,7 +111,7 @@ namespace WmoBspConverter.Textures
         }
 
         /// <summary>
-        /// Convert BLP texture to Q3-compatible PNG format using WoWFormatLib.
+        /// Convert BLP texture to Q3-compatible TGA format using WoWFormatLib.
         /// </summary>
         private async Task<TextureInfo?> ConvertBLPToQ3Format(string texturePath)
         {
@@ -119,7 +121,8 @@ namespace WmoBspConverter.Textures
             // Clean up the texture path
             var cleanPath = texturePath.Replace("\\", "/");
             var fileName = Path.GetFileNameWithoutExtension(cleanPath);
-            var outputFileName = $"{fileName}.png";
+            var fileNameLower = fileName.ToLowerInvariant();
+            var outputFileName = $"{fileNameLower}.tga";
             var outputPath = Path.Combine(_textureOutputDir, outputFileName);
 
             // Skip if already processed
@@ -133,7 +136,7 @@ namespace WmoBspConverter.Textures
                     ShaderName = ConvertTexturePathToShader(texturePath),
                     Width = imageInfo?.Width ?? 0,
                     Height = imageInfo?.Height ?? 0,
-                    Format = "PNG"
+                    Format = "TGA"
                 };
             }
 
@@ -145,7 +148,11 @@ namespace WmoBspConverter.Textures
                 
                 if (blpImage != null)
                 {
-                    await blpImage.SaveAsPngAsync(outputPath);
+                    await blpImage.SaveAsTgaAsync(outputPath, new TgaEncoder
+                    {
+                        BitsPerPixel = TgaBitsPerPixel.Pixel24,
+                        Compression = TgaCompression.None
+                    });
                     return new TextureInfo
                     {
                         OriginalName = texturePath,
@@ -153,7 +160,7 @@ namespace WmoBspConverter.Textures
                         ShaderName = ConvertTexturePathToShader(texturePath),
                         Width = blpImage.Width,
                         Height = blpImage.Height,
-                        Format = "PNG"
+                        Format = "TGA"
                     };
                 }
                 
@@ -345,11 +352,15 @@ namespace WmoBspConverter.Textures
                 }
 
                 var cleanPath = texturePath.Replace("\\", "/");
-                var fileName = Path.GetFileNameWithoutExtension(cleanPath);
-                var outputFileName = $"{fileName}_placeholder.png";
+                var fileName = Path.GetFileNameWithoutExtension(cleanPath).ToLowerInvariant();
+                var outputFileName = $"{fileName}_placeholder.tga";
                 var outputPath = Path.Combine(_textureOutputDir, outputFileName);
                 
-                await image.SaveAsPngAsync(outputPath);
+                await image.SaveAsTgaAsync(outputPath, new TgaEncoder
+                {
+                    BitsPerPixel = TgaBitsPerPixel.Pixel24,
+                    Compression = TgaCompression.None
+                });
                 
                 return new TextureInfo
                 {
@@ -358,7 +369,7 @@ namespace WmoBspConverter.Textures
                     ShaderName = ConvertTexturePathToShader(texturePath),
                     Width = width,
                     Height = height,
-                    Format = "PNG"
+                    Format = "TGA"
                 };
             }
             catch
@@ -377,32 +388,10 @@ namespace WmoBspConverter.Textures
 
             // Normalize path
             var cleanPath = texturePath.Replace("\\", "/");
-            
-            // Remove file extension
-            var fileName = Path.GetFileNameWithoutExtension(cleanPath);
-            
-            // Handle common WoW texture paths
-            if (cleanPath.StartsWith("World/wmo/", StringComparison.OrdinalIgnoreCase))
-            {
-                var relativePath = cleanPath.Substring("World/wmo/".Length);
-                return $"textures/wmo/{relativePath}";
-            }
-            
-            // Handle models/textures paths
-            if (cleanPath.StartsWith("Models/", StringComparison.OrdinalIgnoreCase) ||
-                cleanPath.StartsWith("Textures/", StringComparison.OrdinalIgnoreCase))
-            {
-                return $"textures/models/{fileName}";
-            }
-            
-            // Handle spell textures and other special cases
-            if (cleanPath.StartsWith("Spells/", StringComparison.OrdinalIgnoreCase))
-            {
-                return $"textures/spells/{fileName}";
-            }
-            
-            // Default fallback
-            return $"textures/wmo/{fileName}";
+
+            // Always collapse to textures/wmo/<file> without extension, lowercased
+            var fileNameNoExt = Path.GetFileNameWithoutExtension(cleanPath).ToLowerInvariant();
+            return $"textures/wmo/{fileNameNoExt}";
         }
 
         /// <summary>
@@ -417,6 +406,35 @@ namespace WmoBspConverter.Textures
             var shaderPath = Path.Combine(shaderDir, "wmo_textures.shader");
             
             File.WriteAllText(shaderPath, shaderScript);
+            Console.WriteLine($"[INFO] Generated shader script: {shaderPath}");
+        }
+
+        /// <summary>
+        /// Generate a simple shader script that maps each processed texture to itself (no extension in map path).
+        /// </summary>
+        public void GenerateShaderScripts(List<TextureInfo> textures)
+        {
+            var shaderDir = Path.Combine(_textureOutputDir, "shaders");
+            Directory.CreateDirectory(shaderDir);
+
+            var lines = new List<string>();
+            lines.Add("// Simple WMO texture shaders (auto-generated)");
+            lines.Add("");
+            foreach (var tex in textures)
+            {
+                // Use the shader name (textures/...) without extension in the map directive
+                lines.Add(tex.ShaderName);
+                lines.Add("{");
+                lines.Add("    { ");
+                lines.Add($"        map {tex.ShaderName}");
+                lines.Add("        rgbGen vertex");
+                lines.Add("    }");
+                lines.Add("}");
+                lines.Add("");
+            }
+
+            var shaderPath = Path.Combine(shaderDir, "wmo_textures.shader");
+            File.WriteAllText(shaderPath, string.Join("\n", lines));
             Console.WriteLine($"[INFO] Generated shader script: {shaderPath}");
         }
 
@@ -473,7 +491,8 @@ namespace WmoBspConverter.Textures
                         break;
                 }
                 
-                shaderLines.Add($"    map {texture.ShaderName}.png");
+                // Use shader path without extension; Q3 will load .tga/.jpg as available
+                shaderLines.Add($"    map {texture.ShaderName}");
                 shaderLines.Add("}");
                 shaderLines.Add("");
             }

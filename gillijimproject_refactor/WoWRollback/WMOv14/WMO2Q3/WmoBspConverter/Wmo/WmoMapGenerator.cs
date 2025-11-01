@@ -12,6 +12,14 @@ namespace WmoBspConverter.Wmo
     /// </summary>
     public class WmoMapGenerator
     {
+        // Applies the single WMO -> Quake 3 coordinate transform used for map emission
+        private static Vector3 TransformToQ3(Vector3 v)
+        {
+            const float scale = 100.0f;
+            // WMO(X,Y,Z) -> Q3(X,Z,-Y) with uniform 100x scale
+            return new Vector3(v.X * scale, v.Z * scale, -v.Y * scale);
+        }
+
         public void GenerateMapFile(string outputPath, WmoV14Parser.WmoV14Data wmoData, BspFile bspFile)
         {
             var mapContent = new StringBuilder();
@@ -23,11 +31,18 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine($"// Textures: {wmoData.Textures.Count}");
             mapContent.AppendLine();
             
-            // Generate worldspawn entity
-            GenerateWorldspawnEntity(mapContent, wmoData, bspFile);
+            // Open worldspawn entity and keep it open while emitting brushes
+            StartWorldspawnEntity(mapContent, wmoData, bspFile);
             
-            // Generate brushes from geometry
-            GenerateBrushesFromGeometry(mapContent, bspFile);
+            // Generate brushes from geometry inside worldspawn
+            var defaultTex = bspFile.Textures.Count > 0 ? bspFile.Textures[0].Name : "textures/common/caulk";
+            GenerateBrushesFromGeometry(mapContent, bspFile, defaultTex);
+            
+            // Close worldspawn entity
+            EndWorldspawnEntity(mapContent);
+            
+            // Add a default player spawn entity so editors/games can load
+            AddSpawnEntity(mapContent, bspFile);
             
             // Generate texture info
             GenerateTextureInfo(mapContent, wmoData);
@@ -38,7 +53,7 @@ namespace WmoBspConverter.Wmo
             Console.WriteLine($"[INFO] Generated .map file: {outputPath}");
         }
 
-        private void GenerateWorldspawnEntity(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, BspFile bspFile)
+        private void StartWorldspawnEntity(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, BspFile bspFile)
         {
             mapContent.AppendLine("// Worldspawn entity");
             mapContent.AppendLine("{");
@@ -48,24 +63,31 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine($"\"wmo_textures\" \"{wmoData.Textures.Count}\"");
             mapContent.AppendLine($"\"numpolygons\" \"{bspFile.Faces.Count}\"");
             mapContent.AppendLine($"\"numvertices\" \"{bspFile.Vertices.Count}\"");
-            
-            // Add first texture as skybox if available
-            if (wmoData.Textures.Count > 0)
-            {
-                mapContent.AppendLine($"\"texture\" \"{wmoData.Textures[0]}\"");
-            }
-            
+            // worldspawn stays open; brushes will follow
+        }
+
+        private void EndWorldspawnEntity(StringBuilder mapContent)
+        {
             mapContent.AppendLine("}");
             mapContent.AppendLine();
         }
 
-        private void GenerateBrushesFromGeometry(StringBuilder mapContent, BspFile bspFile)
+        private void GenerateBrushesFromGeometry(StringBuilder mapContent, BspFile bspFile, string defaultTexture)
         {
             mapContent.AppendLine("// Complete geometry brushes generated from WMO data");
             mapContent.AppendLine($"// Total faces: {bspFile.Faces.Count}, Total vertices: {bspFile.Vertices.Count}");
             
+            // DEBUG: Output raw vertex data to console for analysis
+            Console.WriteLine("\n[DEBUG] Raw WMO vertices (first 12):");
+            for (int i = 0; i < Math.Min(12, bspFile.Vertices.Count); i++)
+            {
+                var v = bspFile.Vertices[i].Position;
+                Console.WriteLine($"  v{i}: X={v.X:F4}, Y={v.Y:F4}, Z={v.Z:F4}");
+            }
+            
             // Generate brushes from all faces in the BSP data
             int brushCount = 0;
+            int skippedCount = 0;
             foreach (var face in bspFile.Faces)
             {
                 if (face.FirstVertex + 2 >= bspFile.Vertices.Count)
@@ -75,8 +97,21 @@ namespace WmoBspConverter.Wmo
                 var v1 = bspFile.Vertices[face.FirstVertex + 1].Position;
                 var v2 = bspFile.Vertices[face.FirstVertex + 2].Position;
                 
+                // Cull degenerate triangles
+                var e1 = v1 - v0;
+                var e2 = v2 - v0;
+                var n = Vector3.Cross(e1, e2);
+                if (n.Length() < 1e-6f)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
                 // Create brush from actual triangle geometry
-                var brush = GenerateTriangleBrushFromGeometry(v0, v1, v2, face.Texture);
+                var faceTex = (face.Texture >= 0 && face.Texture < bspFile.Textures.Count)
+                    ? bspFile.Textures[face.Texture].Name
+                    : defaultTexture;
+                var brush = GenerateTriangleBrushFromGeometry(v0, v1, v2, faceTex);
                 mapContent.Append(brush);
                 
                 brushCount++;
@@ -90,59 +125,79 @@ namespace WmoBspConverter.Wmo
             
             mapContent.AppendLine();
             Console.WriteLine($"[DEBUG] Generated {brushCount} geometry brushes from WMO data");
+            if (skippedCount > 0)
+                Console.WriteLine($"[DEBUG] Skipped {skippedCount} degenerate triangles");
         }
 
-        private string GenerateTriangleBrushFromGeometry(Vector3 v0, Vector3 v1, Vector3 v2, int textureIndex)
+        private static readonly string BR = ""; // inline appending only
+
+        private string GenerateTriangleBrushFromGeometry(Vector3 v0, Vector3 v1, Vector3 v2, string textureName)
         {
             var brush = new StringBuilder();
             
-            // Create a triangular prism brush from the actual triangle geometry
-            // This creates a 3D brush from the 2D triangle by extruding it along a normal
-            var normal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
-            var height = 64f; // Extrude height for 3D volume
-            
-            brush.AppendLine($"// Triangle brush {textureIndex} from geometry: v0={v0}, v1={v1}, v2={v2}");
+            var tex = string.IsNullOrWhiteSpace(textureName) ? "textures/common/caulk" : textureName;
+            brush.AppendLine($"// Triangle: v0={v0}, v1={v1}, v2={v2}");
             brush.AppendLine("{");
             
-            // Create 6 faces of the triangular prism
-            brush.AppendLine($"  ( {v0.X} {v0.Y} {v0.Z} ) ( {v1.X} {v1.Y} {v1.Z} ) ( {v2.X} {v2.Y} {v2.Z} ) NULL 0 0 0");
-            brush.AppendLine($"  ( {v0.X + normal.X * height} {v0.Y + normal.Y * height} {v0.Z + normal.Z * height} ) ( {v1.X + normal.X * height} {v1.Y + normal.Y * height} {v1.Z + normal.Z * height} ) ( {v2.X + normal.X * height} {v2.Y + normal.Y * height} {v2.Z + normal.Z * height} ) NULL 0 0 0");
+            v0 = TransformToQ3(v0);
+            v1 = TransformToQ3(v1);
+            v2 = TransformToQ3(v2);
             
-            // Side faces
-            brush.AppendLine($"  ( {v0.X} {v0.Y} {v0.Z} ) ( {v1.X} {v1.Y} {v1.Z} ) ( {v1.X + normal.X * height} {v1.Y + normal.Y * height} {v1.Z + normal.Z * height} ) NULL 0 0 0");
-            brush.AppendLine($"  ( {v1.X} {v1.Y} {v1.Z} ) ( {v2.X} {v2.Y} {v2.Z} ) ( {v2.X + normal.X * height} {v2.Y + normal.Y * height} {v2.Z + normal.Z * height} ) NULL 0 0 0");
-            brush.AppendLine($"  ( {v2.X} {v2.Y} {v2.Z} ) ( {v0.X} {v0.Y} {v0.Z} ) ( {v0.X + normal.X * height} {v0.Y + normal.Y * height} {v0.Z + normal.Z * height} ) NULL 0 0 0");
-            
-            // Top and bottom (extruded)
-            brush.AppendLine($"  ( {v0.X} {v0.Y} {v0.Z} ) ( {v2.X} {v2.Y} {v2.Z} ) ( {v1.X} {v1.Y} {v1.Z} ) NULL 0 0 0");
+            float minX = MathF.Min(v0.X, MathF.Min(v1.X, v2.X));
+            float minY = MathF.Min(v0.Y, MathF.Min(v1.Y, v2.Y));
+            float minZ = MathF.Min(v0.Z, MathF.Min(v1.Z, v2.Z));
+            float maxX = MathF.Max(v0.X, MathF.Max(v1.X, v2.X));
+            float maxY = MathF.Max(v0.Y, MathF.Max(v1.Y, v2.Y));
+            float maxZ = MathF.Max(v0.Z, MathF.Max(v1.Z, v2.Z));
+
+            const float pad = 1.0f;
+            minX -= pad; maxX += pad;
+            minY -= pad; maxY += pad;
+            minZ -= pad; maxZ += pad;
+
+            // -X
+            brush.AppendLine($"  ( {minX} {minY} {minZ} ) ( {minX} {minY} {maxZ} ) ( {minX} {maxY} {maxZ} ) {tex} 0 0 0 1 1");
+            // +X
+            brush.AppendLine($"  ( {maxX} {minY} {minZ} ) ( {maxX} {maxY} {minZ} ) ( {maxX} {maxY} {maxZ} ) {tex} 0 0 0 1 1");
+            // -Y
+            brush.AppendLine($"  ( {minX} {minY} {minZ} ) ( {maxX} {minY} {minZ} ) ( {maxX} {minY} {maxZ} ) {tex} 0 0 0 1 1");
+            // +Y
+            brush.AppendLine($"  ( {minX} {maxY} {minZ} ) ( {minX} {maxY} {maxZ} ) ( {maxX} {maxY} {maxZ} ) {tex} 0 0 0 1 1");
+            // -Z
+            brush.AppendLine($"  ( {minX} {minY} {minZ} ) ( {minX} {maxY} {minZ} ) ( {maxX} {maxY} {minZ} ) {tex} 0 0 0 1 1");
+            // +Z
+            brush.AppendLine($"  ( {minX} {minY} {maxZ} ) ( {maxX} {minY} {maxZ} ) ( {maxX} {maxY} {maxZ} ) {tex} 0 0 0 1 1");
             
             brush.AppendLine("}");
             
             return brush.ToString();
         }
 
-        private string GenerateSimpleCubeBrush(int brushIndex)
+        private void AddSpawnEntity(StringBuilder mapContent, BspFile bspFile)
         {
-            // Fallback method for testing
-            var brush = new StringBuilder();
-            
-            brush.AppendLine($"// Simple cube brush {brushIndex}");
-            brush.AppendLine("{");
-            brush.AppendLine("  ( -64 0 0 ) ( 0 -64 0 ) ( 0 0 -64 ) NULL 0 0 0");
-            brush.AppendLine("  ( 0 0 0 ) ( 0 -64 0 ) ( 0 0 128 ) NULL 0 0 0");
-            brush.AppendLine("  ( 0 0 0 ) ( 0 0 128 ) ( 64 0 0 ) NULL 0 0 0");
-            brush.AppendLine("  ( 0 0 0 ) ( 64 0 0 ) ( 0 64 0 ) NULL 0 0 0");
-            brush.AppendLine("  ( 0 0 0 ) ( 0 64 0 ) ( 0 0 -64 ) NULL 0 0 0");
-            brush.AppendLine("  ( 0 0 0 ) ( 64 0 0 ) ( 0 0 128 ) NULL 0 0 0");
-            brush.AppendLine("}");
-            
-            return brush.ToString();
-        }
-
-        private string GenerateTriangleBrush(Vector3 v0, Vector3 v1, Vector3 v2, int textureIndex)
-        {
-            // This method is no longer used - replaced by GenerateTriangleBrushFromGeometry
-            return GenerateTriangleBrushFromGeometry(v0, v1, v2, textureIndex);
+            if (bspFile.Vertices.Count == 0) return;
+            var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            foreach (var v in bspFile.Vertices)
+            {
+                // Compute bounds in Q3 coordinates to match geometry emission
+                var p = TransformToQ3(v.Position);
+                if (p.X < min.X) min.X = p.X;
+                if (p.Y < min.Y) min.Y = p.Y;
+                if (p.Z < min.Z) min.Z = p.Z;
+                if (p.X > max.X) max.X = p.X;
+                if (p.Y > max.Y) max.Y = p.Y;
+                if (p.Z > max.Z) max.Z = p.Z;
+            }
+            var center = (min + max) * 0.5f;
+            var spawnZ = min.Z + 64f;
+            mapContent.AppendLine("// Default spawn");
+            mapContent.AppendLine("{");
+            mapContent.AppendLine("\"classname\" \"info_player_deathmatch\"");
+            mapContent.AppendLine($"\"origin\" \"{center.X:F1} {center.Y:F1} {spawnZ:F1}\"");
+            mapContent.AppendLine("\"angle\" \"0\"");
+            mapContent.AppendLine("}");
+            mapContent.AppendLine();
         }
 
         private void GenerateTextureInfo(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData)

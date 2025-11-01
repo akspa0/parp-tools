@@ -130,7 +130,7 @@ namespace WmoBspConverter.Bsp
     public class BspHeader
     {
         // Quake 3 BSP format constants
-        public const int Magic = 0x49534250; // "IBSP" in little-endian
+        public const int Magic = 0x50534249; // 'IBSP' as little-endian int
         public const int Version = 46; // Quake 3 BSP version
         public const int Size = 4 + 4 + (17 * 8); // Magic + Version + 17 LumpInfo structs
         

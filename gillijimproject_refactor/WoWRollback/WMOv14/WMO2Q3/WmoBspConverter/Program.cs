@@ -2,7 +2,9 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Numerics;
 using WmoBspConverter.Wmo;
+using WmoBspConverter.Bsp;
 
 namespace WmoBspConverter
 {
@@ -17,17 +19,25 @@ namespace WmoBspConverter
                 return 1;
             }
 
+            bool emitCube = false;
             string inputFile = args[0];
             string? outputFile = null;
             bool extractTextures = true;
             string? outputDir = null;
             bool verbose = false;
+            string? objPath = null;
+            bool allowFallback = false;
+            bool includeNonRender = false;
 
             // Parse simple command line arguments
             for (int i = 1; i < args.Length; i++)
             {
                 switch (args[i].ToLowerInvariant())
                 {
+                    case "--emit-cube":
+                    case "-c":
+                        emitCube = true;
+                        break;
                     case "--output":
                     case "-o":
                         if (i + 1 < args.Length)
@@ -58,6 +68,18 @@ namespace WmoBspConverter
                     case "-v":
                         verbose = true;
                         break;
+                    case "--obj":
+                        if (i + 1 < args.Length)
+                        {
+                            objPath = args[++i];
+                        }
+                        break;
+                    case "--allow-fallback":
+                        allowFallback = true;
+                        break;
+                    case "--include-nonrender":
+                        includeNonRender = true;
+                        break;
                     case "--help":
                     case "-h":
                         ShowUsage();
@@ -67,7 +89,18 @@ namespace WmoBspConverter
 
             try
             {
-                await ConvertAsync(inputFile, outputFile, extractTextures, outputDir, verbose);
+                if (emitCube)
+                {
+                    await CubeEmitter.EmitCubeAsync(outputFile, outputDir, verbose);
+                }
+                else if (!string.IsNullOrEmpty(objPath))
+                {
+                    await ExportObjAsync(inputFile, objPath!, allowFallback, includeNonRender, extractTextures, verbose);
+                }
+                else
+                {
+                    await ConvertAsync(inputFile, outputFile, extractTextures, outputDir, verbose);
+                }
                 return 0;
             }
             catch (Exception ex)
@@ -84,19 +117,26 @@ namespace WmoBspConverter
         static void ShowUsage()
         {
             Console.WriteLine("WMO v14 → Quake 3 BSP Converter");
-            Console.WriteLine("Usage: WmoBspConverter <input.wmo> [options]");
+            Console.WriteLine("Usage: WmoBspConverter <input.wmo> [options] | --emit-cube [options] | <input.wmo> --obj <file> [--allow-fallback]");
             Console.WriteLine();
             Console.WriteLine("Options:");
+            Console.WriteLine("  --emit-cube, -c           Emit a golden cube BSP (test) without WMO input");
             Console.WriteLine("  --output, -o <file>       Output BSP file path");
             Console.WriteLine("  --extract-textures, -t    Extract and convert BLP textures to PNG (default: true)");
             Console.WriteLine("  --output-dir, -d <dir>    Output directory for textures and shaders");
             Console.WriteLine("  --verbose, -v             Enable verbose logging");
+            Console.WriteLine("  --obj <file>              Export OBJ (raw WMO coords). Skips BSP/.map path");
+            Console.WriteLine("  --allow-fallback          When MOVI is absent, emit sequential-triple faces");
+            Console.WriteLine("  --include-nonrender      Include non-render/collision/portal faces (from MOPY flags)");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  WmoBspConverter building.wmo");
             Console.WriteLine("  WmoBspConverter dungeon.wmo --output maps/dungeon.bsp --extract-textures");
             Console.WriteLine("  WmoBspConverter tower.wmo -o tower.bsp -d ./output -v");
+            Console.WriteLine("  WmoBspConverter --emit-cube -d ./output -v");
+            Console.WriteLine("  WmoBspConverter model.wmo --obj ./out/model.obj -v");
+            Console.WriteLine("  WmoBspConverter test.wmo --obj ./out/test.obj --allow-fallback");
         }
 
         static async Task ConvertAsync(string inputFile, string? outputFile, bool extractTextures, string? outputDir, bool verbose)
@@ -167,7 +207,7 @@ namespace WmoBspConverter
                 // Show texture extraction info
                 if (extractTextures && Directory.Exists(textureOutputDir))
                 {
-                    var textureFiles = Directory.GetFiles(textureOutputDir, "*.png", SearchOption.AllDirectories);
+                    var textureFiles = Directory.GetFiles(textureOutputDir, "*.tga", SearchOption.AllDirectories);
                     Console.WriteLine($"  🖼️  Extracted textures: {textureFiles.Length}");
                     
                     var shaderFiles = Directory.GetFiles(textureOutputDir, "*.shader", SearchOption.AllDirectories);
@@ -198,6 +238,122 @@ namespace WmoBspConverter
                     Console.WriteLine(ex.StackTrace);
                 }
                 throw;
+            }
+        }
+        private static async Task ExportObjAsync(string inputFile, string objPath, bool allowFallback, bool includeNonRender, bool extractTextures, bool verbose)
+        {
+            var parser = new WmoV14Parser();
+            var data = parser.ParseWmoV14(inputFile);
+            var exporter = new Wmo.WmoObjExporter();
+            exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures);
+            if (verbose) Console.WriteLine($"[OBJ] Wrote {Path.GetFullPath(objPath)}");
+            await Task.CompletedTask;
+        }
+    }
+
+    internal static class CubeEmitter
+    {
+        internal static async Task EmitCubeAsync(string? outputFile, string? outputDir, bool verbose)
+        {
+            var outDir = outputDir ?? (string.IsNullOrEmpty(outputFile) ? Directory.GetCurrentDirectory() : Path.GetDirectoryName(outputFile)) ?? ".";
+            Directory.CreateDirectory(outDir);
+            var outPath = outputFile ?? Path.Combine(outDir, "cube.bsp");
+
+            var bsp = new BspFile();
+
+            // Texture
+            bsp.Textures.Add(new BspTexture { Name = "textures/common/caulk", Flags = 0, Contents = 0 });
+
+            // Simple cube geometry (12 tris)
+            float s = 64f;
+            Vector3[] verts = new[]
+            {
+                new Vector3(-s, -s, -s), new Vector3(s, -s, -s), new Vector3(s, s, -s), new Vector3(-s, s, -s),
+                new Vector3(-s, -s,  s), new Vector3(s, -s,  s), new Vector3(s, s,  s), new Vector3(-s, s,  s)
+            };
+            int[][] tris = new[]
+            {
+                new[]{0,1,2}, new[]{0,2,3},
+                new[]{4,6,5}, new[]{4,7,6},
+                new[]{4,5,1}, new[]{4,1,0},
+                new[]{5,6,2}, new[]{5,2,1},
+                new[]{6,7,3}, new[]{6,3,2},
+                new[]{7,4,0}, new[]{7,0,3},
+            };
+
+            foreach (var t in tris)
+            {
+                var p0 = verts[t[0]]; var p1 = verts[t[1]]; var p2 = verts[t[2]];
+                var e1 = p1 - p0; var e2 = p2 - p0; var n = Vector3.Cross(e1, e2);
+                var len = n.Length(); if (len < 1e-6f) continue; n /= len;
+
+                int start = bsp.Vertices.Count;
+                bsp.Vertices.Add(new BspVertex { Position = p0, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = n, Color = new byte[]{255,255,255,255} });
+                bsp.Vertices.Add(new BspVertex { Position = p1, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = n, Color = new byte[]{255,255,255,255} });
+                bsp.Vertices.Add(new BspVertex { Position = p2, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = n, Color = new byte[]{255,255,255,255} });
+
+                int mstart = bsp.MeshVertices.Count; bsp.MeshVertices.Add(0); bsp.MeshVertices.Add(1); bsp.MeshVertices.Add(2);
+
+                bsp.Faces.Add(new BspFace
+                {
+                    Texture = 0,
+                    Effect = -1,
+                    Type = 3,
+                    FirstVertex = start,
+                    NumVertices = 3,
+                    FirstMeshVertex = mstart,
+                    NumMeshVertices = 3,
+                    Lightmap = -1,
+                    Normal = n
+                });
+            }
+
+            // Planes from faces
+            foreach (var f in bsp.Faces)
+            {
+                var v0 = bsp.Vertices[f.FirstVertex].Position;
+                var v1 = bsp.Vertices[f.FirstVertex+1].Position;
+                var v2 = bsp.Vertices[f.FirstVertex+2].Position;
+                var n = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+                var d = Vector3.Dot(n, v0);
+                bsp.Planes.Add(new BspPlane { Normal = n, Distance = d });
+            }
+
+            // Bounds / model / nodes / leaves
+            Vector3 min = new Vector3(float.MaxValue), max = new Vector3(float.MinValue);
+            foreach (var v in bsp.Vertices)
+            {
+                var p = v.Position;
+                min = new Vector3(Math.Min(min.X, p.X), Math.Min(min.Y, p.Y), Math.Min(min.Z, p.Z));
+                max = new Vector3(Math.Max(max.X, p.X), Math.Max(max.Y, p.Y), Math.Max(max.Z, p.Z));
+            }
+            bsp.Models.Add(new BspModel { Min = min, Max = max, FirstFace = 0, NumFaces = bsp.Faces.Count });
+            bsp.Nodes.Add(new BspNode { Plane = 0, Children = new[]{-1,-1}, Min = min, Max = max });
+            bsp.Leaves.Add(new BspLeaf { Min = min, Max = max, Cluster = 0, Area = 0, FirstFace = 0, NumFaces = bsp.Faces.Count });
+            for (int i=0;i<bsp.Faces.Count;i++) bsp.LeafFaces.Add(i);
+
+            // Entities (worldspawn + spawn)
+            bsp.Entities.Add("{\n  \"classname\" \"worldspawn\"\n}");
+            var center = (min + max) * 0.5f;
+            bsp.Entities.Add($"{{\n  \"classname\" \"info_player_deathmatch\"\n  \"origin\" \"{center.X:F1} {center.Y:F1} {max.Z + 32:F1}\"\n  \"angle\" \"0\"\n}}");
+
+            // Save and verify
+            bsp.Save(outPath);
+            if (verbose) VerifyBspHeader(outPath);
+            Console.WriteLine($"[CUBE] Wrote golden cube BSP: {outPath}");
+            await Task.CompletedTask;
+        }
+
+        private static void VerifyBspHeader(string path)
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs);
+            int magic = br.ReadInt32();
+            int ver = br.ReadInt32();
+            Console.WriteLine($"[VERIFY] Magic=0x{magic:X8} Version={ver}");
+            if (magic != BspHeader.Magic || ver != BspHeader.Version)
+            {
+                Console.WriteLine("[VERIFY] Invalid IBSP header");
             }
         }
     }

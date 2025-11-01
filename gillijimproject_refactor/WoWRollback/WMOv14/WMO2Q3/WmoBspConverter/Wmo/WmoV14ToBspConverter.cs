@@ -69,9 +69,9 @@ namespace WmoBspConverter.Wmo
 
             Console.WriteLine($"[INFO] Conversion completed successfully!");
             Console.WriteLine($"[STATS] Vertices: {bspFile.Vertices.Count}, Faces: {bspFile.Faces.Count}, Textures: {bspFile.Textures.Count}");
-            Console.WriteLine($"[INFO] 🎯 PRIMARY OUTPUT: .map file for Quake 3 editing");
-            Console.WriteLine($"[INFO] 📁 {mapFilePath}");
-            Console.WriteLine($"[INFO] 🔧 Next steps: 1) Open .map in GtkRadiant, 2) Compile with Q3Map2");
+            Console.WriteLine($"[INFO] PRIMARY OUTPUT: .map file for Quake 3 editing");
+            Console.WriteLine($"[INFO] {mapFilePath}");
+            Console.WriteLine($"[INFO] Next steps: 1) Open .map in GtkRadiant, 2) Compile with Q3Map2 (Bsp → Compile)");
 
             return Task.FromResult(bspFile);
         }
@@ -272,6 +272,33 @@ namespace WmoBspConverter.Wmo
             entity.AppendLine("}");
             
             bspFile.Entities.Add(entity.ToString());
+
+            // Add a default spawn so the map can load in Quake 3
+            if (bspFile.Vertices.Count > 0)
+            {
+                var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                foreach (var v in bspFile.Vertices)
+                {
+                    var p = v.Position;
+                    if (p.X < min.X) min.X = p.X;
+                    if (p.Y < min.Y) min.Y = p.Y;
+                    if (p.Z < min.Z) min.Z = p.Z;
+                    if (p.X > max.X) max.X = p.X;
+                    if (p.Y > max.Y) max.Y = p.Y;
+                    if (p.Z > max.Z) max.Z = p.Z;
+                }
+                var center = (min + max) * 0.5f;
+                var spawnZ = min.Z + 64f; // a bit above the lowest geometry
+
+                var spawn = new StringBuilder();
+                spawn.AppendLine("{");
+                spawn.AppendLine("  \"classname\" \"info_player_deathmatch\"");
+                spawn.AppendLine($"  \"origin\" \"{center.X:F1} {center.Y:F1} {spawnZ:F1}\"");
+                spawn.AppendLine("  \"angle\" \"0\"");
+                spawn.AppendLine("}");
+                bspFile.Entities.Add(spawn.ToString());
+            }
         }
 
         private void CreateBasicBspStructure(BspFile bspFile)
@@ -284,11 +311,29 @@ namespace WmoBspConverter.Wmo
             // Add one lightmap
             bspFile.Lightmaps.Add(Array.Empty<byte>());
             
+            // Compute geometry bounds
+            Vector3 min = new Vector3(-1000, -1000, -1000), max = new Vector3(1000, 1000, 1000);
+            if (bspFile.Vertices.Count > 0)
+            {
+                min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                foreach (var v in bspFile.Vertices)
+                {
+                    var p = v.Position;
+                    if (p.X < min.X) min.X = p.X;
+                    if (p.Y < min.Y) min.Y = p.Y;
+                    if (p.Z < min.Z) min.Z = p.Z;
+                    if (p.X > max.X) max.X = p.X;
+                    if (p.Y > max.Y) max.Y = p.Y;
+                    if (p.Z > max.Z) max.Z = p.Z;
+                }
+            }
+
             // Create one basic model
             var model = new BspModel
             {
-                Min = new Vector3(-1000, -1000, -1000),
-                Max = new Vector3(1000, 1000, 1000),
+                Min = min,
+                Max = max,
                 FirstFace = 0,
                 NumFaces = bspFile.Faces.Count
             };
@@ -301,8 +346,8 @@ namespace WmoBspConverter.Wmo
             // Create one basic leaf
             var leaf = new BspLeaf
             {
-                Min = new Vector3(-1000, -1000, -1000),
-                Max = new Vector3(1000, 1000, 1000),
+                Min = min,
+                Max = max,
                 Cluster = 0,
                 Area = 0,
                 FirstFace = 0,
@@ -334,12 +379,28 @@ namespace WmoBspConverter.Wmo
             }
             
             // Create root node
+            Vector3 min = new Vector3(-1000, -1000, -1000), max = new Vector3(1000, 1000, 1000);
+            if (bspFile.Vertices.Count > 0)
+            {
+                min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+                max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+                foreach (var v in bspFile.Vertices)
+                {
+                    var p = v.Position;
+                    if (p.X < min.X) min.X = p.X;
+                    if (p.Y < min.Y) min.Y = p.Y;
+                    if (p.Z < min.Z) min.Z = p.Z;
+                    if (p.X > max.X) max.X = p.X;
+                    if (p.Y > max.Y) max.Y = p.Y;
+                    if (p.Z > max.Z) max.Z = p.Z;
+                }
+            }
             var rootNode = new BspNode
             {
                 Plane = 0, // Reference first plane
                 Children = new int[] { -1, -1 }, // both children point to leaf 0 for a degenerate but safe tree
-                Min = new Vector3(-1000, -1000, -1000),
-                Max = new Vector3(1000, 1000, 1000)
+                Min = min,
+                Max = max
             };
             
             bspFile.Nodes.Add(rootNode);
@@ -371,8 +432,8 @@ namespace WmoBspConverter.Wmo
                 {
                     normal = Vector3.Normalize(normal);
                     
-                    // Calculate plane distance from origin
-                    var distance = -Vector3.Dot(normal, v0);
+                    // Calculate plane distance from origin (Q3 expects positive distance along normal)
+                    var distance = Vector3.Dot(normal, v0);
                     
                     // Create the plane
                     var plane = new BspPlane
@@ -436,6 +497,24 @@ namespace WmoBspConverter.Wmo
                 // Convert to BSP from parsed v14 data
                 var bspFile = parser.ConvertToBsp(wmoData);
 
+                // Extract textures to TGA and generate shader scripts; update BSP texture names to shader paths
+                if (_extractTextures)
+                {
+                    var tInfos = await _textureProcessor.ProcessTexturesAsync(wmoData.Textures);
+                    // Generate simple shader set based on available textures
+                    _textureProcessor.GenerateShaderScripts(tInfos);
+
+                    // Replace BSP texture table with shader-friendly names (no extensions)
+                    if (tInfos.Count > 0)
+                    {
+                        bspFile.Textures.Clear();
+                        foreach (var ti in tInfos)
+                        {
+                            bspFile.Textures.Add(new BspTexture { Name = ti.ShaderName, Flags = 0 });
+                        }
+                    }
+                }
+
                 // Add entities and basic BSP structure (planes, nodes, leaves)
                 ConvertEntities(wmoData, bspFile);
                 CreateBasicBspStructure(bspFile);
@@ -443,19 +522,17 @@ namespace WmoBspConverter.Wmo
                 // Ensure output directory exists
                 Directory.CreateDirectory(outputDirectory);
 
-                // Save BSP
-                var bspFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".bsp");
-                bspFile.Save(bspFileName);
-                Console.WriteLine($"💾 BSP file written: {Path.GetFileName(bspFileName)}");
-
-                // Generate .map alongside BSP
+                // Generate .map file (primary output for GtkRadiant editing)
                 var mapFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".map");
                 _mapGenerator.GenerateMapFile(mapFileName, wmoData, bspFile);
+                Console.WriteLine($"📝 .map file generated: {Path.GetFileName(mapFileName)}");
 
-                // Generate minimal shader scripts from texture names
-                var scriptsDir = Path.Combine(outputDirectory, "scripts");
-                Directory.CreateDirectory(scriptsDir);
-                await GenerateShaderScriptsAsync(wmoData.Textures, scriptsDir);
+                // NOTE: BSP writing disabled during development
+                // Use GtkRadiant to compile .map → BSP via Q3Map2 for best results
+                // This ensures BSP validity and proper lightmap/vis data generation
+                var bspFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".bsp");
+                Console.WriteLine($"⚠️  BSP file NOT written (use GtkRadiant to compile .map)");
+                Console.WriteLine($"📍 Compile path: {mapFileName}");
 
                 // Populate result stats from actual BSP
                 var result = new ConversionResult
