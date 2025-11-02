@@ -3,6 +3,7 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using WmoBspConverter.Bsp;
+using WmoBspConverter.Export;
 
 namespace WmoBspConverter.Wmo
 {
@@ -160,6 +161,50 @@ namespace WmoBspConverter.Wmo
             File.WriteAllText(outputPath, finalContent);
             
             Console.WriteLine($"[INFO] Generated .map file: {outputPath}");
+        }
+
+        public void GenerateMapFileWithModels(
+            string outputPath,
+            string outputRootDir,
+            string wmoName,
+            WmoV14Parser.WmoV14Data wmoData,
+            BspFile bspFile,
+            AseWriter aseWriter)
+        {
+            var mapContent = new StringBuilder();
+            mapContent.AppendLine("// Auto-generated from WMO v14 file (ASE model placement)");
+            mapContent.AppendLine($"// Original: WMO v{wmoData.Version}");
+            mapContent.AppendLine($"// Groups: {wmoData.Groups.Count}");
+            mapContent.AppendLine($"// Textures: {wmoData.Textures.Count}");
+            mapContent.AppendLine();
+
+            var (context, paddedBounds) = PrepareContext(bspFile);
+
+            // Sealed room and spawn
+            CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
+            AddSpawnEntity(mapContent, context);
+
+            // Place one misc_model per group
+            int g = 0;
+            foreach (var group in wmoData.Groups)
+            {
+                var intIndices = group.Indices.ConvertAll(i => (int)i);
+                var result = aseWriter.ExportGroup(outputRootDir, wmoName, g, group.Vertices, intIndices, context.GeometryOffset);
+                var origin = result.ModelOrigin;
+
+                mapContent.AppendLine("// WMO group model");
+                mapContent.AppendLine("{");
+                mapContent.AppendLine("\"classname\" \"misc_model\"");
+                mapContent.AppendLine($"\"model\" \"{result.RelativeModelPath.Replace("\\", "/")}\"");
+                mapContent.AppendLine($"\"origin\" \"{origin.X:F3} {origin.Y:F3} {origin.Z:F3}\"");
+                mapContent.AppendLine($"\"_wmo_group\" \"{g}\"");
+                mapContent.AppendLine("}");
+                mapContent.AppendLine();
+                g++;
+            }
+
+            File.WriteAllText(outputPath, mapContent.ToString());
+            Console.WriteLine($"[INFO] Generated .map (models): {outputPath}");
         }
 
         private void CreateSealedWorldspawn(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, GeometryBounds bounds)

@@ -11,6 +11,7 @@ using WoWFormatLib.Structs.WMO;
 using WoWFormatLib.FileProviders;
 using WmoBspConverter.Bsp;
 using WmoBspConverter.Textures;
+using WmoBspConverter.Export;
 
 namespace WmoBspConverter.Wmo
 {
@@ -70,7 +71,9 @@ namespace WmoBspConverter.Wmo
             Directory.CreateDirectory(outputDirectory);
             
             var mapFilePath = Path.Combine(outputDirectory, mapFileName);
-            _mapGenerator.GenerateMapFile(mapFilePath, wmoData, bspFile);
+            var aseWriter = new AseWriter();
+            var wmoName = Path.GetFileNameWithoutExtension(wmoFilePath) ?? "wmo";
+            _mapGenerator.GenerateMapFileWithModels(mapFilePath, outputDirectory, wmoName, wmoData, bspFile, aseWriter);
 
             Console.WriteLine($"[INFO] Conversion completed successfully!");
             Console.WriteLine($"[STATS] Vertices: {bspFile.Vertices.Count}, Faces: {bspFile.Faces.Count}, Textures: {bspFile.Textures.Count}");
@@ -530,15 +533,20 @@ namespace WmoBspConverter.Wmo
                 // Generate .map file (primary output for GtkRadiant editing)
                 var mapFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".map");
                 
+                var aseWriter = new AseWriter();
+                var wmoName = Path.GetFileNameWithoutExtension(inputFilePath) ?? "wmo";
                 if (_splitGroups && wmoData.Groups.Count > 1)
                 {
+                    // Still generate per-group .map files if requested (brush mode) for debugging,
+                    // and also generate a primary model-based .map
                     _mapGenerator.GenerateMapFilePerGroup(mapFileName, wmoData, bspFile);
-                    Console.WriteLine($"📝 .map files generated: {wmoData.Groups.Count} group files");
+                    _mapGenerator.GenerateMapFileWithModels(mapFileName, outputDirectory, wmoName, wmoData, bspFile, aseWriter);
+                    Console.WriteLine($"📝 .map files generated: {wmoData.Groups.Count} group files + model-based map");
                 }
                 else
                 {
-                    _mapGenerator.GenerateMapFile(mapFileName, wmoData, bspFile);
-                    Console.WriteLine($"📝 .map file generated: {Path.GetFileName(mapFileName)}");
+                    _mapGenerator.GenerateMapFileWithModels(mapFileName, outputDirectory, wmoName, wmoData, bspFile, aseWriter);
+                    Console.WriteLine($"📝 .map file generated (models): {Path.GetFileName(mapFileName)}");
                 }
 
                 // Write BSP file using new Q3 writer

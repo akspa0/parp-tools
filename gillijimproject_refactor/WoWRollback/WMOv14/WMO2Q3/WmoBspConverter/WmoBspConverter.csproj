@@ -24,4 +24,16 @@
     <Compile Remove="Textures/BLPReader.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="wmo/shaders/**/*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="textures/wmo/**/*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="models/wmo/**/*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
