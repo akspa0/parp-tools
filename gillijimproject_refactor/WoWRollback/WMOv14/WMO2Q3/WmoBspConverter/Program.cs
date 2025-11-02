@@ -182,8 +182,10 @@ namespace WmoBspConverter
                 throw new FileNotFoundException($"Input file not found: {inputFile}");
             }
 
-            // Establish output directory first
-            var outputDirectory = outputDir ?? (string.IsNullOrEmpty(outputFile) ? Path.GetDirectoryName(inputFile) : Path.GetDirectoryName(outputFile)) ?? ".";
+            // Establish output directory first - NEVER use input directory!
+            var outputDirectory = outputDir ?? 
+                                 (string.IsNullOrEmpty(outputFile) ? Path.Combine(Directory.GetCurrentDirectory(), "output") : Path.GetDirectoryName(outputFile)) 
+                                 ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
 
             // Set output file path: if not specified, place BSP under outputDirectory
             if (string.IsNullOrEmpty(outputFile))

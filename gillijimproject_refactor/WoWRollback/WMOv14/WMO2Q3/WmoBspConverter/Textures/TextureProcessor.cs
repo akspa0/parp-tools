@@ -384,14 +384,14 @@ namespace WmoBspConverter.Textures
         private string ConvertTexturePathToShader(string texturePath)
         {
             if (string.IsNullOrEmpty(texturePath))
-                return "textures/wmo/default";
+                return "wmo/default";
 
             // Normalize path
             var cleanPath = texturePath.Replace("\\", "/");
 
-            // Always collapse to textures/wmo/<file> without extension, lowercased
+            // Return wmo/<file> without "textures/" prefix - GtkRadiant adds it automatically
             var fileNameNoExt = Path.GetFileNameWithoutExtension(cleanPath).ToLowerInvariant();
-            return $"textures/wmo/{fileNameNoExt}";
+            return $"wmo/{fileNameNoExt}";
         }
 
         /// <summary>

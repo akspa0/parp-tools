@@ -548,6 +548,7 @@ namespace WmoBspConverter.Wmo
                 }
 
                 // For each triangle, duplicate its three vertices into the BSP Vertices list and fill MeshVertices
+                int triIndex = 0;
                 foreach (var (a, b, c) in tris)
                 {
                     if (a >= group.Vertices.Count || b >= group.Vertices.Count || c >= group.Vertices.Count)
@@ -565,9 +566,19 @@ namespace WmoBspConverter.Wmo
                     var n = Vector3.Cross(e1, e2);
                     var len = n.Length();
                     if (len < 1e-6f) {
+                        triIndex++;
                         continue; // degenerate triangle
                     }
                     n /= len;
+
+                    // Get material ID for this triangle from FaceMaterials
+                    int materialId = 0;
+                    if (triIndex < group.FaceMaterials.Count)
+                    {
+                        materialId = group.FaceMaterials[triIndex];  // FaceMaterials is List<byte>
+                        // Clamp to valid texture range
+                        materialId = Math.Max(0, Math.Min(materialId, bspFile.Textures.Count - 1));
+                    }
 
                     bspFile.Vertices.Add(new BspVertex { Position = p0, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = n, Color = new byte[] { 255, 255, 255, 255 } });
                     bspFile.Vertices.Add(new BspVertex { Position = p1, TextureCoordinate = Vector2.Zero, LightmapCoordinate = Vector2.Zero, Normal = n, Color = new byte[] { 255, 255, 255, 255 } });
@@ -581,7 +592,7 @@ namespace WmoBspConverter.Wmo
 
                     bspFile.Faces.Add(new BspFace
                     {
-                        Texture = 0,
+                        Texture = materialId,  // Use correct material from MOBA/MOPY
                         Effect = -1,
                         Type = 3, // mesh with MeshVertices
                         FirstVertex = start,
@@ -591,6 +602,8 @@ namespace WmoBspConverter.Wmo
                         Lightmap = -1,
                         Normal = n
                     });
+                    
+                    triIndex++;
                 }
             }
 

@@ -61,10 +61,12 @@ namespace WmoBspConverter.Wmo
 
             // Step 5: Generate .map file (primary output format)
             var mapFileName = Path.GetFileNameWithoutExtension(wmoFilePath) + ".map";
-            var mapFilePath = outputDir != null
-                ? Path.Combine(outputDir, mapFileName)
-                : Path.Combine(Path.GetDirectoryName(wmoFilePath) ?? "", mapFileName);
-                
+            
+            // Use output directory or create "output" folder in current directory
+            string outputDirectory = outputDir ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
+            Directory.CreateDirectory(outputDirectory);
+            
+            var mapFilePath = Path.Combine(outputDirectory, mapFileName);
             _mapGenerator.GenerateMapFile(mapFilePath, wmoData, bspFile);
 
             Console.WriteLine($"[INFO] Conversion completed successfully!");
@@ -527,12 +529,19 @@ namespace WmoBspConverter.Wmo
                 _mapGenerator.GenerateMapFile(mapFileName, wmoData, bspFile);
                 Console.WriteLine($"📝 .map file generated: {Path.GetFileName(mapFileName)}");
 
-                // NOTE: BSP writing disabled during development
-                // Use GtkRadiant to compile .map → BSP via Q3Map2 for best results
-                // This ensures BSP validity and proper lightmap/vis data generation
+                // Write BSP file for direct Quake 3 loading
                 var bspFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".bsp");
-                Console.WriteLine($"⚠️  BSP file NOT written (use GtkRadiant to compile .map)");
-                Console.WriteLine($"📍 Compile path: {mapFileName}");
+                try
+                {
+                    bspFile.Save(bspFileName);
+                    Console.WriteLine($"📦 BSP file written: {Path.GetFileName(bspFileName)}");
+                    Console.WriteLine($"💡 Note: BSP has basic geometry only (no lightmaps/vis). For full features, compile .map with Q3Map2.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️  BSP write failed: {ex.Message}");
+                    Console.WriteLine($"📍 Use GtkRadiant to compile: {mapFileName}");
+                }
 
                 // Populate result stats from actual BSP
                 var result = new ConversionResult
