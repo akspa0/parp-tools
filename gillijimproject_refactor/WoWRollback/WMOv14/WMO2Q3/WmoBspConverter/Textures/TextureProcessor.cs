@@ -54,7 +54,7 @@ namespace WmoBspConverter.Textures
                     textureInfos.Add(new TextureInfo
                     {
                         OriginalName = textureName,
-                        ShaderName = "textures/wmo/default",
+                        ShaderName = ConvertTexturePathToShader(textureName),
                         IsValid = false,
                         Error = ex.Message
                     });
@@ -384,14 +384,13 @@ namespace WmoBspConverter.Textures
         private string ConvertTexturePathToShader(string texturePath)
         {
             if (string.IsNullOrEmpty(texturePath))
-                return "wmo/default";
+                return "textures/wmo/default";
 
             // Normalize path
             var cleanPath = texturePath.Replace("\\", "/");
 
-            // Return wmo/<file> without "textures/" prefix - GtkRadiant adds it automatically
             var fileNameNoExt = Path.GetFileNameWithoutExtension(cleanPath).ToLowerInvariant();
-            return $"wmo/{fileNameNoExt}";
+            return $"textures/wmo/{fileNameNoExt}";
         }
 
         /// <summary>
@@ -422,11 +421,13 @@ namespace WmoBspConverter.Textures
             lines.Add("");
             foreach (var tex in textures)
             {
-                // Use the shader name (textures/...) without extension in the map directive
-                lines.Add(tex.ShaderName);
+                var shaderName = tex.ShaderName;
+                var mapPath = shaderName + ".tga";
+                lines.Add(shaderName);
                 lines.Add("{");
-                lines.Add("    { ");
-                lines.Add($"        map {tex.ShaderName}");
+                lines.Add($"    qer_editorImage {mapPath}");
+                lines.Add("    {");
+                lines.Add($"        map {mapPath}");
                 lines.Add("        rgbGen vertex");
                 lines.Add("    }");
                 lines.Add("}");
@@ -455,8 +456,10 @@ namespace WmoBspConverter.Textures
                 
                 shaderLines.Add($"// Original texture: {texture.OriginalName}");
                 shaderLines.Add($"// Material flags: 0x{material.Flags:X8}, Shader: {material.Shader}, BlendMode: {material.BlendMode}");
+                var shaderName = texture.ShaderName;
+                shaderLines.Add(shaderName);
                 shaderLines.Add("{");
-                shaderLines.Add($"    q3map_lightmapSize 256 256");
+                shaderLines.Add("    q3map_lightmapSize 256 256");
                 
                 // Map WMO material properties to Q3 shader flags
                 if ((material.Flags & 0x1) != 0) // F_UNLIT
@@ -492,7 +495,11 @@ namespace WmoBspConverter.Textures
                 }
                 
                 // Use shader path without extension; Q3 will load .tga/.jpg as available
-                shaderLines.Add($"    map {texture.ShaderName}");
+                shaderLines.Add($"    qer_editorImage {shaderName}.tga");
+                shaderLines.Add("    {");
+                shaderLines.Add($"        map {shaderName}.tga");
+                shaderLines.Add("        rgbGen vertex");
+                shaderLines.Add("    }");
                 shaderLines.Add("}");
                 shaderLines.Add("");
             }

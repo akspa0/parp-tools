@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Numerics;
 using System.Text;
 using WmoBspConverter.Bsp;
@@ -25,6 +25,7 @@ namespace WmoBspConverter.Wmo
         private sealed record GeometryBounds(Vector3 Min, Vector3 Max)
         {
             public Vector3 Center => (Min + Max) * 0.5f;
+            public Vector3 Size => Max - Min;
         }
 
         private sealed class MapContext
@@ -56,7 +57,8 @@ namespace WmoBspConverter.Wmo
 
         private static Vector3 ComputeGeometryOffset(GeometryBounds bounds)
         {
-            return bounds.Center;
+            var center = bounds.Center;
+            return new Vector3(center.X, center.Y, bounds.Min.Z);
         }
 
         private (MapContext context, GeometryBounds paddedBounds) PrepareContext(BspFile bspFile)
@@ -182,34 +184,7 @@ namespace WmoBspConverter.Wmo
 
             var (context, paddedBounds) = PrepareContext(bspFile);
 
-            var materialShaderBases = new List<string>();
-            if (wmoData.Materials.Count > 0 && wmoData.MaterialTextureIndices.Count > 0)
-            {
-                for (int i = 0; i < wmoData.Materials.Count; i++)
-                {
-                    var texIdx = i < wmoData.MaterialTextureIndices.Count ? (int)wmoData.MaterialTextureIndices[i] : -1;
-                    if (texIdx >= 0 && texIdx < wmoData.Textures.Count)
-                    {
-                        materialShaderBases.Add(Path.GetFileNameWithoutExtension(wmoData.Textures[texIdx]).ToLowerInvariant());
-                    }
-                    else
-                    {
-                        materialShaderBases.Add("wmo_default");
-                    }
-                }
-            }
-            else if (wmoData.Textures.Count > 0)
-            {
-                foreach (var tex in wmoData.Textures)
-                {
-                    materialShaderBases.Add(Path.GetFileNameWithoutExtension(tex).ToLowerInvariant());
-                }
-            }
-
-            if (materialShaderBases.Count == 0)
-            {
-                materialShaderBases.Add("wmo_default");
-            }
+            var materialShaderNames = BuildMaterialShaderNames(wmoData);
 
             // Sealed room and spawn
             CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
@@ -237,7 +212,7 @@ namespace WmoBspConverter.Wmo
                     group.Vertices,
                     intIndices,
                     faceMats,
-                    materialShaderBases,
+                    materialShaderNames,
                     context.GeometryOffset);
                 var origin = result.ModelOrigin;
 
@@ -245,7 +220,7 @@ namespace WmoBspConverter.Wmo
                 mapContent.AppendLine("{");
                 mapContent.AppendLine("\"classname\" \"misc_model\"");
                 mapContent.AppendLine($"\"model\" \"{result.RelativeModelPath.Replace("\\", "/")}\"");
-                mapContent.AppendLine($"\"origin\" \"{origin.X:F3} {origin.Y:F3} {origin.Z:F3}\"");
+                mapContent.AppendLine($"\"origin\" \"{origin.X:F3} {origin.Y:F3} {paddedBounds.Min.Z:F3}\"");
                 mapContent.AppendLine($"\"_wmo_group\" \"{g}\"");
                 mapContent.AppendLine("}");
                 mapContent.AppendLine();
@@ -512,8 +487,8 @@ namespace WmoBspConverter.Wmo
         {
             var bounds = context.Bounds;
             var center = bounds.Center - context.GeometryOffset;
-            var max = bounds.Max - context.GeometryOffset;
-            center.Z = max.Z + 64.0f; // place spawn above geometry
+            var min = bounds.Min - context.GeometryOffset;
+            center.Z = min.Z + 64.0f; // place spawn above sealed floor
 
             mapContent.AppendLine("// Default spawn");
             mapContent.AppendLine("{");
@@ -522,6 +497,45 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine("\"angle\" \"0\"");
             mapContent.AppendLine("}");
             mapContent.AppendLine();
+        }
+
+        private static IReadOnlyList<string> BuildMaterialShaderNames(WmoV14Parser.WmoV14Data wmoData)
+        {
+            var names = new List<string>();
+            if (wmoData.Materials.Count > 0 && wmoData.MaterialTextureIndices.Count > 0)
+            {
+                for (int i = 0; i < wmoData.Materials.Count; i++)
+                {
+                    var texIdx = i < wmoData.MaterialTextureIndices.Count ? (int)wmoData.MaterialTextureIndices[i] : -1;
+                    names.Add(BuildShaderNameForTexture(wmoData, texIdx));
+                }
+            }
+            else if (wmoData.Textures.Count > 0)
+            {
+                for (int i = 0; i < wmoData.Textures.Count; i++)
+                {
+                    names.Add(BuildShaderNameForTexture(wmoData, i));
+                }
+            }
+
+            if (names.Count == 0)
+            {
+                names.Add("textures/wmo/wmo_default");
+            }
+
+            return names;
+        }
+
+        private static string BuildShaderNameForTexture(WmoV14Parser.WmoV14Data wmoData, int textureIndex)
+        {
+            if (textureIndex >= 0 && textureIndex < wmoData.Textures.Count)
+            {
+                var tex = wmoData.Textures[textureIndex];
+                var baseName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
+                return $"textures/wmo/{baseName}";
+            }
+
+            return "textures/wmo/wmo_default";
         }
 
         private void GenerateTextureInfo(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData)
