@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using WmoBspConverter.Bsp;
@@ -16,10 +17,9 @@ namespace WmoBspConverter.Wmo
         // Applies the single WMO -> Quake 3 coordinate transform used for map emission
         private static Vector3 TransformToQ3(Vector3 v)
         {
-            // WMO stores coordinates as (X, Y, Z) with Y up and Z forward (south).
-            // Quake 3 expects (X, Y, Z) with Z up and Y forward (north).
-            // Keep X, flip forward axis, promote WMO up (Y) to Quake Z.
-            return new Vector3(v.X, -v.Z, v.Y);
+            // WMO stores coordinates as (X, Y, Z) with Z up. Quake 3 also uses Z up.
+            // Align axes directly so forward (Y) stays forward and vertical (Z) stays vertical.
+            return new Vector3(v.X, v.Y, v.Z);
         }
 
         private sealed record GeometryBounds(Vector3 Min, Vector3 Max)
@@ -65,6 +65,8 @@ namespace WmoBspConverter.Wmo
             var offset = ComputeGeometryOffset(bounds);
             var padding = new Vector3(128f, 128f, 128f);
             var paddedBounds = new GeometryBounds(bounds.Min - padding - offset, bounds.Max + padding - offset);
+
+            Console.WriteLine($"[DEBUG] Geometry bounds min={bounds.Min}, max={bounds.Max}, offset={offset}");
 
             return (new MapContext { Bounds = bounds, GeometryOffset = offset }, paddedBounds);
         }
@@ -180,6 +182,35 @@ namespace WmoBspConverter.Wmo
 
             var (context, paddedBounds) = PrepareContext(bspFile);
 
+            var materialShaderBases = new List<string>();
+            if (wmoData.Materials.Count > 0 && wmoData.MaterialTextureIndices.Count > 0)
+            {
+                for (int i = 0; i < wmoData.Materials.Count; i++)
+                {
+                    var texIdx = i < wmoData.MaterialTextureIndices.Count ? (int)wmoData.MaterialTextureIndices[i] : -1;
+                    if (texIdx >= 0 && texIdx < wmoData.Textures.Count)
+                    {
+                        materialShaderBases.Add(Path.GetFileNameWithoutExtension(wmoData.Textures[texIdx]).ToLowerInvariant());
+                    }
+                    else
+                    {
+                        materialShaderBases.Add("wmo_default");
+                    }
+                }
+            }
+            else if (wmoData.Textures.Count > 0)
+            {
+                foreach (var tex in wmoData.Textures)
+                {
+                    materialShaderBases.Add(Path.GetFileNameWithoutExtension(tex).ToLowerInvariant());
+                }
+            }
+
+            if (materialShaderBases.Count == 0)
+            {
+                materialShaderBases.Add("wmo_default");
+            }
+
             // Sealed room and spawn
             CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
             AddSpawnEntity(mapContent, context);
@@ -188,8 +219,26 @@ namespace WmoBspConverter.Wmo
             int g = 0;
             foreach (var group in wmoData.Groups)
             {
+                if (g == 0)
+                {
+                    for (int sample = 0; sample < Math.Min(3, group.Vertices.Count); sample++)
+                    {
+                        var raw = group.Vertices[sample];
+                        var q3 = TransformToQ3(raw) - context.GeometryOffset;
+                        Console.WriteLine($"[DEBUG] Vertex sample g{g} v{sample}: raw=({raw.X:F3},{raw.Y:F3},{raw.Z:F3}) room=({q3.X:F3},{q3.Y:F3},{q3.Z:F3})");
+                    }
+                }
                 var intIndices = group.Indices.ConvertAll(i => (int)i);
-                var result = aseWriter.ExportGroup(outputRootDir, wmoName, g, group.Vertices, intIndices, context.GeometryOffset);
+                var faceMats = group.FaceMaterials.ConvertAll(f => (int)f);
+                var result = aseWriter.ExportGroup(
+                    outputRootDir,
+                    wmoName,
+                    g,
+                    group.Vertices,
+                    intIndices,
+                    faceMats,
+                    materialShaderBases,
+                    context.GeometryOffset);
                 var origin = result.ModelOrigin;
 
                 mapContent.AppendLine("// WMO group model");
