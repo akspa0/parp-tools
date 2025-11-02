@@ -32,6 +32,7 @@ namespace WmoBspConverter
             int? groupIndex = null;
             string mopyPair = "a"; // a or b
             string mapping = "auto"; // auto|mopy|moba
+            bool convertToV17 = false;
 
             // Parse simple command line arguments
             for (int i = 1; i < args.Length; i++)
@@ -111,6 +112,9 @@ namespace WmoBspConverter
                     case "--include-nonrender":
                         includeNonRender = true;
                         break;
+                    case "--to-v17":
+                        convertToV17 = true;
+                        break;
                     case "--help":
                     case "-h":
                         ShowUsage();
@@ -123,6 +127,10 @@ namespace WmoBspConverter
                 if (emitCube)
                 {
                     await CubeEmitter.EmitCubeAsync(outputFile, outputDir, verbose);
+                }
+                else if (convertToV17)
+                {
+                    await ConvertToV17Async(inputFile, outputFile, outputDir, verbose);
                 }
                 else if (!string.IsNullOrEmpty(objPath))
                 {
@@ -163,6 +171,7 @@ namespace WmoBspConverter
             Console.WriteLine("  --group <i>              Emit only a single MOGP group (diagnostic)");
             Console.WriteLine("  --mopy-pair <a|b>        For MOPYx2, prefer 'a' or 'b' entry when both are renderable (default: a)");
             Console.WriteLine("  --mapping <auto|mopy|moba>  Force mapping source (default: auto)");
+            Console.WriteLine("  --to-v17                  Convert WMO v14 to v17 format (for use with wow.tools exporters)");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
             Console.WriteLine("Examples:");
@@ -287,6 +296,63 @@ namespace WmoBspConverter
             bool forceMoba = mapping == "moba";
             exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures, matOnly, groupIndex, preferSecond, forceMopy, forceMoba);
             if (verbose) Console.WriteLine($"[OBJ] Wrote {Path.GetFullPath(objPath)}");
+            await Task.CompletedTask;
+        }
+
+        static async Task ConvertToV17Async(string inputFile, string? outputFile, string? outputDir, bool verbose)
+        {
+            // Validate input
+            if (!File.Exists(inputFile))
+            {
+                throw new FileNotFoundException($"Input file not found: {inputFile}");
+            }
+
+            // Establish output path
+            var outputDirectory = outputDir ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
+            Directory.CreateDirectory(outputDirectory);
+            
+            if (string.IsNullOrEmpty(outputFile))
+            {
+                var name = Path.GetFileNameWithoutExtension(inputFile) + "_v17.wmo";
+                outputFile = Path.Combine(outputDirectory, name);
+            }
+
+            Console.WriteLine("WMO v14 → v17 Converter");
+            Console.WriteLine("======================");
+            Console.WriteLine($"Input: {Path.GetFullPath(inputFile)}");
+            Console.WriteLine($"Output: {Path.GetFullPath(outputFile)}");
+            Console.WriteLine();
+
+            try
+            {
+                // Parse v14 WMO
+                var parser = new WmoV14Parser();
+                var v14Data = parser.ParseWmoV14(inputFile);
+                
+                Console.WriteLine($"[INFO] Parsed v14 WMO: {v14Data.Groups.Count} groups, {v14Data.Materials.Count} materials");
+
+                // Convert to v17
+                var converter = new WmoV14ToV17Converter();
+                converter.ConvertAndWrite(v14Data, outputFile);
+
+                Console.WriteLine();
+                Console.WriteLine("✓ Conversion completed successfully!");
+                Console.WriteLine();
+                Console.WriteLine("💡 Next steps:");
+                Console.WriteLine("   1. Use wow.tools.local or WoWFormatLib to export this v17 WMO");
+                Console.WriteLine("   2. The v17 format preserves your MOBA-based material assignments");
+                Console.WriteLine("   3. wow.tools exporters will handle portals, collision, and other features");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"✗ Conversion failed: {ex.Message}");
+                if (verbose)
+                {
+                    Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                }
+                throw;
+            }
+
             await Task.CompletedTask;
         }
     }
