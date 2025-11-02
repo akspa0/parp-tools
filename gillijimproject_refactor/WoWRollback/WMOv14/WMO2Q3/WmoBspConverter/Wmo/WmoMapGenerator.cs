@@ -15,10 +15,57 @@ namespace WmoBspConverter.Wmo
         // Applies the single WMO -> Quake 3 coordinate transform used for map emission
         private static Vector3 TransformToQ3(Vector3 v)
         {
-            // WMO vertices are already stored as (X, Z, -Y) in the file format
-            // Q3 uses (X, Y, Z) where Y is forward and Z is up
-            // So we just need to pass through: WMO's (X, Z, -Y) -> Q3's (X, Y, Z)
-            return new Vector3(v.X, v.Y, v.Z);
+            // WMO stores coordinates as (X, Y, Z) with Y up and Z forward (south).
+            // Quake 3 expects (X, Y, Z) with Z up and Y forward (north).
+            // Keep X, flip forward axis, promote WMO up (Y) to Quake Z.
+            return new Vector3(v.X, -v.Z, v.Y);
+        }
+
+        private sealed record GeometryBounds(Vector3 Min, Vector3 Max)
+        {
+            public Vector3 Center => (Min + Max) * 0.5f;
+        }
+
+        private sealed class MapContext
+        {
+            public GeometryBounds Bounds { get; init; } = new GeometryBounds(Vector3.Zero, Vector3.Zero);
+            public Vector3 GeometryOffset { get; init; } = Vector3.Zero;
+        }
+
+        private static GeometryBounds ComputeGeometryBounds(BspFile bspFile)
+        {
+            var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            foreach (var vertex in bspFile.Vertices)
+            {
+                var p = TransformToQ3(vertex.Position);
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+            }
+
+            if (bspFile.Vertices.Count == 0)
+            {
+                min = Vector3.Zero;
+                max = Vector3.Zero;
+            }
+
+            return new GeometryBounds(min, max);
+        }
+
+        private static Vector3 ComputeGeometryOffset(GeometryBounds bounds)
+        {
+            return bounds.Center;
+        }
+
+        private (MapContext context, GeometryBounds paddedBounds) PrepareContext(BspFile bspFile)
+        {
+            var bounds = ComputeGeometryBounds(bspFile);
+            var offset = ComputeGeometryOffset(bounds);
+            var padding = new Vector3(128f, 128f, 128f);
+            var paddedBounds = new GeometryBounds(bounds.Min - padding - offset, bounds.Max + padding - offset);
+
+            return (new MapContext { Bounds = bounds, GeometryOffset = offset }, paddedBounds);
         }
 
         public void GenerateMapFilePerGroup(string baseOutputPath, WmoV14Parser.WmoV14Data wmoData, BspFile bspFile)
@@ -85,18 +132,20 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine($"// Textures: {wmoData.Textures.Count}");
             mapContent.AppendLine();
             
+            var (context, paddedBounds) = PrepareContext(bspFile);
+
             // Create sealed worldspawn box to contain the WMO
-            CreateSealedWorldspawn(mapContent, wmoData, bspFile);
+            CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
             Console.WriteLine($"[DEBUG] After worldspawn, length: {mapContent.Length:N0}");
             
             // Add player spawn entity
-            AddSpawnEntity(mapContent, bspFile);
+            AddSpawnEntity(mapContent, context);
             Console.WriteLine($"[DEBUG] After AddSpawn, length: {mapContent.Length:N0}");
             
             // Add WMO geometry as a func_group entity (separate from worldspawn!)
             StartFuncGroupEntity(mapContent, wmoData);
             var defaultTex = bspFile.Textures.Count > 0 ? bspFile.Textures[0].Name : "textures/common/caulk";
-            GenerateBrushesFromGeometry(mapContent, bspFile, defaultTex);
+            GenerateBrushesFromGeometry(mapContent, bspFile, defaultTex, context);
             EndFuncGroupEntity(mapContent);
             Console.WriteLine($"[DEBUG] After func_group, length: {mapContent.Length:N0}");
             
@@ -113,32 +162,11 @@ namespace WmoBspConverter.Wmo
             Console.WriteLine($"[INFO] Generated .map file: {outputPath}");
         }
 
-        private void CreateSealedWorldspawn(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, BspFile bspFile)
+        private void CreateSealedWorldspawn(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, GeometryBounds bounds)
         {
-            // Calculate WMO bounds
-            var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            
-            foreach (var v in bspFile.Vertices)
-            {
-                var p = TransformToQ3(v.Position);
-                if (p.X < min.X) min.X = p.X;
-                if (p.Y < min.Y) min.Y = p.Y;
-                if (p.Z < min.Z) min.Z = p.Z;
-                if (p.X > max.X) max.X = p.X;
-                if (p.Y > max.Y) max.Y = p.Y;
-                if (p.Z > max.Z) max.Z = p.Z;
-            }
-            
-            // Expand bounds to create room around WMO
-            float padding = 128.0f;
-            min.X -= padding;
-            min.Y -= padding;
-            min.Z -= padding;
-            max.X += padding;
-            max.Y += padding;
-            max.Z += padding;
-            
+            var min = bounds.Min;
+            var max = bounds.Max;
+
             mapContent.AppendLine("// Sealed worldspawn room");
             mapContent.AppendLine("{");
             mapContent.AppendLine("\"classname\" \"worldspawn\"");
@@ -248,7 +276,7 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine();
         }
 
-        private void GenerateBrushesFromGeometry(StringBuilder mapContent, BspFile bspFile, string defaultTexture)
+        private void GenerateBrushesFromGeometry(StringBuilder mapContent, BspFile bspFile, string defaultTexture, MapContext context)
         {
             mapContent.AppendLine("// Complete geometry brushes generated from WMO data");
             mapContent.AppendLine($"// Total faces: {bspFile.Faces.Count}, Total vertices: {bspFile.Vertices.Count}");
@@ -287,7 +315,10 @@ namespace WmoBspConverter.Wmo
                 var faceTex = (face.Texture >= 0 && face.Texture < bspFile.Textures.Count)
                     ? bspFile.Textures[face.Texture].Name
                     : defaultTexture;
-                var brush = GenerateTriangleBrushFromGeometry(v0, v1, v2, faceTex);
+                var brush = GenerateTriangleBrushFromGeometry(v0, v1, v2, faceTex, context.GeometryOffset);
+                if (string.IsNullOrEmpty(brush))
+                    continue;
+
                 mapContent.Append(brush);
                 
                 brushCount++;
@@ -305,62 +336,61 @@ namespace WmoBspConverter.Wmo
                 Console.WriteLine($"[DEBUG] Skipped {skippedCount} degenerate triangles");
         }
 
+        private const string CaulkTexture = "common/caulk";
+        private const float TriangleThickness = 2.0f;
         private static readonly string BR = ""; // inline appending only
 
-        private string GenerateTriangleBrushFromGeometry(Vector3 v0, Vector3 v1, Vector3 v2, string textureName)
+        private string GenerateTriangleBrushFromGeometry(Vector3 v0, Vector3 v1, Vector3 v2, string textureName, Vector3 geometryOffset)
         {
             var brush = new StringBuilder();
-            
-            var tex = string.IsNullOrWhiteSpace(textureName) ? "common/caulk" : textureName;
-            
-            // Transform to Q3 coordinates
-            v0 = TransformToQ3(v0);
-            v1 = TransformToQ3(v1);
-            v2 = TransformToQ3(v2);
-            
-            // Reverse winding order to fix mirrored planes
-            // Swap v1 and v2 to flip the triangle normal
-            var temp = v1;
-            v1 = v2;
-            v2 = temp;
-            
+
+            var tex = string.IsNullOrWhiteSpace(textureName) ? CaulkTexture : textureName;
+
+            // Transform to Q3 coordinates and translate into sealed room space
+            var q0 = TransformToQ3(v0) - geometryOffset;
+            var q1 = TransformToQ3(v1) - geometryOffset;
+            var q2 = TransformToQ3(v2) - geometryOffset;
+
             // Skip degenerate triangles
-            var edge1 = v1 - v0;
-            var edge2 = v2 - v0;
+            var edge1 = q1 - q0;
+            var edge2 = q2 - q0;
             var normal = Vector3.Cross(edge1, edge2);
-            if (normal.Length() < 0.001f)
+            var normalLength = normal.Length();
+            if (normalLength < 1e-4f)
+            {
                 return string.Empty;
-            
-            // Create axis-aligned bounding box (6 planes) - Q3 standard format
-            // This is simpler and guaranteed to work
-            float minX = MathF.Min(v0.X, MathF.Min(v1.X, v2.X)) - 0.1f;
-            float minY = MathF.Min(v0.Y, MathF.Min(v1.Y, v2.Y)) - 0.1f;
-            float minZ = MathF.Min(v0.Z, MathF.Min(v1.Z, v2.Z)) - 0.1f;
-            float maxX = MathF.Max(v0.X, MathF.Max(v1.X, v2.X)) + 0.1f;
-            float maxY = MathF.Max(v0.Y, MathF.Max(v1.Y, v2.Y)) + 0.1f;
-            float maxZ = MathF.Max(v0.Z, MathF.Max(v1.Z, v2.Z)) + 0.1f;
-            
+            }
+            normal /= normalLength;
+
+            var halfThickness = TriangleThickness * 0.5f;
+            var offset = normal * halfThickness;
+
+            var top0 = q0 + offset;
+            var top1 = q1 + offset;
+            var top2 = q2 + offset;
+            var bottom0 = q0 - offset;
+            var bottom1 = q1 - offset;
+            var bottom2 = q2 - offset;
+
+            var interiorPoint = (top0 + top1 + top2 + bottom0 + bottom1 + bottom2) / 6f;
+            var caulk = CaulkTexture;
+
             brush.AppendLine("{");
-            
-            // 6 planes in standard Q3 format (matching test_cube.map)
-            // -X plane (left face)
-            WritePlaneLine(brush, new Vector3(minX, minY, minZ), new Vector3(minX, minY+1, minZ), new Vector3(minX, minY, minZ+1), tex);
-            // -Y plane (back face)  
-            WritePlaneLine(brush, new Vector3(minX, minY, minZ), new Vector3(minX, minY, minZ+1), new Vector3(minX+1, minY, minZ), tex);
-            // -Z plane (bottom face)
-            WritePlaneLine(brush, new Vector3(minX, minY, minZ), new Vector3(minX+1, minY, minZ), new Vector3(minX, minY+1, minZ), tex);
-            // +Z plane (top face)
-            WritePlaneLine(brush, new Vector3(maxX, maxY, maxZ), new Vector3(maxX, maxY+1, maxZ), new Vector3(maxX+1, maxY, maxZ), tex);
-            // +Y plane (front face)
-            WritePlaneLine(brush, new Vector3(maxX, maxY, maxZ), new Vector3(maxX+1, maxY, maxZ), new Vector3(maxX, maxY, maxZ+1), tex);
-            // +X plane (right face)
-            WritePlaneLine(brush, new Vector3(maxX, maxY, maxZ), new Vector3(maxX, maxY, maxZ+1), new Vector3(maxX, maxY+1, maxZ), tex);
-            
+
+            // Triangle face (textured)
+            WriteBrushPlane(brush, top0, top1, top2, tex, interiorPoint);
+            // Back face
+            WriteBrushPlane(brush, bottom0, bottom2, bottom1, caulk, interiorPoint);
+            // Edge faces (caulk)
+            WriteBrushPlane(brush, top1, top0, bottom0, caulk, interiorPoint);
+            WriteBrushPlane(brush, top2, top1, bottom1, caulk, interiorPoint);
+            WriteBrushPlane(brush, top0, top2, bottom2, caulk, interiorPoint);
+
             brush.AppendLine("}");
-            
+
             return brush.ToString();
         }
-        
+
         private void WritePlaneLine(StringBuilder brush, Vector3 p0, Vector3 p1, Vector3 p2, string texture)
         {
             // Quake 3 plane format: ( x y z ) ( x y z ) ( x y z ) TEXTURE offsetX offsetY rotation scaleX scaleY contentFlags surfaceFlags value
@@ -368,27 +398,29 @@ namespace WmoBspConverter.Wmo
             brush.AppendLine($"  ( {p0.X:F6} {p0.Y:F6} {p0.Z:F6} ) ( {p1.X:F6} {p1.Y:F6} {p1.Z:F6} ) ( {p2.X:F6} {p2.Y:F6} {p2.Z:F6} ) {texture} 0 0 0 0.5 0.5 0 0 0");
         }
 
-        private void AddSpawnEntity(StringBuilder mapContent, BspFile bspFile)
+        private void WriteBrushPlane(StringBuilder brush, Vector3 p0, Vector3 p1, Vector3 p2, string texture, Vector3 interiorPoint)
         {
-            if (bspFile.Vertices.Count == 0) return;
-            var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            foreach (var v in bspFile.Vertices)
+            var normal = Vector3.Cross(p1 - p0, p2 - p0);
+            if (normal.LengthSquared() < 1e-6f)
             {
-                // Compute bounds in Q3 coordinates to match geometry emission
-                var p = TransformToQ3(v.Position);
-                if (p.X < min.X) min.X = p.X;
-                if (p.Y < min.Y) min.Y = p.Y;
-                if (p.Z < min.Z) min.Z = p.Z;
-                if (p.X > max.X) max.X = p.X;
-                if (p.Y > max.Y) max.Y = p.Y;
-                if (p.Z > max.Z) max.Z = p.Z;
+                return;
             }
-            
-            // Place spawn ABOVE the WMO geometry (so player doesn't spawn inside geometry)
-            var center = (min + max) * 0.5f;
-            center.Z = max.Z + 64.0f; // 64 units above the WMO
-            
+
+            if (Vector3.Dot(normal, interiorPoint - p0) > 0f)
+            {
+                (p1, p2) = (p2, p1);
+            }
+
+            WritePlaneLine(brush, p0, p1, p2, texture);
+        }
+
+        private void AddSpawnEntity(StringBuilder mapContent, MapContext context)
+        {
+            var bounds = context.Bounds;
+            var center = bounds.Center - context.GeometryOffset;
+            var max = bounds.Max - context.GeometryOffset;
+            center.Z = max.Z + 64.0f; // place spawn above geometry
+
             mapContent.AppendLine("// Default spawn");
             mapContent.AppendLine("{");
             mapContent.AppendLine("\"classname\" \"info_player_deathmatch\"");
