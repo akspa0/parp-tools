@@ -18,6 +18,7 @@ namespace WmoBspConverter.Wmo
             public List<Vector2> UVs { get; } = new();
             public List<Batch> Batches { get; } = new();
             public string Name { get; set; } = string.Empty;
+            public List<ushort> FaceOrder { get; } = new();
         }
 
         private class Batch
@@ -25,9 +26,11 @@ namespace WmoBspConverter.Wmo
             public int FirstFace;
             public int NumFaces;
             public int MaterialId;
+            public int Flags;
+            public int PossibleBox2Z;
         }
 
-        public void Export(string objPath, WmoV14Parser.WmoV14Data data, bool allowFallback, bool includeNonRender = false, bool extractTextures = false)
+        public void Export(string objPath, WmoV14Parser.WmoV14Data data, bool allowFallback, bool includeNonRender = false, bool extractTextures = false, int? matOnly = null, int? groupIndex = null, bool preferSecond = false, bool forceMopy = false, bool forceMoba = false)
         {
             // 1) Prefer parsed groups from WmoV14Parser (already robust to header quirks)
             var groups = BuildGroupsFromParsed(data);
@@ -41,8 +44,18 @@ namespace WmoBspConverter.Wmo
             if (groups.Count == 0)
                 throw new InvalidDataException("No geometry groups parsed from WMO v14 file.");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(objPath) ?? ".");
-            var objDir = Path.GetDirectoryName(objPath) ?? ".";
+            // Optional: filter a single group for diagnostics
+            if (groupIndex.HasValue)
+            {
+                if (groupIndex.Value < 0 || groupIndex.Value >= groups.Count)
+                    throw new ArgumentOutOfRangeException(nameof(groupIndex), $"Group index {groupIndex.Value} out of range 0..{groups.Count-1}");
+                groups = new List<Group> { groups[groupIndex.Value] };
+            }
+
+            var objDir = Path.GetDirectoryName(objPath);
+            if (string.IsNullOrEmpty(objDir))
+                objDir = Directory.GetCurrentDirectory();
+            Directory.CreateDirectory(objDir);
             var mtlPath = Path.ChangeExtension(objPath, ".mtl");
 
             // Prepare textures and MTL — collect materials that will actually be used
@@ -54,7 +67,9 @@ namespace WmoBspConverter.Wmo
                 var mats = GetFaceMaterialsForGroup(g, triCount, includeNonRender);
                 foreach (var m in mats)
                 {
-                    if (m >= 0) usedMaterialIds.Add(m);
+                    if (m < 0) continue;
+                    if (matOnly.HasValue && m != matOnly.Value) continue;
+                    usedMaterialIds.Add(m);
                 }
             }
 
@@ -117,8 +132,16 @@ namespace WmoBspConverter.Wmo
                 Console.WriteLine($"[OBJ] Group {gi}: verts={g.Vertices.Count}, idx={g.Indices.Count}, mopy={g.Mopy.Count}");
                 if (g.Batches != null && g.Batches.Count > 0)
                 {
-                    var bsum = string.Join(", ", g.Batches.Select(b => $"[{b.FirstFace}+{b.NumFaces} m={b.MaterialId}]").Take(8));
-                    Console.WriteLine($"[OBJ] Group {gi}: MOBA {g.Batches.Count} batches {bsum}{(g.Batches.Count>8?" ...":"")}");
+                    // Debug: show first few MOBA batches converted to tri spans and chosen material
+                    var triCountDbg = Math.Max(0, g.Indices.Count / 3);
+                    var bsum = string.Join(", ", g.Batches.Select(b =>
+                    {
+                        int triStart = Math.Max(0, b.FirstFace / 3);
+                        int triEnd = Math.Min(triCountDbg, triStart + (b.NumFaces / 3));
+                        int mat = ((b.Flags & 2) != 0) ? b.PossibleBox2Z : b.MaterialId;
+                        return $"[{triStart}..{triEnd} m={mat} f={b.Flags}]";
+                    }).Take(6));
+                    Console.WriteLine($"[OBJ] Group {gi}: MOBA {g.Batches.Count} batches {bsum}{(g.Batches.Count>6?" ...":"")}");
                 }
 
                 // Material histogram for diagnostics (from chosen mapping)
@@ -134,7 +157,7 @@ namespace WmoBspConverter.Wmo
                         matHist[m]++;
                     }
                     var summary = string.Join(", ", matHist.OrderBy(k=>k.Key).Select(k=>$"{k.Key}:{k.Value}"));
-                    string mapping = (g.Mopy.Count>=triCountG*2?"MOPYx2":(g.Mopy.Count>=triCountG?"MOPY":(g.Batches.Count>0?"MOBA":"Default")));
+                    string mapping = (g.Mopy.Count>=triCountG*2?"MOPYx2":(g.Mopy.Count>=triCountG?"MOPY":(g.Batches!=null && g.Batches.Count>0?"MOBA":"Default")));
                     Console.WriteLine($"[OBJ] Group {gi}: mat histogram = [{summary}] (mapping={mapping})");
                 }
 
@@ -165,6 +188,7 @@ namespace WmoBspConverter.Wmo
                         int b = vBase + g.Indices[triBase + 1];
                         int c = vBase + g.Indices[triBase + 2];
                         int mat = faceMats[t];
+                        if (matOnly.HasValue && mat != matOnly.Value) continue;
                         if (mat >= 0 && currentMat != mat)
                         {
                             currentMat = mat;
@@ -246,6 +270,10 @@ namespace WmoBspConverter.Wmo
                         g.Mopy.Add((flags, mat));
                     }
                 }
+                if (gd.FaceOrder != null && gd.FaceOrder.Count > 0)
+                {
+                    g.FaceOrder.AddRange(gd.FaceOrder);
+                }
                 // Copy UVs when available
                 if (gd.UVs != null && gd.UVs.Count > 0)
                 {
@@ -260,7 +288,9 @@ namespace WmoBspConverter.Wmo
                         {
                             FirstFace = (int)b.FirstFace,
                             NumFaces = b.NumFaces,
-                            MaterialId = b.MaterialId
+                            MaterialId = b.MaterialId,
+                            Flags = b.Flags,
+                            PossibleBox2Z = b.PossibleBox2Z
                         });
                     }
                 }
@@ -275,19 +305,68 @@ namespace WmoBspConverter.Wmo
             return (flags & 0x24) == 0x20;
         }
 
-        // Build face materials for a group using MOPY when counts match; otherwise use MOBA; return -1 for faces to skip (non-render and filtering)
+        // Build face materials for a group
+        // V14: Prefer MOBA over MOPY since MOPY often has incorrect material IDs (all 0)
+        // V17+: Use MOPY when available
         private static int[] GetFaceMaterialsForGroup(Group g, int triCount, bool includeNonRender)
         {
             var result = new int[triCount];
             for (int i = 0; i < triCount; i++) result[i] = -1;
+            
+            // V14: Try MOBA first if available
+            if (g.Batches != null && g.Batches.Count > 0)
+            {
+                // Check if MOBA has multiple materials (indicates it's useful)
+                bool hasMultipleMaterials = false;
+                if (g.Batches.Count > 1)
+                {
+                    int firstMat = g.Batches[0].MaterialId;
+                    for (int i = 1; i < g.Batches.Count; i++)
+                    {
+                        if (g.Batches[i].MaterialId != firstMat && g.Batches[i].NumFaces < 60000)
+                        {
+                            hasMultipleMaterials = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (hasMultipleMaterials || g.Mopy.Count == 0)
+                {
+                    // MOBA has multiple materials or MOPY is empty, use it
+                    Console.WriteLine($"[DEBUG] Using MOBA for material assignment (hasMultipleMaterials={hasMultipleMaterials}, mopyCount={g.Mopy.Count})");
+                    var moba = BuildFaceMaterialsFromMoba(g, triCount);
+                    for (int i = 0; i < triCount; i++) result[i] = moba[i];
+                    return result;
+                }
+                else
+                {
+                    Console.WriteLine($"[DEBUG] Falling back to MOPY (batches={g.Batches.Count}, hasMultipleMaterials={hasMultipleMaterials})");
+                }
+            }
+            
+            // Build triangle order mapping: MOPY order -> MOVI triangle index
+            var order = new int[triCount];
+            if (g.FaceOrder != null && g.FaceOrder.Count == triCount)
+            {
+                for (int i = 0; i < triCount; i++) order[i] = g.FaceOrder[i];
+            }
+            else
+            {
+                for (int i = 0; i < triCount; i++) order[i] = i;
+            }
 
             if (g.Mopy.Count >= triCount * 2)
             {
                 // Prefer MOPYx2 when we have at least two entries per triangle
-                for (int i = 0; i < triCount; i++)
+                int usable = Math.Min(triCount, g.Mopy.Count / 2);
+                for (int i = 0; i < usable; i++)
                 {
-                    var a = g.Mopy[i * 2 + 0];
-                    var b = g.Mopy[i * 2 + 1];
+                    int ia = i * 2 + 0;
+                    int ib = i * 2 + 1;
+                    if (ib >= g.Mopy.Count) { result[i] = 0; continue; }
+                    var a = g.Mopy[ia];
+                    var b = g.Mopy[ib];
                     (byte Flags, byte Material) chosen = a;
                     bool aRenderable = IsRenderable(a.Flags);
                     bool bRenderable = IsRenderable(b.Flags);
@@ -301,17 +380,20 @@ namespace WmoBspConverter.Wmo
                         if (a.Material == 255 && b.Material != 255) chosen = b;
                     }
                     int mat = chosen.Material == 255 ? 0 : chosen.Material;
-                    result[i] = mat;
+                    int triIdx = order[i];
+                    if (triIdx >= 0 && triIdx < triCount) result[triIdx] = mat;
                 }
             }
             else if (g.Mopy.Count >= triCount)
             {
-                for (int i = 0; i < triCount; i++)
+                int usable = Math.Min(triCount, g.Mopy.Count);
+                for (int i = 0; i < usable; i++)
                 {
                     var (flags, matb) = g.Mopy[i];
                     if (!includeNonRender && !IsRenderable(flags)) { result[i] = -1; continue; }
                     int mat = matb == 255 ? 0 : matb;
-                    result[i] = mat;
+                    int triIdx = order[i];
+                    if (triIdx >= 0 && triIdx < triCount) result[triIdx] = mat;
                 }
             }
             else if (g.Mopy.Count > 0)
@@ -323,10 +405,16 @@ namespace WmoBspConverter.Wmo
                     var (flags, matb) = g.Mopy[i];
                     if (!includeNonRender && !IsRenderable(flags)) { result[i] = -1; continue; }
                     int mat = matb == 255 ? 0 : matb;
-                    result[i] = mat;
+                    int triIdx = order[i];
+                    if (triIdx >= 0 && triIdx < triCount) result[triIdx] = mat;
                 }
                 // Fill remainder with default 0; avoid MOBA since we don't trust our parse yet
                 for (int i = mcount; i < triCount; i++) if (result[i] < 0) result[i] = 0;
+            }
+            else if (g.Batches != null && g.Batches.Count > 0)
+            {
+                var moba = BuildFaceMaterialsFromMoba(g, triCount);
+                for (int i = 0; i < triCount; i++) result[i] = moba[i];
             }
             else if (g.Batches != null && g.Batches.Count > 0)
             {
@@ -347,15 +435,29 @@ namespace WmoBspConverter.Wmo
             var result = new int[triCount];
             for (int i = 0; i < triCount; i++) result[i] = -1;
             if (g == null || g.Batches == null || g.Batches.Count == 0) { for (int i=0;i<triCount;i++) result[i]=0; return result; }
+            
+            // V14: MOBA batches group consecutive faces by material
+            // The 'texture' field contains the correct material ID
+            // But startIndex may be invalid (0xFFxx sentinel). In that case, assign to sequential faces.
+            int currentFaceIndex = 0;
             foreach (var b in g.Batches)
             {
-                int start = Math.Max(0, b.FirstFace);
-                int end = Math.Min(triCount, b.FirstFace + b.NumFaces);
-                int mat = (b.MaterialId == 255) ? 0 : b.MaterialId;
-                for (int f = start; f < end; f++)
+                int mat = b.MaterialId;  // V14 uses 'texture' field as material ID
+                int numFaces = b.NumFaces / 3;  // NumFaces is index count, divide by 3 for triangle count
+                
+                // Skip invalid batches (sentinel values)
+                if (b.NumFaces > 60000) continue;
+                
+                // If startIndex is valid, use it; otherwise use sequential assignment
+                int triStart = (b.FirstFace < 60000) ? (b.FirstFace / 3) : currentFaceIndex;
+                int triEnd = Math.Min(triCount, triStart + numFaces);
+                
+                for (int f = triStart; f < triEnd; f++)
                 {
-                    result[f] = mat;
+                    result[f] = (mat == 255) ? 0 : mat;
                 }
+                
+                currentFaceIndex = triEnd;
             }
             for (int i = 0; i < triCount; i++) if (result[i] < 0) result[i] = 0;
             return result;

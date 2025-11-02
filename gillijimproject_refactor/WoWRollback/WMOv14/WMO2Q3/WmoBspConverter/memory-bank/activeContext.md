@@ -1,27 +1,67 @@
 # Active Context
 
 Current focus:
-- 🚨 ROOT CAUSE FOUND: WMO data extraction is broken
-  - **POC uses MOVI for indices, current code doesn't**
-  - MOVI = vertex indices (ushort, 3 per triangle)
-  - MOPY = face metadata (flags + material ID)
-  - Current fallback assembles triangles sequentially instead of using MOVI
-- ✅ SOLVED: WMO to Q3 coordinate transformation (for valid data)
+- ✅ COMPLETE: WMO v14 parsing and material assignment
+  - MOVI/MOVT/MOTV chunks parsed correctly
+  - MOMT materials: 44 bytes per entry (v14 has version field, no shader field)
+  - MOBA batches: 24 bytes per entry (lightMap, texture, boundingBox, indices)
+  - Material assignment: MOBA preferred over MOPY (MOPY often has incorrect data)
+  - Geometry exports successfully (test.wmo: 36 verts, castle01.wmo: 7113 verts)
+- ✅ VERIFIED: WMO to Q3 coordinate transformation working
   1. Coordinate mapping: WMO(X,Y,Z) → Q3(X,Z,-Y)
   2. Scaling: Uniform 100x for all axes, with Z inverted
   3. Plane winding: Normals point OUTWARD from solid volume
-- 🔧 NEXT: Fix WmoV14Parser to read MOVI chunk correctly
-  - Compare with FullV14Converter.AnalyzeAndBuildGroup() (lines 165-294)
-  - Implement proper MOVI index reading instead of fallback
-  - Ensure MOPY metadata is associated with correct triangles
+- ✅ VERIFIED: Material and texture mapping working correctly
+  - MOBA `texture` field contains material ID in v14
+  - Multiple materials per group correctly assigned (e.g., stone, wood, roof tiles)
+  - Textures correctly mapped to surfaces (castle01.wmo verified in MeshLab)
+  - BLP → TGA texture conversion working
+- 🔧 NEXT: Test .map files in GtkRadiant and compile to BSP for Quake 3
 
 ## Critical Implementation Notes
 
-### POC Reference Code Location
-`old_sources/src/WoWToolbox/WoWToolbox.Core.v2/Services/WMO/Legacy/FullV14Converter.cs`
-- Lines 165-294: `AnalyzeAndBuildGroup()` method
-- Shows correct MOVI/MOPY/MOVT/MONR/MOTV parsing
-- Reference for fixing current implementation
+### V14 Format Specifications (VERIFIED)
+
+**MOMT Structure (44 bytes):**
+```
+0x00: version (uint32) - V14 only!
+0x04: flags (uint32)
+0x08: blendMode (uint32)
+0x0C: texture1Offset (uint32) - offset into MOTX
+0x10: sidnColor (uint32) - emissive
+0x14: frameSidnColor (uint32) - runtime
+0x18: texture2Offset (uint32)
+0x1C: diffColor (uint32)
+0x20: groundType (uint32)
+0x24: padding (8 bytes)
+```
+NO shader field, NO texture3/color2/flags2/runTimeData in v14!
+
+**MOBA Structure (24 bytes):**
+```
+0x00: lightMap (byte)
+0x01: texture (byte) - MATERIAL ID in v14!
+0x02: boundingBox (12 bytes) - 6 int16 values
+0x0E: startIndex (uint16) - index into MOVI
+0x10: count (uint16) - number of MOVI indices
+0x12: minIndex (uint16) - first vertex
+0x14: maxIndex (uint16) - last vertex
+0x16: flags (byte)
+0x17: padding (byte)
+```
+NO materialId field in v14 - use `texture` field instead!
+
+**MOPY Structure (2 bytes per face):**
+```
+0x00: flags (byte) - render flags
+0x01: materialId (byte) - often incorrect in v14 (all zeros)
+```
+In v14, MOPY material IDs are unreliable - use MOBA instead!
+
+### Reference Implementations
+- `WoWFormatParser/Structures/WMO/MOBA.cs` - Correct v14 structure
+- `mirrormachine/src/WMO_exporter.cpp` - MOPY writes material per face
+- `old_sources/.../FullV14Converter.cs` - POC chunk reading
 
 ### Chunk Reading Order (from POC)
 1. MOPY - Face metadata (flags + material ID)

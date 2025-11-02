@@ -7,16 +7,19 @@
 
 A powerful, production-ready converter that transforms World of Warcraft WMO v14 files into Quake 3 BSP format, complete with BLP texture processing, shader generation, and modern .NET 9 features. **Recently enhanced with complete WMO v14 parsing, BSP format compliance, and professional-grade features.**
 
-## 🚀 Latest Updates (October 2025)
+## 🚀 Latest Updates (November 2025)
 
-**Major Enhancement Complete!** This converter has been completely overhauled with:
+**Material/Texture Mapping Fixed!** Complete WMO v14 format implementation:
 
 - ✅ **Fixed 50+ compilation errors** - Modern .NET 9 compatibility
 - ✅ **WoWFormatLib Integration** - Proven file parsing approach
 - ✅ **Complete WMO v14 Parser** - MOMO container with all chunk types
+- ✅ **Correct MOMT Structure** - 44 bytes with version field (no shader in v14)
+- ✅ **Correct MOBA Structure** - 24 bytes with bounding box and material ID
+- ✅ **Material Assignment Fixed** - MOBA-based assignment (MOPY unreliable in v14)
 - ✅ **BSP Format Compliance** - Proper Quake 3 v46 structure
 - ✅ **Professional CLI** - System.CommandLine with verbose mode
-- ✅ **Texture Pipeline** - BLP to PNG conversion with shaders
+- ✅ **Texture Pipeline** - BLP to TGA conversion with correct material mapping
 - ✅ **Error Resilience** - Comprehensive validation and handling
 - ✅ **Performance Optimized** - Efficient processing (~12ms per file)
 
@@ -31,7 +34,9 @@ A powerful, production-ready converter that transforms World of Warcraft WMO v14
 **WMO v14 Format Support:**
 - **Complete Chunk Parsing** - MOHD, MOTX, MOMT, MOGN, MOGI, MOPV, MOPT, MOPR, MOLT, MODS, MODN, MODD, MFOG
 - **MOMO Container Processing** - Alpha-era wrapper structure handling
-- **Geometry Extraction** - MOVT (vertices), MOVI (indices), MOPY (materials)
+- **Geometry Extraction** - MOVT (vertices), MOVI (indices), MOTV (UVs)
+- **Material Assignment** - MOBA batches (24 bytes) with correct material IDs
+- **MOMT Parsing** - 44-byte structure with version field (v14-specific)
 - **Big-Endian Compatibility** - Proper WMO file format reading
 
 **Quake 3 BSP Generation:**
@@ -305,9 +310,13 @@ The converter has been thoroughly tested with multiple WMO v14 files and scenari
 ### Test Results Summary
 
 **Successful Conversions:**
-- `castle01.wmo` - 2 groups, 11 textures, complete parsing ✅
+- `castle01.wmo` - 2 groups, 11 materials, correct texture mapping ✅
+  - Group 0 (interior): 8 materials (trim, misc, brick, floor, ceiling)
+  - Group 1 (exterior): 6 materials (stone walls, wood, roof tiles)
+  - Verified in MeshLab with correct stone/wood/tile textures
 - `test.wmo` - 1 group, 1 texture, minimal structure ✅
-- **Texture extraction** - BLP to PNG conversion working ✅
+- **Material assignment** - MOBA-based with multiple materials per group ✅
+- **Texture extraction** - BLP to TGA conversion working ✅
 - **Shader generation** - Material definitions created ✅
 - **BSP structure** - Proper Quake 3 format compliance ✅
 
@@ -480,7 +489,10 @@ This creates detailed logs in the output directory.
 **WMO v14 Reference:**
 - Based on [wowdev.wiki/WMO](https://wowdev.wiki/WMO) specifications
 - Uses MOMO container structure
-- 64-byte MOGP headers
+- **MOMT**: 44 bytes (version field, no shader field in v14)
+- **MOBA**: 24 bytes (lightMap, texture, boundingBox, indices)
+- **MOPY**: 2 bytes per face (flags, materialId - often unreliable)
+- Material assignment via MOBA `texture` field (byte 1)
 - Big-endian chunk identification
 
 **Q3 BSP Reference:**

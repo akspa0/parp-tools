@@ -24,32 +24,47 @@ namespace WmoBspConverter.Wmo
 
         private void ProcessMobaChunk(byte[] mobaData, WmoGroupData groupData)
         {
-            // MOBA: render batches. Each entry is 24 bytes in v14
+            // MOBA: render batches. V14 uses 24 bytes per entry
+            // V14 structure: lightMap(1), texture(1), boundingBox(12), startIndex(2), count(2), minIndex(2), maxIndex(2), flags(1), padding(1)
             const int ENTRY_SIZE = 24;
             int count = mobaData.Length / ENTRY_SIZE;
             if (count <= 0) return;
-            // Do not clear; a group might theoretically have multiple MOBA segments
+            
             for (int i = 0; i < count; i++)
             {
                 int o = i * ENTRY_SIZE;
-                // skip first 12 bytes (six int16 unknowns)
-                uint firstFace = BitConverter.ToUInt32(mobaData, o + 12);
-                ushort numFaces = BitConverter.ToUInt16(mobaData, o + 16);
-                ushort firstVertex = BitConverter.ToUInt16(mobaData, o + 18);
-                ushort lastVertex = BitConverter.ToUInt16(mobaData, o + 20);
+                byte lightMap = mobaData[o + 0];
+                byte texture = mobaData[o + 1];           // Material index in v14
+                // Skip bounding box (12 bytes at offset 2-13)
+                ushort startIndex = BitConverter.ToUInt16(mobaData, o + 14);
+                ushort numIndices = BitConverter.ToUInt16(mobaData, o + 16);
+                ushort minIndex = BitConverter.ToUInt16(mobaData, o + 18);
+                ushort maxIndex = BitConverter.ToUInt16(mobaData, o + 20);
                 byte flags = mobaData[o + 22];
-                byte materialId = mobaData[o + 23];
+                // byte 23 is padding
+
                 groupData.Batches.Add(new MobaBatch
                 {
-                    FirstFace = firstFace,
-                    NumFaces = numFaces,
-                    FirstVertex = firstVertex,
-                    LastVertex = lastVertex,
+                    FirstFace = startIndex,               // Index into MOVI
+                    NumFaces = numIndices,                // Number of MOVI indices (not triangles!)
+                    FirstVertex = minIndex,
+                    LastVertex = maxIndex,
                     Flags = flags,
-                    MaterialId = materialId
+                    MaterialId = texture,                 // V14 uses 'texture' field as material ID
+                    PossibleBox2Z = 0                     // Not present in v14
                 });
             }
-            Console.WriteLine($"[DEBUG] Extracted {count} MOBA batches");
+            Console.WriteLine($"[DEBUG] Extracted {count} MOBA batches (v14 format: 24 bytes each)");
+            
+            // Log first few batches for debugging with hex dump
+            for (int i = 0; i < Math.Min(count, 3); i++)
+            {
+                var b = groupData.Batches[groupData.Batches.Count - count + i];
+                int o = i * ENTRY_SIZE;
+                string hex = BitConverter.ToString(mobaData, o, Math.Min(24, mobaData.Length - o));
+                Console.WriteLine($"[DEBUG]   Batch {i}: lightMap={mobaData[o]}, texture={mobaData[o+1]}, startIdx={b.FirstFace}, count={b.NumFaces}, mat={b.MaterialId}");
+                Console.WriteLine($"[DEBUG]     Raw bytes: {hex}");
+            }
         }
 
         private void ProcessMotvChunk(byte[] motvData, WmoGroupData groupData)
@@ -69,31 +84,70 @@ namespace WmoBspConverter.Wmo
             Console.WriteLine($"[DEBUG] Extracted {count} UVs from MOTV");
         }
 
+        private List<WmoMaterial> ParseMomtMaterials(byte[] momtData, List<string> textures, Dictionary<uint, string> texOffsetToName)
+        {
+            // V14 MOMT structure is 44 bytes (not 64!)
+            // Has 'version' field at start, NO shader field, NO texture_3/color_2/flags_2/runTimeData
+            const int ENTRY_SIZE = 44;
+            var materials = new List<WmoMaterial>();
+            
+            for (int off = 0; off + ENTRY_SIZE <= momtData.Length; off += ENTRY_SIZE)
+            {
+                var mat = new WmoMaterial();
+                
+                // V14 structure: version(4), flags(4), blendMode(4), texture_1(4), sidnColor(4), frameSidnColor(4), texture_2(4), diffColor(4), ground_type(4), padding(8)
+                uint version = BitConverter.ToUInt32(momtData, off + 0x00);  // V14 only!
+                mat.Flags = BitConverter.ToUInt32(momtData, off + 0x04);
+                mat.Shader = 0;  // NO shader field in v14
+                mat.BlendMode = BitConverter.ToUInt32(momtData, off + 0x08);
+                mat.Texture1Offset = BitConverter.ToUInt32(momtData, off + 0x0C);
+                mat.EmissiveColor = BitConverter.ToUInt32(momtData, off + 0x10);  // sidnColor
+                mat.Flags2 = BitConverter.ToUInt32(momtData, off + 0x14);         // frameSidnColor (runtime)
+                mat.Texture2Offset = BitConverter.ToUInt32(momtData, off + 0x18);
+                mat.DiffuseColor = BitConverter.ToUInt32(momtData, off + 0x1C);
+                mat.GroundType = BitConverter.ToUInt32(momtData, off + 0x20);
+                // 0x24-0x2B is padding in v14
+                mat.Texture3Offset = 0;  // Not present in v14
+                mat.AmbientColor = 0;
+                mat.SpecularColor = 0;
+                mat.Color2 = 0;
+                
+                materials.Add(mat);
+            }
+            
+            Console.WriteLine($"[DEBUG] Parsed {materials.Count} materials from MOMT (v14 format: 44 bytes each)");
+            
+            // Log material details for debugging
+            for (int i = 0; i < Math.Min(materials.Count, 5); i++)
+            {
+                var m = materials[i];
+                string tex1Name = texOffsetToName.TryGetValue(m.Texture1Offset, out var t1) ? t1 : $"offset_{m.Texture1Offset}";
+                Console.WriteLine($"[DEBUG]   Mat {i}: Flags=0x{m.Flags:X8}, Blend={m.BlendMode}, Tex1={tex1Name}");
+            }
+            if (materials.Count > 5)
+                Console.WriteLine($"[DEBUG]   ... and {materials.Count - 5} more materials");
+            
+            return materials;
+        }
+
         private List<uint> ParseMomtTextureIndices(byte[] momtData, List<string> textures, Dictionary<uint, string> texOffsetToName)
         {
-            const int ENTRY_SIZE = 64;
+            const int ENTRY_SIZE = 44;  // V14 uses 44 bytes, not 64
             var list = new List<uint>();
             for (int off = 0; off + ENTRY_SIZE <= momtData.Length; off += ENTRY_SIZE)
             {
-                // Try index-at-0 convention (some v14 sources)
-                uint idx0 = BitConverter.ToUInt32(momtData, off + 0);
-                if (idx0 < (uint)textures.Count)
-                {
-                    list.Add(idx0);
-                    continue;
-                }
-
-                // Try texture1 at +12 as MOTX offset
-                uint off12 = BitConverter.ToUInt32(momtData, off + 12);
-                if (texOffsetToName.TryGetValue(off12, out var name))
+                // V14: version(4), flags(4), blendMode(4), texture_1(4)...
+                // Try texture1 at +0x0C as MOTX offset
+                uint texture1Offset = BitConverter.ToUInt32(momtData, off + 0x0C);
+                if (texOffsetToName.TryGetValue(texture1Offset, out var name))
                 {
                     int find = textures.FindIndex(t => string.Equals(t, name, StringComparison.OrdinalIgnoreCase));
                     if (find >= 0) { list.Add((uint)find); continue; }
                 }
-                // Fallback: treat off12 as index
-                if (off12 < (uint)textures.Count)
+                // Fallback: treat as index
+                if (texture1Offset < (uint)textures.Count)
                 {
-                    list.Add(off12);
+                    list.Add(texture1Offset);
                     continue;
                 }
                 // Give up: 0
@@ -124,6 +178,21 @@ namespace WmoBspConverter.Wmo
             return (names, offsets);
         }
 
+        private Dictionary<int, string> ParseStringBlockWithOffsets(byte[] data)
+        {
+            var dict = new Dictionary<int, string>();
+            int pos = 0;
+            while (pos < data.Length)
+            {
+                int start = pos;
+                while (pos < data.Length && data[pos] != 0) pos++;
+                string s = Encoding.ASCII.GetString(data, start, pos - start);
+                dict[start] = s;
+                pos++; // skip null
+            }
+            return dict;
+        }
+
         public class WmoV14Data
         {
             public uint Version { get; set; }
@@ -131,6 +200,7 @@ namespace WmoBspConverter.Wmo
             public List<string> Textures { get; set; } = new();
             public Dictionary<uint, string> TextureOffsetToName { get; set; } = new();
             public List<uint> MaterialTextureIndices { get; set; } = new();
+            public List<WmoMaterial> Materials { get; set; } = new();
             public List<WmoGroupData> Groups { get; set; } = new();
             public byte[] FileBytes { get; set; } = Array.Empty<byte>();
             public Dictionary<int, string> GroupNameMap { get; set; } = new();
@@ -147,6 +217,7 @@ namespace WmoBspConverter.Wmo
             public List<Vector2> UVs { get; set; } = new();
             public uint Flags { get; set; }
             public List<MobaBatch> Batches { get; set; } = new();
+            public List<ushort> FaceOrder { get; set; } = new();
         }
 
         public struct MobaBatch
@@ -285,10 +356,11 @@ namespace WmoBspConverter.Wmo
                 wmoData.Textures = names;
                 wmoData.TextureOffsetToName = offsets;
             }
-            // Extract materials (MOMT chunk → texture indices)
+            // Extract materials (MOMT chunk → full material data + texture indices)
             var momtChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOMT");
             if (momtChunk?.Data != null)
             {
+                wmoData.Materials = ParseMomtMaterials(momtChunk.Data, wmoData.Textures, wmoData.TextureOffsetToName);
                 wmoData.MaterialTextureIndices = ParseMomtTextureIndices(momtChunk.Data, wmoData.Textures, wmoData.TextureOffsetToName);
             }
 
@@ -537,19 +609,32 @@ namespace WmoBspConverter.Wmo
             if (ms.Length < MOGP_HEADER_SIZE) return;
             ms.Position = MOGP_HEADER_SIZE;
 
-            // Scan forward for first valid subchunk header after MOGP header
-            string[] valid = new[] { "MOPY", "MOVT", "MOVI", "MOIN", "MONR", "MOTV", "MOBA", "MOBN", "MOBR" };
-            long firstPos = -1;
-            for (long off = MOGP_HEADER_SIZE; off + 4 <= ms.Length; off++)
+            // fresh containers per group region
+            groupData.Vertices.Clear();
+            groupData.Indices.Clear();
+            groupData.FaceFlags.Clear();
+            groupData.FaceMaterials.Clear();
+            groupData.UVs.Clear();
+            groupData.Batches.Clear();
+
+            // Find first plausible sub-chunk header after the variable-size MOGP header.
+            var valid = new HashSet<string>{"MOVT","MOVI","MOIN","MONR","MOTV","MOPY","MOBA","MOBN","MOBR"};
+            long foundPos = -1;
+            long searchStart = MOGP_HEADER_SIZE;
+            long searchLimit = Math.Min(ms.Length, searchStart + 1024); // scan up to 1KB past header
+            for (long off = searchStart; off + 8 <= searchLimit; off++)
             {
                 ms.Position = off;
                 var idBytes = br.ReadBytes(4);
                 if (idBytes.Length < 4) break;
-                var id = Encoding.ASCII.GetString(idBytes.Reverse().ToArray());
-                if (valid.Contains(id)) { firstPos = off; break; }
+                string sid = Encoding.ASCII.GetString(idBytes.Reverse().ToArray());
+                if (!valid.Contains(sid)) continue;
+                uint ssz = br.ReadUInt32();
+                long next = off + 8 + ssz;
+                if (next <= ms.Length) { foundPos = off; break; }
             }
-            if (firstPos == -1) return;
-            ms.Position = firstPos;
+            if (foundPos < 0) foundPos = MOGP_HEADER_SIZE; // fallback
+            ms.Position = foundPos;
 
             bool seenMOVT = false, seenMOVI = false, seenMOPY = false;
             bool indicesFromMoin = false;
@@ -582,8 +667,8 @@ namespace WmoBspConverter.Wmo
                     case "MOIN":
                         if (!seenMOVI)
                         {
+                            // Append all MOIN segments when MOVI is absent
                             ProcessMoinChunk(data, groupData);
-                            seenMOVI = true; // synthesized indices
                             indicesFromMoin = true;
                             moviIdx = groupData.Indices.Count;
                         }
@@ -599,44 +684,11 @@ namespace WmoBspConverter.Wmo
                     case "MOBA":
                         ProcessMobaChunk(data, groupData);
                         break;
+                    case "MOBR":
+                        ProcessMobrChunk(data, groupData);
+                        break;
                 }
                 ms.Position = subEnd;
-
-                // Realign to next valid subchunk header if necessary (scan ahead up to 512 bytes with size check)
-                if (ms.Position + 8 <= ms.Length)
-                {
-                    long searchStart = ms.Position;
-                    bool found = false;
-                    for (int s = 0; s <= 512 && (searchStart + s + 8) <= ms.Length; s++)
-                    {
-                        ms.Position = searchStart + s;
-                        var headerBytes = br.ReadBytes(4);
-                        if (headerBytes.Length < 4) break;
-                        var candId = Encoding.ASCII.GetString(headerBytes.Reverse().ToArray());
-                        if (!valid.Contains(candId)) { ms.Position = searchStart + s; continue; }
-
-                        // Peek size and validate it fits in region
-                        var candSize = br.ReadUInt32();
-                        long candDataEnd = (searchStart + s) + 8 + candSize;
-                        if (candDataEnd <= ms.Length)
-                        {
-                            // Accept this as next subchunk header
-                            ms.Position = searchStart + s;
-                            found = true;
-                            break;
-                        }
-                        else
-                        {
-                            // Not a plausible header; continue scanning
-                            ms.Position = searchStart + s;
-                        }
-                    }
-                    if (!found)
-                    {
-                        // Fallback: keep sequential position
-                        ms.Position = searchStart;
-                    }
-                }
             }
         }
 
@@ -666,7 +718,6 @@ namespace WmoBspConverter.Wmo
             // MOVI: Face indices (2 bytes per index)
             const int INDEX_SIZE = 2;
             var indexCount = moviData.Length / INDEX_SIZE;
-
             for (int i = 0; i < indexCount; i++)
             {
                 var offset = i * INDEX_SIZE;
@@ -680,7 +731,8 @@ namespace WmoBspConverter.Wmo
         {
             // MOPY: 2 bytes per face: flags, materialId
             int faceCount = mopyData.Length / 2;
-            // Append to support multiple MOPY segments
+            groupData.FaceFlags.Clear();
+            groupData.FaceMaterials.Clear();
             for (int i = 0; i < faceCount; i++)
             {
                 byte flags = mopyData[i * 2 + 0];
@@ -689,6 +741,23 @@ namespace WmoBspConverter.Wmo
                 groupData.FaceMaterials.Add(matId);
             }
             Console.WriteLine($"[DEBUG] Extracted {faceCount} faces from MOPY");
+            
+            // Log first few MOPY entries for debugging
+            for (int i = 0; i < Math.Min(faceCount, 5); i++)
+            {
+                Console.WriteLine($"[DEBUG]   MOPY {i}: flags=0x{mopyData[i*2]:X2}, mat={mopyData[i*2+1]}");
+            }
+        }
+        private void ProcessMobrChunk(byte[] mobrData, WmoGroupData groupData)
+        {
+            // MOBR: face order mapping (uint16 entries)
+            int count = mobrData.Length / 2;
+            groupData.FaceOrder.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                groupData.FaceOrder.Add(BitConverter.ToUInt16(mobrData, i * 2));
+            }
+            Console.WriteLine($"[DEBUG] Extracted {count} entries from MOBR");
         }
         private void ProcessMoinChunk(byte[] moinData, WmoGroupData groupData)
         {

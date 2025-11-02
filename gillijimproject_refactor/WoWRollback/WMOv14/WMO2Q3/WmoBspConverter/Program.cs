@@ -28,6 +28,10 @@ namespace WmoBspConverter
             string? objPath = null;
             bool allowFallback = false;
             bool includeNonRender = false;
+            int? matOnly = null;
+            int? groupIndex = null;
+            string mopyPair = "a"; // a or b
+            string mapping = "auto"; // auto|mopy|moba
 
             // Parse simple command line arguments
             for (int i = 1; i < args.Length; i++)
@@ -74,6 +78,33 @@ namespace WmoBspConverter
                             objPath = args[++i];
                         }
                         break;
+                    case "--mat-only":
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out var mo))
+                        {
+                            matOnly = mo;
+                            i++;
+                        }
+                        break;
+                    case "--group":
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], out var gi))
+                        {
+                            groupIndex = gi; i++;
+                        }
+                        break;
+                    case "--mopy-pair":
+                        if (i + 1 < args.Length)
+                        {
+                            var val = args[++i].ToLowerInvariant();
+                            if (val == "a" || val == "b") mopyPair = val;
+                        }
+                        break;
+                    case "--mapping":
+                        if (i + 1 < args.Length)
+                        {
+                            var val = args[++i].ToLowerInvariant();
+                            if (val == "auto" || val == "mopy" || val == "moba") mapping = val;
+                        }
+                        break;
                     case "--allow-fallback":
                         allowFallback = true;
                         break;
@@ -95,7 +126,7 @@ namespace WmoBspConverter
                 }
                 else if (!string.IsNullOrEmpty(objPath))
                 {
-                    await ExportObjAsync(inputFile, objPath!, allowFallback, includeNonRender, extractTextures, verbose);
+                    await ExportObjAsync(inputFile, objPath!, allowFallback, includeNonRender, extractTextures, verbose, matOnly, groupIndex, mopyPair, mapping);
                 }
                 else
                 {
@@ -128,6 +159,10 @@ namespace WmoBspConverter
             Console.WriteLine("  --obj <file>              Export OBJ (raw WMO coords). Skips BSP/.map path");
             Console.WriteLine("  --allow-fallback          When MOVI is absent, emit sequential-triple faces");
             Console.WriteLine("  --include-nonrender      Include non-render/collision/portal faces (from MOPY flags)");
+            Console.WriteLine("  --mat-only <id>          Emit only faces with the given material ID (diagnostic)");
+            Console.WriteLine("  --group <i>              Emit only a single MOGP group (diagnostic)");
+            Console.WriteLine("  --mopy-pair <a|b>        For MOPYx2, prefer 'a' or 'b' entry when both are renderable (default: a)");
+            Console.WriteLine("  --mapping <auto|mopy|moba>  Force mapping source (default: auto)");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
             Console.WriteLine("Examples:");
@@ -240,12 +275,15 @@ namespace WmoBspConverter
                 throw;
             }
         }
-        private static async Task ExportObjAsync(string inputFile, string objPath, bool allowFallback, bool includeNonRender, bool extractTextures, bool verbose)
+        private static async Task ExportObjAsync(string inputFile, string objPath, bool allowFallback, bool includeNonRender, bool extractTextures, bool verbose, int? matOnly, int? groupIndex, string mopyPair, string mapping)
         {
             var parser = new WmoV14Parser();
             var data = parser.ParseWmoV14(inputFile);
             var exporter = new Wmo.WmoObjExporter();
-            exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures);
+            bool preferSecond = mopyPair == "b";
+            bool forceMopy = mapping == "mopy";
+            bool forceMoba = mapping == "moba";
+            exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures, matOnly, groupIndex, preferSecond, forceMopy, forceMoba);
             if (verbose) Console.WriteLine($"[OBJ] Wrote {Path.GetFullPath(objPath)}");
             await Task.CompletedTask;
         }
