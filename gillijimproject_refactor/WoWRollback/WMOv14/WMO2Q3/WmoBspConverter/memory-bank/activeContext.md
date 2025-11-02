@@ -1,22 +1,26 @@
-# Active Context
+# Active Context - WMO to Quake 3 Conversion (2025-11-02)
 
-Current focus:
-- ✅ COMPLETE: WMO v14 parsing and material assignment
-  - MOVI/MOVT/MOTV chunks parsed correctly
-  - MOMT materials: 44 bytes per entry (v14 has version field, no shader field)
-  - MOBA batches: 24 bytes per entry (lightMap, texture, boundingBox, indices)
-  - Material assignment: MOBA preferred over MOPY (MOPY often has incorrect data)
-  - Geometry exports successfully (test.wmo: 36 verts, castle01.wmo: 7113 verts)
-- ✅ VERIFIED: WMO to Q3 coordinate transformation working
-  1. Coordinate mapping: WMO(X,Y,Z) → Q3(X,Z,-Y)
-  2. Scaling: Uniform 100x for all axes, with Z inverted
-  3. Plane winding: Normals point OUTWARD from solid volume
-- ✅ VERIFIED: Material and texture mapping working correctly
-  - MOBA `texture` field contains material ID in v14
-  - Multiple materials per group correctly assigned (e.g., stone, wood, roof tiles)
-  - Textures correctly mapped to surfaces (castle01.wmo verified in MeshLab)
-  - BLP → TGA texture conversion working
-- 🔧 NEXT: Test .map files in GtkRadiant and compile to BSP for Quake 3
+## Current Status: PARTIALLY WORKING
+
+### ✅ What Works
+1. **WMO v14 Parsing** - Correctly reads MOVI/MOVT/MOTV/MOMT/MOBA chunks
+2. **Geometry Export** - WMO → OBJ works perfectly with all textures
+3. **.map File Generation** - Creates valid Q3 .map files that load in GtkRadiant
+4. **Q3Map2 Compilation** - Maps compile successfully (no leak errors with sealed room)
+5. **Coordinate Transform** - WMO(X,Y,Z) → Q3(X,Y,Z) passthrough (WMO already in correct format)
+6. **Sealed Worldspawn** - Automatic 6-sided room generation around WMO geometry
+7. **Group Splitting** - `--split-groups` option for large WMOs like Ironforge
+
+### ❌ Current Issues (BLOCKING Q3 LOADING)
+1. **Mirrored Planes** - ~5 brushes per map have inverted normals (Q3Map2 warnings)
+2. **Single Texture Only** - Only one texture renders despite 11 textures in WMO
+3. **Q3 Won't Load** - Compiled BSP files fail to load in Quake 3 engine
+4. **Inside-Out Geometry** - Brushes render with inverted faces in GtkRadiant
+
+### 🔧 Critical Fixes Needed
+1. **Fix Brush Winding Order** - Swap v1/v2 vertices to correct plane normals
+2. **Fix Texture Assignment** - Map WMO material IDs to correct brush textures
+3. **Validate BSP Output** - Ensure compiled BSP meets Q3 engine requirements
 
 ## Critical Implementation Notes
 
@@ -77,6 +81,30 @@ In v14, MOPY material IDs are unreliable - use MOBA instead!
 - MOVTParser - Reads Vector3 positions
 - MONRParser - Reads Vector3 normals
 - MOTVParser - Reads Vector2 UVs
+
+## Key Discoveries (2025-11-02 Session)
+
+### Coordinate Transform
+- **CRITICAL**: WMO files store vertices as (X, Z, -Y) already
+- Wiki states: "coordinates are in (X,Z,-Y) order"
+- **Current transform**: Pass-through (no transformation needed)
+- **Previous wrong transform**: WMO(X,Y,Z) → Q3(X,Z,-Y) caused double-transform
+
+### Brush Generation
+- **Working approach**: 6-plane axis-aligned bounding boxes around each triangle
+- **Format**: `( x y z ) ( x y z ) ( x y z ) TEXTURE offsetX offsetY rotation scaleX scaleY contentFlags surfaceFlags value`
+- **Required**: 8 texture parameters (not 5!)
+- **Test cube format** (working): Uses min/max corners with proper winding
+
+### Map Structure
+- **Worldspawn**: Sealed 6-sided room (128 unit padding around WMO)
+- **WMO Geometry**: func_group entity (detail brushes)
+- **Player Spawn**: info_player_deathmatch positioned above WMO geometry
+
+### Texture Issues
+- WMO has 11 textures, but only 1 shows in compiled map
+- Texture assignment from MOBA/MOMT might not be reaching brush generation
+- Need to verify material ID → texture name mapping in brush creation
 
 Recent changes (2025-10-31):
 - **Q3MAP2 COMPLIANCE FIX**: Switched from triangular prisms (5 planes) to rectangular boxes (6 planes)

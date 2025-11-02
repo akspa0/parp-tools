@@ -24,10 +24,13 @@ namespace WmoBspConverter.Wmo
         private readonly bool _extractTextures;
         private readonly WmoMapGenerator _mapGenerator;
 
-        public WmoV14ToBspConverter(string? outputDir = null, bool extractTextures = true)
+        private readonly bool _splitGroups;
+        
+        public WmoV14ToBspConverter(string? outputDir = null, bool extractTextures = true, bool splitGroups = false)
         {
             _textureProcessor = new TextureProcessor(outputDir ?? Path.GetTempPath(), extractTextures);
             _extractTextures = extractTextures;
+            _splitGroups = splitGroups;
             _mapGenerator = new WmoMapGenerator();
         }
 
@@ -526,15 +529,27 @@ namespace WmoBspConverter.Wmo
 
                 // Generate .map file (primary output for GtkRadiant editing)
                 var mapFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".map");
-                _mapGenerator.GenerateMapFile(mapFileName, wmoData, bspFile);
-                Console.WriteLine($"📝 .map file generated: {Path.GetFileName(mapFileName)}");
+                
+                if (_splitGroups && wmoData.Groups.Count > 1)
+                {
+                    _mapGenerator.GenerateMapFilePerGroup(mapFileName, wmoData, bspFile);
+                    Console.WriteLine($"📝 .map files generated: {wmoData.Groups.Count} group files");
+                }
+                else
+                {
+                    _mapGenerator.GenerateMapFile(mapFileName, wmoData, bspFile);
+                    Console.WriteLine($"📝 .map file generated: {Path.GetFileName(mapFileName)}");
+                }
 
-                // Write BSP file for direct Quake 3 loading
+                // Write BSP file using new Q3 writer
                 var bspFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFilePath) + ".bsp");
                 try
                 {
-                    bspFile.Save(bspFileName);
-                    Console.WriteLine($"📦 BSP file written: {Path.GetFileName(bspFileName)}");
+                    var q3Converter = new Quake3.WmoToQ3Converter();
+                    var q3Bsp = q3Converter.Convert(wmoData);
+                    var q3Writer = new Quake3.Q3BspWriter(q3Bsp);
+                    q3Writer.Write(bspFileName);
+                    Console.WriteLine($"📦 Q3 BSP file written: {Path.GetFileName(bspFileName)}");
                     Console.WriteLine($"💡 Note: BSP has basic geometry only (no lightmaps/vis). For full features, compile .map with Q3Map2.");
                 }
                 catch (Exception ex)

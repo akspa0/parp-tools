@@ -18,10 +18,10 @@
 
   <ItemGroup>
     <ProjectReference Include="../old_sources/src/lib/wow.tools.local/WoWFormatLib/WoWFormatLib/WoWFormatLib.csproj" />
-      </ItemGroup>
+  </ItemGroup>
     
-      <ItemGroup>
-        <Compile Remove="Textures/BLPReader.cs" />
-      </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Textures/BLPReader.cs" />
+  </ItemGroup>
 
 </Project>

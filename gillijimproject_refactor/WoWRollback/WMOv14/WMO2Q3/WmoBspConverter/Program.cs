@@ -25,6 +25,7 @@ namespace WmoBspConverter
             bool extractTextures = true;
             string? outputDir = null;
             bool verbose = false;
+            bool splitGroups = false;
             string? objPath = null;
             bool allowFallback = false;
             bool includeNonRender = false;
@@ -72,6 +73,10 @@ namespace WmoBspConverter
                     case "--verbose":
                     case "-v":
                         verbose = true;
+                        break;
+                    case "--split-groups":
+                    case "-s":
+                        splitGroups = true;
                         break;
                     case "--obj":
                         if (i + 1 < args.Length)
@@ -138,7 +143,7 @@ namespace WmoBspConverter
                 }
                 else
                 {
-                    await ConvertAsync(inputFile, outputFile, extractTextures, outputDir, verbose);
+                    await ConvertAsync(inputFile, outputFile, extractTextures, outputDir, verbose, splitGroups);
                 }
                 return 0;
             }
@@ -163,6 +168,7 @@ namespace WmoBspConverter
             Console.WriteLine("  --output, -o <file>       Output BSP file path");
             Console.WriteLine("  --extract-textures, -t    Extract and convert BLP textures to PNG (default: true)");
             Console.WriteLine("  --output-dir, -d <dir>    Output directory for textures and shaders");
+            Console.WriteLine("  --split-groups, -s        Export each WMO group as separate .map file (for large WMOs)");
             Console.WriteLine("  --verbose, -v             Enable verbose logging");
             Console.WriteLine("  --obj <file>              Export OBJ (raw WMO coords). Skips BSP/.map path");
             Console.WriteLine("  --allow-fallback          When MOVI is absent, emit sequential-triple faces");
@@ -183,7 +189,7 @@ namespace WmoBspConverter
             Console.WriteLine("  WmoBspConverter test.wmo --obj ./out/test.obj --allow-fallback");
         }
 
-        static async Task ConvertAsync(string inputFile, string? outputFile, bool extractTextures, string? outputDir, bool verbose)
+        static async Task ConvertAsync(string inputFile, string? outputFile, bool extractTextures, string? outputDir, bool verbose, bool splitGroups = false)
         {
             // Validate input file
             if (!File.Exists(inputFile))
@@ -223,7 +229,7 @@ namespace WmoBspConverter
             try
             {
                 // Create converter with enhanced features
-                var converter = new WmoV14ToBspConverter(outputDirectory, extractTextures);
+                var converter = new WmoV14ToBspConverter(outputDirectory, extractTextures, splitGroups);
 
                 // Run enhanced conversion (uses v14 parser path)
                 var result = await converter.ConvertAsync(inputFile, outputDirectory, System.Threading.CancellationToken.None);
