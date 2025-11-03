@@ -122,6 +122,8 @@ internal static class Program
                     return RunDiffListfiles(opts);
                 case "pack-monolithic-alpha-wdt":
                     return RunPackMonolithicAlphaWdt(opts);
+                case "pack-wdl-from-lk":
+                    return RunPackWdlFromLk(opts);
                 case "gui":
                     return RunGui(opts);
                 case "regen-layers":
@@ -201,7 +203,32 @@ internal static class Program
         Console.WriteLine($"[pack] Strict target assets: {options.StrictTargetAssets.ToString().ToLowerInvariant()}");
 
         AlphaWdtMonolithicWriter.WriteMonolithic(lkWdt, lkMapDir, outWdt!, options);
+        // Emit a sibling WDL next to the WDT for distant terrain rendering
+        try
+        {
+            var outWdl = Path.ChangeExtension(outWdt, ".wdl");
+            WdlWriterV18.WriteFromLk(lkWdt, lkMapDir, outWdl);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[warn] WDL generation skipped: {ex.Message}");
+        }
         Console.WriteLine($"[ok] WDT written: {outWdt}");
+        return 0;
+    }
+
+    private static int RunPackWdlFromLk(Dictionary<string, string> opts)
+    {
+        if (!opts.ContainsKey("lk-wdt")) { Console.Error.WriteLine("[error] --lk-wdt <file> is required"); return 2; }
+        var lkWdt = opts["lk-wdt"];
+        var lkMapDir = opts.GetValueOrDefault("lk-map-dir", Path.GetDirectoryName(lkWdt) ?? ".");
+        var outWdl = GetOption(opts, "out");
+        if (string.IsNullOrWhiteSpace(outWdl)) { Console.Error.WriteLine("[error] --out <map.wdl> is required"); return 2; }
+
+        Console.WriteLine("[pack] Building WDL v18 from LK inputs...");
+        Console.WriteLine($"[pack] LK WDT: {lkWdt}");
+        Console.WriteLine($"[pack] LK Map Dir: {lkMapDir}");
+        WdlWriterV18.WriteFromLk(lkWdt, lkMapDir, outWdl!);
         return 0;
     }
 

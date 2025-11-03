@@ -384,9 +384,9 @@ public static class AlphaMcnkBuilder
         int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
 
         using var ms = new MemoryStream();
-        // Write MCNK letters reversed ('KNCM')
-        var reversedLetters = Encoding.ASCII.GetBytes("KNCM");
-        ms.Write(reversedLetters, 0, 4);
+        // Write MCNK letters reversed on disk ('KNCM') to match Alpha v18 expectations
+        var letters = Encoding.ASCII.GetBytes("KNCM");
+        ms.Write(letters, 0, 4);
         ms.Write(BitConverter.GetBytes(givenSize), 0, 4);
 
         // Build Alpha SMChunk header (128 bytes)
@@ -455,6 +455,11 @@ public static class AlphaMcnkBuilder
         if (mcalRaw.Length > 0) ms.Write(mcalRaw, 0, mcalRaw.Length);  // Raw data only!
         if (mcseRaw.Length > 0) ms.Write(mcseRaw, 0, mcseRaw.Length);  // Raw data only!
 
+        // Even-byte pad: if MCNK data size is odd, write a single 0x00 pad byte (not counted in size)
+        if ((givenSize & 1) == 1)
+        {
+            ms.WriteByte(0);
+        }
         return ms.ToArray();
     }
 
