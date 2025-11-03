@@ -32,9 +32,11 @@ public sealed class LkAdtReader : IAdtReader
             string fcc = Encoding.ASCII.GetString(bytes, i, 4);
             int size = BitConverter.ToInt32(bytes, i + 4);
             int dataStart = i + 8;
+            if (size < 0) break;
             int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
             if (fcc == "RDHM") { mhdrOffset = i; break; }
             if (dataStart + size > bytes.Length) break;
+            if (next <= i) break;
             i = next;
         }
         if (mhdrOffset < 0) throw new InvalidDataException("MHDR not found in ADT");
@@ -73,6 +75,7 @@ public sealed class LkAdtReader : IAdtReader
             string fourCC = Encoding.ASCII.GetString(bytes, i, 4);
             int size = BitConverter.ToInt32(bytes, i + 4);
             int dataStart = i + 8;
+            if (size < 0) break;
             int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
             if (dataStart + size > bytes.Length) break;
 
@@ -101,6 +104,7 @@ public sealed class LkAdtReader : IAdtReader
                 break;
             }
 
+            if (next <= i) break;
             i = next;
         }
 
@@ -122,6 +126,7 @@ public sealed class LkAdtReader : IAdtReader
             string fourCC = Encoding.ASCII.GetString(bytes, i, 4);
             int size = BitConverter.ToInt32(bytes, i + 4);
             int dataStart = i + 8;
+            if (size < 0) break;
             int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
             if (dataStart + size > bytes.Length) break;
 
@@ -150,6 +155,7 @@ public sealed class LkAdtReader : IAdtReader
                 break;
             }
 
+            if (next <= i) break;
             i = next;
         }
 

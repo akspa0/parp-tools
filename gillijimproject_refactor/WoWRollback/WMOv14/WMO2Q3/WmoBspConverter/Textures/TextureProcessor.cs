@@ -406,6 +406,25 @@ namespace WmoBspConverter.Textures
             
             File.WriteAllText(shaderPath, shaderScript);
             Console.WriteLine($"[INFO] Generated shader script: {shaderPath}");
+
+            // Also write to root scripts directory for GtkRadiant discovery
+            try
+            {
+                var texturesDir = Directory.GetParent(_textureOutputDir);
+                var outputRoot = texturesDir?.Parent?.FullName;
+                if (!string.IsNullOrEmpty(outputRoot))
+                {
+                    var rootScripts = Path.Combine(outputRoot, "scripts");
+                    Directory.CreateDirectory(rootScripts);
+                    var rootShader = Path.Combine(rootScripts, "wmo_textures.shader");
+                    File.WriteAllText(rootShader, shaderScript);
+                    Console.WriteLine($"[INFO] Duplicated shader script: {rootShader} (add 'wmo_textures' to shaderlist.txt)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Could not duplicate shader script to /scripts: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -437,6 +456,25 @@ namespace WmoBspConverter.Textures
             var shaderPath = Path.Combine(shaderDir, "wmo_textures.shader");
             File.WriteAllText(shaderPath, string.Join("\n", lines));
             Console.WriteLine($"[INFO] Generated shader script: {shaderPath}");
+
+            // Also write to root scripts directory
+            try
+            {
+                var texturesDir = Directory.GetParent(_textureOutputDir);
+                var outputRoot = texturesDir?.Parent?.FullName;
+                if (!string.IsNullOrEmpty(outputRoot))
+                {
+                    var rootScripts = Path.Combine(outputRoot, "scripts");
+                    Directory.CreateDirectory(rootScripts);
+                    var rootShader = Path.Combine(rootScripts, "wmo_textures.shader");
+                    File.WriteAllText(rootShader, string.Join("\n", lines));
+                    Console.WriteLine($"[INFO] Duplicated shader script: {rootShader} (add 'wmo_textures' to shaderlist.txt)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Could not duplicate shader script to /scripts: {ex.Message}");
+            }
         }
 
         /// <summary>

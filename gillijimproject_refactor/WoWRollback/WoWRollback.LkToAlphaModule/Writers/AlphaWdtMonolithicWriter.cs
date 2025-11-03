@@ -10,6 +10,7 @@ using WoWRollback.LkToAlphaModule.Readers;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using WoWRollback.LkToAlphaModule.Builders;
+using WoWRollback.Core.Services.Archive;
 
 namespace WoWRollback.LkToAlphaModule.Writers;
 
@@ -33,13 +34,10 @@ public sealed class AlphaWdtMonolithicWriter
             .Where(p => !p.Contains("_obj", StringComparison.OrdinalIgnoreCase) && !p.Contains("_tex", StringComparison.OrdinalIgnoreCase))
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (verbose)
+        Console.WriteLine($"[pack] root ADTs: {rootAdts.Count}");
+        if (verbose && rootAdts.Count > 0)
         {
-            Console.WriteLine($"[pack] root ADTs: {rootAdts.Count}");
-            if (rootAdts.Count > 0)
-            {
-                Console.WriteLine($"[pack] first: {Path.GetFileName(rootAdts.First())}, last: {Path.GetFileName(rootAdts.Last())}");
-            }
+            Console.WriteLine($"[pack] first: {Path.GetFileName(rootAdts.First())}, last: {Path.GetFileName(rootAdts.Last())}");
         }
 
         // Collect WMO and M2 names from WDT and all tile ADTs
@@ -55,140 +53,39 @@ public sealed class AlphaWdtMonolithicWriter
             allWmoNames.Add(name);
         }
         
-        // Read from each tile ADT (root and obj variants)
-        foreach (var rootAdt in rootAdts)
-        {
-            var tileWmos = adtReader.ReadWmoNames(rootAdt);
-            foreach (var name in tileWmos)
-            {
-                allWmoNames.Add(name);
-            }
-            
-            var tileM2s = adtReader.ReadM2Names(rootAdt);
-            foreach (var name in tileM2s)
-            {
-                allM2Names.Add(name);
-            }
+        int mccvExported = 0;
+        int mccvHeaders = 0;
 
-            // Also scan OBJ ADT if present (often carries additional names)
-            var objAdt = Path.Combine(Path.GetDirectoryName(rootAdt)!,
-                Path.GetFileNameWithoutExtension(rootAdt) + "_obj.adt");
-            if (File.Exists(objAdt))
-            {
-                var objWmos = adtReader.ReadWmoNames(objAdt);
-                foreach (var name in objWmos)
-                {
-                    allWmoNames.Add(name);
-                }
-
-                var objM2s = adtReader.ReadM2Names(objAdt);
-                foreach (var name in objM2s)
-                {
-                    allM2Names.Add(name);
-                }
-            }
-        }
-        
+        // Build WDT scaffolding (Alpha format): MVER -> MPHD -> MAIN -> MDNM -> MONM
+        using var ms = new MemoryStream();
+        // MVER
+        ms.Write(new Chunk("MVER", 4, BitConverter.GetBytes(18)).GetWholeChunk());
+        // MPHD placeholder (128 bytes)
+        long mphdStart = ms.Position; var mphd = new Chunk("MPHD", 128, new byte[128]); ms.Write(mphd.GetWholeChunk()); long mphdDataStart = mphdStart + 8;
+        // MAIN placeholder (4096 * 16)
+        var mainData = new byte[GridTiles * 16]; var main = new Chunk("MAIN", mainData.Length, mainData); long mainStart = ms.Position; ms.Write(main.GetWholeChunk());
+        // Build name lists (optional); currently use collected sets (may be empty)
         var wmoNames = allWmoNames.ToList();
         var m2Names = allM2Names.ToList();
-        
-        Console.WriteLine($"[pack] Collected {wmoNames.Count} unique WMO names:");
-        foreach (var name in wmoNames)
-        {
-            Console.WriteLine($"  - {name}");
-        }
-        
-        if (verbose)
-        {
-            Console.WriteLine($"[pack] Collected {m2Names.Count} unique M2 names from {rootAdts.Count} tiles");
-        }
+        // MDNM/MONM chunks
+        long mdnmStart = ms.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2Names).Length, BuildMdnmData(m2Names)); ms.Write(mdnm.GetWholeChunk());
+        long monmStart = ms.Position; var monm = new Chunk("MONM", BuildMonmData(wmoNames).Length, BuildMonmData(wmoNames)); ms.Write(monm.GetWholeChunk());
+        // Patch MPHD counts and absolute offsets
+        long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
+        BitConverter.GetBytes(m2Names.Count).CopyTo(mphdData);
+        BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
+        // MONM count must include a trailing empty string when any names exist
+        BitConverter.GetBytes(wmoNames.Count > 0 ? wmoNames.Count + 1 : 0).CopyTo(mphdData.Slice(8));
+        BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
+        ms.Write(mphdData); ms.Position = savePos;
 
-        // Asset gating against target listfile (e.g., 3.3.5)
-        if (!string.IsNullOrWhiteSpace(opts?.TargetListfilePath) && File.Exists(opts!.TargetListfilePath))
-        {
-            try
-            {
-                var idx = ListfileIndex.Load(opts.TargetListfilePath!);
-                var gate = new AssetGate(idx);
-                var keptM2 = gate.FilterNames(m2Names, out var droppedM2);
-                var keptWmo = gate.FilterNames(wmoNames, out var droppedWmo);
-
-                if (opts.StrictTargetAssets)
-                {
-                    m2Names = keptM2.ToList();
-                    wmoNames = keptWmo.ToList();
-                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
-                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
-                    Console.WriteLine($"[gate] Target listfile: kept M2={m2Names.Count}, dropped={droppedM2.Count}; kept WMO={wmoNames.Count}, dropped={droppedWmo.Count}");
-                }
-                else
-                {
-                    Console.WriteLine("[gate] StrictTargetAssets=false; gating report only (no drops)");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[warn] Asset gating failed: {ex.Message}");
-            }
-        }
-
-        using var ms = new MemoryStream();
-        // Write MVER
-        var mver = new Chunk("MVER", 4, BitConverter.GetBytes(18));
-        ms.Write(mver.GetWholeChunk());
-
-        // Write MPHD (Alpha expects 128 bytes). We'll patch its data after writing MDNM/MONM.
-        long mphdStart = ms.Position; // letters position
-        var mphd = new Chunk("MPHD", 128, new byte[128]);
-        long mphdDataStart = mphdStart + 8; // letters+size then data
-        var mphdWhole = mphd.GetWholeChunk();
-        ms.Write(mphdWhole, 0, mphdWhole.Length);
-
-        // Prepare MAIN placeholder (4096 * 16)
-        var mainData = new byte[GridTiles * 16]; // zeros now
-        var main = new Chunk("MAIN", mainData.Length, mainData);
-        long mainStart = ms.Position; // we will patch its data later
-        var mainWhole = main.GetWholeChunk();
-        ms.Write(mainWhole, 0, mainWhole.Length);
-
-        // MDNM then MONM must follow MAIN in Alpha order
-        // Build from collected LK names (MMDX → MDNM, MWMO → MONM)
-        var mdnmDataBytes = BuildMdnmData(m2Names);
-        var monmDataBytes = BuildMonmData(wmoNames);
-
-        long mdnmStart = ms.Position;
-        var mdnm = new Chunk("MDNM", mdnmDataBytes.Length, mdnmDataBytes);
-        ms.Write(mdnm.GetWholeChunk());
-
-        long monmStart = ms.Position;
-        var monm = new Chunk("MONM", monmDataBytes.Length, monmDataBytes);
-        ms.Write(monm.GetWholeChunk());
-
-        if (verbose)
-        {
-            Console.WriteLine($"[pack] MDNM bytes: {mdnmDataBytes.Length}, names: {m2Names.Count}");
-            Console.WriteLine($"[pack] MONM bytes: {monmDataBytes.Length}, names: {wmoNames.Count}");
-        }
-
-        // Patch MPHD with counts and offsets (absolute file offsets to chunk FourCC)
-        // struct SMMapHeader { uint32 nDoodadNames; uint32 offsDoodadNames; uint32 nMapObjNames; uint32 offsMapObjNames; uint8 pad[112]; };
-        long savePos = ms.Position;
-        ms.Position = mphdDataStart;
-        Span<byte> mphdData = stackalloc byte[128];
-        mphdData.Clear();
-        BitConverter.GetBytes(m2Names.Count).CopyTo(mphdData);                  // nDoodadNames
-        BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));   // offsDoodadNames (absolute)
-        BitConverter.GetBytes(wmoNames.Count).CopyTo(mphdData.Slice(8));            // nMapObjNames
-        BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));  // offsMapObjNames (absolute)
-        // write patched data
-        ms.Write(mphdData);
-        // restore
-        ms.Position = savePos;
-
-        // Build tile segments and collect MHDR absolute offsets for MAIN
-        var mhdrAbsoluteOffsets = Enumerable.Repeat(0, GridTiles).ToArray();
+        // MAIN patch arrays
+        var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
         var mhdrToFirstMcnkSizes = Enumerable.Repeat(0, GridTiles).ToArray();
+        // Provide alias for compatibility with downstream code segments
+        var outMs = ms;
 
+        // Read from each tile ADT (root and obj variants)
         foreach (var rootAdt in rootAdts)
         {
             try
@@ -224,40 +121,28 @@ public sealed class AlphaWdtMonolithicWriter
                 {
                     alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts);
                     presentIndices.Add(i);
-
+                    if (off + 8 + 0x80 <= bytes.Length)
+                    {
+                        int hdrStart = off + 8;
+                        int mRel = BitConverter.ToInt32(bytes, hdrStart + 0x64);
+                        if (mRel > 0) mccvHeaders++;
+                    }
                     if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
                     {
-                        try
-                        {
-                            ExportMccvIfPresent(bytes, off, Path.Combine(opts!.ExportMccvDir!, mapName), yy, xx, i);
-                        }
-                        catch { }
+                        try { if (ExportMccvIfPresent(bytes, off, Path.Combine(opts!.ExportMccvDir!, mapName), yy, xx, i)) mccvExported++; } catch { }
                     }
                 }
-                else
-                {
-                    alphaMcnkBytes[i] = Array.Empty<byte>();
-                }
-            }
-            if (verbose)
-            {
-                Console.WriteLine($"[pack] tile {yy:D2}_{xx:D2}: mcnk present {presentIndices.Count}");
+                else alphaMcnkBytes[i] = Array.Empty<byte>();
             }
 
-            // Now we can compute absolute offsets and write MHDR + MCIN + MCNKs
-            long mhdrAbsolute = ms.Position;
-            // MAIN.offset points to MHDR start (letters)
-            mhdrAbsoluteOffsets[tileIndex] = checked((int)(mhdrAbsolute));
+            tileIndex = xx * 64 + yy;
+            long mhdrAbsolute = outMs.Position; mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+            var aMhdr = AlphaMhdrBuilder.BuildMhdrForTerrain();
+            outMs.Write(aMhdr.GetWholeChunk());
 
-            var mhdr = AlphaMhdrBuilder.BuildMhdrForTerrain();
-            var mhdrWhole = mhdr.GetWholeChunk();
-            ms.Write(mhdrWhole, 0, mhdrWhole.Length);
+            long mcinPosition = outMs.Position; var mcinPh = AlphaMcinBuilder.BuildMcin(new int[256], new int[256]); var mcinWhole = mcinPh.GetWholeChunk(); outMs.Write(mcinWhole);
 
-            // MCIN absolute offset comes after MHDR
-            long mcinAbsolute = ms.Position;
-            long mhdrDataStart = mhdrAbsolute + 8;
-            
-            // Prepare MTEX data: prefer LK tile TEX ADT MTEX; then root ADT; fallback to BaseTexture
+            // MTEX (prefer tile _tex.adt, fallback to root ADT MTEX, then BaseTexture)
             byte[] mtexData = Array.Empty<byte>();
             var rootDir = Path.GetDirectoryName(rootAdt)!;
             var baseName = Path.GetFileNameWithoutExtension(rootAdt);
@@ -267,170 +152,329 @@ public sealed class AlphaWdtMonolithicWriter
                 var texBytes = File.ReadAllBytes(texAdt);
                 mtexData = ExtractLkMtexData(texBytes);
             }
-            if (mtexData.Length == 0)
-            {
-                mtexData = ExtractLkMtexData(bytes);
-            }
+            if (mtexData.Length == 0) mtexData = ExtractLkMtexData(bytes);
             if (mtexData.Length == 0)
             {
                 var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
-                var mtexString = baseTexturePath + "\0";
-                try { mtexData = Encoding.ASCII.GetBytes(mtexString); }
-                catch (Exception ex) { throw new InvalidOperationException($"Failed to encode MTEX texture path '{baseTexturePath}': {ex.Message}", ex); }
+                mtexData = Encoding.ASCII.GetBytes(baseTexturePath + "\0");
             }
+            long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk()); long mtexEnd = outMs.Position;
 
-            // STEP 1: Write all chunks FIRST and track their actual positions
-            // This ensures offsets always match reality
-            
-            // Write MCIN (placeholder, will rebuild later with correct MCNK positions)
-            long mcinPosition = ms.Position;
-            var mcinPlaceholder = AlphaMcinBuilder.BuildMcin(new int[256], new int[256]);
-            var mcinWhole = mcinPlaceholder.GetWholeChunk();
-            ms.Write(mcinWhole, 0, mcinWhole.Length);
-            long mcinEndPosition = ms.Position;
-            
-            // Write MTEX
-            long mtexPosition = ms.Position;
-            var mtex = new Chunk("MTEX", mtexData.Length, mtexData);
-            var mtexWhole = mtex.GetWholeChunk();
-            ms.Write(mtexWhole, 0, mtexWhole.Length);
-            long mtexEndPosition = ms.Position;
-            
-            // Write empty MDDF
-            long mddfPosition = ms.Position;
-            var mddf = new Chunk("MDDF", 0, Array.Empty<byte>());
-            var mddfWhole = mddf.GetWholeChunk();
-            ms.Write(mddfWhole, 0, mddfWhole.Length);
-            long mddfEndPosition = ms.Position;
-            
-            // Write empty MODF
-            long modfPosition = ms.Position;
-            var modf = new Chunk("MODF", 0, Array.Empty<byte>());
-            var modfWhole = modf.GetWholeChunk();
-            ms.Write(modfWhole, 0, modfWhole.Length);
-            long modfEndPosition = ms.Position;
-            
-            // First MCNK starts here
-            long firstMcnkAbsolute = ms.Position;
+            // Empty MDDF/MODF
+            long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk()); long mddfEnd = outMs.Position;
+            long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk()); long modfEnd = outMs.Position;
 
-            // STEP 2: Calculate MCNK positions now that we know where they start
-            int[] mcnkAbs = new int[256];
-            int[] mcnkSizes = new int[256];
-            long cursor = firstMcnkAbsolute;
-            for (int i = 0; i < 256; i++)
-            {
-                if (alphaMcnkBytes[i] is { Length: > 0 })
-                {
-                    mcnkAbs[i] = checked((int)cursor);
-                    mcnkSizes[i] = alphaMcnkBytes[i].Length;
-                    cursor += alphaMcnkBytes[i].Length;
-                }
-                else
-                {
-                    mcnkAbs[i] = 0;
-                    mcnkSizes[i] = 0;
-                }
-            }
-
-            // STEP 3: Now go back and patch MHDR with ACTUAL positions
-            long savedPosition = ms.Position;
-            
-            // Calculate offsets relative to MHDR.data start
-            // CRITICAL: ALL offsets point to chunk start (FourCC), not data!
-            // This is the Alpha convention - verified against real 0.5.3 Kalidar WDT
-            int offsTexRel = checked((int)(mtexPosition - mhdrDataStart)); // Point to MTEX FourCC
-            int offsDooRel = checked((int)(mddfPosition - mhdrDataStart)); // Point to MDDF FourCC
-            int offsMobRel = checked((int)(modfPosition - mhdrDataStart)); // Point to MODF FourCC
-            
-            // Debug logging (always on for now)
-            Console.WriteLine($"[OFFSET-DEBUG] Tile {tileIndex}:");
-            Console.WriteLine($"  mhdrDataStart: 0x{mhdrDataStart:X}");
-            Console.WriteLine($"  MCIN: 0x{mcinPosition:X} (length: {mcinEndPosition - mcinPosition})");
-            Console.WriteLine($"  MTEX: 0x{mtexPosition:X} (length: {mtexEndPosition - mtexPosition})");
-            Console.WriteLine($"  MDDF: 0x{mddfPosition:X} (length: {mddfEndPosition - mddfPosition})");
-            Console.WriteLine($"  MODF: 0x{modfPosition:X} (length: {modfEndPosition - modfPosition})");
-            Console.WriteLine($"  First MCNK: 0x{firstMcnkAbsolute:X}");
-            Console.WriteLine($"  Calculated offsTex: {offsTexRel}");
-            Console.WriteLine($"  Calculated offsDoo: {offsDooRel}");
-            Console.WriteLine($"  Calculated offsMob: {offsMobRel}");
-            
-            // Write Alpha MHDR structure (NO sizeInfo field!)
-            // struct SMAreaHeader {
-            //     uint32_t offsInfo;  // MCIN  [offset 0]
-            //     uint32_t offsTex;   // MTEX  [offset 4]
-            //     uint32_t sizeTex;           [offset 8]
-            //     uint32_t offsDoo;   // MDDF  [offset 12]
-            //     uint32_t sizeDoo;           [offset 16]
-            //     uint32_t offsMob;   // MODF  [offset 20]
-            //     uint32_t sizeMob;           [offset 24]
-            //     uint8_t pad[36];            [offset 28-63]
-            // };
-            
-            ms.Position = mhdrDataStart + 0;
-            ms.Write(BitConverter.GetBytes(64)); // offsInfo - MCIN immediately follows 64-byte MHDR.data
-            
-            ms.Position = mhdrDataStart + 4;
-            ms.Write(BitConverter.GetBytes(offsTexRel)); // offsTex
-            
-            ms.Position = mhdrDataStart + 8;
-            ms.Write(BitConverter.GetBytes(mtexData.Length)); // sizeTex
-            
-            ms.Position = mhdrDataStart + 12;
-            ms.Write(BitConverter.GetBytes(offsDooRel)); // offsDoo
-            
-            ms.Position = mhdrDataStart + 16;
-            ms.Write(BitConverter.GetBytes(0)); // sizeDoo
-            
-            ms.Position = mhdrDataStart + 20;
-            ms.Write(BitConverter.GetBytes(offsMobRel)); // offsMob
-            
-            ms.Position = mhdrDataStart + 24;
-            ms.Write(BitConverter.GetBytes(0)); // sizeMob
-            
-            // STEP 4: Go back and rewrite MCIN with correct MCNK positions
-            ms.Position = mcinPosition;
-            var mcin = AlphaMcinBuilder.BuildMcin(mcnkAbs, mcnkSizes);
-            mcinWhole = mcin.GetWholeChunk();
-            ms.Write(mcinWhole, 0, mcinWhole.Length);
-            
-            // STEP 5: Restore position to write MCNKs
-            ms.Position = savedPosition;
-            
-            // MAIN.size = (first MCNK absolute - MHDR start), or 0 if none
-            mhdrToFirstMcnkSizes[tileIndex] = presentIndices.Count > 0 ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
-
-            // Write MCNK bytes in index order
+            long firstMcnkAbsolute = outMs.Position;
+            int[] mcnkAbs = new int[256]; int[] mcnkSizes = new int[256]; long cursor = firstMcnkAbsolute;
             for (int i = 0; i < 256; i++)
             {
                 var buf = alphaMcnkBytes[i];
-                if (buf is { Length: > 0 })
+                if (buf is { Length: > 0 }) { mcnkAbs[i] = checked((int)cursor); mcnkSizes[i] = buf.Length; cursor += buf.Length; }
+                else { mcnkAbs[i] = 0; mcnkSizes[i] = 0; }
+            }
+
+            // Patch MHDR.data with relative offsets
+            long mhdrDataStart = mhdrAbsolute + 8;
+            outMs.Position = mhdrDataStart + 0; outMs.Write(BitConverter.GetBytes(64));
+            outMs.Position = mhdrDataStart + 4; outMs.Write(BitConverter.GetBytes(checked((int)(mtexPosition - mhdrDataStart))));
+            outMs.Position = mhdrDataStart + 8; outMs.Write(BitConverter.GetBytes(mtexData.Length));
+            outMs.Position = mhdrDataStart + 12; outMs.Write(BitConverter.GetBytes(checked((int)(mddfPosition - mhdrDataStart))));
+            outMs.Position = mhdrDataStart + 16; outMs.Write(BitConverter.GetBytes(0));
+            outMs.Position = mhdrDataStart + 20; outMs.Write(BitConverter.GetBytes(checked((int)(modfPosition - mhdrDataStart))));
+            outMs.Position = mhdrDataStart + 24; outMs.Write(BitConverter.GetBytes(0));
+
+            // Rewrite MCIN with positions RELATIVE to embedded ADT base (MHDR letters)
+            var mcnkRel = new int[256];
+            for (int i = 0; i < 256; i++) mcnkRel[i] = mcnkAbs[i] > 0 ? mcnkAbs[i] - checked((int)mhdrAbsolute) : 0;
+            outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkRel, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
+            outMs.Position = cursor; // restore to end
+
+            // MAIN.size distance
+            mhdrToFirstMcnkSizes[tileIndex] = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
+
+            // Write MCNKs
+            for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) outMs.Write(buf); }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[pack] tile failed {Path.GetFileName(rootAdt)}: {ex.Message}");
+        }
+        }
+        // Patch MAIN data
+        outMs.Position = mainStart + 8;
+        var patchedMain = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirstMcnkSizes, false);
+        outMs.Write(patchedMain.Data, 0, patchedMain.Data.Length);
+
+        File.WriteAllBytes(outWdtPath, outMs.ToArray());
+        if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
+        {
+            Console.WriteLine($"[pack] MCCV images exported: {mccvExported}");
+            Console.WriteLine($"[pack] MCCV headers present: {mccvHeaders}");
+        }
+    }
+
+    public static void WriteMonolithicFromArchive(IArchiveSource src, string mapName, string outWdtPath, LkToAlphaOptions? opts = null)
+    {
+        if (src is null) throw new ArgumentNullException(nameof(src));
+        if (string.IsNullOrWhiteSpace(mapName)) throw new ArgumentException("mapName required");
+        if (string.IsNullOrWhiteSpace(outWdtPath)) throw new ArgumentException("outWdtPath required");
+        Directory.CreateDirectory(Path.GetDirectoryName(outWdtPath) ?? ".");
+
+        bool verbose = opts?.Verbose == true;
+
+        // Discover tiles from archive
+        var tiles = new List<(int YY, int XX, string RootVPath)>();
+        var pattern = $"world/maps/{mapName}/{mapName}_*_*.adt";
+        var allCandidates = src.EnumerateFiles(pattern)
+            .Where(p => !p.Contains("_obj", StringComparison.OrdinalIgnoreCase) && !p.Contains("_tex", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (allCandidates.Count > 0)
+        {
+            foreach (var vp in allCandidates)
+            {
+                var stem = Path.GetFileNameWithoutExtension(vp);
+                var body = stem.Substring(mapName.Length + 1);
+                var parts = body.Split('_');
+                if (parts.Length >= 2 && int.TryParse(parts[0], out var yy) && int.TryParse(parts[1], out var xx))
                 {
-                    ms.Write(buf, 0, buf.Length);
+                    tiles.Add((yy, xx, vp));
                 }
             }
+        }
+        else
+        {
+            for (int yy = 0; yy < 64; yy++)
+            {
+                for (int xx = 0; xx < 64; xx++)
+                {
+                    var vp = $"world/maps/{mapName}/{mapName}_{yy}_{xx}.adt";
+                    if (src.FileExists(vp)) tiles.Add((yy, xx, vp));
+                }
+            }
+        }
+        if (verbose) Console.WriteLine($"[pack] archive tiles detected: {tiles.Count}");
+
+        // Build name tables by scanning tiles
+        var m2Names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var wmoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (yy, xx, rootVPath) in tiles)
+        {
+            try
+            {
+                using (var s = src.OpenFile(rootVPath)) using (var msScan = new MemoryStream())
+                {
+                    s.CopyTo(msScan);
+                    var bytes = msScan.ToArray();
+                    foreach (var n in ReadM2NamesFromBytes(bytes)) m2Names.Add(n);
+                    foreach (var n in ReadWmoNamesFromBytes(bytes)) wmoNames.Add(n);
+                }
+                var objVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_obj.adt";
+                if (src.FileExists(objVPath))
+                {
+                    using var so = src.OpenFile(objVPath);
+                    using var mso = new MemoryStream();
+                    so.CopyTo(mso);
+                    var objBytes = mso.ToArray();
+                    foreach (var n in ReadM2NamesFromBytes(objBytes)) m2Names.Add(n);
+                    foreach (var n in ReadWmoNamesFromBytes(objBytes)) wmoNames.Add(n);
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        var m2List = m2Names.ToList();
+        var wmoList = wmoNames.ToList();
+
+        // Optional asset gating to target listfile
+        if (!string.IsNullOrWhiteSpace(opts?.TargetListfilePath) && File.Exists(opts!.TargetListfilePath))
+        {
+            try
+            {
+                var idx = ListfileIndex.Load(opts.TargetListfilePath!);
+                var gate = new AssetGate(idx);
+                var keptM2 = gate.FilterNames(m2List, out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoList, out var droppedWmo);
+                if (opts.StrictTargetAssets)
+                {
+                    m2List = keptM2.ToList();
+                    wmoList = keptWmo.ToList();
+                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
+                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                }
+            }
+            catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
+        }
+
+        // Build WDT scaffolding
+        using var outMs = new MemoryStream();
+        outMs.Write(new Chunk("MVER", 4, BitConverter.GetBytes(18)).GetWholeChunk());
+        long mphdStart = outMs.Position; var mphd = new Chunk("MPHD", 128, new byte[128]); outMs.Write(mphd.GetWholeChunk()); long mphdDataStart = mphdStart + 8;
+        var mainData = new byte[GridTiles * 16]; var main = new Chunk("MAIN", mainData.Length, mainData); long mainStart = outMs.Position; outMs.Write(main.GetWholeChunk());
+        long mdnmStart = outMs.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2List).Length, BuildMdnmData(m2List)); outMs.Write(mdnm.GetWholeChunk());
+        long monmStart = outMs.Position; var monm = new Chunk("MONM", BuildMonmData(wmoList).Length, BuildMonmData(wmoList)); outMs.Write(monm.GetWholeChunk());
+        long savePos = outMs.Position; outMs.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
+        BitConverter.GetBytes(m2List.Count).CopyTo(mphdData);
+        BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
+        // MONM count must include a trailing empty string when any names exist
+        BitConverter.GetBytes(wmoList.Count > 0 ? wmoList.Count + 1 : 0).CopyTo(mphdData.Slice(8));
+        BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
+        outMs.Write(mphdData); outMs.Position = savePos;
+
+        var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
+        var mhdrToFirst = Enumerable.Repeat(0, GridTiles).ToArray();
+        int mccvExported2 = 0;
+
+        // Build tiles from archive
+        foreach (var (yy, xx, rootVPath) in tiles)
+        {
+            try
+            {
+                using var s = src.OpenFile(rootVPath);
+                using var msTile = new MemoryStream(); s.CopyTo(msTile); var bytes = msTile.ToArray();
+
+                int mhdrOffset = FindFourCC(bytes, "MHDR"); if (mhdrOffset < 0) continue;
+                var lkMhdr = new Mhdr(bytes, mhdrOffset);
+                int lkMhdrDataStart = mhdrOffset + 8;
+                int lkMcinOff = lkMhdr.GetOffset(Mhdr.McinOffset); if (lkMcinOff == 0) continue;
+                var lkMcin = new Mcin(bytes, lkMhdrDataStart + lkMcinOff);
+                var lkMcnkOffsets = lkMcin.GetMcnkOffsets();
+
+                var alphaMcnkBytes = new byte[256][];
+                var present = new List<int>(256);
+                for (int i = 0; i < 256; i++)
+                {
+                    int off = (i < lkMcnkOffsets.Count) ? lkMcnkOffsets[i] : 0;
+                    if (off > 0)
+                    {
+                        alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts);
+                        present.Add(i);
+                        if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
+                        {
+                            try { if (ExportMccvIfPresent(bytes, off, Path.Combine(opts!.ExportMccvDir!, mapName), yy, xx, i)) mccvExported2++; } catch { }
+                        }
+                    }
+                    else alphaMcnkBytes[i] = Array.Empty<byte>();
+                }
+
+                int tileIndex = xx * 64 + yy;
+                long mhdrAbsolute = outMs.Position; mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+                var aMhdr = AlphaMhdrBuilder.BuildMhdrForTerrain();
+                outMs.Write(aMhdr.GetWholeChunk());
+
+                long mcinPosition = outMs.Position; var mcinPh = AlphaMcinBuilder.BuildMcin(new int[256], new int[256]); var mcinWhole = mcinPh.GetWholeChunk(); outMs.Write(mcinWhole);
+
+                // MTEX from _tex.adt, fallback to root bytes, else BaseTexture
+                byte[] mtexData = Array.Empty<byte>();
+                var texVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_tex.adt";
+                if (src.FileExists(texVPath))
+                {
+                    using var ts = src.OpenFile(texVPath); using var tms = new MemoryStream(); ts.CopyTo(tms); mtexData = ExtractLkMtexData(tms.ToArray());
+                }
+                if (mtexData.Length == 0) mtexData = ExtractLkMtexData(bytes);
+                if (mtexData.Length == 0)
+                {
+                    var baseTexturePath = string.IsNullOrWhiteSpace(opts?.BaseTexture) ? "Tileset\\Generic\\Checkers.blp" : opts!.BaseTexture!;
+                    mtexData = Encoding.ASCII.GetBytes(baseTexturePath + "\0");
+                }
+                long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk());
+
+                // Empty MDDF/MODF
+                long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk());
+                long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
+
+                long firstMcnkAbsolute = outMs.Position;
+                int[] mcnkAbs = new int[256]; int[] mcnkSizes = new int[256]; long cursor = firstMcnkAbsolute;
+                for (int i = 0; i < 256; i++)
+                {
+                    var buf = alphaMcnkBytes[i];
+                    if (buf is { Length: > 0 }) { mcnkAbs[i] = checked((int)cursor); mcnkSizes[i] = buf.Length; cursor += buf.Length; }
+                    else { mcnkAbs[i] = 0; mcnkSizes[i] = 0; }
+                }
+
+                // Patch MHDR.data with relative offsets
+                long mhdrDataStartRel = mhdrAbsolute + 8;
+                outMs.Position = mhdrDataStartRel + 0; outMs.Write(BitConverter.GetBytes(64));
+                outMs.Position = mhdrDataStartRel + 4; outMs.Write(BitConverter.GetBytes(checked((int)(mtexPosition - mhdrDataStartRel))));
+                outMs.Position = mhdrDataStartRel + 8; outMs.Write(BitConverter.GetBytes(mtexData.Length));
+                outMs.Position = mhdrDataStartRel + 12; outMs.Write(BitConverter.GetBytes(checked((int)(mddfPosition - mhdrDataStartRel))));
+                outMs.Position = mhdrDataStartRel + 16; outMs.Write(BitConverter.GetBytes(0));
+                outMs.Position = mhdrDataStartRel + 20; outMs.Write(BitConverter.GetBytes(checked((int)(modfPosition - mhdrDataStartRel))));
+                outMs.Position = mhdrDataStartRel + 24; outMs.Write(BitConverter.GetBytes(0));
+
+                // Rewrite MCIN with positions RELATIVE to ADT start (MHDR letters) and restore
+                var mcnkRel = new int[256];
+                for (int i = 0; i < 256; i++) mcnkRel[i] = mcnkAbs[i] > 0 ? mcnkAbs[i] - checked((int)mhdrAbsolute) : 0;
+                outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkRel, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
+                outMs.Position = cursor;
+
+                // MAIN.size distance
+                mhdrToFirst[tileIndex] = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
+
+                // Write MCNKs
+                for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) outMs.Write(buf); }
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"Failed to process tile '{Path.GetFileName(rootAdt)}': {ex.Message}", ex);
+                Console.WriteLine($"[pack] tile {yy}_{xx} failed: {ex.Message}");
             }
         }
 
-        // Patch MAIN data with MHDR absolute offsets
-        // CRITICAL: mainStart points to MAIN chunk start (FourCC), header is already written
-        // We only need to write the DATA portion, so seek to mainStart + 8
-        ms.Position = mainStart + 8; // Skip the 8-byte header (FourCC + size)
-        // Rebuild MAIN with collected offsets
-        bool pointToData = opts?.MainPointToMhdrData ?? false;
-        var patchedMain = AlphaMainBuilder.BuildMain(mhdrAbsoluteOffsets, mhdrToFirstMcnkSizes, pointToData);
-        // Write only the data, not the whole chunk (which would include header again)
-        ms.Write(patchedMain.Data, 0, patchedMain.Data.Length);
-        if (verbose)
-        {
-            Console.WriteLine($"[pack] MAIN offset mode: {(pointToData ? "MHDR.data (+8)" : "MHDR letters")}");
-        }
+        // Patch MAIN data and save
+        outMs.Position = mainStart + 8;
+        var patched = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirst, opts?.MainPointToMhdrData ?? false);
+        outMs.Write(patched.Data, 0, patched.Data.Length);
+        File.WriteAllBytes(outWdtPath, outMs.ToArray());
+        if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir)) Console.WriteLine($"[pack] MCCV images exported: {mccvExported2}");
+    }
 
-        // Flush to file
-        File.WriteAllBytes(outWdtPath, ms.ToArray());
+    private static IEnumerable<string> ReadM2NamesFromBytes(byte[] bytes)
+    {
+        var result = new List<string>();
+        if (bytes == null || bytes.Length < 8) return result;
+        int i = 0;
+        while (i + 8 <= bytes.Length)
+        {
+            string four = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8; int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > bytes.Length) break;
+            if (four == "XDMM") // MMDX reversed
+            {
+                int pos = dataStart; int end = dataStart + size;
+                while (pos < end)
+                {
+                    int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos); if (nul == -1) nul = end; int len = nul - pos; if (len > 0) result.Add(Encoding.UTF8.GetString(bytes, pos, len)); pos = nul + 1;
+                }
+                break;
+            }
+            i = next;
+        }
+        return result;
+    }
+
+    private static IEnumerable<string> ReadWmoNamesFromBytes(byte[] bytes)
+    {
+        var result = new List<string>();
+        if (bytes == null || bytes.Length < 8) return result;
+        int i = 0;
+        while (i + 8 <= bytes.Length)
+        {
+            string four = Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            int dataStart = i + 8; int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > bytes.Length) break;
+            if (four == "OMWM") // MWMO reversed
+            {
+                int pos = dataStart; int end = dataStart + size;
+                while (pos < end)
+                {
+                    int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos); if (nul == -1) nul = end; int len = nul - pos; if (len > 0) result.Add(Encoding.UTF8.GetString(bytes, pos, len)); pos = nul + 1;
+                }
+                break;
+            }
+            i = next;
+        }
+        return result;
     }
 
     private static byte[] BuildMdnmData(List<string> m2Names)
@@ -482,8 +526,10 @@ public sealed class AlphaWdtMonolithicWriter
             // Use ASCII encoding to match Alpha WoW format
             var nameBytes = Encoding.ASCII.GetBytes(name);
             ms.Write(nameBytes, 0, nameBytes.Length);
-            ms.WriteByte(0); // null terminator
+            ms.WriteByte(0); // null terminator per entry
         }
+        // Append trailing empty string (extra null) to satisfy Alpha MONM iteration rules
+        ms.WriteByte(0);
         return ms.ToArray();
     }
 
@@ -520,40 +566,41 @@ public sealed class AlphaWdtMonolithicWriter
     }
 
     // --- MCCV Export (optional debug) ---
-    private static void ExportMccvIfPresent(byte[] adtBytes, int mcnkOffset, string baseOutDir, int tileY, int tileX, int chunkIdx)
+    private static bool ExportMccvIfPresent(byte[] adtBytes, int mcnkOffset, string baseOutDir, int tileY, int tileX, int chunkIdx)
     {
         const int ChunkLettersAndSize = 8;
         const int McnkHeaderSize = 0x80;
-        if (mcnkOffset < 0 || mcnkOffset + ChunkLettersAndSize + McnkHeaderSize > adtBytes.Length) return;
+        if (mcnkOffset < 0 || mcnkOffset + ChunkLettersAndSize + McnkHeaderSize > adtBytes.Length) return false;
 
-        // MccvOffset is at byte 116 within the LK MCNK header
-        int mccvOffsetInHeader = 116;
+        // MCCV offset is at 0x64 (100) within the LK MCNK header
+        const int mccvOffsetInHeader = 0x64;
         int headerStart = mcnkOffset + ChunkLettersAndSize;
         int mccvRel = BitConverter.ToInt32(adtBytes, headerStart + mccvOffsetInHeader);
-        if (mccvRel <= 0) return;
+        if (mccvRel <= 0) return false;
 
-        int mccvChunkOffset = mcnkOffset + mccvRel;
-        if (mccvChunkOffset < 0 || mccvChunkOffset + 8 > adtBytes.Length) return;
+        // Offsets in header point to chunk DATA (after 8-byte header). Move back 8 to land on FourCC.
+        int mccvChunkOffset = headerStart + mccvRel - ChunkLettersAndSize;
+        if (mccvChunkOffset < 0 || mccvChunkOffset + 8 > adtBytes.Length) return false;
 
         Chunk mccvChunk;
         try { mccvChunk = new Chunk(adtBytes, mccvChunkOffset); }
-        catch { return; }
-        if (mccvChunk.GivenSize <= 0 || mccvChunk.Data.Length <= 0) return;
+        catch { return false; }
+        if (mccvChunk.GivenSize <= 0 || mccvChunk.Data.Length <= 0) return false;
 
         // Build a 64x64 BGR image from MCCV vertex shading (use 9x9 outer grid, bilinear upsample)
         var bgr = BuildMccvBgrImage(mccvChunk.Data, 64, 64);
-        if (bgr.Length == 0) return;
+        if (bgr.Length == 0) return false;
 
         var outDir = Path.Combine(baseOutDir, $"{tileY:D2}_{tileX:D2}");
         Directory.CreateDirectory(outDir);
         var outPath = Path.Combine(outDir, $"{tileY:D2}_{tileX:D2}_mcnk_{chunkIdx:D3}_mccv.bmp");
-        try { SaveBmp24(outPath, 64, 64, bgr); } catch { }
+        try { SaveBmp24(outPath, 64, 64, bgr); } catch { return false; }
+        return true;
     }
 
     private static byte[] BuildMccvBgrImage(byte[] mccvData, int width, int height)
     {
         // Expect 145 RGBA entries interleaved as rows: 9,8,9,8,... (like MCNR/MCVT)
-        int expected = 145 * 4;
         if (mccvData == null || mccvData.Length < 9 * 9 * 4) return Array.Empty<byte>();
 
         var outer = new (byte r, byte g, byte b)[9,9];
@@ -565,8 +612,8 @@ public sealed class AlphaWdtMonolithicWriter
                 if (src + 4 > mccvData.Length) return Array.Empty<byte>();
                 byte r = mccvData[src + 0]; byte g = mccvData[src + 1]; byte b = mccvData[src + 2];
                 outer[i, j] = (r, g, b);
+                src += 4;
             }
-            src += 9 * 4;
             if (i < 8)
             {
                 // skip inner row (8 vertices) to keep outer-only for simple bilinear

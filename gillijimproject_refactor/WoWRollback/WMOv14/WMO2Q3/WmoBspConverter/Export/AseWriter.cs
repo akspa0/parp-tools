@@ -14,7 +14,12 @@ namespace WmoBspConverter.Export
             return new Vector3(v.X, v.Y, v.Z);
         }
 
-        public sealed record ExportResult(string RelativeModelPath, Vector3 ModelOrigin);
+        public sealed record ExportResult(
+            string RelativeModelPath,
+            Vector3 RoomCenter,
+            Vector3 RoomMin,
+            Vector3 RoomMax,
+            Vector3 MapOffset);
 
         public ExportResult ExportGroup(
             string outputRootDir,
@@ -33,33 +38,28 @@ namespace WmoBspConverter.Export
                 var emptyAbs = Path.Combine(outputRootDir, emptyRel);
                 Directory.CreateDirectory(Path.GetDirectoryName(emptyAbs)!);
                 File.WriteAllText(emptyAbs, BuildEmptyAse(groupIndex, shaderNames));
-                return new ExportResult(emptyRel, Vector3.Zero);
+                return new ExportResult(emptyRel, Vector3.Zero, Vector3.Zero, Vector3.Zero, mapOffset);
             }
 
             // Transform vertices to room space and compute centroid
             var vertsRoom = new Vector3[vertices.Count];
             var sum = Vector3.Zero;
-            var min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            var max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-            var rawMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-            var rawMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+            var roomMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var roomMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
             for (int i = 0; i < vertices.Count; i++)
             {
                 var q = TransformToQ3(vertices[i]);
                 var room = q - mapOffset;
                 vertsRoom[i] = room;
                 sum += room;
-                min = Vector3.Min(min, room);
-                max = Vector3.Max(max, room);
-                rawMin = Vector3.Min(rawMin, vertices[i]);
-                rawMax = Vector3.Max(rawMax, vertices[i]);
+                roomMin = Vector3.Min(roomMin, room);
+                roomMax = Vector3.Max(roomMax, room);
             }
             var center = sum / vertices.Count;
 
             if (groupIndex < 3)
             {
-                Console.WriteLine($"[DEBUG] ASE group {groupIndex} raw min={rawMin}, raw max={rawMax}");
-                Console.WriteLine($"[DEBUG] ASE group {groupIndex} bounds room min={min}, max={max}, center={center}");
+                Console.WriteLine($"[DEBUG] ASE group {groupIndex} bounds room min={roomMin}, max={roomMax}, center={center}");
             }
 
             // Recenter vertices around origin
@@ -75,7 +75,7 @@ namespace WmoBspConverter.Export
             var ase = BuildAse(groupIndex, vertsRoom, indices, faceMaterials, shaderNames);
             File.WriteAllText(absPath, ase);
 
-            return new ExportResult(relPath, center);
+            return new ExportResult(relPath, center, roomMin, roomMax, mapOffset);
         }
 
         private static string BuildEmptyAse(int groupIndex, IReadOnlyList<string> shaderNames)
@@ -161,12 +161,10 @@ namespace WmoBspConverter.Export
                     var baseName = shaderNames[i];
                     if (string.IsNullOrWhiteSpace(baseName))
                     {
-                        baseName = "wmo_default";
+                        baseName = "textures/wmo/wmo_default";
                     }
-                    var shader = baseName.StartsWith("wmo/", StringComparison.OrdinalIgnoreCase)
-                        ? baseName
-                        : $"wmo/{baseName}";
-                    var bitmap = $"textures/{shader}.tga";
+                    var shader = baseName; // use shader name as provided (e.g., textures/wmo/<name>)
+                    var bitmap = $"{shader}.tga";
                     sb.AppendLine($"  *MATERIAL {i} {{");
                     sb.AppendLine($"    *MATERIAL_NAME \"{shader}\"");
                     sb.AppendLine("    *MATERIAL_CLASS \"Standard\"");

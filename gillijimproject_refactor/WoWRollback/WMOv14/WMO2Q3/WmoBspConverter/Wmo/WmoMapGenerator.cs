@@ -138,13 +138,15 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine();
             
             var (context, paddedBounds) = PrepareContext(bspFile);
+            var combinedMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var combinedMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
 
             // Create sealed worldspawn box to contain the WMO
             CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
             Console.WriteLine($"[DEBUG] After worldspawn, length: {mapContent.Length:N0}");
             
             // Add player spawn entity
-            AddSpawnEntity(mapContent, context);
+            AddSpawnEntity(mapContent, context, paddedBounds.Min.Z);
             Console.WriteLine($"[DEBUG] After AddSpawn, length: {mapContent.Length:N0}");
             
             // Add WMO geometry as a func_group entity (separate from worldspawn!)
@@ -175,34 +177,15 @@ namespace WmoBspConverter.Wmo
             BspFile bspFile,
             AseWriter aseWriter)
         {
-            var mapContent = new StringBuilder();
-            mapContent.AppendLine("// Auto-generated from WMO v14 file (ASE model placement)");
-            mapContent.AppendLine($"// Original: WMO v{wmoData.Version}");
-            mapContent.AppendLine($"// Groups: {wmoData.Groups.Count}");
-            mapContent.AppendLine($"// Textures: {wmoData.Textures.Count}");
-            mapContent.AppendLine();
-
             var (context, paddedBounds) = PrepareContext(bspFile);
-
             var materialShaderNames = BuildMaterialShaderNames(wmoData);
+            var placements = new List<(int GroupIndex, AseWriter.ExportResult Result)>();
+            var modelMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            var modelMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
 
-            // Sealed room and spawn
-            CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
-            AddSpawnEntity(mapContent, context);
-
-            // Place one misc_model per group
             int g = 0;
             foreach (var group in wmoData.Groups)
             {
-                if (g == 0)
-                {
-                    for (int sample = 0; sample < Math.Min(3, group.Vertices.Count); sample++)
-                    {
-                        var raw = group.Vertices[sample];
-                        var q3 = TransformToQ3(raw) - context.GeometryOffset;
-                        Console.WriteLine($"[DEBUG] Vertex sample g{g} v{sample}: raw=({raw.X:F3},{raw.Y:F3},{raw.Z:F3}) room=({q3.X:F3},{q3.Y:F3},{q3.Z:F3})");
-                    }
-                }
                 var intIndices = group.Indices.ConvertAll(i => (int)i);
                 var faceMats = group.FaceMaterials.ConvertAll(f => (int)f);
                 var result = aseWriter.ExportGroup(
@@ -214,18 +197,47 @@ namespace WmoBspConverter.Wmo
                     faceMats,
                     materialShaderNames,
                     context.GeometryOffset);
-                var origin = result.ModelOrigin;
+
+                placements.Add((g, result));
+                modelMin = Vector3.Min(modelMin, result.RoomMin);
+                modelMax = Vector3.Max(modelMax, result.RoomMax);
+                g++;
+            }
+
+            var zShift = placements.Count == 0 ? 0f : paddedBounds.Min.Z - modelMin.Z;
+            const float modelLift = 8.0f; // raise models slightly above floor to avoid z-fighting
+            zShift += modelLift;
+
+            var mapContent = new StringBuilder();
+            mapContent.AppendLine("// Auto-generated from WMO v14 file (ASE model placement)");
+            mapContent.AppendLine($"// Original: WMO v{wmoData.Version}");
+            mapContent.AppendLine($"// Groups: {wmoData.Groups.Count}");
+            mapContent.AppendLine($"// Textures: {wmoData.Textures.Count}");
+            mapContent.AppendLine();
+
+            // Sealed room and spawn
+            CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
+            AddSpawnEntity(mapContent, context, paddedBounds.Min.Z);
+
+            foreach (var placement in placements)
+            {
+                var result = placement.Result;
+                var adjustedOrigin = new Vector3(
+                    result.RoomCenter.X,
+                    result.RoomCenter.Y,
+                    result.RoomCenter.Z + zShift);
 
                 mapContent.AppendLine("// WMO group model");
                 mapContent.AppendLine("{");
                 mapContent.AppendLine("\"classname\" \"misc_model\"");
                 mapContent.AppendLine($"\"model\" \"{result.RelativeModelPath.Replace("\\", "/")}\"");
-                mapContent.AppendLine($"\"origin\" \"{origin.X:F3} {origin.Y:F3} {paddedBounds.Min.Z:F3}\"");
-                mapContent.AppendLine($"\"_wmo_group\" \"{g}\"");
+                mapContent.AppendLine($"\"origin\" \"{adjustedOrigin.X:F3} {adjustedOrigin.Y:F3} {adjustedOrigin.Z:F3}\"");
+                mapContent.AppendLine($"\"_wmo_group\" \"{placement.GroupIndex}\"");
                 mapContent.AppendLine("}");
                 mapContent.AppendLine();
-                g++;
             }
+
+            Console.WriteLine($"[DEBUG] Combined model bounds (room): min={modelMin}, max={modelMax}, zShift={zShift}");
 
             File.WriteAllText(outputPath, mapContent.ToString());
             Console.WriteLine($"[INFO] Generated .map (models): {outputPath}");
@@ -483,12 +495,11 @@ namespace WmoBspConverter.Wmo
             WritePlaneLine(brush, p0, p1, p2, texture);
         }
 
-        private void AddSpawnEntity(StringBuilder mapContent, MapContext context)
+        private void AddSpawnEntity(StringBuilder mapContent, MapContext context, float floorZ)
         {
             var bounds = context.Bounds;
             var center = bounds.Center - context.GeometryOffset;
-            var min = bounds.Min - context.GeometryOffset;
-            center.Z = min.Z + 64.0f; // place spawn above sealed floor
+            center.Z = floorZ + 16.0f; // place spawn slightly above sealed floor
 
             mapContent.AppendLine("// Default spawn");
             mapContent.AppendLine("{");

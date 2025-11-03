@@ -153,16 +153,13 @@ internal static class Program
 
     private static int RunPackMonolithicAlphaWdt(Dictionary<string, string> opts)
     {
-        Require(opts, "lk-wdt");
-        Require(opts, "out");
-
-        var lkWdt = opts["lk-wdt"];
-        var outWdt = opts["out"];
-        var lkMapDir = opts.GetValueOrDefault("lk-map-dir", Path.GetDirectoryName(lkWdt) ?? ".");
-
+        // Common options
         var targetListfile = GetOption(opts, "target-listfile");
         var modernListfile = GetOption(opts, "modern-listfile");
         var strict = !opts.TryGetValue("strict-target-assets", out var strictStr) || !string.Equals(strictStr, "false", StringComparison.OrdinalIgnoreCase);
+        var exportMccv = GetOption(opts, "export-mccv");
+        var outWdt = GetOption(opts, "out");
+        if (string.IsNullOrWhiteSpace(outWdt)) { Console.Error.WriteLine("[error] --out <wdt> is required"); return 2; }
 
         var options = new LkToAlphaOptions
         {
@@ -170,9 +167,32 @@ internal static class Program
             ModernListfilePath = modernListfile,
             StrictTargetAssets = strict
         };
-
-        var exportMccv = GetOption(opts, "export-mccv");
         if (!string.IsNullOrWhiteSpace(exportMccv)) options = options with { ExportMccvDir = exportMccv };
+
+        // MPQ client mode
+        var clientPath = GetOption(opts, "client-path");
+        var mapName = GetOption(opts, "map");
+        if (!string.IsNullOrWhiteSpace(clientPath) && !string.IsNullOrWhiteSpace(mapName))
+        {
+            Console.WriteLine("[pack] Building monolithic Alpha WDT from MPQ client...");
+            Console.WriteLine($"[pack] Client (MPQ): {clientPath}");
+            Console.WriteLine($"[pack] Map: {mapName}");
+            if (!string.IsNullOrWhiteSpace(targetListfile)) Console.WriteLine($"[pack] Target listfile: {targetListfile}");
+            Console.WriteLine($"[pack] Strict target assets: {options.StrictTargetAssets.ToString().ToLowerInvariant()}");
+
+            if (!Directory.Exists(clientPath)) { Console.Error.WriteLine("[error] --client-path does not exist"); return 2; }
+            EnsureStormLibOnPath();
+            var mpqs = ArchiveLocator.LocateMpqs(clientPath);
+            using var src = new PrioritizedArchiveSource(clientPath, mpqs);
+            AlphaWdtMonolithicWriter.WriteMonolithicFromArchive(src, mapName, outWdt!, options);
+            Console.WriteLine($"[ok] WDT written: {outWdt}");
+            return 0;
+        }
+
+        // Loose file mode
+        if (!opts.ContainsKey("lk-wdt")) { Console.Error.WriteLine("[error] Provide either --client-path & --map, or --lk-wdt (<file>)"); return 2; }
+        var lkWdt = opts["lk-wdt"];
+        var lkMapDir = opts.GetValueOrDefault("lk-map-dir", Path.GetDirectoryName(lkWdt) ?? ".");
 
         Console.WriteLine("[pack] Building monolithic Alpha WDT from LK inputs...");
         Console.WriteLine($"[pack] LK WDT: {lkWdt}");
@@ -180,7 +200,7 @@ internal static class Program
         if (!string.IsNullOrWhiteSpace(targetListfile)) Console.WriteLine($"[pack] Target listfile: {targetListfile}");
         Console.WriteLine($"[pack] Strict target assets: {options.StrictTargetAssets.ToString().ToLowerInvariant()}");
 
-        AlphaWdtMonolithicWriter.WriteMonolithic(lkWdt, lkMapDir, outWdt, options);
+        AlphaWdtMonolithicWriter.WriteMonolithic(lkWdt, lkMapDir, outWdt!, options);
         Console.WriteLine($"[ok] WDT written: {outWdt}");
         return 0;
     }
