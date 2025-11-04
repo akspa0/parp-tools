@@ -3743,7 +3743,9 @@ internal static class Program
                     Console.Error.WriteLine("[hint] Use 'pack-monolithic-alpha-wdt' to generate an Alpha WDT from LK/modern inputs, then pass it via --input.");
                     return 2;
                 }
-                var wdt = new WdtAlpha(wdtBytes, mapName + ".wdt");
+                // Library constructor takes a file path. Write bytes to the planned output path and parse from there.
+                File.WriteAllBytes(outputPath, wdtBytes);
+                var wdt = new WdtAlpha(outputPath);
                 existingAdts = wdt.GetExistingAdtsNumbers();
                 adtOffsets = wdt.GetAdtOffsetsInMain();
             }
@@ -3765,9 +3767,27 @@ internal static class Program
                 int adtOffset = adtOffsets[adtNum];
                 if (adtOffset == 0) continue;
 
-                var adt = cascMode ? new AdtAlpha(wdtBytes, adtOffset, adtNum) : new AdtAlpha(inputPath, adtOffset, adtNum);
-                var mddf = adt.GetMddf();
-                var modf = adt.GetModf();
+                // Build AdtAlpha using a file path (library does not expose a byte[] ctor)
+                var adtPath = cascMode ? outputPath : inputPath;
+                var adt = new AdtAlpha(adtPath, adtOffset, adtNum);
+
+                // Compute MDDF/MODF chunk positions from MHDR relative offsets
+                int mhdrDataStart = adtOffset + 8; // skip 'MHDR' header
+                int mddfRel = BitConverter.ToInt32(wdtBytes, mhdrDataStart + 0x0C);
+                int modfRel = BitConverter.ToInt32(wdtBytes, mhdrDataStart + 0x14);
+                int mddfChunkOffset = (mddfRel > 0) ? mhdrDataStart + mddfRel : -1;
+                int modfChunkOffset = (modfRel > 0) ? mhdrDataStart + modfRel : -1;
+
+                var mddf = (mddfChunkOffset >= 0 && (mddfChunkOffset + 8) <= wdtBytes.Length)
+                    ? new Mddf(wdtBytes, mddfChunkOffset)
+                    : new Mddf("MDDF", 0, Array.Empty<byte>());
+                var modf = (modfChunkOffset >= 0 && (modfChunkOffset + 8) <= wdtBytes.Length)
+                    ? new Modf(wdtBytes, modfChunkOffset)
+                    : new Modf("MODF", 0, Array.Empty<byte>());
+
+                // Data payload starts after each subchunk's 8-byte header
+                int mddfFileOffsetLocal = (mddfChunkOffset >= 0) ? (mddfChunkOffset + 8) : -1;
+                int modfFileOffsetLocal = (modfChunkOffset >= 0) ? (modfChunkOffset + 8) : -1;
 
                 const int mddfEntrySize = 36;
                 int mddfCount = mddf.Data.Length / mddfEntrySize;
@@ -3943,15 +3963,13 @@ internal static class Program
                 }
 
                 // Commit MDDF/MODF changes after hole/MCSH passes
-                if (mddf.Data.Length > 0)
+                if (mddf.Data.Length > 0 && mddfFileOffsetLocal >= 0 && (mddfFileOffsetLocal + mddf.Data.Length) <= wdtBytes.Length)
                 {
-                    int mddfFileOffset = adt.GetMddfDataOffset();
-                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffset, mddf.Data.Length);
+                    Array.Copy(mddf.Data, 0, wdtBytes, mddfFileOffsetLocal, mddf.Data.Length);
                 }
-                if (modf.Data.Length > 0)
+                if (modf.Data.Length > 0 && modfFileOffsetLocal >= 0 && (modfFileOffsetLocal + modf.Data.Length) <= wdtBytes.Length)
                 {
-                    int modfFileOffset = adt.GetModfDataOffset();
-                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffset, modf.Data.Length);
+                    Array.Copy(modf.Data, 0, wdtBytes, modfFileOffsetLocal, modf.Data.Length);
                 }
 
                 tilesProcessed++;
@@ -4120,7 +4138,7 @@ internal static class Program
                         int adtOff2 = adtOffsetsAfter[adtNum2];
                         if (adtOff2 == 0) continue;
                         var a = new AdtAlpha(outputPath, adtOff2, adtNum2);
-                        var lk = a.ToAdtLk(mdnmNames, monmNames, areaRemap);
+                        var lk = a.ToAdtLk(mdnmNames, monmNames);
                         lk.ToFile(lkOutDir); // Treats directory as output root
 
                         // Crosswalk-based AreaID patching (in-place)
