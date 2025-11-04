@@ -21,4 +21,6 @@ public sealed record LkToAlphaOptions
     public bool StrictTargetAssets { get; init; } = true;
     public string? ModernListfilePath { get; init; }
     public string? ExportMccvDir { get; init; }
+    public bool PreferTexLayers { get; init; }
+    public bool RawCopyLkLayers { get; init; }
 }

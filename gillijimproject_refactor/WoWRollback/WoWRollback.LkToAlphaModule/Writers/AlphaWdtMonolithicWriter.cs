@@ -112,6 +112,33 @@ public sealed class AlphaWdtMonolithicWriter
             var lkMcin = new Mcin(bytes, lkMhdrDataStart + lkMcinOff);
             var lkMcnkOffsets = lkMcin.GetMcnkOffsets(); // absolute LK file offsets or 0
 
+            // Optional: read _tex.adt for this tile and get its MCNK offsets as well
+            byte[]? texBytesForChunks = null;
+            System.Collections.Generic.List<int>? texMcnkOffsets = null;
+            try
+            {
+                var rootDirLocal = Path.GetDirectoryName(rootAdt)!;
+                var baseNameLocal = Path.GetFileNameWithoutExtension(rootAdt);
+                var texAdtLocal = Path.Combine(rootDirLocal, baseNameLocal + "_tex.adt");
+                if (File.Exists(texAdtLocal))
+                {
+                    texBytesForChunks = File.ReadAllBytes(texAdtLocal);
+                    int tMhOff = FindFourCC(texBytesForChunks, "MHDR");
+                    if (tMhOff >= 0)
+                    {
+                        var tMhdr = new Mhdr(texBytesForChunks, tMhOff);
+                        int tData = tMhOff + 8;
+                        int tMcinRel = tMhdr.GetOffset(Mhdr.McinOffset);
+                        if (tMcinRel > 0)
+                        {
+                            var tMcin = new Mcin(texBytesForChunks, tData + tMcinRel);
+                            texMcnkOffsets = tMcin.GetMcnkOffsets();
+                        }
+                    }
+                }
+            }
+            catch { /* optional */ }
+
             // Prebuild Alpha MCNK bytes for present entries
             var alphaMcnkBytes = new byte[256][];
             var presentIndices = new List<int>(256);
@@ -120,7 +147,9 @@ public sealed class AlphaWdtMonolithicWriter
                 int off = (i < lkMcnkOffsets.Count) ? lkMcnkOffsets[i] : 0;
                 if (off > 0)
                 {
-                    alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts);
+                    int texOff = (texMcnkOffsets != null && i < texMcnkOffsets.Count) ? texMcnkOffsets[i] : 0;
+                    // Root-first: AlphaMcnkBuilder should prefer root MCLY/MCAL and only fallback to _tex if root is missing those per-chunk
+                    alphaMcnkBytes[i] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts, texBytesForChunks, texOff);
                     presentIndices.Add(i);
                     if (off + 8 + 0x80 <= bytes.Length)
                     {

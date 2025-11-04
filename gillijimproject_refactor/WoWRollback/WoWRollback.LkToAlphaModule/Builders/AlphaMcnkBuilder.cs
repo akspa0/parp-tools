@@ -34,11 +34,25 @@ public static class AlphaMcnkBuilder
         byte[]? mcshLkWhole = null;
         byte[]? mcseLkWhole = null;
         
-        // Extract MCLY, MCAL, MCSH using header offsets (LK stores them as proper chunks)
+        // Extract MCLY using header offsets (LK offsets point to subchunk letters/FourCC)
         if (lkHeader.MclyOffset > 0)
         {
             int mclyPos = mcNkOffset + lkHeader.MclyOffset;
-            if (mclyPos + 8 <= lkAdtBytes.Length)
+            bool ok = mclyPos >= 0 && mclyPos + 8 <= lkAdtBytes.Length && Encoding.ASCII.GetString(lkAdtBytes, mclyPos, 4) == "YLCM";
+            if (!ok)
+            {
+                // Fallback: scan subregion for YLCM
+                for (int p = subStart; p + 8 <= subEnd;)
+                {
+                    string fcc = Encoding.ASCII.GetString(lkAdtBytes, p, 4);
+                    int size = BitConverter.ToInt32(lkAdtBytes, p + 4);
+                    int dataStart = p + 8;
+                    int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+                    if (fcc == "YLCM") { mclyPos = p; ok = true; break; }
+                    if (dataStart + size > subEnd || next <= p) break; p = next;
+                }
+            }
+            if (ok)
             {
                 int mclySize = BitConverter.ToInt32(lkAdtBytes, mclyPos + 4);
                 if (mclySize > 0 && mclyPos + 8 + mclySize <= lkAdtBytes.Length)
@@ -49,16 +63,39 @@ public static class AlphaMcnkBuilder
             }
         }
         
-        if (lkHeader.McalOffset > 0 && lkHeader.McalSize > 0)
+        if (lkHeader.McalOffset > 0)
         {
             int mcalPos = mcNkOffset + lkHeader.McalOffset;
-            if (mcalPos + 8 <= lkAdtBytes.Length)
+            bool ok = mcalPos >= 0 && mcalPos + 8 <= lkAdtBytes.Length && Encoding.ASCII.GetString(lkAdtBytes, mcalPos, 4) == "LACM";
+            if (!ok)
             {
-                int mcalSize = BitConverter.ToInt32(lkAdtBytes, mcalPos + 4);
-                if (mcalSize > 0 && mcalPos + 8 + mcalSize <= lkAdtBytes.Length)
+                // Fallback: scan subregion for LACM
+                for (int p = subStart; p + 8 <= subEnd;)
                 {
-                    mcalLkWhole = new byte[8 + mcalSize + ((mcalSize & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkAdtBytes, mcalPos, mcalLkWhole, 0, mcalLkWhole.Length);
+                    string fcc = Encoding.ASCII.GetString(lkAdtBytes, p, 4);
+                    int size = BitConverter.ToInt32(lkAdtBytes, p + 4);
+                    int dataStart = p + 8;
+                    int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+                    if (fcc == "LACM") { mcalPos = p; ok = true; break; }
+                    if (dataStart + size > subEnd || next <= p) break; p = next;
+                }
+            }
+            if (ok)
+            {
+                // Prefer LK header-reported size (includes 8-byte header); fallback to chunk's own size
+                int payloadFromHeader = (int)lkHeader.McalSize - ChunkLettersAndSize;
+                int payloadSize = payloadFromHeader > 0 ? payloadFromHeader : BitConverter.ToInt32(lkAdtBytes, mcalPos + 4);
+                if (payloadSize > 0)
+                {
+                    int pad = (payloadSize & 1) == 1 ? 1 : 0;
+                    int totalLen = ChunkLettersAndSize + payloadSize + pad;
+                    int maxAvail = Math.Min(subEnd, lkAdtBytes.Length) - mcalPos;
+                    int copyLen = Math.Min(totalLen, Math.Max(0, maxAvail));
+                    if (copyLen >= ChunkLettersAndSize)
+                    {
+                        mcalLkWhole = new byte[copyLen];
+                        Buffer.BlockCopy(lkAdtBytes, mcalPos, mcalLkWhole, 0, copyLen);
+                    }
                 }
             }
         }
@@ -66,7 +103,21 @@ public static class AlphaMcnkBuilder
         if (lkHeader.McshOffset > 0 && lkHeader.McshOffset != lkHeader.McalOffset)
         {
             int mcshPos = mcNkOffset + lkHeader.McshOffset;
-            if (mcshPos + 8 <= lkAdtBytes.Length)
+            bool ok = mcshPos >= 0 && mcshPos + 8 <= lkAdtBytes.Length && Encoding.ASCII.GetString(lkAdtBytes, mcshPos, 4) == "HSCM";
+            if (!ok)
+            {
+                // Fallback: scan subregion for HSCM
+                for (int p = subStart; p + 8 <= subEnd;)
+                {
+                    string fcc = Encoding.ASCII.GetString(lkAdtBytes, p, 4);
+                    int size = BitConverter.ToInt32(lkAdtBytes, p + 4);
+                    int dataStart = p + 8;
+                    int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+                    if (fcc == "HSCM") { mcshPos = p; ok = true; break; }
+                    if (dataStart + size > subEnd || next <= p) break; p = next;
+                }
+            }
+            if (ok)
             {
                 int mcshSize = BitConverter.ToInt32(lkAdtBytes, mcshPos + 4);
                 if (mcshSize > 0 && mcshPos + 8 + mcshSize <= lkAdtBytes.Length)
@@ -116,49 +167,45 @@ public static class AlphaMcnkBuilder
             p = next;
         }
         
-        // If texture ADT provided, scan it for MCLY/MCAL/MCSH/MCSE
+        // If texture ADT provided, scan its MCNK subrange for YLCM/LACM/HSCM and only use as fallback when root is missing
         if (lkTexAdtBytes != null && texMcNkOffset >= 0)
         {
+            int texSize = BitConverter.ToInt32(lkTexAdtBytes, texMcNkOffset + 4);
             int texSubStart = texMcNkOffset + ChunkLettersAndSize + McnkHeaderSize;
-            int texSubEnd = texMcNkOffset + 8 + BitConverter.ToInt32(lkTexAdtBytes, texMcNkOffset + 4);
+            int texSubEnd = texMcNkOffset + ChunkLettersAndSize + Math.Max(0, texSize);
             if (texSubEnd > lkTexAdtBytes.Length) texSubEnd = lkTexAdtBytes.Length;
-            
-            for (int p = texSubStart; p + 8 <= texSubEnd;)
+
+            bool preferTex = opts?.PreferTexLayers == true;
+            for (int p2 = texSubStart; p2 + 8 <= texSubEnd;)
             {
-                if (p < 0 || p + 4 > lkTexAdtBytes.Length) break;
-                
-                string fcc = Encoding.ASCII.GetString(lkTexAdtBytes, p, 4);
-                int size = BitConverter.ToInt32(lkTexAdtBytes, p + 4);
-                
-                if (size < 0 || size > lkTexAdtBytes.Length) break;
-                
-                int dataStart = p + 8;
-                int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
-                if (dataStart + size > texSubEnd) break;
-                if (next <= p) break;
-                
-                if (fcc == "YLCM") // 'MCLY' reversed on disk
+                string fcc2 = Encoding.ASCII.GetString(lkTexAdtBytes, p2, 4);
+                int size2 = BitConverter.ToInt32(lkTexAdtBytes, p2 + 4);
+                int dataStart2 = p2 + 8;
+                int next2 = dataStart2 + size2 + ((size2 & 1) == 1 ? 1 : 0);
+                if (dataStart2 + size2 > texSubEnd || next2 <= p2) break;
+
+                if (fcc2 == "YLCM")
                 {
-                    mclyLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mclyLkWhole, 0, mclyLkWhole.Length);
+                    var cand = new byte[8 + size2 + ((size2 & 1) == 1 ? 1 : 0)];
+                    Buffer.BlockCopy(lkTexAdtBytes, p2, cand, 0, cand.Length);
+                    if (preferTex || mclyLkWhole == null) mclyLkWhole = cand;
+                    if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] {(preferTex ? "prefer" : "fallback")} _tex MCLY for chunk ({lkHeader.IndexX},{lkHeader.IndexY})");
                 }
-                else if (fcc == "LACM") // 'MCAL' reversed on disk
+                else if (fcc2 == "LACM")
                 {
-                    mcalLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcalLkWhole, 0, mcalLkWhole.Length);
+                    var cand = new byte[8 + size2 + ((size2 & 1) == 1 ? 1 : 0)];
+                    Buffer.BlockCopy(lkTexAdtBytes, p2, cand, 0, cand.Length);
+                    if (preferTex || mcalLkWhole == null) mcalLkWhole = cand;
+                    if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] {(preferTex ? "prefer" : "fallback")} _tex MCAL for chunk ({lkHeader.IndexX},{lkHeader.IndexY})");
                 }
-                else if (fcc == "HSCM") // 'MCSH' reversed on disk
+                else if (fcc2 == "HSCM")
                 {
-                    mcshLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcshLkWhole, 0, mcshLkWhole.Length);
+                    var cand = new byte[8 + size2 + ((size2 & 1) == 1 ? 1 : 0)];
+                    Buffer.BlockCopy(lkTexAdtBytes, p2, cand, 0, cand.Length);
+                    if (preferTex || mcshLkWhole == null) mcshLkWhole = cand;
+                    if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] {(preferTex ? "prefer" : "fallback")} _tex MCSH for chunk ({lkHeader.IndexX},{lkHeader.IndexY})");
                 }
-                else if (fcc == "ESCM") // 'MCSE' reversed on disk
-                {
-                    mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
-                    Buffer.BlockCopy(lkTexAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
-                }
-                
-                p = next;
+                p2 = next2;
             }
         }
         
@@ -218,23 +265,24 @@ public static class AlphaMcnkBuilder
         }
         
         // Build MCAL raw - convert LK 8-bit (4096 bytes per layer) to Alpha 4-bit packed (2048 bytes per layer)
-        byte[] mcalRaw;
+        byte[] mcalRaw = Array.Empty<byte>();
         {
             // Extract LK MCAL payload (strip chunk header)
             byte[] mcalLkRaw = Array.Empty<byte>();
             if (mcalLkWhole != null && mcalLkWhole.Length > 8)
             {
-                int sz = BitConverter.ToInt32(mcalLkWhole, 4);
-                if (sz > 0)
-                {
-                    mcalLkRaw = new byte[sz];
-                    Buffer.BlockCopy(mcalLkWhole, 8, mcalLkRaw, 0, sz);
-                    DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalLkRaw, opts);
-                }
+                int payloadLen = Math.Max(0, mcalLkWhole.Length - 8);
+                mcalLkRaw = new byte[payloadLen];
+                Buffer.BlockCopy(mcalLkWhole, 8, mcalLkRaw, 0, payloadLen);
+                DumpMcalData("lk", lkHeader.IndexX, lkHeader.IndexY, mcalLkRaw, opts);
             }
 
             // Prepare updated MCLY table and new Alpha MCAL stream
             int numLayers = mclyRaw.Length / 16;
+            if (opts?.VerboseLogging == true)
+            {
+                Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) nLayers={numLayers}");
+            }
             var mclyOut = new byte[mclyRaw.Length];
             Buffer.BlockCopy(mclyRaw, 0, mclyOut, 0, mclyRaw.Length);
             const uint FLAG_USE_ALPHA = 0x100;
@@ -250,54 +298,202 @@ public static class AlphaMcnkBuilder
                 Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, 8, 4);
             }
 
-            // Collect LK offsets (relative to MCAL data start) for layers > 0
-            var entries = new System.Collections.Generic.List<(int idx, int offs)>();
-            for (int i = 1; i < numLayers; i++)
+            // If explicitly requested: force raw pass-through from LK MCAL
+            bool forcedRaw = false;
+            if (opts?.RawCopyLkLayers == true && mcalLkRaw.Length > 0 && numLayers >= 1)
             {
-                int baseOff = i * 16;
-                uint off = BitConverter.ToUInt32(mclyRaw, baseOff + 8);
-                if (off > 0) entries.Add((i, (int)off));
-            }
-            entries.Sort((a, b) => a.offs.CompareTo(b.offs));
-
-            using var msAlpha = new MemoryStream();
-            for (int k = 0; k < entries.Count; k++)
-            {
-                int idx = entries[k].idx;
-                int off = entries[k].offs;
-                int nextOff = (k + 1 < entries.Count) ? entries[k + 1].offs : mcalLkRaw.Length;
-                int available = Math.Max(0, nextOff - off);
-
-                // Require at least one full 64x64 (4096 bytes)
-                bool canUse = (mcalLkRaw.Length >= off + 4096);
-                int outOffset = (int)msAlpha.Length;
-                int layerBase = idx * 16;
-                if (canUse)
+                if (numLayers > 0)
                 {
-                    // Pack 8bpp 64x64 -> 4bpp 2048 with 63x63 rule (duplicate last col/row), LSB-first nibble
-                    var packed = Pack8To4_63x63(mcalLkRaw, off);
-                    msAlpha.Write(packed, 0, packed.Length);
+                    uint f0 = BitConverter.ToUInt32(mclyOut, 4);
+                    f0 &= ~FLAG_USE_ALPHA; f0 &= ~FLAG_ALPHA_COMP;
+                    Buffer.BlockCopy(BitConverter.GetBytes(f0), 0, mclyOut, 4, 4);
+                    Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, 8, 4);
+                }
+                for (int i = 1; i < numLayers; i++)
+                {
+                    int baseOff = i * 16;
+                    uint fi = BitConverter.ToUInt32(mclyOut, baseOff + 4);
+                    fi |= FLAG_USE_ALPHA; fi &= ~FLAG_ALPHA_COMP;
+                    Buffer.BlockCopy(BitConverter.GetBytes(fi), 0, mclyOut, baseOff + 4, 4);
+                    uint desiredOff = (uint)((i - 1) * 2048);
+                    Buffer.BlockCopy(BitConverter.GetBytes(desiredOff), 0, mclyOut, baseOff + 8, 4);
+                }
 
-                    uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
-                    flags |= FLAG_USE_ALPHA;
-                    flags |= FLAG_ALPHA_COMP; // 4bpp path
-                    Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
-                    Buffer.BlockCopy(BitConverter.GetBytes((uint)outOffset), 0, mclyOut, layerBase + 8, 4);
+                int needed = 2048 * Math.Max(0, numLayers - 1);
+                var passthrough = new byte[needed];
+                int toCopy = Math.Min(needed, mcalLkRaw.Length);
+                if (toCopy > 0) Buffer.BlockCopy(mcalLkRaw, 0, passthrough, 0, toCopy);
+                mcalRaw = passthrough;
+                mclyRaw = mclyOut;
+                if (opts?.VerboseLogging == true)
+                {
+                    Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) FORCED RAW-PASSTHROUGH size={mcalRaw.Length}");
+                }
+                DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+                forcedRaw = true;
+            }
+            if (!forcedRaw)
+            {
+                // Collect LK offsets (relative to MCAL data start) for layers > 0
+                var entries = new System.Collections.Generic.List<(int idx, int offs)>();
+                for (int i = 1; i < numLayers; i++)
+                {
+                    int baseOff = i * 16;
+                    int off = unchecked((int)BitConverter.ToUInt32(mclyRaw, baseOff + 8));
+                    if (off < 0) off = 0;
+                    if (mcalLkRaw.Length > 0 && off > mcalLkRaw.Length) off = mcalLkRaw.Length; // clamp
+                    entries.Add((i, off));
+                }
+                entries.Sort((a, b) => a.offs.CompareTo(b.offs));
+
+                // Fast-path: if LK payload looks like old 4bpp (every extra layer span == 2048), just pass MCAL through verbatim
+                bool looks4bpp = entries.Count > 0 && mcalLkRaw.Length > 0;
+                if (looks4bpp)
+                {
+                    for (int k = 0; k < entries.Count; k++)
+                    {
+                        int start = entries[k].offs;
+                        int next = (k + 1 < entries.Count) ? entries[k + 1].offs : mcalLkRaw.Length;
+                        int span = Math.Max(0, next - start);
+                        if (span != 2048) { looks4bpp = false; break; }
+                    }
+                }
+                // Also accept pass-through if total payload size matches 2048 per extra layer
+                if (!looks4bpp && entries.Count > 0)
+                {
+                    int expected = 2048 * entries.Count;
+                    if (mcalLkRaw.Length == expected) looks4bpp = true;
+                }
+                if (looks4bpp)
+                {
+                    // Fix flags: base layer no alpha, others use alpha and not compressed
+                    if (numLayers > 0)
+                    {
+                        uint f0 = BitConverter.ToUInt32(mclyOut, 4);
+                        f0 &= ~FLAG_USE_ALPHA; f0 &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(f0), 0, mclyOut, 4, 4);
+                        Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, 8, 4);
+                    }
+                    for (int i = 1; i < numLayers; i++)
+                    {
+                        int baseOff = i * 16;
+                        uint fi = BitConverter.ToUInt32(mclyOut, baseOff + 4);
+                        fi |= FLAG_USE_ALPHA; fi &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(fi), 0, mclyOut, baseOff + 4, 4);
+                        // If offsets are not strictly sequential 2048*n, rewrite them
+                        uint desiredOff = (uint)((i - 1) * 2048);
+                        Buffer.BlockCopy(BitConverter.GetBytes(desiredOff), 0, mclyOut, baseOff + 8, 4);
+                    }
+
+                    mcalRaw = mcalLkRaw; // pass-through
+                    mclyRaw = mclyOut;
+                    if (opts?.VerboseLogging == true)
+                    {
+                        Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) RAW-PASSTHROUGH MCAL (4bpp spans) size={mcalRaw.Length}");
+                    }
+                    DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
                 }
                 else
                 {
-                    // No valid alpha payload -> clear flags and offset
-                    uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
-                    flags &= ~FLAG_USE_ALPHA;
-                    flags &= ~FLAG_ALPHA_COMP;
-                    Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
-                    Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, layerBase + 8, 4);
+                // Normal path: decode LK layers then pack to 4bpp
+                using var msAlpha = new MemoryStream();
+                int slicesWritten = 0;
+                for (int k = 0; k < entries.Count; k++)
+                {
+                    int idx = entries[k].idx;
+                    int off = entries[k].offs;
+                    // Find next DISTINCT offset to compute span; identical offsets should not zero-length earlier slices
+                    int nextDistinct = mcalLkRaw.Length;
+                    for (int j = k + 1; j < entries.Count; j++)
+                    {
+                        if (entries[j].offs > off) { nextDistinct = entries[j].offs; break; }
+                    }
+                    int available = Math.Max(0, nextDistinct - off);
+
+                    int outOffset = (int)msAlpha.Length;
+                    int layerBase = idx * 16;
+
+                    // Determine LK flags for this layer to detect compression
+                    uint lkFlags = BitConverter.ToUInt32(mclyRaw, layerBase + 4);
+                    bool lkCompressed = (lkFlags & 0x200) != 0;
+
+                    // Decode LK MCAL to 8bpp 64x64 (handles compressed/uncompressed)
+                    // If span is zero or negative, fallback to reading until end of payload; decoder will stop at 4096
+                    var src8 = DecodeLkMcalTo8bpp(mcalLkRaw, off, available, lkCompressed);
+
+                    if (src8.Length == 4096)
+                    {
+                        // Pack 8bpp 64x64 -> 4bpp 2048 without 63x63 duplication, LSB-first nibble
+                        var packed = Pack8To4_64x64(src8, 0);
+                        msAlpha.Write(packed, 0, packed.Length);
+                        slicesWritten++;
+
+                        uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
+                        flags |= FLAG_USE_ALPHA;
+                        // IMPORTANT: 4bpp (2048) is UNCOMPRESSED; 0x200 indicates compressed (RLE, 8-bit only)
+                        flags &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
+                        Buffer.BlockCopy(BitConverter.GetBytes((uint)outOffset), 0, mclyOut, layerBase + 8, 4);
+
+                        if (opts?.VerboseLogging == true)
+                        {
+                            Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) layer {idx}: lkOff={off}, avail={available}, outOff={outOffset}, slice=2048");
+                        }
+                    }
+                    else
+                    {
+                        // No valid alpha payload -> clear flags and offset
+                        uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
+                        flags &= ~FLAG_USE_ALPHA;
+                        flags &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
+                        Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, layerBase + 8, 4);
+                        if (opts?.VerboseLogging == true)
+                        {
+                            Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) layer {idx}: MISSING alpha (lkOff={off}, avail={available})");
+                        }
+                    }
+                }
+
+                mcalRaw = msAlpha.ToArray();
+                if (opts?.VerboseLogging == true)
+                {
+                    Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) wroteSlices={slicesWritten} mcalBytes={mcalRaw.Length}");
+                }
+                mclyRaw = mclyOut;
+                DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+
+                // If nothing was written but we do have a LK payload, fallback to raw pass-through (treat as 4bpp 2048 per extra layer)
+                if (mcalRaw.Length == 0 && entries.Count > 0 && mcalLkRaw.Length > 0)
+                {
+                    if (numLayers > 0)
+                    {
+                        uint f0 = BitConverter.ToUInt32(mclyOut, 4);
+                        f0 &= ~FLAG_USE_ALPHA; f0 &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(f0), 0, mclyOut, 4, 4);
+                        Buffer.BlockCopy(BitConverter.GetBytes(0u), 0, mclyOut, 8, 4);
+                    }
+                    for (int i = 1; i < numLayers; i++)
+                    {
+                        int baseOff = i * 16;
+                        uint fi = BitConverter.ToUInt32(mclyOut, baseOff + 4);
+                        fi |= FLAG_USE_ALPHA; fi &= ~FLAG_ALPHA_COMP;
+                        Buffer.BlockCopy(BitConverter.GetBytes(fi), 0, mclyOut, baseOff + 4, 4);
+                        uint desiredOff = (uint)((i - 1) * 2048);
+                        Buffer.BlockCopy(BitConverter.GetBytes(desiredOff), 0, mclyOut, baseOff + 8, 4);
+                    }
+                    mcalRaw = mcalLkRaw;
+                    mclyRaw = mclyOut;
+                    if (opts?.VerboseLogging == true)
+                    {
+                        Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) FALLBACK RAW-PASSTHROUGH size={mcalRaw.Length}");
+                    }
+                    DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+                }
                 }
             }
 
-            mcalRaw = msAlpha.ToArray();
-            mclyRaw = mclyOut;
-            DumpMcalData("alpha", lkHeader.IndexX, lkHeader.IndexY, mcalRaw, opts);
+            // end build MCAL
         }
         
         // Build MCSH raw - use extracted LK data or create empty fallback
@@ -632,6 +828,158 @@ public static class AlphaMcnkBuilder
                 byte lo = (byte)((src[rowBase + x0] + 8) >> 4);
                 byte hi = (byte)((src[rowBase + x1] + 8) >> 4);
                 dst[di++] = (byte)((lo & 0x0F) | ((hi & 0x0F) << 4));
+            }
+        }
+        return dst;
+    }
+    private static byte[] Pack8To4_64x64(byte[] src, int off)
+    {
+        // Convert 64x64 8bpp -> 2048 bytes (4bpp) without duplication; LSB-first nibbles
+        var dst = new byte[2048];
+        int di = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            int rowBase = off + y * 64;
+            for (int i = 0; i < 32; i++)
+            {
+                int x0 = i * 2;
+                int x1 = x0 + 1;
+                byte lo = (byte)((src[rowBase + x0] + 8) >> 4);
+                byte hi = (byte)((src[rowBase + x1] + 8) >> 4);
+                dst[di++] = (byte)((lo & 0x0F) | ((hi & 0x0F) << 4));
+            }
+        }
+        return dst;
+    }
+    
+    private static byte[] DecodeLkMcalTo8bpp(byte[] src, int off, int available, bool compressed)
+    {
+        // Returns exactly 4096 bytes (64x64) or Array.Empty<byte>() on failure
+        if (src == null || off < 0 || off >= src.Length) return Array.Empty<byte>();
+        // If available<=0, treat as unlimited (read until end or until 4096 produced)
+        int limit;
+        if (available <= 0)
+            limit = src.Length;
+        else
+            limit = Math.Min(src.Length, off + available);
+        if (!compressed)
+        {
+            // Decide between 8bpp (4096) and 4bpp (2048) based on available span
+            int span = Math.Max(0, limit - off);
+            if (span >= 4096)
+            {
+                var dst = new byte[4096];
+                Buffer.BlockCopy(src, off, dst, 0, 4096);
+                return dst;
+            }
+            else if (span >= 2048)
+            {
+                return Expand4bppTo8bpp_64x64(src, off);
+            }
+            else
+            {
+                // If span is too small, but buffer still has enough data beyond current limit, fallback to reading to end
+                int remaining = src.Length - off;
+                if (remaining >= 4096)
+                {
+                    var dst = new byte[4096];
+                    Buffer.BlockCopy(src, off, dst, 0, 4096);
+                    return dst;
+                }
+                return Array.Empty<byte>();
+            }
+        }
+
+        // Compressed RLE per wiki (rows cannot span); stop at 4096 bytes
+        var outBuf = new byte[4096];
+        int produced = 0;
+        int p = off;
+        for (int row = 0; row < 64 && produced < 4096; row++)
+        {
+            int rowPos = 0;
+            while (rowPos < 64 && produced < 4096)
+            {
+                if (p >= limit) return Array.Empty<byte>();
+                byte control = src[p++];
+                bool fill = (control & 0x80) != 0;
+                int count = control & 0x7F; // 1..127 typical; treat 0 as 64 for safety
+                if (count == 0) count = 64;
+                int room = 64 - rowPos;
+                int take = Math.Min(count, room);
+                if (fill)
+                {
+                    if (p >= limit) return Array.Empty<byte>();
+                    byte v = src[p++];
+                    for (int i = 0; i < take; i++) outBuf[produced + i] = v;
+                    // discard excess if run exceeds row
+                }
+                else
+                {
+                    if (p + take > limit) return Array.Empty<byte>();
+                    Buffer.BlockCopy(src, p, outBuf, produced, take);
+                    p += take;
+                    // skip any excess beyond row
+                    int excess = count - take;
+                    if (excess > 0)
+                    {
+                        int skip = Math.Min(excess, Math.Max(0, limit - p));
+                        p += skip;
+                    }
+                }
+                produced += take;
+                rowPos += take;
+            }
+        }
+        return (produced == 4096) ? outBuf : Array.Empty<byte>();
+    }
+
+    private static byte[] Expand4bppTo8bpp_63x63(byte[] src, int off)
+    {
+        // Expand 2048 bytes (64 rows × 32 bytes) to 4096 bytes (64×64),
+        // mapping low/high nibbles to 8-bit and duplicating last column and last row.
+        var dst = new byte[4096];
+        int di = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            int rowBase = off + y * 32; // 32 bytes per row in 4bpp
+            for (int i = 0; i < 32; i++)
+            {
+                byte b = src[rowBase + i];
+                byte lo = (byte)(b & 0x0F);
+                byte hi = (byte)((b >> 4) & 0x0F);
+                // First pixel: low nibble scaled to 8-bit
+                dst[di++] = (byte)(lo * 17);
+                if (i != 31)
+                {
+                    // Normal case: second pixel from high nibble
+                    dst[di++] = (byte)(hi * 17);
+                }
+                else
+                {
+                    // Duplicate last column: use low nibble again for pixel 63
+                    dst[di++] = (byte)(lo * 17);
+                }
+            }
+        }
+        // Duplicate last row from row 62 into row 63
+        Buffer.BlockCopy(dst, 62 * 64, dst, 63 * 64, 64);
+        return dst;
+    }
+    private static byte[] Expand4bppTo8bpp_64x64(byte[] src, int off)
+    {
+        // Expand 2048 bytes (64×32) to 4096 bytes (64×64) without duplication
+        var dst = new byte[4096];
+        int di = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            int rowBase = off + y * 32;
+            for (int i = 0; i < 32; i++)
+            {
+                byte b = src[rowBase + i];
+                byte lo = (byte)(b & 0x0F);
+                byte hi = (byte)((b >> 4) & 0x0F);
+                dst[di++] = (byte)(lo * 17);
+                dst[di++] = (byte)(hi * 17);
             }
         }
         return dst;

@@ -173,6 +173,10 @@ internal static class Program
             ModernListfilePath = modernListfile,
             StrictTargetAssets = strict
         };
+        var wantVerbose = opts.ContainsKey("verbose-logging") || opts.ContainsKey("alpha-debug") || opts.ContainsKey("verbose");
+        if (wantVerbose) options = options with { VerboseLogging = true, Verbose = true };
+        if (opts.ContainsKey("raw-copy-layers")) options = options with { RawCopyLkLayers = true };
+        if (opts.ContainsKey("prefer-tex") || opts.ContainsKey("prefer-tex-layers")) options = options with { PreferTexLayers = true };
         if (!string.IsNullOrWhiteSpace(exportMccv)) options = options with { ExportMccvDir = exportMccv };
 
         // MPQ client mode
