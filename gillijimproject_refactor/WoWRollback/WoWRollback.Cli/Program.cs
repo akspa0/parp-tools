@@ -16,6 +16,8 @@ using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.Minimap;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.Alpha;
+using GillijimProject.WowFiles.LichKing;
+using GillijimProject.Utilities;
 using AlphaWdtAnalyzer.Core.Export;
 using AlphaWdtAnalyzer.Core.Dbc;
 using WoWRollback.Core.Services.AreaMapping;
@@ -124,6 +126,8 @@ internal static class Program
                     return RunPackMonolithicAlphaWdt(opts);
                 case "pack-wdl-from-lk":
                     return RunPackWdlFromLk(opts);
+                case "build-test-adt":
+                    return RunBuildTestAdt(opts);
                 case "gui":
                     return RunGui(opts);
                 case "regen-layers":
@@ -215,6 +219,151 @@ internal static class Program
         }
         Console.WriteLine($"[ok] WDT written: {outWdt}");
         return 0;
+    }
+
+    private static int RunBuildTestAdt(Dictionary<string, string> opts)
+    {
+        if (!opts.ContainsKey("lk-adt")) { Console.Error.WriteLine("[error] --lk-adt <file> is required"); return 2; }
+        var inAdtPath = opts["lk-adt"]; var outAdtPath = GetOption(opts, "out");
+        if (string.IsNullOrWhiteSpace(outAdtPath)) { Console.Error.WriteLine("[error] --out <file> is required"); return 2; }
+        var pattern = opts.GetValueOrDefault("pattern", "solid").ToLowerInvariant();
+
+        byte[] adtFile = File.ReadAllBytes(inAdtPath);
+        int offsetInFile = 0;
+        int currentChunkSize;
+        var mver = new Chunk(adtFile, offsetInFile);
+        offsetInFile += 4; currentChunkSize = BitConverter.ToInt32(adtFile, offsetInFile); offsetInFile = 4 + offsetInFile + currentChunkSize;
+        int mhdrStartOffset = offsetInFile + 8;
+        var mhdr = new Mhdr(adtFile, offsetInFile);
+
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.McinOffset);
+        var mcin = new Mcin(adtFile, offsetInFile);
+
+        Mh2o mh2o = new Mh2o();
+        if (mhdr.GetOffset(Mhdr.Mh2oOffset) != 0)
+        {
+            var off = mhdrStartOffset + mhdr.GetOffset(Mhdr.Mh2oOffset);
+            mh2o = new Mh2o(adtFile, off);
+        }
+
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MtexOffset);
+        var mtex = new Chunk(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MmdxOffset);
+        var mmdx = new Mmdx(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MmidOffset);
+        var mmid = new Mmid(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MwmoOffset);
+        var mwmo = new Mwmo(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MwidOffset);
+        var mwid = new Mwid(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.MddfOffset);
+        var mddf = new Mddf(adtFile, offsetInFile);
+        offsetInFile = mhdrStartOffset + BitConverter.ToInt32(adtFile, mhdrStartOffset + Mhdr.ModfOffset);
+        var modf = new Modf(adtFile, offsetInFile);
+
+        Chunk mfbo = new Chunk("MFBO", 0, Array.Empty<byte>());
+        if (mhdr.GetOffset(Mhdr.MfboOffset) != 0)
+        {
+            var off = mhdrStartOffset + mhdr.GetOffset(Mhdr.MfboOffset);
+            mfbo = new Chunk(adtFile, off);
+        }
+        Chunk mtxf = new Chunk("MTXF", 0, Array.Empty<byte>());
+        if (mhdr.GetOffset(Mhdr.MtxfOffset) != 0)
+        {
+            var off = mhdrStartOffset + mhdr.GetOffset(Mhdr.MtxfOffset);
+            mtxf = new Chunk(adtFile, off);
+        }
+
+        var texNames = ParseMtexNames(mtex.Data);
+        int texCount = texNames.Count == 0 ? 1 : texNames.Count;
+
+        var mcnkOffsets = mcin.GetMcnkOffsets();
+        var newMcnks = new List<McnkLk>(256);
+
+        for (int idx = 0; idx < 256; idx++)
+        {
+            int mOff = mcnkOffsets[idx];
+            if (mOff <= 0 || mOff + 8 > adtFile.Length)
+            {
+                newMcnks.Add(McnkLk.CreatePlaceholder());
+                continue;
+            }
+
+            int headerStart = mOff;
+            byte[] hdr = new byte[128];
+            Buffer.BlockCopy(adtFile, headerStart + 8, hdr, 0, 128);
+            var h = Utilities.ByteArrayToStruct<McnkHeader>(hdr);
+
+            var mcvt = new Chunk(adtFile, headerStart + h.McvtOffset);
+            Chunk? mccv = null;
+            if (h.MccvOffset != 0) mccv = new Chunk(adtFile, headerStart + h.MccvOffset);
+            var mcnr = new McnrLk(adtFile, headerStart + h.McnrOffset);
+            var mcrf = new Mcrf(adtFile, headerStart + h.McrfOffset);
+            Chunk? mcsh = null;
+            if (h.McshOffset != 0 && h.McshOffset != h.McalOffset) mcsh = new Chunk(adtFile, headerStart + h.McshOffset);
+            Chunk? mclq = null;
+            if (h.MclqOffset != 0) mclq = new Chunk(adtFile, headerStart + h.MclqOffset);
+            Chunk? mcse = null;
+            if (h.McseOffset != 0) mcse = new Chunk(adtFile, headerStart + h.McseOffset);
+
+            int chosenTex = idx % texCount;
+            int baseTex = (chosenTex + 1) % texCount; // ensure visible contrast
+            int nLayers = 2;
+            var mclyBytes = new byte[nLayers * 16];
+            void WriteLayer(int i, uint texId, uint flags, uint offs, uint effect)
+            {
+                int b = i * 16; Buffer.BlockCopy(BitConverter.GetBytes(texId), 0, mclyBytes, b + 0, 4); Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyBytes, b + 4, 4); Buffer.BlockCopy(BitConverter.GetBytes(offs), 0, mclyBytes, b + 8, 4); Buffer.BlockCopy(BitConverter.GetBytes(effect), 0, mclyBytes, b + 12, 4);
+            }
+            uint effNone = 0xFFFFFFFF;
+            WriteLayer(0, (uint)(Math.Min(baseTex, int.MaxValue)), 0u, 0u, effNone); // base
+            WriteLayer(1, (uint)(Math.Min(chosenTex, int.MaxValue)), 0x100u, 0u, effNone); // blend uses alpha
+            var mcly = new Chunk("MCLY", mclyBytes.Length, mclyBytes);
+
+            var alpha = new byte[64 * 64];
+            switch (pattern)
+            {
+                case "solid":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)255; break;
+                case "half-top":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)((y < 32) ? 255 : 0); break;
+                case "half-left":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)((x < 32) ? 255 : 0); break;
+                case "checker":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)((((x >> 3) ^ (y >> 3)) & 1) == 0 ? 255 : 0); break;
+                case "diagonal":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)((x > y) ? 255 : 0); break;
+                case "center-dot":
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) { int dx = x - 32, dy = y - 32; alpha[y * 64 + x] = (byte)((dx * dx + dy * dy <= 8 * 8) ? 255 : 0); } break;
+                default:
+                    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) alpha[y * 64 + x] = (byte)255; break;
+            }
+            var mcal = new Mcal("MCAL", alpha.Length, alpha);
+
+            var outHdr = h;
+            outHdr.NLayers = nLayers;
+            var m = new McnkLk(outHdr, mcvt, mccv, mcnr, mcly, mcrf, mcsh, mcal, mclq, mcse);
+            newMcnks.Add(m);
+        }
+
+        var adtName = Path.GetFileName(outAdtPath);
+        var test = new AdtLk(adtName, mver, 0, mh2o, mtex, mmdx, mmid, mwmo, mwid, mddf, modf, newMcnks, mfbo, mtxf);
+        test.ToFile(outAdtPath!);
+        Console.WriteLine($"[ok] Test ADT written: {outAdtPath}");
+        return 0;
+
+        static List<string> ParseMtexNames(byte[] data)
+        {
+            var list = new List<string>();
+            if (data == null || data.Length == 0) return list;
+            int i = 0;
+            while (i < data.Length)
+            {
+                int j = i; while (j < data.Length && data[j] != 0) j++;
+                if (j > i) list.Add(Encoding.ASCII.GetString(data, i, j - i));
+                i = j + 1;
+            }
+            return list;
+        }
     }
 
     private static int RunPackWdlFromLk(Dictionary<string, string> opts)

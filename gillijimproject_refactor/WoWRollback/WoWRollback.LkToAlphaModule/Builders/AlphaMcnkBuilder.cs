@@ -268,28 +268,19 @@ public static class AlphaMcnkBuilder
                 int nextOff = (k + 1 < entries.Count) ? entries[k + 1].offs : mcalLkRaw.Length;
                 int available = Math.Max(0, nextOff - off);
 
-                // Use first 4096 bytes when available (8-bit 64x64)
+                // Require at least one full 64x64 (4096 bytes)
                 bool canUse = (mcalLkRaw.Length >= off + 4096);
                 int outOffset = (int)msAlpha.Length;
                 int layerBase = idx * 16;
                 if (canUse)
                 {
-                    // Pack two 4-bit pixels per byte with rounding
-                    var packed = new byte[2048];
-                    int pi = 0;
-                    for (int p = 0; p < 4096; p += 2)
-                    {
-                        int a = mcalLkRaw[off + p];
-                        int b = mcalLkRaw[off + p + 1];
-                        byte a4 = (byte)((a + 8) >> 4);
-                        byte b4 = (byte)((b + 8) >> 4);
-                        packed[pi++] = (byte)((a4 << 4) | (b4 & 0x0F));
-                    }
+                    // Pack 8bpp 64x64 -> 4bpp 2048 with 63x63 rule (duplicate last col/row), LSB-first nibble
+                    var packed = Pack8To4_63x63(mcalLkRaw, off);
                     msAlpha.Write(packed, 0, packed.Length);
 
                     uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
                     flags |= FLAG_USE_ALPHA;
-                    flags &= ~FLAG_ALPHA_COMP; // start uncompressed path
+                    flags |= FLAG_ALPHA_COMP; // 4bpp path
                     Buffer.BlockCopy(BitConverter.GetBytes(flags), 0, mclyOut, layerBase + 4, 4);
                     Buffer.BlockCopy(BitConverter.GetBytes((uint)outOffset), 0, mclyOut, layerBase + 8, 4);
                 }
@@ -621,6 +612,29 @@ public static class AlphaMcnkBuilder
         
         // Padding bytes are already zero-initialized
         return alphaData;
+    }
+    
+    private static byte[] Pack8To4_63x63(byte[] src, int off)
+    {
+        // Convert 64x64 8bpp -> 2048 bytes (4bpp) with 63x63 duplication rule; LSB-first nibbles
+        var dst = new byte[2048];
+        int di = 0;
+        for (int y = 0; y < 64; y++)
+        {
+            int yy = (y == 63) ? 62 : y;
+            int rowBase = off + yy * 64;
+            for (int i = 0; i < 32; i++)
+            {
+                int x0 = i * 2;
+                int x1 = i * 2 + 1;
+                if (x0 >= 63) x0 = 62;
+                if (x1 >= 63) x1 = 62;
+                byte lo = (byte)((src[rowBase + x0] + 8) >> 4);
+                byte hi = (byte)((src[rowBase + x1] + 8) >> 4);
+                dst[di++] = (byte)((lo & 0x0F) | ((hi & 0x0F) << 4));
+            }
+        }
+        return dst;
     }
     
     private static float CalculateRadius(byte[] mcvtRaw)
