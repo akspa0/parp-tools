@@ -17,6 +17,7 @@ namespace WoWRollback.LkToAlphaModule.Writers;
 public sealed class AlphaWdtMonolithicWriter
 {
     private const int GridTiles = 64 * 64; // 4096
+    private const long OutSizeLimit = (long)int.MaxValue - (1L << 16);
 
     public static void WriteMonolithic(string lkWdtPath, string lkMapDir, string outWdtPath, LkToAlphaOptions? opts = null, bool skipWmos = false)
     {
@@ -84,11 +85,19 @@ public sealed class AlphaWdtMonolithicWriter
         var mhdrToFirstMcnkSizes = Enumerable.Repeat(0, GridTiles).ToArray();
         // Provide alias for compatibility with downstream code segments
         var outMs = ms;
+        bool limitLogged = false;
         // RAW EMBED MODE disabled in monolithic packer (use conversion path below)
 
         // Read from each tile ADT (root and obj variants)
         foreach (var rootAdt in rootAdts)
         {
+            int tileIndex = -1;
+            long tileStart = 0;
+            if (outMs.Position >= OutSizeLimit)
+            {
+                if (!limitLogged) { Console.WriteLine("[pack][limit] WDT near 2GiB; stopping further tiles."); limitLogged = true; }
+                break;
+            }
             try
             {
                 // Parse tile indices from file name map_yy_xx.adt
@@ -99,7 +108,9 @@ public sealed class AlphaWdtMonolithicWriter
                 if (!int.TryParse(parts[^2], out int yy)) continue;
                 if (!int.TryParse(parts[^1], out int xx)) continue;
                 // Alpha MAIN grid stores tiles with X-major ordering (xx as rows).
-                int tileIndex = xx * 64 + yy;
+                tileIndex = xx * 64 + yy;
+
+                tileStart = outMs.Position;
 
                 var bytes = File.ReadAllBytes(rootAdt);
             // Locate LK MHDR → MCIN to get MCNK offsets to know which exist
@@ -165,8 +176,9 @@ public sealed class AlphaWdtMonolithicWriter
                 else alphaMcnkBytes[i] = Array.Empty<byte>();
             }
 
+
             tileIndex = xx * 64 + yy;
-            long mhdrAbsolute = outMs.Position; mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+            long mhdrAbsolute = outMs.Position;
             var aMhdr = AlphaMhdrBuilder.BuildMhdrForTerrain();
             outMs.Write(aMhdr.GetWholeChunk());
 
@@ -196,6 +208,10 @@ public sealed class AlphaWdtMonolithicWriter
             long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk()); long modfEnd = outMs.Position;
 
             long firstMcnkAbsolute = outMs.Position;
+            if (firstMcnkAbsolute > OutSizeLimit) throw new InvalidOperationException("2GiB limit");
+            long predictedEnd = firstMcnkAbsolute;
+            for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) predictedEnd += buf.Length; }
+            if (predictedEnd > OutSizeLimit) throw new InvalidOperationException($"tile {yy:D2}_{xx:D2} would exceed 2GiB");
             int[] mcnkAbs = new int[256]; int[] mcnkSizes = new int[256]; long cursor = firstMcnkAbsolute;
             for (int i = 0; i < 256; i++)
             {
@@ -219,8 +235,7 @@ public sealed class AlphaWdtMonolithicWriter
             // Move to the start of the MCNK region and write MCNKs in place
             outMs.Position = firstMcnkAbsolute;
 
-            // MAIN.size distance
-            mhdrToFirstMcnkSizes[tileIndex] = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
+            int mhdrToFirstVal = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
 
             // Write MCNKs
             for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) outMs.Write(buf); }
@@ -259,29 +274,45 @@ public sealed class AlphaWdtMonolithicWriter
                         }
                     }
                 }
-                else
-                {
-                    Console.WriteLine($"[pack][check] tile {yy:D2}_{xx:D2} has no MCNK buffers (all empty)");
-                }
             }
             catch { }
+            // Commit MAIN entries after successful tile write
+            mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+            mhdrToFirstMcnkSizes[tileIndex] = mhdrToFirstVal;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[pack] tile failed {Path.GetFileName(rootAdt)}: {ex.Message}");
+            try
+            {
+                if (tileIndex >= 0)
+                {
+                    outMs.SetLength(tileStart);
+                    outMs.Position = tileStart;
+                    mhdrAbs[tileIndex] = 0;
+                    mhdrToFirstMcnkSizes[tileIndex] = 0;
+                }
+            }
+            catch { /* best-effort rollback */ }
+            continue;
         }
         }
+
         // Patch MAIN data
         outMs.Position = mainStart + 8;
         var patchedMain = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirstMcnkSizes, false);
         outMs.Write(patchedMain.Data, 0, patchedMain.Data.Length);
-
-        File.WriteAllBytes(outWdtPath, outMs.ToArray());
-        if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
+        using (var fs = File.Create(outWdtPath))
         {
-            Console.WriteLine($"[pack] MCCV images exported: {mccvExported}");
-            Console.WriteLine($"[pack] MCCV headers present: {mccvHeaders}");
+            outMs.Position = 0;
+            outMs.WriteTo(fs);
         }
+    if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
+    {
+        Console.WriteLine($"[pack] MCCV images exported: {mccvExported}");
+        Console.WriteLine($"[pack] MCCV headers present: {mccvHeaders}");
+    }
+
     }
 
     public static void WriteMonolithicFromArchive(IArchiveSource src, string mapName, string outWdtPath, LkToAlphaOptions? opts = null)
@@ -394,10 +425,19 @@ public sealed class AlphaWdtMonolithicWriter
         var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
         var mhdrToFirst = Enumerable.Repeat(0, GridTiles).ToArray();
         int mccvExported2 = 0;
+        bool limitLogged2 = false;
 
         // Build tiles from archive
         foreach (var (yy, xx, rootVPath) in tiles)
         {
+            // Prepare per-tile bookkeeping
+            int tileIndex = xx * 64 + yy;
+            long tileStart = outMs.Position;
+            if (outMs.Position >= OutSizeLimit)
+            {
+                if (!limitLogged2) { Console.WriteLine("[pack][limit] WDT near 2GiB; stopping further tiles."); limitLogged2 = true; }
+                break;
+            }
             try
             {
                 using var s = src.OpenFile(rootVPath);
@@ -427,8 +467,7 @@ public sealed class AlphaWdtMonolithicWriter
                     else alphaMcnkBytes[i] = Array.Empty<byte>();
                 }
 
-                int tileIndex = xx * 64 + yy;
-                long mhdrAbsolute = outMs.Position; mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+                long mhdrAbsolute = outMs.Position; // Defer assigning mhdrAbs until success
                 var aMhdr = AlphaMhdrBuilder.BuildMhdrForTerrain();
                 outMs.Write(aMhdr.GetWholeChunk());
 
@@ -454,6 +493,10 @@ public sealed class AlphaWdtMonolithicWriter
                 long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
 
                 long firstMcnkAbsolute = outMs.Position;
+                if (firstMcnkAbsolute > OutSizeLimit) throw new InvalidOperationException("2GiB limit");
+                long predictedEnd = firstMcnkAbsolute;
+                for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) predictedEnd += buf.Length; }
+                if (predictedEnd > OutSizeLimit) throw new InvalidOperationException($"tile {yy:D2}_{xx:D2} would exceed 2GiB");
                 int[] mcnkAbs = new int[256]; int[] mcnkSizes = new int[256]; long cursor = firstMcnkAbsolute;
                 for (int i = 0; i < 256; i++)
                 {
@@ -478,8 +521,8 @@ public sealed class AlphaWdtMonolithicWriter
                 outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkRel, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
                 outMs.Position = cursor;
 
-                // MAIN.size distance
-                mhdrToFirst[tileIndex] = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
+                // MAIN.size distance (defer array assign until success)
+                int mhdrToFirstVal2 = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
 
                 // Write MCNKs
                 for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) outMs.Write(buf); }
@@ -502,10 +545,23 @@ public sealed class AlphaWdtMonolithicWriter
                     }
                 }
                 catch { }
+                // Commit MAIN entries after successful tile write
+                mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
+                mhdrToFirst[tileIndex] = mhdrToFirstVal2;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[pack] tile {yy}_{xx} failed: {ex.Message}");
+                try
+                {
+                    // Roll back partial writes for this tile and leave MAIN entries zeroed
+                    outMs.SetLength(tileStart);
+                    outMs.Position = tileStart;
+                    mhdrAbs[tileIndex] = 0;
+                    mhdrToFirst[tileIndex] = 0;
+                }
+                catch { /* best-effort rollback */ }
+                continue;
             }
         }
 
@@ -513,7 +569,11 @@ public sealed class AlphaWdtMonolithicWriter
         outMs.Position = mainStart + 8;
         var patched = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirst, true);
         outMs.Write(patched.Data, 0, patched.Data.Length);
-        File.WriteAllBytes(outWdtPath, outMs.ToArray());
+        using (var fs = File.Create(outWdtPath))
+        {
+            outMs.Position = 0;
+            outMs.WriteTo(fs);
+        }
         if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir)) Console.WriteLine($"[pack] MCCV images exported: {mccvExported2}");
     }
 
@@ -526,14 +586,19 @@ public sealed class AlphaWdtMonolithicWriter
         {
             string four = Encoding.ASCII.GetString(bytes, i, 4);
             int size = BitConverter.ToInt32(bytes, i + 4);
-            int dataStart = i + 8; int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
             if (dataStart + size > bytes.Length) break;
-            if (four == "XDMM") // MMDX reversed
+            if (four == "XDMM")
             {
                 int pos = dataStart; int end = dataStart + size;
                 while (pos < end)
                 {
-                    int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos); if (nul == -1) nul = end; int len = nul - pos; if (len > 0) result.Add(Encoding.UTF8.GetString(bytes, pos, len)); pos = nul + 1;
+                    int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos);
+                    if (nul == -1) nul = end;
+                    int len = nul - pos;
+                    if (len > 0) result.Add(Encoding.UTF8.GetString(bytes, pos, len));
+                    pos = nul + 1;
                 }
                 break;
             }
