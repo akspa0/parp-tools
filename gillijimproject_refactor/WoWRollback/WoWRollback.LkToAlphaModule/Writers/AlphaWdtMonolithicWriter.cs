@@ -41,6 +41,7 @@ public sealed class AlphaWdtMonolithicWriter
             Console.WriteLine($"[pack] first: {Path.GetFileName(rootAdts.First())}, last: {Path.GetFileName(rootAdts.Last())}");
         }
 
+
         // Collect WMO and M2 names from WDT and all tile ADTs
         var wdtReader = new LkWdtReader();
         var adtReader = new LkAdtReader();
@@ -68,6 +69,11 @@ public sealed class AlphaWdtMonolithicWriter
         // Build name lists (optional); currently use collected sets (may be empty)
         var wmoNames = allWmoNames.ToList();
         var m2Names = allM2Names.ToList();
+        // Global name indices for MDNM/MONM
+        var mdnmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < m2Names.Count; i++) mdnmIndexFs[NormalizeAssetName(m2Names[i])] = i;
+        var monmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < wmoNames.Count; i++) monmIndexFs[NormalizeAssetName(wmoNames[i])] = i;
         // MDNM/MONM chunks
         long mdnmStart = ms.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2Names).Length, BuildMdnmData(m2Names)); ms.Write(mdnm.GetWholeChunk());
         long monmStart = ms.Position; var monm = new Chunk("MONM", BuildMonmData(wmoNames).Length, BuildMonmData(wmoNames)); ms.Write(monm.GetWholeChunk());
@@ -203,9 +209,38 @@ public sealed class AlphaWdtMonolithicWriter
             }
             long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk()); long mtexEnd = outMs.Position;
 
-            // Empty MDDF/MODF
-            long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk()); long mddfEnd = outMs.Position;
-            long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk()); long modfEnd = outMs.Position;
+            // Build MDDF/MODF from _obj.adt if present (fallback: root)
+            byte[] objBytesFs = Array.Empty<byte>();
+            var objAdt = Path.Combine(rootDir, baseName + "_obj.adt");
+            if (File.Exists(objAdt)) objBytesFs = File.ReadAllBytes(objAdt);
+            if (objBytesFs.Length == 0) objBytesFs = bytes;
+
+            var mmdxOrderedFs = BuildMmdxOrdered(objBytesFs);
+            if (mmdxOrderedFs.Count == 0) mmdxOrderedFs = BuildMmdxOrdered(bytes);
+            var mwmoOrderedFs = BuildMwmoOrdered(objBytesFs);
+            if (mwmoOrderedFs.Count == 0) mwmoOrderedFs = BuildMwmoOrdered(bytes);
+
+            var mddfDataFs = BuildMddfFromLk(objBytesFs, mmdxOrderedFs, mdnmIndexFs);
+            var modfDataFs = BuildModfFromLk(objBytesFs, mwmoOrderedFs, monmIndexFs);
+            var (doodadRefsByChunkFs, wmoRefsByChunkFs) = BuildRefsByChunk(objBytesFs, mmdxOrderedFs, mwmoOrderedFs, mdnmIndexFs, monmIndexFs, yy, xx);
+
+            long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfDataFs.Length, mddfDataFs).GetWholeChunk()); long mddfEnd = outMs.Position;
+            long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfDataFs.Length, modfDataFs).GetWholeChunk()); long modfEnd = outMs.Position;
+
+            // Rebuild MCNKs with MCRF refs
+            alphaMcnkBytes = new byte[256][];
+            for (int ci = 0; ci < 256; ci++)
+            {
+                int off = (ci < lkMcnkOffsets.Count) ? lkMcnkOffsets[ci] : 0;
+                if (off > 0)
+                {
+                    int texOff = (texMcnkOffsets != null && ci < texMcnkOffsets.Count) ? texMcnkOffsets[ci] : 0;
+                    var drefs = doodadRefsByChunkFs[ci];
+                    var wrefs = wmoRefsByChunkFs[ci];
+                    alphaMcnkBytes[ci] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts, texBytesForChunks, texOff, drefs, wrefs);
+                }
+                else alphaMcnkBytes[ci] = Array.Empty<byte>();
+            }
 
             long firstMcnkAbsolute = outMs.Position;
             if (firstMcnkAbsolute > OutSizeLimit) throw new InvalidOperationException("2GiB limit");
@@ -227,9 +262,9 @@ public sealed class AlphaWdtMonolithicWriter
             outMs.Position = mhdrDataStart + 4; outMs.Write(BitConverter.GetBytes(checked((int)(mtexPosition - mhdrDataStart))));
             outMs.Position = mhdrDataStart + 8; outMs.Write(BitConverter.GetBytes(mtexData.Length));
             outMs.Position = mhdrDataStart + 12; outMs.Write(BitConverter.GetBytes(checked((int)(mddfPosition - mhdrDataStart))));
-            outMs.Position = mhdrDataStart + 16; outMs.Write(BitConverter.GetBytes(0));
+            outMs.Position = mhdrDataStart + 16; outMs.Write(BitConverter.GetBytes(mddfDataFs.Length));
             outMs.Position = mhdrDataStart + 20; outMs.Write(BitConverter.GetBytes(checked((int)(modfPosition - mhdrDataStart))));
-            outMs.Position = mhdrDataStart + 24; outMs.Write(BitConverter.GetBytes(0));
+            outMs.Position = mhdrDataStart + 24; outMs.Write(BitConverter.GetBytes(modfDataFs.Length));
             // Rewrite MCIN with ABSOLUTE positions (letters positions) and full chunk lengths
             outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkAbs, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
             // Move to the start of the MCNK region and write MCNKs in place
@@ -399,13 +434,17 @@ public sealed class AlphaWdtMonolithicWriter
                 if (opts.StrictTargetAssets)
                 {
                     m2List = keptM2.ToList();
-                    wmoList = keptWmo.ToList();
                     var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
                     AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
                 }
             }
-            catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
+        catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
         }
+        // Build global name indices (normalized)
+        var mdnmIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < m2List.Count; i++) mdnmIndex[NormalizeAssetName(m2List[i])] = i;
+        var monmIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < wmoList.Count; i++) monmIndex[NormalizeAssetName(wmoList[i])] = i;
 
         // Build WDT scaffolding
         using var outMs = new MemoryStream();
@@ -488,9 +527,38 @@ public sealed class AlphaWdtMonolithicWriter
                 }
                 long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk());
 
-                // Empty MDDF/MODF
-                long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", 0, Array.Empty<byte>()).GetWholeChunk());
-                long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
+                // Build MDDF/MODF from _obj.adt if present (fallback: root)
+                byte[] objBytes = Array.Empty<byte>();
+                var objVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_obj.adt";
+                if (src.FileExists(objVPath)) { using var os = src.OpenFile(objVPath); using var oms = new MemoryStream(); os.CopyTo(oms); objBytes = oms.ToArray(); }
+                if (objBytes.Length == 0) objBytes = bytes;
+
+                var mmdxOrdered = BuildMmdxOrdered(objBytes);
+                if (mmdxOrdered.Count == 0) mmdxOrdered = BuildMmdxOrdered(bytes);
+                var mwmoOrdered = BuildMwmoOrdered(objBytes);
+                if (mwmoOrdered.Count == 0) mwmoOrdered = BuildMwmoOrdered(bytes);
+
+                var mddfData = BuildMddfFromLk(objBytes, mmdxOrdered, mdnmIndex);
+                var modfData = BuildModfFromLk(objBytes, mwmoOrdered, monmIndex);
+                (System.Collections.Generic.List<int>[] doodadRefsByChunk, System.Collections.Generic.List<int>[] wmoRefsByChunk) =
+                    BuildRefsByChunk(objBytes, mmdxOrdered, mwmoOrdered, mdnmIndex, monmIndex, yy, xx);
+
+                long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfData.Length, mddfData).GetWholeChunk());
+                long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfData.Length, modfData).GetWholeChunk());
+
+                // Rebuild MCNKs with MCRF refs
+                alphaMcnkBytes = new byte[256][];
+                for (int ci = 0; ci < 256; ci++)
+                {
+                    int off = (ci < lkMcnkOffsets.Count) ? lkMcnkOffsets[ci] : 0;
+                    if (off > 0)
+                    {
+                        var drefs = doodadRefsByChunk[ci];
+                        var wrefs = wmoRefsByChunk[ci];
+                        alphaMcnkBytes[ci] = AlphaMcnkBuilder.BuildFromLk(bytes, off, opts, null, -1, drefs, wrefs);
+                    }
+                    else alphaMcnkBytes[ci] = Array.Empty<byte>();
+                }
 
                 long firstMcnkAbsolute = outMs.Position;
                 if (firstMcnkAbsolute > OutSizeLimit) throw new InvalidOperationException("2GiB limit");
@@ -511,9 +579,9 @@ public sealed class AlphaWdtMonolithicWriter
                 outMs.Position = mhdrDataStartRel + 4; outMs.Write(BitConverter.GetBytes(checked((int)(mtexPosition - mhdrDataStartRel))));
                 outMs.Position = mhdrDataStartRel + 8; outMs.Write(BitConverter.GetBytes(mtexData.Length));
                 outMs.Position = mhdrDataStartRel + 12; outMs.Write(BitConverter.GetBytes(checked((int)(mddfPosition - mhdrDataStartRel))));
-                outMs.Position = mhdrDataStartRel + 16; outMs.Write(BitConverter.GetBytes(0));
+                outMs.Position = mhdrDataStartRel + 16; outMs.Write(BitConverter.GetBytes(mddfData.Length));
                 outMs.Position = mhdrDataStartRel + 20; outMs.Write(BitConverter.GetBytes(checked((int)(modfPosition - mhdrDataStartRel))));
-                outMs.Position = mhdrDataStartRel + 24; outMs.Write(BitConverter.GetBytes(0));
+                outMs.Position = mhdrDataStartRel + 24; outMs.Write(BitConverter.GetBytes(modfData.Length));
 
                 outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkAbs, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
                 outMs.Position = firstMcnkAbsolute;
@@ -681,6 +749,244 @@ public sealed class AlphaWdtMonolithicWriter
         }
         // Append trailing empty string (extra null) to satisfy Alpha MONM iteration rules
         ms.WriteByte(0);
+        return ms.ToArray();
+    }
+
+    private static string NormalizeAssetName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        var s = name.Replace('/', '\\').Trim();
+        return s;
+    }
+
+    private static List<string> BuildMmdxOrdered(byte[] bytes)
+    {
+        var result = new List<string>();
+        if (bytes == null || bytes.Length < 8) return result;
+        int mmdx = FindFourCC(bytes, "MMDX");
+        int mmid = FindFourCC(bytes, "MMID");
+        if (mmdx < 0 || mmid < 0) return result;
+        int mmdxSize = BitConverter.ToInt32(bytes, mmdx + 4);
+        int mmdxData = mmdx + 8;
+        int mmidSize = BitConverter.ToInt32(bytes, mmid + 4);
+        int mmidData = mmid + 8;
+        int entries = Math.Max(0, mmidSize / 4);
+        for (int i = 0; i < entries; i++)
+        {
+            int rel = BitConverter.ToInt32(bytes, mmidData + i * 4);
+            if (rel < 0 || rel >= mmdxSize) { result.Add(string.Empty); continue; }
+            int sp = mmdxData + rel;
+            int end = Array.IndexOf(bytes, (byte)0, sp);
+            if (end < 0 || end > mmdxData + mmdxSize) end = Math.Min(bytes.Length, mmdxData + mmdxSize);
+            int len = Math.Max(0, end - sp);
+            string s = len > 0 ? Encoding.ASCII.GetString(bytes, sp, len) : string.Empty;
+            result.Add(s);
+        }
+        return result;
+    }
+
+    private static List<string> BuildMwmoOrdered(byte[] bytes)
+    {
+        var result = new List<string>();
+        if (bytes == null || bytes.Length < 8) return result;
+        int mwmo = FindFourCC(bytes, "MWMO");
+        int mwid = FindFourCC(bytes, "MWID");
+        if (mwmo < 0 || mwid < 0) return result;
+        int mwmoSize = BitConverter.ToInt32(bytes, mwmo + 4);
+        int mwmoData = mwmo + 8;
+        int mwidSize = BitConverter.ToInt32(bytes, mwid + 4);
+        int mwidData = mwid + 8;
+        int entries = Math.Max(0, mwidSize / 4);
+        for (int i = 0; i < entries; i++)
+        {
+            int rel = BitConverter.ToInt32(bytes, mwidData + i * 4);
+            if (rel < 0 || rel >= mwmoSize) { result.Add(string.Empty); continue; }
+            int sp = mwmoData + rel;
+            int end = Array.IndexOf(bytes, (byte)0, sp);
+            if (end < 0 || end > mwmoData + mwmoSize) end = Math.Min(bytes.Length, mwmoData + mwmoSize);
+            int len = Math.Max(0, end - sp);
+            string s = len > 0 ? Encoding.ASCII.GetString(bytes, sp, len) : string.Empty;
+            result.Add(s);
+        }
+        return result;
+    }
+
+    private static (List<int>[] doodadRefs, List<int>[] wmoRefs) BuildRefsByChunk(
+        byte[] bytes,
+        List<string> mmdxOrdered,
+        List<string> mwmoOrdered,
+        Dictionary<string, int> mdnmIndex,
+        Dictionary<string, int> monmIndex,
+        int tileYY,
+        int tileXX)
+    {
+        var doodadSets = new HashSet<int>[256];
+        var wmoSets = new HashSet<int>[256];
+        for (int i = 0; i < 256; i++) { doodadSets[i] = new HashSet<int>(); wmoSets[i] = new HashSet<int>(); }
+
+        const float TILESIZE = 533.33333f;
+        const float CHUNK = TILESIZE / 16f;
+        float tileMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
+        float tileMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
+
+        // MDDF
+        int mddf = FindFourCC(bytes, "MDDF");
+        if (mddf >= 0)
+        {
+            int size = BitConverter.ToInt32(bytes, mddf + 4);
+            int data = mddf + 8;
+            const int entry = 36;
+            int count = Math.Max(0, size / entry);
+            for (int i = 0; i < count; i++)
+            {
+                int p = data + i * entry; if (p + entry > bytes.Length) break;
+                int localIdx = BitConverter.ToInt32(bytes, p + 0);
+                if (localIdx >= 0 && localIdx < mmdxOrdered.Count)
+                {
+                    string s = NormalizeAssetName(mmdxOrdered[localIdx]);
+                    if (mdnmIndex.TryGetValue(s, out int g))
+                    {
+                        float wx = BitConverter.ToSingle(bytes, p + 8);
+                        float wy = BitConverter.ToSingle(bytes, p + 16);
+                        int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
+                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
+                        if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                        {
+                            int idx = cy * 16 + cx;
+                            doodadSets[idx].Add(g);
+                        }
+                    }
+                }
+            }
+        }
+
+        // MODF
+        int modf = FindFourCC(bytes, "MODF");
+        if (modf >= 0)
+        {
+            int size = BitConverter.ToInt32(bytes, modf + 4);
+            int data = modf + 8;
+            const int entry = 64;
+            int count = Math.Max(0, size / entry);
+            for (int i = 0; i < count; i++)
+            {
+                int p = data + i * entry; if (p + entry > bytes.Length) break;
+                int localIdx = BitConverter.ToInt32(bytes, p + 0);
+                if (localIdx >= 0 && localIdx < mwmoOrdered.Count)
+                {
+                    string s = NormalizeAssetName(mwmoOrdered[localIdx]);
+                    if (monmIndex.TryGetValue(s, out int g))
+                    {
+                        float wx = BitConverter.ToSingle(bytes, p + 8);
+                        float wy = BitConverter.ToSingle(bytes, p + 16);
+                        int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
+                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
+                        if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                        {
+                            int idx = cy * 16 + cx;
+                            wmoSets[idx].Add(g);
+                        }
+                    }
+                }
+            }
+        }
+
+        var doodadRefs = new List<int>[256];
+        var wmoRefs = new List<int>[256];
+        for (int i = 0; i < 256; i++)
+        {
+            var dl = new List<int>(doodadSets[i]); dl.Sort(); doodadRefs[i] = dl;
+            var wl = new List<int>(wmoSets[i]); wl.Sort(); wmoRefs[i] = wl;
+        }
+        return (doodadRefs, wmoRefs);
+    }
+
+    private static byte[] BuildMddfFromLk(byte[] bytes, List<string> mmdxOrdered, Dictionary<string, int> mdnmIndex)
+    {
+        if (bytes == null || bytes.Length < 8) return Array.Empty<byte>();
+        int mddf = FindFourCC(bytes, "MDDF");
+        if (mddf < 0) return Array.Empty<byte>();
+        int size = BitConverter.ToInt32(bytes, mddf + 4);
+        int data = mddf + 8;
+        const int entry = 36;
+        int count = Math.Max(0, Math.Min(size / entry, 1_000_000));
+        using var ms = new MemoryStream();
+        for (int i = 0; i < count; i++)
+        {
+            int p = data + i * entry;
+            if (p + entry > bytes.Length) break;
+            int localIdx = BitConverter.ToInt32(bytes, p + 0);
+            if (localIdx < 0 || localIdx >= mmdxOrdered.Count) continue;
+            string name = NormalizeAssetName(mmdxOrdered[localIdx]);
+            if (string.IsNullOrEmpty(name) || !mdnmIndex.TryGetValue(name, out int globalIdx)) continue;
+            int uniqueId = BitConverter.ToInt32(bytes, p + 4);
+            float posX = BitConverter.ToSingle(bytes, p + 8);
+            float posY = BitConverter.ToSingle(bytes, p + 12);
+            float posZ = BitConverter.ToSingle(bytes, p + 16);
+            float rotX = BitConverter.ToSingle(bytes, p + 20);
+            float rotY = BitConverter.ToSingle(bytes, p + 24);
+            float rotZ = BitConverter.ToSingle(bytes, p + 28);
+            ushort scale = BitConverter.ToUInt16(bytes, p + 32);
+            ushort flags = BitConverter.ToUInt16(bytes, p + 34);
+            ms.Write(BitConverter.GetBytes(globalIdx));
+            ms.Write(BitConverter.GetBytes(uniqueId));
+            ms.Write(BitConverter.GetBytes(posX));
+            ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(rotX));
+            ms.Write(BitConverter.GetBytes(rotY));
+            ms.Write(BitConverter.GetBytes(rotZ));
+            ms.Write(BitConverter.GetBytes(scale));
+            ms.Write(BitConverter.GetBytes(flags));
+        }
+        return ms.ToArray();
+    }
+
+    private static byte[] BuildModfFromLk(byte[] bytes, List<string> mwmoOrdered, Dictionary<string, int> monmIndex)
+    {
+        if (bytes == null || bytes.Length < 8) return Array.Empty<byte>();
+        int modf = FindFourCC(bytes, "MODF");
+        if (modf < 0) return Array.Empty<byte>();
+        int size = BitConverter.ToInt32(bytes, modf + 4);
+        int data = modf + 8;
+        const int entry = 64;
+        int count = Math.Max(0, Math.Min(size / entry, 1_000_000));
+        using var ms = new MemoryStream();
+        for (int i = 0; i < count; i++)
+        {
+            int p = data + i * entry;
+            if (p + entry > bytes.Length) break;
+            int localIdx = BitConverter.ToInt32(bytes, p + 0);
+            if (localIdx < 0 || localIdx >= mwmoOrdered.Count) continue;
+            string name = NormalizeAssetName(mwmoOrdered[localIdx]);
+            if (string.IsNullOrEmpty(name) || !monmIndex.TryGetValue(name, out int globalIdx)) continue;
+            int uniqueId = BitConverter.ToInt32(bytes, p + 4);
+            float posX = BitConverter.ToSingle(bytes, p + 8);
+            float posY = BitConverter.ToSingle(bytes, p + 12);
+            float posZ = BitConverter.ToSingle(bytes, p + 16);
+            float rotX = BitConverter.ToSingle(bytes, p + 20);
+            float rotY = BitConverter.ToSingle(bytes, p + 24);
+            float rotZ = BitConverter.ToSingle(bytes, p + 28);
+            // extents 0x20..0x3F
+            ms.Write(BitConverter.GetBytes(globalIdx));
+            ms.Write(BitConverter.GetBytes(uniqueId));
+            ms.Write(BitConverter.GetBytes(posX));
+            ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(rotX));
+            ms.Write(BitConverter.GetBytes(rotY));
+            ms.Write(BitConverter.GetBytes(rotZ));
+            // extents (copy 24 bytes)
+            ms.Write(bytes, p + 32, 24);
+            ushort flags = BitConverter.ToUInt16(bytes, p + 56);
+            ushort doodadSet = BitConverter.ToUInt16(bytes, p + 58);
+            ushort nameSet = BitConverter.ToUInt16(bytes, p + 60);
+            ushort scale = BitConverter.ToUInt16(bytes, p + 62);
+            ms.Write(BitConverter.GetBytes(flags));
+            ms.Write(BitConverter.GetBytes(doodadSet));
+            ms.Write(BitConverter.GetBytes(nameSet));
+            ms.Write(BitConverter.GetBytes(scale));
+        }
         return ms.ToArray();
     }
 

@@ -13,7 +13,7 @@ public static class AlphaMcnkBuilder
     private const int McnkHeaderSize = 0x80;
     private const int ChunkLettersAndSize = 8;
 
-    public static byte[] BuildFromLk(byte[] lkAdtBytes, int mcNkOffset, LkToAlphaOptions? opts = null, byte[]? lkTexAdtBytes = null, int texMcNkOffset = -1)
+    public static byte[] BuildFromLk(byte[] lkAdtBytes, int mcNkOffset, LkToAlphaOptions? opts = null, byte[]? lkTexAdtBytes = null, int texMcNkOffset = -1, System.Collections.Generic.IReadOnlyList<int>? doodadRefs = null, System.Collections.Generic.IReadOnlyList<int>? mapObjRefs = null)
     {
         int headerStart = mcNkOffset;
         // Read LK MCNK header to get IndexX/IndexY
@@ -522,8 +522,27 @@ public static class AlphaMcnkBuilder
             mcseRaw = Array.Empty<byte>();
         }
 
-        // MCRF raw is empty in our current flow
-        var mcrfRaw = Array.Empty<byte>();
+        // Build MCRF raw from provided references (Alpha uses MDNM indices followed by MONM indices)
+        byte[] mcrfRaw;
+        int nDoodadRefs = doodadRefs?.Count ?? 0;
+        int nMapObjRefs = mapObjRefs?.Count ?? 0;
+        if (nDoodadRefs > 0 || nMapObjRefs > 0)
+        {
+            using var msRefs = new MemoryStream();
+            if (nDoodadRefs > 0)
+            {
+                for (int i = 0; i < nDoodadRefs; i++) msRefs.Write(BitConverter.GetBytes(doodadRefs![i]));
+            }
+            if (nMapObjRefs > 0)
+            {
+                for (int i = 0; i < nMapObjRefs; i++) msRefs.Write(BitConverter.GetBytes(mapObjRefs![i]));
+            }
+            mcrfRaw = msRefs.ToArray();
+        }
+        else
+        {
+            mcrfRaw = Array.Empty<byte>();
+        }
 
         // Build named chunk wrappers ONLY for MCLY and MCRF (Alpha v18 format)
         // CRITICAL: MCSH, MCAL, MCSE do NOT have headers in Alpha - raw data only!
@@ -610,7 +629,7 @@ public static class AlphaMcnkBuilder
         BitConverter.GetBytes(lkHeader.IndexY).CopyTo(smh[0x08..]);
         BitConverter.GetBytes(radius).CopyTo(smh[0x0C..]);
         BitConverter.GetBytes(nLayers).CopyTo(smh[0x10..]);
-        BitConverter.GetBytes(0).CopyTo(smh[0x14..]); // nDoodadRefs (we write empty MCRF)
+        BitConverter.GetBytes(nDoodadRefs).CopyTo(smh[0x14..]); // nDoodadRefs
         BitConverter.GetBytes(offsHeight).CopyTo(smh[0x18..]);
         BitConverter.GetBytes(offsNormal).CopyTo(smh[0x1C..]);
         BitConverter.GetBytes(offsLayer).CopyTo(smh[0x20..]);
@@ -620,7 +639,7 @@ public static class AlphaMcnkBuilder
         BitConverter.GetBytes(offsShadow).CopyTo(smh[0x30..]);
         BitConverter.GetBytes(sizeShadow).CopyTo(smh[0x34..]);
         BitConverter.GetBytes(areaIdVal).CopyTo(smh[0x38..]);
-        BitConverter.GetBytes(0).CopyTo(smh[0x3C..]); // nMapObjRefs
+        BitConverter.GetBytes(nMapObjRefs).CopyTo(smh[0x3C..]); // nMapObjRefs
         // holes (uint16) at 0x40, pad0 at 0x42 (leave zeros)
         // predTex[8] at 0x44, noEffectDoodad[8] at 0x54 (already zeros)
         BitConverter.GetBytes(offsSnd).CopyTo(smh[0x5C..]);
