@@ -74,7 +74,7 @@ public sealed class AlphaWdtMonolithicWriter
         // Patch MPHD with absolute offsets and counts
         long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
         // MPHD layout: [0..3]=nTextures (M2), [4..7]=MDNM abs, [8..11]=nMapObjNames (WMO, +1 when any), [12..15]=MONM abs
-        BitConverter.GetBytes(m2Names.Count).CopyTo(mphdData);
+        BitConverter.GetBytes(m2Names.Count > 0 ? m2Names.Count + 1 : 0).CopyTo(mphdData);
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
         BitConverter.GetBytes(wmoNames.Count > 0 ? wmoNames.Count + 1 : 0).CopyTo(mphdData.Slice(8));
         BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
@@ -415,7 +415,7 @@ public sealed class AlphaWdtMonolithicWriter
         long mdnmStart = outMs.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2List).Length, BuildMdnmData(m2List)); outMs.Write(mdnm.GetWholeChunk());
         long monmStart = outMs.Position; var monm = new Chunk("MONM", BuildMonmData(wmoList).Length, BuildMonmData(wmoList)); outMs.Write(monm.GetWholeChunk());
         long savePos = outMs.Position; outMs.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
-        BitConverter.GetBytes(m2List.Count).CopyTo(mphdData);
+        BitConverter.GetBytes(m2List.Count > 0 ? m2List.Count + 1 : 0).CopyTo(mphdData);
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
         // MONM count must include a trailing empty string when any names exist
         BitConverter.GetBytes(wmoList.Count > 0 ? wmoList.Count + 1 : 0).CopyTo(mphdData.Slice(8));
@@ -515,33 +515,28 @@ public sealed class AlphaWdtMonolithicWriter
                 outMs.Position = mhdrDataStartRel + 20; outMs.Write(BitConverter.GetBytes(checked((int)(modfPosition - mhdrDataStartRel))));
                 outMs.Position = mhdrDataStartRel + 24; outMs.Write(BitConverter.GetBytes(0));
 
-                // Rewrite MCIN with positions RELATIVE to ADT MHDR.data (letters+8) and restore
-                var mcnkRel = new int[256];
-                for (int i = 0; i < 256; i++) mcnkRel[i] = mcnkAbs[i] > 0 ? mcnkAbs[i] - checked((int)(mhdrAbsolute + 8)) : 0;
-                outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkRel, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
-                outMs.Position = cursor;
+                outMs.Position = mcinPosition; var mcinReal = AlphaMcinBuilder.BuildMcin(mcnkAbs, mcnkSizes); outMs.Write(mcinReal.GetWholeChunk());
+                outMs.Position = firstMcnkAbsolute;
 
                 // MAIN.size distance (defer array assign until success)
                 int mhdrToFirstVal2 = (alphaMcnkBytes.Any(b => b != null && b.Length > 0)) ? checked((int)(firstMcnkAbsolute - mhdrAbsolute)) : 0;
 
                 // Write MCNKs
                 for (int i = 0; i < 256; i++) { var buf = alphaMcnkBytes[i]; if (buf is { Length: > 0 }) outMs.Write(buf); }
-                // Sanity: verify MCIN[0] points to 'KNCM'
+                // Sanity: verify MCIN[0] absolute points to 'KNCM'
                 try
                 {
                     int firstIdx = -1; for (int i = 0; i < 256; i++) if (mcnkAbs[i] > 0) { firstIdx = i; break; }
                     if (firstIdx >= 0)
                     {
-                        int rel = mcnkRel[firstIdx];
-                        long basePos = mhdrAbsolute + 8; // MHDR.data base
-                        long abs = basePos + rel;
+                        long abs = mcnkAbs[firstIdx];
                         long cur = outMs.Position;
                         outMs.Position = abs;
                         Span<byte> sig = stackalloc byte[4];
                         outMs.Read(sig);
                         outMs.Position = cur;
                         var tokenStr2 = Encoding.ASCII.GetString(sig);
-                        Console.WriteLine($"[pack][check] tile {yy:D2}_{xx:D2} MCIN[{firstIdx}] rel={rel} abs={abs} token='{tokenStr2}'");
+                        Console.WriteLine($"[pack][check] tile {yy:D2}_{xx:D2} MCIN[{firstIdx}] abs={abs} token='{tokenStr2}'");
                     }
                 }
                 catch { }
@@ -567,7 +562,7 @@ public sealed class AlphaWdtMonolithicWriter
 
         // Patch MAIN data and save
         outMs.Position = mainStart + 8;
-        var patched = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirst, true);
+        var patched = AlphaMainBuilder.BuildMain(mhdrAbs, mhdrToFirst, false);
         outMs.Write(patched.Data, 0, patched.Data.Length);
         using (var fs = File.Create(outWdtPath))
         {
@@ -644,6 +639,7 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(nameBytes, 0, nameBytes.Length);
             ms.WriteByte(0);
         }
+        ms.WriteByte(0);
         return ms.ToArray();
     }
 
