@@ -89,6 +89,24 @@ public sealed class AlphaWdtMonolithicWriter
         // Build name lists (optional); currently use collected sets (may be empty)
         var wmoNames = allWmoNames.ToList();
         var m2Names = allM2Names.ToList();
+        if (!string.IsNullOrWhiteSpace(opts?.TargetListfilePath) && File.Exists(opts.TargetListfilePath))
+        {
+            try
+            {
+                var idx = ListfileIndex.Load(opts.TargetListfilePath!);
+                var gate = new AssetGate(idx);
+                var keptM2 = gate.FilterNames(m2Names, out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoNames, out var droppedWmo);
+                if (opts!.StrictTargetAssets)
+                {
+                    m2Names = keptM2.ToList();
+                    wmoNames = keptWmo.ToList();
+                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
+                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                }
+            }
+            catch { }
+        }
         // Global name indices for MDNM/MONM
         var mdnmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < m2Names.Count; i++) mdnmIndexFs[NormalizeAssetName(m2Names[i])] = i;
@@ -454,11 +472,12 @@ public sealed class AlphaWdtMonolithicWriter
                 if (opts.StrictTargetAssets)
                 {
                     m2List = keptM2.ToList();
+                    wmoList = keptWmo.ToList();
                     var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
                     AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
                 }
             }
-        catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
+            catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
         }
         // Build global name indices (normalized)
         var mdnmIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

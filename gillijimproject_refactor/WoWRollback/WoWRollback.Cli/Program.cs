@@ -394,6 +394,8 @@ internal static class Program
         var clientPath = opts["client-path"]; // game root
         var alias = opts["alias"];            // full build string
         var outPath = opts["out"];            // json file
+        var csvOut = GetOption(opts, "csv-out");
+        var communityPath = GetOption(opts, "community-listfile");
 
         if (!Directory.Exists(clientPath)) throw new DirectoryNotFoundException(clientPath);
 
@@ -443,19 +445,142 @@ internal static class Program
                 var rel = GetRelativeUnderDataOrRoot(clientPath, file);
                 var norm = NormalizeAssetPath(rel);
                 if (!string.IsNullOrEmpty(norm)) paths.Add(norm);
+                if (!string.IsNullOrEmpty(norm) && norm.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+                {
+                    var noMpq = norm.Substring(0, norm.Length - 4);
+                    var ext = Path.GetExtension(noMpq);
+                    if (!string.IsNullOrEmpty(ext))
+                    {
+                        switch (ext.ToLowerInvariant())
+                        {
+                            case ".wdt":
+                            case ".wdl":
+                            case ".wmo":
+                            case ".mdx":
+                            case ".m2":
+                            case ".blp":
+                            case ".adt":
+                                paths.Add(noMpq);
+                                if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var asMdx = noMpq.Substring(0, noMpq.Length - 3) + "mdx";
+                                    paths.Add(asMdx);
+                                }
+                                break;
+                        }
+                    }
+                }
             }
             catch { }
         }
 
+        // Optional FDID enrichment from a community listfile
+        Dictionary<string, uint?>? comm = null;
+        Dictionary<string, List<(string Path, uint? Id)>>? byFile = null;
+        if (!string.IsNullOrWhiteSpace(communityPath) && File.Exists(communityPath))
+        {
+            comm = LoadGenericListfile(communityPath!);
+            byFile = new Dictionary<string, List<(string, uint?)>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in comm)
+            {
+                var fname = Path.GetFileName(kv.Key);
+                if (!byFile.TryGetValue(fname, out var list)) { list = new List<(string, uint?)>(); byFile[fname] = list; }
+                list.Add((kv.Key, kv.Value));
+                // m2<->mdx alias on filename
+                if (fname.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                {
+                    var aliasName = fname.Substring(0, fname.Length - 3) + "mdx";
+                    if (!byFile.TryGetValue(aliasName, out var list2)) { list2 = new List<(string, uint?)>(); byFile[aliasName] = list2; }
+                    list2.Add((kv.Key, kv.Value));
+                }
+                else if (fname.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                {
+                    var aliasName = fname.Substring(0, fname.Length - 4) + "m2";
+                    if (!byFile.TryGetValue(aliasName, out var list3)) { list3 = new List<(string, uint?)>(); byFile[aliasName] = list3; }
+                    list3.Add((kv.Key, kv.Value));
+                }
+            }
+        }
+
+        var missing = new List<string>();
+        var ambiguous = new List<(string Path, List<string> Candidates)>();
+
         foreach (var p in paths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
         {
-            snapshot.Entries.Add(new ListfileSnapshot.Entry { Path = p });
+            uint? fdid = null;
+            if (comm != null)
+            {
+                // exact path
+                if (!comm.TryGetValue(p, out fdid))
+                {
+                    // mdx<->m2 alias on path
+                    string pathAlias = p;
+                    if (p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)) pathAlias = p.Substring(0, p.Length - 3) + "mdx";
+                    else if (p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)) pathAlias = p.Substring(0, p.Length - 4) + "m2";
+                    if (!string.Equals(pathAlias, p, StringComparison.OrdinalIgnoreCase)) comm.TryGetValue(pathAlias, out fdid);
+
+                    // fallback: filename-only heuristic
+                    if (!fdid.HasValue && byFile != null)
+                    {
+                        var fname = Path.GetFileName(p);
+                        if (byFile.TryGetValue(fname, out var list) && list.Count == 1)
+                        {
+                            fdid = list[0].Id;
+                        }
+                        else if (byFile.TryGetValue(fname, out var many) && many.Count > 1)
+                        {
+                            ambiguous.Add((p, many.Select(t => t.Path).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList()));
+                        }
+                    }
+                }
+            }
+
+            snapshot.Entries.Add(new ListfileSnapshot.Entry { Path = p, FileDataId = fdid });
+            if (comm != null && !fdid.HasValue)
+            {
+                // log truly unresolved ones (exclude those recorded as ambiguous)
+                if (!ambiguous.Any(a => a.Path.Equals(p, StringComparison.OrdinalIgnoreCase))) missing.Add(p);
+            }
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? ".");
+        // Write diagnostics when community listfile provided
+        if (comm != null)
+        {
+            var outDir = Path.GetDirectoryName(outPath) ?? ".";
+            if (missing.Count > 0)
+            {
+                File.WriteAllText(Path.Combine(outDir, "snapshot_missing_fdid.csv"), "path\n" + string.Join("\n", missing));
+                Console.WriteLine($"[info] missing fdid: {missing.Count}");
+            }
+            if (ambiguous.Count > 0)
+            {
+                using var sw = new StreamWriter(Path.Combine(outDir, "snapshot_ambiguous_fdid.csv"));
+                sw.WriteLine("path,candidates");
+                foreach (var a in ambiguous)
+                {
+                    var cand = string.Join('|', a.Candidates);
+                    sw.WriteLine($"{a.Path},{EscapeCsvLocal(cand)}");
+                }
+                Console.WriteLine($"[info] ambiguous fdid: {ambiguous.Count}");
+            }
+        }
         var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(outPath, json);
         Console.WriteLine($"[ok] Snapshot written: {outPath} (paths={paths.Count})");
+        if (!string.IsNullOrWhiteSpace(csvOut))
+        {
+            var sb = new StringBuilder();
+            foreach (var e in snapshot.Entries.OrderBy(e => e.Path, StringComparer.OrdinalIgnoreCase))
+            {
+                if (e.FileDataId.HasValue)
+                    sb.AppendLine($"{e.FileDataId.Value};{e.Path}");
+                else
+                    sb.AppendLine(e.Path);
+            }
+            File.WriteAllText(csvOut!, sb.ToString());
+            Console.WriteLine($"[ok] CSV written: {csvOut} (rows={snapshot.Entries.Count})");
+        }
         return 0;
 
         static string GetRelativeUnderDataOrRoot(string root, string fullPath)
@@ -471,6 +596,57 @@ internal static class Program
                 }
             }
             return rel;
+        }
+        static string EscapeCsvLocal(string s)
+        {
+            return (s.Contains(',') || s.Contains('"')) ? '"' + s.Replace("\"", "\"\"") + '"' : s;
+        }
+    }
+
+    // Parse listfile in plain/CSV/JSON (our snapshot format) into path->fdid map
+    private static Dictionary<string, uint?> LoadGenericListfile(string path)
+    {
+        if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            var snap = JsonSerializer.Deserialize<ListfileSnapshot>(File.ReadAllText(path));
+            var dict = new Dictionary<string, uint?>(StringComparer.OrdinalIgnoreCase);
+            if (snap?.Entries != null)
+            {
+                foreach (var e in snap.Entries)
+                {
+                    if (string.IsNullOrWhiteSpace(e.Path)) continue;
+                    var norm = NormalizeAssetPath(e.Path);
+                    uint? id = e.FileDataId.HasValue ? e.FileDataId.Value : (uint?)null;
+                    dict[norm] = id;
+                }
+            }
+            return dict;
+        }
+        else
+        {
+            var dict = new Dictionary<string, uint?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in File.ReadLines(path))
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var line = raw.Trim();
+                if (line.StartsWith("#") || line.StartsWith("//")) continue;
+                string[] parts = line.Split(';');
+                if (parts.Length < 2) parts = line.Split(',');
+                if (parts.Length < 2) parts = line.Split('\t');
+                if (parts.Length >= 2 && uint.TryParse(parts[0].Trim(), out var fdid))
+                {
+                    var pathPart = NormalizeAssetPath(parts[1]);
+                    if (pathPart.Length == 0) continue;
+                    if (!dict.ContainsKey(pathPart)) dict[pathPart] = fdid;
+                }
+                else
+                {
+                    var onlyPath = NormalizeAssetPath(line);
+                    if (onlyPath.Length == 0) continue;
+                    if (!dict.ContainsKey(onlyPath)) dict[onlyPath] = null;
+                }
+            }
+            return dict;
         }
     }
 
