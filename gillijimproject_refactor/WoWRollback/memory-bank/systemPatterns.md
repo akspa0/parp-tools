@@ -301,3 +301,20 @@ Array.Copy(chunk.Data, 0, wdtBytes, fileOffset, chunk.Data.Length);
 - Heatmap Scope: Local | Global (build) | Global (epoch).
 - Layer Scope: Tile | Selection | Map.
 - Overlays: Show Empty Tiles, Show MCCV.
+
+# New Patterns (2025-11-07)
+
+## Placement & Gating Rules
+- Build MDNM/MONM from the union of all referenced names across scanned tiles; do not gate the name tables.
+- Do not gate placements. Always resolve local indices to global indices and write all MDDF/MODF.
+- Keep Alpha placement coordinates in X,Z,Y order. Normalize names (`/`→`\`, `.m2`→`.mdx`).
+- Build MCRF per-chunk from computed global indices; never gate references.
+
+## Water Rules
+- Prefer MH2O-derived MCLQ when present. Set MCNK liquid flags and `offsLiquid` accordingly.
+- Compose per-tile flags (fishable/fatigue) and only set `dont_render` when a subtile truly does not exist.
+- Ensure min/max heights and vertex heights are populated for 9×9 grid; write type per 8×8 tile.
+
+## Logging & Diagnostics
+- Tee all console output to a timestamped log file via `--log-file`/`--log-dir`.
+- Emit diagnostics CSVs: kept assets, dropped assets, `objects_written.csv` (per-tile MDDF/MODF counts), `mclq_summary.csv`.

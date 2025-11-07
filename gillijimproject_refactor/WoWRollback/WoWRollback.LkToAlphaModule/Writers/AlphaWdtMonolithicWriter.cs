@@ -77,6 +77,7 @@ public sealed class AlphaWdtMonolithicWriter
         
         int mccvExported = 0;
         int mccvHeaders = 0;
+        var objectsCsvLines = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
 
         // Build WDT scaffolding (Alpha format): MVER -> MPHD(16) -> MAIN -> MDNM -> MONM
         using var ms = new MemoryStream();
@@ -97,13 +98,18 @@ public sealed class AlphaWdtMonolithicWriter
                 var gate = new AssetGate(idx);
                 var keptM2 = gate.FilterNames(m2Names.Select(NormalizeAssetName), out var droppedM2);
                 var keptWmo = gate.FilterNames(wmoNames.Select(NormalizeAssetName), out var droppedWmo);
-                if (opts!.StrictTargetAssets)
+                var outDir = Path.GetDirectoryName(outWdtPath) ?? ".";
+                var dropCsv = Path.Combine(outDir, "dropped_assets.csv");
+                AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                try
                 {
-                    m2Names = keptM2.ToList();
-                    wmoNames = keptWmo.ToList();
-                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
-                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                    var keptCsv = Path.Combine(outDir, "kept_assets.csv");
+                    using var sw = new StreamWriter(keptCsv, false, Encoding.UTF8);
+                    sw.WriteLine("type,path");
+                    foreach (var p in keptM2) sw.WriteLine($"m2,{p}");
+                    foreach (var p in keptWmo) sw.WriteLine($"wmo,{p}");
                 }
+                catch { }
             }
             catch { }
         }
@@ -264,6 +270,55 @@ public sealed class AlphaWdtMonolithicWriter
 
             long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfDataFs.Length, mddfDataFs).GetWholeChunk()); long mddfEnd = outMs.Position;
             long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfDataFs.Length, modfDataFs).GetWholeChunk()); long modfEnd = outMs.Position;
+            int mddfCountFs = mddfDataFs.Length / 36;
+            int modfCountFs = modfDataFs.Length / 64;
+            if (verbose)
+            {
+                Console.WriteLine($"[pack][objects] tile {yy:D2}_{xx:D2} mddf={mddfCountFs} modf={modfCountFs}");
+            }
+            string firstMddfName = string.Empty;
+            string firstModfName = string.Empty;
+            try
+            {
+                int mddfOff = FindFourCC(objBytesFs, "MDDF");
+                if (mddfOff >= 0)
+                {
+                    int size = BitConverter.ToInt32(objBytesFs, mddfOff + 4);
+                    int data = mddfOff + 8;
+                    int count = Math.Max(0, size / 36);
+                    if (count > 0)
+                    {
+                        int p = data;
+                        int local = BitConverter.ToInt32(objBytesFs, p + 0);
+                        if (local >= 0 && local < mmdxOrderedFs.Count)
+                        {
+                            firstMddfName = NormalizeAssetName(mmdxOrderedFs[local]);
+                        }
+                    }
+                }
+            }
+            catch { }
+            try
+            {
+                int modfOff = FindFourCC(objBytesFs, "MODF");
+                if (modfOff >= 0)
+                {
+                    int size = BitConverter.ToInt32(objBytesFs, modfOff + 4);
+                    int data = modfOff + 8;
+                    int count = Math.Max(0, size / 64);
+                    if (count > 0)
+                    {
+                        int p = data;
+                        int local = BitConverter.ToInt32(objBytesFs, p + 0);
+                        if (local >= 0 && local < mwmoOrderedFs.Count)
+                        {
+                            firstModfName = NormalizeAssetName(mwmoOrderedFs[local]);
+                        }
+                    }
+                }
+            }
+            catch { }
+            objectsCsvLines.Add($"{yy},{xx},{mddfCountFs},{modfCountFs},{firstMddfName},{firstModfName}");
 
             // Rebuild MCNKs with MCRF refs
             alphaMcnkBytes = new byte[256][];
@@ -380,11 +435,24 @@ public sealed class AlphaWdtMonolithicWriter
             outMs.Position = 0;
             outMs.WriteTo(fs);
         }
+        try
+        {
+            var objCsvPath = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "objects_written.csv");
+            File.WriteAllLines(objCsvPath, objectsCsvLines, Encoding.UTF8);
+        }
+        catch { }
+
     if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir))
     {
         Console.WriteLine($"[pack] MCCV images exported: {mccvExported}");
         Console.WriteLine($"[pack] MCCV headers present: {mccvHeaders}");
     }
+    try
+    {
+        var objCsvPath = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "objects_written.csv");
+        File.WriteAllLines(objCsvPath, objectsCsvLines, Encoding.UTF8);
+    }
+    catch { }
 
     }
 
@@ -469,13 +537,18 @@ public sealed class AlphaWdtMonolithicWriter
                 var gate = new AssetGate(idx);
                 var keptM2 = gate.FilterNames(m2List.Select(NormalizeAssetName), out var droppedM2);
                 var keptWmo = gate.FilterNames(wmoList.Select(NormalizeAssetName), out var droppedWmo);
-                if (opts.StrictTargetAssets)
+                var outDir2 = Path.GetDirectoryName(outWdtPath) ?? ".";
+                var dropCsv2 = Path.Combine(outDir2, "dropped_assets.csv");
+                AssetGate.WriteDropReport(dropCsv2, droppedM2, droppedWmo);
+                try
                 {
-                    m2List = keptM2.ToList();
-                    wmoList = keptWmo.ToList();
-                    var dropCsv = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "dropped_assets.csv");
-                    AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
+                    var keptCsv2 = Path.Combine(outDir2, "kept_assets.csv");
+                    using var sw2 = new StreamWriter(keptCsv2, false, Encoding.UTF8);
+                    sw2.WriteLine("type,path");
+                    foreach (var p in keptM2) sw2.WriteLine($"m2,{p}");
+                    foreach (var p in keptWmo) sw2.WriteLine($"wmo,{p}");
                 }
+                catch { }
             }
             catch (Exception ex) { Console.WriteLine($"[warn] Asset gating failed: {ex.Message}"); }
         }
@@ -502,6 +575,7 @@ public sealed class AlphaWdtMonolithicWriter
 
         var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
         var mhdrToFirst = Enumerable.Repeat(0, GridTiles).ToArray();
+        var objectsCsvLines2 = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
         int mccvExported2 = 0;
         bool limitLogged2 = false;
 
@@ -647,6 +721,37 @@ public sealed class AlphaWdtMonolithicWriter
                     }
                     catch { }
                 }
+                try
+                {
+                    int mddfCountW = mddfData.Length / 36;
+                    int modfCountW = modfData.Length / 64;
+                    string firstM = string.Empty;
+                    string firstW = string.Empty;
+                    int mddfOff3 = FindFourCC(objBytes, "MDDF");
+                    if (mddfOff3 >= 0)
+                    {
+                        int size3 = BitConverter.ToInt32(objBytes, mddfOff3 + 4);
+                        int data3 = mddfOff3 + 8;
+                        if (size3 >= 36)
+                        {
+                            int local3 = BitConverter.ToInt32(objBytes, data3 + 0);
+                            if (local3 >= 0 && local3 < mmdxOrdered.Count) firstM = NormalizeAssetName(mmdxOrdered[local3]);
+                        }
+                    }
+                    int modfOff3 = FindFourCC(objBytes, "MODF");
+                    if (modfOff3 >= 0)
+                    {
+                        int size3 = BitConverter.ToInt32(objBytes, modfOff3 + 4);
+                        int data3 = modfOff3 + 8;
+                        if (size3 >= 64)
+                        {
+                            int local3 = BitConverter.ToInt32(objBytes, data3 + 0);
+                            if (local3 >= 0 && local3 < mwmoOrdered.Count) firstW = NormalizeAssetName(mwmoOrdered[local3]);
+                        }
+                    }
+                    objectsCsvLines2.Add($"{yy},{xx},{mddfCountW},{modfCountW},{firstM},{firstW}");
+                }
+                catch { }
 
                 // Rebuild MCNKs with MCRF refs
                 alphaMcnkBytes = new byte[256][];

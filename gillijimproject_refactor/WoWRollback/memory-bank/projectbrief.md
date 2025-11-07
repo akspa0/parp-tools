@@ -20,6 +20,13 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 - **CSV Crosswalk AreaIDs** - Patch `MCNK.AreaId` using CSV crosswalks (`--crosswalk-dir|--crosswalk-file`). No DBCTool dependency at runtime.
 - **Mapping Fallbacks** - Support `--area-remap-json` or write 0 for unmapped; use `Map.dbc` only to resolve target map guard (no heuristics).
 
+### Latest Direction (2025-11-07)
+- Alpha WDT monolithic pack focus: fix liquids (MH2O→MCLQ) and object placements.
+- Build MDNM/MONM from union of referenced names; do not gate placements; recompute MCRF.
+- Normalize names (`/`→`\\`, `.m2`→`.mdx`); placements axis order X,Z,Y.
+- Diagnostics: `objects_written.csv`, kept assets CSV, `dropped_assets.csv`, `mclq_summary.csv`.
+- Logging: add `--log-file` and `--log-dir` to tee console output to a timestamped log file.
+
 ### Latest Direction (2025-10-27)
 - CLI-first with GUI as runner (Load → Build → Layers); no modals; overlay + inline logs; auto-tab navigation.
 - Energy-efficient preflight: skip-if-exists for LK ADTs, crosswalk CSVs, tile layers, and layers.json; reuse cache to save time/energy.

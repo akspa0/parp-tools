@@ -1,4 +1,10 @@
 # Technical Context - WoWRollback.RollbackTool
+ 
+## Hot Update (2025-11-07) – Liquids & Placements diagnostics
+- Modules touched: AlphaWdtMonolithicWriter (MDNM/MONM build from referenced union; placements MDDF/MODF; MCRF), AlphaMcnkBuilder (MH2O→MCLQ composition; MCAL pack logging), Program CLI (new flags).
+- New flags: `--log-file`, `--log-dir` to tee console output to a timestamped log file near outputs.
+- Diagnostics: kept assets CSV, `dropped_assets.csv`, `objects_written.csv` (per-tile MDDF/MODF counts and samples), `mclq_summary.csv`.
+- Policies: do not gate placements; build name tables from union of referenced names; normalize `/`→`\\`, `.m2`→`.mdx`; placements axis X,Z,Y.
 
 ## Runtime Environment
 - **Target Framework**: .NET 9.0

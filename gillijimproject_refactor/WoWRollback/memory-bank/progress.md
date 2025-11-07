@@ -1,5 +1,24 @@
 # Progress - WoWRollback.RollbackTool
 
+## Hot Update (2025-11-07) – Alpha WDT monolithic pack: liquids & placements
+
+### What works
+- StackOverflow eliminated (removed stackalloc); monolithic pack completes.
+- MDNM/MONM names present; placement axis order corrected (X,Z,Y).
+- `.m2`↔`.mdx` alias gating added; MCAL pack verbose logs in place.
+
+### Known issues
+- MDDF/MODF/MCRF effectively empty due to gating semantics → no objects render.
+- MH2O→MCLQ conversion yields too few chunks; most tiles flagged `dont_render` → liquids invisible.
+- Logs are not tee'd to a file → limited ability to compare runs.
+
+### Next
+- Build MDNM/MONM from union of referenced names (no culling). Do not gate placements; recompute MCRF.
+- Emit `objects_written.csv` and kept assets CSV; keep `dropped_assets.csv`.
+- Add per-tile MDDF/MODF counts to file-mode writer.
+- Instrument MH2O→MCLQ and emit `mclq_summary.csv`; verify `offsLiquid` and MPHD liquid flags.
+- Add `--log-file` and `--log-dir` flags; wire tee logger for persistent logs.
+
 ## ✅ Completed (2025-10-30)
 - GUI: Fixed `MainWindow.cs` compile errors (`CS0136`, `CS0103`) in time range/global stats logic.
 - GUI Recompile: Live STDOUT/STDERR streaming to Build Log; log CWD and full `dotnet` command; exit code; persist `<outRoot>/session.log`; show log path.

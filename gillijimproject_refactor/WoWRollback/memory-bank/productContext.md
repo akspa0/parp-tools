@@ -57,6 +57,13 @@ dotnet run --project WoWRollback/WoWRollback.Cli -- \
 ```
 *Invariant*: LK export always emits `<Map>.wdt` alongside the ADTs in the LK output folder.
 
+### 2025-11-07: Liquids & Placements Debugging
+- Goal: Fix Alpha monolithic pack so liquids (MH2O→MCLQ) and object placements render in 0.5.3.
+- Decisions: Build MDNM/MONM from union of referenced names; do not gate placements; recompute MCRF. Keep X,Z,Y axis. Normalize names (`/`→`\\`, `.m2`→`.mdx`).
+- Diagnostics: Emit `objects_written.csv` (per-tile counts, samples), kept assets CSV, keep `dropped_assets.csv`, and `mclq_summary.csv`.
+- Logging: Add `--log-file` and `--log-dir` to tee console output to a timestamped file near outputs.
+- UX Expectation: After repack, verify water visibility and object presence; logs/CSVs enable quick root-cause when missing.
+
 ### Step 2: (Optional) LK patcher
 ```powershell
 WoWRollback lk-to-alpha --lk-adts-dir World/Maps/Kalimdor --max-uniqueid 125000 \

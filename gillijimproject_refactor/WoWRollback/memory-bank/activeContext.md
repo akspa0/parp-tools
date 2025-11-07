@@ -20,6 +20,32 @@
 - Energy efficiency: preflight/skip-if-exists for LK ADTs, crosswalks, tile layers, and layers.json.
 - BYOD: tooling must not include copyrighted game data anywhere in repo/binaries.
 
+## Hot Update (2025-11-07) – Alpha WDT monolithic pack: liquids & placements
+
+### Current state
+- StackOverflow fixed by removing stackalloc; pack completes.
+- MDNM/MONM populated, but MDDF/MODF and MCRF effectively empty → no objects render.
+- MCLQ count is low (~100) and most tiles are marked dont_render → liquids not visible in 0.5.3.
+- Logging is not persisted; need tee-to-file to capture full runs.
+
+### Root causes
+- Using asset gating to build MDNM/MONM dropped referenced names; placements were skipped when global name index was missing.
+- MH2O→MCLQ conversion writes payloads but tile flags/min/max/offsLiquid composition leads to empty/don't_render tiles.
+
+### Decisions
+- Build MDNM/MONM from the union of all referenced names (no culling). Use AssetGate only for reporting (kept/dropped), not for building the name tables.
+- Never gate placements. Always resolve local indices to global MDNM/MONM indices and write all MDDF/MODF entries.
+- Keep placement axis order X,Z,Y. Normalize names: convert `/`→`\` and `.m2`→`.mdx` for Alpha.
+- Prefer MH2O-derived MCLQ when present. Set MCNK liquid flags and offsLiquid properly; compose per-tile flags (fishable/fatigue); only set dont_render when a subtile is truly absent.
+- Add tee logging with `--log-file` and `--log-dir`; emit diagnostics CSVs.
+
+### Next steps
+- Fix placements: rebuild MDNM/MONM from all referenced names and map placements accordingly in both writer paths; emit per-chunk MCRF.
+- Emit `objects_written.csv` with per-tile MDDF/MODF counts and sample rows; keep `dropped_assets.csv` and add kept assets report.
+- Add per-tile verbose object counts in file-path `WriteMonolithic`.
+- Instrument MH2O→MCLQ and write `mclq_summary.csv`; verify counts/flags/heights; export debug images if needed.
+- Add CLI flags `--log-file`, `--log-dir`; wire tee logger.
+
 ## Hot Update (2025-10-30) – Build cache, discovery, recompile, layers roadmap
 
 ### What changed
