@@ -6,6 +6,7 @@ using System.Text;
 using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using Util = GillijimProject.Utilities.Utilities;
+using WoWRollback.Core.Services.Archive;
 
 namespace WoWRollback.LkToAlphaModule.Writers;
 
@@ -222,6 +223,112 @@ public static class WdlWriterV18
 
         File.WriteAllBytes(outWdlPath, outBytes);
         Console.WriteLine($"[ok] WDL written: {outWdlPath}");
+    }
+
+    public static void WriteFromArchive(IArchiveSource src, string mapName, string outWdlPath)
+    {
+        if (src == null) throw new ArgumentNullException(nameof(src));
+        if (string.IsNullOrWhiteSpace(mapName)) throw new ArgumentException("mapName required");
+        if (string.IsNullOrWhiteSpace(outWdlPath)) throw new ArgumentException("outWdlPath required");
+        Directory.CreateDirectory(Path.GetDirectoryName(outWdlPath) ?? ".");
+
+        var perTileHeights = new Dictionary<int, short[]>();
+        for (int yy = 0; yy < 64; yy++)
+        {
+            for (int xx = 0; xx < 64; xx++)
+            {
+                string rootVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}.adt";
+                if (!src.FileExists(rootVPath)) continue;
+                int tileIndex = xx * 64 + yy;
+                try
+                {
+                    using var s = src.OpenFile(rootVPath);
+                    using var msFile = new MemoryStream();
+                    s.CopyTo(msFile); var bytes = msFile.ToArray();
+                    int mhdrOff = FindFourCC(bytes, "MHDR"); if (mhdrOff < 0) continue;
+                    var lkMhdr = new Mhdr(bytes, mhdrOff);
+                    int lkMhdrDataStart = mhdrOff + 8;
+                    int lkMcinOff = lkMhdr.GetOffset(Mhdr.McinOffset); if (lkMcinOff == 0) continue;
+                    var lkMcin = new Mcin(bytes, lkMhdrDataStart + lkMcinOff);
+                    var mcnkOffsets = lkMcin.GetMcnkOffsets();
+
+                    var outer129 = new float[129, 129];
+                    var inner128 = new float[128, 128];
+                    for (int i = 0; i < 256; i++)
+                    {
+                        int off = (i < mcnkOffsets.Count) ? mcnkOffsets[i] : 0;
+                        if (off <= 0) continue;
+
+                        byte[] hdrBytes = new byte[McnkHeaderSize];
+                        Buffer.BlockCopy(bytes, off + ChunkLettersAndSize, hdrBytes, 0, McnkHeaderSize);
+                        var lkHdr = Util.ByteArrayToStruct<McnkHeader>(hdrBytes);
+                        int idxX = lkHdr.IndexX;
+                        int idxY = lkHdr.IndexY;
+                        float baseZ = lkHdr.PosZ;
+
+                        int mcnkSize = BitConverter.ToInt32(bytes, off + 4);
+                        int subStart = off + ChunkLettersAndSize + McnkHeaderSize;
+                        int subEnd = off + 8 + mcnkSize; if (subEnd > bytes.Length) subEnd = bytes.Length;
+
+                        byte[]? mcvtWhole = null;
+                        for (int p = subStart; p + 8 <= subEnd;)
+                        {
+                            string fcc = Encoding.ASCII.GetString(bytes, p, 4);
+                            int sz = BitConverter.ToInt32(bytes, p + 4);
+                            if (sz < 0 || p + 8 + sz > subEnd) break;
+                            int next = p + 8 + sz + ((sz & 1) == 1 ? 1 : 0);
+                            if (fcc == "TVCM") { mcvtWhole = new byte[8 + sz + ((sz & 1) == 1 ? 1 : 0)]; Buffer.BlockCopy(bytes, p, mcvtWhole, 0, mcvtWhole.Length); break; }
+                            if (next <= p) break; p = next;
+                        }
+                        if (mcvtWhole == null) continue;
+                        int mcvtSize = BitConverter.ToInt32(mcvtWhole, 4); if (mcvtSize < 145 * 4) continue;
+                        var lkData = new byte[mcvtSize]; Buffer.BlockCopy(mcvtWhole, 8, lkData, 0, mcvtSize);
+                        var alphaMcvt = ConvertMcvtLkToAlpha(lkData, baseZ);
+
+                        int rowBase = idxY * 8; int colBase = idxX * 8;
+                        for (int oy = 0; oy < 9; oy++)
+                        {
+                            for (int ox = 0; ox < 9; ox++)
+                            {
+                                int outerIdx = oy * 9 + ox; int rr = rowBase + oy; int cc = colBase + ox;
+                                if (rr >= 0 && rr < 129 && cc >= 0 && cc < 129)
+                                    outer129[rr, cc] = BitConverter.ToSingle(alphaMcvt, outerIdx * 4);
+                            }
+                        }
+                        int innerBase = 9 * 9 * 4;
+                        for (int iy2 = 0; iy2 < 8; iy2++)
+                        {
+                            for (int ix2 = 0; ix2 < 8; ix2++)
+                            {
+                                int innerIdx = iy2 * 8 + ix2; int rr = rowBase + iy2; int cc = colBase + ix2;
+                                if (rr >= 0 && rr < 128 && cc >= 0 && cc < 128)
+                                    inner128[rr, cc] = BitConverter.ToSingle(alphaMcvt, innerBase + innerIdx * 4);
+                            }
+                        }
+                    }
+
+                    var heights = new short[545]; int pos = 0;
+                    for (int y = 0; y < 17; y++) { int rr = Math.Min(128, y * 8); for (int x = 0; x < 17; x++) { int cc = Math.Min(128, x * 8); float v = outer129[rr, cc]; heights[pos++] = (short)Math.Round(v); } }
+                    for (int y = 0; y < 16; y++) { int rr = y * 8; for (int x = 0; x < 16; x++) { int cc = x * 8; float v = inner128[rr, cc]; heights[pos++] = (short)Math.Round(v); } }
+                    perTileHeights[tileIndex] = heights;
+                }
+                catch { }
+            }
+        }
+
+        using var w = new MemoryStream();
+        w.Write(new Chunk("MVER", 4, BitConverter.GetBytes(18)).GetWholeChunk());
+        var maofData = new byte[GridTiles * 4]; long maofStart = w.Position; long maofDataStart = maofStart + 8; w.Write(new Chunk("MAOF", maofData.Length, maofData).GetWholeChunk());
+        var offsets = new int[GridTiles]; var mahoData = new byte[16 * 2];
+        for (int i = 0; i < GridTiles; i++)
+        {
+            if (!perTileHeights.TryGetValue(i, out var heights)) { offsets[i] = 0; continue; }
+            var mareData = new byte[545 * 2]; Buffer.BlockCopy(heights, 0, mareData, 0, mareData.Length);
+            long marePos = w.Position; w.Write(new Chunk("MARE", mareData.Length, mareData).GetWholeChunk()); w.Write(new Chunk("MAHO", mahoData.Length, mahoData).GetWholeChunk());
+            offsets[i] = checked((int)marePos);
+        }
+        long save = w.Position; w.Position = maofDataStart; for (int i = 0; i < GridTiles; i++) w.Write(BitConverter.GetBytes(offsets[i])); w.Position = save;
+        File.WriteAllBytes(outWdlPath, w.ToArray());
     }
 
     private static byte[] ConvertMcvtLkToAlpha(byte[] mcvtLk, float baseZ)

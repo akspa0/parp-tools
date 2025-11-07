@@ -55,6 +55,26 @@ public sealed class AlphaWdtMonolithicWriter
             allWmoNames.Add(name);
         }
         
+        foreach (var rootAdt in rootAdts)
+        {
+            try
+            {
+                var bytesScan = File.ReadAllBytes(rootAdt);
+                foreach (var n in ReadM2NamesFromBytes(bytesScan)) allM2Names.Add(n);
+                foreach (var n in ReadWmoNamesFromBytes(bytesScan)) allWmoNames.Add(n);
+                var baseNameScan = Path.GetFileNameWithoutExtension(rootAdt);
+                var dirScan = Path.GetDirectoryName(rootAdt) ?? ".";
+                var objScan = Path.Combine(dirScan, baseNameScan + "_obj.adt");
+                if (File.Exists(objScan))
+                {
+                    var objBytesScan = File.ReadAllBytes(objScan);
+                    foreach (var n in ReadM2NamesFromBytes(objBytesScan)) allM2Names.Add(n);
+                    foreach (var n in ReadWmoNamesFromBytes(objBytesScan)) allWmoNames.Add(n);
+                }
+            }
+            catch { /* best-effort name harvest */ }
+        }
+        
         int mccvExported = 0;
         int mccvHeaders = 0;
 
@@ -545,6 +565,69 @@ public sealed class AlphaWdtMonolithicWriter
 
                 long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfData.Length, mddfData).GetWholeChunk());
                 long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfData.Length, modfData).GetWholeChunk());
+                if (opts?.Verbose == true)
+                {
+                    int mddfCount = mddfData.Length / 36;
+                    int modfCount = modfData.Length / 64;
+                    Console.WriteLine($"[pack][objects] tile {yy:D2}_{xx:D2} mddf={mddfCount} modf={modfCount}");
+                    try
+                    {
+                        int mddfOff2 = FindFourCC(objBytes, "MDDF");
+                        if (mddfOff2 >= 0)
+                        {
+                            int size2 = BitConverter.ToInt32(objBytes, mddfOff2 + 4);
+                            int data2 = mddfOff2 + 8;
+                            const int entry2 = 36;
+                            int count2 = Math.Max(0, size2 / entry2);
+                            int samples = 0;
+                            for (int k = 0; k < count2 && samples < 3; k++)
+                            {
+                                int p2 = data2 + k * entry2; if (p2 + entry2 > objBytes.Length) break;
+                                int local = BitConverter.ToInt32(objBytes, p2 + 0);
+                                if (local < 0 || local >= mmdxOrdered.Count) continue;
+                                string n = NormalizeAssetName(mmdxOrdered[local]);
+                                mdnmIndex.TryGetValue(n, out int gidx);
+                                float wx = BitConverter.ToSingle(objBytes, p2 + 8);
+                                float wy = BitConverter.ToSingle(objBytes, p2 + 16);
+                                var (yyW, xxW) = WorldToTileFromCentered(wx, wy);
+                                Console.WriteLine($"[pack][sample][mddf] {yy:D2}_{xx:D2} world=({wx:F2},{wy:F2}) -> tile={yyW:D2}_{xxW:D2} name='{n}' mdnmIdx={gidx}");
+                                if (yyW != yy || xxW != xx)
+                                {
+                                    Console.WriteLine($"[pack][warn][tile-check] mddf worldTile {yyW:D2}_{xxW:D2} != current {yy:D2}_{xx:D2}");
+                                }
+                                samples++;
+                            }
+                        }
+
+                        int modfOff2 = FindFourCC(objBytes, "MODF");
+                        if (modfOff2 >= 0)
+                        {
+                            int size2 = BitConverter.ToInt32(objBytes, modfOff2 + 4);
+                            int data2 = modfOff2 + 8;
+                            const int entry2 = 64;
+                            int count2 = Math.Max(0, size2 / entry2);
+                            int samples = 0;
+                            for (int k = 0; k < count2 && samples < 3; k++)
+                            {
+                                int p2 = data2 + k * entry2; if (p2 + entry2 > objBytes.Length) break;
+                                int local = BitConverter.ToInt32(objBytes, p2 + 0);
+                                if (local < 0 || local >= mwmoOrdered.Count) continue;
+                                string n = NormalizeAssetName(mwmoOrdered[local]);
+                                monmIndex.TryGetValue(n, out int gidx);
+                                float wx = BitConverter.ToSingle(objBytes, p2 + 8);
+                                float wy = BitConverter.ToSingle(objBytes, p2 + 16);
+                                var (yyW, xxW) = WorldToTileFromCentered(wx, wy);
+                                Console.WriteLine($"[pack][sample][modf] {yy:D2}_{xx:D2} world=({wx:F2},{wy:F2}) -> tile={yyW:D2}_{xxW:D2} name='{n}' monmIdx={gidx}");
+                                if (yyW != yy || xxW != xx)
+                                {
+                                    Console.WriteLine($"[pack][warn][tile-check] modf worldTile {yyW:D2}_{xxW:D2} != current {yy:D2}_{xx:D2}");
+                                }
+                                samples++;
+                            }
+                        }
+                    }
+                    catch { }
+                }
 
                 // Rebuild MCNKs with MCRF refs
                 alphaMcnkBytes = new byte[256][];
@@ -608,6 +691,36 @@ public sealed class AlphaWdtMonolithicWriter
                     }
                 }
                 catch { }
+                // Sanity: when verbose, inspect first MCNK with nonzero MCRF counts and verify letters at offsRefs
+                if (opts?.Verbose == true)
+                {
+                    try
+                    {
+                        for (int i = 0; i < 256; i++)
+                        {
+                            if (mcnkAbs[i] <= 0) continue;
+                            long baseAbs = mcnkAbs[i];
+                            long cur = outMs.Position;
+                            outMs.Position = baseAbs + 8; // start of MCNK header
+                            Span<byte> hdr = stackalloc byte[0x80];
+                            outMs.Read(hdr);
+                            int nDood = BitConverter.ToInt32(hdr.Slice(0x14, 4));
+                            int offsRefs = BitConverter.ToInt32(hdr.Slice(0x24, 4));
+                            int nWmo = BitConverter.ToInt32(hdr.Slice(0x3C, 4));
+                            if ((nDood + nWmo) > 0 && offsRefs > 0)
+                            {
+                                outMs.Position = baseAbs + offsRefs;
+                                Span<byte> tag = stackalloc byte[4]; outMs.Read(tag);
+                                string token = Encoding.ASCII.GetString(tag);
+                                Console.WriteLine($"[pack][mcrf] chunk {i:D3} nDood={nDood} nWmo={nWmo} offsRefs={offsRefs} token='{token}'");
+                                outMs.Position = cur;
+                                break;
+                            }
+                            outMs.Position = cur;
+                        }
+                    }
+                    catch { }
+                }
                 // Commit MAIN entries after successful tile write
                 mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
                 mhdrToFirst[tileIndex] = mhdrToFirstVal2;
@@ -637,6 +750,12 @@ public sealed class AlphaWdtMonolithicWriter
             outMs.Position = 0;
             outMs.WriteTo(fs);
         }
+        try
+        {
+            var wdlPath = Path.ChangeExtension(outWdtPath, ".wdl");
+            WdlWriterV18.WriteFromArchive(src, mapName, wdlPath);
+        }
+        catch { }
         if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir)) Console.WriteLine($"[pack] MCCV images exported: {mccvExported2}");
     }
 
@@ -703,7 +822,7 @@ public sealed class AlphaWdtMonolithicWriter
         using var ms = new MemoryStream();
         foreach (var name in m2Names)
         {
-            var nameBytes = Encoding.ASCII.GetBytes(name);
+            var nameBytes = Encoding.ASCII.GetBytes(NormalizeAssetName(name));
             ms.Write(nameBytes, 0, nameBytes.Length);
             ms.WriteByte(0);
         }
@@ -743,7 +862,7 @@ public sealed class AlphaWdtMonolithicWriter
         foreach (var name in wmoNames)
         {
             // Use ASCII encoding to match Alpha WoW format
-            var nameBytes = Encoding.ASCII.GetBytes(name);
+            var nameBytes = Encoding.ASCII.GetBytes(NormalizeAssetName(name));
             ms.Write(nameBytes, 0, nameBytes.Length);
             ms.WriteByte(0); // null terminator per entry
         }
@@ -756,6 +875,11 @@ public sealed class AlphaWdtMonolithicWriter
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
         var s = name.Replace('/', '\\').Trim();
+        // Alpha uses .mdx for model files
+        if (s.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            s = s.Substring(0, s.Length - 3) + ".mdx";
+        }
         return s;
     }
 
@@ -847,9 +971,9 @@ public sealed class AlphaWdtMonolithicWriter
                     if (mdnmIndex.TryGetValue(s, out int g))
                     {
                         float wx = BitConverter.ToSingle(bytes, p + 8);
-                        float wy = BitConverter.ToSingle(bytes, p + 16);
+                        float wz = BitConverter.ToSingle(bytes, p + 16);
                         int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
-                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
+                        int cy = (int)Math.Floor((wz - tileMinY) / CHUNK);
                         if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                         {
                             int idx = cy * 16 + cx;
@@ -878,9 +1002,9 @@ public sealed class AlphaWdtMonolithicWriter
                     if (monmIndex.TryGetValue(s, out int g))
                     {
                         float wx = BitConverter.ToSingle(bytes, p + 8);
-                        float wy = BitConverter.ToSingle(bytes, p + 16);
+                        float wz = BitConverter.ToSingle(bytes, p + 16);
                         int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
-                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
+                        int cy = (int)Math.Floor((wz - tileMinY) / CHUNK);
                         if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                         {
                             int idx = cy * 16 + cx;
@@ -930,9 +1054,10 @@ public sealed class AlphaWdtMonolithicWriter
             ushort flags = BitConverter.ToUInt16(bytes, p + 34);
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
+            // Alpha MDDF stores position as X, Z(height), Y in centered world coordinates
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
@@ -970,13 +1095,14 @@ public sealed class AlphaWdtMonolithicWriter
             // extents 0x20..0x3F
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
+            // Alpha MODF stores position as X, Z(height), Y in centered world coordinates
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
-            // extents (copy 24 bytes)
+            // extents (copy-through, centered world coordinate basis)
             ms.Write(bytes, p + 32, 24);
             ushort flags = BitConverter.ToUInt16(bytes, p + 56);
             ushort doodadSet = BitConverter.ToUInt16(bytes, p + 58);
@@ -1020,6 +1146,16 @@ public sealed class AlphaWdtMonolithicWriter
             i = next;
         }
         return -1;
+    }
+
+    private static (int YY, int XX) WorldToTileFromCentered(float worldX, float worldY)
+    {
+        const float BLOCK_SIZE = 533.33333f;
+        int xx = (int)Math.Floor(32 - (worldX / BLOCK_SIZE));
+        int yy = (int)Math.Floor(32 - (worldY / BLOCK_SIZE));
+        if (xx < 0) xx = 0; else if (xx > 63) xx = 63;
+        if (yy < 0) yy = 0; else if (yy > 63) yy = 63;
+        return (yy, xx);
     }
 
     // --- MCCV Export (optional debug) ---
