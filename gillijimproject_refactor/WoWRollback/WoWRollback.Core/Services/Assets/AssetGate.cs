@@ -19,7 +19,16 @@ namespace WoWRollback.Core.Services.Assets
                 if (string.IsNullOrWhiteSpace(n)) continue;
                 var fwd = n.Replace('\\', '/');
                 if (_target.ContainsPath(fwd)) keep.Add(n);
-                else drop.Add(n);
+                else
+                {
+                    string alias = fwd.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)
+                        ? fwd.Substring(0, fwd.Length - 4) + ".m2"
+                        : (fwd.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
+                            ? fwd.Substring(0, fwd.Length - 3) + "mdx"
+                            : string.Empty);
+                    if (alias.Length > 0 && _target.ContainsPath(alias)) keep.Add(n);
+                    else drop.Add(n);
+                }
             }
             dropped = drop;
             return keep;

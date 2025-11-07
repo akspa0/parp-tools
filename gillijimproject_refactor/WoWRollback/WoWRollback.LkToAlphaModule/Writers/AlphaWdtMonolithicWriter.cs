@@ -116,7 +116,7 @@ public sealed class AlphaWdtMonolithicWriter
         long mdnmStart = ms.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2Names).Length, BuildMdnmData(m2Names)); ms.Write(mdnm.GetWholeChunk());
         long monmStart = ms.Position; var monm = new Chunk("MONM", BuildMonmData(wmoNames).Length, BuildMonmData(wmoNames)); ms.Write(monm.GetWholeChunk());
         // Patch MPHD with absolute offsets and counts
-        long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
+        long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = new byte[128]; mphdData.Clear();
         // MPHD layout: [0..3]=nTextures (M2), [4..7]=MDNM abs, [8..11]=nMapObjNames (WMO, +1 when any), [12..15]=MONM abs
         BitConverter.GetBytes(m2Names.Count > 0 ? m2Names.Count + 1 : 0).CopyTo(mphdData);
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
@@ -322,7 +322,7 @@ public sealed class AlphaWdtMonolithicWriter
                     long absPos = mcnkAbs[firstIdxPresent];
                     long cur = outMs.Position;
                     outMs.Position = absPos;
-                    Span<byte> sig = stackalloc byte[4];
+                    Span<byte> sig = new byte[4];
                     int read = outMs.Read(sig);
                     outMs.Position = cur;
                     var tokenStr = Encoding.ASCII.GetString(sig);
@@ -335,7 +335,7 @@ public sealed class AlphaWdtMonolithicWriter
                             long pos = mcnkAbs[i];
                             long cur2 = outMs.Position;
                             outMs.Position = pos;
-                            Span<byte> t = stackalloc byte[4];
+                            Span<byte> t = new byte[4];
                             int r = outMs.Read(t);
                             outMs.Position = cur2;
                             var tok = Encoding.ASCII.GetString(t);
@@ -492,7 +492,7 @@ public sealed class AlphaWdtMonolithicWriter
         var mainData = new byte[GridTiles * 16]; var main = new Chunk("MAIN", mainData.Length, mainData); long mainStart = outMs.Position; outMs.Write(main.GetWholeChunk());
         long mdnmStart = outMs.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2List).Length, BuildMdnmData(m2List)); outMs.Write(mdnm.GetWholeChunk());
         long monmStart = outMs.Position; var monm = new Chunk("MONM", BuildMonmData(wmoList).Length, BuildMonmData(wmoList)); outMs.Write(monm.GetWholeChunk());
-        long savePos = outMs.Position; outMs.Position = mphdDataStart; Span<byte> mphdData = stackalloc byte[128]; mphdData.Clear();
+        long savePos = outMs.Position; outMs.Position = mphdDataStart; Span<byte> mphdData = new byte[128]; mphdData.Clear();
         BitConverter.GetBytes(m2List.Count > 0 ? m2List.Count + 1 : 0).CopyTo(mphdData);
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
         // MONM count must include a trailing empty string when any names exist
@@ -702,7 +702,7 @@ public sealed class AlphaWdtMonolithicWriter
                         long abs = mcnkAbs[firstIdx];
                         long cur = outMs.Position;
                         outMs.Position = abs;
-                        Span<byte> sig = stackalloc byte[4];
+                        Span<byte> sig = new byte[4];
                         outMs.Read(sig);
                         outMs.Position = cur;
                         var tokenStr2 = Encoding.ASCII.GetString(sig);
@@ -721,7 +721,7 @@ public sealed class AlphaWdtMonolithicWriter
                             long baseAbs = mcnkAbs[i];
                             long cur = outMs.Position;
                             outMs.Position = baseAbs + 8; // start of MCNK header
-                            Span<byte> hdr = stackalloc byte[0x80];
+                            Span<byte> hdr = new byte[0x80];
                             outMs.Read(hdr);
                             int nDood = BitConverter.ToInt32(hdr.Slice(0x14, 4));
                             int offsRefs = BitConverter.ToInt32(hdr.Slice(0x24, 4));
@@ -729,7 +729,7 @@ public sealed class AlphaWdtMonolithicWriter
                             if ((nDood + nWmo) > 0 && offsRefs > 0)
                             {
                                 outMs.Position = baseAbs + offsRefs;
-                                Span<byte> tag = stackalloc byte[4]; outMs.Read(tag);
+                                Span<byte> tag = new byte[4]; outMs.Read(tag);
                                 string token = Encoding.ASCII.GetString(tag);
                                 Console.WriteLine($"[pack][mcrf] chunk {i:D3} nDood={nDood} nWmo={nWmo} offsRefs={offsRefs} token='{token}'");
                                 outMs.Position = cur;
@@ -1075,8 +1075,8 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(uniqueId));
             // Alpha MDDF stores position as X, Z(height), Y in centered world coordinates
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
@@ -1114,10 +1114,10 @@ public sealed class AlphaWdtMonolithicWriter
             // extents 0x20..0x3F
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
-            // Write position as X, Y, Z (no axis swap)
+            // Write position as X, Z, Y
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(posZ));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
@@ -1278,7 +1278,7 @@ public sealed class AlphaWdtMonolithicWriter
         int imageSize = stride * height;
         int fileSize = 54 + imageSize;
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        Span<byte> header = stackalloc byte[54];
+        Span<byte> header = new byte[54];
         // BITMAPFILEHEADER
         header[0] = (byte)'B'; header[1] = (byte)'M';
         BitConverter.GetBytes(fileSize).CopyTo(header.Slice(2));
@@ -1288,6 +1288,8 @@ public sealed class AlphaWdtMonolithicWriter
         BitConverter.GetBytes(40).CopyTo(header.Slice(14)); // info header size
         BitConverter.GetBytes(width).CopyTo(header.Slice(18));
         BitConverter.GetBytes(-height).CopyTo(header.Slice(22)); // negative for top-down
+        BitConverter.GetBytes((ushort)1).CopyTo(header.Slice(26)); // planes
+        BitConverter.GetBytes((ushort)24).CopyTo(header.Slice(28)); // bpp
         BitConverter.GetBytes((ushort)1).CopyTo(header.Slice(26)); // planes
         BitConverter.GetBytes((ushort)24).CopyTo(header.Slice(28)); // bpp
         // compression 0 at 30..33

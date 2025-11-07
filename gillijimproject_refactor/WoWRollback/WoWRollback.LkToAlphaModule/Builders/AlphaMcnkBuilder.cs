@@ -447,9 +447,17 @@ public static class AlphaMcnkBuilder
                     if (src8.Length == 4096)
                     {
                         // Pack 8bpp 64x64 -> 4bpp 2048 without 63x63 duplication, LSB-first nibble
+                        if (opts?.VerboseLogging == true)
+                        {
+                            Console.WriteLine($"[alpha][mcal-pack] start ({lkHeader.IndexX},{lkHeader.IndexY}) layer {idx}");
+                        }
                         var packed = Pack8To4_64x64(src8, 0);
                         msAlpha.Write(packed, 0, packed.Length);
                         slicesWritten++;
+                        if (opts?.VerboseLogging == true)
+                        {
+                            Console.WriteLine($"[alpha][mcal-pack] done ({lkHeader.IndexX},{lkHeader.IndexY}) layer {idx} out=2048");
+                        }
 
                         uint flags = BitConverter.ToUInt32(mclyOut, layerBase + 4);
                         flags |= FLAG_USE_ALPHA;
@@ -622,7 +630,8 @@ public static class AlphaMcnkBuilder
         ms.Write(BitConverter.GetBytes(givenSize), 0, 4);
 
         // Build Alpha SMChunk header (128 bytes)
-        Span<byte> smh = stackalloc byte[McnkHeaderSize];
+        // Use heap-backed Span to reduce stack usage across many chunks
+        Span<byte> smh = new Span<byte>(new byte[McnkHeaderSize]);
         smh.Clear();
         // Offsets within header (see Alpha.md):
         // 0x00 flags
