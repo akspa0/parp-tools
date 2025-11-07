@@ -95,8 +95,8 @@ public sealed class AlphaWdtMonolithicWriter
             {
                 var idx = ListfileIndex.Load(opts.TargetListfilePath!);
                 var gate = new AssetGate(idx);
-                var keptM2 = gate.FilterNames(m2Names, out var droppedM2);
-                var keptWmo = gate.FilterNames(wmoNames, out var droppedWmo);
+                var keptM2 = gate.FilterNames(m2Names.Select(NormalizeAssetName), out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoNames.Select(NormalizeAssetName), out var droppedWmo);
                 if (opts!.StrictTargetAssets)
                 {
                     m2Names = keptM2.ToList();
@@ -467,8 +467,8 @@ public sealed class AlphaWdtMonolithicWriter
             {
                 var idx = ListfileIndex.Load(opts.TargetListfilePath!);
                 var gate = new AssetGate(idx);
-                var keptM2 = gate.FilterNames(m2List, out var droppedM2);
-                var keptWmo = gate.FilterNames(wmoList, out var droppedWmo);
+                var keptM2 = gate.FilterNames(m2List.Select(NormalizeAssetName), out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoList.Select(NormalizeAssetName), out var droppedWmo);
                 if (opts.StrictTargetAssets)
                 {
                     m2List = keptM2.ToList();
@@ -607,7 +607,7 @@ public sealed class AlphaWdtMonolithicWriter
                                 string n = NormalizeAssetName(mmdxOrdered[local]);
                                 mdnmIndex.TryGetValue(n, out int gidx);
                                 float wx = BitConverter.ToSingle(objBytes, p2 + 8);
-                                float wy = BitConverter.ToSingle(objBytes, p2 + 16);
+                                float wy = BitConverter.ToSingle(objBytes, p2 + 12);
                                 var (yyW, xxW) = WorldToTileFromCentered(wx, wy);
                                 Console.WriteLine($"[pack][sample][mddf] {yy:D2}_{xx:D2} world=({wx:F2},{wy:F2}) -> tile={yyW:D2}_{xxW:D2} name='{n}' mdnmIdx={gidx}");
                                 if (yyW != yy || xxW != xx)
@@ -634,7 +634,7 @@ public sealed class AlphaWdtMonolithicWriter
                                 string n = NormalizeAssetName(mwmoOrdered[local]);
                                 monmIndex.TryGetValue(n, out int gidx);
                                 float wx = BitConverter.ToSingle(objBytes, p2 + 8);
-                                float wy = BitConverter.ToSingle(objBytes, p2 + 16);
+                                float wy = BitConverter.ToSingle(objBytes, p2 + 12);
                                 var (yyW, xxW) = WorldToTileFromCentered(wx, wy);
                                 Console.WriteLine($"[pack][sample][modf] {yy:D2}_{xx:D2} world=({wx:F2},{wy:F2}) -> tile={yyW:D2}_{xxW:D2} name='{n}' monmIdx={gidx}");
                                 if (yyW != yy || xxW != xx)
@@ -990,9 +990,9 @@ public sealed class AlphaWdtMonolithicWriter
                     if (mdnmIndex.TryGetValue(s, out int g))
                     {
                         float wx = BitConverter.ToSingle(bytes, p + 8);
-                        float wz = BitConverter.ToSingle(bytes, p + 16);
+                        float wy = BitConverter.ToSingle(bytes, p + 12);
                         int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
-                        int cy = (int)Math.Floor((wz - tileMinY) / CHUNK);
+                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
                         if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                         {
                             int idx = cy * 16 + cx;
@@ -1021,9 +1021,9 @@ public sealed class AlphaWdtMonolithicWriter
                     if (monmIndex.TryGetValue(s, out int g))
                     {
                         float wx = BitConverter.ToSingle(bytes, p + 8);
-                        float wz = BitConverter.ToSingle(bytes, p + 16);
+                        float wy = BitConverter.ToSingle(bytes, p + 12);
                         int cx = (int)Math.Floor((wx - tileMinX) / CHUNK);
-                        int cy = (int)Math.Floor((wz - tileMinY) / CHUNK);
+                        int cy = (int)Math.Floor((wy - tileMinY) / CHUNK);
                         if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                         {
                             int idx = cy * 16 + cx;
@@ -1075,8 +1075,8 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(uniqueId));
             // Alpha MDDF stores position as X, Z(height), Y in centered world coordinates
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
@@ -1114,10 +1114,10 @@ public sealed class AlphaWdtMonolithicWriter
             // extents 0x20..0x3F
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
-            // Alpha MODF stores position as X, Z(height), Y in centered world coordinates
+            // Write position as X, Y, Z (no axis swap)
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));

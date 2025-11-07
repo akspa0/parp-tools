@@ -77,6 +77,58 @@ dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --s53
 
 ---
 
+## Alpha / Legacy asset gating (prevent old client crashes)
+
+Older clients (e.g., 0.5.3) crash if MDNM/MONM reference assets that don’t exist in that build. Use the workflow below to build a version-accurate listfile and strictly gate assets when packing.
+
+### 1) Build a version listfile (scan MPQs + loose files)
+
+```bash
+dotnet run --project WoWRollback.Cli/WoWRollback.Cli.csproj snapshot-listfile \
+  --client-path "C:/Path/To/ClientRoot" \
+  --alias "alpha-0.5.3" \
+  --community-listfile "../test_data/community-listfile-withcapitals.csv" \
+  --out ./alpha_053.json \
+  --csv-out ./alpha_053.csv \
+  --csv-missing-fdid 0
+```
+
+What it does:
+
+- Scans all MPQs (including locale subfolders) and loose files under the client.
+- Reads embedded `(listfile)` when present and derives asset names from wrappers (e.g., `Azeroth.wdt.MPQ` → `Azeroth.wdt`, `*.m2.MPQ` → `*.m2` and `.mdx`).
+- Optionally enriches with a community listfile to set FDIDs (exact path, `.m2`↔`.mdx` alias, and filename-only heuristic when unique).
+- Writes:
+  - `alpha_053.json` (snapshot with optional `fdid` fields)
+  - `alpha_053.csv` (community-style CSV; unknown FDIDs use the provided token, default `0`)
+  - `snapshot_missing_fdid.csv` and `snapshot_ambiguous_fdid.csv` for diagnostics
+
+Useful flags:
+
+- `--community-listfile <file>`: CSV/JSON/plain community listfile for FDID enrichment
+- `--csv-out <file>`: emit a community-style CSV (preferred for downstream gating)
+- `--csv-missing-fdid <token>`: placeholder for unknown FDIDs (e.g., `0`, `XXXXXXXX`, or `none` for path-only)
+
+### 2) Pack with strict asset gating
+
+```bash
+dotnet run --project WoWRollback.Cli/WoWRollback.Cli.csproj pack-monolithic-alpha-wdt \
+  --client-path "C:/Path/To/ClientRoot" \
+  --map "expansion01" \
+  --out ./build/expansion01.wdt \
+  --target-listfile ./alpha_053.csv \
+  --strict-target-assets true \
+  --verbose
+```
+
+Notes:
+
+- Gating is applied for both M2 (MDNM) and WMO (MONM) names; unknowns are dropped.
+- Placements referencing dropped names are skipped (no invalid MCRF refs).
+- A `dropped_assets.csv` report is written next to the output WDT.
+
+---
+
 ## Policies
 
 - Strict numeric mapping only; map-locked; no heuristics.

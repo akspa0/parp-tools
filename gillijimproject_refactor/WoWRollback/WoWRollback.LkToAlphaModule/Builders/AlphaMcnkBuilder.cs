@@ -52,12 +52,6 @@ public static class AlphaMcnkBuilder
                     if (fcc == "YLCM") { mclyPos = p; ok = true; break; }
                     if (dataStart + size > subEnd || next <= p) break; p = next;
                 }
-        // If source has no MCLQ, try to build it from MH2O (LK/TBC/WotLK)
-        if (mclqWhole == null)
-        {
-            var cand = TryBuildMclqFromMh2o(lkAdtBytes, lkHeader.IndexX, lkHeader.IndexY);
-            if (cand != null && cand.Length > 0) mclqWhole = cand;
-        }
             }
             if (ok)
             {
@@ -67,6 +61,21 @@ public static class AlphaMcnkBuilder
                     mclyLkWhole = new byte[8 + mclySize + ((mclySize & 1) == 1 ? 1 : 0)];
                     Buffer.BlockCopy(lkAdtBytes, mclyPos, mclyLkWhole, 0, mclyLkWhole.Length);
                 }
+            }
+        }
+        // After scanning subchunks: if no MCLQ present, try to synthesize from MH2O (LK/TBC/WotLK)
+        if (mclqWhole == null)
+        {
+            var cand = TryBuildMclqFromMh2o(lkAdtBytes, lkHeader.IndexX, lkHeader.IndexY, opts);
+            if (cand != null && cand.Length > 0)
+            {
+                mclqWhole = cand;
+                if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) MCLQ built from MH2O");
+                DumpMclqData("built", lkHeader.IndexX, lkHeader.IndexY, mclqWhole, opts);
+            }
+            else
+            {
+                if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) no MCLQ and MH2O build failed");
             }
         }
         
@@ -173,6 +182,8 @@ public static class AlphaMcnkBuilder
             {
                 mclqWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
                 Buffer.BlockCopy(lkAdtBytes, p, mclqWhole, 0, mclqWhole.Length);
+                if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) MCLQ passthrough size={mclqWhole.Length}");
+                DumpMclqData("passthrough", lkHeader.IndexX, lkHeader.IndexY, mclqWhole, opts);
             }
             // Note: MCLY, MCAL, MCSH are extracted via header offsets above, not scanned here
             
@@ -515,6 +526,9 @@ public static class AlphaMcnkBuilder
             int sz = BitConverter.ToInt32(mcshLkWhole, 4);
             mcshRaw = new byte[sz];
             Buffer.BlockCopy(mcshLkWhole, 8, mcshRaw, 0, sz);
+            // Invert bits so shadowed areas appear dark (not white) in Alpha
+            for (int i = 0; i < mcshRaw.Length; i++) mcshRaw[i] = (byte)~mcshRaw[i];
+            if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) MCSH inverted size={mcshRaw.Length}");
         }
         else
         {
@@ -636,7 +650,25 @@ public static class AlphaMcnkBuilder
         // 0x64 offsLiquid
         // 0x68 pad1[24]
 
-        BitConverter.GetBytes(0).CopyTo(smh[0x00..]); // flags
+        // Flags: set liquid flags based on MCLQ content and set has_mcsh when present
+        uint flagsVal = 0;
+        if (mcshRaw.Length > 0) flagsVal |= 0x1; // has_mcsh
+        if (mclqWhole != null && mclqWhole.Length >= 8 + 8 + 81 * 8 + 64)
+        {
+            int tileStart = 8 + 8 + 81 * 8; // chunk header + min/max + vertices
+            for (int i = 0; i < 64; i++)
+            {
+                byte tb = mclqWhole[tileStart + i];
+                bool dontRender = (tb & 0x08) != 0;
+                if (dontRender) continue;
+                int t = tb & 0x7;
+                if (t == 4) flagsVal |= (1u << 2); // river
+                else if (t == 1) flagsVal |= (1u << 3); // ocean
+                else if (t == 6) flagsVal |= (1u << 4); // magma
+                else if (t == 3) flagsVal |= (1u << 5); // slime
+            }
+        }
+        BitConverter.GetBytes(flagsVal).CopyTo(smh[0x00..]); // flags
         BitConverter.GetBytes(lkHeader.IndexX).CopyTo(smh[0x04..]);
         BitConverter.GetBytes(lkHeader.IndexY).CopyTo(smh[0x08..]);
         BitConverter.GetBytes(radius).CopyTo(smh[0x0C..]);
@@ -677,7 +709,8 @@ public static class AlphaMcnkBuilder
         if (mclqWhole != null && mclqWhole.Length > 0)
         {
             offsLiquid = headerTotal + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
-            ms.Write(mclqWhole, 0, mclqWhole.Length); // With header
+            if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) offsLiquid={offsLiquid} mclqLen={mclqWhole.Length}");
+            ms.Write(mclqWhole, 0, mclqWhole.Length);
         }
 
         // Even-byte pad: if MCNK data size is odd, write a single 0x00 pad byte (not counted in size)
@@ -697,10 +730,14 @@ public static class AlphaMcnkBuilder
         return outBuf;
     }
 
-    private static byte[]? TryBuildMclqFromMh2o(byte[] bytes, int chunkX, int chunkY)
+    private static byte[]? TryBuildMclqFromMh2o(byte[] bytes, int chunkX, int chunkY, LkToAlphaOptions? opts)
     {
-        int mh2o = FindFourCCForward(bytes, "MH2O");
-        if (mh2o < 0 || mh2o + 8 > bytes.Length) return null;
+        int mh2o = FindFourCCReversed(bytes, "MH2O");
+        if (mh2o < 0 || mh2o + 8 > bytes.Length)
+        {
+            if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] MH2O not found for mcnk ({chunkX},{chunkY})");
+            return null;
+        }
         int mh2oSize = BitConverter.ToInt32(bytes, mh2o + 4);
         int basePos = mh2o + 8;
         if (basePos + 256 * 12 > bytes.Length) return null; // 256 headers x 12 bytes
@@ -830,7 +867,31 @@ public static class AlphaMcnkBuilder
         // Wrap as proper chunk with reversed FourCC via Chunk helper
         var payload = BuildMclqPayload(minAll, maxAll, heights, hasH, depths, tilesUsed, tilesType, fishable, fatigue);
         var ch = new Chunk("MCLQ", payload.Length, payload);
-        return ch.GetWholeChunk();
+        var whole = ch.GetWholeChunk();
+        if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({chunkX},{chunkY}) built MCLQ payloadLen={payload.Length} wholeLen={whole.Length}");
+        DumpMclqData("built_payload", chunkX, chunkY, whole, opts);
+        return whole;
+    }
+
+    private static int FindFourCCReversed(byte[] buf, string forwardFourCC)
+    {
+        if (buf == null || buf.Length < 8) return -1;
+        if (string.IsNullOrEmpty(forwardFourCC) || forwardFourCC.Length != 4) return -1;
+        string reversed = new string(new[] { forwardFourCC[3], forwardFourCC[2], forwardFourCC[1], forwardFourCC[0] });
+        for (int i = 0; i + 8 <= buf.Length;)
+        {
+            if (i < 0 || i + 4 > buf.Length) break;
+            string fcc = Encoding.ASCII.GetString(buf, i, 4);
+            int size = BitConverter.ToInt32(buf, i + 4);
+            if (size < 0 || size > buf.Length) break;
+            int dataStart = i + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (fcc == reversed) return i;
+            if (dataStart + size > buf.Length) break;
+            if (next <= i) break;
+            i = next;
+        }
+        return -1;
     }
 
     private static byte[] BuildMclqPayload(float minH, float maxH, float[] heights, bool[] hasH, byte[] depths, bool[] tilesUsed, byte[] tilesType, ulong fishable, ulong fatigue)
@@ -922,6 +983,24 @@ public static class AlphaMcnkBuilder
         catch (Exception ex)
         {
             Console.WriteLine($"[dump] Failed to write MCAL {stage} for tile {indexY:D2}_{indexX:D2}: {ex.Message}");
+        }
+    }
+
+    private static void DumpMclqData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
+    {
+        if (opts?.VerboseLogging != true) return;
+        if (data is null || data.Length == 0) return;
+        try
+        {
+            string root = Path.Combine("debug_mclq", $"{indexY:D2}_{indexX:D2}");
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, $"{stage}_mclq.bin");
+            File.WriteAllBytes(path, data);
+            Console.WriteLine($"[dump] MCLQ {stage} -> {path} ({data.Length} bytes)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[dump] Failed to write MCLQ {stage} for tile {indexY:D2}_{indexX:D2}: {ex.Message}");
         }
     }
 
