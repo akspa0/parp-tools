@@ -33,6 +33,7 @@ public static class AlphaMcnkBuilder
         byte[]? mcalLkWhole = null;
         byte[]? mcshLkWhole = null;
         byte[]? mcseLkWhole = null;
+        byte[]? mclqWhole = null;
         
         // Extract MCLY using header offsets (LK offsets point to subchunk letters/FourCC)
         if (lkHeader.MclyOffset > 0)
@@ -51,6 +52,12 @@ public static class AlphaMcnkBuilder
                     if (fcc == "YLCM") { mclyPos = p; ok = true; break; }
                     if (dataStart + size > subEnd || next <= p) break; p = next;
                 }
+        // If source has no MCLQ, try to build it from MH2O (LK/TBC/WotLK)
+        if (mclqWhole == null)
+        {
+            var cand = TryBuildMclqFromMh2o(lkAdtBytes, lkHeader.IndexX, lkHeader.IndexY);
+            if (cand != null && cand.Length > 0) mclqWhole = cand;
+        }
             }
             if (ok)
             {
@@ -161,6 +168,11 @@ public static class AlphaMcnkBuilder
             {
                 mcseLkWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
                 Buffer.BlockCopy(lkAdtBytes, p, mcseLkWhole, 0, mcseLkWhole.Length);
+            }
+            else if (fcc == "QLCM") // 'MCLQ' reversed on disk
+            {
+                mclqWhole = new byte[8 + size + ((size & 1) == 1 ? 1 : 0)];
+                Buffer.BlockCopy(lkAdtBytes, p, mclqWhole, 0, mclqWhole.Length);
             }
             // Note: MCLY, MCAL, MCSH are extracted via header offsets above, not scanned here
             
@@ -556,7 +568,7 @@ public static class AlphaMcnkBuilder
         // Validate MCLY/MCAL integrity to catch offset corruption bugs
         ValidateMclyMcalIntegrity(mclyRaw, mcalRaw, lkHeader.IndexX, lkHeader.IndexY, opts);
 
-        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
+        int totalSubChunkSize = alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length + (mclqWhole?.Length ?? 0);
         
         // Calculate bounding sphere radius from MCVT heights
         float radius = CalculateRadius(alphaMcvtRaw);
@@ -587,7 +599,7 @@ public static class AlphaMcnkBuilder
         }
         int areaIdVal  = (lkHeader.AreaId == 0 && opts?.ForceAreaId is int forced && forced > 0) ? forced : lkHeader.AreaId;
 
-        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
+        int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length + (mclqWhole?.Length ?? 0);
 
         using var ms = new MemoryStream();
         // Write MCNK letters reversed on disk ('KNCM') to match Alpha v18 expectations
@@ -653,6 +665,7 @@ public static class AlphaMcnkBuilder
         // MCVT, MCNR: raw data (no headers)
         // MCLY, MCRF: with headers (FourCC+size+data)
         // MCSH, MCAL, MCSE: raw data (NO headers in Alpha v18!)
+        // MCLQ: with header (FourCC+size+data)
         if (alphaMcvtRaw.Length > 0) ms.Write(alphaMcvtRaw, 0, alphaMcvtRaw.Length);
         if (mcnrRaw.Length > 0) ms.Write(mcnrRaw, 0, mcnrRaw.Length);
         ms.Write(mclyWhole, 0, mclyWhole.Length);  // Has header
@@ -660,13 +673,237 @@ public static class AlphaMcnkBuilder
         if (mcshRaw.Length > 0) ms.Write(mcshRaw, 0, mcshRaw.Length);  // Raw data only!
         if (mcalRaw.Length > 0) ms.Write(mcalRaw, 0, mcalRaw.Length);  // Raw data only!
         if (mcseRaw.Length > 0) ms.Write(mcseRaw, 0, mcseRaw.Length);  // Raw data only!
+        int offsLiquid = 0;
+        if (mclqWhole != null && mclqWhole.Length > 0)
+        {
+            offsLiquid = headerTotal + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length;
+            ms.Write(mclqWhole, 0, mclqWhole.Length); // With header
+        }
 
         // Even-byte pad: if MCNK data size is odd, write a single 0x00 pad byte (not counted in size)
         if ((givenSize & 1) == 1)
         {
             ms.WriteByte(0);
         }
+        var outBuf = ms.ToArray();
+        if (offsLiquid > 0)
+        {
+            // Patch offsLiquid into header (relative to beginning of MCNK chunk)
+            // MCNK header starts at byte 8 in this buffer
+            int headerPos = 8;
+            // 0x64 relative within header
+            BitConverter.GetBytes(offsLiquid).CopyTo(outBuf, headerPos + 0x64);
+        }
+        return outBuf;
+    }
+
+    private static byte[]? TryBuildMclqFromMh2o(byte[] bytes, int chunkX, int chunkY)
+    {
+        int mh2o = FindFourCCForward(bytes, "MH2O");
+        if (mh2o < 0 || mh2o + 8 > bytes.Length) return null;
+        int mh2oSize = BitConverter.ToInt32(bytes, mh2o + 4);
+        int basePos = mh2o + 8;
+        if (basePos + 256 * 12 > bytes.Length) return null; // 256 headers x 12 bytes
+
+        int idx = chunkY * 16 + chunkX;
+        int hdrPos = basePos + idx * 12;
+        int ofsInformation = BitConverter.ToInt32(bytes, hdrPos + 0);
+        int nLayers = BitConverter.ToInt32(bytes, hdrPos + 4);
+        int ofsAttributes = BitConverter.ToInt32(bytes, hdrPos + 8);
+        if (nLayers <= 0 || ofsInformation <= 0) return null;
+
+        ulong fishable = 0xFFFFFFFFFFFFFFFFUL;
+        ulong fatigue = 0UL;
+        if (ofsAttributes > 0 && basePos + ofsAttributes + 16 <= bytes.Length)
+        {
+            fishable = BitConverter.ToUInt64(bytes, basePos + ofsAttributes + 0);
+            fatigue = BitConverter.ToUInt64(bytes, basePos + ofsAttributes + 8);
+        }
+
+        float[] heights = new float[9 * 9];
+        bool[] hasH = new bool[9 * 9];
+        byte[] depths = new byte[9 * 9];
+        for (int i = 0; i < depths.Length; i++) depths[i] = 0xFF;
+        byte[] tilesType = new byte[8 * 8];
+        bool[] tilesUsed = new bool[8 * 8];
+
+        int infoBase = basePos + ofsInformation;
+        for (int k = 0; k < nLayers; k++)
+        {
+            int ip = infoBase + k * 24; // MH2O_Information size
+            if (ip + 24 > bytes.Length) break;
+            ushort liquidId = BitConverter.ToUInt16(bytes, ip + 0);
+            ushort vfmt = BitConverter.ToUInt16(bytes, ip + 2);
+            float minH = BitConverter.ToSingle(bytes, ip + 4);
+            float maxH = BitConverter.ToSingle(bytes, ip + 8);
+            int xOff = bytes[ip + 12];
+            int yOff = bytes[ip + 13];
+            int width = bytes[ip + 14];
+            int height = bytes[ip + 15];
+            int ofsInfoMask = BitConverter.ToInt32(bytes, ip + 16);
+            int ofsHeightMap = BitConverter.ToInt32(bytes, ip + 20);
+
+            ulong mask = 0xFFFFFFFFFFFFFFFFUL;
+            if (ofsInfoMask > 0 && height > 0 && width > 0)
+            {
+                int bits = width * height;
+                int bsz = (bits + 7) / 8;
+                if (basePos + ofsInfoMask + bsz <= bytes.Length)
+                {
+                    mask = 0UL;
+                    for (int b = 0; b < bsz; b++)
+                    {
+                        mask |= ((ulong)bytes[basePos + ofsInfoMask + b]) << (b * 8);
+                    }
+                }
+            }
+
+            int p = basePos + ofsHeightMap;
+            if (ofsHeightMap > 0 && p >= 0 && p <= bytes.Length)
+            {
+                bool hasHeights = (vfmt == 0 /*HEIGHT_DEPTH*/ || vfmt == 1 /*HEIGHT_UV*/);
+                if (hasHeights)
+                {
+                    for (int zy = yOff; zy <= yOff + height; zy++)
+                    {
+                        for (int xx = xOff; xx <= xOff + width; xx++)
+                        {
+                            if (p + 4 > bytes.Length) { xx = xOff + width; zy = yOff + height; break; }
+                            float h = BitConverter.ToSingle(bytes, p); p += 4;
+                            int vi = zy * 9 + xx;
+                            if (vi >= 0 && vi < 81)
+                            {
+                                heights[vi] = h;
+                                hasH[vi] = true;
+                            }
+                        }
+                    }
+                }
+                if (vfmt == 1)
+                {
+                    int count = (width + 1) * (height + 1);
+                    int need = count * 4;
+                    p += need; // skip UVs
+                }
+                if (vfmt == 0 || vfmt == 2)
+                {
+                    for (int zy = yOff; zy <= yOff + height; zy++)
+                    {
+                        for (int xx = xOff; xx <= xOff + width; xx++)
+                        {
+                            if (p + 1 > bytes.Length) { xx = xOff + width; zy = yOff + height; break; }
+                            byte d = bytes[p++];
+                            int vi = zy * 9 + xx;
+                            if (vi >= 0 && vi < 81) depths[vi] = d;
+                        }
+                    }
+                }
+            }
+
+            for (int zy = 0; zy < height; zy++)
+            {
+                for (int xx = 0; xx < width; xx++)
+                {
+                    int bit = zy * width + xx;
+                    bool on = ((mask >> bit) & 1UL) != 0UL;
+                    int tx = xOff + xx;
+                    int ty = yOff + zy;
+                    if (tx >= 0 && tx < 8 && ty >= 0 && ty < 8)
+                    {
+                        int ti = ty * 8 + tx;
+                        if (on)
+                        {
+                            tilesUsed[ti] = true;
+                            byte t = MapLiquidType(liquidId);
+                            if (Priority(t) >= Priority(tilesType[ti])) tilesType[ti] = t;
+                        }
+                    }
+                }
+            }
+        }
+
+        float minAll = float.MaxValue, maxAll = float.MinValue;
+        for (int i = 0; i < 81; i++) if (hasH[i]) { if (heights[i] < minAll) minAll = heights[i]; if (heights[i] > maxAll) maxAll = heights[i]; }
+        if (minAll == float.MaxValue) { minAll = 0f; maxAll = 0f; }
+
+        using var ms = new MemoryStream();
+        // Wrap as proper chunk with reversed FourCC via Chunk helper
+        var payload = BuildMclqPayload(minAll, maxAll, heights, hasH, depths, tilesUsed, tilesType, fishable, fatigue);
+        var ch = new Chunk("MCLQ", payload.Length, payload);
+        return ch.GetWholeChunk();
+    }
+
+    private static byte[] BuildMclqPayload(float minH, float maxH, float[] heights, bool[] hasH, byte[] depths, bool[] tilesUsed, byte[] tilesType, ulong fishable, ulong fatigue)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(BitConverter.GetBytes(minH));
+        ms.Write(BitConverter.GetBytes(maxH));
+        for (int i = 0; i < 81; i++)
+        {
+            // union water/magma: write water-style by default
+            ms.WriteByte(depths[i]);
+            ms.WriteByte(0); // flow0
+            ms.WriteByte(0); // flow1
+            ms.WriteByte(0); // filler
+            float h = hasH[i] ? heights[i] : minH;
+            ms.Write(BitConverter.GetBytes(h));
+        }
+        for (int i = 0; i < 64; i++)
+        {
+            byte b = 0;
+            if (tilesUsed[i])
+            {
+                byte t = (byte)(tilesType[i] & 0x7);
+                b = (byte)(t | (0 << 3));
+                if (((fishable >> i) & 1UL) != 0) b |= 0x40;
+                if (((fatigue  >> i) & 1UL) != 0) b |= 0x80;
+            }
+            else
+            {
+                b = 0x0F; // dont_render (top 4 bits set in Noggit but we use 0x0F-> type=7,dont_render=1)
+            }
+            ms.WriteByte(b);
+        }
+        ms.Write(BitConverter.GetBytes(0)); // n_flowvs
+        // always 2 flowvs reserved (write zeros)
+        for (int i = 0; i < 2; i++)
+        {
+            for (int j = 0; j < 3; j++) ms.Write(BitConverter.GetBytes(0f)); // pos
+            ms.Write(BitConverter.GetBytes(0f)); // radius
+            for (int j = 0; j < 3; j++) ms.Write(BitConverter.GetBytes(0f)); // dir
+            ms.Write(BitConverter.GetBytes(0f)); // velocity
+            ms.Write(BitConverter.GetBytes(0f)); // amplitude
+            ms.Write(BitConverter.GetBytes(0f)); // frequency
+        }
         return ms.ToArray();
+    }
+
+    private static int FindFourCCForward(byte[] buf, string forwardFourCC)
+    {
+        if (buf == null || buf.Length < 8) return -1;
+        if (string.IsNullOrEmpty(forwardFourCC) || forwardFourCC.Length != 4) return -1;
+        var pat = Encoding.ASCII.GetBytes(forwardFourCC);
+        for (int i = 0; i + 4 <= buf.Length; i++)
+        {
+            if (buf[i] == pat[0] && buf[i + 1] == pat[1] && buf[i + 2] == pat[2] && buf[i + 3] == pat[3]) return i;
+        }
+        return -1;
+    }
+
+    private static byte MapLiquidType(ushort liquidId)
+    {
+        // 1=water -> river(4), 2=ocean->1, 3=magma->6, 4=slime->3
+        return liquidId switch
+        {
+            2 => (byte)1,
+            3 => (byte)6,
+            4 => (byte)3,
+            _ => (byte)4,
+        };
+    }
+    private static int Priority(byte mclqType)
+    {
+        return mclqType switch { 6 => 3, 3 => 2, 1 => 1, 4 => 0, _ => -1 };
     }
 
     private static void DumpMcalData(string stage, int indexX, int indexY, byte[] data, LkToAlphaOptions? opts)
