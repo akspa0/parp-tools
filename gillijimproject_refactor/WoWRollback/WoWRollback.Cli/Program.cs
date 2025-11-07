@@ -395,6 +395,8 @@ internal static class Program
         var alias = opts["alias"];            // full build string
         var outPath = opts["out"];            // json file
         var csvOut = GetOption(opts, "csv-out");
+        var csvMissingToken = GetOption(opts, "csv-missing-fdid");
+        if (string.IsNullOrWhiteSpace(csvMissingToken)) csvMissingToken = "0"; // default: zeros
         var communityPath = GetOption(opts, "community-listfile");
 
         if (!Directory.Exists(clientPath)) throw new DirectoryNotFoundException(clientPath);
@@ -576,7 +578,12 @@ internal static class Program
                 if (e.FileDataId.HasValue)
                     sb.AppendLine($"{e.FileDataId.Value};{e.Path}");
                 else
-                    sb.AppendLine(e.Path);
+                {
+                    if (csvMissingToken.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        sb.AppendLine(e.Path);
+                    else
+                        sb.AppendLine($"{csvMissingToken};{e.Path}");
+                }
             }
             File.WriteAllText(csvOut!, sb.ToString());
             Console.WriteLine($"[ok] CSV written: {csvOut} (rows={snapshot.Entries.Count})");

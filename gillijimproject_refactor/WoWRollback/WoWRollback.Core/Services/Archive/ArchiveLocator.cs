@@ -8,7 +8,8 @@ namespace WoWRollback.Core.Services.Archive
 {
     public static class ArchiveLocator
     {
-        private static readonly Regex PatchRegex = new Regex(@"patch[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Recognize both patch-2.MPQ and patch-enUS-2.MPQ (case-insensitive)
+        private static readonly Regex PatchRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static IReadOnlyList<string> LocateMpqs(string clientRoot)
         {
