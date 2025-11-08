@@ -77,3 +77,13 @@ WoWRollback is a **map modification tool** that enables users to "roll back" Wor
 
 ## Next Milestone
 - Run the pipeline directly from the viewer UI (Tools panel): configure global/per-tile UniqueID ranges, terrain options, crosswalk rules; launch builds and stream logs; open results in viewer.
+
+### Latest Direction (2025-11-07) – MPQ Overlay & WDT Fallback
+- MPQ overlay precedence mirrors client behavior:
+  - FS (loose) > root letter patches > locale letter patches > root numeric patches > locale numeric patches > base
+- Implementation:
+  - Ordered grouping in `ArchiveLocator`, reverse-priority scan in `MpqArchiveSource`, FS-first in `PrioritizedArchiveSource`.
+  - DBC safeguard: `DBFilesClient/*.dbc` prefer root Data patch MPQs.
+  - CLI verbose logs: numeric and letter patch counts/lists; overlay summary line.
+- WDT fallback when archive tile scan returns 0:
+  - Read `<map>.wdt` MAIN to find present tiles; add existing ADTs; emit `tiles_missing.csv` for expected-but-missing.

@@ -1,4 +1,14 @@
 # Technical Context - WoWRollback.RollbackTool
+
+## Current Progress (concise)
+- MPQ overlay precedence implemented (FS > root-letter > locale-letter > root-numeric > locale-numeric > base).
+- Plain patch support: `patch(.locale).MPQ` treated as numeric order 1 in `ArchiveLocator`.
+- DBC resolution: for `DBFilesClient/*`, locale patch MPQs are searched before root patch MPQs.
+- `IArchiveSource` + `PrioritizedArchiveSource` implemented (loose-over-MPQ). Tee logging available via `--log-dir`/`--log-file`.
+
+## TODOs (concise)
+- Add tests for `ArchiveLocator` ordering and DBC locale-first resolution.
+- Extend verbose logs: plain-patch counts and optional DBC source path line.
  
 ## Hot Update (2025-11-07) – Liquids & Placements diagnostics
 - Modules touched: AlphaWdtMonolithicWriter (MDNM/MONM build from referenced union; placements MDDF/MODF; MCRF), AlphaMcnkBuilder (MH2O→MCLQ composition; MCAL pack logging), Program CLI (new flags).
@@ -350,6 +360,18 @@ class PrioritizedArchiveSource : IArchiveSource {
 - `DirectoryReader.cs` automatically detects and sorts patch MPQs
 - Higher-numbered patches override lower (patch-3 > patch-2 > patch-1 > base)
 - `MpqArchive.AddPatchArchives()` applies patch chain automatically
+
+### MPQ Overlay Details (2025-11-07)
+- Clarified precedence of numeric vs letter patches to mirror client:
+  - FS (loose) > root letter patches > locale letter patches > root numeric patches > locale numeric patches > base
+- Implementation in WoWRollback:
+  - `ArchiveLocator` returns base → locale numeric → root numeric → locale letter → root letter, and `MpqArchiveSource` searches in reverse.
+  - `PrioritizedArchiveSource` checks filesystem before MPQs.
+  - DBC-specific safeguard: prioritize root Data patch MPQs for `DBFilesClient/*.dbc`.
+- CLI verbose:
+  - `[mpq][numeric] root=<N>, locale=<N>` and lists
+  - `[mpq][letter] root=<N>, locale=<N>` and lists
+  - `[mpq][overlay] FS > root-letter > locale-letter > root-numeric > locale-numeric > base`
 
 ### Current Gap
 - StormLibWrapper exists but not integrated with WoWRollback

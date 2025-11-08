@@ -318,3 +318,25 @@ Array.Copy(chunk.Data, 0, wdtBytes, fileOffset, chunk.Data.Length);
 ## Logging & Diagnostics
 - Tee all console output to a timestamped log file via `--log-file`/`--log-dir`.
 - Emit diagnostics CSVs: kept assets, dropped assets, `objects_written.csv` (per-tile MDDF/MODF counts), `mclq_summary.csv`.
+
+## MPQ Overlay & Source Priority (2025-11-07)
+
+- Effective overlay precedence in runtime resolution:
+  - FS (loose files) > root letter patches > locale letter patches > root numeric patches > locale numeric patches > base MPQs
+- Implementation pieces:
+  - `ArchiveLocator.LocateMpqs` groups and orders: base → locale numeric → root numeric → locale letter → root letter.
+  - `MpqArchiveSource` searches archives in reverse order, giving items later in the list higher priority.
+  - `PrioritizedArchiveSource` always checks filesystem first before MPQs (loose overrides all).
+  - DBC safeguard: for `DBFilesClient/*.dbc`, `MpqArchiveSource.OpenFile` prefers locale patch MPQs before root patch MPQs.
+- CLI logging:
+  - `[mpq][numeric] root=<N>, locale=<N>` and lists of each.
+  - `[mpq][letter] root=<N>, locale=<N>` and lists of each.
+  - Overlay summary line: `[mpq][overlay] FS > root-letter > locale-letter > root-numeric > locale-numeric > base`.
+
+## WDT Tile Presence Fallback (2025-11-07)
+
+- When archive scan finds 0 tiles for `world/maps/<map>`, read `<map>.wdt` MAIN to detect present tiles.
+- For each present tile (YY,XX):
+  - If `world/maps/<map>/<map>_YY_XX.adt` exists in sources, include in `tiles`.
+  - Else record in `tiles_missing.csv` for diagnostics.
+- Logging: `[pack] wdt-present tiles found: <found>, missing: <missing>`.

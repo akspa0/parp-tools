@@ -1,4 +1,22 @@
-# Progress - WoWRollback.RollbackTool
+# Progress - WoWRollback.RollbackTool (2025-11-08)
+
+## Current Progress (concise)
+- MPQ overlay precedence in place; CLI logs show counts/lists and summary.
+- Plain patch support: `patch(.locale).MPQ` treated as numeric order 1.
+- DBFilesClient precedence: locale patch MPQs searched before root patch MPQs, fixing `Map.dbc` selection.
+- WDT tile presence fallback active when archive tiles=0; emits `tiles_missing.csv`.
+- Tee logging available via `--log-dir` and `--log-file`.
+- Alpha WDT monolithic pack builds; placements/liquids diagnostics emitted (tuning pending).
+
+## TODOs (concise)
+- Tests: `ArchiveLocator` order incl. plain patch; `MpqArchiveSource` DBC locale-first path.
+- Logs: add plain-patch counts; optional verbose line for DBC source MPQ.
+- Verify on maps (CataclysmCTF, development): overlay precedence and Map.dbc path.
+- Placements: union MDNM/MONM; never gate placements; recompute MCRF; per‑tile MDDF/MODF counts.
+- Liquids: instrument MH2O→MCLQ; write `mclq_summary.csv`; fix flags/heights; reduce `dont_render`.
+- Textures: tileset resize option (256) with alpha preservation.
+
+---
 
 ## Hot Update (2025-11-07) – Alpha WDT monolithic pack: liquids & placements
 
@@ -18,6 +36,17 @@
 - Add per-tile MDDF/MODF counts to file-mode writer.
 - Instrument MH2O→MCLQ and emit `mclq_summary.csv`; verify `offsLiquid` and MPHD liquid flags.
 - Add `--log-file` and `--log-dir` flags; wire tee logger for persistent logs.
+
+## Hot Update (2025-11-07) – MPQ overlay & WDT fallback
+
+### What works
+- MPQ overlay precedence implemented to mirror client: FS > root letter > locale letter > root numeric > locale numeric > base.
+- CLI verbose now prints numeric and letter patch counts/lists (root vs locale) and a single overlay summary line.
+- WDT-based tile presence fallback implemented when archive tiles=0; emits `tiles_missing.csv` with expected-but-missing ADTs.
+
+### Next
+- Validate logs on representative maps (e.g., CataclysmCTF, development) to confirm patch coverage.
+- Proceed with tileset texture resizing path (256) gated by option; verify alpha preservation.
 
 ## ✅ Completed (2025-10-30)
 - GUI: Fixed `MainWindow.cs` compile errors (`CS0136`, `CS0103`) in time range/global stats logic.
