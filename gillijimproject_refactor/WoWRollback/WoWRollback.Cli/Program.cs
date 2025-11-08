@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using WoWRollback.AnalysisModule;
@@ -246,6 +247,52 @@ internal static class Program
             if (!Directory.Exists(clientPath)) { Console.Error.WriteLine("[error] --client-path does not exist"); return 2; }
             EnsureStormLibOnPath();
             var mpqs = ArchiveLocator.LocateMpqs(clientPath);
+            if (wantVerbose)
+            {
+                Console.WriteLine($"[mpq][order] total={mpqs.Count}");
+                int n = Math.Min(5, mpqs.Count);
+                for (int i = 0; i < n; i++) Console.WriteLine($"[mpq][first] {mpqs[i]}");
+                for (int i = Math.Max(0, mpqs.Count - n); i < mpqs.Count; i++) Console.WriteLine($"[mpq][last]  {mpqs[i]}");
+
+                static bool IsLocalePathLocal(string path)
+                {
+                    var p = path.Replace('\\', '/');
+                    var idx = p.IndexOf("/Data/", StringComparison.OrdinalIgnoreCase);
+                    if (idx < 0) return false;
+                    var rest = p.Substring(idx + 6);
+                    int slash = rest.IndexOf('/');
+                    if (slash <= 0) return false;
+                    var seg = rest.Substring(0, slash);
+                    if (seg.Length != 4) return false;
+                    return char.IsLetter(seg[0]) && char.IsLetter(seg[1]) && char.IsLetter(seg[2]) && char.IsLetter(seg[3]);
+                }
+
+                var reNum = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase);
+                var reLet = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([A-Za-z])\.mpq", RegexOptions.IgnoreCase);
+                var rootNums = new List<string>();
+                var localeNums = new List<string>();
+                var rootLets = new List<string>();
+                var localeLets = new List<string>();
+                foreach (var mpq in mpqs)
+                {
+                    var file = Path.GetFileName(mpq);
+                    if (reNum.IsMatch(file))
+                    {
+                        if (IsLocalePathLocal(mpq)) localeNums.Add(mpq); else rootNums.Add(mpq);
+                    }
+                    if (reLet.IsMatch(file))
+                    {
+                        if (IsLocalePathLocal(mpq)) localeLets.Add(mpq); else rootLets.Add(mpq);
+                    }
+                }
+                Console.WriteLine($"[mpq][numeric] root={rootNums.Count}, locale={localeNums.Count}");
+                foreach (var p in rootNums.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Console.WriteLine($"[mpq][numeric][root] {p}");
+                foreach (var p in localeNums.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Console.WriteLine($"[mpq][numeric][locale] {p}");
+                Console.WriteLine($"[mpq][letter] root={rootLets.Count}, locale={localeLets.Count}");
+                foreach (var p in rootLets.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Console.WriteLine($"[mpq][letter][root] {p}");
+                foreach (var p in localeLets.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) Console.WriteLine($"[mpq][letter][locale] {p}");
+                Console.WriteLine("[mpq][overlay] FS > root-letter > locale-letter > root-numeric > locale-numeric > base");
+            }
             using var src = new PrioritizedArchiveSource(clientPath, mpqs);
             AlphaWdtMonolithicWriter.WriteMonolithicFromArchive(src, mapName, outWdt!, options);
             Console.WriteLine($"[ok] WDT written: {outWdt}");

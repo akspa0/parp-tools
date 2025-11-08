@@ -13,6 +13,21 @@ namespace WoWRollback.Core.Services.Archive
         // Recognize letter patches: patch-A.MPQ, patch-enUS-A.MPQ (case-insensitive)
         private static readonly Regex PatchLetterRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([A-Za-z])\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private static bool IsLocalePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var p = path.Replace('\\', '/');
+            var idx = p.IndexOf("/Data/", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return false;
+            var rest = p.Substring(idx + 6);
+            var slash = rest.IndexOf('/') >= 0 ? rest.IndexOf('/') : rest.Length;
+            if (slash <= 0) return false;
+            var seg = rest.Substring(0, slash);
+            if (seg.Length != 4) return false;
+            bool letters = char.IsLetter(seg[0]) && char.IsLetter(seg[1]) && char.IsLetter(seg[2]) && char.IsLetter(seg[3]);
+            return letters;
+        }
+
         public static IReadOnlyList<string> LocateMpqs(string clientRoot)
         {
             if (string.IsNullOrWhiteSpace(clientRoot) || !Directory.Exists(clientRoot))
@@ -23,10 +38,11 @@ namespace WoWRollback.Core.Services.Archive
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // Heuristic ordering: base first, numeric patches ascending, then letter patches ascending (A..Z) last for highest priority
             var baseMpqs = new List<string>();
-            var patchNumerics = new List<(int Order, string Path)>();
-            var patchLetters = new List<(char Letter, string Path)>();
+            var localeNumeric = new List<(int Order, string Path)>();
+            var localeLetter = new List<(char Letter, string Path)>();
+            var rootNumeric = new List<(int Order, string Path)>();
+            var rootLetter = new List<(char Letter, string Path)>();
 
             foreach (var path in allMpqs)
             {
@@ -34,7 +50,7 @@ namespace WoWRollback.Core.Services.Archive
                 var mNum = PatchNumericRegex.Match(file);
                 if (mNum.Success && int.TryParse(mNum.Groups[1].Value, out var n))
                 {
-                    patchNumerics.Add((n, path));
+                    if (IsLocalePath(path)) localeNumeric.Add((n, path)); else rootNumeric.Add((n, path));
                     continue;
                 }
 
@@ -42,20 +58,24 @@ namespace WoWRollback.Core.Services.Archive
                 if (mLet.Success && mLet.Groups[1].Success)
                 {
                     char c = char.ToUpperInvariant(mLet.Groups[1].Value[0]);
-                    patchLetters.Add((c, path));
+                    if (IsLocalePath(path)) localeLetter.Add((c, path)); else rootLetter.Add((c, path));
                     continue;
                 }
 
                 baseMpqs.Add(path);
             }
 
-            patchNumerics.Sort((a, b) => a.Order.CompareTo(b.Order));
-            patchLetters.Sort((a, b) => a.Letter.CompareTo(b.Letter));
+            localeNumeric.Sort((a, b) => a.Order.CompareTo(b.Order));
+            localeLetter.Sort((a, b) => a.Letter.CompareTo(b.Letter));
+            rootNumeric.Sort((a, b) => a.Order.CompareTo(b.Order));
+            rootLetter.Sort((a, b) => a.Letter.CompareTo(b.Letter));
 
             var ordered = new List<string>();
             ordered.AddRange(baseMpqs);
-            ordered.AddRange(patchNumerics.Select(p => p.Path));
-            ordered.AddRange(patchLetters.Select(p => p.Path));
+            ordered.AddRange(localeNumeric.Select(p => p.Path));
+            ordered.AddRange(rootNumeric.Select(p => p.Path));
+            ordered.AddRange(localeLetter.Select(p => p.Path));
+            ordered.AddRange(rootLetter.Select(p => p.Path));
             return ordered;
         }
     }

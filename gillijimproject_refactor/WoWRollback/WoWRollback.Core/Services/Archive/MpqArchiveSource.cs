@@ -9,11 +9,11 @@ namespace WoWRollback.Core.Services.Archive
 {
     public sealed class MpqArchiveSource : IArchiveSource
     {
-        private readonly List<MpqArchive> _archives; // priority: earlier = lower, later = higher
+        private readonly List<(MpqArchive Arc, string Path, bool IsLocale, bool IsPatch)> _archives;
 
         public MpqArchiveSource(IEnumerable<string> mpqPaths)
         {
-            _archives = new List<MpqArchive>();
+            _archives = new List<(MpqArchive, string, bool, bool)>();
             int opened = 0, failed = 0;
             
             foreach (var path in mpqPaths.Where(File.Exists))
@@ -21,7 +21,10 @@ namespace WoWRollback.Core.Services.Archive
                 try
                 {
                     var mpq = new MpqArchive(path, FileAccess.Read);
-                    _archives.Add(mpq);
+                    var isLocale = IsLocalePath(path);
+                    var file = System.IO.Path.GetFileName(path);
+                    var isPatch = file.StartsWith("patch", StringComparison.OrdinalIgnoreCase);
+                    _archives.Add((mpq, path, isLocale, isPatch));
                     opened++;
                 }
                 catch (Exception ex)
@@ -35,6 +38,20 @@ namespace WoWRollback.Core.Services.Archive
         }
 
         private static string Normalize(string virtualPath) => PathUtils.NormalizeVirtual(virtualPath);
+        private static bool IsLocalePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var p = path.Replace('\\', '/');
+            var idx = p.IndexOf("/Data/", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return false;
+            var rest = p.Substring(idx + 6);
+            var slash = rest.IndexOf('/') >= 0 ? rest.IndexOf('/') : rest.Length;
+            if (slash <= 0) return false;
+            var seg = rest.Substring(0, slash);
+            if (seg.Length != 4) return false;
+            bool letters = char.IsLetter(seg[0]) && char.IsLetter(seg[1]) && char.IsLetter(seg[2]) && char.IsLetter(seg[3]);
+            return letters;
+        }
 
         public bool FileExists(string virtualPath)
         {
@@ -44,7 +61,8 @@ namespace WoWRollback.Core.Services.Archive
             
             for (int i = _archives.Count - 1; i >= 0; i--)
             {
-                if (_archives[i].HasFile(normBackslash) || _archives[i].HasFile(norm))
+                var arc = _archives[i].Arc;
+                if (arc.HasFile(normBackslash) || arc.HasFile(norm))
                     return true;
             }
             return false;
@@ -55,11 +73,36 @@ namespace WoWRollback.Core.Services.Archive
             var norm = Normalize(virtualPath);
             var normBackslash = norm.Replace('/', '\\');
             
+            var isDbc = norm.StartsWith("DBFilesClient/", StringComparison.OrdinalIgnoreCase);
+            if (isDbc)
+            {
+                for (int i = _archives.Count - 1; i >= 0; i--)
+                {
+                    var meta = _archives[i];
+                    if (!(meta.IsPatch && !meta.IsLocale)) continue;
+                    var mpq = meta.Arc;
+                    MpqFileStream? fileStream = null;
+                    try { fileStream = mpq.OpenFile(normBackslash); } catch { }
+                    if (fileStream == null) { try { fileStream = mpq.OpenFile(norm); } catch { } }
+                    if (fileStream != null)
+                    {
+                        try
+                        {
+                            var ms = new MemoryStream();
+                            fileStream.CopyTo(ms);
+                            fileStream.Dispose();
+                            ms.Position = 0;
+                            return ms;
+                        }
+                        catch { fileStream?.Dispose(); }
+                    }
+                }
+            }
+
             for (int i = _archives.Count - 1; i >= 0; i--)
             {
-                var mpq = _archives[i];
-                
-                // Try backslash first (MPQ standard), then forward slash
+                var mpq = _archives[i].Arc;
+
                 MpqFileStream? fileStream = null;
                 try
                 {
@@ -67,7 +110,6 @@ namespace WoWRollback.Core.Services.Archive
                 }
                 catch
                 {
-                    // Try forward slash if backslash fails
                 }
                 
                 if (fileStream == null)
@@ -78,7 +120,6 @@ namespace WoWRollback.Core.Services.Archive
                     }
                     catch
                     {
-                        // Continue to next archive
                     }
                 }
                 
@@ -86,7 +127,6 @@ namespace WoWRollback.Core.Services.Archive
                 {
                     try
                     {
-                        // Copy to MemoryStream since MpqFileStream might not be fully compatible
                         var ms = new MemoryStream();
                         fileStream.CopyTo(ms);
                         fileStream.Dispose();
@@ -112,9 +152,9 @@ namespace WoWRollback.Core.Services.Archive
 
         public void Dispose()
         {
-            foreach (var arc in _archives)
+            foreach (var meta in _archives)
             {
-                arc.Dispose();
+                meta.Arc.Dispose();
             }
             _archives.Clear();
         }

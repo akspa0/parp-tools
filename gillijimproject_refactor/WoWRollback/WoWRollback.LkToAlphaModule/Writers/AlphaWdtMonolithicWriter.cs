@@ -598,6 +598,45 @@ public sealed class AlphaWdtMonolithicWriter
             }
         }
         if (verbose) Console.WriteLine($"[pack] archive tiles detected: {tiles.Count}");
+        var wdtMissingTiles = new List<string>();
+        if (tiles.Count == 0)
+        {
+            try
+            {
+                var wdtVPath = $"world/maps/{mapName}/{mapName}.wdt";
+                if (src.FileExists(wdtVPath))
+                {
+                    using var ws = src.OpenFile(wdtVPath);
+                    using var wms = new MemoryStream(); ws.CopyTo(wms); var wdtBytes = wms.ToArray();
+                    int iMain = FindFourCC(wdtBytes, "MAIN");
+                    if (iMain >= 0)
+                    {
+                        int size = BitConverter.ToInt32(wdtBytes, iMain + 4);
+                        int dataStart = iMain + 8;
+                        int len = Math.Max(0, Math.Min(size, wdtBytes.Length - dataStart));
+                        int entrySizeApprox = GridTiles > 0 ? (len / GridTiles) : 0;
+                        int step = entrySizeApprox >= 16 ? 16 : entrySizeApprox >= 8 ? 8 : entrySizeApprox;
+                        if (step >= 8)
+                        {
+                            for (int idx = 0; idx < GridTiles; idx++)
+                            {
+                                int off = dataStart + idx * step;
+                                bool present = false;
+                                for (int b = 0; b < step; b++) { if (wdtBytes[off + b] != 0) { present = true; break; } }
+                                if (present)
+                                {
+                                    int yy = idx / 64; int xx = idx % 64;
+                                    var vp = $"world/maps/{mapName}/{mapName}_{yy}_{xx}.adt";
+                                    if (src.FileExists(vp)) tiles.Add((yy, xx, vp)); else wdtMissingTiles.Add(vp);
+                                }
+                            }
+                            if (verbose) Console.WriteLine($"[pack] wdt-present tiles found: {tiles.Count}, missing: {wdtMissingTiles.Count}");
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
 
         // Texture harvesting across tiles (archive mode only)
         var texturesUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1111,6 +1150,10 @@ public sealed class AlphaWdtMonolithicWriter
             if (texturesCsv.Count > 1)
             {
                 File.WriteAllLines(Path.Combine(outDir, "textures.csv"), texturesCsv, Encoding.UTF8);
+            }
+            if (wdtMissingTiles.Count > 0)
+            {
+                File.WriteAllLines(Path.Combine(outDir, "tiles_missing.csv"), new [] { "tile" }.Concat(wdtMissingTiles), Encoding.UTF8);
             }
             if (opts?.ExtractAssets == true && texturesUsed.Count > 0)
             {
