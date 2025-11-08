@@ -1112,12 +1112,11 @@ public sealed class AlphaWdtMonolithicWriter
             {
                 File.WriteAllLines(Path.Combine(outDir, "textures.csv"), texturesCsv, Encoding.UTF8);
             }
-            // Extract textures to assets folder when requested
             if (opts?.ExtractAssets == true && texturesUsed.Count > 0)
             {
                 var assetsRoot = string.IsNullOrWhiteSpace(opts.AssetsOut) ? Path.Combine(outDir, "assets") : opts.AssetsOut!;
-                var texRoot = Path.Combine(assetsRoot, "textures");
-                Directory.CreateDirectory(texRoot);
+                var tilesetsRoot = Path.Combine(assetsRoot, "tilesets");
+                Directory.CreateDirectory(tilesetsRoot);
                 var missing = new List<string>();
                 foreach (var t in texturesUsed.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
                 {
@@ -1126,8 +1125,9 @@ public sealed class AlphaWdtMonolithicWriter
                     {
                         if (!src.FileExists(vp)) { missing.Add(t); continue; }
                         using var sTex = src.OpenFile(vp);
-                        var outPath = Path.Combine(texRoot, t.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
-                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? texRoot);
+                        var rel = IsTilesetTexturePath(t) ? TilesetRelativeSubpath(t) : vp; 
+                        var outPath = Path.Combine(tilesetsRoot, rel.Replace('/', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? tilesetsRoot);
                         using var fsTex = File.Create(outPath);
                         sTex.CopyTo(fsTex);
                     }
@@ -1339,6 +1339,24 @@ public sealed class AlphaWdtMonolithicWriter
     {
         if (string.IsNullOrWhiteSpace(p)) return string.Empty;
         return p.Replace('\\', '/');
+    }
+
+    private static bool IsTilesetTexturePath(string p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return false;
+        var s = p.Replace('\\', '/');
+        return s.IndexOf("tileset/", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static string TilesetRelativeSubpath(string p)
+    {
+        var s = p.Replace('\\', '/');
+        int idx = s.IndexOf("tileset/", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            return s.Substring(idx + "tileset/".Length);
+        }
+        return Path.GetFileName(s);
     }
 
     private static List<int> ReadMCLYTextureIdsInChunk(byte[] adtBytes, int mcNkOffset)
