@@ -1,3 +1,13 @@
+## Enforced Patterns (concise)
+
+- Main outstanding issue: LK ADT positions → Alpha WDT writeout (compute MAIN offsets, embed ADTs, validate).
+- MPQ overlay precedence: FS > root-letter > locale-letter > root-numeric > locale-numeric > base.
+- DBC safeguard: for `DBFilesClient/*`, search locale patch MPQs before root patch MPQs.
+- WDT tile presence fallback: when archive tiles=0, read `<map>.wdt` MAIN; emit `tiles_missing.csv`.
+- Crosswalk mapping: CSV-only, strict zone/map locking; discard cross-map results; stable CSV schemas.
+- Placements/liquids: union MDNM/MONM; never gate placements; recompute MCRF; MH2O→MCLQ with proper flags/heights; `dont_render` minimized.
+- Logging/diagnostics: tee with `--log-dir`/`--log-file`; emit kept/dropped assets; `objects_written.csv`; `mclq_summary.csv`.
+
 ## Crosswalk Mapping Pattern (CSV-Only)
 
 ### Sources

@@ -1,6 +1,7 @@
 # Active Context (2025-11-08)
 
 ## Current Progress (concise)
+- Main issue: LK ADT positions data must be generated and written into Alpha WDT (MAIN offsets + embedded ADT data).
 - MPQ overlay precedence implemented and verified in CLI logs.
 - Plain patch detection: `patch(.locale).MPQ` treated as numeric order 1 in `ArchiveLocator`.
 - DBFilesClient precedence fix: prefer locale patch MPQs before root patch MPQs in `MpqArchiveSource` for `DBFilesClient/*` (corrects `Map.dbc`).
@@ -8,6 +9,11 @@
 - Alpha WDT monolithic pack: build completes; placements diagnostics CSVs available; liquids path present (needs tuning).
 
 ## TODOs (concise)
+- LK ADT positions → Alpha WDT:
+  - Derive per‑tile presence/ordering from LK inputs; compute MAIN offsets table.
+  - Embed per‑tile ADT payloads into Alpha WDT and update MHDR/MCIN alignments.
+  - Validate offsets/sizes with `TryIsAlphaV18Wdt` and round‑trip read.
+  - Emit `tiles_written.csv` with tile offsets and byte sizes.
 - Tests: `ArchiveLocator` ordering (incl. plain patch) and `MpqArchiveSource` DBC resolution.
 - Logs: include plain-patch counts in numeric sections; add one-line DBC resolution source when verbose.
 - Verify: run representative maps (CataclysmCTF, development) and confirm Map.dbc and overlay precedence.

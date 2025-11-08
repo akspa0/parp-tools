@@ -1,6 +1,7 @@
 # Technical Context - WoWRollback.RollbackTool
 
 ## Current Progress (concise)
+* Main outstanding issue: LK ADT positions → Alpha WDT writeout.
 - MPQ overlay precedence implemented (FS > root-letter > locale-letter > root-numeric > locale-numeric > base).
 - Plain patch support: `patch(.locale).MPQ` treated as numeric order 1 in `ArchiveLocator`.
 - DBC resolution: for `DBFilesClient/*`, locale patch MPQs are searched before root patch MPQs.
@@ -9,7 +10,10 @@
 ## TODOs (concise)
 - Add tests for `ArchiveLocator` ordering and DBC locale-first resolution.
 - Extend verbose logs: plain-patch counts and optional DBC source path line.
- 
+
+## Archive (historical)
+Legacy technical details retained below; top sections are authoritative.
+
 ## Hot Update (2025-11-07) – Liquids & Placements diagnostics
 - Modules touched: AlphaWdtMonolithicWriter (MDNM/MONM build from referenced union; placements MDDF/MODF; MCRF), AlphaMcnkBuilder (MH2O→MCLQ composition; MCAL pack logging), Program CLI (new flags).
 - New flags: `--log-file`, `--log-dir` to tee console output to a timestamped log file near outputs.

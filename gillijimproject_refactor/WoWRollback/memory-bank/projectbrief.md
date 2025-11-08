@@ -1,89 +1,39 @@
 # WoWRollback - Time-Travel Your WoW Maps
 
-## Project Vision
-WoWRollback is a **map modification tool** that enables users to "roll back" World of Warcraft maps to earlier development states by selectively removing object placements based on UniqueID thresholds. Think of it as a time machine for WoW's game world.
 
-## Core Purpose
-1. **Analyze Maps**: Scan WDT/ADT files to discover UniqueID distribution (what content exists and when it was added)
-2. **Visualize Layers**: Pre-generate minimap overlays showing different historical "snapshots" of content
-3. **Modify Maps**: Bury unwanted objects below the terrain by UniqueID threshold
-4. **Fix Terrain**: Clear terrain hole flags where buildings were removed, so ground appears intact
+## Project Brief (concise)
 
-## Key Features
-- **Works on 0.5.3 through 3.3.5** - Tested and confirmed working on earliest Alpha builds!
-- **Pre-generated Overlays** - No on-the-fly rendering; fast, lightweight viewer
-- **Terrain Hole Management** - Automatically fixes MCNK flags when buildings were removed, so ground appears intact
-- **Shadow Disabling** - Optional: remove baked shadows (MCSH) that might look weird
-- **MD5 Checksums** - Auto-generates .md5 files for minimap compatibility
-- **Stupid Easy UI** - Drag a slider, pick a version, click a button. Done.
-- **Unified Pipeline (Alpha→LK)** - One command: Alpha WDT → patched Alpha WDT → patched LK ADTs
-- **CSV Crosswalk AreaIDs** - Patch `MCNK.AreaId` using CSV crosswalks (`--crosswalk-dir|--crosswalk-file`). No DBCTool dependency at runtime.
-- **Mapping Fallbacks** - Support `--area-remap-json` or write 0 for unmapped; use `Map.dbc` only to resolve target map guard (no heuristics).
+### What it is
+WoWRollback is a toolkit to “time‑travel” WoW maps by burying late‑added objects, fixing terrain, and exporting compatible LK ADTs. It is CLI‑first with a lean README and detailed context in memory‑bank/.
 
-### Latest Direction (2025-11-07)
-- Alpha WDT monolithic pack focus: fix liquids (MH2O→MCLQ) and object placements.
-- Build MDNM/MONM from union of referenced names; do not gate placements; recompute MCRF.
-- Normalize names (`/`→`\\`, `.m2`→`.mdx`); placements axis order X,Z,Y.
-- Diagnostics: `objects_written.csv`, kept assets CSV, `dropped_assets.csv`, `mclq_summary.csv`.
-- Logging: add `--log-file` and `--log-dir` to tee console output to a timestamped log file.
+### Main Outstanding Issue
+LK ADT positions → Alpha WDT writeout. Compute correct MAIN offsets and embed ADT payloads; validate round‑trip.
 
-### Latest Direction (2025-10-27)
-- CLI-first with GUI as runner (Load → Build → Layers); no modals; overlay + inline logs; auto-tab navigation.
-- Energy-efficient preflight: skip-if-exists for LK ADTs, crosswalk CSVs, tile layers, and layers.json; reuse cache to save time/energy.
-- Presets: management in Settings; Load Preset control on Load page.
-- CSV handling: adopt CsvHelper in GUI for robust parsing; keep CSV schemas stable.
-- BYOD: do not include copyrighted game data; rely on user-provided sources.
+### Goals
+- Roll back Alpha WDT/ADT content by UniqueID threshold (bury placements, fix MCNK holes, optional MCSH zeroing).
+- Export LK ADTs and always emit `<Map>.wdt` in LK output.
+- Map AreaIDs via CSV crosswalks (strict, no cross‑map leakage; 0.6.0 pivot opt‑in).
+- Maintain MPQ overlay parity with client and DBC locale‑first safeguard.
 
-### Latest Direction (2025-10-29)
-- CASC/DB2 discovery: when Map.dbc is unavailable, read Map.db2 via DBCD over CASC with FDID listfile; fallback to WDT scan using listfile enumeration.
-- Versioned listfiles:
-  - JSON snapshots per client (`snapshot-listfile --client-path <dir> --alias <major.minor.patch.build> --out <json>`)
-  - Diff utilities (`diff-listfiles --a <fileA> --b <fileB> --out <dir>`) for added/removed/changed FDIDs
-- Asset gating for recompile/export:
-  - Outputs must reference assets present in the 3.3.5 target listfile; non-present assets are dropped and reported
-  - Integrated in `pack-monolithic-alpha-wdt` for MDNM/MONM; placements to follow
-- Alias policy: use full build strings (major.minor.patch.build) from .build.info/DBD/path heuristics
+### Scope
+- Alpha → LK pipeline (analyze, modify, map, export) driven by `WoWRollback.Cli`.
+- Diagnostics: tee logging (`--log-dir`/`--log-file`), kept/dropped assets CSVs, `objects_written.csv`, `mclq_summary.csv`.
+- WDT tile presence fallback when archive scan yields zero tiles.
 
-### Latest Direction (2025-10-25)
-- **CLI-first**: `WoWRollback.Cli` is the primary entrypoint. Orchestrator is legacy.
-- **Strict AreaID mapping (non-pivot by default)**: map-locked numeric → target map name → per-source-map numeric → exact-by-src-number only if strict=false; 0.6.0 pivot opt-in via `--chain-via-060`.
-- **LK WDT emission**: Write `<Map>.wdt` alongside LK ADTs in the output folder.
+### Constraints
+- BYOD: no copyrighted assets are included; user supplies clients/DBCs.
+- CSV‑only crosswalk contract; never accept cross‑map results.
+- Stable CSV schemas; GUI acts as a runner (orchestration is legacy).
 
-### Latest Direction (2025-10-30)
-- Cache versioning via `.build.info` in GUI Load/Preview; outputs routed to `<cache>/<build>` instead of `unknown`.
-- Map discovery normalization at cache root and version folders; flatten nested `<map>/<map>`; CASC datasets are not WDT‑gated.
-- Global Heatmap: dataset‑wide min/max (and future epoch mode) with `heatmap_stats.json`; UI toggle Local/Global.
-- Layers Scope: Tile | Selection | Map; deterministic per‑tile lists.
-- FDID Pipeline: resolver (community listfile + JSON snapshots) to enrich CSVs with `fdid` + canonical path; unresolved diagnostics CSV.
-- MCCV Analyzer & Overlay: detect MCCV per MCNK, flag "hidden by holes", export MCCV PNGs; UI overlay toggle.
-- Empty Tiles Visualization: gray gridlines for tiles that exist but have no placements/minimap.
-- Recompile Modes: prefer LK client for WDT with CASC; manual WDT picker fallback; plan synthetic Alpha WDT from tiles when no LK WDT exists.
+### Current Focus
+- Fix LK ADT positions → Alpha WDT writeout.
+- Liquids: MH2O→MCLQ correctness; flags/heights; reduce `dont_render`.
+- Placements: union MDNM/MONM; never gate; recompute MCRF; per‑tile counts.
+- Logging: plain‑patch counts; optional DBC source line.
 
-## Use Cases
-- **Empty World Screenshots**: Remove all objects for terrain-only views
-- **Historical Comparisons**: See what Azeroth looked like in patch 0.5.3 vs 1.0 vs 3.3.5
-- **Content Analysis**: Identify which objects were added in which development phases
-- **Machinima/Photography**: Create clean environments for video production
+### Links
+- memory-bank/activeContext.md — current focus, decisions, TODOs
+- memory-bank/progress.md — snapshot of progress
+- memory-bank/systemPatterns.md — overlay precedence, WDT fallback, mapping rules
+- memory-bank/techContext.md — runtime, modules, CLI, overlay details
 
-## Success Criteria
-- ✅ Successfully bury objects in 0.5.3 WDT files (PROVEN - works on Kalimdor!)
-- ✅ Clear terrain holes conservatively (only chunks whose referenced objects were all buried)
-- ✅ Export LK ADTs with correct indices and AreaIDs via CSV crosswalks; explicitly write 0 when unmapped
-- ✅ Emit LK WDT (`<Map>.wdt`) together with LK ADTs
-- ✅ Enforce strict, non-pivot AreaID mapping order; pivot gated by `--chain-via-060`
-- ⏳ Generate pre-rendered overlay images for all UniqueID ranges
-- ⏳ Build lightweight HTML viewer with slider control
-- ⏳ One-button rollback with all options exposed
-
-## Next Milestone
-- Run the pipeline directly from the viewer UI (Tools panel): configure global/per-tile UniqueID ranges, terrain options, crosswalk rules; launch builds and stream logs; open results in viewer.
-
-### Latest Direction (2025-11-07) – MPQ Overlay & WDT Fallback
-- MPQ overlay precedence mirrors client behavior:
-  - FS (loose) > root letter patches > locale letter patches > root numeric patches > locale numeric patches > base
-- Implementation:
-  - Ordered grouping in `ArchiveLocator`, reverse-priority scan in `MpqArchiveSource`, FS-first in `PrioritizedArchiveSource`.
-  - DBC safeguard: `DBFilesClient/*.dbc` prefer root Data patch MPQs.
-  - CLI verbose logs: numeric and letter patch counts/lists; overlay summary line.
-- WDT fallback when archive tile scan returns 0:
-  - Read `<map>.wdt` MAIN to find present tiles; add existing ADTs; emit `tiles_missing.csv` for expected-but-missing.

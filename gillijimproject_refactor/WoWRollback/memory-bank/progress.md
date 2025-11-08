@@ -1,6 +1,7 @@
 # Progress - WoWRollback.RollbackTool (2025-11-08)
 
 ## Current Progress (concise)
+- **Main outstanding issue: LK ADT positions → Alpha WDT writeout.**
 - MPQ overlay precedence in place; CLI logs show counts/lists and summary.
 - Plain patch support: `patch(.locale).MPQ` treated as numeric order 1.
 - DBFilesClient precedence: locale patch MPQs searched before root patch MPQs, fixing `Map.dbc` selection.
@@ -16,7 +17,9 @@
 - Liquids: instrument MH2O→MCLQ; write `mclq_summary.csv`; fix flags/heights; reduce `dont_render`.
 - Textures: tileset resize option (256) with alpha preservation.
 
----
+## Archive (historical)
+
+Legacy details retained below; top sections are authoritative.
 
 ## Hot Update (2025-11-07) – Alpha WDT monolithic pack: liquids & placements
 
