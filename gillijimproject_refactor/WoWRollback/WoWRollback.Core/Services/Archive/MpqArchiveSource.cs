@@ -76,6 +76,30 @@ namespace WoWRollback.Core.Services.Archive
             var isDbc = norm.StartsWith("DBFilesClient/", StringComparison.OrdinalIgnoreCase);
             if (isDbc)
             {
+                // Prefer locale patches first (letter > numeric due to reverse scan), then root patches
+                // Pass 1: locale patches
+                for (int i = _archives.Count - 1; i >= 0; i--)
+                {
+                    var meta = _archives[i];
+                    if (!(meta.IsPatch && meta.IsLocale)) continue;
+                    var mpq = meta.Arc;
+                    MpqFileStream? fileStream = null;
+                    try { fileStream = mpq.OpenFile(normBackslash); } catch { }
+                    if (fileStream == null) { try { fileStream = mpq.OpenFile(norm); } catch { } }
+                    if (fileStream != null)
+                    {
+                        try
+                        {
+                            var ms = new MemoryStream();
+                            fileStream.CopyTo(ms);
+                            fileStream.Dispose();
+                            ms.Position = 0;
+                            return ms;
+                        }
+                        catch { fileStream?.Dispose(); }
+                    }
+                }
+                // Pass 2: root patches
                 for (int i = _archives.Count - 1; i >= 0; i--)
                 {
                     var meta = _archives[i];

@@ -12,6 +12,7 @@ namespace WoWRollback.Core.Services.Archive
         private static readonly Regex PatchNumericRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         // Recognize letter patches: patch-A.MPQ, patch-enUS-A.MPQ (case-insensitive)
         private static readonly Regex PatchLetterRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([A-Za-z])\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex PatchPlainRegex = new Regex(@"^patch(?:[-_][a-z]{2}[A-Z]{2})?\.mpq$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static bool IsLocalePath(string path)
         {
@@ -59,6 +60,13 @@ namespace WoWRollback.Core.Services.Archive
                 {
                     char c = char.ToUpperInvariant(mLet.Groups[1].Value[0]);
                     if (IsLocalePath(path)) localeLetter.Add((c, path)); else rootLetter.Add((c, path));
+                    continue;
+                }
+
+                var mPlain = PatchPlainRegex.Match(file);
+                if (mPlain.Success)
+                {
+                    if (IsLocalePath(path)) localeNumeric.Add((1, path)); else rootNumeric.Add((1, path));
                     continue;
                 }
 
