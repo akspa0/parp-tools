@@ -22,6 +22,8 @@ public sealed class AlphaWdtMonolithicWriter
     public static void WriteMonolithic(string lkWdtPath, string lkMapDir, string outWdtPath, LkToAlphaOptions? opts = null, bool skipWmos = false)
     {
         bool verbose = opts?.Verbose == true;
+        var usedM2ForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedWmoForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(lkWdtPath)) throw new ArgumentException("lkWdtPath required");
         if (string.IsNullOrWhiteSpace(lkMapDir)) throw new ArgumentException("lkMapDir required");
         if (string.IsNullOrWhiteSpace(outWdtPath)) throw new ArgumentException("outWdtPath required");
@@ -60,16 +62,30 @@ public sealed class AlphaWdtMonolithicWriter
             try
             {
                 var bytesScan = File.ReadAllBytes(rootAdt);
-                foreach (var n in ReadM2NamesFromBytes(bytesScan)) allM2Names.Add(n);
-                foreach (var n in ReadWmoNamesFromBytes(bytesScan)) allWmoNames.Add(n);
+                foreach (var n in BuildMmdxOrdered(bytesScan)) allM2Names.Add(n);
+                foreach (var n in BuildMwmoOrdered(bytesScan)) allWmoNames.Add(n);
                 var baseNameScan = Path.GetFileNameWithoutExtension(rootAdt);
                 var dirScan = Path.GetDirectoryName(rootAdt) ?? ".";
                 var objScan = Path.Combine(dirScan, baseNameScan + "_obj.adt");
+                var obj0Scan = Path.Combine(dirScan, baseNameScan + "_obj0.adt");
+                var obj1Scan = Path.Combine(dirScan, baseNameScan + "_obj1.adt");
                 if (File.Exists(objScan))
                 {
                     var objBytesScan = File.ReadAllBytes(objScan);
-                    foreach (var n in ReadM2NamesFromBytes(objBytesScan)) allM2Names.Add(n);
-                    foreach (var n in ReadWmoNamesFromBytes(objBytesScan)) allWmoNames.Add(n);
+                    foreach (var n in BuildMmdxOrdered(objBytesScan)) allM2Names.Add(n);
+                    foreach (var n in BuildMwmoOrdered(objBytesScan)) allWmoNames.Add(n);
+                }
+                if (File.Exists(obj0Scan))
+                {
+                    var obj0BytesScan = File.ReadAllBytes(obj0Scan);
+                    foreach (var n in BuildMmdxOrdered(obj0BytesScan)) allM2Names.Add(n);
+                    foreach (var n in BuildMwmoOrdered(obj0BytesScan)) allWmoNames.Add(n);
+                }
+                if (File.Exists(obj1Scan))
+                {
+                    var obj1BytesScan = File.ReadAllBytes(obj1Scan);
+                    foreach (var n in BuildMmdxOrdered(obj1BytesScan)) allM2Names.Add(n);
+                    foreach (var n in BuildMwmoOrdered(obj1BytesScan)) allWmoNames.Add(n);
                 }
             }
             catch { /* best-effort name harvest */ }
@@ -78,6 +94,9 @@ public sealed class AlphaWdtMonolithicWriter
         int mccvExported = 0;
         int mccvHeaders = 0;
         var objectsCsvLines = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
+        var rawObjectsLines = new List<string> { "tile_yy,tile_xx,source,mddf_count,modf_count,first_mddf,first_modf" };
+        var placementsSkippedLines = new List<string> { "tile_yy,tile_xx,source,type,local_index,name,reason" };
+        long totalMddfWritten = 0, totalModfWritten = 0;
 
         // Build WDT scaffolding (Alpha format): MVER -> MPHD(16) -> MAIN -> MDNM -> MONM
         using var ms = new MemoryStream();
@@ -129,6 +148,12 @@ public sealed class AlphaWdtMonolithicWriter
         BitConverter.GetBytes(wmoNames.Count > 0 ? wmoNames.Count + 1 : 0).CopyTo(mphdData.Slice(8));
         BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
         ms.Write(mphdData); ms.Position = savePos;
+        try
+        {
+            var outDirIdx = Path.GetDirectoryName(outWdtPath) ?? ".";
+            WriteIndexCsv(outDirIdx, mdnmIndexFs, monmIndexFs);
+        }
+        catch { }
 
         // MAIN patch arrays
         var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
@@ -253,25 +278,93 @@ public sealed class AlphaWdtMonolithicWriter
             }
             long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk()); long mtexEnd = outMs.Position;
 
-            // Build MDDF/MODF from _obj.adt if present (fallback: root)
-            byte[] objBytesFs = Array.Empty<byte>();
+            // Build MDDF/MODF from _obj0/_obj1 if present (fallback: _obj, then root)
             var objAdt = Path.Combine(rootDir, baseName + "_obj.adt");
-            if (File.Exists(objAdt)) objBytesFs = File.ReadAllBytes(objAdt);
-            if (objBytesFs.Length == 0) objBytesFs = bytes;
+            var obj0Adt = Path.Combine(rootDir, baseName + "_obj0.adt");
+            var obj1Adt = Path.Combine(rootDir, baseName + "_obj1.adt");
 
-            var mmdxOrderedFs = BuildMmdxOrdered(objBytesFs);
-            if (mmdxOrderedFs.Count == 0) mmdxOrderedFs = BuildMmdxOrdered(bytes);
-            var mwmoOrderedFs = BuildMwmoOrdered(objBytesFs);
-            if (mwmoOrderedFs.Count == 0) mwmoOrderedFs = BuildMwmoOrdered(bytes);
+            byte[] objBytesFs = File.Exists(objAdt) ? File.ReadAllBytes(objAdt) : Array.Empty<byte>();
+            byte[] obj0BytesFs = File.Exists(obj0Adt) ? File.ReadAllBytes(obj0Adt) : Array.Empty<byte>();
+            byte[] obj1BytesFs = File.Exists(obj1Adt) ? File.ReadAllBytes(obj1Adt) : Array.Empty<byte>();
 
-            var mddfDataFs = BuildMddfFromLk(objBytesFs, mmdxOrderedFs, mdnmIndexFs);
-            var modfDataFs = BuildModfFromLk(objBytesFs, mwmoOrderedFs, monmIndexFs);
-            var (doodadRefsByChunkFs, wmoRefsByChunkFs) = BuildRefsByChunk(objBytesFs, mmdxOrderedFs, mwmoOrderedFs, mdnmIndexFs, monmIndexFs, yy, xx);
+            // Local name tables per source
+            var mmdxRoot = BuildMmdxOrdered(bytes);
+            var mwmoRoot = BuildMwmoOrdered(bytes);
+            var mmdxObj = BuildMmdxOrdered(objBytesFs);
+            var mwmoObj = BuildMwmoOrdered(objBytesFs);
+            var mmdxObj0 = BuildMmdxOrdered(obj0BytesFs);
+            var mwmoObj0 = BuildMwmoOrdered(obj0BytesFs);
+            var mmdxObj1 = BuildMmdxOrdered(obj1BytesFs);
+            var mwmoObj1 = BuildMwmoOrdered(obj1BytesFs);
+
+            // MDDF/MODF refs by chunk must point to actual record indices within this tile's MDDF/MODF
+            var doodadRefsByChunkFs = new System.Collections.Generic.List<int>[256];
+            var wmoRefsByChunkFs = new System.Collections.Generic.List<int>[256];
+            for (int i = 0; i < 256; i++) { doodadRefsByChunkFs[i] = new System.Collections.Generic.List<int>(); wmoRefsByChunkFs[i] = new System.Collections.Generic.List<int>(); }
+
+            // MDDF: prefer obj0, then obj, then root
+            using var msMddf = new MemoryStream();
+            int mddfBaseFs = 0;
+            if (obj0BytesFs.Length > 0)
+            {
+                var part = BuildMddfFromLk(obj0BytesFs, mmdxObj0, mdnmIndexFs, placementsSkippedLines, "obj0", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
+                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+            }
+            if (objBytesFs.Length > 0)
+            {
+                var part = BuildMddfFromLk(objBytesFs, mmdxObj, mdnmIndexFs, placementsSkippedLines, "obj", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
+                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+            }
+            {
+                var part = BuildMddfFromLk(bytes, mmdxRoot, mdnmIndexFs, placementsSkippedLines, "root", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
+                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+            }
+            var mddfDataFs = msMddf.ToArray();
+
+            // MODF: prefer obj1, then obj, then root
+            using var msModf = new MemoryStream();
+            int modfBaseFs = 0;
+            if (obj1BytesFs.Length > 0)
+            {
+                var part = BuildModfFromLk(obj1BytesFs, mwmoObj1, monmIndexFs, placementsSkippedLines, "obj1", yy, xx, wmoRefsByChunkFs, modfBaseFs);
+                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+            }
+            if (objBytesFs.Length > 0)
+            {
+                var part = BuildModfFromLk(objBytesFs, mwmoObj, monmIndexFs, placementsSkippedLines, "obj", yy, xx, wmoRefsByChunkFs, modfBaseFs);
+                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+            }
+            {
+                var part = BuildModfFromLk(bytes, mwmoRoot, monmIndexFs, placementsSkippedLines, "root", yy, xx, wmoRefsByChunkFs, modfBaseFs);
+                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+            }
+            var modfDataFs = msModf.ToArray();
+
+            // Raw source counts and first names
+            try
+            {
+                void AddRaw(string sourceLbl, byte[] b, List<string> mmdxOrd, List<string> mwmoOrd)
+                {
+                    int cm = GetMddfCount(b);
+                    int cw = GetModfCount(b);
+                    string fm = TryGetFirstMddfName(b, mmdxOrd);
+                    string fw = TryGetFirstModfName(b, mwmoOrd);
+                    rawObjectsLines.Add($"{yy},{xx},{sourceLbl},{cm},{cw},{fm},{fw}");
+                }
+                AddRaw("obj0", obj0BytesFs, mmdxObj0, mwmoObj0);
+                AddRaw("obj1", obj1BytesFs, mmdxObj1, mwmoObj1);
+                AddRaw("obj", objBytesFs, mmdxObj, mwmoObj);
+                AddRaw("root", bytes, mmdxRoot, mwmoRoot);
+            }
+            catch { }
+
+            // doodadRefsByChunkFs and wmoRefsByChunkFs were populated during MDDF/MODF writes above
 
             long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfDataFs.Length, mddfDataFs).GetWholeChunk()); long mddfEnd = outMs.Position;
             long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfDataFs.Length, modfDataFs).GetWholeChunk()); long modfEnd = outMs.Position;
             int mddfCountFs = mddfDataFs.Length / 36;
             int modfCountFs = modfDataFs.Length / 64;
+            totalMddfWritten += mddfCountFs; totalModfWritten += modfCountFs;
             if (verbose)
             {
                 Console.WriteLine($"[pack][objects] tile {yy:D2}_{xx:D2} mddf={mddfCountFs} modf={modfCountFs}");
@@ -290,9 +383,9 @@ public sealed class AlphaWdtMonolithicWriter
                     {
                         int p = data;
                         int local = BitConverter.ToInt32(objBytesFs, p + 0);
-                        if (local >= 0 && local < mmdxOrderedFs.Count)
+                        if (local >= 0 && local < mmdxObj.Count)
                         {
-                            firstMddfName = NormalizeAssetName(mmdxOrderedFs[local]);
+                            firstMddfName = NormalizeAssetName(mmdxObj[local]);
                         }
                     }
                 }
@@ -310,9 +403,9 @@ public sealed class AlphaWdtMonolithicWriter
                     {
                         int p = data;
                         int local = BitConverter.ToInt32(objBytesFs, p + 0);
-                        if (local >= 0 && local < mwmoOrderedFs.Count)
+                        if (local >= 0 && local < mwmoObj.Count)
                         {
-                            firstModfName = NormalizeAssetName(mwmoOrderedFs[local]);
+                            firstModfName = NormalizeAssetName(mwmoObj[local]);
                         }
                     }
                 }
@@ -437,8 +530,15 @@ public sealed class AlphaWdtMonolithicWriter
         }
         try
         {
-            var objCsvPath = Path.Combine(Path.GetDirectoryName(outWdtPath) ?? ".", "objects_written.csv");
-            File.WriteAllLines(objCsvPath, objectsCsvLines, Encoding.UTF8);
+            var outDir = Path.GetDirectoryName(outWdtPath) ?? ".";
+            File.WriteAllLines(Path.Combine(outDir, "objects_written.csv"), objectsCsvLines, Encoding.UTF8);
+            File.WriteAllLines(Path.Combine(outDir, "adt_objects_raw.csv"), rawObjectsLines, Encoding.UTF8);
+            if (placementsSkippedLines.Count > 1)
+                File.WriteAllLines(Path.Combine(outDir, "placements_skipped.csv"), placementsSkippedLines, Encoding.UTF8);
+            if ((m2Names.Count + wmoNames.Count) > 0 && (totalMddfWritten + totalModfWritten) == 0)
+            {
+                Console.WriteLine("[warn] MDNM/MONM non-empty but wrote zero placements (MDDF/MODF=0). Check name-index mapping and gating.");
+            }
         }
         catch { }
 
@@ -464,6 +564,8 @@ public sealed class AlphaWdtMonolithicWriter
         Directory.CreateDirectory(Path.GetDirectoryName(outWdtPath) ?? ".");
 
         bool verbose = opts?.Verbose == true;
+        var usedM2ForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedWmoForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Discover tiles from archive
         var tiles = new List<(int YY, int XX, string RootVPath)>();
@@ -496,6 +598,10 @@ public sealed class AlphaWdtMonolithicWriter
             }
         }
         if (verbose) Console.WriteLine($"[pack] archive tiles detected: {tiles.Count}");
+
+        // Texture harvesting across tiles (archive mode only)
+        var texturesUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var texturesCsv = new List<string> { "tile_yy,tile_xx,chunk_index,texture,source" };
 
         // Build name tables by scanning tiles
         var m2Names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -572,10 +678,19 @@ public sealed class AlphaWdtMonolithicWriter
         BitConverter.GetBytes(wmoList.Count > 0 ? wmoList.Count + 1 : 0).CopyTo(mphdData.Slice(8));
         BitConverter.GetBytes(checked((int)monmStart)).CopyTo(mphdData.Slice(12));
         outMs.Write(mphdData); outMs.Position = savePos;
+        try
+        {
+            var outDirIdx2 = Path.GetDirectoryName(outWdtPath) ?? ".";
+            WriteIndexCsv(outDirIdx2, mdnmIndex, monmIndex);
+        }
+        catch { }
 
         var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
         var mhdrToFirst = Enumerable.Repeat(0, GridTiles).ToArray();
         var objectsCsvLines2 = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
+        var rawObjectsLines2 = new List<string> { "tile_yy,tile_xx,source,mddf_count,modf_count,first_mddf,first_modf" };
+        var placementsSkippedLines2 = new List<string> { "tile_yy,tile_xx,source,type,local_index,name,reason" };
+        long totalMddf2 = 0, totalModf2 = 0;
         int mccvExported2 = 0;
         bool limitLogged2 = false;
 
@@ -627,10 +742,28 @@ public sealed class AlphaWdtMonolithicWriter
 
                 // MTEX from _tex.adt, fallback to root bytes, else BaseTexture
                 byte[] mtexData = Array.Empty<byte>();
+                byte[] texBytesFull = Array.Empty<byte>();
+                System.Collections.Generic.List<int>? texMcnkOffsets = null;
                 var texVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_tex.adt";
                 if (src.FileExists(texVPath))
                 {
-                    using var ts = src.OpenFile(texVPath); using var tms = new MemoryStream(); ts.CopyTo(tms); mtexData = ExtractLkMtexData(tms.ToArray());
+                    using var ts = src.OpenFile(texVPath);
+                    using var tms = new MemoryStream();
+                    ts.CopyTo(tms);
+                    texBytesFull = tms.ToArray();
+                    mtexData = ExtractLkMtexData(texBytesFull);
+                    int tMhOff = FindFourCC(texBytesFull, "MHDR");
+                    if (tMhOff >= 0)
+                    {
+                        var tMhdr = new Mhdr(texBytesFull, tMhOff);
+                        int tData = tMhOff + 8;
+                        int tMcinRel = tMhdr.GetOffset(Mhdr.McinOffset);
+                        if (tMcinRel > 0)
+                        {
+                            var tMcin = new Mcin(texBytesFull, tData + tMcinRel);
+                            texMcnkOffsets = tMcin.GetMcnkOffsets();
+                        }
+                    }
                 }
                 if (mtexData.Length == 0) mtexData = ExtractLkMtexData(bytes);
                 if (mtexData.Length == 0)
@@ -640,21 +773,107 @@ public sealed class AlphaWdtMonolithicWriter
                 }
                 long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk());
 
-                // Build MDDF/MODF from _obj.adt if present (fallback: root)
+                // Chunk-driven texture harvesting: parse MTEX names and scan MCLY per present chunk
+                var mtexNames = ParseMtexNamesLocal(mtexData);
+                // Build union of present chunks between root and _tex for inventory
+                var presentTexScan = new List<int>(present);
+                if (texMcnkOffsets != null)
+                {
+                    for (int i = 0; i < texMcnkOffsets.Count; i++)
+                    {
+                        if (texMcnkOffsets[i] > 0 && !presentTexScan.Contains(i)) presentTexScan.Add(i);
+                    }
+                }
+                presentTexScan.Sort();
+                bool preferTexForMtex = texBytesFull.Length > 0; // we used _tex MTEX when available
+                foreach (var ci in presentTexScan)
+                {
+                    int rootOff = (ci < lkMcnkOffsets.Count) ? lkMcnkOffsets[ci] : 0;
+                    int texOff = (texMcnkOffsets != null && ci < texMcnkOffsets.Count) ? texMcnkOffsets[ci] : 0;
+                    List<int> ids = new List<int>();
+                    string srcTag = string.Empty;
+                    if (preferTexForMtex)
+                    {
+                        if (texOff > 0) { ids = ReadMCLYTextureIdsInChunk(texBytesFull, texOff); srcTag = "tex"; }
+                        else if (rootOff > 0) { ids = ReadMCLYTextureIdsInChunk(bytes, rootOff); srcTag = "root"; }
+                    }
+                    else
+                    {
+                        if (rootOff > 0) { ids = ReadMCLYTextureIdsInChunk(bytes, rootOff); srcTag = "root"; }
+                        else if (texOff > 0) { ids = ReadMCLYTextureIdsInChunk(texBytesFull, texOff); srcTag = "tex"; }
+                    }
+                    foreach (var tid in ids)
+                    {
+                        if (tid >= 0 && tid < mtexNames.Count)
+                        {
+                            var tex = NormalizeTexturePath(mtexNames[tid]);
+                            if (!string.IsNullOrWhiteSpace(tex))
+                            {
+                                texturesUsed.Add(tex);
+                                texturesCsv.Add($"{yy},{xx},{ci},{tex},{srcTag}");
+                            }
+                        }
+                    }
+                }
+
+                // Build MDDF/MODF from _obj0/_obj1 if present (fallbacks: _obj then root)
                 byte[] objBytes = Array.Empty<byte>();
                 var objVPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_obj.adt";
                 if (src.FileExists(objVPath)) { using var os = src.OpenFile(objVPath); using var oms = new MemoryStream(); os.CopyTo(oms); objBytes = oms.ToArray(); }
-                if (objBytes.Length == 0) objBytes = bytes;
+                byte[] obj0Bytes = Array.Empty<byte>();
+                var obj0VPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_obj0.adt";
+                if (src.FileExists(obj0VPath)) { using var os0 = src.OpenFile(obj0VPath); using var oms0 = new MemoryStream(); os0.CopyTo(oms0); obj0Bytes = oms0.ToArray(); }
+                byte[] obj1Bytes = Array.Empty<byte>();
+                var obj1VPath = $"world/maps/{mapName}/{mapName}_{yy}_{xx}_obj1.adt";
+                if (src.FileExists(obj1VPath)) { using var os1 = src.OpenFile(obj1VPath); using var oms1 = new MemoryStream(); os1.CopyTo(oms1); obj1Bytes = oms1.ToArray(); }
 
-                var mmdxOrdered = BuildMmdxOrdered(objBytes);
-                if (mmdxOrdered.Count == 0) mmdxOrdered = BuildMmdxOrdered(bytes);
-                var mwmoOrdered = BuildMwmoOrdered(objBytes);
-                if (mwmoOrdered.Count == 0) mwmoOrdered = BuildMwmoOrdered(bytes);
+                var mmdxRoot2 = BuildMmdxOrdered(bytes);
+                var mwmoRoot2 = BuildMwmoOrdered(bytes);
+                var mmdxObj2 = BuildMmdxOrdered(objBytes);
+                var mwmoObj2 = BuildMwmoOrdered(objBytes);
+                var mmdxObj0_2 = BuildMmdxOrdered(obj0Bytes);
+                var mwmoObj0_2 = BuildMwmoOrdered(obj0Bytes);
+                var mmdxObj1_2 = BuildMmdxOrdered(obj1Bytes);
+                var mwmoObj1_2 = BuildMwmoOrdered(obj1Bytes);
 
-                var mddfData = BuildMddfFromLk(objBytes, mmdxOrdered, mdnmIndex);
-                var modfData = BuildModfFromLk(objBytes, mwmoOrdered, monmIndex);
-                (System.Collections.Generic.List<int>[] doodadRefsByChunk, System.Collections.Generic.List<int>[] wmoRefsByChunk) =
-                    BuildRefsByChunk(objBytes, mmdxOrdered, mwmoOrdered, mdnmIndex, monmIndex, yy, xx);
+                // Prepare per-chunk refs arrays to be filled during writes
+                var doodadRefsByChunk = new System.Collections.Generic.List<int>[256];
+                var wmoRefsByChunk = new System.Collections.Generic.List<int>[256];
+                for (int i2 = 0; i2 < 256; i2++) { doodadRefsByChunk[i2] = new System.Collections.Generic.List<int>(); wmoRefsByChunk[i2] = new System.Collections.Generic.List<int>(); }
+
+                using var msMddf2 = new MemoryStream();
+                int mddfBase = 0;
+                if (obj0Bytes.Length > 0) { var part = BuildMddfFromLk(obj0Bytes, mmdxObj0_2, mdnmIndex, placementsSkippedLines2, "obj0", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                if (objBytes.Length > 0) { var part = BuildMddfFromLk(objBytes, mmdxObj2, mdnmIndex, placementsSkippedLines2, "obj", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                { var part = BuildMddfFromLk(bytes, mmdxRoot2, mdnmIndex, placementsSkippedLines2, "root", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                var mddfData = msMddf2.ToArray();
+
+                using var msModf2 = new MemoryStream();
+                int modfBase = 0;
+                if (obj1Bytes.Length > 0) { var part = BuildModfFromLk(obj1Bytes, mwmoObj1_2, monmIndex, placementsSkippedLines2, "obj1", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                if (objBytes.Length > 0) { var part = BuildModfFromLk(objBytes, mwmoObj2, monmIndex, placementsSkippedLines2, "obj", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                { var part = BuildModfFromLk(bytes, mwmoRoot2, monmIndex, placementsSkippedLines2, "root", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                var modfData = msModf2.ToArray();
+
+                // Raw source counts
+                try
+                {
+                    void AddRaw2(string sourceLbl, byte[] b, List<string> mmdxOrd, List<string> mwmoOrd)
+                    {
+                        int cm = GetMddfCount(b);
+                        int cw = GetModfCount(b);
+                        string fm = TryGetFirstMddfName(b, mmdxOrd);
+                        string fw = TryGetFirstModfName(b, mwmoOrd);
+                        rawObjectsLines2.Add($"{yy},{xx},{sourceLbl},{cm},{cw},{fm},{fw}");
+                    }
+                    AddRaw2("obj0", obj0Bytes, mmdxObj0_2, mwmoObj0_2);
+                    AddRaw2("obj1", obj1Bytes, mmdxObj1_2, mwmoObj1_2);
+                    AddRaw2("obj", objBytes, mmdxObj2, mwmoObj2);
+                    AddRaw2("root", bytes, mmdxRoot2, mwmoRoot2);
+                }
+                catch { }
+
+                // per-chunk refs were filled during MDDF/MODF writes above
 
                 long mddfPosition = outMs.Position; outMs.Write(new Chunk("MDDF", mddfData.Length, mddfData).GetWholeChunk());
                 long modfPosition = outMs.Position; outMs.Write(new Chunk("MODF", modfData.Length, modfData).GetWholeChunk());
@@ -677,8 +896,8 @@ public sealed class AlphaWdtMonolithicWriter
                             {
                                 int p2 = data2 + k * entry2; if (p2 + entry2 > objBytes.Length) break;
                                 int local = BitConverter.ToInt32(objBytes, p2 + 0);
-                                if (local < 0 || local >= mmdxOrdered.Count) continue;
-                                string n = NormalizeAssetName(mmdxOrdered[local]);
+                                if (local < 0 || local >= mmdxObj2.Count) continue;
+                                string n = NormalizeAssetName(mmdxObj2[local]);
                                 mdnmIndex.TryGetValue(n, out int gidx);
                                 float wx = BitConverter.ToSingle(objBytes, p2 + 8);
                                 float wy = BitConverter.ToSingle(objBytes, p2 + 12);
@@ -704,8 +923,8 @@ public sealed class AlphaWdtMonolithicWriter
                             {
                                 int p2 = data2 + k * entry2; if (p2 + entry2 > objBytes.Length) break;
                                 int local = BitConverter.ToInt32(objBytes, p2 + 0);
-                                if (local < 0 || local >= mwmoOrdered.Count) continue;
-                                string n = NormalizeAssetName(mwmoOrdered[local]);
+                                if (local < 0 || local >= mwmoObj2.Count) continue;
+                                string n = NormalizeAssetName(mwmoObj2[local]);
                                 monmIndex.TryGetValue(n, out int gidx);
                                 float wx = BitConverter.ToSingle(objBytes, p2 + 8);
                                 float wy = BitConverter.ToSingle(objBytes, p2 + 12);
@@ -725,6 +944,7 @@ public sealed class AlphaWdtMonolithicWriter
                 {
                     int mddfCountW = mddfData.Length / 36;
                     int modfCountW = modfData.Length / 64;
+                    totalMddf2 += mddfCountW; totalModf2 += modfCountW;
                     string firstM = string.Empty;
                     string firstW = string.Empty;
                     int mddfOff3 = FindFourCC(objBytes, "MDDF");
@@ -735,7 +955,7 @@ public sealed class AlphaWdtMonolithicWriter
                         if (size3 >= 36)
                         {
                             int local3 = BitConverter.ToInt32(objBytes, data3 + 0);
-                            if (local3 >= 0 && local3 < mmdxOrdered.Count) firstM = NormalizeAssetName(mmdxOrdered[local3]);
+                            if (local3 >= 0 && local3 < mmdxObj2.Count) firstM = NormalizeAssetName(mmdxObj2[local3]);
                         }
                     }
                     int modfOff3 = FindFourCC(objBytes, "MODF");
@@ -746,7 +966,7 @@ public sealed class AlphaWdtMonolithicWriter
                         if (size3 >= 64)
                         {
                             int local3 = BitConverter.ToInt32(objBytes, data3 + 0);
-                            if (local3 >= 0 && local3 < mwmoOrdered.Count) firstW = NormalizeAssetName(mwmoOrdered[local3]);
+                            if (local3 >= 0 && local3 < mwmoObj2.Count) firstW = NormalizeAssetName(mwmoObj2[local3]);
                         }
                     }
                     objectsCsvLines2.Add($"{yy},{xx},{mddfCountW},{modfCountW},{firstM},{firstW}");
@@ -881,6 +1101,106 @@ public sealed class AlphaWdtMonolithicWriter
         }
         catch { }
         if (!string.IsNullOrWhiteSpace(opts?.ExportMccvDir)) Console.WriteLine($"[pack] MCCV images exported: {mccvExported2}");
+        try
+        {
+            var outDir = Path.GetDirectoryName(outWdtPath) ?? ".";
+            File.WriteAllLines(Path.Combine(outDir, "objects_written.csv"), objectsCsvLines2, Encoding.UTF8);
+            File.WriteAllLines(Path.Combine(outDir, "adt_objects_raw.csv"), rawObjectsLines2, Encoding.UTF8);
+            if (placementsSkippedLines2.Count > 1)
+                File.WriteAllLines(Path.Combine(outDir, "placements_skipped.csv"), placementsSkippedLines2, Encoding.UTF8);
+            if (texturesCsv.Count > 1)
+            {
+                File.WriteAllLines(Path.Combine(outDir, "textures.csv"), texturesCsv, Encoding.UTF8);
+            }
+            // Extract textures to assets folder when requested
+            if (opts?.ExtractAssets == true && texturesUsed.Count > 0)
+            {
+                var assetsRoot = string.IsNullOrWhiteSpace(opts.AssetsOut) ? Path.Combine(outDir, "assets") : opts.AssetsOut!;
+                var texRoot = Path.Combine(assetsRoot, "textures");
+                Directory.CreateDirectory(texRoot);
+                var missing = new List<string>();
+                foreach (var t in texturesUsed.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    var vp = t.Replace('\\', '/');
+                    try
+                    {
+                        if (!src.FileExists(vp)) { missing.Add(t); continue; }
+                        using var sTex = src.OpenFile(vp);
+                        var outPath = Path.Combine(texRoot, t.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? texRoot);
+                        using var fsTex = File.Create(outPath);
+                        sTex.CopyTo(fsTex);
+                    }
+                    catch { missing.Add(t); }
+                }
+                if (missing.Count > 0)
+                {
+                    File.WriteAllLines(Path.Combine(outDir, "textures_missing.csv"), new [] { "texture" }.Concat(missing), Encoding.UTF8);
+                }
+            }
+            // Extract models when requested and scope includes models; write missing list
+            if (opts?.ExtractAssets == true && (string.Equals(opts.AssetScope, "textures+models", StringComparison.OrdinalIgnoreCase) || string.Equals(opts.AssetScope, "models", StringComparison.OrdinalIgnoreCase)))
+            {
+                var assetsRoot = string.IsNullOrWhiteSpace(opts.AssetsOut) ? Path.Combine(outDir, "assets") : opts.AssetsOut!;
+                var modelsRoot = Path.Combine(assetsRoot, "models");
+                Directory.CreateDirectory(modelsRoot);
+                var missingModels = new List<string> { "type,path" };
+                // copy M2/MDX
+                foreach (var m in usedM2ForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    var mdxPath = m.Replace('\\', '/');
+                    var m2Path = (mdxPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)) ? mdxPath.Substring(0, mdxPath.Length - 3) + "m2" : mdxPath;
+                    bool ok = false;
+                    try
+                    {
+                        string attempt = src.FileExists(mdxPath) ? mdxPath : (src.FileExists(m2Path) ? m2Path : string.Empty);
+                        if (!string.IsNullOrEmpty(attempt))
+                        {
+                            using var sModel = src.OpenFile(attempt);
+                            var outRel = mdxPath.Replace('/', Path.DirectorySeparatorChar);
+                            var outPath = Path.Combine(modelsRoot, outRel);
+                            Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? modelsRoot);
+                            using var fsOut = File.Create(outPath);
+                            sModel.CopyTo(fsOut);
+                            ok = true;
+                        }
+                    }
+                    catch { ok = false; }
+                    if (!ok) missingModels.Add($"m2,{mdxPath}");
+                }
+                // copy WMO
+                foreach (var w in usedWmoForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    var wmoPath = w.Replace('\\', '/');
+                    bool ok = false;
+                    try
+                    {
+                        if (src.FileExists(wmoPath))
+                        {
+                            using var sWmo = src.OpenFile(wmoPath);
+                            var outRel = wmoPath.Replace('/', Path.DirectorySeparatorChar);
+                            var outPath = Path.Combine(modelsRoot, outRel);
+                            Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? modelsRoot);
+                            using var fsOut = File.Create(outPath);
+                            sWmo.CopyTo(fsOut);
+                            ok = true;
+                        }
+                    }
+                    catch { ok = false; }
+                    if (!ok) missingModels.Add($"wmo,{wmoPath}");
+                }
+                if (missingModels.Count > 1)
+                {
+                    File.WriteAllLines(Path.Combine(outDir, "models_missing.csv"), missingModels, Encoding.UTF8);
+                }
+            }
+
+            if ((m2List.Count + wmoList.Count) > 0 && (totalMddf2 + totalModf2) == 0)
+            {
+                Console.WriteLine("[warn] MDNM/MONM non-empty but wrote zero placements (MDDF/MODF=0). Check name-index mapping and gating.");
+            }
+        }
+        catch { }
     }
 
     private static IEnumerable<string> ReadM2NamesFromBytes(byte[] bytes)
@@ -993,6 +1313,65 @@ public sealed class AlphaWdtMonolithicWriter
         // Append trailing empty string (extra null) to satisfy Alpha MONM iteration rules
         ms.WriteByte(0);
         return ms.ToArray();
+    }
+
+    // Helpers for texture harvesting (archive path)
+    private static List<string> ParseMtexNamesLocal(byte[] data)
+    {
+        var list = new List<string>();
+        if (data == null || data.Length == 0) return list;
+        int i = 0;
+        while (i < data.Length)
+        {
+            int j = i;
+            while (j < data.Length && data[j] != 0) j++;
+            if (j > i)
+            {
+                var s = Encoding.ASCII.GetString(data, i, j - i);
+                list.Add(s);
+            }
+            i = j + 1;
+        }
+        return list;
+    }
+
+    private static string NormalizeTexturePath(string p)
+    {
+        if (string.IsNullOrWhiteSpace(p)) return string.Empty;
+        return p.Replace('\\', '/');
+    }
+
+    private static List<int> ReadMCLYTextureIdsInChunk(byte[] adtBytes, int mcNkOffset)
+    {
+        var ids = new List<int>();
+        if (adtBytes == null || mcNkOffset < 0 || mcNkOffset + 8 > adtBytes.Length) return ids;
+        int mcnkSize = BitConverter.ToInt32(adtBytes, mcNkOffset + 4);
+        int subStart = mcNkOffset + 8 + 0x80; // after MCNK header
+        int subEnd = Math.Min(adtBytes.Length, mcNkOffset + 8 + Math.Max(0, mcnkSize));
+        for (int p = subStart; p + 8 <= subEnd;)
+        {
+            string fcc = Encoding.ASCII.GetString(adtBytes, p, 4);
+            int size = BitConverter.ToInt32(adtBytes, p + 4);
+            int dataStart = p + 8;
+            int next = dataStart + size + ((size & 1) == 1 ? 1 : 0);
+            if (dataStart + size > subEnd || next <= p) break;
+            if (fcc == "YLCM") // MCLY reversed
+            {
+                int layers = size / 16; // LK MCLY entry size
+                for (int i = 0; i < layers; i++)
+                {
+                    int baseOff = dataStart + i * 16;
+                    if (baseOff + 4 <= adtBytes.Length)
+                    {
+                        int texId = unchecked((int)BitConverter.ToUInt32(adtBytes, baseOff + 0));
+                        if (texId >= 0) ids.Add(texId);
+                    }
+                }
+                break;
+            }
+            p = next;
+        }
+        return ids;
     }
 
     private static string NormalizeAssetName(string name)
@@ -1149,7 +1528,7 @@ public sealed class AlphaWdtMonolithicWriter
         return (doodadRefs, wmoRefs);
     }
 
-    private static byte[] BuildMddfFromLk(byte[] bytes, List<string> mmdxOrdered, Dictionary<string, int> mdnmIndex)
+    private static byte[] BuildMddfFromLk(byte[] bytes, List<string> mmdxOrdered, Dictionary<string, int> mdnmIndex, List<string>? skipped = null, string? source = null, int tileYY = -1, int tileXX = -1, System.Collections.Generic.List<int>[]? perChunkRefs = null, int baseIndex = 0, HashSet<string>? usedM2Out = null)
     {
         if (bytes == null || bytes.Length < 8) return Array.Empty<byte>();
         int mddf = FindFourCC(bytes, "MDDF");
@@ -1164,9 +1543,15 @@ public sealed class AlphaWdtMonolithicWriter
             int p = data + i * entry;
             if (p + entry > bytes.Length) break;
             int localIdx = BitConverter.ToInt32(bytes, p + 0);
-            if (localIdx < 0 || localIdx >= mmdxOrdered.Count) continue;
+            if (localIdx < 0 || localIdx >= mmdxOrdered.Count)
+            {
+                skipped?.Add($"{tileYY},{tileXX},{source},mddf,{localIdx},,out_of_range");
+                continue;
+            }
             string name = NormalizeAssetName(mmdxOrdered[localIdx]);
-            if (string.IsNullOrEmpty(name) || !mdnmIndex.TryGetValue(name, out int globalIdx)) continue;
+            if (string.IsNullOrEmpty(name)) { skipped?.Add($"{tileYY},{tileXX},{source},mddf,{localIdx},,empty_name"); continue; }
+            if (!mdnmIndex.TryGetValue(name, out int globalIdx)) { skipped?.Add($"{tileYY},{tileXX},{source},mddf,{localIdx},{name},not_in_global_names"); continue; }
+            usedM2Out?.Add(name);
             int uniqueId = BitConverter.ToInt32(bytes, p + 4);
             float posX = BitConverter.ToSingle(bytes, p + 8);
             float posY = BitConverter.ToSingle(bytes, p + 12);
@@ -1187,11 +1572,26 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(rotZ));
             ms.Write(BitConverter.GetBytes(scale));
             ms.Write(BitConverter.GetBytes(flags));
+
+            // Populate per-chunk refs with the GLOBAL MDNM index for this record
+            if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
+            {
+                const float TILESIZE = 533.33333f; const float CHUNK = TILESIZE / 16f;
+                float tileMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
+                float tileMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
+                int cx = (int)Math.Floor((posX - tileMinX) / CHUNK);
+                int cy = (int)Math.Floor((posY - tileMinY) / CHUNK);
+                if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                {
+                    int idx = cy * 16 + cx;
+                    perChunkRefs[idx].Add(globalIdx);
+                }
+            }
         }
         return ms.ToArray();
     }
 
-    private static byte[] BuildModfFromLk(byte[] bytes, List<string> mwmoOrdered, Dictionary<string, int> monmIndex)
+    private static byte[] BuildModfFromLk(byte[] bytes, List<string> mwmoOrdered, Dictionary<string, int> monmIndex, List<string>? skipped = null, string? source = null, int tileYY = -1, int tileXX = -1, System.Collections.Generic.List<int>[]? perChunkRefs = null, int baseIndex = 0, HashSet<string>? usedWmoOut = null)
     {
         if (bytes == null || bytes.Length < 8) return Array.Empty<byte>();
         int modf = FindFourCC(bytes, "MODF");
@@ -1206,9 +1606,15 @@ public sealed class AlphaWdtMonolithicWriter
             int p = data + i * entry;
             if (p + entry > bytes.Length) break;
             int localIdx = BitConverter.ToInt32(bytes, p + 0);
-            if (localIdx < 0 || localIdx >= mwmoOrdered.Count) continue;
+            if (localIdx < 0 || localIdx >= mwmoOrdered.Count)
+            {
+                skipped?.Add($"{tileYY},{tileXX},{source},modf,{localIdx},,out_of_range");
+                continue;
+            }
             string name = NormalizeAssetName(mwmoOrdered[localIdx]);
-            if (string.IsNullOrEmpty(name) || !monmIndex.TryGetValue(name, out int globalIdx)) continue;
+            if (string.IsNullOrEmpty(name)) { skipped?.Add($"{tileYY},{tileXX},{source},modf,{localIdx},,empty_name"); continue; }
+            if (!monmIndex.TryGetValue(name, out int globalIdx)) { skipped?.Add($"{tileYY},{tileXX},{source},modf,{localIdx},{name},not_in_global_names"); continue; }
+            usedWmoOut?.Add(name);
             int uniqueId = BitConverter.ToInt32(bytes, p + 4);
             float posX = BitConverter.ToSingle(bytes, p + 8);
             float posY = BitConverter.ToSingle(bytes, p + 12);
@@ -1236,8 +1642,75 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(doodadSet));
             ms.Write(BitConverter.GetBytes(nameSet));
             ms.Write(BitConverter.GetBytes(scale));
+
+            if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
+            {
+                const float TILESIZE = 533.33333f; const float CHUNK = TILESIZE / 16f;
+                float tileMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
+                float tileMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
+                int cx = (int)Math.Floor((posX - tileMinX) / CHUNK);
+                int cy = (int)Math.Floor((posY - tileMinY) / CHUNK);
+                if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
+                {
+                    int idx = cy * 16 + cx;
+                    perChunkRefs[idx].Add(globalIdx);
+                }
+            }
         }
         return ms.ToArray();
+    }
+
+    private static void WriteIndexCsv(string outDir, Dictionary<string, int> mdnmIndex, Dictionary<string, int> monmIndex)
+    {
+        try
+        {
+            var path = Path.Combine(outDir, "mdnm_monm_index.csv");
+            using var sw = new StreamWriter(path, false, Encoding.UTF8);
+            sw.WriteLine("type,index,name");
+            foreach (var kv in mdnmIndex.OrderBy(k => k.Value)) sw.WriteLine($"m2,{kv.Value},{kv.Key}");
+            foreach (var kv in monmIndex.OrderBy(k => k.Value)) sw.WriteLine($"wmo,{kv.Value},{kv.Key}");
+        }
+        catch { }
+    }
+
+    private static int GetMddfCount(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length < 12) return 0;
+        int off = FindFourCC(bytes, "MDDF"); if (off < 0) return 0;
+        int size = BitConverter.ToInt32(bytes, off + 4); return Math.Max(0, size / 36);
+    }
+
+    private static int GetModfCount(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length < 12) return 0;
+        int off = FindFourCC(bytes, "MODF"); if (off < 0) return 0;
+        int size = BitConverter.ToInt32(bytes, off + 4); return Math.Max(0, size / 64);
+    }
+
+    private static string TryGetFirstMddfName(byte[] bytes, List<string> mmdxOrdered)
+    {
+        try
+        {
+            int off = FindFourCC(bytes, "MDDF"); if (off < 0) return string.Empty;
+            int size = BitConverter.ToInt32(bytes, off + 4); if (size < 36) return string.Empty;
+            int data = off + 8; int local = BitConverter.ToInt32(bytes, data + 0);
+            if (local >= 0 && local < mmdxOrdered.Count) return NormalizeAssetName(mmdxOrdered[local]);
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    private static string TryGetFirstModfName(byte[] bytes, List<string> mwmoOrdered)
+    {
+        try
+        {
+            int off = FindFourCC(bytes, "MODF"); if (off < 0) return string.Empty;
+            int size = BitConverter.ToInt32(bytes, off + 4); if (size < 64) return string.Empty;
+            int data = off + 8; int local = BitConverter.ToInt32(bytes, data + 0);
+            if (local >= 0 && local < mwmoOrdered.Count) return NormalizeAssetName(mwmoOrdered[local]);
+        }
+        catch { }
+        return string.Empty;
     }
 
     private static int FindFourCC(byte[] buf, string forwardFourCC)

@@ -71,6 +71,43 @@ internal static class Program
         }
     }
 
+    private static void SetupTeeLogging(string cmd, Dictionary<string, string> opts)
+    {
+        try
+        {
+            var logDir = GetOption(opts, "log-dir");
+            var logFile = GetOption(opts, "log-file");
+            if (string.IsNullOrWhiteSpace(logDir) && string.IsNullOrWhiteSpace(logFile)) return;
+
+            string dir = string.IsNullOrWhiteSpace(logDir) ? Directory.GetCurrentDirectory() : logDir!;
+            Directory.CreateDirectory(dir);
+
+            string fileName = string.IsNullOrWhiteSpace(logFile)
+                ? $"wowrollback_{cmd}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.log"
+                : logFile!;
+            if (!Path.IsPathRooted(fileName)) fileName = Path.Combine(dir, fileName);
+
+            var fs = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.Read);
+            var writer = new StreamWriter(fs) { AutoFlush = true };
+            Console.SetOut(new SplitWriter(Console.Out, writer));
+            Console.SetError(new SplitWriter(Console.Error, writer));
+            Console.WriteLine($"[log] tee: {fileName}");
+        }
+        catch { }
+    }
+
+    private sealed class SplitWriter : System.IO.TextWriter
+    {
+        private readonly System.IO.TextWriter _a;
+        private readonly System.IO.TextWriter _b;
+        public SplitWriter(System.IO.TextWriter a, System.IO.TextWriter b) { _a = a; _b = b; }
+        public override Encoding Encoding => _a.Encoding;
+        public override void Write(char value) { _a.Write(value); _b.Write(value); }
+        public override void Write(string? value) { _a.Write(value); _b.Write(value); }
+        public override void WriteLine(string? value) { _a.WriteLine(value); _b.WriteLine(value); }
+        public override void Flush() { _a.Flush(); _b.Flush(); }
+    }
+
     private static int Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help")
@@ -81,6 +118,7 @@ internal static class Program
 
         var cmd = args[0].ToLowerInvariant();
         var opts = ParseArgs(args.Skip(1).ToArray());
+        SetupTeeLogging(cmd, opts);
 
         try
         {
@@ -173,6 +211,20 @@ internal static class Program
             ModernListfilePath = modernListfile,
             StrictTargetAssets = strict
         };
+        if (opts.ContainsKey("extract-assets"))
+        {
+            options = options with { ExtractAssets = true, AssetScope = "textures+models" };
+        }
+        var assetScopeOpt = GetOption(opts, "asset-scope");
+        if (!string.IsNullOrWhiteSpace(assetScopeOpt))
+        {
+            options = options with { AssetScope = assetScopeOpt! };
+        }
+        var assetsOutOpt = GetOption(opts, "assets-out");
+        if (!string.IsNullOrWhiteSpace(assetsOutOpt))
+        {
+            options = options with { AssetsOut = assetsOutOpt };
+        }
         var wantVerbose = opts.ContainsKey("verbose-logging") || opts.ContainsKey("alpha-debug") || opts.ContainsKey("verbose");
         if (wantVerbose) options = options with { VerboseLogging = true, Verbose = true };
         if (opts.ContainsKey("raw-copy-layers")) options = options with { RawCopyLkLayers = true };
@@ -189,6 +241,7 @@ internal static class Program
             Console.WriteLine($"[pack] Map: {mapName}");
             if (!string.IsNullOrWhiteSpace(targetListfile)) Console.WriteLine($"[pack] Target listfile: {targetListfile}");
             Console.WriteLine($"[pack] Strict target assets: {options.StrictTargetAssets.ToString().ToLowerInvariant()}");
+            if (options.ExtractAssets) Console.WriteLine("[pack] Extract assets: true");
 
             if (!Directory.Exists(clientPath)) { Console.Error.WriteLine("[error] --client-path does not exist"); return 2; }
             EnsureStormLibOnPath();

@@ -23,4 +23,11 @@ public sealed record LkToAlphaOptions
     public string? ExportMccvDir { get; init; }
     public bool PreferTexLayers { get; init; }
     public bool RawCopyLkLayers { get; init; }
+
+    public bool ExtractAssets { get; init; }
+    public string? AssetsOut { get; init; }
+    public string AssetScope { get; init; } = "textures";
+    public bool IncludeMissingModels { get; init; } = true;
+    public bool WriteAssetManifest { get; init; } = true;
+    public string? RunTag { get; init; }
 }

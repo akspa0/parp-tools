@@ -8,8 +8,10 @@ namespace WoWRollback.Core.Services.Archive
 {
     public static class ArchiveLocator
     {
-        // Recognize both patch-2.MPQ and patch-enUS-2.MPQ (case-insensitive)
-        private static readonly Regex PatchRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Recognize numeric patches: patch-2.MPQ, patch_enUS-2.MPQ (case-insensitive)
+        private static readonly Regex PatchNumericRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([0-9]+)\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        // Recognize letter patches: patch-A.MPQ, patch-enUS-A.MPQ (case-insensitive)
+        private static readonly Regex PatchLetterRegex = new Regex(@"patch(?:[-_][a-z]{2}[A-Z]{2})?[-_]?([A-Za-z])\.mpq", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static IReadOnlyList<string> LocateMpqs(string clientRoot)
         {
@@ -21,29 +23,39 @@ namespace WoWRollback.Core.Services.Archive
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // Heuristic ordering: base first, patches ascending last (so highest patch gets highest priority)
+            // Heuristic ordering: base first, numeric patches ascending, then letter patches ascending (A..Z) last for highest priority
             var baseMpqs = new List<string>();
-            var patchMpqs = new List<(int Order, string Path)>();
+            var patchNumerics = new List<(int Order, string Path)>();
+            var patchLetters = new List<(char Letter, string Path)>();
 
             foreach (var path in allMpqs)
             {
                 var file = Path.GetFileName(path);
-                var m = PatchRegex.Match(file);
-                if (m.Success && int.TryParse(m.Groups[1].Value, out var n))
+                var mNum = PatchNumericRegex.Match(file);
+                if (mNum.Success && int.TryParse(mNum.Groups[1].Value, out var n))
                 {
-                    patchMpqs.Add((n, path));
+                    patchNumerics.Add((n, path));
+                    continue;
                 }
-                else
+
+                var mLet = PatchLetterRegex.Match(file);
+                if (mLet.Success && mLet.Groups[1].Success)
                 {
-                    baseMpqs.Add(path);
+                    char c = char.ToUpperInvariant(mLet.Groups[1].Value[0]);
+                    patchLetters.Add((c, path));
+                    continue;
                 }
+
+                baseMpqs.Add(path);
             }
 
-            patchMpqs.Sort((a, b) => a.Order.CompareTo(b.Order));
+            patchNumerics.Sort((a, b) => a.Order.CompareTo(b.Order));
+            patchLetters.Sort((a, b) => a.Letter.CompareTo(b.Letter));
 
             var ordered = new List<string>();
             ordered.AddRange(baseMpqs);
-            ordered.AddRange(patchMpqs.Select(p => p.Path));
+            ordered.AddRange(patchNumerics.Select(p => p.Path));
+            ordered.AddRange(patchLetters.Select(p => p.Path));
             return ordered;
         }
     }
