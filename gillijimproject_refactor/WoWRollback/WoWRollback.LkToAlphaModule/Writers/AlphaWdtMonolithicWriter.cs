@@ -11,6 +11,7 @@ using GillijimProject.WowFiles;
 using GillijimProject.WowFiles.LichKing;
 using WoWRollback.LkToAlphaModule.Builders;
 using WoWRollback.Core.Services.Archive;
+using WoWRollback.LkToAlphaModule.AssetConversion;
 
 namespace WoWRollback.LkToAlphaModule.Writers;
 
@@ -24,6 +25,8 @@ public sealed class AlphaWdtMonolithicWriter
         bool verbose = opts?.Verbose == true;
         var usedM2ForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var usedWmoForExtract = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var texturesCsv = new List<string> { "tile_yy,tile_xx,chunk_idx,tex_path,src" };
+        var texturesUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(lkWdtPath)) throw new ArgumentException("lkWdtPath required");
         if (string.IsNullOrWhiteSpace(lkMapDir)) throw new ArgumentException("lkMapDir required");
         if (string.IsNullOrWhiteSpace(outWdtPath)) throw new ArgumentException("outWdtPath required");
@@ -106,17 +109,25 @@ public sealed class AlphaWdtMonolithicWriter
         long mphdStart = ms.Position; var mphd = new Chunk("MPHD", 128, new byte[128]); ms.Write(mphd.GetWholeChunk()); long mphdDataStart = mphdStart + 8;
         // MAIN placeholder (4096 * 16)
         var mainData = new byte[GridTiles * 16]; var main = new Chunk("MAIN", mainData.Length, mainData); long mainStart = ms.Position; ms.Write(main.GetWholeChunk());
-        // Build name lists (optional); currently use collected sets (may be empty)
-        var wmoNames = allWmoNames.ToList();
-        var m2Names = allM2Names.ToList();
+        // Build name lists (normalize + distinct); currently use collected sets (may be empty)
+        var m2Names = allM2Names
+            .Select(NormalizeAssetName)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var wmoNames = allWmoNames
+            .Select(NormalizeAssetName)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (!string.IsNullOrWhiteSpace(opts?.TargetListfilePath) && File.Exists(opts.TargetListfilePath))
         {
             try
             {
                 var idx = ListfileIndex.Load(opts.TargetListfilePath!);
                 var gate = new AssetGate(idx);
-                var keptM2 = gate.FilterNames(m2Names.Select(NormalizeAssetName), out var droppedM2);
-                var keptWmo = gate.FilterNames(wmoNames.Select(NormalizeAssetName), out var droppedWmo);
+                var keptM2 = gate.FilterNames(m2Names, out var droppedM2);
+                var keptWmo = gate.FilterNames(wmoNames, out var droppedWmo);
                 var outDir = Path.GetDirectoryName(outWdtPath) ?? ".";
                 var dropCsv = Path.Combine(outDir, "dropped_assets.csv");
                 AssetGate.WriteDropReport(dropCsv, droppedM2, droppedWmo);
@@ -129,9 +140,14 @@ public sealed class AlphaWdtMonolithicWriter
                     foreach (var p in keptWmo) sw.WriteLine($"wmo,{p}");
                 }
                 catch { }
+                // Apply gating results
+                m2Names = keptM2.ToList();
+                wmoNames = keptWmo.ToList();
             }
             catch { }
         }
+        // Respect skipWmos flag
+        if (skipWmos) wmoNames.Clear();
         // Global name indices for MDNM/MONM
         var mdnmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < m2Names.Count; i++) mdnmIndexFs[NormalizeAssetName(m2Names[i])] = i;
@@ -278,6 +294,52 @@ public sealed class AlphaWdtMonolithicWriter
             }
             long mtexPosition = outMs.Position; outMs.Write(new Chunk("MTEX", mtexData.Length, mtexData).GetWholeChunk()); long mtexEnd = outMs.Position;
 
+            // Inventory textures referenced by present chunks for diagnostics (textures.csv)
+            try
+            {
+                var mtexNames = ParseMtexNamesLocal(mtexData);
+                var presentTexScan = new List<int>(presentIndices);
+                if (texMcnkOffsets != null)
+                {
+                    for (int i = 0; i < texMcnkOffsets.Count; i++)
+                    {
+                        if (texMcnkOffsets[i] > 0 && !presentTexScan.Contains(i)) presentTexScan.Add(i);
+                    }
+                }
+                presentTexScan.Sort();
+                bool preferTexForMtex = (texBytesForChunks != null && texBytesForChunks.Length > 0);
+                foreach (var ci in presentTexScan)
+                {
+                    int rootOff = (ci < lkMcnkOffsets.Count) ? lkMcnkOffsets[ci] : 0;
+                    int texOff = (texMcnkOffsets != null && ci < texMcnkOffsets.Count) ? texMcnkOffsets[ci] : 0;
+                    List<int> ids = new List<int>();
+                    string srcTag = string.Empty;
+                    if (preferTexForMtex)
+                    {
+                        if (texOff > 0) { ids = ReadMCLYTextureIdsInChunk(texBytesForChunks!, texOff); srcTag = "tex"; }
+                        else if (rootOff > 0) { ids = ReadMCLYTextureIdsInChunk(bytes, rootOff); srcTag = "root"; }
+                    }
+                    else
+                    {
+                        if (rootOff > 0) { ids = ReadMCLYTextureIdsInChunk(bytes, rootOff); srcTag = "root"; }
+                        else if (texOff > 0) { ids = ReadMCLYTextureIdsInChunk(texBytesForChunks!, texOff); srcTag = "tex"; }
+                    }
+                    foreach (var tid in ids)
+                    {
+                        if (tid >= 0 && tid < mtexNames.Count)
+                        {
+                            var texPath = NormalizeTexturePath(mtexNames[tid]);
+                            if (!string.IsNullOrWhiteSpace(texPath))
+                            {
+                                if (texturesUsed.Add(texPath)) { }
+                                texturesCsv.Add($"{yy},{xx},{ci},{texPath},{srcTag}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
             // Build MDDF/MODF from _obj0/_obj1 if present (fallback: _obj, then root)
             var objAdt = Path.Combine(rootDir, baseName + "_obj.adt");
             var obj0Adt = Path.Combine(rootDir, baseName + "_obj0.adt");
@@ -302,43 +364,60 @@ public sealed class AlphaWdtMonolithicWriter
             var wmoRefsByChunkFs = new System.Collections.Generic.List<int>[256];
             for (int i = 0; i < 256; i++) { doodadRefsByChunkFs[i] = new System.Collections.Generic.List<int>(); wmoRefsByChunkFs[i] = new System.Collections.Generic.List<int>(); }
 
-            // MDDF: prefer obj0, then obj, then root
-            using var msMddf = new MemoryStream();
-            int mddfBaseFs = 0;
-            if (obj0BytesFs.Length > 0)
+            byte[] mddfDataFs;
+            if (opts?.SkipM2 == true)
             {
-                var part = BuildMddfFromLk(obj0BytesFs, mmdxObj0, mdnmIndexFs, placementsSkippedLines, "obj0", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
-                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+                mddfDataFs = Array.Empty<byte>();
             }
-            if (objBytesFs.Length > 0)
+            else
             {
-                var part = BuildMddfFromLk(objBytesFs, mmdxObj, mdnmIndexFs, placementsSkippedLines, "obj", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
-                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+                using var msMddf = new MemoryStream();
+                int mddfBaseFs = 0;
+                if (obj0BytesFs.Length > 0)
+                {
+                    var part = BuildMddfFromLk(obj0BytesFs, mmdxObj0, mdnmIndexFs, placementsSkippedLines, "obj0", yy, xx, doodadRefsByChunkFs, mddfBaseFs, usedM2ForExtract);
+                    if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+                }
+                if (objBytesFs.Length > 0)
+                {
+                    var part = BuildMddfFromLk(objBytesFs, mmdxObj, mdnmIndexFs, placementsSkippedLines, "obj", yy, xx, doodadRefsByChunkFs, mddfBaseFs, usedM2ForExtract);
+                    if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+                }
+                {
+                    var part = BuildMddfFromLk(bytes, mmdxRoot, mdnmIndexFs, placementsSkippedLines, "root", yy, xx, doodadRefsByChunkFs, mddfBaseFs, usedM2ForExtract);
+                    if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
+                }
+                mddfDataFs = msMddf.ToArray();
             }
-            {
-                var part = BuildMddfFromLk(bytes, mmdxRoot, mdnmIndexFs, placementsSkippedLines, "root", yy, xx, doodadRefsByChunkFs, mddfBaseFs);
-                if (part.Length > 0) { msMddf.Write(part, 0, part.Length); mddfBaseFs += part.Length / 36; }
-            }
-            var mddfDataFs = msMddf.ToArray();
 
-            // MODF: prefer obj1, then obj, then root
-            using var msModf = new MemoryStream();
-            int modfBaseFs = 0;
-            if (obj1BytesFs.Length > 0)
+            // MODF: prefer obj1, then obj, then root (or skip entirely if requested)
+            byte[] modfDataFs;
+            if (!skipWmos)
             {
-                var part = BuildModfFromLk(obj1BytesFs, mwmoObj1, monmIndexFs, placementsSkippedLines, "obj1", yy, xx, wmoRefsByChunkFs, modfBaseFs);
-                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+                using var msModf = new MemoryStream();
+                int modfBaseFs = 0;
+                if (obj1BytesFs.Length > 0)
+                {
+                    var part = BuildModfFromLk(obj1BytesFs, mwmoObj1, monmIndexFs, placementsSkippedLines, "obj1", yy, xx, wmoRefsByChunkFs, modfBaseFs, usedWmoForExtract);
+                    if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+                }
+                if (objBytesFs.Length > 0)
+                {
+                    var part = BuildModfFromLk(objBytesFs, mwmoObj, monmIndexFs, placementsSkippedLines, "obj", yy, xx, wmoRefsByChunkFs, modfBaseFs, usedWmoForExtract);
+                    if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+                }
+                {
+                    var part = BuildModfFromLk(bytes, mwmoRoot, monmIndexFs, placementsSkippedLines, "root", yy, xx, wmoRefsByChunkFs, modfBaseFs, usedWmoForExtract);
+                    if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+                }
+                modfDataFs = msModf.ToArray();
             }
-            if (objBytesFs.Length > 0)
+            else
             {
-                var part = BuildModfFromLk(objBytesFs, mwmoObj, monmIndexFs, placementsSkippedLines, "obj", yy, xx, wmoRefsByChunkFs, modfBaseFs);
-                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
+                // Clear WMO refs per chunk when skipping WMOs
+                for (int i = 0; i < 256; i++) wmoRefsByChunkFs[i].Clear();
+                modfDataFs = Array.Empty<byte>();
             }
-            {
-                var part = BuildModfFromLk(bytes, mwmoRoot, monmIndexFs, placementsSkippedLines, "root", yy, xx, wmoRefsByChunkFs, modfBaseFs);
-                if (part.Length > 0) { msModf.Write(part, 0, part.Length); modfBaseFs += part.Length / 64; }
-            }
-            var modfDataFs = msModf.ToArray();
 
             // Raw source counts and first names
             try
@@ -535,9 +614,45 @@ public sealed class AlphaWdtMonolithicWriter
             File.WriteAllLines(Path.Combine(outDir, "adt_objects_raw.csv"), rawObjectsLines, Encoding.UTF8);
             if (placementsSkippedLines.Count > 1)
                 File.WriteAllLines(Path.Combine(outDir, "placements_skipped.csv"), placementsSkippedLines, Encoding.UTF8);
+            if (texturesCsv.Count > 1)
+                File.WriteAllLines(Path.Combine(outDir, "textures.csv"), texturesCsv, Encoding.UTF8);
+            if (usedM2ForExtract.Count > 0)
+                File.WriteAllLines(Path.Combine(outDir, "m2_used.csv"), new [] { "name" }.Concat(usedM2ForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)), Encoding.UTF8);
+            if (usedWmoForExtract.Count > 0)
+                File.WriteAllLines(Path.Combine(outDir, "wmo_used.csv"), new [] { "name" }.Concat(usedWmoForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)), Encoding.UTF8);
             if ((m2Names.Count + wmoNames.Count) > 0 && (totalMddfWritten + totalModfWritten) == 0)
             {
                 Console.WriteLine("[warn] MDNM/MONM non-empty but wrote zero placements (MDDF/MODF=0). Check name-index mapping and gating.");
+            }
+        }
+        catch { }
+
+        try
+        {
+            var outDir = Path.GetDirectoryName(outWdtPath) ?? ".";
+            if (opts?.ExtractAssets == true && !string.IsNullOrWhiteSpace(opts.AssetsSourceRoot) && texturesUsed.Count > 0)
+            {
+                var tilesetsRoot = Path.Combine(outDir, "assets", "tilesets");
+                Directory.CreateDirectory(tilesetsRoot);
+                var missing = new List<string>();
+                foreach (var t in texturesUsed.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                {
+                    var rel = t.Replace('/', Path.DirectorySeparatorChar);
+                    var srcPath = Path.Combine(opts.AssetsSourceRoot!, rel);
+                    try
+                    {
+                        if (!File.Exists(srcPath)) { missing.Add(t); continue; }
+                        var subRel = IsTilesetTexturePath(t) ? TilesetRelativeSubpath(t).Replace('/', Path.DirectorySeparatorChar) : rel;
+                        var outPath = Path.Combine(tilesetsRoot, subRel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? tilesetsRoot);
+                        File.Copy(srcPath, outPath, true);
+                    }
+                    catch { missing.Add(t); }
+                }
+                if (missing.Count > 0)
+                {
+                    File.WriteAllLines(Path.Combine(outDir, "textures_missing.csv"), new [] { "texture" }.Concat(missing), Encoding.UTF8);
+                }
             }
         }
         catch { }
@@ -880,19 +995,35 @@ public sealed class AlphaWdtMonolithicWriter
                 var wmoRefsByChunk = new System.Collections.Generic.List<int>[256];
                 for (int i2 = 0; i2 < 256; i2++) { doodadRefsByChunk[i2] = new System.Collections.Generic.List<int>(); wmoRefsByChunk[i2] = new System.Collections.Generic.List<int>(); }
 
-                using var msMddf2 = new MemoryStream();
-                int mddfBase = 0;
-                if (obj0Bytes.Length > 0) { var part = BuildMddfFromLk(obj0Bytes, mmdxObj0_2, mdnmIndex, placementsSkippedLines2, "obj0", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
-                if (objBytes.Length > 0) { var part = BuildMddfFromLk(objBytes, mmdxObj2, mdnmIndex, placementsSkippedLines2, "obj", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
-                { var part = BuildMddfFromLk(bytes, mmdxRoot2, mdnmIndex, placementsSkippedLines2, "root", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
-                var mddfData = msMddf2.ToArray();
+                byte[] mddfData;
+                if (opts?.SkipM2 == true)
+                {
+                    mddfData = Array.Empty<byte>();
+                }
+                else
+                {
+                    using var msMddf2 = new MemoryStream();
+                    int mddfBase = 0;
+                    if (obj0Bytes.Length > 0) { var part = BuildMddfFromLk(obj0Bytes, mmdxObj0_2, mdnmIndex, placementsSkippedLines2, "obj0", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                    if (objBytes.Length > 0) { var part = BuildMddfFromLk(objBytes, mmdxObj2, mdnmIndex, placementsSkippedLines2, "obj", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                    { var part = BuildMddfFromLk(bytes, mmdxRoot2, mdnmIndex, placementsSkippedLines2, "root", yy, xx, doodadRefsByChunk, mddfBase, usedM2ForExtract); if (part.Length > 0) { msMddf2.Write(part, 0, part.Length); mddfBase += part.Length / 36; } }
+                    mddfData = msMddf2.ToArray();
+                }
 
-                using var msModf2 = new MemoryStream();
-                int modfBase = 0;
-                if (obj1Bytes.Length > 0) { var part = BuildModfFromLk(obj1Bytes, mwmoObj1_2, monmIndex, placementsSkippedLines2, "obj1", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
-                if (objBytes.Length > 0) { var part = BuildModfFromLk(objBytes, mwmoObj2, monmIndex, placementsSkippedLines2, "obj", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
-                { var part = BuildModfFromLk(bytes, mwmoRoot2, monmIndex, placementsSkippedLines2, "root", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
-                var modfData = msModf2.ToArray();
+                byte[] modfData;
+                if (opts?.SkipWmos == true)
+                {
+                    modfData = Array.Empty<byte>();
+                }
+                else
+                {
+                    using var msModf2 = new MemoryStream();
+                    int modfBase = 0;
+                    if (obj1Bytes.Length > 0) { var part = BuildModfFromLk(obj1Bytes, mwmoObj1_2, monmIndex, placementsSkippedLines2, "obj1", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                    if (objBytes.Length > 0) { var part = BuildModfFromLk(objBytes, mwmoObj2, monmIndex, placementsSkippedLines2, "obj", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                    { var part = BuildModfFromLk(bytes, mwmoRoot2, monmIndex, placementsSkippedLines2, "root", yy, xx, wmoRefsByChunk, modfBase, usedWmoForExtract); if (part.Length > 0) { msModf2.Write(part, 0, part.Length); modfBase += part.Length / 64; } }
+                    modfData = msModf2.ToArray();
+                }
 
                 // Raw source counts
                 try
@@ -1200,7 +1331,7 @@ public sealed class AlphaWdtMonolithicWriter
                         if (!string.IsNullOrEmpty(attempt))
                         {
                             using var sModel = src.OpenFile(attempt);
-                            var outRel = mdxPath.Replace('/', Path.DirectorySeparatorChar);
+                            var outRel = attempt.Replace('/', Path.DirectorySeparatorChar);
                             var outPath = Path.Combine(modelsRoot, outRel);
                             Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? modelsRoot);
                             using var fsOut = File.Create(outPath);
@@ -1235,6 +1366,52 @@ public sealed class AlphaWdtMonolithicWriter
                 if (missingModels.Count > 1)
                 {
                     File.WriteAllLines(Path.Combine(outDir, "models_missing.csv"), missingModels, Encoding.UTF8);
+                }
+
+                // Optional legacy conversion pass (stubbed via Warcraft.NET wrappers)
+                var convManifest = new List<string> { "type,source,destination,status,note" };
+                if (opts?.ConvertModelsToLegacy == true)
+                {
+                    var legacyModelsRoot = Path.Combine(assetsRoot, "models_legacy");
+                    Directory.CreateDirectory(legacyModelsRoot);
+                    var modelConv = new WarcraftNetModelConverter();
+                    foreach (var m in usedM2ForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var mdxPath = m.Replace('\\', '/');
+                        var m2Path = (mdxPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)) ? mdxPath.Substring(0, mdxPath.Length - 3) + "m2" : mdxPath;
+                        string attempt = src.FileExists(m2Path) ? m2Path : (src.FileExists(mdxPath) ? mdxPath : string.Empty);
+                        if (string.IsNullOrEmpty(attempt)) { convManifest.Add($"m2,{mdxPath},,missing,source not found"); continue; }
+                        using var sIn = src.OpenFile(attempt);
+                        var relNoExt = Path.ChangeExtension(attempt, null).Replace('/', Path.DirectorySeparatorChar);
+                        var outRel = relNoExt + ".mdx";
+                        var outPath = Path.Combine(legacyModelsRoot, outRel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? legacyModelsRoot);
+                        using var sOut = File.Create(outPath);
+                        if (modelConv.TryConvertM2ToMdx(sIn, sOut, out var note)) convManifest.Add($"m2,{attempt},{outRel},converted,{note}");
+                        else { sOut.Flush(); convManifest.Add($"m2,{attempt},{outRel},passthrough,{note}"); }
+                    }
+                }
+                if (opts?.ConvertWmosToLegacy == true)
+                {
+                    var legacyWmosRoot = Path.Combine(assetsRoot, "wmos_legacy");
+                    Directory.CreateDirectory(legacyWmosRoot);
+                    var wmoConv = new WarcraftNetWmoConverter();
+                    foreach (var w in usedWmoForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var wmoPath = w.Replace('\\', '/');
+                        if (!src.FileExists(wmoPath)) { convManifest.Add($"wmo,{wmoPath},,missing,source not found"); continue; }
+                        using var sIn = src.OpenFile(wmoPath);
+                        var outRel = wmoPath.Replace('/', Path.DirectorySeparatorChar); // keep .wmo
+                        var outPath = Path.Combine(legacyWmosRoot, outRel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(outPath) ?? legacyWmosRoot);
+                        using var sOut = File.Create(outPath);
+                        if (wmoConv.TryConvertWmoToV14(sIn, sOut, out var note)) convManifest.Add($"wmo,{wmoPath},{outRel},converted,{note}");
+                        else { sOut.Flush(); convManifest.Add($"wmo,{wmoPath},{outRel},passthrough,{note}"); }
+                    }
+                }
+                if (convManifest.Count > 1)
+                {
+                    File.WriteAllLines(Path.Combine(outDir, "conversion_manifest.csv"), convManifest, Encoding.UTF8);
                 }
             }
 

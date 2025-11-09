@@ -4,6 +4,7 @@ public sealed record LkToAlphaOptions
 {
     public bool SkipLiquids { get; init; } = true;
     public bool SkipWmos { get; init; }
+    public bool SkipM2 { get; init; }
     public string? TextureMappingPath { get; init; }
     public bool Validate { get; init; }
     public bool Verbose { get; init; }
@@ -30,4 +31,8 @@ public sealed record LkToAlphaOptions
     public bool IncludeMissingModels { get; init; } = true;
     public bool WriteAssetManifest { get; init; } = true;
     public string? RunTag { get; init; }
+
+    public bool ConvertModelsToLegacy { get; init; }
+    public bool ConvertWmosToLegacy { get; init; }
+    public string? AssetsSourceRoot { get; init; }
 }

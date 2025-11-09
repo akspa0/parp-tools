@@ -226,6 +226,13 @@ internal static class Program
         {
             options = options with { AssetsOut = assetsOutOpt };
         }
+        // New flags: skip toggles and conversion controls
+        if (opts.ContainsKey("skip-wmos")) options = options with { SkipWmos = true };
+        if (opts.ContainsKey("skip-m2")) options = options with { SkipM2 = true };
+        var assetsSourceRootOpt = GetOption(opts, "assets-source-root");
+        if (!string.IsNullOrWhiteSpace(assetsSourceRootOpt)) options = options with { AssetsSourceRoot = assetsSourceRootOpt };
+        if (opts.ContainsKey("convert-models-to-legacy")) options = options with { ConvertModelsToLegacy = true };
+        if (opts.ContainsKey("convert-wmos-to-legacy")) options = options with { ConvertWmosToLegacy = true };
         var wantVerbose = opts.ContainsKey("verbose-logging") || opts.ContainsKey("alpha-debug") || opts.ContainsKey("verbose");
         if (wantVerbose) options = options with { VerboseLogging = true, Verbose = true };
         if (opts.ContainsKey("raw-copy-layers")) options = options with { RawCopyLkLayers = true };
