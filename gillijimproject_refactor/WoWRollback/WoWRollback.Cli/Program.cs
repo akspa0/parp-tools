@@ -302,6 +302,36 @@ internal static class Program
             }
             using var src = new PrioritizedArchiveSource(clientPath, mpqs);
             AlphaWdtMonolithicWriter.WriteMonolithicFromArchive(src, mapName, outWdt!, options);
+            // Optional: export LK ADTs for diagnostics
+            if (opts.ContainsKey("export-lk-adts-after-pack"))
+            {
+                try
+                {
+                    Console.WriteLine("[diag] Exporting LK ADTs after pack (diagnostic phase)...");
+                    var roll = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["input"] = outWdt!,
+                        ["out"] = Path.GetDirectoryName(Path.GetFullPath(outWdt!)) ?? ".",
+                        ["max-uniqueid"] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["export-lk-adts"] = "true",
+                        ["force"] = "true"
+                    };
+                    var lkOut = GetOption(opts, "lk-out");
+                    if (!string.IsNullOrWhiteSpace(lkOut)) roll["lk-out"] = lkOut!;
+                    var lkClient = GetOption(opts, "lk-client-path");
+                    if (!string.IsNullOrWhiteSpace(lkClient)) roll["lk-client-path"] = lkClient!;
+                    var lkDbcDir = GetOption(opts, "lk-dbc-dir");
+                    if (!string.IsNullOrWhiteSpace(lkDbcDir)) roll["lk-dbc-dir"] = lkDbcDir!;
+                    var areaRemapJson = GetOption(opts, "area-remap-json");
+                    if (!string.IsNullOrWhiteSpace(areaRemapJson)) roll["area-remap-json"] = areaRemapJson!;
+                    var code = RunRollback(roll);
+                    Console.WriteLine($"[diag] LK export finished (exit={code})");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[warn] Post-pack LK export failed: {ex.Message}");
+                }
+            }
             Console.WriteLine($"[ok] WDT written: {outWdt}");
             return 0;
         }
@@ -327,6 +357,36 @@ internal static class Program
         catch (Exception ex)
         {
             Console.WriteLine($"[warn] WDL generation skipped: {ex.Message}");
+        }
+        // Optional: export LK ADTs for diagnostics
+        if (opts.ContainsKey("export-lk-adts-after-pack"))
+        {
+            try
+            {
+                Console.WriteLine("[diag] Exporting LK ADTs after pack (diagnostic phase)...");
+                var roll = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["input"] = outWdt!,
+                    ["out"] = Path.GetDirectoryName(Path.GetFullPath(outWdt!)) ?? ".",
+                    ["max-uniqueid"] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["export-lk-adts"] = "true",
+                    ["force"] = "true"
+                };
+                var lkOut = GetOption(opts, "lk-out");
+                if (!string.IsNullOrWhiteSpace(lkOut)) roll["lk-out"] = lkOut!;
+                var lkClient = GetOption(opts, "lk-client-path");
+                if (!string.IsNullOrWhiteSpace(lkClient)) roll["lk-client-path"] = lkClient!;
+                var lkDbcDir = GetOption(opts, "lk-dbc-dir");
+                if (!string.IsNullOrWhiteSpace(lkDbcDir)) roll["lk-dbc-dir"] = lkDbcDir!;
+                var areaRemapJson = GetOption(opts, "area-remap-json");
+                if (!string.IsNullOrWhiteSpace(areaRemapJson)) roll["area-remap-json"] = areaRemapJson!;
+                var code = RunRollback(roll);
+                Console.WriteLine($"[diag] LK export finished (exit={code})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[warn] Post-pack LK export failed: {ex.Message}");
+            }
         }
         Console.WriteLine($"[ok] WDT written: {outWdt}");
         return 0;
@@ -2511,7 +2571,10 @@ internal static class Program
         Console.WriteLine("    Analyze ADTs from CASC depots. Requires a listfile to enumerate named paths reliably.");
         Console.WriteLine();
         Console.WriteLine("  pack-monolithic-alpha-wdt  --lk-wdt <file> [--lk-map-dir <dir>] --out <wdt> [--target-listfile <335.csv>] [--strict-target-assets true|false]");
+        Console.WriteLine("                             [--extract-assets] [--asset-scope textures|models|textures+models] [--assets-out <dir>]");
+        Console.WriteLine("                             [--export-lk-adts-after-pack] [--lk-out <dir>] [--lk-client-path <dir>] [--lk-dbc-dir <dir>] [--area-remap-json <path>]");
         Console.WriteLine("    Pack alpha WDT (monolithic) from LK inputs. Optionally gate MDNM/MONM assets to 3.3.5 listfile.");
+        Console.WriteLine("    When --export-lk-adts-after-pack is set, runs a post-pack diagnostic phase to write LK ADTs from the new WDT.");
         Console.WriteLine();
         Console.WriteLine("  snapshot-listfile  --client-path <dir> --alias <name> --out <json>");
         Console.WriteLine("    Build a JSON listfile snapshot from MPQs (reads (listfile) entries) and loose files under Data.");
