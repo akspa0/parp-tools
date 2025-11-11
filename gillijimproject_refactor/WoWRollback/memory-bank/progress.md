@@ -1,4 +1,4 @@
-# Progress - WoWRollback.RollbackTool (2025-11-08)
+# Progress - WoWRollback.RollbackTool (2025-11-10)
 
 ## Current Progress (concise)
 - **Main outstanding issue: LK ADT positions → Alpha WDT writeout.**
@@ -8,6 +8,16 @@
 - WDT tile presence fallback active when archive tiles=0; emits `tiles_missing.csv`.
 - Tee logging available via `--log-dir` and `--log-file`.
 - Alpha WDT monolithic pack builds; placements/liquids diagnostics emitted (tuning pending).
+- Options consolidated; added `SkipM2`, `ConvertModelsToLegacy`, `ConvertWmosToLegacy`, `AssetsSourceRoot`.
+- Archive-mode model export preserves `.m2` extension when source is `.m2`.
+- Placements manifests emitted: `m2_used.csv`, `wmo_used.csv`; textures inventory `textures.csv` written.
+- Converter scaffolding added (Warcraft.NET stubs) and optional `conversion_manifest.csv` when conversion flags are enabled.
+
+- Planning diagnostics hardening and automation:
+  - Offset/coordinate semantics to be asserted (MCNK bases, placement transforms).
+  - MCRF dumper offset base verification and payload checks.
+  - MH2O→MCLQ per‑chunk instrumentation (summary CSVs).
+  - Agentic AI initiative (local/hosted Qwen3‑Coder) to automate diffing and validation.
 
 ## TODOs (concise)
 - Tests: `ArchiveLocator` order incl. plain patch; `MpqArchiveSource` DBC locale-first path.
@@ -15,7 +25,12 @@
 - Verify on maps (CataclysmCTF, development): overlay precedence and Map.dbc path.
 - Placements: union MDNM/MONM; never gate placements; recompute MCRF; per‑tile MDDF/MODF counts.
 - Liquids: instrument MH2O→MCLQ; write `mclq_summary.csv`; fix flags/heights; reduce `dont_render`.
+- Diagnostics: confirm MCNK subchunk offset bases; add FourCC checks to MCRF dumper; validate payload sizes and sample indices.
+- Agentic AI: design pipeline (local/hosted Qwen3‑Coder) to run automated audits and CSV comparisons.
 - Textures: tileset resize option (256) with alpha preservation.
+ - Asset export: preserve original `.m2`/`.wmo` on disk; Alpha name-table normalization to `.mdx` is internal only.
+ - Modularization: create `WoWRollback.AssetManagement` for export, gating, and converters; keep `.Cli` thin.
+ - Converters: design docs + golden tests for M2→MDX and WMO v17→v14.
 
 ## Archive (historical)
 

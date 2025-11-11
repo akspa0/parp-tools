@@ -1,0 +1,274 @@
+// 010 Editor v11 Template - Alpha WDT (v18) sanity checker
+// Parses MVER/MPHD/MAIN/MDNM/MONM and per-tile MHDR/MCIN/MDDF/MODF/MCNK
+// Focus: MCNK -> MCRF integrity and offsets
+
+// Colors
+local int cOffset = cLtYellow;
+local int cTag    = cLtAqua;
+local int cVec    = cLtPurple;
+
+/*******************************************************
+ *  Helpers & Basic Types
+ *******************************************************/
+
+// Show forward FourCC while reading normal on-disk bytes
+string fourccToStr(char f[4]) {
+    string s;
+    SPrintf(s, "%c%c%c%c", f[3], f[2], f[1], f[0]);
+    return s;
+}
+
+// Generic chunk with reversed letters on disk
+typedef struct {
+    local uint32 myOffset = FTell();
+    local uint32 dataStart = myOffset + 8;
+    SetColor(cWhite, cDkRed);
+    char magic[4];
+    SetColor(cBlack, 0x99CCFF);
+    uint32 byte_size;
+    SetStdColor();
+} _chunk <read=_chunk_read>;
+
+string _chunk_read(_chunk &c) {
+    string s;
+    SPrintf(s, "%s: %u bytes", fourccToStr(c.magic), c.byte_size);
+    return s;
+}
+
+// Offset relative to some base (upperChunkOffset). 0 means unused.
+typedef struct {
+    local uint32 myOffset = FTell();
+    local uint32 upperChunkOffset = 0; // base for relative offsets
+    SetColor(cBlack, cOffset);
+    uint32 adress <format=hex>; // spelled like in legacy templates
+    SetStdColor();
+} rel_off <read=rel_off_read>;
+
+string rel_off_read(rel_off &o) {
+    if (o.adress == 0) return "- unused -";
+    string s;
+    SPrintf(s, "rel +0x%X (abs 0x%X)", o.adress, o.upperChunkOffset + o.adress);
+    return s;
+}
+
+// Simple vector (unused for WDT, reserved)
+typedef struct { float x, y, z; } Vec3 <read=vec3Read>;
+string vec3Read(Vec3 &v) { string s; SPrintf(s, "(%f %f %f)", v.x, v.y, v.z); return s; }
+
+void SetStdColor() { SetColor(cBlack, cWhite); }
+
+/*******************************************************
+ *  Top-level WDT chunks
+ *******************************************************/
+
+// MVER (expects version 18 for Alpha)
+typedef struct {
+    _chunk hdr;
+    uint32 version;
+} MVER <read=readMver>;
+string readMver(MVER &o) { string s; SPrintf(s, "ver=%u", o.version); return s; }
+
+// MPHD (128 bytes): our builder layout
+// [0..3]  = nTextures(M2) (count or count+1 when present)
+// [4..7]  = MDNM absolute offset (to chunk letters)
+// [8..11] = nMapObjNames(WMO) (count or count+1 when present)
+// [12..15]= MONM absolute offset (to chunk letters)
+typedef struct {
+    _chunk hdr;
+    uint32 nTextures;
+    uint32 ofsMDNM <format=hex>;
+    uint32 nWmoNames;
+    uint32 ofsMONM <format=hex>;
+    // MPHD is 128-byte data; we consumed 16 bytes of known fields, pad the rest
+    uint8  pad[112];
+} MPHD <read=readMphd>;
+string readMphd(MPHD &o) { string s; SPrintf(s, "nTex=%u MDNM@0x%X nWmo=%u MONM@0x%X", o.nTextures, o.ofsMDNM, o.nWmoNames, o.ofsMONM); return s; }
+
+// MAIN: 4096 entries * 16 bytes
+// Entry: [0] abs MHDR letters, [1] distance to first MCNK, [2] flags(0), [3] pad
+typedef struct { uint32 mhdrAbs, distFirst, flags, pad; } MAIN_Entry <read=readMainEntry>;
+string readMainEntry(MAIN_Entry &e) {
+    string s;
+    if (e.mhdrAbs == 0) { s = "empty"; return s; }
+    SPrintf(s, "MHDR@0x%X dist=%u", e.mhdrAbs, e.distFirst);
+    return s;
+}
+
+typedef struct {
+    _chunk hdr;
+    MAIN_Entry entry[4096];
+} MAIN_Tbl;
+
+// MDNM/MONM: null-terminated strings packed into data
+string readCStringAt(uint32 pos) {
+    string s; local ubyte ch; local int i=0; local uint32 p = pos; s="";
+    do {
+        FSeek(p);
+        ch = ReadUByte();
+        if (ch!=0) { string t; SPrintf(t, "%c", ch); s += t; }
+        p++; i++; if (i>4096) break;
+    } while (ch!=0);
+    return s;
+}
+
+typedef struct { _chunk hdr; } MDNM;
+typedef struct { _chunk hdr; } MONM;
+
+/*******************************************************
+ *  Tile-level (per cell) chunks
+ *******************************************************/
+
+// MHDR inside tile ADT (offsets relative to MHDR.data)
+typedef struct {
+    _chunk hdr;
+    // layout used by AdtAlpha.cs; offsets are relative to hdr.dataStart
+    rel_off ofsMCIN; // +0x00
+      ofsMCIN.upperChunkOffset = hdr.dataStart;
+    rel_off ofsMTEX; // +0x04
+      ofsMTEX.upperChunkOffset = hdr.dataStart;
+    rel_off ofsMMDX; // +0x08 (not always used)
+      ofsMMDX.upperChunkOffset = hdr.dataStart;
+    rel_off ofsMDDF; // +0x0C
+      ofsMDDF.upperChunkOffset = hdr.dataStart;
+    rel_off ofsMMID; // +0x10 (unused)
+      ofsMMID.upperChunkOffset = hdr.dataStart;
+    rel_off ofsMODF; // +0x14
+      ofsMODF.upperChunkOffset = hdr.dataStart;
+    // remaining fields ignored
+} MHDR <read=readMhdr>;
+string readMhdr(MHDR &o) {
+    string s; SPrintf(s, "MCIN@+0x%X MTEX@+0x%X MDDF@+0x%X MODF@+0x%X", o.ofsMCIN.adress, o.ofsMTEX.adress, o.ofsMDDF.adress, o.ofsMODF.adress); return s;
+}
+
+// MCIN (absolute MCNK addresses)
+typedef struct { uint32 adress, size, flags, asyncId; } MCIN_Entry <read=readMcinEntry>;
+string readMcinEntry(MCIN_Entry &e) { if (e.adress==0) return "-"; string s; SPrintf(s, "MCNK@0x%X len=%u", e.adress, e.size); return s; }
+
+typedef struct { _chunk hdr; MCIN_Entry entries[256]; } MCIN;
+
+// MCNK (Alpha v18): header then sub-chunks; offsets relative to start of MCNK
+typedef struct {
+    _chunk hdr;
+    struct {
+        uint32 flags;        // 0x00
+        uint32 indexX;       // 0x04
+        uint32 indexY;       // 0x08
+        float  radius;       // 0x0C
+        uint32 nLayers;      // 0x10
+        uint32 nDoodadRefs;  // 0x14
+        uint32 offsHeight;   // 0x18 (MCVT raw)
+        uint32 offsNormal;   // 0x1C (MCNR raw)
+        uint32 offsLayer;    // 0x20 (MCLY with header)
+        uint32 offsRefs;     // 0x24 (MCRF with header)
+        uint32 offsAlpha;    // 0x28 (MCAL raw)
+        uint32 sizeAlpha;    // 0x2C
+        uint32 offsShadow;   // 0x30 (MCSH raw)
+        uint32 sizeShadow;   // 0x34
+        uint32 areaId;       // 0x38
+        uint32 nMapObjRefs;  // 0x3C
+        uint16 holes; uint16 pad0; // 0x40..0x43
+        uint16 predTex[8];   // 0x44..0x53
+        uint8  noEffectDoodad[8]; // 0x54..0x5B
+        uint32 offsSnd;      // 0x5C
+        uint32 nSnd;         // 0x60
+        uint32 offsLiquid;   // 0x64
+        uint8  pad1[0x80 - 0x68]; // pad to 128 bytes
+    } head;
+
+    // Follow MCLY (if present)
+    if (head.offsLayer != 0) {
+        FSeek(hdr.myOffset + head.offsLayer);
+        _chunk mcly;
+        FSeek(mcly.dataStart + mcly.byte_size + (mcly.byte_size & 1)); // skip
+    }
+
+    // Validate MCRF (if present)
+    local string mcrfSummary = "";
+    if (head.offsRefs != 0) {
+        FSeek(hdr.myOffset + head.offsRefs);
+        _chunk mcrfHdr;
+        local uint32 count = mcrfHdr.byte_size / 4;
+        local uint32 expect = head.nDoodadRefs + head.nMapObjRefs;
+        local int sizeOk = (mcrfHdr.byte_size % 4 == 0) && (count == expect);
+        // Scan a few indices and range-check against MDNM/MONM counts if available (global state set later)
+        local int i;
+        local uint32 bad = 0;
+        for (i = 0; i < count && i < 32; i++) {
+            uint32 idx;
+            FSeek(mcrfHdr.dataStart + i*4);
+            idx = ReadUInt();
+            if (i < head.nDoodadRefs) { if (idx >= __MDNM_COUNT) bad++; }
+            else { if (idx >= __MONM_COUNT) bad++; }
+        }
+        if (!sizeOk) mcrfSummary = "MCRF size mismatch";
+        else if (bad > 0) { string t; SPrintf(t, "MCRF range viol=%u", bad); mcrfSummary = t; }
+        else mcrfSummary = "MCRF ok";
+    }
+} MCNK <read=readMcnk>;
+
+string readMcnk(MCNK &o) {
+    string s; SPrintf(s, "[%u,%u] d=%u w=%u %s", o.head.indexY, o.head.indexX, o.head.nDoodadRefs, o.head.nMapObjRefs, o.mcrfSummary);
+    return s;
+}
+
+/*******************************************************
+ *  File Parser
+ *******************************************************/
+
+// Global name counts (set after reading MDNM/MONM)
+local uint32 __MDNM_COUNT = 0;
+local uint32 __MONM_COUNT = 0;
+
+struct {
+    MVER mver;
+    MPHD mphd;
+    MAIN_Tbl main;
+
+    // MDNM
+    FSeek(mphd.ofsMDNM);
+    MDNM mdnm;
+    // Count strings in MDNM
+    {
+        local uint32 cur = mdnm.hdr.dataStart;
+        local uint32 end = mdnm.hdr.dataStart + mdnm.hdr.byte_size;
+        while (cur < end) {
+            string n = readCStringAt(cur);
+            if (n == "") break; __MDNM_COUNT++;
+            cur += Strlen(n) + 1;
+        }
+    }
+
+    // MONM
+    FSeek(mphd.ofsMONM);
+    MONM monm;
+    {
+        local uint32 cur2 = monm.hdr.dataStart;
+        local uint32 end2 = monm.hdr.dataStart + monm.hdr.byte_size;
+        while (cur2 < end2) {
+            string n2 = readCStringAt(cur2);
+            if (n2 == "") break; __MONM_COUNT++;
+            cur2 += Strlen(n2) + 1;
+        }
+    }
+
+    // Iterate MAIN entries (tiles)
+    local int ti;
+    for (ti = 0; ti < 4096; ti++) {
+        if (main.entry[ti].mhdrAbs == 0) continue;
+        FSeek(main.entry[ti].mhdrAbs);
+        MHDR mhdr;
+
+        // MCIN
+        if (mhdr.ofsMCIN.adress != 0) {
+            FSeek(mhdr.hdr.dataStart + mhdr.ofsMCIN.adress);
+            MCIN mcin;
+            // Walk MCNKs
+            local int ci;
+            for (ci = 0; ci < 256; ci++) {
+                if (mcin.entries[ci].adress == 0) continue;
+                FSeek(mcin.entries[ci].adress);
+                MCNK mcnk;
+            }
+        }
+    }
+} ALPHA_WDT;

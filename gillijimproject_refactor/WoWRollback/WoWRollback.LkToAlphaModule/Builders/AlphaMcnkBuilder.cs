@@ -534,9 +534,7 @@ public static class AlphaMcnkBuilder
             int sz = BitConverter.ToInt32(mcshLkWhole, 4);
             mcshRaw = new byte[sz];
             Buffer.BlockCopy(mcshLkWhole, 8, mcshRaw, 0, sz);
-            // Invert bits so shadowed areas appear dark (not white) in Alpha
-            for (int i = 0; i < mcshRaw.Length; i++) mcshRaw[i] = (byte)~mcshRaw[i];
-            if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) MCSH inverted size={mcshRaw.Length}");
+            if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] mcnk ({lkHeader.IndexX},{lkHeader.IndexY}) MCSH passthrough size={mcshRaw.Length}");
         }
         else
         {

@@ -183,6 +183,8 @@ internal static class Program
                 case "compute-heatmap-stats":
                 case "heatmap-stats":
                     return RunComputeHeatmapStats(opts);
+                case "alpha-roundtrip-verify":
+                    return RunAlphaRoundtripVerify(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -318,6 +320,33 @@ internal static class Program
                     };
                     var lkOut = GetOption(opts, "lk-out");
                     if (!string.IsNullOrWhiteSpace(lkOut)) roll["lk-out"] = lkOut!;
+                    // Pre-create diagnostics CSV from driver as early as possible
+                    try
+                    {
+                        var outRootForDiag = roll["out"];
+                        string[] diagCandidates = new[]
+                        {
+                            Path.Combine(outRootForDiag, "lk_export_diag.csv"),
+                            Path.Combine(!string.IsNullOrWhiteSpace(lkOut) ? lkOut! : outRootForDiag, "lk_export_diag.csv"),
+                            Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag.csv"),
+                        };
+                        var header = "tile_yy,tile_xx,chunk_idx,nDoodadRefs,nMapObjRefs,offsRefs,offsLayer,offsAlpha,offsShadow,offsSnd,offsLiquid,mddf_count,modf_count,mcrf_expected,mcrf_payload,d_samples,w_samples,exception\n";
+                        var diagDriverWritten = new List<string>();
+                        foreach (var cand in diagCandidates)
+                        {
+                            try
+                            {
+                                var dir = Path.GetDirectoryName(cand);
+                                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                                if (!File.Exists(cand)) File.WriteAllText(cand, header);
+                                try { File.AppendAllText(cand, "-1,-1,-1,,,,,,,,,,,,,,,export_begin_driver\n"); } catch { }
+                                diagDriverWritten.Add(cand);
+                            }
+                            catch { }
+                        }
+                        Console.WriteLine($"[diag] lk_export_diag.csv (driver) => {string.Join(" | ", diagDriverWritten)}");
+                    }
+                    catch { }
                     var lkClient = GetOption(opts, "lk-client-path");
                     if (!string.IsNullOrWhiteSpace(lkClient)) roll["lk-client-path"] = lkClient!;
                     var lkDbcDir = GetOption(opts, "lk-dbc-dir");
@@ -374,6 +403,33 @@ internal static class Program
                 };
                 var lkOut = GetOption(opts, "lk-out");
                 if (!string.IsNullOrWhiteSpace(lkOut)) roll["lk-out"] = lkOut!;
+                // Pre-create diagnostics CSV from driver as early as possible
+                try
+                {
+                    var outRootForDiag = roll["out"];
+                    string[] diagCandidates = new[]
+                    {
+                        Path.Combine(outRootForDiag, "lk_export_diag.csv"),
+                        Path.Combine(!string.IsNullOrWhiteSpace(lkOut) ? lkOut! : outRootForDiag, "lk_export_diag.csv"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag.csv"),
+                    };
+                    var header = "tile_yy,tile_xx,chunk_idx,nDoodadRefs,nMapObjRefs,offsRefs,offsLayer,offsAlpha,offsShadow,offsSnd,offsLiquid,mddf_count,modf_count,mcrf_expected,mcrf_payload,d_samples,w_samples,exception\n";
+                    var diagDriverWritten = new List<string>();
+                    foreach (var cand in diagCandidates)
+                    {
+                        try
+                        {
+                            var dir = Path.GetDirectoryName(cand);
+                            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                            if (!File.Exists(cand)) File.WriteAllText(cand, header);
+                            try { File.AppendAllText(cand, "-1,-1,-1,,,,,,,,,,,,,,,export_begin_driver\n"); } catch { }
+                            diagDriverWritten.Add(cand);
+                        }
+                        catch { }
+                    }
+                    Console.WriteLine($"[diag] lk_export_diag.csv (driver) => {string.Join(" | ", diagDriverWritten)}");
+                }
+                catch { }
                 var lkClient = GetOption(opts, "lk-client-path");
                 if (!string.IsNullOrWhiteSpace(lkClient)) roll["lk-client-path"] = lkClient!;
                 var lkDbcDir = GetOption(opts, "lk-dbc-dir");
@@ -2631,6 +2687,9 @@ internal static class Program
         Console.WriteLine("      --pivot-060-client-path <dir>  Optional 0.6.0 client root (MPQs) for pivot extraction");
         Console.WriteLine("      --chain-via-060                Force pivot chain resolution via 0.6.0");
         Console.WriteLine();
+        Console.WriteLine("  alpha-roundtrip-verify  --input <alpha.wdt> --rt-out <dir> [--lk-out <dir>] [--map <name>] [--accept-padding] [--accept-name-normalization]");
+        Console.WriteLine("    Run AlphaWDT → LK ADTs → AlphaWDT and write chunk-aware diff CSVs (skeleton)");
+        Console.WriteLine();
         Console.WriteLine("  lk-to-alpha  --lk-adts-dir <dir> --map <name> --max-uniqueid <N> [--bury-depth <float>] [--out <dir>] [--fix-holes] [--holes-scope self|neighbors] [--holes-wmo-preserve true|false] [--disable-mcsh]");
         Console.WriteLine("    Patch existing LK ADTs: bury placements with UniqueID > N, optionally clear holes (MCRF-gated) and zero MCSH");
         Console.WriteLine();
@@ -2646,6 +2705,32 @@ internal static class Program
         Console.WriteLine("Archaeological Perspective:");
         Console.WriteLine("  Each UniqueID range represents a 'volume of work' by ancient developers.");
         Console.WriteLine("  We're uncovering sedimentary layers of 20+ years of WoW development history.");
+    }
+
+    private static int RunAlphaRoundtripVerify(Dictionary<string, string> opts)
+    {
+        var input = GetOption(opts, "input");
+        var rtOut = GetOption(opts, "rt-out");
+        if (string.IsNullOrWhiteSpace(input) || string.IsNullOrWhiteSpace(rtOut))
+        {
+            Console.Error.WriteLine("[error] --input <alpha.wdt> and --rt-out <dir> are required");
+            return 2;
+        }
+        try { Directory.CreateDirectory(rtOut!); } catch { }
+
+        var map = GetOption(opts, "map");
+        var lkOut = GetOption(opts, "lk-out");
+        bool acceptPadding = opts.ContainsKey("accept-padding");
+        bool acceptNameNorm = opts.ContainsKey("accept-name-normalization");
+
+        Console.WriteLine("[rt] alpha-roundtrip-verify (skeleton)");
+        Console.WriteLine($"[rt] input: {input}");
+        Console.WriteLine($"[rt] rt-out: {rtOut}");
+        if (!string.IsNullOrWhiteSpace(map)) Console.WriteLine($"[rt] map: {map}");
+        if (!string.IsNullOrWhiteSpace(lkOut)) Console.WriteLine($"[rt] lk-out: {lkOut}");
+        Console.WriteLine($"[rt] accept: padding={acceptPadding.ToString().ToLowerInvariant()}, name_norm={acceptNameNorm.ToString().ToLowerInvariant()}");
+        Console.WriteLine("[rt] dry-run complete: wiring OK; embedder and comparators to follow");
+        return 0;
     }
 
     private static int RunDiscoverMaps(Dictionary<string, string> opts)
@@ -4219,6 +4304,36 @@ internal static class Program
             Console.WriteLine($"LK ADT Out:     {lkOutDir}");
             if (!string.IsNullOrWhiteSpace(lkClientPath)) Console.WriteLine($"LK Client:      {lkClientPath}");
             if (!string.IsNullOrWhiteSpace(areaRemapJsonPath)) Console.WriteLine($"Area Map JSON:  {areaRemapJsonPath}");
+
+            // Very-early diagnostics CSV creation (before any export try/catch)
+            try
+            {
+                string[] diagCandidatesEarly = new[]
+                {
+                    Path.Combine(outRoot, "lk_export_diag.csv"),
+                    Path.Combine(lkOutDir, "lk_export_diag.csv"),
+                    Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag.csv"),
+                };
+                var header = "tile_yy,tile_xx,chunk_idx,nDoodadRefs,nMapObjRefs,offsRefs,offsLayer,offsAlpha,offsShadow,offsSnd,offsLiquid,mddf_count,modf_count,mcrf_expected,mcrf_payload,d_samples,w_samples,exception\n";
+                var diagEarlyWritten = new List<string>();
+                foreach (var cand in diagCandidatesEarly)
+                {
+                    try
+                    {
+                        var dir = Path.GetDirectoryName(cand);
+                        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                        if (!File.Exists(cand)) File.WriteAllText(cand, header);
+                        try { File.AppendAllText(cand, "-1,-1,-1,,,,,,,,,,,,,,,export_begin_pre\n"); } catch { }
+                        diagEarlyWritten.Add(cand);
+                    }
+                    catch { }
+                }
+                if (diagEarlyWritten.Count > 0)
+                {
+                    Console.WriteLine($"[diag] lk_export_diag.csv => {string.Join(" | ", diagEarlyWritten)}");
+                }
+            }
+            catch { }
             Console.WriteLine($"Strict AreaIDs: {(strictAreaId ? "true" : "false")}");
             if (reportAreaId) Console.WriteLine("Option:         --report-areaid (write summary CSV)");
         }
@@ -4639,18 +4754,296 @@ internal static class Program
                     int written = 0;
                     long totalAreaPresent = 0, totalAreaPatched = 0, totalAreaMapped = 0;
                     var perAdtRows = new List<string>();
+                    // Prepare diagnostics CSV path and ensure header exists with fallbacks
+                    string[] diagCandidates = new[]
+                    {
+                        Path.Combine(outRoot, "lk_export_diag.csv"),
+                        Path.Combine(lkOutDir, "lk_export_diag.csv"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag.csv"),
+                    };
+                    var header = "tile_yy,tile_xx,chunk_idx,nDoodadRefs,nMapObjRefs,offsRefs,offsLayer,offsAlpha,offsShadow,offsSnd,offsLiquid,mddf_count,modf_count,mcrf_expected,mcrf_payload,d_samples,w_samples,exception\n";
+                    var diagWritten = new List<string>();
+                    string diagPath = diagCandidates[0];
+                    foreach (var cand in diagCandidates)
+                    {
+                        try
+                        {
+                            var dir = Path.GetDirectoryName(cand);
+                            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                            if (!File.Exists(cand)) File.WriteAllText(cand, header);
+                            try { File.AppendAllText(cand, "-1,-1,-1,,,,,,,,,,,,,,,export_begin\n"); } catch { }
+                            diagWritten.Add(cand);
+                            diagPath = cand; // keep last successful for subsequent appends
+                        }
+                        catch { /* try next candidate */ }
+                    }
+                    Console.WriteLine($"[diag] lk_export_diag.csv => {string.Join(" | ", diagWritten)}");
+                    string[] mcrfDiagCandidates = new[]
+                    {
+                        Path.Combine(outRoot, "lk_export_diag_mcrf.csv"),
+                        Path.Combine(lkOutDir, "lk_export_diag_mcrf.csv"),
+                        Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag_mcrf.csv"),
+                    };
+                    var mcrfHeader = "tile_yy,tile_xx,chunk_idx,src,nDoodadRefs,nMapObjRefs,mcrf_payload,d_samples,w_samples\n";
+                    var mcrfTargets = new List<string>();
+                    foreach (var cand in mcrfDiagCandidates)
+                    {
+                        try { var dir = Path.GetDirectoryName(cand); if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir); if (!File.Exists(cand)) File.WriteAllText(cand, mcrfHeader); mcrfTargets.Add(cand); } catch { }
+                    }
+                    static int FindFourCCLocal(byte[] buf, string fwd)
+                    {
+                        if (buf == null || buf.Length < 8) return -1; if (string.IsNullOrEmpty(fwd) || fwd.Length != 4) return -1;
+                        var r = new[] { (byte)fwd[3], (byte)fwd[2], (byte)fwd[1], (byte)fwd[0] };
+                        for (int i = 0; i + 8 <= buf.Length;)
+                        {
+                            if (i < 0 || i + 8 > buf.Length) break;
+                            if (buf[i + 0] == r[0] && buf[i + 1] == r[1] && buf[i + 2] == r[2] && buf[i + 3] == r[3]) return i;
+                            int size = BitConverter.ToInt32(buf, i + 4); if (size < 0 || size > buf.Length) break; int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0); if (next <= i) break; i = next;
+                        }
+                        return -1;
+                    }
+                    var diagTargets = diagWritten.Count > 0 ? diagWritten.ToArray() : new[] { diagPath };
+                    // Pre-loop marker with counts so we know we reached the iteration boundary
+                    try
+                    {
+                        var pre = $"-1,-1,-1,,,,,,,,,,,,,,,pre_loop existing={existingAfter.Count} offsets={adtOffsetsAfter.Count}\\n";
+                        foreach (var pth in diagTargets) { try { File.AppendAllText(pth, pre); } catch { } }
+                        Console.WriteLine($"[diag] pre_loop: existing={existingAfter.Count} offsets={adtOffsetsAfter.Count}");
+                    }
+                    catch { }
+
                     foreach (var adtNum2 in existingAfter)
                     {
                         int adtOff2 = adtOffsetsAfter[adtNum2];
                         if (adtOff2 == 0) continue;
-                        var a = new AdtAlpha(outputPath, adtOff2, adtNum2);
-                        var lk = a.ToAdtLk(mdnmNames, monmNames);
-                        lk.ToFile(lkOutDir); // Treats directory as output root
+                        // Per-tile begin marker before any parsing or object construction
+                        try
+                        {
+                            int tileX0 = adtNum2 % 64, tileY0 = adtNum2 / 64;
+                            var line = $"{tileY0},{tileX0},-1,,,,,,,,,,,,,,,tile_begin\n";
+                            foreach (var p in diagTargets) { try { File.AppendAllText(p, line); } catch { } }
+                            Console.WriteLine($"[diag] tile_begin {tileY0},{tileX0}");
+                        }
+                        catch { }
+
+                        // Gather diagnostics from Alpha ADT bytes prior to conversion
+                        try
+                        {
+                            byte[] alphaWdtBytes = File.ReadAllBytes(outputPath);
+                            int mhdrStart = adtOff2 + 8;
+                            int mcinRel2 = BitConverter.ToInt32(alphaWdtBytes, mhdrStart + 0x0);
+                            int mddfRel2 = BitConverter.ToInt32(alphaWdtBytes, mhdrStart + 0x0C);
+                            int modfRel2 = BitConverter.ToInt32(alphaWdtBytes, mhdrStart + 0x14);
+                            int mcinChunkOffset2 = mhdrStart + mcinRel2;
+                            int mddfChunkOffset2 = (mddfRel2 > 0) ? mhdrStart + mddfRel2 : -1;
+                            int modfChunkOffset2 = (modfRel2 > 0) ? mhdrStart + modfRel2 : -1;
+                            int mddfCount2 = 0, modfCount2 = 0;
+                            if (mddfChunkOffset2 >= 0 && mddfChunkOffset2 + 8 <= alphaWdtBytes.Length)
+                            {
+                                int sz = BitConverter.ToInt32(alphaWdtBytes, mddfChunkOffset2 + 4);
+                                mddfCount2 = Math.Max(0, sz / 36);
+                            }
+                            if (modfChunkOffset2 >= 0 && modfChunkOffset2 + 8 <= alphaWdtBytes.Length)
+                            {
+                                int sz = BitConverter.ToInt32(alphaWdtBytes, modfChunkOffset2 + 4);
+                                modfCount2 = Math.Max(0, sz / 64);
+                            }
+                            var mcin2 = new Mcin(alphaWdtBytes, mcinChunkOffset2);
+                            var mcnkOffsets2 = mcin2.GetMcnkOffsets();
+                            int tileX = adtNum2 % 64, tileY = adtNum2 / 64;
+
+                            for (int ci = 0; ci < mcnkOffsets2.Count && ci < 256; ci++)
+                            {
+                                int pos = mcnkOffsets2[ci];
+                                if (pos <= 0 || pos + 8 > alphaWdtBytes.Length) continue;
+                                int headerStart = pos + 8;
+                                if (headerStart + 128 > alphaWdtBytes.Length) continue;
+                                int nDoodadRefs = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x14);
+                                int nMapObjRefs = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x3C);
+                                int offsRefs = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x24);
+                                int offsLayer = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x20);
+                                int offsAlpha = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x28);
+                                int offsShadow = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x30);
+                                int offsSnd = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x5C);
+                                int offsLiquid = BitConverter.ToInt32(alphaWdtBytes, headerStart + 0x64);
+
+                                int mcrfPayload = 0;
+                                string dSamples = string.Empty, wSamples = string.Empty;
+                                try
+                                {
+                                    // Offsets in Alpha MCNK header are relative to the beginning of the MCNK chunk (letters position).
+                                    int mcrfChunkOffset2 = pos + offsRefs;
+                                    if (mcrfChunkOffset2 + 8 <= alphaWdtBytes.Length && offsRefs > 0)
+                                    {
+                                        var mcrf2 = new Mcrf(alphaWdtBytes, mcrfChunkOffset2);
+                                        mcrfPayload = mcrf2.Data.Length;
+                                        var dIdx = (System.Collections.Generic.IEnumerable<int>)mcrf2.GetDoodadsIndices(Math.Max(0, nDoodadRefs)) ?? System.Linq.Enumerable.Empty<int>();
+                                        var wIdx = (System.Collections.Generic.IEnumerable<int>)mcrf2.GetWmosIndices(Math.Max(0, nMapObjRefs)) ?? System.Linq.Enumerable.Empty<int>();
+                                        var dTake = System.Linq.Enumerable.Take(dIdx, 4);
+                                        var wTake = System.Linq.Enumerable.Take(wIdx, 4);
+                                        dSamples = string.Join('|', System.Linq.Enumerable.Select(dTake, v => v.ToString(CultureInfo.InvariantCulture)));
+                                        wSamples = string.Join('|', System.Linq.Enumerable.Select(wTake, v => v.ToString(CultureInfo.InvariantCulture)));
+                                        if (mcrfTargets.Count > 0)
+                                        {
+                                            var row2 = string.Join(',', new[]
+                                            {
+                                                tileY.ToString(CultureInfo.InvariantCulture),
+                                                tileX.ToString(CultureInfo.InvariantCulture),
+                                                ci.ToString(CultureInfo.InvariantCulture),
+                                                "alpha",
+                                                nDoodadRefs.ToString(CultureInfo.InvariantCulture),
+                                                nMapObjRefs.ToString(CultureInfo.InvariantCulture),
+                                                mcrfPayload.ToString(CultureInfo.InvariantCulture),
+                                                dSamples,
+                                                wSamples
+                                            }) + "\n";
+                                            foreach (var p in mcrfTargets) { try { File.AppendAllText(p, row2); } catch { } }
+                                        }
+                                    }
+                                }
+                                catch { }
+
+                                long expected = (long)(nDoodadRefs + nMapObjRefs) * 4L;
+                                var row = string.Join(',', new[]
+                                {
+                                    tileY.ToString(CultureInfo.InvariantCulture),
+                                    tileX.ToString(CultureInfo.InvariantCulture),
+                                    ci.ToString(CultureInfo.InvariantCulture),
+                                    nDoodadRefs.ToString(CultureInfo.InvariantCulture),
+                                    nMapObjRefs.ToString(CultureInfo.InvariantCulture),
+                                    offsRefs.ToString(CultureInfo.InvariantCulture),
+                                    offsLayer.ToString(CultureInfo.InvariantCulture),
+                                    offsAlpha.ToString(CultureInfo.InvariantCulture),
+                                    offsShadow.ToString(CultureInfo.InvariantCulture),
+                                    offsSnd.ToString(CultureInfo.InvariantCulture),
+                                    offsLiquid.ToString(CultureInfo.InvariantCulture),
+                                    mddfCount2.ToString(CultureInfo.InvariantCulture),
+                                    modfCount2.ToString(CultureInfo.InvariantCulture),
+                                    expected.ToString(CultureInfo.InvariantCulture),
+                                    mcrfPayload.ToString(CultureInfo.InvariantCulture),
+                                    dSamples,
+                                    wSamples,
+                                    string.Empty
+                                }) + "\n";
+                                foreach (var p in diagTargets) { try { File.AppendAllText(p, row); } catch { } }
+                            }
+                        }
+                        catch (Exception exDiag)
+                        {
+                            try
+                            {
+                                int tileX = adtNum2 % 64, tileY = adtNum2 / 64;
+                                var line = $"{tileY},{tileX},-1,,,,,,,,,,,,,,,{exDiag.Message}\n";
+                                foreach (var p in diagTargets) { try { File.AppendAllText(p, line); } catch { } }
+                            }
+                            catch { }
+                        }
+
+                        // Construct ADT object after diagnostics; capture ctor exceptions
+                        AdtAlpha? a = null;
+                        try
+                        {
+                            a = new AdtAlpha(outputPath, adtOff2, adtNum2);
+                        }
+                        catch (Exception exCtor)
+                        {
+                            try
+                            {
+                                int tileX = adtNum2 % 64, tileY = adtNum2 / 64;
+                                var line = $"{tileY},{tileX},-1,,,,,,,,,,,,,,,{exCtor.Message}\n";
+                                foreach (var p in diagTargets) { try { File.AppendAllText(p, line); } catch { } }
+                            }
+                            catch { }
+                            continue; // skip this tile
+                        }
+
+                        // Perform conversion with exception capture
+                        try
+                        {
+                            var lk = a!.ToAdtLk(mdnmNames, monmNames);
+                            lk.ToFile(lkOutDir); // Treats directory as output root
+                            try
+                            {
+                                int tileX = adtNum2 % 64, tileY = adtNum2 / 64;
+                                var outFile = Path.Combine(lkOutDir, $"{mapName}_{tileX}_{tileY}.adt");
+                                if (File.Exists(outFile))
+                                {
+                                    var lkBytes = File.ReadAllBytes(outFile);
+                                    int lkMh = FindFourCCLocal(lkBytes, "MHDR");
+                                    if (lkMh >= 0)
+                                    {
+                                        int lkMhStart = lkMh + 8;
+                                        int lkMcinRel = BitConverter.ToInt32(lkBytes, lkMhStart + 0x0);
+                                        int lkMcinChunk = lkMhStart + lkMcinRel;
+                                        if (lkMcinChunk >= 0 && lkMcinChunk + 8 <= lkBytes.Length)
+                                        {
+                                            int entries = 256;
+                                            for (int ci = 0; ci < entries; ci++)
+                                            {
+                                                int mcPos = BitConverter.ToInt32(lkBytes, lkMcinChunk + 8 + ci * 16 + 0);
+                                                if (mcPos <= 0 || mcPos + 8 > lkBytes.Length) continue;
+                                                int hStart = mcPos + 8;
+                                                if (hStart + 128 > lkBytes.Length) continue;
+                                                int dN = BitConverter.ToInt32(lkBytes, hStart + 0x14);
+                                                int wN = BitConverter.ToInt32(lkBytes, hStart + 0x3C);
+                                                int oRefs = BitConverter.ToInt32(lkBytes, hStart + 0x20);
+                                                int mcrfPayload = 0;
+                                                string dSamples = string.Empty, wSamples = string.Empty;
+                                                if (oRefs > 0)
+                                                {
+                                                    // Offsets in LK MCNK header are relative to the beginning of the MCNK chunk (letters position).
+                                                    int mcrfOff = mcPos + oRefs;
+                                                    if (mcrfOff + 8 <= lkBytes.Length)
+                                                    {
+                                                        var mcrf3 = new Mcrf(lkBytes, mcrfOff);
+                                                        mcrfPayload = mcrf3.Data.Length;
+                                                        var dIdx = (System.Collections.Generic.IEnumerable<int>)mcrf3.GetDoodadsIndices(Math.Max(0, dN)) ?? System.Linq.Enumerable.Empty<int>();
+                                                        var wIdx = (System.Collections.Generic.IEnumerable<int>)mcrf3.GetWmosIndices(Math.Max(0, wN)) ?? System.Linq.Enumerable.Empty<int>();
+                                                        var dTake = System.Linq.Enumerable.Take(dIdx, 4);
+                                                        var wTake = System.Linq.Enumerable.Take(wIdx, 4);
+                                                        dSamples = string.Join('|', System.Linq.Enumerable.Select(dTake, v => v.ToString(CultureInfo.InvariantCulture)));
+                                                        wSamples = string.Join('|', System.Linq.Enumerable.Select(wTake, v => v.ToString(CultureInfo.InvariantCulture)));
+                                                    }
+                                                }
+                                                if (mcrfTargets.Count > 0)
+                                                {
+                                                    var row3 = string.Join(',', new[]
+                                                    {
+                                                        tileY.ToString(CultureInfo.InvariantCulture),
+                                                        tileX.ToString(CultureInfo.InvariantCulture),
+                                                        ci.ToString(CultureInfo.InvariantCulture),
+                                                        "lk",
+                                                        dN.ToString(CultureInfo.InvariantCulture),
+                                                        wN.ToString(CultureInfo.InvariantCulture),
+                                                        mcrfPayload.ToString(CultureInfo.InvariantCulture),
+                                                        dSamples,
+                                                        wSamples
+                                                    }) + "\n";
+                                                    foreach (var p in mcrfTargets) { try { File.AppendAllText(p, row3); } catch { } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                        catch (Exception exConv)
+                        {
+                            try
+                            {
+                                int tileX = adtNum2 % 64, tileY = adtNum2 / 64;
+                                var line = $"{tileY},{tileX},-1,,,,,,,,,,,,,,,{exConv.Message}\n";
+                                foreach (var p in diagTargets) { try { File.AppendAllText(p, line); } catch { } }
+                            }
+                            catch { }
+                            // Do not rethrow here; continue to next tile to ensure diagnostics are fully emitted
+                        }
 
                         // Crosswalk-based AreaID patching (in-place)
                         if (patchMap != null)
                         {
-                            var alphaAreaIds = a.GetAlphaMcnkAreaIds();
+                            var alphaAreaIds = a!.GetAlphaMcnkAreaIds();
                             var outFile = Path.Combine(lkOutDir, $"{mapName}_{adtNum2 % 64}_{adtNum2 / 64}.adt");
                             try
                             {
@@ -4711,6 +5104,20 @@ internal static class Program
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[warn] LK ADT export failed: {ex.Message}");
+                    try
+                    {
+                        string[] diagCandidatesErr = new[]
+                        {
+                            Path.Combine(outRoot, "lk_export_diag.csv"),
+                            Path.Combine(lkOutDir, "lk_export_diag.csv"),
+                            Path.Combine(Directory.GetCurrentDirectory(), "lk_export_diag.csv"),
+                        };
+                        foreach (var cand in diagCandidatesErr)
+                        {
+                            try { File.AppendAllText(cand, $"-1,-1,-1,,,,,,,,,,,,,,,{ex.Message}\n"); } catch { }
+                        }
+                    }
+                    catch { }
                 }
             }
             return 0;

@@ -20,6 +20,17 @@ Legacy technical details retained below; top sections are authoritative.
 - Diagnostics: kept assets CSV, `dropped_assets.csv`, `objects_written.csv` (per-tile MDDF/MODF counts and samples), `mclq_summary.csv`.
 - Policies: do not gate placements; build name tables from union of referenced names; normalize `/`→`\\`, `.m2`→`.mdx`; placements axis X,Z,Y.
 
+## Hot Update (2025-11-10) – Diagnostics & Agentic AI
+- Diagnostics hardening (in progress):
+  - Confirm MCNK subchunk offset bases (use chunk-start) and assert in code.
+  - MCRF dumper: FourCC checks, payload-size validation, sample indices CSV dump.
+  - MH2O→MCLQ: per-chunk instrumentation (layers, LVF, masks, heights/depths), write `mclq_summary.csv`.
+  - Placement transforms: assert world↔tile↔chunk mapping and output a tiny CSV sample.
+- Agentic AI initiative (design):
+  - Optional pipeline using local Qwen3‑Coder or hosted to automate audits and comparisons.
+  - Scope: offset auditing, MCRF/MH2O validation, coordinate checks, CSV diffing.
+  - Integration: opt-in CLI mode; offline-friendly; secrets via env/config.
+
 ## Runtime Environment
 - **Target Framework**: .NET 9.0
 - **Platform**: Windows x64 (primary), cross-platform capable

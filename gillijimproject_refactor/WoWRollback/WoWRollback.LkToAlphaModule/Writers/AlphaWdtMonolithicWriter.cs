@@ -495,6 +495,55 @@ public sealed class AlphaWdtMonolithicWriter
             catch { }
             objectsCsvLines.Add($"{yy},{xx},{mddfCountFs},{modfCountFs},{firstMddfName},{firstModfName}");
 
+            // Emit per-tile MCRF debug CSV for quick inspection
+            try
+            {
+                var outDirLocal = Path.GetDirectoryName(outWdtPath) ?? ".";
+                Directory.CreateDirectory(Path.Combine(outDirLocal, "mcrf_debug"));
+                var dbgPath = Path.Combine(outDirLocal, "mcrf_debug", $"{yy:D2}_{xx:D2}_mcrf_debug.csv");
+                using var swDbg = new StreamWriter(dbgPath, false, Encoding.UTF8);
+                swDbg.WriteLine("chunk_idx,nDoodadRefs,nMapObjRefs,d_min,d_max,w_min,w_max,d_samples,w_samples,violations");
+                for (int ci = 0; ci < 256; ci++)
+                {
+                    var drefs = doodadRefsByChunkFs[ci];
+                    var wrefs = wmoRefsByChunkFs[ci];
+                    int dn = drefs?.Count ?? 0;
+                    int wn = wrefs?.Count ?? 0;
+                    int dmin = int.MaxValue, dmax = int.MinValue, wmin = int.MaxValue, wmax = int.MinValue;
+                    bool viol = false;
+                    if (dn > 0)
+                    {
+                        for (int k = 0; k < dn; k++) { int v = drefs[k]; if (v < dmin) dmin = v; if (v > dmax) dmax = v; if (v < 0 || v >= mddfCountFs) viol = true; }
+                    }
+                    else { dmin = dmax = -1; }
+                    if (wn > 0)
+                    {
+                        for (int k = 0; k < wn; k++) { int v = wrefs[k]; if (v < wmin) wmin = v; if (v > wmax) wmax = v; if (v < 0 || v >= modfCountFs) viol = true; }
+                    }
+                    else { wmin = wmax = -1; }
+
+                    // Sample up to 4 refs of each type
+                    string ds = string.Empty;
+                    if (dn > 0)
+                    {
+                        int take = Math.Min(4, dn);
+                        var arr = new string[take];
+                        for (int t = 0; t < take; t++) arr[t] = drefs[t].ToString(CultureInfo.InvariantCulture);
+                        ds = string.Join('|', arr);
+                    }
+                    string ws = string.Empty;
+                    if (wn > 0)
+                    {
+                        int take = Math.Min(4, wn);
+                        var arr = new string[take];
+                        for (int t = 0; t < take; t++) arr[t] = wrefs[t].ToString(CultureInfo.InvariantCulture);
+                        ws = string.Join('|', arr);
+                    }
+                    swDbg.WriteLine($"{ci},{dn},{wn},{dmin},{dmax},{wmin},{wmax},{ds},{ws},{(viol ? "viol" : "")}");
+                }
+            }
+            catch { }
+
             // Rebuild MCNKs with MCRF refs
             alphaMcnkBytes = new byte[256][];
             for (int ci = 0; ci < 256; ci++)
@@ -1830,19 +1879,19 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(scale));
             ms.Write(BitConverter.GetBytes(flags));
 
-            // Populate per-chunk refs with the GLOBAL MDNM index for this record
+            // Populate per-chunk refs using LK absolute planar coords (posX,posY) -> local chunk indices in this tile
             if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
             {
-                const float CHUNK = TILESIZE / 16f;
-                float tileMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
-                float tileMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
-                int cx = (int)Math.Floor((alphaX - tileMinX) / CHUNK);
-                int cy = (int)Math.Floor((alphaY - tileMinY) / CHUNK);
+                const float CHUNK_ABS = TILESIZE / 16f;
+                float tileOriginX = tileXX * TILESIZE - WORLD_BASE;
+                float tileOriginY = WORLD_BASE - tileYY * TILESIZE;
+                int cx = (int)Math.Floor((posX - tileOriginX) / CHUNK_ABS);
+                int cy = (int)Math.Floor((tileOriginY - posY) / CHUNK_ABS);
                 if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                 {
                     int idx = cy * 16 + cx;
-                    // Add MDDF record index within this tile (baseIndex + written count)
-                    perChunkRefs[idx].Add(baseIndex + written);
+                    // Add MDNM global name index expected by Alpha MCRF (not MDDF record index)
+                    perChunkRefs[idx].Add(globalIdx);
                 }
             }
 
@@ -1852,11 +1901,11 @@ public sealed class AlphaWdtMonolithicWriter
                 int chunkIdx = -1;
                 if (tileYY >= 0 && tileXX >= 0)
                 {
-                    const float CHUNK2 = TILESIZE / 16f;
-                    float tMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
-                    float tMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
-                    int cx2 = (int)Math.Floor((alphaX - tMinX) / CHUNK2);
-                    int cy2 = (int)Math.Floor((alphaY - tMinY) / CHUNK2);
+                    const float CHUNK_ABS2 = TILESIZE / 16f;
+                    float tOriginX = tileXX * TILESIZE - WORLD_BASE;
+                    float tOriginY = WORLD_BASE - tileYY * TILESIZE;
+                    int cx2 = (int)Math.Floor((posX - tOriginX) / CHUNK_ABS2);
+                    int cy2 = (int)Math.Floor((tOriginY - posY) / CHUNK_ABS2);
                     if (cx2 >= 0 && cx2 < 16 && cy2 >= 0 && cy2 < 16) chunkIdx = cy2 * 16 + cx2;
                 }
                 placementsOut.Add(string.Join(',', new[]
@@ -1894,6 +1943,7 @@ public sealed class AlphaWdtMonolithicWriter
         const int entry = 64;
         int count = Math.Max(0, Math.Min(size / entry, 1_000_000));
         using var ms = new MemoryStream();
+        int written = 0; // number of MODF records written by this function
         for (int i = 0; i < count; i++)
         {
             int p = data + i * entry;
@@ -1959,11 +2009,11 @@ public sealed class AlphaWdtMonolithicWriter
 
             if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
             {
-                const float CHUNK = TILESIZE_M / 16f;
-                float tileMinX = 32f * TILESIZE_M - (tileXX + 1) * TILESIZE_M;
-                float tileMinY = 32f * TILESIZE_M - (tileYY + 1) * TILESIZE_M;
-                int cx = (int)Math.Floor((alphaX - tileMinX) / CHUNK);
-                int cy = (int)Math.Floor((alphaY - tileMinY) / CHUNK);
+                const float CHUNK_ABS = TILESIZE_M / 16f;
+                float tileMinAbsX = tileXX * TILESIZE_M;
+                float tileMinAbsY = tileYY * TILESIZE_M;
+                int cx = (int)Math.Floor((posX - tileMinAbsX) / CHUNK_ABS);
+                int cy = (int)Math.Floor((posY - tileMinAbsY) / CHUNK_ABS);
                 if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                 {
                     int idx = cy * 16 + cx;
@@ -1977,11 +2027,11 @@ public sealed class AlphaWdtMonolithicWriter
                 int chunkIdx = -1;
                 if (tileYY >= 0 && tileXX >= 0)
                 {
-                    const float CHUNK2 = TILESIZE_M / 16f;
-                    float tMinX = 32f * TILESIZE_M - (tileXX + 1) * TILESIZE_M;
-                    float tMinY = 32f * TILESIZE_M - (tileYY + 1) * TILESIZE_M;
-                    int cx2 = (int)Math.Floor((alphaX - tMinX) / CHUNK2);
-                    int cy2 = (int)Math.Floor((alphaY - tMinY) / CHUNK2);
+                    const float CHUNK_ABS2 = TILESIZE_M / 16f;
+                    float tMinAbsX = tileXX * TILESIZE_M;
+                    float tMinAbsY = tileYY * TILESIZE_M;
+                    int cx2 = (int)Math.Floor((posX - tMinAbsX) / CHUNK_ABS2);
+                    int cy2 = (int)Math.Floor((posY - tMinAbsY) / CHUNK_ABS2);
                     if (cx2 >= 0 && cx2 < 16 && cy2 >= 0 && cy2 < 16) chunkIdx = cy2 * 16 + cx2;
                 }
                 float bbMinXc = cMinX;
@@ -2018,6 +2068,7 @@ public sealed class AlphaWdtMonolithicWriter
                     scale.ToString(CultureInfo.InvariantCulture)
                 }));
             }
+            written++;
         }
         return ms.ToArray();
     }
