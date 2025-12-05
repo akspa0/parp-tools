@@ -13,6 +13,10 @@ public static class AlphaMcnkBuilder
     private const int McnkHeaderSize = 0x80;
     private const int ChunkLettersAndSize = 8;
 
+    // Optional diagnostics: caller can hook to receive per-chunk sizes
+    // args: chunkIdx(0..255), nLayers, mclyLen, mcalLen, mcshLen, mcseLen, mclqLen, nDoodadRefs, nMapObjRefs, mcrfLen
+    public static Action<int, int, int, int, int, int, int, int, int, int>? OnChunkBuilt;
+
     public static byte[] BuildFromLk(byte[] lkAdtBytes, int mcNkOffset, LkToAlphaOptions? opts = null, byte[]? lkTexAdtBytes = null, int texMcNkOffset = -1, System.Collections.Generic.IReadOnlyList<int>? doodadRefs = null, System.Collections.Generic.IReadOnlyList<int>? mapObjRefs = null)
     {
         int headerStart = mcNkOffset;
@@ -621,6 +625,14 @@ public static class AlphaMcnkBuilder
 
         int givenSize = McnkHeaderSize + alphaMcvtRaw.Length + mcnrRaw.Length + mclyWhole.Length + mcrfWhole.Length + mcshRaw.Length + mcalRaw.Length + mcseRaw.Length + (mclqWhole?.Length ?? 0);
 
+        // Emit diagnostics if requested
+        try
+        {
+            int chunkIdx = (lkHeader.IndexY * 16) + lkHeader.IndexX;
+            OnChunkBuilt?.Invoke(chunkIdx, nLayers, mclyRaw.Length, mcalRaw.Length, mcshRaw.Length, mcseRaw.Length, (mclqWhole?.Length ?? 0), nDoodadRefs, nMapObjRefs, mcrfWhole.Length);
+        }
+        catch { }
+
         using var ms = new MemoryStream();
         // Write MCNK letters reversed on disk ('KNCM') to match Alpha v18 expectations
         var letters = Encoding.ASCII.GetBytes("KNCM");
@@ -739,7 +751,13 @@ public static class AlphaMcnkBuilder
 
     private static byte[]? TryBuildMclqFromMh2o(byte[] bytes, int chunkX, int chunkY, LkToAlphaOptions? opts)
     {
-        int mh2o = FindFourCCReversed(bytes, "MH2O");
+        // MH2O is a top-level ADT chunk in LK/TBC/WotLK and is stored with forward FourCC
+        int mh2o = FindFourCCForward(bytes, "MH2O");
+        if (mh2o < 0)
+        {
+            // Fallback: try reversed in case upstream provided reversed ASCII view
+            mh2o = FindFourCCReversed(bytes, "MH2O");
+        }
         if (mh2o < 0 || mh2o + 8 > bytes.Length)
         {
             if (opts?.VerboseLogging == true) Console.WriteLine($"[alpha] MH2O not found for mcnk ({chunkX},{chunkY})");

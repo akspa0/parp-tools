@@ -39,7 +39,7 @@ internal static class Program
         {
             var orch = new LkToAlphaOrchestrator();
             var resolvedOut = string.IsNullOrWhiteSpace(outDir) ? OutputPathResolver.GetDefaultRoot(map) : outDir;
-            var res = orch.ConvertLkToAlphaTerrainOnlyAdts(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions());
+            var res = orch.PackMonolithicAlphaWdt(wdt, lkDir, resolvedOut, map, new LkToAlphaOptions());
             Console.WriteLine(res.Success ? $"MAP OK: {res.TilesProcessed} tiles -> {res.AlphaOutputDirectory}" : $"MAP FAILED: {res.ErrorMessage}");
         }, wdtPath, lkDirOpt, mapOpt, outOpt);
 

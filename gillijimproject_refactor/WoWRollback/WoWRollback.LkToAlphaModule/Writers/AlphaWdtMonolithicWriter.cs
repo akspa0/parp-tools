@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Globalization;
 using WoWRollback.LkToAlphaModule;
@@ -79,6 +80,8 @@ public sealed class AlphaWdtMonolithicWriter
                     foreach (var n in BuildMmdxOrdered(objBytesScan)) allM2Names.Add(n);
                     foreach (var n in BuildMwmoOrdered(objBytesScan)) allWmoNames.Add(n);
                 }
+            // Clear diagnostics hook for safety before moving to next tile
+            AlphaMcnkBuilder.OnChunkBuilt = null;
                 if (File.Exists(obj0Scan))
                 {
                     var obj0BytesScan = File.ReadAllBytes(obj0Scan);
@@ -98,10 +101,12 @@ public sealed class AlphaWdtMonolithicWriter
         int mccvExported = 0;
         int mccvHeaders = 0;
         var objectsCsvLines = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
+        var mcnkSizesCsv = new List<string> { "tile_yy,tile_xx,chunk_idx,nLayers,mcly_bytes,mcal_bytes,mcsh_bytes,mcse_bytes,mclq_bytes,nDoodadRefs,nMapObjRefs,mcrf_bytes" };
         var rawObjectsLines = new List<string> { "tile_yy,tile_xx,source,mddf_count,modf_count,first_mddf,first_modf" };
         var placementsSkippedLines = new List<string> { "tile_yy,tile_xx,source,type,local_index,name,reason" };
         var placementsMddfLines = new List<string> { "tile_yy,tile_xx,source,chunk_idx,local_index,global_index,name,uid,x,z,y,rx,ry,rz,scale,flags" };
         var placementsModfLines = new List<string> { "tile_yy,tile_xx,source,chunk_idx,local_index,global_index,name,uid,x,z,y,rx,ry,rz,bb_minx,bb_miny,bb_minz,bb_maxx,bb_maxy,bb_maxz,flags,doodad_set,name_set,scale" };
+        var packTimingRows = new List<string>();
         long totalMddfWritten = 0, totalModfWritten = 0;
 
         // Build WDT scaffolding (Alpha format): MVER -> MPHD(16) -> MAIN -> MDNM -> MONM
@@ -194,6 +199,7 @@ public sealed class AlphaWdtMonolithicWriter
             }
             try
             {
+                Stopwatch swTile = Stopwatch.StartNew();
                 // Parse tile indices from file name map_yy_xx.adt
                 var file = Path.GetFileNameWithoutExtension(rootAdt);
                 // Expected: <map>_YY_XX
@@ -513,12 +519,12 @@ public sealed class AlphaWdtMonolithicWriter
                     bool viol = false;
                     if (dn > 0)
                     {
-                        for (int k = 0; k < dn; k++) { int v = drefs[k]; if (v < dmin) dmin = v; if (v > dmax) dmax = v; if (v < 0 || v >= mddfCountFs) viol = true; }
+                        for (int k = 0; k < dn; k++) { int v = drefs[k]; if (v < dmin) dmin = v; if (v > dmax) dmax = v; if (v < 0 || v >= m2Names.Count) viol = true; }
                     }
                     else { dmin = dmax = -1; }
                     if (wn > 0)
                     {
-                        for (int k = 0; k < wn; k++) { int v = wrefs[k]; if (v < wmin) wmin = v; if (v > wmax) wmax = v; if (v < 0 || v >= modfCountFs) viol = true; }
+                        for (int k = 0; k < wn; k++) { int v = wrefs[k]; if (v < wmin) wmin = v; if (v > wmax) wmax = v; if (v < 0 || v >= wmoNames.Count) viol = true; }
                     }
                     else { wmin = wmax = -1; }
 
@@ -545,6 +551,25 @@ public sealed class AlphaWdtMonolithicWriter
             catch { }
 
             // Rebuild MCNKs with MCRF refs
+            // Hook diagnostics to collect per-chunk sizes for this tile
+            AlphaMcnkBuilder.OnChunkBuilt = (ciDiag, nLayersDiag, mclyLen, mcalLen, mcshLen, mcseLen, mclqLen, nDRefs, nWRefs, mcrfLen) =>
+            {
+                mcnkSizesCsv.Add(string.Join(',', new[]
+                {
+                    yy.ToString(CultureInfo.InvariantCulture),
+                    xx.ToString(CultureInfo.InvariantCulture),
+                    ciDiag.ToString(CultureInfo.InvariantCulture),
+                    nLayersDiag.ToString(CultureInfo.InvariantCulture),
+                    mclyLen.ToString(CultureInfo.InvariantCulture),
+                    mcalLen.ToString(CultureInfo.InvariantCulture),
+                    mcshLen.ToString(CultureInfo.InvariantCulture),
+                    mcseLen.ToString(CultureInfo.InvariantCulture),
+                    mclqLen.ToString(CultureInfo.InvariantCulture),
+                    nDRefs.ToString(CultureInfo.InvariantCulture),
+                    nWRefs.ToString(CultureInfo.InvariantCulture),
+                    mcrfLen.ToString(CultureInfo.InvariantCulture),
+                }));
+            };
             alphaMcnkBytes = new byte[256][];
             for (int ci = 0; ci < 256; ci++)
             {
@@ -604,8 +629,9 @@ public sealed class AlphaWdtMonolithicWriter
                     Span<byte> sig = new byte[4];
                     int read = outMs.Read(sig);
                     outMs.Position = cur;
-                    var tokenStr = Encoding.ASCII.GetString(sig);
-                    Console.WriteLine($"[pack][check] tile {yy:D2}_{xx:D2} MCNK[{firstIdxPresent}] abs={absPos} len={outMs.Length} read={read} token='{tokenStr}'");
+                    var tokenRaw = Encoding.ASCII.GetString(sig);
+                    var tokenFwd = new string(tokenRaw.Reverse().ToArray());
+                    Console.WriteLine($"[pack][check] tile {yy:D2}_{xx:D2} MCNK[{firstIdxPresent}] abs={absPos} len={outMs.Length} read={read} token='{tokenFwd}'");
                     // Validate all MCIN entries for this tile (absolute)
                     for (int i = 0; i < 256; i++)
                     {
@@ -617,10 +643,11 @@ public sealed class AlphaWdtMonolithicWriter
                             Span<byte> t = new byte[4];
                             int r = outMs.Read(t);
                             outMs.Position = cur2;
-                            var tok = Encoding.ASCII.GetString(t);
-                            if (r != 4 || tok != "MCNK")
+                            var tokRaw = Encoding.ASCII.GetString(t);
+                            var tokFwd = new string(tokRaw.Reverse().ToArray());
+                            if (r != 4 || tokFwd != "MCNK")
                             {
-                                Console.WriteLine($"[pack][BAD] tile {yy:D2}_{xx:D2} MCIN[{i}] abs={pos} read={r} token='{tok}'");
+                                Console.WriteLine($"[pack][BAD] tile {yy:D2}_{xx:D2} MCIN[{i}] abs={pos} read={r} token='{tokFwd}'");
                                 break;
                             }
                         }
@@ -631,6 +658,12 @@ public sealed class AlphaWdtMonolithicWriter
             // Commit MAIN entries after successful tile write
             mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
             mhdrToFirstMcnkSizes[tileIndex] = mhdrToFirstVal;
+            try
+            {
+                swTile.Stop();
+                packTimingRows.Add($"{yy},{xx},{tileIndex},{swTile.Elapsed.TotalMilliseconds.ToString(CultureInfo.InvariantCulture)},");
+            }
+            catch { }
         }
         catch (Exception ex)
         {
@@ -646,6 +679,11 @@ public sealed class AlphaWdtMonolithicWriter
                 }
             }
             catch { /* best-effort rollback */ }
+            try
+            {
+                packTimingRows.Add($"-1,-1,{tileIndex},,{'"'}{ex.Message.Replace("\n", " ").Replace("\r", " ")}{'"'}");
+            }
+            catch { }
             continue;
         }
         }
@@ -676,9 +714,11 @@ public sealed class AlphaWdtMonolithicWriter
                 File.WriteAllLines(Path.Combine(outDir, "m2_used.csv"), new [] { "name" }.Concat(usedM2ForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)), Encoding.UTF8);
             if (usedWmoForExtract.Count > 0)
                 File.WriteAllLines(Path.Combine(outDir, "wmo_used.csv"), new [] { "name" }.Concat(usedWmoForExtract.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)), Encoding.UTF8);
-            if ((m2Names.Count + wmoNames.Count) > 0 && (totalMddfWritten + totalModfWritten) == 0)
+            if (packTimingRows.Count > 0)
+                File.WriteAllLines(Path.Combine(outDir, "pack_prep_timing.csv"), new [] { "tile_yy,tile_xx,index,ms_total,exception" }.Concat(packTimingRows), Encoding.UTF8);
+            if (mcnkSizesCsv.Count > 1)
             {
-                Console.WriteLine("[warn] MDNM/MONM non-empty but wrote zero placements (MDDF/MODF=0). Check name-index mapping and gating.");
+                File.WriteAllLines(Path.Combine(outDir, "alpha_pack_mcnk_sizes.csv"), mcnkSizesCsv, Encoding.UTF8);
             }
         }
         catch { }
@@ -709,6 +749,10 @@ public sealed class AlphaWdtMonolithicWriter
                 {
                     File.WriteAllLines(Path.Combine(outDir, "textures_missing.csv"), new [] { "texture" }.Concat(missing), Encoding.UTF8);
                 }
+            }
+            if (mcnkSizesCsv.Count > 1)
+            {
+                File.WriteAllLines(Path.Combine(outDir, "alpha_pack_mcnk_sizes.csv"), mcnkSizesCsv, Encoding.UTF8);
             }
         }
         catch { }
@@ -898,6 +942,7 @@ public sealed class AlphaWdtMonolithicWriter
         var mhdrAbs = Enumerable.Repeat(0, GridTiles).ToArray();
         var mhdrToFirst = Enumerable.Repeat(0, GridTiles).ToArray();
         var objectsCsvLines2 = new List<string> { "tile_yy,tile_xx,mddf_count,modf_count,first_mddf,first_modf" };
+        var mcnkSizesCsv2 = new List<string> { "tile_yy,tile_xx,chunk_idx,nLayers,mcly_bytes,mcal_bytes,mcsh_bytes,mcse_bytes,mclq_bytes,nDoodadRefs,nMapObjRefs,mcrf_bytes" };
         var rawObjectsLines2 = new List<string> { "tile_yy,tile_xx,source,mddf_count,modf_count,first_mddf,first_modf" };
         var placementsMddfLines2 = new List<string> { "tile_yy,tile_xx,source,chunk_idx,local_index,global_index,name,uid,x,z,y,rx,ry,rz,scale,flags" };
         var placementsModfLines2 = new List<string> { "tile_yy,tile_xx,source,chunk_idx,local_index,global_index,name,uid,x,z,y,rx,ry,rz,bb_minx,bb_miny,bb_minz,bb_maxx,bb_maxy,bb_maxz,flags,doodad_set,name_set,scale" };
@@ -1202,6 +1247,24 @@ public sealed class AlphaWdtMonolithicWriter
                 catch { }
 
                 // Rebuild MCNKs with MCRF refs
+                AlphaMcnkBuilder.OnChunkBuilt = (ciDiag, nLayersDiag, mclyLen, mcalLen, mcshLen, mcseLen, mclqLen, nDRefs, nWRefs, mcrfLen) =>
+                {
+                    mcnkSizesCsv2.Add(string.Join(',', new[]
+                    {
+                        yy.ToString(CultureInfo.InvariantCulture),
+                        xx.ToString(CultureInfo.InvariantCulture),
+                        ciDiag.ToString(CultureInfo.InvariantCulture),
+                        nLayersDiag.ToString(CultureInfo.InvariantCulture),
+                        mclyLen.ToString(CultureInfo.InvariantCulture),
+                        mcalLen.ToString(CultureInfo.InvariantCulture),
+                        mcshLen.ToString(CultureInfo.InvariantCulture),
+                        mcseLen.ToString(CultureInfo.InvariantCulture),
+                        mclqLen.ToString(CultureInfo.InvariantCulture),
+                        nDRefs.ToString(CultureInfo.InvariantCulture),
+                        nWRefs.ToString(CultureInfo.InvariantCulture),
+                        mcrfLen.ToString(CultureInfo.InvariantCulture),
+                    }));
+                };
                 alphaMcnkBytes = new byte[256][];
                 for (int ci = 0; ci < 256; ci++)
                 {
@@ -1860,8 +1923,6 @@ public sealed class AlphaWdtMonolithicWriter
             // Convert LK global (server) coords to Alpha centered coords
             // LK & Alpha: plane X/Y, height Z. Alpha is centered; LK is absolute.
             const float TILESIZE = 533.33333f; const float WORLD_BASE = 32f * TILESIZE;
-            float alphaX = WORLD_BASE - posX;
-            float alphaY = WORLD_BASE - posY;
             float rotX = BitConverter.ToSingle(bytes, p + 20);
             float rotY = BitConverter.ToSingle(bytes, p + 24);
             float rotZ = BitConverter.ToSingle(bytes, p + 28);
@@ -1870,28 +1931,29 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
             // Alpha MDDF stores position as X, Z(height), Y in centered world coordinates
-            ms.Write(BitConverter.GetBytes(alphaX));
+            ms.Write(BitConverter.GetBytes(posX));
             ms.Write(BitConverter.GetBytes(posZ)); // Z is height
-            ms.Write(BitConverter.GetBytes(alphaY));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
             ms.Write(BitConverter.GetBytes(scale));
             ms.Write(BitConverter.GetBytes(flags));
 
-            // Populate per-chunk refs using LK absolute planar coords (posX,posY) -> local chunk indices in this tile
+            // Populate per-chunk refs using planar world coords; store MDDF record index (baseIndex + written)
             if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
             {
-                const float CHUNK_ABS = TILESIZE / 16f;
-                float tileOriginX = tileXX * TILESIZE - WORLD_BASE;
-                float tileOriginY = WORLD_BASE - tileYY * TILESIZE;
-                int cx = (int)Math.Floor((posX - tileOriginX) / CHUNK_ABS);
-                int cy = (int)Math.Floor((tileOriginY - posY) / CHUNK_ABS);
+                const float CHUNK = TILESIZE / 16f;
+                float tileMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
+                float tileMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
+                float localX = posX - tileMinX;
+                float localY = posY - tileMinY;
+                int cx = (int)Math.Floor(localX / CHUNK);
+                int cy = (int)Math.Floor(localY / CHUNK);
                 if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                 {
                     int idx = cy * 16 + cx;
-                    // Add MDNM global name index expected by Alpha MCRF (not MDDF record index)
-                    perChunkRefs[idx].Add(globalIdx);
+                    perChunkRefs[idx].Add(baseIndex + written);
                 }
             }
 
@@ -1901,11 +1963,13 @@ public sealed class AlphaWdtMonolithicWriter
                 int chunkIdx = -1;
                 if (tileYY >= 0 && tileXX >= 0)
                 {
-                    const float CHUNK_ABS2 = TILESIZE / 16f;
-                    float tOriginX = tileXX * TILESIZE - WORLD_BASE;
-                    float tOriginY = WORLD_BASE - tileYY * TILESIZE;
-                    int cx2 = (int)Math.Floor((posX - tOriginX) / CHUNK_ABS2);
-                    int cy2 = (int)Math.Floor((tOriginY - posY) / CHUNK_ABS2);
+                    const float CHUNK2 = TILESIZE / 16f;
+                    float tMinX = 32f * TILESIZE - (tileXX + 1) * TILESIZE;
+                    float tMinY = 32f * TILESIZE - (tileYY + 1) * TILESIZE;
+                    float localX2 = posX - tMinX;
+                    float localY2 = posY - tMinY;
+                    int cx2 = (int)Math.Floor(localX2 / CHUNK2);
+                    int cy2 = (int)Math.Floor(localY2 / CHUNK2);
                     if (cx2 >= 0 && cx2 < 16 && cy2 >= 0 && cy2 < 16) chunkIdx = cy2 * 16 + cx2;
                 }
                 placementsOut.Add(string.Join(',', new[]
@@ -1918,9 +1982,9 @@ public sealed class AlphaWdtMonolithicWriter
                     globalIdx.ToString(CultureInfo.InvariantCulture),
                     name,
                     uniqueId.ToString(CultureInfo.InvariantCulture),
-                    alphaX.ToString(CultureInfo.InvariantCulture),
+                    posX.ToString(CultureInfo.InvariantCulture),
                     posZ.ToString(CultureInfo.InvariantCulture),
-                    alphaY.ToString(CultureInfo.InvariantCulture),
+                    posY.ToString(CultureInfo.InvariantCulture),
                     rotX.ToString(CultureInfo.InvariantCulture),
                     rotY.ToString(CultureInfo.InvariantCulture),
                     rotZ.ToString(CultureInfo.InvariantCulture),
@@ -1963,9 +2027,7 @@ public sealed class AlphaWdtMonolithicWriter
             float posZ = BitConverter.ToSingle(bytes, p + 12);
             float posY = BitConverter.ToSingle(bytes, p + 16);
             // Convert LK global (server) coords to Alpha centered coords (plane X/Y, height Z)
-            const float TILESIZE_M = 533.33333f; const float WORLD_BASE_M = 32f * TILESIZE_M;
-            float alphaX = WORLD_BASE_M - posX;
-            float alphaY = WORLD_BASE_M - posY;
+            const float TILESIZE_M = 533.33333f;
             float rotX = BitConverter.ToSingle(bytes, p + 20);
             float rotY = BitConverter.ToSingle(bytes, p + 24);
             float rotZ = BitConverter.ToSingle(bytes, p + 28);
@@ -1973,9 +2035,9 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
             // Write position as X, Z, Y in centered world coordinates
-            ms.Write(BitConverter.GetBytes(alphaX));
+            ms.Write(BitConverter.GetBytes(posX));
             ms.Write(BitConverter.GetBytes(posZ));
-            ms.Write(BitConverter.GetBytes(alphaY));
+            ms.Write(BitConverter.GetBytes(posY));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
@@ -1986,11 +2048,11 @@ public sealed class AlphaWdtMonolithicWriter
             float lkMaxX = BitConverter.ToSingle(bytes, p + 44);
             float lkMaxZ = BitConverter.ToSingle(bytes, p + 48);
             float lkMaxY = BitConverter.ToSingle(bytes, p + 52);
-            float cMinX = WORLD_BASE_M - lkMaxX;
-            float cMinY = WORLD_BASE_M - lkMaxY;
+            float cMinX = lkMinX;
+            float cMinY = lkMinY;
             float cMinZ = lkMinZ;
-            float cMaxX = WORLD_BASE_M - lkMinX;
-            float cMaxY = WORLD_BASE_M - lkMinY;
+            float cMaxX = lkMaxX;
+            float cMaxY = lkMaxY;
             float cMaxZ = lkMaxZ;
             ms.Write(BitConverter.GetBytes(cMinX));
             ms.Write(BitConverter.GetBytes(cMinY));
@@ -2007,17 +2069,19 @@ public sealed class AlphaWdtMonolithicWriter
             ms.Write(BitConverter.GetBytes(nameSet));
             ms.Write(BitConverter.GetBytes(scale));
 
+            // Populate per-chunk refs using planar world coords; store MODF record index (baseIndex + written)
             if (perChunkRefs != null && tileYY >= 0 && tileXX >= 0)
             {
                 const float CHUNK_ABS = TILESIZE_M / 16f;
-                float tileMinAbsX = tileXX * TILESIZE_M;
-                float tileMinAbsY = tileYY * TILESIZE_M;
-                int cx = (int)Math.Floor((posX - tileMinAbsX) / CHUNK_ABS);
-                int cy = (int)Math.Floor((posY - tileMinAbsY) / CHUNK_ABS);
+                float tileMinX = 32f * TILESIZE_M - (tileXX + 1) * TILESIZE_M;
+                float tileMinY = 32f * TILESIZE_M - (tileYY + 1) * TILESIZE_M;
+                float localX = posX - tileMinX;
+                float localY = posY - tileMinY;
+                int cx = (int)Math.Floor(localX / CHUNK_ABS);
+                int cy = (int)Math.Floor(localY / CHUNK_ABS);
                 if (cx >= 0 && cx < 16 && cy >= 0 && cy < 16)
                 {
                     int idx = cy * 16 + cx;
-                    // Add MODF record index within this tile (baseIndex + written count)
                     perChunkRefs[idx].Add(baseIndex + written);
                 }
             }
@@ -2028,10 +2092,12 @@ public sealed class AlphaWdtMonolithicWriter
                 if (tileYY >= 0 && tileXX >= 0)
                 {
                     const float CHUNK_ABS2 = TILESIZE_M / 16f;
-                    float tMinAbsX = tileXX * TILESIZE_M;
-                    float tMinAbsY = tileYY * TILESIZE_M;
-                    int cx2 = (int)Math.Floor((posX - tMinAbsX) / CHUNK_ABS2);
-                    int cy2 = (int)Math.Floor((posY - tMinAbsY) / CHUNK_ABS2);
+                    float tMinX = 32f * TILESIZE_M - (tileXX + 1) * TILESIZE_M;
+                    float tMinY = 32f * TILESIZE_M - (tileYY + 1) * TILESIZE_M;
+                    float localX2 = posX - tMinX;
+                    float localY2 = posY - tMinY;
+                    int cx2 = (int)Math.Floor(localX2 / CHUNK_ABS2);
+                    int cy2 = (int)Math.Floor(localY2 / CHUNK_ABS2);
                     if (cx2 >= 0 && cx2 < 16 && cy2 >= 0 && cy2 < 16) chunkIdx = cy2 * 16 + cx2;
                 }
                 float bbMinXc = cMinX;
@@ -2050,9 +2116,9 @@ public sealed class AlphaWdtMonolithicWriter
                     globalIdx.ToString(CultureInfo.InvariantCulture),
                     name,
                     uniqueId.ToString(CultureInfo.InvariantCulture),
-                    alphaX.ToString(CultureInfo.InvariantCulture),
+                    posX.ToString(CultureInfo.InvariantCulture),
                     posZ.ToString(CultureInfo.InvariantCulture),
-                    alphaY.ToString(CultureInfo.InvariantCulture),
+                    posY.ToString(CultureInfo.InvariantCulture),
                     rotX.ToString(CultureInfo.InvariantCulture),
                     rotY.ToString(CultureInfo.InvariantCulture),
                     rotZ.ToString(CultureInfo.InvariantCulture),
