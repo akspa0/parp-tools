@@ -18,6 +18,11 @@
   - LK DBC root from `test_data/3.3.5/tree/DBFilesClient`.
   - DBCTool.V2 outputs from `DBCTool.V2/dbctool_outputs`.
 
+## Format Specifications (Source of Truth)
+- **Alpha 0.5.3**: `memory-bank/specs/Alpha-0.5.3-Format.md`
+  - Defines Monolithic WDT structure, chunk offsets, and legacy sub-chunk formats (MCLQ, etc.).
+  - Validated against 0.5.3.3368 client behavior.
+
 ## External Libraries
 - Uses `WoWRollback.Core` MPQ/StormLib stack to support a pristine 3.3.5 install as LK input.
 - Uses `AlphaWdtAnalyzer.Core.AdtExportPipeline` and DBCTool.V2 loaders/crosswalks for Alpha→LK export and AreaID mapping.

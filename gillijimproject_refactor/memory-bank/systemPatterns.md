@@ -1,5 +1,19 @@
 # System Patterns
 
+## Alpha Format Patterns
+
+### Monolithic WDT Pattern
+- **Single File**: The `.wdt` file acts as a container for the entire map.
+- **Embedded Tiles**: MHDR, MCIN, and 256 MCNKs are written inline for each tile referenced by MAIN.
+- **Global Metadata**: MDNM (M2 names) and MONM (WMO names) are global to the map and reside in the WDT header.
+- **Relative Offsets**: MHDR offsets (`offsInfo`, `offsTex`, etc.) are relative to `MHDR.data` (start + 8).
+- **Absolute Offsets**: MCIN and MAIN use absolute file offsets.
+
+### Format Parity Pattern
+- **Byte-Perfect Goals**: Where possible, output should match the original Alpha client's expectations exactly (e.g., WMO name counting with trailing empty string).
+- **Reversed FourCC**: Writers must reverse FourCCs on disk (`KNCM`, `YLCM`) to match Alpha's big-endian-like expectations on little-endian systems (or vice-versa legacy artifact).
+- **Raw Chunk Data**: MCVT, MCNR, MCSH, MCAL, MCSE are written as raw data blobs without headers in the MCNK stream.
+
 ## Architecture
 - Standalone, self-contained CLI with two phases:
   - Phase A: `export-lk` – export LK ADTs from an original Alpha WDT.

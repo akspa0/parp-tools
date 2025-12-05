@@ -1,6 +1,7 @@
 # Progress – AlphaWdtInspector & Retroporting Tools
 
 ## ✅ Completed
+- **Format Specification**: Created verified [memory-bank/specs/Alpha-0.5.3-Format.md](memory-bank/specs/Alpha-0.5.3-Format.md) based on battle-tested code and in-game verification.
 - Plan and Memory Bank alignment for standalone diagnostic tool focus.
 - Implemented `placements-sweep-diff`, `wdt-sanity`, and `mtex-audit` commands.
 - Fixed `pack-alpha` MCIN backpatching (offsets are RELATIVE to `MHDR.data`).

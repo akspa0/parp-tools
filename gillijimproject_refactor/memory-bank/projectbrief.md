@@ -1,16 +1,28 @@
 # Project Brief
 
 ## Mission
-Build a standalone .NET 9 console toolchain ('AlphaWdtInspector' and a dedicated LK→Alpha converter) to diagnose and fix LK ADT → Alpha WDT packing issues (MCRF destination re-bucketing, MCLQ from MH2O, MCSE extraction) and provide a canonical LK→Alpha WDT writer independent of WoWRollback, mirroring AlphaWDTAnalysisTool semantics.
+**WoWRollback** is a comprehensive toolchain designed to **read, write, and convert** all file formats for the **World of Warcraft Alpha 0.5.3 (3368)** client. The primary goal is to enable full bidirectional asset transfer: bringing modern WoW content into the Alpha client and extracting Alpha content for analysis or use in modern clients.
 
-## Objectives
-- Implement CLI commands: `export-lk`, `pack-alpha` [--no-coord-xform] [--dest-rebucket] [--emit-mclq] [--scan-mcse], `tile-diff`, `dump-adt`.
-- Emit CSVs: `mcnk_sizes.csv`, `placements_mddf.csv`, `placements_modf.csv`, `mcrf_diag.csv`.
-- Keep the tool self-contained (no WoWRollback dependencies) and deterministic.
-- Provide a minimal standalone LK→Alpha converter that uses AlphaWDTAnalysisTool crosswalk CSVs in reverse (3.3.5→0.5.3), with no asset gating and full MDDF/MODF/WMO UID preservation.
+## Core Objectives
+1.  **Full Read/Write Support**: Implement robust readers and writers for all key Alpha formats:
+    *   **WDT/ADT**: Monolithic format with embedded tiles (MCNK) and legacy liquids (MCLQ).
+    *   **WMO**: Alpha v14 format (monolithic).
+    *   **M2/MDX**: Alpha MDX format.
+    *   **BLP**: BLP2 format with DXT compression.
+2.  **Bidirectional Conversion**:
+    *   **Modern → Alpha**: Downporting assets (LK 3.3.5 and newer) to 0.5.3 specifications.
+    *   **Alpha → Modern**: Up-porting historical assets to 3.3.5+ formats.
+3.  **Diagnostic Tooling**: Provide a standalone toolchain (`AlphaWdtInspector`) to diagnose format issues, verify packing integrity, and ensure "byte-perfect" output where possible.
+4.  **No Guesswork**: Maintain definitive, verified specifications (`memory-bank/specs/Alpha-0.5.3-Format.md`) derived from clean-room analysis and battle-tested code.
+
+## Key Components
+- **WoWRollback.Core**: Shared library for format handling.
+- **AlphaLkToAlphaStandalone**: Dedicated LK → Alpha converter and roundtrip validator.
+- **AlphaWdtInspector**: Diagnostic CLI for WDT/ADT analysis.
+- **BlpResizer**: Batch texture converter/resizer for Alpha compatibility.
 
 ## Success Criteria
-- `pack-alpha` produces Alpha WDTs with non-zero MCLQ/MCSE where present and populated MCRF on busy tiles (non-zero refs).
-- `tile-diff` shows expected subchunk presence/size/offset parity; raw subchunks are dumped for inspection.
-- `dump-adt` confirms MH2O and MDDF/MODF presence on source LK ADTs.
-- `export-lk` and `pack-alpha` paths are deterministic and reproducible.
+- **In-Game Validation**: Converted worlds and assets load and render correctly in the original 0.5.3 client without crashes.
+- **Data Integrity**: Roundtrip conversions (Alpha → LK → Alpha) preserve critical metadata like AreaIDs, liquid types, and object placements.
+- **Deterministic Output**: Toolchains produce consistent, reproducible results.
+

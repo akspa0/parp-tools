@@ -37,6 +37,9 @@
 **LK 3.3.5 Format:**
 - ALL sub-chunks: Have FourCC+size headers
 
+## Format Specifications (Verified)
+- **Alpha WDT/ADT**: `memory-bank/specs/Alpha-0.5.3-Format.md` (Definitive spec, replaces all previous notes)
+
 ## Documentation Created
 1. `docs/MCNK-SubChunk-Audit.md` - Complete format comparison
 2. `docs/MCAL-Data-Orientation-Bug.md` - Analysis of visual corruption
