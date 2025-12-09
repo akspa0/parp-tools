@@ -77,3 +77,43 @@
 2. Add mismatch-only CSVs derived from `areaid_roundtrip.csv` to highlight problematic MCNKs/tiles.
 3. Run golden-file style checks on a Kalidar subset (original Alpha vs roundtrip-reconstructed Alpha).
 4. Backport LK→Alpha learnings into WoWRollback.Cli / related tooling once the standalone pipeline is trusted.
+
+## Update 2025-12-09 – PM4 Pathfinding ↔ WMO Correlation & ADT Reconstruction
+
+### 🎯 Current Focus
+Reconstruct 3.3.5 ADT files with PM4-derived MODF placement data for Noggit visualization.
+
+### ❌ Failed Approach (DO NOT REPEAT)
+- Created `AdtLkFactory` to build ADTs from scratch
+- Manually constructed MCNK chunks with minimal data
+- Result: Invalid ADT files that crash viewers and Noggit
+- **Lesson**: Don't reinvent the wheel - use existing proven code
+
+### ✅ Correct Approach
+1. **Read existing development ADT files** (split Cata+ format from `test_data/development/`)
+2. **Convert to 3.3.5 monolithic format** using existing WoWRollback converters
+3. **Patch MWMO/MWID/MODF chunks** with PM4 reconstruction data
+4. **Write back** using existing proven `gillijimproject-csharp` writers
+
+### 📚 Existing Code to Use (DO NOT MODIFY)
+- `gillijimproject-csharp/WowFiles/LichKing/AdtLk.cs` - LK ADT reader/writer
+- `gillijimproject-csharp/WowFiles/LichKing/McnkLk.cs` - MCNK chunk handling
+- `WoWRollback.LkToAlphaModule/` - Format conversion builders
+- `Warcraft.NET` - Modern ADT reading
+
+### 🔧 Files Created (May Need Cleanup)
+- `WoWRollback.Core/Services/PM4/AdtLkFactory.cs` - **BROKEN, creates invalid ADTs**
+- `WoWRollback.Core/Services/PM4/SplitAdtMerger.cs` - Split→Monolithic merger (untested)
+
+### 📝 Key Discoveries
+- PM4 pathfinding geometry ≠ WMO render/collision geometry
+- MODF.NameId = index into MWID (not byte offset into MWMO)
+- MCNR has 13-byte padding after chunk data (handled by existing code)
+- FourCC reversed on disk, data NOT reversed
+
+### 🎯 Next Steps
+1. **Delete or disable `AdtLkFactory`** - it creates broken files
+2. **Implement proper split ADT → monolithic converter** using existing readers
+3. **Patch only MWMO/MWID/MODF chunks** in converted ADTs
+4. **Test with `development_22_18.adt`** - largest PM4 with most object instances
+5. Use `development_29_39` as reference (has complete ADT + PM4 + _obj0.adt)

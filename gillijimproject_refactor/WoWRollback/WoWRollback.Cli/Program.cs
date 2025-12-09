@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -30,6 +31,7 @@ using WoWRollback.LkToAlphaModule;
 using WoWRollback.LkToAlphaModule.Writers;
 using MPQToTACT.MPQ;
 using WoWRollback.Core.Services.Assets;
+using WoWRollback.Core.Services.PM4;
 
 namespace WoWRollback.Cli;
 
@@ -190,6 +192,22 @@ internal static class Program
                     return RunAlphaRoundtripVerify(opts);
                 case "dump-alpha-mcnk":
                     return RunDumpAlphaMcnk(opts);
+                case "pm4-adt-correlate":
+                    return RunPm4AdtCorrelate(opts);
+                case "wmo-walkable-extract":
+                    return RunWmoWalkableExtract(opts);
+                case "pm4-export-obj":
+                    return RunPm4ExportObj(opts);
+                case "pm4-wmo-match":
+                    return RunPm4WmoMatch(opts);
+                case "pm4-reconstruct-modf":
+                    return RunPm4ReconstructModf(opts);
+                case "wmo-batch-extract":
+                    return RunWmoBatchExtract(opts);
+                case "pm4-export-modf":
+                    return RunPm4ExportModf(opts);
+                case "pm4-create-adt":
+                    return RunPm4CreateAdt(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -6083,5 +6101,996 @@ internal static class Program
             }
         }
         return positions;
+    }
+
+    /// <summary>
+    /// Correlate PM4 pathfinding objects with ADT MODF placements.
+    /// Uses development_29_39 as the Rosetta Stone for understanding PM4↔WMO relationships.
+    /// </summary>
+    private static int RunPm4AdtCorrelate(Dictionary<string, string> opts)
+    {
+        // Required: --pm4 <path> --obj0 <path>
+        // Optional: --out <dir>
+        var pm4Path = opts.GetValueOrDefault("pm4", "");
+        var obj0Path = opts.GetValueOrDefault("obj0", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+
+        // If no paths provided, use development_29_39 test data
+        if (string.IsNullOrEmpty(pm4Path) && string.IsNullOrEmpty(obj0Path))
+        {
+            // Try to find test data
+            var testDataRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "test_data");
+            if (!Directory.Exists(testDataRoot))
+            {
+                testDataRoot = @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data";
+            }
+
+            var devPath = Path.Combine(testDataRoot, "development", "World", "Maps", "development");
+            if (Directory.Exists(devPath))
+            {
+                pm4Path = Path.Combine(devPath, "development_29_39.pm4");
+                obj0Path = Path.Combine(devPath, "development_29_39_obj0.adt");
+                Console.WriteLine("[INFO] Using default test data: development_29_39");
+            }
+            else
+            {
+                // Try 3.3.5 test data
+                devPath = Path.Combine(testDataRoot, "3.3.5", "tree", "World", "Maps", "development");
+                if (Directory.Exists(devPath))
+                {
+                    pm4Path = Path.Combine(devPath, "development_29_39.pm4");
+                    obj0Path = Path.Combine(devPath, "development_29_39_obj0.adt");
+                    Console.WriteLine("[INFO] Using 3.3.5 test data: development_29_39");
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(pm4Path))
+        {
+            Console.Error.WriteLine("[ERROR] Missing required argument: --pm4 <path>");
+            Console.Error.WriteLine("  Optional: --obj0 <path> (for full correlation)");
+            Console.Error.WriteLine("  Or run without arguments to use development_29_39 test data");
+            return 1;
+        }
+
+        if (!File.Exists(pm4Path))
+        {
+            Console.Error.WriteLine($"[ERROR] PM4 file not found: {pm4Path}");
+            return 1;
+        }
+
+        // Setup output
+        if (string.IsNullOrEmpty(outDir))
+        {
+            outDir = Path.Combine(Path.GetDirectoryName(pm4Path) ?? ".", "pm4_analysis_output");
+        }
+        Directory.CreateDirectory(outDir);
+
+        var correlator = new Pm4AdtCorrelator();
+
+        // If obj0 provided, do full correlation; otherwise PM4-only analysis
+        if (!string.IsNullOrEmpty(obj0Path) && File.Exists(obj0Path))
+        {
+            var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+            var outputCsv = Path.Combine(outDir, $"{baseName}_correlation.csv");
+
+            Console.WriteLine("=== PM4-ADT Correlator ===");
+            Console.WriteLine($"PM4: {pm4Path}");
+            Console.WriteLine($"_obj0.adt: {obj0Path}");
+            Console.WriteLine($"Output: {outDir}");
+            Console.WriteLine();
+
+            correlator.AnalyzeTile(pm4Path, obj0Path, outputCsv);
+        }
+        else
+        {
+            Console.WriteLine("=== PM4 Analysis (no _obj0.adt) ===");
+            Console.WriteLine($"PM4: {pm4Path}");
+            Console.WriteLine($"Output: {outDir}");
+            Console.WriteLine();
+
+            correlator.AnalyzePm4Only(pm4Path, outDir);
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Extract walkable surfaces from a WMO file.
+    /// </summary>
+    private static int RunWmoWalkableExtract(Dictionary<string, string> opts)
+    {
+        var wmoPath = opts.GetValueOrDefault("wmo", "");
+        var outPath = opts.GetValueOrDefault("out", "");
+        var clientPath = opts.GetValueOrDefault("client-path", "");
+        var v14 = opts.ContainsKey("v14");
+        var exportAll = opts.ContainsKey("all");
+        var exportFloors = opts.ContainsKey("floors");
+
+        if (string.IsNullOrEmpty(wmoPath))
+        {
+            Console.WriteLine("Usage: wmo-walkable-extract --wmo <virtual-path> --client-path <path> [--out <obj>] [--all] [--floors]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --wmo          Virtual path to WMO (e.g., World\\wmo\\Azeroth\\Buildings\\...)");
+            Console.WriteLine("  --client-path  Path to WoW client installation with MPQ files");
+            Console.WriteLine("  --out          Output OBJ file (default: <wmo-name>_collision.obj)");
+            Console.WriteLine("  --v14          Parse as v14 monolithic format (for alpha clients)");
+            Console.WriteLine("  --all          Export ALL triangles (full render geometry)");
+            Console.WriteLine("  --floors       Export upward-facing render faces (walkable floors)");
+            return 1;
+        }
+
+        Console.WriteLine("=== WMO Walkable Surface Extractor ===");
+        Console.WriteLine($"WMO: {wmoPath}");
+        Console.WriteLine($"Client: {clientPath}");
+        Console.WriteLine();
+
+        var extractor = new WmoWalkableSurfaceExtractor();
+        WmoWalkableSurfaceExtractor.WmoWalkableData data;
+
+        // If client-path provided, load from MPQ
+        if (!string.IsNullOrEmpty(clientPath))
+        {
+            if (!Directory.Exists(clientPath))
+            {
+                Console.Error.WriteLine($"[ERROR] Client path not found: {clientPath}");
+                return 1;
+            }
+
+            EnsureStormLibOnPath();
+
+            // Locate MPQs
+            var mpqs = ArchiveLocator.LocateMpqs(clientPath);
+            Console.WriteLine($"[INFO] Found {mpqs.Count} MPQ archives");
+
+            if (mpqs.Count == 0)
+            {
+                Console.Error.WriteLine("[ERROR] No MPQ archives found");
+                return 1;
+            }
+
+            using var src = new PrioritizedArchiveSource(clientPath, mpqs);
+
+            // Check if WMO exists
+            if (!src.FileExists(wmoPath))
+            {
+                Console.Error.WriteLine($"[ERROR] WMO not found in archives: {wmoPath}");
+                return 1;
+            }
+
+            // Load root WMO
+            byte[] rootData;
+            using (var stream = src.OpenFile(wmoPath))
+            using (var ms = new MemoryStream())
+            {
+                stream.CopyTo(ms);
+                rootData = ms.ToArray();
+            }
+            Console.WriteLine($"[INFO] Loaded root WMO: {rootData.Length} bytes");
+
+            // Group loader function
+            byte[]? LoadGroup(string groupPath)
+            {
+                if (!src.FileExists(groupPath))
+                    return null;
+                using var stream = src.OpenFile(groupPath);
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                return ms.ToArray();
+            }
+
+            data = extractor.ExtractFromBytes(rootData, wmoPath, LoadGroup);
+        }
+        else if (File.Exists(wmoPath))
+        {
+            // Load from local file
+            if (v14)
+            {
+                data = extractor.ExtractFromWmoV14(wmoPath);
+            }
+            else
+            {
+                data = extractor.ExtractFromWmoV17(wmoPath);
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine($"[ERROR] WMO not found: {wmoPath}");
+            Console.Error.WriteLine("Provide --client-path to load from MPQ archives");
+            return 1;
+        }
+
+        // Set output path
+        var wmoName = Path.GetFileNameWithoutExtension(wmoPath);
+        if (string.IsNullOrEmpty(outPath))
+        {
+            outPath = exportAll ? $"{wmoName}_full.obj" : 
+                      exportFloors ? $"{wmoName}_floors.obj" : 
+                      $"{wmoName}_collision.obj";
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"[RESULT] Extraction complete:");
+        Console.WriteLine($"  Total triangles: {data.AllTriangles.Count}");
+        Console.WriteLine($"  Collision triangles: {data.WalkableTriangles.Count}");
+        
+        if (data.WalkableVertices.Count > 0)
+        {
+            Console.WriteLine($"  Bounds: ({data.BoundsMin.X:F1}, {data.BoundsMin.Y:F1}, {data.BoundsMin.Z:F1}) to ({data.BoundsMax.X:F1}, {data.BoundsMax.Y:F1}, {data.BoundsMax.Z:F1})");
+        }
+
+        // Export based on mode
+        if (exportAll)
+        {
+            extractor.ExportAllToObj(data, outPath);
+        }
+        else if (exportFloors)
+        {
+            extractor.ExportWalkableFloorsToObj(data, outPath);
+        }
+        else if (data.WalkableTriangles.Count > 0)
+        {
+            extractor.ExportToObj(data, outPath);
+        }
+        else
+        {
+            Console.WriteLine("[WARN] No collision surfaces found to export");
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Export PM4 pathfinding geometry to OBJ.
+    /// </summary>
+    private static int RunPm4ExportObj(Dictionary<string, string> opts)
+    {
+        var pm4Path = opts.GetValueOrDefault("pm4", "");
+        var outPath = opts.GetValueOrDefault("out", "");
+
+        if (string.IsNullOrEmpty(pm4Path))
+        {
+            Console.WriteLine("Usage: pm4-export-obj --pm4 <path> [--out <obj>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --pm4    Path to PM4 file");
+            Console.WriteLine("  --out    Output OBJ file (default: <pm4-name>.obj)");
+            return 1;
+        }
+
+        if (!File.Exists(pm4Path))
+        {
+            Console.Error.WriteLine($"[ERROR] PM4 file not found: {pm4Path}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outPath))
+        {
+            outPath = Path.ChangeExtension(pm4Path, ".obj");
+        }
+
+        Console.WriteLine("=== PM4 Geometry Exporter ===");
+        Console.WriteLine($"PM4: {pm4Path}");
+        Console.WriteLine($"Output: {outPath}");
+        Console.WriteLine();
+
+        var exporter = new Pm4GeometryExporter();
+        exporter.ExportToObj(pm4Path, outPath);
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Match PM4 geometry to WMO geometry to derive placement transform.
+    /// </summary>
+    private static int RunPm4WmoMatch(Dictionary<string, string> opts)
+    {
+        var pm4Obj = opts.GetValueOrDefault("pm4-obj", "");
+        var wmoObj = opts.GetValueOrDefault("wmo-obj", "");
+        var outPath = opts.GetValueOrDefault("out", "");
+
+        if (string.IsNullOrEmpty(pm4Obj) || string.IsNullOrEmpty(wmoObj))
+        {
+            Console.WriteLine("Usage: pm4-wmo-match --pm4-obj <path> --wmo-obj <path> [--out <transformed.obj>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --pm4-obj    Path to PM4 geometry OBJ (in world space)");
+            Console.WriteLine("  --wmo-obj    Path to WMO geometry OBJ (in local space)");
+            Console.WriteLine("  --out        Output transformed WMO OBJ (optional)");
+            Console.WriteLine();
+            Console.WriteLine("This tool analyzes both geometries to derive the placement transform");
+            Console.WriteLine("(position, rotation, scale) that was applied to place the WMO in the world.");
+            return 1;
+        }
+
+        if (!File.Exists(pm4Obj))
+        {
+            Console.Error.WriteLine($"[ERROR] PM4 OBJ not found: {pm4Obj}");
+            return 1;
+        }
+
+        if (!File.Exists(wmoObj))
+        {
+            Console.Error.WriteLine($"[ERROR] WMO OBJ not found: {wmoObj}");
+            return 1;
+        }
+
+        Console.WriteLine("=== PM4-WMO Geometry Matcher ===");
+        Console.WriteLine($"PM4: {pm4Obj}");
+        Console.WriteLine($"WMO: {wmoObj}");
+        Console.WriteLine();
+
+        var matcher = new Pm4WmoGeometryMatcher();
+        var transform = matcher.AnalyzeAndAlign(pm4Obj, wmoObj, string.IsNullOrEmpty(outPath) ? null : outPath);
+
+        Console.WriteLine("\n=== Derived MODF Placement Data ===");
+        Console.WriteLine($"Position: ({transform.Position.X:F2}, {transform.Position.Y:F2}, {transform.Position.Z:F2})");
+        Console.WriteLine($"Rotation: ({transform.Rotation.X:F2}°, {transform.Rotation.Y:F2}°, {transform.Rotation.Z:F2}°)");
+        Console.WriteLine($"Scale: {transform.Scale:F4}");
+        Console.WriteLine($"Confidence: {transform.MatchConfidence:P1}");
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Reconstruct MODF placement data from PM4 objects by matching against WMO library.
+    /// </summary>
+    private static int RunPm4ReconstructModf(Dictionary<string, string> opts)
+    {
+        var pm4Dir = opts.GetValueOrDefault("pm4-dir", "");
+        var wmoDir = opts.GetValueOrDefault("wmo-dir", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+        var minConfStr = opts.GetValueOrDefault("min-confidence", "0.7");
+
+        if (string.IsNullOrEmpty(pm4Dir) || string.IsNullOrEmpty(wmoDir))
+        {
+            Console.WriteLine("Usage: pm4-reconstruct-modf --pm4-dir <path> --wmo-dir <path> [--out <dir>] [--min-confidence <0.7>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --pm4-dir         Path to PM4FacesTool output directory");
+            Console.WriteLine("  --wmo-dir         Path to WMO collision geometry directory");
+            Console.WriteLine("  --out             Output directory for MODF reconstruction");
+            Console.WriteLine("  --min-confidence  Minimum match confidence (0.0-1.0, default 0.7)");
+            Console.WriteLine();
+            Console.WriteLine("This tool matches PM4 pathfinding objects against known WMOs to");
+            Console.WriteLine("reconstruct MODF placement data for ADT generation.");
+            return 1;
+        }
+
+        if (!Directory.Exists(pm4Dir))
+        {
+            Console.Error.WriteLine($"[ERROR] PM4 directory not found: {pm4Dir}");
+            return 1;
+        }
+
+        if (!Directory.Exists(wmoDir))
+        {
+            Console.Error.WriteLine($"[ERROR] WMO directory not found: {wmoDir}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outDir))
+        {
+            outDir = Path.Combine(pm4Dir, "modf_reconstruction");
+        }
+        Directory.CreateDirectory(outDir);
+
+        float minConfidence = 0.7f;
+        float.TryParse(minConfStr, out minConfidence);
+
+        Console.WriteLine("=== PM4 MODF Reconstructor ===");
+        Console.WriteLine($"PM4 Dir: {pm4Dir}");
+        Console.WriteLine($"WMO Dir: {wmoDir}");
+        Console.WriteLine($"Output: {outDir}");
+        Console.WriteLine($"Min Confidence: {minConfidence:P0}");
+        Console.WriteLine();
+
+        var reconstructor = new Pm4ModfReconstructor();
+
+        // Build WMO library
+        var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir);
+        if (wmoLibrary.Count == 0)
+        {
+            Console.Error.WriteLine("[ERROR] No WMOs found in library");
+            return 1;
+        }
+
+        // Reconstruct MODF
+        var result = reconstructor.ReconstructModf(pm4Dir, wmoLibrary, minConfidence);
+
+        // Export results
+        reconstructor.ExportToCsv(result, Path.Combine(outDir, "modf_entries.csv"));
+        reconstructor.ExportMwmo(result, Path.Combine(outDir, "mwmo_names.csv"));
+
+        // Export unmatched objects
+        if (result.UnmatchedPm4Objects.Count > 0)
+        {
+            File.WriteAllLines(
+                Path.Combine(outDir, "unmatched_objects.txt"),
+                result.UnmatchedPm4Objects);
+            Console.WriteLine($"[INFO] {result.UnmatchedPm4Objects.Count} unmatched objects written to unmatched_objects.txt");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("=== Summary ===");
+        Console.WriteLine($"Total MODF entries: {result.ModfEntries.Count}");
+        Console.WriteLine($"Unique WMOs: {result.WmoNames.Count}");
+        Console.WriteLine($"Unmatched objects: {result.UnmatchedPm4Objects.Count}");
+
+        if (result.MatchCounts.Count > 0)
+        {
+            Console.WriteLine("\nTop WMO matches:");
+            foreach (var kv in result.MatchCounts.OrderByDescending(x => x.Value).Take(10))
+            {
+                Console.WriteLine($"  {Path.GetFileName(kv.Key)}: {kv.Value} placements");
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Batch extract WMO collision geometry from MPQ archives.
+    /// </summary>
+    private static int RunWmoBatchExtract(Dictionary<string, string> opts)
+    {
+        var clientPath = opts.GetValueOrDefault("client-path", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+        var pattern = opts.GetValueOrDefault("pattern", "");
+        var limitStr = opts.GetValueOrDefault("limit", "0");
+
+        if (string.IsNullOrEmpty(clientPath))
+        {
+            Console.WriteLine("Usage: wmo-batch-extract --client-path <path> [--out <dir>] [--pattern <filter>] [--limit <n>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --client-path   Path to WoW client (with MPQ files)");
+            Console.WriteLine("  --out           Output directory for collision OBJs");
+            Console.WriteLine("  --pattern       Filter WMO paths (e.g., 'stormwind')");
+            Console.WriteLine("  --limit         Max WMOs to extract (0 = unlimited)");
+            Console.WriteLine();
+            Console.WriteLine("Extracts collision geometry from all WMOs in the client to build");
+            Console.WriteLine("a reference library for PM4-to-MODF reconstruction.");
+            return 1;
+        }
+
+        if (!Directory.Exists(clientPath))
+        {
+            Console.Error.WriteLine($"[ERROR] Client path not found: {clientPath}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outDir))
+        {
+            outDir = Path.Combine(clientPath, "wmo_collision_library");
+        }
+        Directory.CreateDirectory(outDir);
+
+        int limit = 0;
+        int.TryParse(limitStr, out limit);
+
+        Console.WriteLine("=== WMO Batch Extractor ===");
+        Console.WriteLine($"Client: {clientPath}");
+        Console.WriteLine($"Output: {outDir}");
+        Console.WriteLine($"Pattern: {(string.IsNullOrEmpty(pattern) ? "(all)" : pattern)}");
+        Console.WriteLine($"Limit: {(limit == 0 ? "unlimited" : limit.ToString())}");
+        Console.WriteLine();
+
+        EnsureStormLibOnPath();
+
+        // Locate MPQs
+        var mpqs = ArchiveLocator.LocateMpqs(clientPath);
+        Console.WriteLine($"[INFO] Found {mpqs.Count} MPQ archives");
+
+        if (mpqs.Count == 0)
+        {
+            Console.Error.WriteLine("[ERROR] No MPQ archives found");
+            return 1;
+        }
+
+        using var archiveSource = new PrioritizedArchiveSource(clientPath, mpqs);
+
+        // Find all WMO root files
+        var wmoFiles = new List<string>();
+        
+        // Scan common WMO paths
+        var searchPaths = new[]
+        {
+            "World\\wmo\\",
+            "World\\WMO\\"
+        };
+
+        Console.WriteLine("[INFO] Scanning for WMO files...");
+
+        // Check for listfile in multiple locations
+        var listfilePaths = new[]
+        {
+            opts.GetValueOrDefault("listfile", ""),
+            Path.Combine(clientPath, "listfile.txt"),
+            @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\World of Warcraft 3x.txt",
+            @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\wmo_roots_3x.txt"
+        };
+
+        string? listfilePath = listfilePaths.FirstOrDefault(p => !string.IsNullOrEmpty(p) && File.Exists(p));
+
+        if (!string.IsNullOrEmpty(listfilePath))
+        {
+            Console.WriteLine($"[INFO] Using listfile: {listfilePath}");
+            foreach (var line in File.ReadLines(listfilePath))
+            {
+                var path = line.Trim();
+                // Skip group files (e.g., _000.wmo, _001.wmo)
+                if (!path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (System.Text.RegularExpressions.Regex.IsMatch(path, @"_\d{3}\.wmo$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    continue;
+                    
+                if (string.IsNullOrEmpty(pattern) || path.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (archiveSource.FileExists(path))
+                        wmoFiles.Add(path);
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("[WARN] No listfile found. Use --listfile to specify one.");
+            Console.WriteLine("[WARN] Expected: 3.x listfile from test_data/World of Warcraft 3x.txt");
+        }
+
+        Console.WriteLine($"[INFO] Found {wmoFiles.Count} WMO root files");
+
+        if (limit > 0 && wmoFiles.Count > limit)
+        {
+            wmoFiles = wmoFiles.Take(limit).ToList();
+            Console.WriteLine($"[INFO] Limited to {limit} WMOs");
+        }
+
+        var extractor = new WmoWalkableSurfaceExtractor();
+        int success = 0;
+        int failed = 0;
+
+        foreach (var wmoPath in wmoFiles)
+        {
+            try
+            {
+                var wmoName = Path.GetFileNameWithoutExtension(wmoPath);
+                var outputPath = Path.Combine(outDir, $"{wmoName}_collision.obj");
+
+                if (File.Exists(outputPath))
+                {
+                    Console.WriteLine($"  [SKIP] {wmoName} (already exists)");
+                    success++;
+                    continue;
+                }
+
+                Console.Write($"  Extracting {wmoName}...");
+
+                // Get group count from root file
+                using var rootStream = archiveSource.OpenFile(wmoPath);
+                var rootBytes = new byte[rootStream.Length];
+                rootStream.Read(rootBytes, 0, rootBytes.Length);
+
+                // Parse root to get group count
+                int groupCount = ParseWmoGroupCount(rootBytes);
+                if (groupCount == 0)
+                {
+                    Console.WriteLine(" [WARN] No groups found");
+                    failed++;
+                    continue;
+                }
+
+                // Create group loader function
+                var basePath = wmoPath.Substring(0, wmoPath.Length - 4); // Remove .wmo
+                var archiveRef = archiveSource; // Capture for closure
+                
+                Func<string, byte[]?> groupLoader = (groupPath) =>
+                {
+                    if (archiveRef.FileExists(groupPath))
+                    {
+                        using var groupStream = archiveRef.OpenFile(groupPath);
+                        var groupBytes = new byte[groupStream.Length];
+                        groupStream.Read(groupBytes, 0, groupBytes.Length);
+                        return groupBytes;
+                    }
+                    return null;
+                };
+
+                // Extract collision geometry
+                var result = extractor.ExtractFromBytes(rootBytes, wmoPath, groupLoader);
+                
+                if (result.AllTriangles.Count == 0)
+                {
+                    Console.WriteLine(" [WARN] No triangles extracted");
+                    failed++;
+                    continue;
+                }
+                
+                extractor.ExportToObj(result, outputPath);
+
+                Console.WriteLine($" OK ({result.AllTriangles.Count} faces)");
+                success++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($" [ERROR] {ex.Message}");
+                failed++;
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"=== Complete ===");
+        Console.WriteLine($"Success: {success}");
+        Console.WriteLine($"Failed: {failed}");
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Parse WMO root file to get group count from MOHD chunk.
+    /// v17 MOHD structure: nTextures (4), nGroups (4), nPortals (4), ...
+    /// </summary>
+    private static int ParseWmoGroupCount(byte[] data)
+    {
+        // Scan for MOHD chunk (forward or reversed)
+        for (int i = 0; i < data.Length - 12; i++)
+        {
+            // Check for "MOHD" (forward)
+            if (data[i] == 'M' && data[i + 1] == 'O' && data[i + 2] == 'H' && data[i + 3] == 'D')
+            {
+                // v17: nTextures at +0, nGroups at +4
+                if (i + 8 + 8 <= data.Length)
+                {
+                    return BitConverter.ToInt32(data, i + 8 + 4); // nGroups at offset 4 in MOHD data
+                }
+            }
+            // Check for "DHOM" (reversed, little-endian storage)
+            if (data[i] == 'D' && data[i + 1] == 'H' && data[i + 2] == 'O' && data[i + 3] == 'M')
+            {
+                if (i + 8 + 8 <= data.Length)
+                {
+                    return BitConverter.ToInt32(data, i + 8 + 4);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Export MODF binary chunks from reconstruction results.
+    /// </summary>
+    private static int RunPm4ExportModf(Dictionary<string, string> opts)
+    {
+        var modfCsv = opts.GetValueOrDefault("modf-csv", "");
+        var mwmoCsv = opts.GetValueOrDefault("mwmo-csv", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+
+        if (string.IsNullOrEmpty(modfCsv))
+        {
+            Console.WriteLine("Usage: pm4-export-modf --modf-csv <path> [--mwmo-csv <path>] [--out <dir>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --modf-csv    Path to modf_entries.csv from pm4-reconstruct-modf");
+            Console.WriteLine("  --mwmo-csv    Path to mwmo_names.csv (optional, derived from modf-csv)");
+            Console.WriteLine("  --out         Output directory for binary chunks");
+            Console.WriteLine();
+            Console.WriteLine("Exports MWMO and MODF binary chunks for ADT reconstruction.");
+            return 1;
+        }
+
+        if (!File.Exists(modfCsv))
+        {
+            Console.Error.WriteLine($"[ERROR] MODF CSV not found: {modfCsv}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(mwmoCsv))
+        {
+            mwmoCsv = Path.Combine(Path.GetDirectoryName(modfCsv)!, "mwmo_names.csv");
+        }
+
+        if (string.IsNullOrEmpty(outDir))
+        {
+            outDir = Path.Combine(Path.GetDirectoryName(modfCsv)!, "modf_binary");
+        }
+        Directory.CreateDirectory(outDir);
+
+        Console.WriteLine("=== PM4 MODF Binary Exporter ===");
+        Console.WriteLine($"MODF CSV: {modfCsv}");
+        Console.WriteLine($"MWMO CSV: {mwmoCsv}");
+        Console.WriteLine($"Output: {outDir}");
+        Console.WriteLine();
+
+        // Load MODF entries from CSV
+        var modfEntries = new List<Pm4ModfReconstructor.ModfEntry>();
+        var wmoNames = new List<string>();
+        var wmoNameSet = new HashSet<string>();
+
+        foreach (var line in File.ReadLines(modfCsv).Skip(1)) // Skip header
+        {
+            var parts = line.Split(',');
+            if (parts.Length < 12) continue;
+
+            var entry = new Pm4ModfReconstructor.ModfEntry(
+                NameId: uint.Parse(parts[2]),
+                UniqueId: uint.Parse(parts[3]),
+                Position: new Vector3(float.Parse(parts[4]), float.Parse(parts[5]), float.Parse(parts[6])),
+                Rotation: new Vector3(float.Parse(parts[7]), float.Parse(parts[8]), float.Parse(parts[9])),
+                BoundsMin: Vector3.Zero, // Will be computed
+                BoundsMax: Vector3.Zero,
+                Flags: 0,
+                DoodadSet: 0,
+                NameSet: 0,
+                Scale: 1024,
+                WmoPath: parts[1],
+                Ck24: parts[0],
+                MatchConfidence: float.Parse(parts[11])
+            );
+
+            modfEntries.Add(entry);
+
+            if (!wmoNameSet.Contains(entry.WmoPath))
+            {
+                wmoNameSet.Add(entry.WmoPath);
+                wmoNames.Add(entry.WmoPath);
+            }
+        }
+
+        Console.WriteLine($"[INFO] Loaded {modfEntries.Count} MODF entries, {wmoNames.Count} unique WMOs");
+
+        // Create reconstruction result for the writer
+        var result = new Pm4ModfReconstructor.ReconstructionResult(
+            modfEntries,
+            wmoNames,
+            new List<string>(),
+            new Dictionary<string, int>()
+        );
+
+        // Export per-tile
+        var writer = new ModfChunkWriter();
+        writer.ExportPerTile(result, outDir);
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Create 3.3.5 ADT files with MODF data from reconstruction results.
+    /// </summary>
+    private static int RunPm4CreateAdt(Dictionary<string, string> opts)
+    {
+        var modfBinaryDir = opts.GetValueOrDefault("modf-dir", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+        var mapName = opts.GetValueOrDefault("map", "development");
+        var tileFilter = opts.GetValueOrDefault("tile", "");
+        var sourceAdtDir = opts.GetValueOrDefault("source-adt", "");
+
+        if (string.IsNullOrEmpty(modfBinaryDir))
+        {
+            Console.WriteLine("Usage: pm4-create-adt --modf-dir <path> [--source-adt <dir>] [--out <dir>] [--map <name>] [--tile X_Y]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --modf-dir    Path to modf_binary output from pm4-export-modf");
+            Console.WriteLine("  --source-adt  Path to source split ADT files (root + _obj0 + _tex0)");
+            Console.WriteLine("  --out         Output directory for ADT files");
+            Console.WriteLine("  --map         Map name (default: development)");
+            Console.WriteLine("  --tile        Filter to specific tile (e.g., 15_36)");
+            Console.WriteLine();
+            Console.WriteLine("Creates 3.3.5 monolithic ADT files with WMO placements.");
+            Console.WriteLine("If --source-adt is provided, merges split ADTs and patches MODF.");
+            return 1;
+        }
+
+        if (!Directory.Exists(modfBinaryDir))
+        {
+            Console.Error.WriteLine($"[ERROR] MODF binary directory not found: {modfBinaryDir}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outDir))
+        {
+            outDir = Path.Combine(modfBinaryDir, "..", "adt_335");
+        }
+        Directory.CreateDirectory(outDir);
+
+        Console.WriteLine("=== PM4 ADT Creator (3.3.5 Format) ===");
+        Console.WriteLine($"MODF Dir: {modfBinaryDir}");
+        if (!string.IsNullOrEmpty(sourceAdtDir))
+            Console.WriteLine($"Source ADT: {sourceAdtDir}");
+        Console.WriteLine($"Output: {outDir}");
+        Console.WriteLine($"Map: {mapName}");
+        if (!string.IsNullOrEmpty(tileFilter))
+            Console.WriteLine($"Tile filter: {tileFilter}");
+        Console.WriteLine();
+
+        var injector = new AdtModfInjector();
+        var merger = new SplitAdtMerger();
+        int created = 0;
+        int merged = 0;
+
+        // Find all tile directories
+        var tileDirs = Directory.GetDirectories(modfBinaryDir, "tile_*");
+        
+        foreach (var tileDir in tileDirs)
+        {
+            var dirName = Path.GetFileName(tileDir);
+            var parts = dirName.Replace("tile_", "").Split('_');
+            if (parts.Length != 2) continue;
+
+            if (!int.TryParse(parts[0], out int tileX) || !int.TryParse(parts[1], out int tileY))
+                continue;
+
+            // Apply tile filter if specified
+            if (!string.IsNullOrEmpty(tileFilter) && $"{tileX}_{tileY}" != tileFilter)
+                continue;
+
+            var mwmoPath = Path.Combine(tileDir, "MWMO.bin");
+            var modfPath = Path.Combine(tileDir, "MODF.bin");
+
+            if (!File.Exists(mwmoPath) || !File.Exists(modfPath))
+            {
+                Console.WriteLine($"  [SKIP] Tile {tileX}_{tileY}: Missing MWMO or MODF");
+                continue;
+            }
+
+            Console.Write($"  Creating {mapName}_{tileX}_{tileY}.adt...");
+
+            try
+            {
+                // Read MWMO data and extract WMO names
+                var mwmoData = File.ReadAllBytes(mwmoPath);
+                var wmoNames = ParseMwmoChunk(mwmoData);
+
+                // Read MODF data and parse entries
+                var modfData = File.ReadAllBytes(modfPath);
+                var modfEntries = ParseModfChunk(modfData, wmoNames, tileX, tileY);
+
+                // Convert to AdtLkFactory.ModfEntry format
+                var factoryEntries = modfEntries.Select(e => new AdtLkFactory.ModfEntry
+                {
+                    NameId = e.NameId,
+                    UniqueId = e.UniqueId,
+                    Position = e.Position,
+                    Rotation = e.Rotation,
+                    BoundsMin = e.BoundsMin,
+                    BoundsMax = e.BoundsMax,
+                    Flags = e.Flags,
+                    DoodadSet = e.DoodadSet,
+                    NameSet = e.NameSet,
+                    Scale = e.Scale
+                }).ToList();
+
+                // Create proper LK ADT using the factory
+                var adtName = $"{mapName}_{tileX}_{tileY}.adt";
+                var adt = AdtLkFactory.CreateMinimalAdt(adtName, tileX, tileY, wmoNames, factoryEntries);
+
+                // Write ADT file using the proper LK writer
+                var adtPath = Path.Combine(outDir, adtName);
+                adt.ToFile(adtPath);
+
+                // Get file size for reporting
+                var fileInfo = new FileInfo(adtPath);
+                Console.WriteLine($" OK ({factoryEntries.Count} WMOs, {fileInfo.Length} bytes)");
+                created++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($" [ERROR] {ex.Message}");
+            }
+        }
+
+        // Create WDT file
+        if (created > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("[INFO] Creating WDT file...");
+            var wdtWriter = new Wdt335Writer();
+            wdtWriter.WriteWdtFromAdtFiles(outDir, mapName);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"=== Complete: {created} ADT files created ===");
+
+        return 0;
+    }
+
+    private static List<string> ParseMwmoChunk(byte[] data)
+    {
+        var names = new List<string>();
+        
+        // Skip chunk header (MWMO + size = 8 bytes)
+        if (data.Length < 8) return names;
+        
+        int pos = 8;
+        int dataSize = BitConverter.ToInt32(data, 4);
+        int end = Math.Min(8 + dataSize, data.Length);
+
+        while (pos < end)
+        {
+            int start = pos;
+            while (pos < end && data[pos] != 0) pos++;
+            
+            if (pos > start)
+            {
+                names.Add(Encoding.ASCII.GetString(data, start, pos - start));
+            }
+            pos++; // Skip null terminator
+        }
+
+        return names;
+    }
+
+    private static List<AdtModfInjector.ModfEntry335> ParseModfChunk(byte[] data, List<string> wmoNames, int tileX, int tileY)
+    {
+        var entries = new List<AdtModfInjector.ModfEntry335>();
+        
+        // Skip chunk header (MODF + size = 8 bytes)
+        if (data.Length < 8) return entries;
+        
+        int dataSize = BitConverter.ToInt32(data, 4);
+        int entryCount = dataSize / 64;
+        int pos = 8;
+
+        // Generate unique IDs starting from a high base to avoid conflicts
+        // Format: 0xPPXXYYII where PP=0x80 (PM4 marker), XX=tileX, YY=tileY, II=index
+        uint baseUniqueId = 0x80000000u | ((uint)tileX << 16) | ((uint)tileY << 8);
+
+        for (int i = 0; i < entryCount && pos + 64 <= data.Length; i++)
+        {
+            // Read the entry from our binary format
+            uint nameOffset = BitConverter.ToUInt32(data, pos);
+            // Generate globally unique ID based on tile + index
+            uint uniqueId = baseUniqueId | (uint)i;
+            
+            // Position is in server coordinates - convert to ADT world coordinates
+            var serverPos = new Vector3(
+                BitConverter.ToSingle(data, pos + 8),
+                BitConverter.ToSingle(data, pos + 12),
+                BitConverter.ToSingle(data, pos + 16)
+            );
+            var worldPos = AdtModfInjector.ServerToAdtPosition(serverPos);
+            
+            var rotation = new Vector3(
+                BitConverter.ToSingle(data, pos + 20),
+                BitConverter.ToSingle(data, pos + 24),
+                BitConverter.ToSingle(data, pos + 28)
+            );
+
+            // Find the WMO name index from offset
+            uint nameId = 0;
+            uint currentOffset = 0;
+            for (int j = 0; j < wmoNames.Count; j++)
+            {
+                if (currentOffset == nameOffset)
+                {
+                    nameId = (uint)j;
+                    break;
+                }
+                currentOffset += (uint)(Encoding.ASCII.GetByteCount(wmoNames[j]) + 1);
+            }
+
+            // Compute bounding box (approximate from WMO size - would need actual WMO data for accuracy)
+            var boundsMin = worldPos - new Vector3(50, 50, 50);
+            var boundsMax = worldPos + new Vector3(50, 50, 50);
+
+            entries.Add(new AdtModfInjector.ModfEntry335
+            {
+                NameId = nameId, // Index into MWID (not byte offset!)
+                UniqueId = uniqueId,
+                Position = worldPos,
+                Rotation = rotation,
+                BoundsMin = boundsMin,
+                BoundsMax = boundsMax,
+                Flags = 0,
+                DoodadSet = 0,
+                NameSet = 0,
+                Scale = 1024 // Always 1.0 for WMOs
+            });
+
+            pos += 64;
+        }
+
+        return entries;
     }
 }

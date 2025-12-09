@@ -108,6 +108,43 @@
 - MDX format is WC3-like, M2 is completely different chunked format
 - Existing `WmoV14Parser` and `WmoV14ToV17Converter` are battle-tested from Q3 experiments
 
+## Update 2025-12-09 – PM4 ADT Reconstruction
+
+### Goal
+Create valid 3.3.5 ADT files with PM4-derived MODF placement data for Noggit visualization.
+
+### ❌ FAILED: Creating ADTs from Scratch
+Attempted to create minimal ADTs using `AdtLkFactory` - **THIS DOES NOT WORK**:
+- Manually constructed MCNK chunks are invalid
+- Missing proper subchunk structure/offsets
+- Results in files that crash Noggit and 010 Editor templates
+
+### ✅ CORRECT APPROACH
+1. **Read existing split ADTs** from `test_data/development/World/Maps/development/`
+2. **Convert to 3.3.5 monolithic** using existing WoWRollback converters
+3. **Patch MWMO/MWID/MODF chunks only** with PM4 reconstruction data
+4. **Write using existing `AdtLk.ToFile()`** - proven working code
+
+### Key Files
+- **Test tile**: `development_22_18` - largest PM4, most object instances
+- **Reference tile**: `development_29_39` - has complete ADT + PM4 + _obj0.adt
+- **PM4 reconstruction output**: `modf_reconstruction/modf_binary/`
+
+### Existing Code (DO NOT MODIFY)
+- `gillijimproject-csharp/WowFiles/LichKing/AdtLk.cs`
+- `gillijimproject-csharp/WowFiles/LichKing/McnkLk.cs`
+- `gillijimproject-csharp/WowFiles/Chunk.cs`
+- `WoWRollback.LkToAlphaModule/Builders/*`
+
+### Broken Code (NEEDS REMOVAL/REWRITE)
+- `WoWRollback.Core/Services/PM4/AdtLkFactory.cs` - creates invalid ADTs
+
+### Technical Notes
+- MODF.NameId = index into MWID array (NOT byte offset into MWMO)
+- FourCC reversed on disk, chunk DATA is NOT reversed
+- MCNR 13-byte padding handled by existing code
+- Split ADTs: root + _obj0 + _tex0 must be merged for 3.3.5
+
 ## Update 2025-11-15 – AlphaLkToAlphaStandalone Roundtrip
 
 ### Current Focus

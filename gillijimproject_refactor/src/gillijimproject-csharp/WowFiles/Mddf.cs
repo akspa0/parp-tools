@@ -80,6 +80,35 @@ public class Mddf : Chunk
         }
     }
 
+    /// <summary>
+    /// [PORT] Remap LK per-ADT indices to Alpha WDT-global indices.
+    /// perAdtNames: the MMDX string table from this LK ADT (in order)
+    /// globalNames: the MDNM string table for the Alpha WDT (in order)
+    /// </summary>
+    public void UpdateIndicesForAlpha(List<string> perAdtNames, List<string> globalNames)
+    {
+        const int entrySize = 36;
+        // Build lookup: globalName -> globalIndex
+        var globalLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < globalNames.Count; i++)
+            globalLookup[globalNames[i]] = i;
+
+        for (int start = 0; start + entrySize <= Data.Length; start += entrySize)
+        {
+            int perAdtIndex = BitConverter.ToInt32(Data, start);
+            if (perAdtIndex < 0 || perAdtIndex >= perAdtNames.Count)
+                continue; // invalid index, leave as-is
+
+            var name = perAdtNames[perAdtIndex];
+            if (globalLookup.TryGetValue(name, out var globalIndex))
+            {
+                var bytes = BitConverter.GetBytes(globalIndex);
+                Buffer.BlockCopy(bytes, 0, Data, start, 4);
+            }
+            // else: name not in global table, leave index as-is (will be broken, but logged)
+        }
+    }
+
     public void AddToObjectsHeight(int heightToAdd)
     {
         if (GivenSize <= 0) return;

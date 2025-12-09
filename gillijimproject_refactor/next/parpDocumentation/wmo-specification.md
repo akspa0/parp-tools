@@ -29,28 +29,45 @@ struct ChunkHeader {
 
 ## Key Chunks
 
-### MOHD: Header (164 bytes V14, 172 V17)
+### MOHD: Header (64 bytes V17)
 **Purpose**: File metadata: group/portal/light counts, bounding box, flags.
 
-**Plain English**: Defines WMO scope (nGroups for sub-buildings, nPortals for interiors). BBox for culling; flags for render/physics. V17 extends with extra uints (TBD). Code: MOHDHeader.FromSpan(data) reads fields; verifies chunk counts.
+**Plain English**: Defines WMO scope (nGroups for sub-buildings, nPortals for interiors). BBox for culling; flags for render/physics.
 
-**C Struct (V14)**:
+**C Struct (V17 - 3.3.5)**:
+```c
+struct MOHD_V17 {
+    uint32_t nTextures;     // 0x00: Number of textures
+    uint32_t nGroups;       // 0x04: Number of MOGP groups
+    uint32_t nPortals;      // 0x08: Number of portals
+    uint32_t nLights;       // 0x0C: Number of lights
+    uint32_t nDoodadNames;  // 0x10: Number of doodad names
+    uint32_t nDoodadDefs;   // 0x14: Number of doodad definitions
+    uint32_t nDoodadSets;   // 0x18: Number of doodad sets
+    uint32_t ambColor;      // 0x1C: Ambient color (CArgb)
+    uint32_t wmoID;         // 0x20: WMOAreaTable ID
+    float bbox[6];          // 0x24: Bounding box (min xyz, max xyz)
+    uint16_t flags;         // 0x3C: Flags
+    uint16_t numLod;        // 0x3E: LOD count (Legion+)
+};  // 64 bytes
+```
+
+**C Struct (V14 - Alpha 0.5.3)**:
 ```c
 struct MOHD_V14 {
-    uint32_t nVertices;     // Total verts across groups
-    uint32_t nTriangles;    // Total faces
-    uint32_t nGroups;       // Number of MOGP groups
-    uint32_t nPortals;      // Number of PORT portals
-    uint32_t nLights;       // Number of lights
-    uint32_t nDoodads;      // Number of doodads
-    uint32_t nObjects;      // Number of objects
-    float bbox_min_x, bbox_min_y, bbox_min_z;  // Bounding box min
-    float bbox_max_x, bbox_max_y, bbox_max_z;  // Bounding box max
-    uint32_t flags;         // Render/physics flags
-    uint32_t unk1, unk2;    // Unknowns
-};  // 164 bytes
+    uint32_t nTextures;     // 0x00
+    uint32_t nGroups;       // 0x04
+    uint32_t nPortals;      // 0x08
+    uint32_t nLights;       // 0x0C
+    uint32_t nDoodadNames;  // 0x10
+    uint32_t nDoodadDefs;   // 0x14
+    uint32_t nDoodadSets;   // 0x18
+    uint32_t ambColor;      // 0x1C
+    uint32_t wmoID;         // 0x20
+    uint8_t padding[0x1C];  // 0x24: No bounding box in v14
+};
 ```
-**V17**: +8 bytes (two extra uint32 unk).
+**Note**: V14 (Alpha) has no bounding box - it was computed at load time.
 
 **Usage**: Header = FromSpan(mohd.Data); Groups.Count == nGroups.
 
