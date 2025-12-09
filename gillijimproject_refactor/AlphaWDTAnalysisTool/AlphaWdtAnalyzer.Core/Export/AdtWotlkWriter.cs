@@ -24,12 +24,23 @@ public static class AdtWotlkWriter
     };
     private static readonly HashSet<int> s_forceZeroMapIds = new()
     {
-        17 // Kalidar prototype map: no LK AreaTable entries exist, preserve as 0
+        13, // Test
+        17, // Kalidar prototype map
+        451 // Development Land
     };
     private static readonly HashSet<string> s_forceZeroMapNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Kalidar"
+        "Kalidar",
+        "Test",
+        "Development Land"
     };
+
+    private static bool IsForcedZero(int? mapId, string mapName)
+    {
+        if (mapId.HasValue && s_forceZeroMapIds.Contains(mapId.Value)) return true;
+        if (!string.IsNullOrWhiteSpace(mapName) && s_forceZeroMapNames.Contains(mapName)) return true;
+        return false;
+    }
 
     public sealed class WriteContext
     {
@@ -306,8 +317,7 @@ public static class AdtWotlkWriter
                 }
 
                 bool mapped = false;
-                bool forceZeroMapFlag = (currentMapId.HasValue && s_forceZeroMapIds.Contains(currentMapId.Value))
-                    || (!currentMapId.HasValue && s_forceZeroMapNames.Contains(mapName));
+                bool forceZeroMapFlag = IsForcedZero(currentMapId, mapName);
                 int zoneBase = (aIdNum > 0) ? (aIdNum & unchecked((int)0xFFFF0000)) : 0;
                 int subLo = (aIdNum > 0) ? (aIdNum & 0xFFFF) : 0;
                 int midAreaHint = 0;
@@ -1051,10 +1061,17 @@ WriteArea:
             }
 
             int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty; int tgtParent = 0;
+            
+            bool forcedZero = IsForcedZero(ctx.CurrentMapId, ctx.MapName);
+            
             if (alphaRaw >= 0)
             {
+                if (forcedZero)
+                {
+                    lkAreaId = 0; reason = "map_forced_zero";
+                }
                 // Strict: numeric CSV mapping in order: mapId-locked, mapName-locked, then per-map src-name
-                if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
+                else if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
                 {
                     lkAreaId = csvNumMap; reason = "patch_csv_num_mapX";
                 }
@@ -1077,6 +1094,23 @@ WriteArea:
             {
                 // best-effort: capture parent id from CSV mapping for auditing
                 if (!ctx.PatchMapping.TryGetTargetParentId(lkAreaId, out tgtParent)) tgtParent = 0;
+            }
+
+            sw.WriteLine(string.Join(',', new[]
+            {
+                ctx.TileX.ToString(),
+                ctx.TileY.ToString(),
+                i.ToString(),
+                alphaRaw.ToString(),
+                lkAreaId.ToString(),
+                tgtParent.ToString(),
+                onDisk.ToString(),
+                reason,
+            if (forcedZero && onDisk != 0)
+            {
+                // Critical validation failure: map is forced-zero but we found a non-zero AreaID on disk!
+                // This means PatchMcnkAreaIdsOnDiskV2 failed to enforce the lock or was skipped.
+                throw new InvalidOperationException($"[Validation Failure] Map {ctx.MapName} (MapID={ctx.CurrentMapId}) is forced-zero but chunk {i} has AreaID {onDisk}. This violates the prototype map lock.");
             }
 
             sw.WriteLine(string.Join(',', new[]

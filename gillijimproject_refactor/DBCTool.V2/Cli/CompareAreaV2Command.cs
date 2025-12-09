@@ -17,6 +17,8 @@ namespace DBCTool.V2.Cli;
 
 public sealed class CompareAreaV2Command
 {
+    private static readonly HashSet<int> s_forceZeroMapIds = new() { 13, 17, 451 };
+    
     public int Run(string dbdDir, string outBase, string localeStr, List<(string build, string dir)> inputs, bool chainVia060)
     {
         // Resolve required inputs
@@ -511,7 +513,17 @@ public sealed class CompareAreaV2Command
             string pivotChainDisplay = string.Empty;
             bool matchedByHierarchy = false;
             var srcKeyNorm = NormKey(nm);
-            if (renameOverrides.TryGetValue(srcKeyNorm, out var forced))
+
+            if (s_forceZeroMapIds.Contains(mapResolved))
+            {
+                chosen = 0;
+                method = "map_forced_zero";
+                mapIdX = mapResolved; // Ensure we write to the correct per-map file
+                hasMapX = true;
+                // Avoid any further matching
+                matchedByHierarchy = true; // functionally skip other blocks
+            }
+            else if (renameOverrides.TryGetValue(srcKeyNorm, out var forced))
             {
                 chosen = forced.areaId;
                 mapIdX = forced.mapId;
@@ -1219,7 +1231,8 @@ public sealed class CompareAreaV2Command
                     string.Empty,
                     string.Empty,
                     string.Empty,
-                    "unmatched_zone"
+                    string.Empty,
+                    !string.IsNullOrEmpty(method) ? method : "unmatched_zone"
                 });
                 unmatched.AppendLine(line);
                 int mapResolvedUnmatched = hasMapX ? mapIdX : contResolved;
@@ -1260,7 +1273,7 @@ public sealed class CompareAreaV2Command
                     (hasMapX ? mapIdX.ToString(CultureInfo.InvariantCulture) : "-1"),
                     Csv(mapNameX),
                     string.Empty,
-                    "unmatched_zone"
+                    !string.IsNullOrEmpty(method) ? method : "unmatched_zone"
                 });
                 crosswalkV3.AppendLine(crosswalkUnmatched);
                 if (!perMapCrosswalk.TryGetValue(mapResolvedUnmatched, out var mapCrosswalkUn))

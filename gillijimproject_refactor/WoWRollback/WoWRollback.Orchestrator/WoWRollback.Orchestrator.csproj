@@ -15,6 +15,7 @@
     <ProjectReference Include="..\WoWRollback.ViewerModule\WoWRollback.ViewerModule.csproj" />
     <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.Mpq\WoWRollback.Mpq.csproj" />
   </ItemGroup>
 
 </Project>
