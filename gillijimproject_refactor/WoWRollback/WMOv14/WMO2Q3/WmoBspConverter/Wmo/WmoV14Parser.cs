@@ -266,8 +266,8 @@ namespace WmoBspConverter.Wmo
                 throw new InvalidDataException($"Expected MVER chunk, got {versionChunk.Id}");
 
             wmoData.Version = BitConverter.ToUInt32(versionChunk.Data, 0);
-            if (wmoData.Version != 14)
-                throw new InvalidDataException($"Expected WMO v14, got v{wmoData.Version}");
+            if (wmoData.Version != 14 && wmoData.Version != 16)
+                throw new InvalidDataException($"Expected WMO v14 or v16, got v{wmoData.Version}");
 
             Console.WriteLine($"[DEBUG] Parsing WMO version {wmoData.Version}");
 
@@ -295,7 +295,7 @@ namespace WmoBspConverter.Wmo
         private ChunkInfo ReadChunk(BinaryReader reader)
         {
             var chunkIdBytes = reader.ReadBytes(4);
-            Array.Reverse(chunkIdBytes);
+            Array.Reverse(chunkIdBytes); // Correct for byte-stream reading
             var chunkId = Encoding.ASCII.GetString(chunkIdBytes);
 
             var chunkSize = reader.ReadUInt32();

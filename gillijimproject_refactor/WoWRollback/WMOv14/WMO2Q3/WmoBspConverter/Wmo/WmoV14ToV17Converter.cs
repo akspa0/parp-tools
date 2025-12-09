@@ -287,6 +287,8 @@ namespace WmoBspConverter.Wmo
             if (chunkIdBytes.Length != 4)
                 throw new ArgumentException($"Chunk ID must be 4 characters: {chunkId}");
             
+            // WMO files store chunk IDs in reversed byte order (MVER -> REVM on disk)
+            Array.Reverse(chunkIdBytes);
             writer.Write(chunkIdBytes);
             
             // Write size placeholder

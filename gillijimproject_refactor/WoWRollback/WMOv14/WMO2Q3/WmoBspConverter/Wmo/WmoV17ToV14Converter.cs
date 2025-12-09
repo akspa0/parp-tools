@@ -262,7 +262,7 @@ namespace WmoBspConverter.Wmo
                         w.Write(info.Flags);
                         WriteVector3(w, info.BoundingBox.Min);
                         WriteVector3(w, info.BoundingBox.Max);
-                        // v14 doesn't have nameOffset here
+                        w.Write(info.NameOffset); // v14 has nameOffset (32 bytes total)
                     }
                 });
             }
@@ -288,7 +288,8 @@ namespace WmoBspConverter.Wmo
 
         private void WriteMaterialV14(BinaryWriter writer, WmoMaterialV17 mat)
         {
-            // v14 material is 40 bytes (vs 64 in v17)
+            // v14 material is 44 bytes in our parser (starts with version)
+            writer.Write((uint)1); // Version (V14)
             writer.Write(mat.Flags);
             writer.Write(mat.Shader);
             writer.Write(mat.BlendMode);
@@ -299,7 +300,6 @@ namespace WmoBspConverter.Wmo
             writer.Write(mat.DiffColor);
             writer.Write(mat.GroundType);
             writer.Write(mat.Texture3Offset);
-            // v14 doesn't have the extra fields
         }
 
         private void ConvertGroupFile(string inputPath, string outputPath, WmoV17Data rootData)
@@ -335,7 +335,8 @@ namespace WmoBspConverter.Wmo
         private void ConvertMOGP(BinaryReader reader, BinaryWriter writer, uint chunkSize)
         {
             var mogpStart = writer.BaseStream.Position;
-            writer.Write(Encoding.ASCII.GetBytes("MOGP"));
+            // PGOM reversed
+            writer.Write(new byte[] { (byte)'P', (byte)'G', (byte)'O', (byte)'M' });
             var sizePos = writer.BaseStream.Position;
             writer.Write((uint)0); // Placeholder
 
@@ -373,6 +374,7 @@ namespace WmoBspConverter.Wmo
             writer.Write(fogIndices);
             writer.Write(liquidType);
             writer.Write(groupId);
+            writer.Write((uint)0); // Padding to match 64 bytes (Parser expects 0x40)
 
             // Copy subchunks, converting as needed
             var subchunkEnd = reader.BaseStream.Position + (chunkSize - 68);
@@ -452,7 +454,9 @@ namespace WmoBspConverter.Wmo
 
         private void WriteChunk(BinaryWriter writer, string chunkId, Action<BinaryWriter> writeContent)
         {
-            writer.Write(Encoding.ASCII.GetBytes(chunkId));
+            var bytes = Encoding.ASCII.GetBytes(chunkId);
+            Array.Reverse(bytes);
+            writer.Write(bytes);
             var sizePos = writer.BaseStream.Position;
             writer.Write((uint)0);
             var dataStart = writer.BaseStream.Position;

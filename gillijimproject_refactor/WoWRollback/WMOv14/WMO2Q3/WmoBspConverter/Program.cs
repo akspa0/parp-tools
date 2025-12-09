@@ -129,7 +129,15 @@ namespace WmoBspConverter
 
             try
             {
-                if (emitCube)
+                if (args.Contains("--list-textures"))
+                {
+                    await ListTexturesAsync(inputFile);
+                }
+                else if (args.Contains("--verify-roundtrip"))
+                {
+                    await Verification.WmoRoundTripVerifier.VerifyAsync(verbose);
+                }
+                else if (emitCube)
                 {
                     await CubeEmitter.EmitCubeAsync(outputFile, outputDir, verbose);
                 }
@@ -187,6 +195,19 @@ namespace WmoBspConverter
             Console.WriteLine("  WmoBspConverter --emit-cube -d ./output -v");
             Console.WriteLine("  WmoBspConverter model.wmo --obj ./out/model.obj -v");
             Console.WriteLine("  WmoBspConverter test.wmo --obj ./out/test.obj --allow-fallback");
+        }
+
+        static async Task ListTexturesAsync(string inputFile)
+        {
+            if (!File.Exists(inputFile)) throw new FileNotFoundException("WMO not found", inputFile);
+            var parser = new WmoV14Parser();
+            var data = parser.ParseWmoV14(inputFile);
+            Console.WriteLine($"Textures in {Path.GetFileName(inputFile)}:");
+            foreach (var t in data.Textures)
+            {
+                Console.WriteLine($"  {t}");
+            }
+            await Task.CompletedTask;
         }
 
         static async Task ConvertAsync(string inputFile, string? outputFile, bool extractTextures, string? outputDir, bool verbose, bool splitGroups = false)
@@ -468,5 +489,7 @@ namespace WmoBspConverter
                 Console.WriteLine("[VERIFY] Invalid IBSP header");
             }
         }
+
+
     }
 }
