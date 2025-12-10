@@ -4,10 +4,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\libs\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
-    <ProjectReference Include="..\..\libs\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\..\lib\SharpGLTF\src\SharpGLTF.Core\SharpGLTF.Core.csproj" />
     <ProjectReference Include="..\..\..\lib\SharpGLTF\src\SharpGLTF.Toolkit\SharpGLTF.Toolkit.csproj" />
-    <ProjectReference Include="..\..\..\lib\parp\parpToolbox\parpToolbox\parpToolbox.csproj" />
+    <ProjectReference Include="..\..\..\WoWRollback\WMOv14\WMO2Q3\old_sources\src\parpToolbox\parpToolbox.csproj" />
   </ItemGroup>
 </Project>

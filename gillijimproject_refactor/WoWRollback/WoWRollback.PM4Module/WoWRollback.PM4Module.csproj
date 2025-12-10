@@ -8,10 +8,6 @@
   </PropertyGroup>
   
   <ItemGroup>
-    <PackageReference Include="StormLibSharp" Version="1.2.0" />
-  </ItemGroup>
-  
-  <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
   </ItemGroup>
 </Project>

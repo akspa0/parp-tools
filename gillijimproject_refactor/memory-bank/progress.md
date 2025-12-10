@@ -78,42 +78,47 @@
 3. Run golden-file style checks on a Kalidar subset (original Alpha vs roundtrip-reconstructed Alpha).
 4. Backport LK→Alpha learnings into WoWRollback.Cli / related tooling once the standalone pipeline is trusted.
 
-## Update 2025-12-09 – PM4 Pathfinding ↔ WMO Correlation & ADT Reconstruction
+## Update 2025-12-09 – ADT Merger & WDL→ADT Generator ✅ COMPLETE
 
-### 🎯 Current Focus
-Reconstruct 3.3.5 ADT files with PM4-derived MODF placement data for Noggit visualization.
+### ✅ ADT Merger (`WoWRollback.PM4Module`)
+Successfully merges split 3.3.5 ADTs into monolithic format:
+- **352 tiles** processed from `test_data/development/`
+- **Texture path normalization**: backslash → forward slash, uppercase → lowercase
+- **MCCV vertex colors**: Generates default neutral colors (0x7F7F7F00)
+- **MCNK header flags**: Sets `has_mccv` (0x40) when MCCV present
+- **WDT generation**: Correct flags (0x0E = MCCV | BigAlpha | DoodadRefsSorted)
 
-### ❌ Failed Approach (DO NOT REPEAT)
-- Created `AdtLkFactory` to build ADTs from scratch
-- Manually constructed MCNK chunks with minimal data
-- Result: Invalid ADT files that crash viewers and Noggit
-- **Lesson**: Don't reinvent the wheel - use existing proven code
+**Output**: `PM4ADTs/clean/` - 352 merged ADTs + WDT
 
-### ✅ Correct Approach
-1. **Read existing development ADT files** (split Cata+ format from `test_data/development/`)
-2. **Convert to 3.3.5 monolithic format** using existing WoWRollback converters
-3. **Patch MWMO/MWID/MODF chunks** with PM4 reconstruction data
-4. **Write back** using existing proven `gillijimproject-csharp` writers
+### ✅ WDL→ADT Generator
+Generates ADT terrain from WDL low-resolution heights:
+- **1144 ADTs** generated to fill gaps (tiles without existing ADT data)
+- **352 tiles** skipped (already have real ADT data)
+- **Interpolation**: WDL 17×17 grid → ADT 145 vertices per chunk
 
-### 📚 Existing Code to Use (DO NOT MODIFY)
-- `gillijimproject-csharp/WowFiles/LichKing/AdtLk.cs` - LK ADT reader/writer
-- `gillijimproject-csharp/WowFiles/LichKing/McnkLk.cs` - MCNK chunk handling
-- `WoWRollback.LkToAlphaModule/` - Format conversion builders
-- `Warcraft.NET` - Modern ADT reading
+**Usage**:
+```bash
+dotnet run --project WoWRollback/WoWRollback.PM4Module -- wdl-to-adt \
+  --in <wdl-file> --out <dir> --map <name> --fill-gaps --existing <real-adts>
+```
 
-### 🔧 Files Created (May Need Cleanup)
-- `WoWRollback.Core/Services/PM4/AdtLkFactory.cs` - **BROKEN, creates invalid ADTs**
-- `WoWRollback.Core/Services/PM4/SplitAdtMerger.cs` - Split→Monolithic merger (untested)
+**Output**: `PM4ADTs/wdl_generated/` - 1144 generated ADTs
 
-### 📝 Key Discoveries
-- PM4 pathfinding geometry ≠ WMO render/collision geometry
-- MODF.NameId = index into MWID (not byte offset into MWMO)
-- MCNR has 13-byte padding after chunk data (handled by existing code)
-- FourCC reversed on disk, data NOT reversed
+### Key Files
+| File | Purpose |
+|------|---------|
+| `WoWRollback.PM4Module/AdtPatcher.cs` | ADT merger with MCCV fix |
+| `WoWRollback.PM4Module/WdlToAdtTest.cs` | WDL→ADT generator |
+| `WoWRollback.PM4Module/WdlToAdtProgram.cs` | CLI for WDL→ADT |
+| `WoWRollback.Core/Services/PM4/Wdt335Writer.cs` | WDT generator |
+
+### Technical Notes
+- **MCCV format**: 145 entries × 4 bytes (BGRA), 0x7F = 1.0 (neutral)
+- **WDL MARE**: 17×17 outer + 16×16 inner heights per tile
+- **ADT MCNK**: 145 vertices (9×9 + 8×8 interleaved) per chunk
+- **Bilinear interpolation** from WDL grid to ADT resolution
 
 ### 🎯 Next Steps
-1. **Delete or disable `AdtLkFactory`** - it creates broken files
-2. **Implement proper split ADT → monolithic converter** using existing readers
-3. **Patch only MWMO/MWID/MODF chunks** in converted ADTs
-4. **Test with `development_22_18.adt`** - largest PM4 with most object instances
-5. Use `development_29_39` as reference (has complete ADT + PM4 + _obj0.adt)
+1. **Test in Noggit** - Verify merged ADTs load correctly with textures
+2. **PM4 object patching** - Add MODF/MDDF from PM4 reconstruction
+3. **Combine outputs** - Merge `clean/` and `wdl_generated/` into complete map

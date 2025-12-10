@@ -108,42 +108,63 @@
 - MDX format is WC3-like, M2 is completely different chunked format
 - Existing `WmoV14Parser` and `WmoV14ToV17Converter` are battle-tested from Q3 experiments
 
-## Update 2025-12-09 – PM4 ADT Reconstruction
+## Update 2025-12-09 – ADT Merger & WDL→ADT Generator
 
 ### Goal
-Create valid 3.3.5 ADT files with PM4-derived MODF placement data for Noggit visualization.
+Create valid 3.3.5 ADT files from split development ADTs, with proper MCCV vertex colors and texture path normalization. Also generate ADT terrain from WDL heights for tiles without existing ADT data.
 
-### ❌ FAILED: Creating ADTs from Scratch
-Attempted to create minimal ADTs using `AdtLkFactory` - **THIS DOES NOT WORK**:
-- Manually constructed MCNK chunks are invalid
-- Missing proper subchunk structure/offsets
-- Results in files that crash Noggit and 010 Editor templates
+### ✅ COMPLETED: ADT Merger (`WoWRollback.PM4Module`)
 
-### ✅ CORRECT APPROACH
-1. **Read existing split ADTs** from `test_data/development/World/Maps/development/`
-2. **Convert to 3.3.5 monolithic** using existing WoWRollback converters
-3. **Patch MWMO/MWID/MODF chunks only** with PM4 reconstruction data
-4. **Write using existing `AdtLk.ToFile()`** - proven working code
+**What it does:**
+1. Merges split 3.3.5 ADTs (root + _obj0 + _tex0) into monolithic format
+2. Fixes texture paths (backslash → forward slash, uppercase → lowercase)
+3. Generates default MCCV vertex colors (0x7F7F7F00 = neutral white)
+4. Sets `has_mccv` flag (0x40) in MCNK headers
+5. Updates all MCNK subchunk offsets correctly
+6. Generates WDT with correct flags (0x0E = MCCV | BigAlpha | DoodadRefsSorted)
+
+**Output:**
+- `PM4ADTs/clean/` - 352 merged ADTs with real terrain data
+- `PM4ADTs/clean/development.wdt` - WDT file
+
+### ✅ COMPLETED: WDL→ADT Generator
+
+**What it does:**
+1. Parses WDL file (MAOF → MARE chunks with 17×17 outer + 16×16 inner heights)
+2. Interpolates WDL heights to ADT MCNK resolution (145 vertices per chunk)
+3. Generates valid 3.3.5 ADT files with:
+   - MCVT (interpolated heights)
+   - MCCV (default vertex colors)
+   - MCNR (default normals pointing up)
+   - Empty texture/object chunks
+4. `--fill-gaps` mode: Only generates ADTs for tiles without existing ADT data
+
+**Usage:**
+```bash
+dotnet run --project WoWRollback/WoWRollback.PM4Module -- wdl-to-adt \
+  --in <wdl-file> \
+  --out <output-dir> \
+  --map <map-name> \
+  --fill-gaps \
+  --existing <dir-with-real-adts>
+```
+
+**Output:**
+- `PM4ADTs/wdl_generated/` - 1144 generated ADTs (gaps filled)
+- Combined with `PM4ADTs/clean/` = 1496 total tiles with terrain
 
 ### Key Files
-- **Test tile**: `development_22_18` - largest PM4, most object instances
-- **Reference tile**: `development_29_39` - has complete ADT + PM4 + _obj0.adt
-- **PM4 reconstruction output**: `modf_reconstruction/modf_binary/`
-
-### Existing Code (DO NOT MODIFY)
-- `gillijimproject-csharp/WowFiles/LichKing/AdtLk.cs`
-- `gillijimproject-csharp/WowFiles/LichKing/McnkLk.cs`
-- `gillijimproject-csharp/WowFiles/Chunk.cs`
-- `WoWRollback.LkToAlphaModule/Builders/*`
-
-### Broken Code (NEEDS REMOVAL/REWRITE)
-- `WoWRollback.Core/Services/PM4/AdtLkFactory.cs` - creates invalid ADTs
+- `WoWRollback.PM4Module/AdtPatcher.cs` - ADT merger with MCCV fix
+- `WoWRollback.PM4Module/WdlToAdtTest.cs` - WDL→ADT generator
+- `WoWRollback.PM4Module/WdlToAdtProgram.cs` - CLI for WDL→ADT
+- `WoWRollback.Core/Services/PM4/Wdt335Writer.cs` - WDT generator
 
 ### Technical Notes
-- MODF.NameId = index into MWID array (NOT byte offset into MWMO)
-- FourCC reversed on disk, chunk DATA is NOT reversed
-- MCNR 13-byte padding handled by existing code
-- Split ADTs: root + _obj0 + _tex0 must be merged for 3.3.5
+- MCCV format: 145 entries × 4 bytes (BGRA), 0x7F = 1.0 (neutral)
+- MCNK header `has_mccv` flag = bit 6 (0x40)
+- WDL MARE: 17×17 outer heights + 16×16 inner heights per tile
+- ADT MCNK: 145 vertices (9×9 + 8×8 interleaved) per chunk
+- Bilinear interpolation from WDL grid to ADT resolution
 
 ## Update 2025-11-15 – AlphaLkToAlphaStandalone Roundtrip
 

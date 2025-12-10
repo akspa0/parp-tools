@@ -1,207 +1,133 @@
-// PM4-WMO Pathfinding Comparison Tool with MPQ Support
-// Extracts clean WMO v17 from 2.4.3 MPQ archive for comparison
+// ADT Merger - Merges split 3.3.5 ADTs into monolithic format
+// Creates "clean" LK ADTs preserving all existing object data + WDT
+// Also supports WDL to ADT generation for filling gaps
 
-using System.Numerics;
-using StormLibSharp;
-using WoWRollback.Core.Services.Archive;
 using WoWRollback.PM4Module;
+using WoWRollback.Core.Services.PM4;
 
-Console.WriteLine("=== PM4-WMO Pathfinding Comparison Tool ===\n");
-
-// === Part 1: PM4 Analysis ===
-var pm4DataPath = @"I:\parp-tools\pm4next-branch\parp-tools\gillijimproject_refactor\test_data\development";
-var pm4File = Path.Combine(pm4DataPath, "development_14_50.pm4");
-
-Console.WriteLine("--- PM4 Pathfinding Data ---\n");
-
-if (File.Exists(pm4File))
+// Check for wdl-to-adt subcommand
+if (args.Length > 0 && args[0] == "wdl-to-adt")
 {
-    var pm4 = PM4File.FromFile(pm4File);
-    Console.WriteLine($"File: {Path.GetFileName(pm4File)}");
-    Console.WriteLine($"Total Surfaces: {pm4.Surfaces.Count}");
-    Console.WriteLine($"Total Mesh Verts: {pm4.MeshVertices.Count}");
+    return WdlToAdtProgram.Run(args.Skip(1).ToArray());
+}
+
+Console.WriteLine("=== ADT Merger - Clean LK ADT Generation ===\n");
+
+// Paths
+var sourceDir = @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\development\World\Maps\development";
+var outputDir = @"j:\wowDev\parp-tools\gillijimproject_refactor\PM4ADTs\clean";
+var mapName = "development";
+
+// Create output directory
+Directory.CreateDirectory(outputDir);
+Console.WriteLine($"Source: {sourceDir}");
+Console.WriteLine($"Output: {outputDir}\n");
+
+// Find tiles that have both ADT and PM4 data (non-zero size)
+var tiles = new List<(int x, int y, long adtSize, long pm4Size, bool hasObj0, bool hasTex0)>();
+
+foreach (var file in Directory.GetFiles(sourceDir, "*.adt"))
+{
+    var name = Path.GetFileNameWithoutExtension(file);
     
-    // Group by CK24 (distinct objects)
-    var pm4Objects = pm4.Surfaces
-        .Where(s => s.CK24 != 0) // Exclude 0x000000 (M2/terrain)
-        .GroupBy(s => s.CK24)
-        .Select(g => CreatePm4Fingerprint(pm4, g.Key, g.ToList()))
-        .OrderByDescending(f => f.SurfaceCount)
-        .ToList();
+    // Skip split files
+    if (name.Contains("_obj") || name.Contains("_tex")) continue;
     
-    Console.WriteLine($"WMO Objects (CK24 != 0): {pm4Objects.Count}\n");
-    
-    Console.WriteLine("| CK24 | Surfaces | Verts | Size WxLxH | Type |");
-    Console.WriteLine("|------|----------|-------|------------|------|");
-    foreach (var obj in pm4Objects.Take(10))
+    // Parse tile coordinates: development_X_Y.adt
+    var parts = name.Split('_');
+    if (parts.Length >= 3 && int.TryParse(parts[1], out int x) && int.TryParse(parts[2], out int y))
     {
-        string objType = ClassifyPm4Object(obj);
-        Console.WriteLine($"| 0x{obj.CK24:X6} | {obj.SurfaceCount,8} | {obj.VertexCount,5} | {obj.Size.X:F0}x{obj.Size.Y:F0}x{obj.Size.Z:F0} | {objType} |");
+        var adtSize = new FileInfo(file).Length;
+        var pm4Path = Path.Combine(sourceDir, $"{mapName}_{x}_{y}.pm4");
+        var pm4Size = File.Exists(pm4Path) ? new FileInfo(pm4Path).Length : 0;
+        
+        var obj0Path = Path.Combine(sourceDir, $"{mapName}_{x}_{y}_obj0.adt");
+        var tex0Path = Path.Combine(sourceDir, $"{mapName}_{x}_{y}_tex0.adt");
+        var hasObj0 = File.Exists(obj0Path) && new FileInfo(obj0Path).Length > 0;
+        var hasTex0 = File.Exists(tex0Path) && new FileInfo(tex0Path).Length > 0;
+        
+        if (adtSize > 0) // Only include tiles with actual ADT data
+        {
+            tiles.Add((x, y, adtSize, pm4Size, hasObj0, hasTex0));
+        }
     }
 }
-else
+
+Console.WriteLine($"Found {tiles.Count} tiles with ADT data\n");
+
+// Show sample of tiles
+Console.WriteLine("Sample tiles:");
+Console.WriteLine("| Tile | ADT Size | PM4 Size | Has _obj0 | Has _tex0 |");
+Console.WriteLine("|------|----------|----------|-----------|-----------|");
+foreach (var t in tiles.OrderBy(t => t.x).ThenBy(t => t.y).Take(15))
 {
-    Console.WriteLine($"PM4 file not found: {pm4File}");
+    Console.WriteLine($"| {t.x,2}_{t.y,2} | {t.adtSize,8:N0} | {t.pm4Size,8:N0} | {(t.hasObj0 ? "Yes" : "No"),-9} | {(t.hasTex0 ? "Yes" : "No"),-9} |");
 }
+Console.WriteLine();
 
-// === Part 2: WMO Analysis from MPQ ===
-Console.WriteLine("\n--- WMO Pathfinding Extraction (from 2.4.3 MPQ) ---\n");
+// Process ALL tiles
+var testTiles = tiles.OrderBy(t => t.x).ThenBy(t => t.y).ToList();
 
-var clientPath = @"G:\WoW\WoWArchive-0.X-3.X\Mount\2.X_Retail_Windows_enUS_2.4.3.8606\World of Warcraft";
-var wmoPath = @"World\wmo\Azeroth\Buildings\Stormwind\Stormwind.wmo";
+Console.WriteLine($"Processing {testTiles.Count} tiles:\n");
 
-if (Directory.Exists(clientPath))
+var patcher = new AdtPatcher();
+int successCount = 0;
+int failCount = 0;
+
+foreach (var tile in testTiles)
 {
-    Console.WriteLine($"Client: {clientPath}");
-    Console.WriteLine($"Extracting: {wmoPath}\n");
+    var baseName = $"{mapName}_{tile.x}_{tile.y}";
+    var rootPath = Path.Combine(sourceDir, $"{baseName}.adt");
+    var obj0Path = Path.Combine(sourceDir, $"{baseName}_obj0.adt");
+    var tex0Path = Path.Combine(sourceDir, $"{baseName}_tex0.adt");
+    var outputPath = Path.Combine(outputDir, $"{baseName}.adt");
+    
+    Console.WriteLine($"=== Processing {baseName} ===");
     
     try
     {
-        var mpqs = ArchiveLocator.LocateMpqs(clientPath);
-        Console.WriteLine($"Found {mpqs.Count} MPQ archives");
+        // Merge split ADTs into monolithic format, preserving all existing data
+        patcher.MergeAndWrite(
+            rootPath,
+            File.Exists(obj0Path) ? obj0Path : null,
+            File.Exists(tex0Path) ? tex0Path : null,
+            outputPath
+        );
         
-        byte[]? wmoData = null;
-        foreach (var mpqPath in mpqs.Reverse()) // Reverse to get highest patch priority first
+        // Verify output
+        if (File.Exists(outputPath))
         {
-            try
-            {
-                using var mpq = new MpqArchive(mpqPath, FileAccess.Read);
-                if (mpq.HasFile(wmoPath))
-                {
-                    using var stream = mpq.OpenFile(wmoPath);
-                    if (stream != null && stream.CanRead)
-                    {
-                        wmoData = new byte[stream.Length];
-                        stream.Read(wmoData, 0, wmoData.Length);
-                        Console.WriteLine($"Found in: {Path.GetFileName(mpqPath)}");
-                        Console.WriteLine($"WMO Size: {wmoData.Length:N0} bytes");
-                        break;
-                    }
-                }
-            }
-            catch { /* Try next MPQ */ }
-        }
-        
-        if (wmoData != null)
-        {
-            // Extract WMO and analyze
-            var extractor = new WmoPathfindingExtractor();
-            var wmoResult = extractor.ExtractFromBytes(wmoData, wmoPath);
-            
-            Console.WriteLine($"\nWMO Analysis:");
-            Console.WriteLine($"  Walkable Surfaces: {wmoResult.SurfaceCount}");
-            Console.WriteLine($"  Unique Vertices: {wmoResult.VertexCount}");
-            if (wmoResult.SurfaceCount > 0)
-            {
-                Console.WriteLine($"  Bounding Box: {wmoResult.BoundsMin} -> {wmoResult.BoundsMax}");
-                Console.WriteLine($"  Size: {wmoResult.Size.X:F1} x {wmoResult.Size.Y:F1} x {wmoResult.Size.Z:F1}");
-            }
+            var outSize = new FileInfo(outputPath).Length;
+            Console.WriteLine($"[SUCCESS] Output: {outSize:N0} bytes\n");
+            successCount++;
         }
         else
         {
-            Console.WriteLine($"WMO not found in any MPQ: {wmoPath}");
-            
-            // List some available WMOs
-            Console.WriteLine("\nSearching for available WMOs...");
-            var wmos = new List<string>();
-            foreach (var mpqPath in mpqs.Take(3))
-            {
-                try
-                {
-                    using var mpq = new MpqArchive(mpqPath, FileAccess.Read);
-                    if (mpq.HasFile("(listfile)"))
-                    {
-                        using var stream = mpq.OpenFile("(listfile)");
-                        using var reader = new StreamReader(stream);
-                        while (!reader.EndOfStream)
-                        {
-                            var line = reader.ReadLine();
-                            if (line?.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) == true && 
-                                !line.Contains("_00") && wmos.Count < 20)
-                            {
-                                wmos.Add(line);
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-            
-            if (wmos.Count > 0)
-            {
-                Console.WriteLine("Sample WMO root files:");
-                foreach (var w in wmos.Take(10))
-                    Console.WriteLine($"  {w}");
-            }
+            Console.WriteLine($"[FAIL] Output file not created\n");
+            failCount++;
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"MPQ Error: {ex.Message}");
+        Console.WriteLine($"[ERROR] {ex.Message}\n");
+        failCount++;
     }
 }
-else
-{
-    Console.WriteLine($"Client path not found: {clientPath}");
-    Console.WriteLine("Please update the path to your 2.4.3 client installation.");
-}
 
-// === Helper Functions ===
+Console.WriteLine("=== Summary ===");
+Console.WriteLine($"Success: {successCount}");
+Console.WriteLine($"Failed: {failCount}");
+Console.WriteLine($"Output directory: {outputDir}");
 
-PM4ObjectFingerprint CreatePm4Fingerprint(PM4File pm4, uint ck24, List<MsurEntry> surfaces)
-{
-    var fp = new PM4ObjectFingerprint { CK24 = ck24, SurfaceCount = surfaces.Count };
-    
-    var usedVerts = new HashSet<int>();
-    foreach (var surf in surfaces)
-    {
-        for (int i = 0; i < surf.IndexCount; i++)
-        {
-            int idx = (int)(surf.MsviFirstIndex + i);
-            if (idx < pm4.MeshIndices.Count)
-            {
-                usedVerts.Add((int)pm4.MeshIndices[idx]);
-            }
-        }
-    }
-    
-    fp.VertexCount = usedVerts.Count;
-    
-    var verts = usedVerts
-        .Where(idx => idx < pm4.MeshVertices.Count)
-        .Select(idx => pm4.MeshVertices[idx])
-        .ToList();
-    
-    if (verts.Count > 0)
-    {
-        fp.BoundsMin = new Vector3(verts.Min(v => v.X), verts.Min(v => v.Y), verts.Min(v => v.Z));
-        fp.BoundsMax = new Vector3(verts.Max(v => v.X), verts.Max(v => v.Y), verts.Max(v => v.Z));
-    }
-    
-    fp.HeightRange = (surfaces.Min(s => s.Height), surfaces.Max(s => s.Height));
-    
-    return fp;
-}
+// Generate WDT file with correct flags (matching reference: 0x0E = MCCV | BigAlpha | DoodadRefsSorted)
+Console.WriteLine("\n=== Generating WDT ===");
+var wdtWriter = new Wdt335Writer();
+var tileSet = new HashSet<(int x, int y)>(testTiles.Select(t => (t.x, t.y)));
+var wdtFlags = Wdt335Writer.MphdFlags.AdtHasMccv | Wdt335Writer.MphdFlags.AdtHasBigAlpha | Wdt335Writer.MphdFlags.AdtHasDoodadRefsSortedBySizeCat;
+var wdtData = wdtWriter.CreateWdt(tileSet, wdtFlags);
+var wdtPath = Path.Combine(outputDir, $"{mapName}.wdt");
+File.WriteAllBytes(wdtPath, wdtData);
+Console.WriteLine($"[SUCCESS] WDT written: {wdtPath} ({wdtData.Length:N0} bytes)");
+Console.WriteLine($"  Tiles marked: {tileSet.Count}");
 
-string ClassifyPm4Object(PM4ObjectFingerprint fp)
-{
-    var aspectXY = fp.Size.X > 0 ? fp.Size.Y / fp.Size.X : 1;
-    var heightRatio = fp.Size.Z > 0 ? Math.Max(fp.Size.X, fp.Size.Y) / fp.Size.Z : 1;
-    
-    if (fp.Size.Z > 80 && heightRatio < 2) return "Tower";
-    if (fp.Size.Z > 40) return "Building";
-    if (fp.SurfaceCount < 50) return "Small";
-    if (aspectXY > 3 || aspectXY < 0.33) return "Bridge/Wall";
-    return "Structure";
-}
-
-class PM4ObjectFingerprint
-{
-    public uint CK24 { get; set; }
-    public int SurfaceCount { get; set; }
-    public int VertexCount { get; set; }
-    public Vector3 BoundsMin { get; set; }
-    public Vector3 BoundsMax { get; set; }
-    public Vector3 Size => BoundsMax - BoundsMin;
-    public (float min, float max) HeightRange { get; set; }
-}
+return 0;
