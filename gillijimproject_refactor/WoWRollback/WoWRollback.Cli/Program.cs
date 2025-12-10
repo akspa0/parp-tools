@@ -32,6 +32,7 @@ using WoWRollback.LkToAlphaModule.Writers;
 using MPQToTACT.MPQ;
 using WoWRollback.Core.Services.Assets;
 using WoWRollback.Core.Services.PM4;
+using WoWRollback.Cli.Commands;
 
 namespace WoWRollback.Cli;
 
@@ -201,6 +202,7 @@ internal static class Program
                 case "pm4-wmo-match":
                     return RunPm4WmoMatch(opts);
                 case "pm4-reconstruct-modf":
+                case "modf-reconstruct":
                     return RunPm4ReconstructModf(opts);
                 case "wmo-batch-extract":
                     return RunWmoBatchExtract(opts);
@@ -208,6 +210,8 @@ internal static class Program
                     return RunPm4ExportModf(opts);
                 case "pm4-create-adt":
                     return RunPm4CreateAdt(opts);
+                case "development-repair":
+                    return DevelopmentRepairCommand.Execute(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -6498,6 +6502,15 @@ internal static class Program
 
         // Reconstruct MODF
         var result = reconstructor.ReconstructModf(pm4Dir, wmoLibrary, minConfidence);
+
+        // Apply Coordinate Transform (PM4 -> ADT World)
+        Console.WriteLine("[INFO] Applying PM4->ADT coordinate transform (ServerToAdtPosition)...");
+        var transformedEntries = result.ModfEntries.Select(e => e with 
+        { 
+            Position = AdtModfInjector.ServerToAdtPosition(e.Position) 
+        }).ToList();
+        
+        result = result with { ModfEntries = transformedEntries };
 
         // Export results
         reconstructor.ExportToCsv(result, Path.Combine(outDir, "modf_entries.csv"));

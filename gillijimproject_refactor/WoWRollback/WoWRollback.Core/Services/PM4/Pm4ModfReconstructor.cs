@@ -103,76 +103,77 @@ public sealed class Pm4ModfReconstructor
 
     /// <summary>
     /// Load PM4 objects from PM4FacesTool output.
+    /// Recursively finds all ck_instances.csv files and aggregates objects.
     /// </summary>
     public List<Pm4Object> LoadPm4Objects(string pm4FacesOutputDir)
     {
         var objects = new List<Pm4Object>();
 
-        // Look for ck_instances.csv
-        var instancesCsv = Path.Combine(pm4FacesOutputDir, "ck_instances.csv");
-        if (!File.Exists(instancesCsv))
+        // Look for ALL ck_instances.csv files recursively
+        var csvFiles = Directory.GetFiles(pm4FacesOutputDir, "ck_instances.csv", SearchOption.AllDirectories);
+        
+        if (csvFiles.Length == 0)
         {
-            // Try to find it recursively
-            var csvFiles = Directory.GetFiles(pm4FacesOutputDir, "ck_instances.csv", SearchOption.AllDirectories);
-            if (csvFiles.Length > 0)
-                instancesCsv = csvFiles[0];
-            else
-            {
-                Console.WriteLine($"[WARN] ck_instances.csv not found in {pm4FacesOutputDir}");
-                return objects;
-            }
+            Console.WriteLine($"[WARN] No ck_instances.csv found in {pm4FacesOutputDir}");
+            return objects;
         }
 
-        var baseDir = Path.GetDirectoryName(instancesCsv)!;
-        Console.WriteLine($"[INFO] Loading PM4 objects from {instancesCsv}...");
+        Console.WriteLine($"[INFO] Found {csvFiles.Length} instance files to process...");
 
-        foreach (var line in File.ReadLines(instancesCsv).Skip(1)) // Skip header
+        foreach (var instancesCsv in csvFiles)
         {
-            var parts = line.Split(',');
-            if (parts.Length < 6) continue;
+            var baseDir = Path.GetDirectoryName(instancesCsv)!;
+            Console.WriteLine($"[INFO] Loading PM4 objects from {instancesCsv}...");
 
-            var ck24 = parts[0].Trim();
-            var objRelPath = parts[5].Trim();
-            var objPath = Path.Combine(baseDir, objRelPath);
-
-            if (!File.Exists(objPath))
+            foreach (var line in File.ReadLines(instancesCsv).Skip(1)) // Skip header
             {
-                Console.WriteLine($"[WARN] OBJ not found: {objPath}");
-                continue;
-            }
+                var parts = line.Split(',');
+                if (parts.Length < 6) continue;
 
-            // Parse tile from path (e.g., objects\t15_37\ck42CBEA_merged.obj)
-            int tileX = 0, tileY = 0;
-            var pathParts = objRelPath.Split(Path.DirectorySeparatorChar, '/');
-            foreach (var p in pathParts)
-            {
-                if (p.StartsWith("t") && p.Contains("_"))
+                var ck24 = parts[0].Trim();
+                var objRelPath = parts[5].Trim();
+                var objPath = Path.Combine(baseDir, objRelPath);
+
+                if (!File.Exists(objPath))
                 {
-                    var tileParts = p.Substring(1).Split('_');
-                    if (tileParts.Length >= 2)
+                    // Only warn once per missing file to avoid spam
+                    // Console.WriteLine($"[WARN] OBJ not found: {objPath}");
+                    continue;
+                }
+
+                // Parse tile from path (e.g., objects\t15_37\ck42CBEA_merged.obj)
+                int tileX = 0, tileY = 0;
+                var pathParts = objRelPath.Split(Path.DirectorySeparatorChar, '/');
+                foreach (var p in pathParts)
+                {
+                    if (p.StartsWith("t") && p.Contains("_"))
                     {
-                        int.TryParse(tileParts[0], out tileX);
-                        int.TryParse(tileParts[1], out tileY);
+                        var tileParts = p.Substring(1).Split('_');
+                        if (tileParts.Length >= 2)
+                        {
+                            int.TryParse(tileParts[0], out tileX);
+                            int.TryParse(tileParts[1], out tileY);
+                        }
+                        break;
                     }
-                    break;
+                }
+
+                try
+                {
+                    var vertices = _matcher.LoadObjVertices(objPath);
+                    if (vertices.Count < 10) continue; // Skip tiny objects
+
+                    var stats = _matcher.ComputeStats(vertices);
+                    objects.Add(new Pm4Object(ck24, objPath, tileX, tileY, stats));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Failed to load {objPath}: {ex.Message}");
                 }
             }
-
-            try
-            {
-                var vertices = _matcher.LoadObjVertices(objPath);
-                if (vertices.Count < 10) continue; // Skip tiny objects
-
-                var stats = _matcher.ComputeStats(vertices);
-                objects.Add(new Pm4Object(ck24, objPath, tileX, tileY, stats));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[WARN] Failed to load {objPath}: {ex.Message}");
-            }
         }
 
-        Console.WriteLine($"[INFO] Loaded {objects.Count} PM4 objects");
+        Console.WriteLine($"[INFO] Loaded {objects.Count} total PM4 objects");
         return objects;
     }
 
@@ -249,7 +250,17 @@ public sealed class Pm4ModfReconstructor
         float minConfidence = 0.7f)
     {
         var pm4Objects = LoadPm4Objects(pm4FacesOutputDir);
-        
+        return ReconstructModf(pm4Objects, wmoLibrary, minConfidence);
+    }
+
+    /// <summary>
+    /// Reconstruct MODF entries for a list of PM4 objects.
+    /// </summary>
+    public ReconstructionResult ReconstructModf(
+        List<Pm4Object> pm4Objects, 
+        List<WmoReference> wmoLibrary,
+        float minConfidence = 0.7f)
+    {
         var modfEntries = new List<ModfEntry>();
         var wmoNames = new List<string>();
         var wmoNameToId = new Dictionary<string, uint>();

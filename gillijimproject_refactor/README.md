@@ -129,6 +129,48 @@ Notes:
 
 ---
 
+## Development Map Repair Pipeline
+
+Automated pipeline to reconstruct the "development" map (The Vice) by extracting WMO geometry, matching against PM4 pathfinding objects, and patching clean 3.3.5 ADTs.
+
+### Usage
+
+```bash
+dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
+  --pm4-dir "path/to/development/pm4" \
+  --source-adt "path/to/clean_adts" \
+  --client-path "path/to/3.3.5/client" \
+  --out "output_dir" \
+  --cache-dir "work/cache" \
+  --listfile "listfile.txt" \
+  --dump-objs
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--pm4-dir` | Path to extracted PM4 files (containing `.obj` geometry). |
+| `--source-adt` | Path to clean 3.3.5 ADTs (must have valid textures!). |
+| `--client-path` | Path to 3.3.5 client (for WMO extraction). |
+| `--out` | Output directory for patched ADTs and diagnostics. |
+| `--cache-dir` | **Highly Recommended**. Directory to store heavy cache files (`wmo_library.json`, `pm4_library.json`). Reusing this speeds up runs from 20m to 10s. |
+| `--listfile` | Listfile to filter WMO candidates (optional). |
+| `--dump-objs` | If set, dumps extracted `.obj` files to output for inspection. |
+
+### Output Structure
+
+- `adt_335/`: The patched ADT files ready for Noggit.
+- `modf_reconstruction/`: CSVs detailing the matched placements.
+- `chunk_dump/`: **(Debug)** Raw binary dumps of `MTEX`, `MODF`, `MWMO` chunks for verification.
+
+### Troubleshooting
+
+- **Empty Textures / Missing Objects**: Check `chunk_dump/` in the output. If `MTEX_....bin` or `MODF_....bin` are 0 bytes, the patching failed.
+- **"Domino Effect"**: If the input `--source-adt` files are corrupt (missing chunk sizes), the output will also be corrupt. Ensure source ADTs are generated with the latest `wdl-to-adt` and `adt-merge` tools.
+
+---
+
 ## Policies
 
 - Strict numeric mapping only; map-locked; no heuristics.

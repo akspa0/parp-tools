@@ -358,14 +358,17 @@ public sealed class WmoWalkableSurfaceExtractor
             }
 
             bool isCollision = IsCollisionFace(flags);
+            // Walkable logic preserved for reference but we extract everything now
             bool isWalkable = isCollision && IsWalkableByNormal(v0, v1, v2);
 
             var tri = new WmoTriangle(v0, v1, v2, materialId, flags, isCollision, isWalkable);
             result.AllTriangles.Add(tri);
 
-            if (isWalkable)
+            // User Request: Extract whole WMO data, not just walkable
+            // We treat any collision or render face as part of the shape
+            if (isCollision || IsRenderFace(flags)) 
             {
-                result.WalkableTriangles.Add(tri);
+                result.WalkableTriangles.Add(tri); // Reusing this list for "Matching Candidates"
                 result.WalkableVertices.Add(v0);
                 result.WalkableVertices.Add(v1);
                 result.WalkableVertices.Add(v2);

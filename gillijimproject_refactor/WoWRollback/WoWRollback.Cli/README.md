@@ -58,5 +58,28 @@ dotnet run --project . -- serve-viewer --viewer-dir analysis_output\viewer --por
 
 ## Notes
 - Neighbor-aware MCNK holes clearing uses pre-scan of buried placement refs and clears holes in self+8-neighbors.
-- Shadows (MCSH) can be zeroed per-chunk with `--disable-mcsh`.
-- Crosswalk flags: prefer `--crosswalk-dir` / `--crosswalk-file`; legacy `--dbctool-patch-*` still work.
+## Development Map Repair Pipeline
+
+Automated pipeline for repairing the `development` map (PM4 -> WMO matching -> ADT patching).
+
+```bash
+dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
+  --pm4-dir <path/to/pm4faces_output> \
+  --source-adt <path/to/source_adts> \
+  --client-path <path/to/3.3.5_client> \
+  --out <path/to/output_dir> \
+  [--map <map_name>]
+```
+
+### Arguments
+- `--pm4-dir`: Root directory of PM4FacesTool output (containing `ck_instances.csv` files).
+- `--source-adt`: Directory containing source ADTs to patch (e.g., WDL-generated or existing split ADTs).
+- `--client-path`: Path to 3.3.5 WoW client (root folder containing `Data/`).
+- `--out`: Output directory for repaired ADTs and intermediate files.
+- `--map`: Map name (default: `development`).
+
+### What it does
+1.  **Extracts WMOs**: Scans client MPQs for Stormwind/Ogrimmar WMOs and extracts collision geometry.
+2.  **Matches Objects**: Matches PM4 geometry against extracted WMOs to reconstruct `MODF` placements.
+3.  **Fixes Coordinates**: Applies `ServerToAdtPosition` transform to fix PM4 coordinate system issues.
+4.  **Patches ADTs**: Injects new placements into source ADTs, creating valid 3.3.5 files ready for Noggit.
