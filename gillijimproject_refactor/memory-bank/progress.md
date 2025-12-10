@@ -78,7 +78,7 @@
 3. Run golden-file style checks on a Kalidar subset (original Alpha vs roundtrip-reconstructed Alpha).
 4. Backport LK→Alpha learnings into WoWRollback.Cli / related tooling once the standalone pipeline is trusted.
 
-## Update 2025-12-09 – ADT Merger & WDL→ADT Generator ✅ COMPLETE
+## Update 2025-12-09/10 – ADT Merger & WDL→ADT Generator ✅ COMPLETE
 
 ### ✅ ADT Merger (`WoWRollback.PM4Module`)
 Successfully merges split 3.3.5 ADTs into monolithic format:
@@ -87,22 +87,45 @@ Successfully merges split 3.3.5 ADTs into monolithic format:
 - **MCCV vertex colors**: Generates default neutral colors (0x7F7F7F00)
 - **MCNK header flags**: Sets `has_mccv` (0x40) when MCCV present
 - **WDT generation**: Correct flags (0x0E = MCCV | BigAlpha | DoodadRefsSorted)
+- **MODF placements**: Preserved from original `_obj0.adt` files
 
-**Output**: `PM4ADTs/clean/` - 352 merged ADTs + WDT
+**Output**: `PM4ADTs/clean/` - 352 merged ADTs + WDT (with placements)
 
-### ✅ WDL→ADT Generator
+### ✅ WDL→ADT Generator (Noggit-compatible)
 Generates ADT terrain from WDL low-resolution heights:
 - **1144 ADTs** generated to fill gaps (tiles without existing ADT data)
 - **352 tiles** skipped (already have real ADT data)
 - **Interpolation**: WDL 17×17 grid → ADT 145 vertices per chunk
 
-**Usage**:
-```bash
-dotnet run --project WoWRollback/WoWRollback.PM4Module -- wdl-to-adt \
-  --in <wdl-file> --out <dir> --map <name> --fill-gaps --existing <real-adts>
-```
+**Noggit Compatibility Fixes (2025-12-10):**
+- Fixed MHDR offsets: Write all chunk offsets at correct positions (ofsMcin at 0x04, etc.)
+- Fixed MCNK header: Exactly 128 bytes matching noggit's `MapChunkHeader` struct
+- Fixed MCNK subchunk offsets: Relative to MCNK chunk start (ofsHeight = 0x88)
+- Fixed WDT tile flags: Only mark tiles with actual ADT files
 
-**Output**: `PM4ADTs/wdl_generated/` - 1144 generated ADTs
+**Output**: `PM4ADTs/wdl_generated/` - 1144 generated ADTs (terrain only, no placements)
+
+### ✅ Combined Map (`PM4ADTs/combined/`)
+- **1496 total ADTs** (352 clean + 1144 WDL gap-fill)
+- **IMPORTANT**: Copy order matters - clean ADTs first, then WDL (clean takes priority)
+- Ready for Noggit testing
+
+### Noggit Testing Results (2025-12-10)
+- ✅ **MCCV working**: Vertex colors from original split ADTs transfer correctly (yellow/green terrain visible)
+- ✅ **Textures working on clean ADTs**: Merged ADTs show proper texturing
+- ❌ **WDL ADTs have no textures**: Gap-fill terrain shows only default salmon/peach color (no MTEX/MCLY data)
+- ❌ **No minimap data on WDL ADTs**: Need to add minimap textures for visual verification of object placements
+
+### 🎯 Next Priority: Add Minimap/Texture Data to WDL ADTs
+WDL-generated ADTs need basic texture data so we can:
+1. Visually distinguish terrain in Noggit
+2. Verify object placements once PM4 MODF patching is working
+3. Have a usable base map for further development
+
+Options:
+- Generate simple solid-color MTEX/MCLY layers
+- Use minimap BLP textures as terrain texture source
+- Copy texture layers from nearest clean ADT tiles
 
 ### Key Files
 | File | Purpose |
@@ -117,8 +140,36 @@ dotnet run --project WoWRollback/WoWRollback.PM4Module -- wdl-to-adt \
 - **WDL MARE**: 17×17 outer + 16×16 inner heights per tile
 - **ADT MCNK**: 145 vertices (9×9 + 8×8 interleaved) per chunk
 - **Bilinear interpolation** from WDL grid to ADT resolution
+- **Noggit offset convention**: Adds 0x14 to MHDR offsets (MVER header + MHDR header)
+- **MCNK subchunk offsets**: Relative to MCNK chunk start (including 8-byte header)
 
-### 🎯 Next Steps
-1. **Test in Noggit** - Verify merged ADTs load correctly with textures
-2. **PM4 object patching** - Add MODF/MDDF from PM4 reconstruction
-3. **Combine outputs** - Merge `clean/` and `wdl_generated/` into complete map
+## 🔄 In Progress – PM4 Placement Reconstruction
+
+### Goal
+Patch ADTs with MODF/MDDF placement data from PM4 reconstruction to restore missing WMO/M2 assets.
+
+### PM4 Reconstruction Data Available
+- Location: `test_data/development/.../pm4_15_37_output/pm4faces_batch/development_15_37/modf_reconstruction/`
+- `modf_entries.csv` - 1003 MODF entries with PM4-relative coordinates
+- `mwmo_names.csv` - 254 unique WMO paths
+- `ck_instances.csv` - PM4 object instances with tile assignments (e.g., `t36_24`)
+
+### ⚠️ BLOCKING ISSUE: PM4 Coordinate System
+The `modf_entries.csv` has coordinates in PM4-relative space, NOT world coordinates:
+- Example: `pos_x=-19422.50, pos_y=12862.74, pos_z=3.08` for tile 36_24
+- Expected world coords for tile 36_24: X in [-2666, -2133], Y in [4266, 4800]
+- Simple transforms (17066.666 offset, axis swaps) don't produce valid world coords
+
+**What works**: Tile assignments from `ck_instances.csv` paths (e.g., `objects\t36_24\...`)
+**What's broken**: World position derivation from PM4 coordinates
+
+### Existing Tools (not wired to CLI)
+- `WoWRollback.Core/Services/PM4/Pm4ModfReconstructor.cs`
+- `WoWRollback.Core/Services/PM4/Pm4WmoGeometryMatcher.cs`
+- `lib/WoWToolbox/WoWToolbox.Core/Navigation/PM4/Pm4CoordinateTransforms.cs`
+
+### 🎯 Next Steps (for new chat session)
+1. Investigate PM4 coordinate system more deeply
+2. Derive world positions from PM4 object geometry centroids
+3. Wire up PM4 MODF reconstruction to CLI
+4. Patch WDL-generated ADTs with PM4 placements
