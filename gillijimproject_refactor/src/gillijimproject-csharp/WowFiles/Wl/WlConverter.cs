@@ -13,7 +13,7 @@ public static class WlConverter
     /// Converts a WlwBlock (4x4 vertices) to an Alpha MCLQ chunk (9x9 vertices).
     /// Upscales grid using bicubic or linear interpolation.
     /// </summary>
-    public static byte[] ToMclq(WlwBlock block, int liquidType)
+    public static byte[] ToMclq(WlBlock block, int liquidType)
     {
         // 1. Create 9x9 Height Grid from 4x4 using Interpolation
         // Grid size: Wlw is 4x4 vertices?

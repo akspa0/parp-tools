@@ -1096,16 +1096,6 @@ WriteArea:
                 if (!ctx.PatchMapping.TryGetTargetParentId(lkAreaId, out tgtParent)) tgtParent = 0;
             }
 
-            sw.WriteLine(string.Join(',', new[]
-            {
-                ctx.TileX.ToString(),
-                ctx.TileY.ToString(),
-                i.ToString(),
-                alphaRaw.ToString(),
-                lkAreaId.ToString(),
-                tgtParent.ToString(),
-                onDisk.ToString(),
-                reason,
             if (forcedZero && onDisk != 0)
             {
                 // Critical validation failure: map is forced-zero but we found a non-zero AreaID on disk!
