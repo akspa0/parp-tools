@@ -13,6 +13,11 @@ namespace WoWRollback.PM4Module;
 /// </summary>
 public sealed class AdtPatcher
 {
+    // Optional minimap MCCV data for fallback when no existing MCCV
+    // Indexed by MCNK index (0-255), each entry is 580 bytes (145 vertices * 4 bytes BGRA)
+    private byte[][]? _minimapMccvData;
+    private int _currentMcnkIndex;
+
     /// <summary>
     /// Represents a parsed chunk that can be modified.
     /// </summary>
@@ -287,6 +292,8 @@ public sealed class AdtPatcher
 
         for (int i = 0; i < rootMcnks.Count; i++)
         {
+            _currentMcnkIndex = i; // Track for minimap MCCV fallback
+            
             var rootMcnk = rootMcnks[i];
             var tex0Mcnk = i < tex0Mcnks.Count ? tex0Mcnks[i] : null;
             var obj0Mcnk = i < obj0Mcnks.Count ? obj0Mcnks[i] : null;
@@ -463,8 +470,14 @@ public sealed class AdtPatcher
         else
             data = rootSubs.GetValueOrDefault(sig) ?? tex0Subs.GetValueOrDefault(sig) ?? obj0Subs.GetValueOrDefault(sig);
 
-        if (sig == SUB_MCCV && (data == null || data.Length == 0))
-            data = GenerateDefaultMccv();
+        if (sig == SUB_MCCV)
+        {
+            // Always use minimap MCCV if provided, otherwise fall back to existing or generate default
+            if (_minimapMccvData != null && _currentMcnkIndex < _minimapMccvData.Length && _minimapMccvData[_currentMcnkIndex] != null)
+                data = _minimapMccvData[_currentMcnkIndex];
+            else if (data == null || data.Length == 0)
+                data = GenerateDefaultMccv();
+        }
 
         offsets[sig] = (uint)ms.Position + 8;
         
@@ -1031,8 +1044,31 @@ public sealed class AdtPatcher
         string? tex0Path,
         string outputPath)
     {
+        MergeAndWrite(rootAdtPath, obj0Path, tex0Path, outputPath, null);
+    }
+
+    /// <summary>
+    /// Merge split ADTs into monolithic 3.3.5 ADT with optional minimap MCCV painting.
+    /// For MCNKs without existing MCCV data, uses minimap colors if provided.
+    /// </summary>
+    /// <param name="minimapMccvData">Optional array of 256 MCCV byte arrays from minimap (one per MCNK).
+    /// Each entry should be 580 bytes (145 vertices * 4 bytes BGRA). Pass null to use neutral gray.</param>
+    public void MergeAndWrite(
+        string rootAdtPath,
+        string? obj0Path,
+        string? tex0Path,
+        string outputPath,
+        byte[][]? minimapMccvData)
+    {
         Console.WriteLine($"[INFO] Merging ADT: {rootAdtPath}");
+        
+        // Set minimap MCCV data for fallback during merge
+        _minimapMccvData = minimapMccvData;
+        
         var adt = ParseSplitAdt(rootAdtPath, obj0Path, tex0Path);
+        
+        // Clear minimap data after merge
+        _minimapMccvData = null;
 
         Console.WriteLine($"[INFO] Merged {adt.Chunks.Count} chunks (no patching)");
         foreach (var c in adt.Chunks.GroupBy(x => x.ReadableSig))

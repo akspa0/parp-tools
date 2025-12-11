@@ -4,11 +4,13 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>WoWRollback.PM4Module</RootNamespace>
   </PropertyGroup>
   
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
   
   <ItemGroup>

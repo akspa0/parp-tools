@@ -40,31 +40,37 @@ public static class MccvPainter
         
         int vertexIndex = 0;
         
-        // Outer grid: 9x9 vertices (corners and edges)
+        // MCVT/MCCV vertex layout is INTERLEAVED:
+        // Row 0: 9 outer vertices
+        // Row 0: 8 inner vertices (offset by 0.5)
+        // Row 1: 9 outer vertices
+        // Row 1: 8 inner vertices
+        // ... repeat for 9 outer rows and 8 inner rows
+        
         for (int row = 0; row < 9; row++)
         {
+            // Outer vertices for this row (9 vertices)
             for (int col = 0; col < 9; col++)
             {
-                // Map vertex to pixel position
                 float pixelX = basePixelX + (col / 8.0f) * (PixelsPerMcnk - 1);
                 float pixelY = basePixelY + (row / 8.0f) * (PixelsPerMcnk - 1);
                 
                 var color = SamplePixel(image, pixelX, pixelY);
                 WriteVertex(data, vertexIndex++, color);
             }
-        }
-        
-        // Inner grid: 8x8 vertices (centers)
-        for (int row = 0; row < 8; row++)
-        {
-            for (int col = 0; col < 8; col++)
+            
+            // Inner vertices for this row (8 vertices) - only for rows 0-7
+            if (row < 8)
             {
-                // Inner vertices are offset by 0.5 cell
-                float pixelX = basePixelX + ((col + 0.5f) / 8.0f) * (PixelsPerMcnk - 1);
-                float pixelY = basePixelY + ((row + 0.5f) / 8.0f) * (PixelsPerMcnk - 1);
-                
-                var color = SamplePixel(image, pixelX, pixelY);
-                WriteVertex(data, vertexIndex++, color);
+                for (int col = 0; col < 8; col++)
+                {
+                    // Inner vertices are offset by 0.5 cell in both X and Y
+                    float pixelX = basePixelX + ((col + 0.5f) / 8.0f) * (PixelsPerMcnk - 1);
+                    float pixelY = basePixelY + ((row + 0.5f) / 8.0f) * (PixelsPerMcnk - 1);
+                    
+                    var color = SamplePixel(image, pixelX, pixelY);
+                    WriteVertex(data, vertexIndex++, color);
+                }
             }
         }
         
