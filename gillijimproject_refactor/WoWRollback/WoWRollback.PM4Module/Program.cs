@@ -4,6 +4,7 @@
 
 using WoWRollback.PM4Module;
 using WoWRollback.Core.Services.PM4;
+using System.Numerics;
 using System.Text;
 
 // Check for subcommands
@@ -34,6 +35,12 @@ if (args.Length > 0)
         
         case "inject-modf":
             return RunInjectModf(args.Skip(1).ToArray());
+
+        case "dump-modf":
+            return RunDumpModf(args.Skip(1).ToArray());
+
+        case "dump-modf-csv":
+            return RunDumpModfCsv(args.Skip(1).ToArray());
     }
 }
 
@@ -144,6 +151,215 @@ static int RunCompare(string[] args)
     
     var merger = new SplitAdtMerger();
     merger.CompareWithReference(args[0], args[1]);
+    return 0;
+}
+
+// dump-modf command - dump raw MODF placements from an ADT for inspection
+static int RunDumpModf(string[] args)
+{
+    string? adtPath = null;
+    string? adtDir = null;
+    string? mapName = null;
+    string? tile = null;
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--file": adtPath = args[++i]; break;
+            case "--in": adtDir = args[++i]; break;
+            case "--map": mapName = args[++i]; break;
+            case "--tile": tile = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: dump-modf --file <adt_file> | --in <adt_dir> --map <name> --tile X_Y");
+                return 0;
+        }
+    }
+
+    if (string.IsNullOrEmpty(adtPath))
+    {
+        if (string.IsNullOrEmpty(adtDir) || string.IsNullOrEmpty(mapName) || string.IsNullOrEmpty(tile))
+        {
+            Console.Error.WriteLine("Error: either --file or (--in, --map, --tile) must be specified.");
+            return 1;
+        }
+
+        var parts = tile.Split('_');
+        if (parts.Length != 2 || !int.TryParse(parts[0], out int tx) || !int.TryParse(parts[1], out int ty))
+        {
+            Console.Error.WriteLine("Error: --tile must be in format X_Y (e.g., '22_18').");
+            return 1;
+        }
+
+        adtPath = Path.Combine(adtDir, $"{mapName}_{tx}_{ty}.adt");
+    }
+
+    if (!File.Exists(adtPath))
+    {
+        Console.Error.WriteLine($"Error: ADT file not found: {adtPath}");
+        return 1;
+    }
+
+    Console.WriteLine($"=== Dumping MODF from {adtPath} ===\n");
+
+    var patcher = new AdtPatcher();
+    var data = File.ReadAllBytes(adtPath);
+    var parsed = patcher.ParseAdt(data);
+    var modfChunk = parsed.FindChunk("MODF");
+
+    if (modfChunk == null || modfChunk.Data.Length == 0)
+    {
+        Console.WriteLine("No MODF chunk found or it is empty.");
+        return 0;
+    }
+
+    const float TileSize = 533.33333f;
+    const float MapExtent = TileSize * 32f; // 17066.666...
+
+    using var ms = new MemoryStream(modfChunk.Data);
+    using var br = new BinaryReader(ms);
+
+    int entrySize = 64; // SMMapObjDef size for 3.3.5
+    int count = modfChunk.Data.Length / entrySize;
+    Console.WriteLine($"Entries: {count}\n");
+
+    for (int i = 0; i < count; i++)
+    {
+        uint nameId = br.ReadUInt32();
+        uint uniqueId = br.ReadUInt32();
+        float px = br.ReadSingle();
+        float py = br.ReadSingle();
+        float pz = br.ReadSingle();
+        float rx = br.ReadSingle();
+        float ry = br.ReadSingle();
+        float rz = br.ReadSingle();
+        float bminx = br.ReadSingle();
+        float bminy = br.ReadSingle();
+        float bminz = br.ReadSingle();
+        float bmaxx = br.ReadSingle();
+        float bmaxy = br.ReadSingle();
+        float bmaxz = br.ReadSingle();
+        ushort flags = br.ReadUInt16();
+        ushort doodadSet = br.ReadUInt16();
+        ushort nameSet = br.ReadUInt16();
+        ushort scale = br.ReadUInt16();
+
+        // Convert placement-space back to world-space for comparison
+        float worldX = MapExtent - pz;
+        float worldY = MapExtent - px;
+        float worldZ = py;
+
+        // Tile indices follow wowdev ADT/v18: blockX from X axis, blockY from Y axis
+        int tileX = (int)(32 - (worldX / TileSize));
+        int tileY = (int)(32 - (worldY / TileSize));
+
+        Console.WriteLine($"[{i}] nameId={nameId} uniqueId={uniqueId}");
+        Console.WriteLine($"     placement: ({px:F3}, {py:F3}, {pz:F3})");
+        Console.WriteLine($"     world:     ({worldX:F3}, {worldY:F3}, {worldZ:F3})  tile=({tileX},{tileY})");
+        Console.WriteLine($"     scale={scale} flags={flags} doodadSet={doodadSet} nameSet={nameSet}\n");
+    }
+
+    return 0;
+}
+
+// dump-modf-csv command - inspect PM4 reconstruction CSV entries for a tile
+static int RunDumpModfCsv(string[] args)
+{
+    string? csvPath = null;
+    string? tile = null;
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--csv": csvPath = args[++i]; break;
+            case "--tile": tile = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: dump-modf-csv --csv <modf_entries.csv> --tile X_Y");
+                return 0;
+        }
+    }
+
+    if (string.IsNullOrEmpty(csvPath) || string.IsNullOrEmpty(tile))
+    {
+        Console.Error.WriteLine("Error: --csv and --tile are required.");
+        return 1;
+    }
+
+    if (!File.Exists(csvPath))
+    {
+        Console.Error.WriteLine($"Error: CSV file not found: {csvPath}");
+        return 1;
+    }
+
+    var parts = tile.Split('_');
+    if (parts.Length != 2 || !int.TryParse(parts[0], out int tileX) || !int.TryParse(parts[1], out int tileY))
+    {
+        Console.Error.WriteLine("Error: --tile must be in format X_Y (e.g., '22_18').");
+        return 1;
+    }
+
+    Console.WriteLine($"=== Dumping modf_entries for tile {tileX}_{tileY} from {csvPath} ===\n");
+
+    const float TileSize = 533.33333f;
+    const float MapExtent = TileSize * 32f; // 17066.666...
+
+    using var reader = new StreamReader(csvPath);
+    string? header = reader.ReadLine();
+    if (header == null)
+    {
+        Console.Error.WriteLine("CSV is empty.");
+        return 1;
+    }
+
+    int count = 0;
+    while (!reader.EndOfStream)
+    {
+        var line = reader.ReadLine();
+        if (string.IsNullOrWhiteSpace(line))
+            continue;
+
+        var cols = line.Split(',');
+        if (cols.Length < 12)
+            continue;
+
+        // ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence
+        var ck24 = cols[0];
+        var wmoPath = cols[1];
+        if (!uint.TryParse(cols[2], out var nameId)) continue;
+        if (!uint.TryParse(cols[3], out var uniqueId)) continue;
+        if (!float.TryParse(cols[4], out var posX)) continue;
+        if (!float.TryParse(cols[5], out var posY)) continue;
+        if (!float.TryParse(cols[6], out var posZ)) continue;
+        if (!float.TryParse(cols[7], out var rotX)) continue;
+        if (!float.TryParse(cols[8], out var rotY)) continue;
+        if (!float.TryParse(cols[9], out var rotZ)) continue;
+        if (!float.TryParse(cols[10], out var scale)) continue;
+
+        // Tile indices follow wowdev ADT/v18: blockX from X axis, blockY from Y axis
+        int csvTileX = (int)(32 - (posX / TileSize));
+        int csvTileY = (int)(32 - (posY / TileSize));
+
+        if (csvTileX != tileX || csvTileY != tileY)
+            continue;
+
+        // Convert world (posX,posY,posZ) to placement space in the same way
+        // RunInjectModf now does when building AdtPatcher.ModfEntry.
+        float placementX = MapExtent - posY;
+        float placementY = posZ;
+        float placementZ = MapExtent - posX;
+
+        Console.WriteLine($"ck24={ck24} nameId={nameId} uniqueId={uniqueId}");
+        Console.WriteLine($"  WMO: {wmoPath}");
+        Console.WriteLine($"  world:     ({posX:F3}, {posY:F3}, {posZ:F3})  tile=({csvTileX},{csvTileY})");
+        Console.WriteLine($"  placement: ({placementX:F3}, {placementY:F3}, {placementZ:F3})");
+        Console.WriteLine($"  rot=({rotX:F2}, {rotY:F2}, {rotZ:F2}) scale={scale:F4}\n");
+        count++;
+    }
+
+    Console.WriteLine($"Total entries for tile {tileX}_{tileY}: {count}");
     return 0;
 }
 
@@ -887,8 +1103,8 @@ static int RunInjectModf(string[] args)
     }
     Console.WriteLine($"[INFO] Loaded {wmoNames.Count} WMO names from {Path.GetFileName(mwmoCsvPath)}");
     
-    // Read MODF entries and group by tile - use Warcraft.NET MODFEntry
-    var modfByTile = new Dictionary<(int x, int y), List<Warcraft.NET.Files.ADT.Entries.MODFEntry>>();
+    // Read MODF entries and group by tile - use AdtPatcher.ModfEntry (manual writer path)
+    var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
     int totalEntries = 0;
     
     foreach (var line in File.ReadLines(modfCsvPath).Skip(1))
@@ -911,6 +1127,9 @@ static int RunInjectModf(string[] args)
         // WoW coordinate system: tile (32,32) is at world origin (0,0)
         // Each tile is 533.33333 units
         const float TileSize = 533.33333f;
+        const float MapExtent = TileSize * 32f; // 17066.666...
+
+        // Tile indices follow wowdev ADT/v18: blockX from X axis, blockY from Y axis
         int tileX = (int)(32 - (posX / TileSize));
         int tileY = (int)(32 - (posY / TileSize));
         
@@ -919,30 +1138,48 @@ static int RunInjectModf(string[] args)
         tileY = Math.Clamp(tileY, 0, 63);
         
         var key = (tileX, tileY);
-        if (!modfByTile.ContainsKey(key))
-            modfByTile[key] = new List<Warcraft.NET.Files.ADT.Entries.MODFEntry>();
-        
-        modfByTile[key].Add(new Warcraft.NET.Files.ADT.Entries.MODFEntry
+        if (!modfByTile.TryGetValue(key, out var list))
+        {
+            list = new List<AdtPatcher.ModfEntry>();
+            modfByTile[key] = list;
+        }
+
+        // CSV pos_x/pos_y are world-space coordinates (centered around 0) used for
+        // tile grouping. MODF on disk stores corner-based placement coordinates
+        // as described in ADT_v18. Convert world -> placement space here:
+        //   worldX = 32*TILESIZE - pos.z
+        //   worldY = 32*TILESIZE - pos.x
+        // inverted:
+        //   pos.x = 32*TILESIZE - worldY
+        //   pos.z = 32*TILESIZE - worldX
+        //   pos.y = worldZ
+
+        float placementX = MapExtent - posY; // placement.x
+        float placementY = posZ;             // placement.y (height)
+        float placementZ = MapExtent - posX; // placement.z
+
+        var placementPos = new Vector3(placementX, placementY, placementZ);
+
+        list.Add(new AdtPatcher.ModfEntry
         {
             NameId = nameId,
-            UniqueId = (int)uniqueId,
-            Position = new System.Numerics.Vector3(posX, posY, posZ),
-            Rotation = new Warcraft.NET.Files.Structures.Rotator(rotX, rotY, rotZ),
-            BoundingBox = new Warcraft.NET.Files.Structures.BoundingBox(
-                new System.Numerics.Vector3(posX - 50, posY - 50, posZ - 50),
-                new System.Numerics.Vector3(posX + 50, posY + 50, posZ + 50)),
+            UniqueId = uniqueId,
+            Position = placementPos,
+            Rotation = new Vector3(rotX, rotY, rotZ),
+            BoundsMin = new Vector3(placementX - 50f, placementY - 50f, placementZ - 50f),
+            BoundsMax = new Vector3(placementX + 50f, placementY + 50f, placementZ + 50f),
             Flags = 0,
             DoodadSet = 0,
             NameSet = 0,
-            Scale = (ushort)(scale * 1024)
+            Scale = (ushort)(scale * 1024f)
         });
         totalEntries++;
     }
     
     Console.WriteLine($"[INFO] Loaded {totalEntries} MODF entries across {modfByTile.Count} tiles");
     
-    // Process each ADT using Pm4AdtPatcher (Warcraft.NET handles offsets correctly)
-    var patcher = new Pm4AdtPatcher();
+    // Process each ADT using MuseumAdtPatcher (manual chunk-preserving path)
+    var patcher = new MuseumAdtPatcher();
     int processed = 0;
     int injected = 0;
     int copied = 0;
@@ -968,12 +1205,12 @@ static int RunInjectModf(string[] args)
             Console.WriteLine($"[INJECT] {fileName}: {entries.Count} WMO placements");
             try
             {
-                patcher.PatchWithWmoData(adtPath, outputPath, wmoNames, entries);
+                patcher.PatchWmoPlacements(adtPath, outputPath, wmoNames, entries);
                 injected++;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  [ERROR] Warcraft.NET failed: {ex.Message}");
+                Console.WriteLine($"  [ERROR] MuseumAdtPatcher failed: {ex.Message}");
                 Console.WriteLine($"  [FALLBACK] Copying original file unchanged");
                 File.Copy(adtPath, outputPath, overwrite: true);
                 copied++;

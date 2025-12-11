@@ -98,8 +98,11 @@ public static class DevelopmentRepairCommand
             Console.WriteLine("[Step 2/3] Reconstructing placements...");
             var reconstructor = new Pm4ModfReconstructor();
             
+            // Load PM4 objects first so we can include them in verification
+            var pm4Objects = reconstructor.LoadPm4Objects(pm4Dir);
+            
             // Use 0.5f confidence
-            var result = reconstructor.ReconstructModf(pm4Dir, wmoLibrary, 0.5f);
+            var result = reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.5f);
 
             // Apply Coordinate Transform
             Console.WriteLine("[INFO] Applying PM4->ADT coordinate transform...");
@@ -114,6 +117,10 @@ public static class DevelopmentRepairCommand
             
             reconstructor.ExportToCsv(transformedResult, modfCsvPath);
             reconstructor.ExportMwmo(transformedResult, Path.Combine(reconstructionDir, "mwmo_names.csv"));
+            
+            // *** VERIFICATION JSON - PROOF OF DATA GENERATION ***
+            var verificationJsonPath = Path.Combine(reconstructionDir, "verification_report.json");
+            reconstructor.ExportVerificationJson(transformedResult, pm4Objects, wmoLibrary, verificationJsonPath);
         }
 
         // 3. Create ADTs

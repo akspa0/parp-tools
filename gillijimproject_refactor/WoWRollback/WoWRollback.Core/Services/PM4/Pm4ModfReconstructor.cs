@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WoWRollback.Core.Services.PM4;
 
@@ -267,7 +269,8 @@ public sealed class Pm4ModfReconstructor
         var unmatchedObjects = new List<string>();
         var matchCounts = new Dictionary<string, int>();
 
-        uint nextUniqueId = 1;
+        const uint UniqueIdBase = 66_000_000;
+        uint nextUniqueId = UniqueIdBase;
 
         Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {wmoLibrary.Count} WMOs...\n");
 
@@ -316,11 +319,11 @@ public sealed class Pm4ModfReconstructor
                 matchCounts[bestMatch.WmoPath] = 0;
             matchCounts[bestMatch.WmoPath]++;
 
-            // Compute transformed bounds
+            // Use PM4/server-space placement and bounds; PM4->ADT transform is applied at the CLI layer
+            // when exporting via RunPm4ReconstructModf.
             var boundsMin = pm4Obj.Stats.BoundsMin;
             var boundsMax = pm4Obj.Stats.BoundsMax;
 
-            // Create MODF entry
             var modf = new ModfEntry(
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
@@ -391,4 +394,181 @@ public sealed class Pm4ModfReconstructor
 
         Console.WriteLine($"[INFO] Exported {result.WmoNames.Count} WMO names to {outputPath}");
     }
+
+    /// <summary>
+    /// Export PLACEMENT-FOCUSED verification JSON - just the data we need to verify.
+    /// Shows exactly what MODF entries will be written to ADTs.
+    /// </summary>
+    public void ExportVerificationJson(
+        ReconstructionResult result,
+        List<Pm4Object> pm4Objects,
+        List<WmoReference> wmoLibrary,
+        string outputPath)
+    {
+        // PLACEMENT-FOCUSED: Only include what matters for verification
+        var verification = new PlacementVerificationReport
+        {
+            GeneratedAt = DateTime.UtcNow.ToString("O"),
+            Summary = new PlacementSummary
+            {
+                TotalPm4ObjectsProcessed = pm4Objects.Count,
+                TotalWmosInLibrary = wmoLibrary.Count,
+                MatchedPlacements = result.ModfEntries.Count,
+                UnmatchedObjects = result.UnmatchedPm4Objects.Count,
+                UniqueWmosUsed = result.WmoNames.Count,
+                TilesWithPlacements = result.ModfEntries
+                    .GroupBy(e => GetTileForPosition(e.Position))
+                    .Count()
+            },
+            // MWMO string table - exactly what gets written to ADT
+            MwmoChunkData = result.WmoNames.Select((name, idx) => new MwmoChunkEntry
+            {
+                NameId = idx,
+                WmoPath = name,
+                PlacementCount = result.MatchCounts.GetValueOrDefault(name, 0)
+            }).ToList(),
+            // ALL MODF placements - exactly what gets written to ADT
+            ModfEntries = result.ModfEntries.Select(e => new ModfChunkEntry
+            {
+                Pm4ObjectId = e.Ck24,
+                WmoPath = e.WmoPath,
+                NameId = e.NameId,
+                UniqueId = e.UniqueId,
+                PositionX = e.Position.X,
+                PositionY = e.Position.Y,
+                PositionZ = e.Position.Z,
+                RotationX = e.Rotation.X,
+                RotationY = e.Rotation.Y,
+                RotationZ = e.Rotation.Z,
+                Scale = e.Scale / 1024f,
+                MatchConfidence = e.MatchConfidence,
+                TileX = GetTileForPosition(e.Position).X,
+                TileY = GetTileForPosition(e.Position).Y
+            }).ToList(),
+            // Per-tile breakdown for easy verification
+            PlacementsByTile = result.ModfEntries
+                .GroupBy(e => GetTileForPosition(e.Position))
+                .OrderBy(g => g.Key.X).ThenBy(g => g.Key.Y)
+                .Select(g => new TilePlacementSummary
+                {
+                    TileX = g.Key.X,
+                    TileY = g.Key.Y,
+                    PlacementCount = g.Count(),
+                    WmoList = g.Select(e => $"{e.Ck24} -> {Path.GetFileName(e.WmoPath)} ({e.MatchConfidence:P0})").ToList()
+                }).ToList(),
+            // Unmatched for debugging
+            UnmatchedPm4Objects = result.UnmatchedPm4Objects
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        var json = JsonSerializer.Serialize(verification, options);
+        File.WriteAllText(outputPath, json);
+
+        Console.WriteLine($"\n========================================");
+        Console.WriteLine($"[PLACEMENT VERIFICATION] {outputPath}");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"  PM4 Objects:       {verification.Summary.TotalPm4ObjectsProcessed}");
+        Console.WriteLine($"  Matched:           {verification.Summary.MatchedPlacements}");
+        Console.WriteLine($"  Unmatched:         {verification.Summary.UnmatchedObjects}");
+        Console.WriteLine($"  Unique WMOs:       {verification.Summary.UniqueWmosUsed}");
+        Console.WriteLine($"  Tiles with data:   {verification.Summary.TilesWithPlacements}");
+        Console.WriteLine($"========================================\n");
+        
+        // Also print first few placements as proof
+        Console.WriteLine("First 10 placements:");
+        foreach (var entry in verification.ModfEntries.Take(10))
+        {
+            Console.WriteLine($"  {entry.Pm4ObjectId} -> {Path.GetFileName(entry.WmoPath)}");
+            Console.WriteLine($"    Position: ({entry.PositionX:F1}, {entry.PositionY:F1}, {entry.PositionZ:F1})");
+            Console.WriteLine($"    Tile: ({entry.TileX}, {entry.TileY}), Confidence: {entry.MatchConfidence:P0}");
+        }
+    }
+
+    private static float[] Vec3ToArray(Vector3 v) => new[] { v.X, v.Y, v.Z };
+
+    /// <summary>
+    /// Convert PM4/server-space coordinates (origin near a map corner, range ~[0 .. 64 * TileSize])
+    /// into ADT world coordinates as described in ADT_v18 (origin at map center, range
+    /// approximately [-17066.66 .. +17066.66]).
+    /// </summary>
+    private static Vector3 ServerToAdtPosition(Vector3 server)
+    {
+        const float TileSize = 533.33333f;
+        const float HalfMap = TileSize * 32f; // 32 tiles from center to edge
+
+        return new Vector3(
+            server.X - HalfMap,
+            server.Y - HalfMap,
+            server.Z);
+    }
+
+    private static (int X, int Y) GetTileForPosition(Vector3 pos)
+    {
+        const float TileSize = 533.33333f;
+        int x = (int)(32 - (pos.X / TileSize));
+        int y = (int)(32 - (pos.Y / TileSize));
+        return (x, y);
+    }
+
+    #region Placement Verification JSON Models
+
+    public class PlacementVerificationReport
+    {
+        public string GeneratedAt { get; set; } = "";
+        public PlacementSummary Summary { get; set; } = new();
+        public List<MwmoChunkEntry> MwmoChunkData { get; set; } = new();
+        public List<ModfChunkEntry> ModfEntries { get; set; } = new();
+        public List<TilePlacementSummary> PlacementsByTile { get; set; } = new();
+        public List<string> UnmatchedPm4Objects { get; set; } = new();
+    }
+
+    public class PlacementSummary
+    {
+        public int TotalPm4ObjectsProcessed { get; set; }
+        public int TotalWmosInLibrary { get; set; }
+        public int MatchedPlacements { get; set; }
+        public int UnmatchedObjects { get; set; }
+        public int UniqueWmosUsed { get; set; }
+        public int TilesWithPlacements { get; set; }
+    }
+
+    public class MwmoChunkEntry
+    {
+        public int NameId { get; set; }
+        public string WmoPath { get; set; } = "";
+        public int PlacementCount { get; set; }
+    }
+
+    public class ModfChunkEntry
+    {
+        public string Pm4ObjectId { get; set; } = "";
+        public string WmoPath { get; set; } = "";
+        public uint NameId { get; set; }
+        public uint UniqueId { get; set; }
+        public float PositionX { get; set; }
+        public float PositionY { get; set; }
+        public float PositionZ { get; set; }
+        public float RotationX { get; set; }
+        public float RotationY { get; set; }
+        public float RotationZ { get; set; }
+        public float Scale { get; set; }
+        public float MatchConfidence { get; set; }
+        public int TileX { get; set; }
+        public int TileY { get; set; }
+    }
+
+    public class TilePlacementSummary
+    {
+        public int TileX { get; set; }
+        public int TileY { get; set; }
+        public int PlacementCount { get; set; }
+        public List<string> WmoList { get; set; } = new();
+    }
+
+    #endregion
 }

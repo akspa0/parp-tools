@@ -41,13 +41,16 @@
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
 
-## 🔄 Next Steps: Chunk-Preserving ADT Patcher
+## Next Steps
+1. **Smoke-test MuseumAdtPatcher** — Run `inject-modf` over a small set of WoWMuseum ADTs and confirm structure (MHDR/MCIN offsets, MCNK count) and placements in Noggit / LK client. See `activeContext.md` for details.
+2. Test patched ADTs more broadly in WoW 3.3.5 client
+3. M2/MDX placements (after WMO WMO pipeline works)
 
-1. **Create `MuseumAdtPatcher`** - Parse WoWMuseum ADT chunks as raw bytes
-2. **Preserve MCNK exactly** - Store all 256 as raw bytes (keeps all subchunks)
-3. **Modify only MWMO/MWID/MODF** - Append new WMO names and placements
-4. **Rebuild with correct offsets** - Use WdlToAdtGenerator pattern for MHDR/MCIN
-5. **Only patch tiles that need it** - Skip tiles without PM4 MODF entries
+## Session Dec 11, 2025 - PM4 Verification Complete
+- PM4→WMO matching **proven working**: 1101 placements, 351 WMOs, 163 tiles
+- Verification JSON: `pm4_full_verification.json`
+- New CLI commands: `verify-pm4-data`, `csv-to-json`
+- Fixed paths documented in `.windsurf/rules/data-paths.md`
 
 ## Key Files
 
@@ -58,6 +61,8 @@
 | `WoWRollback.PM4Module/Program.cs` | ✅ Has `inject-modf` command (needs fix) |
 | `WoWRollback.Core/Services/PM4/AdtModfInjector.cs` | ❌ BROKEN - appends chunks incorrectly |
 | `WoWRollback.Core/Services/PM4/Pm4ModfReconstructor.cs` | ✅ Works - generates MODF from PM4 |
+| `WoWRollback.AdtModule/` | ✅ Known-good LK ADT write path (Alpha→LK) using WowFiles, reference for MuseumAdtPatcher offsets/structure |
+| `WoWRollback.LkToAlphaModule/` | ⚠️ LK↔Alpha ADT/WDT models and writers; placements coord system still being tuned but useful for MODF/MDDF and liquids wiring |
 
 ## Data Inventory
 

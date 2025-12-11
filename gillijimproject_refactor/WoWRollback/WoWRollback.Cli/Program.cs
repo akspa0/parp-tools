@@ -215,6 +215,10 @@ internal static class Program
                     return CompareAdtCommand.Execute(opts);
                 case "development-repair":
                     return DevelopmentRepairCommand.Execute(opts);
+                case "verify-pm4-data":
+                    return VerifyPm4DataCommand(opts);
+                case "csv-to-json":
+                    return CsvToJsonCommand(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -6770,6 +6774,216 @@ internal static class Program
                 }
             }
         }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Convert existing modf_entries.csv to JSON for verification.
+    /// </summary>
+    private static int CsvToJsonCommand(Dictionary<string, string> opts)
+    {
+        var csvPath = opts.GetValueOrDefault("csv", "");
+        var outPath = opts.GetValueOrDefault("out", "");
+
+        if (string.IsNullOrEmpty(csvPath))
+        {
+            Console.WriteLine("Usage: csv-to-json --csv <modf_entries.csv> [--out <path>]");
+            Console.WriteLine();
+            Console.WriteLine("Converts existing modf_entries.csv to JSON for verification.");
+            return 1;
+        }
+
+        if (!File.Exists(csvPath))
+        {
+            Console.Error.WriteLine($"[ERROR] CSV not found: {csvPath}");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outPath))
+        {
+            outPath = Path.ChangeExtension(csvPath, ".json");
+        }
+
+        Console.WriteLine($"Converting {csvPath} to JSON...");
+
+        var lines = File.ReadAllLines(csvPath).Skip(1).ToList(); // Skip header
+        var placements = new List<object>();
+        var wmoSet = new HashSet<string>();
+
+        foreach (var line in lines)
+        {
+            var parts = line.Split(',');
+            if (parts.Length < 12) continue;
+
+            var wmoPath = parts[1];
+            wmoSet.Add(wmoPath);
+
+            placements.Add(new
+            {
+                pm4ObjectId = parts[0],
+                wmoPath = wmoPath,
+                nameId = int.Parse(parts[2]),
+                uniqueId = int.Parse(parts[3]),
+                positionX = float.Parse(parts[4]),
+                positionY = float.Parse(parts[5]),
+                positionZ = float.Parse(parts[6]),
+                rotationX = float.Parse(parts[7]),
+                rotationY = float.Parse(parts[8]),
+                rotationZ = float.Parse(parts[9]),
+                scale = float.Parse(parts[10]),
+                confidence = float.Parse(parts[11])
+            });
+        }
+
+        var report = new
+        {
+            generatedAt = DateTime.UtcNow.ToString("O"),
+            sourceFile = csvPath,
+            summary = new
+            {
+                totalPlacements = placements.Count,
+                uniqueWmos = wmoSet.Count
+            },
+            placements = placements
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        var json = JsonSerializer.Serialize(report, options);
+        File.WriteAllText(outPath, json);
+
+        Console.WriteLine($"\n========================================");
+        Console.WriteLine($"[CSV TO JSON] {outPath}");
+        Console.WriteLine($"========================================");
+        Console.WriteLine($"  Total Placements: {placements.Count}");
+        Console.WriteLine($"  Unique WMOs:      {wmoSet.Count}");
+        Console.WriteLine($"========================================\n");
+
+        // Print first 10 as proof
+        Console.WriteLine("First 10 placements:");
+        foreach (var p in placements.Take(10))
+        {
+            var dict = (dynamic)p;
+            Console.WriteLine($"  {dict.pm4ObjectId} -> {Path.GetFileName(dict.wmoPath)}");
+            Console.WriteLine($"    Position: ({dict.positionX:F1}, {dict.positionY:F1}, {dict.positionZ:F1})");
+            Console.WriteLine($"    Confidence: {dict.confidence:P0}");
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Verify PM4 data generation by dumping comprehensive JSON report.
+    /// This is PROOF that the reconstruction pipeline generates data correctly.
+    /// </summary>
+    private static int VerifyPm4DataCommand(Dictionary<string, string> opts)
+    {
+        var pm4Dir = opts.GetValueOrDefault("pm4-dir", "");
+        var wmoLibraryPath = opts.GetValueOrDefault("wmo-library", "");
+        var outPath = opts.GetValueOrDefault("out", "");
+        var minConfidence = float.Parse(opts.GetValueOrDefault("min-confidence", "0.5"));
+
+        if (string.IsNullOrEmpty(pm4Dir))
+        {
+            Console.WriteLine("Usage: verify-pm4-data --pm4-dir <dir> [--wmo-library <json>] [--out <path>] [--min-confidence <0.5>]");
+            Console.WriteLine();
+            Console.WriteLine("Generates comprehensive verification JSON proving PM4 data generation works.");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --pm4-dir         Directory containing PM4FacesTool output (ck_instances.csv files)");
+            Console.WriteLine("  --wmo-library     Path to wmo_library.json (optional, will use cached if available)");
+            Console.WriteLine("  --out             Output path for verification JSON (default: pm4_verification.json)");
+            Console.WriteLine("  --min-confidence  Minimum match confidence threshold (default: 0.5)");
+            Console.WriteLine();
+            Console.WriteLine("Output JSON contains:");
+            Console.WriteLine("  - All PM4 objects with geometry stats");
+            Console.WriteLine("  - All WMOs in library with geometry stats");
+            Console.WriteLine("  - All matched placements with positions, rotations, confidence");
+            Console.WriteLine("  - MWMO string table (exact chunk data to write)");
+            Console.WriteLine("  - Per-tile placement breakdown");
+            Console.WriteLine("  - Unmatched objects list");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outPath))
+        {
+            outPath = Path.Combine(pm4Dir, "pm4_verification.json");
+        }
+
+        Console.WriteLine("=== PM4 Data Verification ===");
+        Console.WriteLine($"PM4 Dir:        {pm4Dir}");
+        Console.WriteLine($"WMO Library:    {(string.IsNullOrEmpty(wmoLibraryPath) ? "(auto-detect)" : wmoLibraryPath)}");
+        Console.WriteLine($"Output:         {outPath}");
+        Console.WriteLine($"Min Confidence: {minConfidence:P0}");
+        Console.WriteLine();
+
+        var reconstructor = new Pm4ModfReconstructor();
+
+        // Load PM4 objects
+        Console.WriteLine("[1/3] Loading PM4 objects...");
+        var pm4Objects = reconstructor.LoadPm4Objects(pm4Dir);
+        if (pm4Objects.Count == 0)
+        {
+            Console.Error.WriteLine("[ERROR] No PM4 objects found. Check that pm4-dir contains ck_instances.csv files.");
+            return 1;
+        }
+
+        // Load WMO library
+        Console.WriteLine("[2/3] Loading WMO library...");
+        List<Pm4ModfReconstructor.WmoReference> wmoLibrary;
+        
+        if (!string.IsNullOrEmpty(wmoLibraryPath) && File.Exists(wmoLibraryPath))
+        {
+            var json = File.ReadAllText(wmoLibraryPath);
+            var jsonOpts = new JsonSerializerOptions { IncludeFields = true };
+            wmoLibrary = JsonSerializer.Deserialize<List<Pm4ModfReconstructor.WmoReference>>(json, jsonOpts) ?? new();
+            Console.WriteLine($"  Loaded {wmoLibrary.Count} WMOs from {wmoLibraryPath}");
+        }
+        else
+        {
+            // Try to find cached library
+            var cachedPath = Path.Combine(pm4Dir, "..", "wmo_library.json");
+            if (File.Exists(cachedPath))
+            {
+                var json = File.ReadAllText(cachedPath);
+                var jsonOpts = new JsonSerializerOptions { IncludeFields = true };
+                wmoLibrary = JsonSerializer.Deserialize<List<Pm4ModfReconstructor.WmoReference>>(json, jsonOpts) ?? new();
+                Console.WriteLine($"  Loaded {wmoLibrary.Count} WMOs from cached library: {cachedPath}");
+            }
+            else
+            {
+                Console.Error.WriteLine("[ERROR] No WMO library found. Run development-repair first or provide --wmo-library path.");
+                return 1;
+            }
+        }
+
+        if (wmoLibrary.Count == 0)
+        {
+            Console.Error.WriteLine("[ERROR] WMO library is empty.");
+            return 1;
+        }
+
+        // Run reconstruction
+        Console.WriteLine("[3/3] Running reconstruction and generating verification JSON...");
+        var result = reconstructor.ReconstructModf(pm4Objects, wmoLibrary, minConfidence);
+
+        // Export verification JSON
+        reconstructor.ExportVerificationJson(result, pm4Objects, wmoLibrary, outPath);
+
+        Console.WriteLine();
+        Console.WriteLine($"[SUCCESS] Verification JSON written to: {outPath}");
+        Console.WriteLine();
+        Console.WriteLine("Open this JSON to see PROOF of data generation:");
+        Console.WriteLine("  - pm4Objects: All PM4 geometry loaded");
+        Console.WriteLine("  - wmoLibrary: All WMO collision geometry");
+        Console.WriteLine("  - modfPlacements: Exact MODF entries to write");
+        Console.WriteLine("  - mwmoStringTable: Exact MWMO chunk data");
+        Console.WriteLine("  - placementsByTile: Per-tile breakdown");
 
         return 0;
     }

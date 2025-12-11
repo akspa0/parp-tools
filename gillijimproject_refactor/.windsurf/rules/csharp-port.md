@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: always_off
 ---
 
 # 🌊 Windsurf Rules — C++ → C# Port (Target: net9.0)

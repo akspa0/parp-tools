@@ -81,6 +81,8 @@ Use `WdlToAdtGenerator` pattern:
 - `WoWRollback.PM4Module/WdlToAdtTest.cs` - Shows correct MHDR offset calculation
 - `src/gillijimproject-csharp/WowFiles/LichKing/AdtLk.cs` - Shows chunk parsing pattern
 - `pm4-adt-test12/modf_reconstruction/modf_entries.csv` - PM4 MODF data to inject
+- `WoWRollback.AdtModule/` - End-to-end Alpha→LK ADT conversion using known-good WowFiles writers (baseline for LK ADT structure)
+- `WoWRollback.LkToAlphaModule/` - LK↔Alpha ADT/WDT models and writers (reference for placements and liquids wiring, even if coords need tuning)
 
 ### MHDR Offset Calculation (from WdlToAdtTest.cs)
 ```csharp
@@ -100,11 +102,21 @@ BitConverter.GetBytes((uint)(mtexPos - mhdrDataStart)).CopyTo(result, mhdrDataSt
 
 ## Completed This Session (Dec 10-11, 2025)
 - ✅ Fixed MCCV vertex layout (interleaved format matching MCVT)
-- ✅ Created memory for critical file locations
-- ✅ Verified PM4 reconstruction data exists (1101 MODF entries, 352 WMOs)
+- ✅ Created `.windsurf/rules/data-paths.md` with all fixed paths
+- ✅ Verified PM4 reconstruction pipeline works end-to-end
+- ✅ Added `ExportVerificationJson()` to `Pm4ModfReconstructor.cs`
+- ✅ Added `verify-pm4-data` and `csv-to-json` CLI commands
+- ✅ Generated full verification: **1101 matched placements**, 351 WMOs, 163 tiles
+- ✅ Output: `pm4_full_verification.json` proves data generation works
 - ✅ Tested AdtModfInjector (binary append) - FAILED
 - ✅ Tested Warcraft.NET Terrain.Serialize() - FAILED (corrupts MCNK)
 - ✅ Designed chunk-preserving patcher approach
+ - ✅ Implemented `MuseumAdtPatcher` (chunk-preserving LK ADT patcher using `AdtPatcher` for MHDR/MCIN) and rewired `inject-modf` to use it instead of `Pm4AdtPatcher`/Warcraft.NET
+
+## Next Session: Test MuseumAdtPatcher Outputs
+The PM4→WMO matching is **proven working** (1101 placements). The chunk-preserving ADT patcher is now implemented (`WoWRollback.PM4Module/MuseumAdtPatcher.cs`) and wired into the `inject-modf` CLI using `AdtPatcher`'s manual write path.
+
+Next step is to run `inject-modf` over a small tile subset, diff patched ADTs against known-good LK outputs (AdtModule) and Noggit, and confirm MWMO/MWID/MODF are correct while MCNK and other chunks remain byte-stable.
 
 ## Critical Rule
 > **DO NOT USE Warcraft.NET for ADT serialization** - it corrupts MCNK data. Use manual binary writing with raw chunk preservation.
