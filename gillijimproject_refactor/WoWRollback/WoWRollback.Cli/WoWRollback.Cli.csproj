@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
     <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
     <ProjectReference Include="..\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\lib\WoWTools.Minimaps\StormLibWrapper\StormLib.dll">

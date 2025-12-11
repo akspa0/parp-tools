@@ -14,6 +14,7 @@ public static class WdlToAdtProgram
         string? outDir = null;
         string? existingDir = null;
         string? mapName = null;
+        string? minimapDir = null;
         bool fillGapsOnly = false;
 
         for (int i = 0; i < args.Length; i++)
@@ -24,6 +25,7 @@ public static class WdlToAdtProgram
                 case "--out": outDir = args[++i]; break;
                 case "--existing": existingDir = args[++i]; break;
                 case "--map": mapName = args[++i]; break;
+                case "--minimap": minimapDir = args[++i]; break;
                 case "--fill-gaps": fillGapsOnly = true; break;
                 case "--help":
                 case "-h":
@@ -48,6 +50,8 @@ public static class WdlToAdtProgram
         Console.WriteLine($"Fill gaps only: {fillGapsOnly}");
         if (!string.IsNullOrEmpty(existingDir))
             Console.WriteLine($"Existing ADTs: {existingDir}");
+        if (!string.IsNullOrEmpty(minimapDir))
+            Console.WriteLine($"Minimap dir: {minimapDir} (MCCV painting enabled)");
         Console.WriteLine();
 
         try
@@ -95,7 +99,14 @@ Console.WriteLine($"Parsed WDL: {tileCount} tiles with data");
                         }
                     }
 
-                    var adtData = WdlToAdtGenerator.GenerateAdt(tile, x, y);
+                    // Load minimap MCCV data if available
+                    byte[][]? mccvData = null;
+                    if (!string.IsNullOrEmpty(minimapDir))
+                    {
+                        mccvData = TryLoadMinimapMccv(minimapDir, mapName, x, y);
+                    }
+
+                    var adtData = WdlToAdtGenerator.GenerateAdt(tile, x, y, mccvData);
                     File.WriteAllBytes(adtPath, adtData);
                     generated++;
 
@@ -302,6 +313,38 @@ Console.WriteLine($"Parsed WDL: {tileCount} tiles with data");
         Console.WriteLine($"  Tiles marked in WDT: {count}");
     }
 
+    private static byte[][]? TryLoadMinimapMccv(string minimapDir, string mapName, int tileX, int tileY)
+    {
+        // Try common minimap naming patterns (development_X_Y.png is the primary format)
+        string[] patterns = 
+        {
+            $"{mapName}_{tileX}_{tileY}.png",
+            $"map{tileX:D2}_{tileY:D2}.png",
+            $"map{tileX}_{tileY}.png",
+            $"{mapName}{tileX:D2}_{tileY:D2}.png",
+            $"{mapName}_{tileX}_{tileY}.blp",
+            $"map{tileX:D2}_{tileY:D2}.blp",
+        };
+
+        foreach (var pattern in patterns)
+        {
+            var path = Path.Combine(minimapDir, pattern);
+            if (File.Exists(path))
+            {
+                try
+                {
+                    return MccvPainter.GenerateAllMccvFromImage(path);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"  [WARN] Failed to load minimap {path}: {ex.Message}");
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("WDL to ADT Generator - Generate 3.3.5 ADT terrain from WDL heights");
@@ -312,6 +355,7 @@ Console.WriteLine($"Parsed WDL: {tileCount} tiles with data");
         Console.WriteLine("  --in <path>       Input WDL file (required)");
         Console.WriteLine("  --out <dir>       Output directory (default: adt_from_wdl)");
         Console.WriteLine("  --map <name>      Map name for output files (default: WDL filename)");
+        Console.WriteLine("  --minimap <dir>   Directory with minimap PNG/BLP files for MCCV painting");
         Console.WriteLine("  --fill-gaps       Only generate ADTs for tiles without existing ADTs");
         Console.WriteLine("  --existing <dir>  Directory with existing ADTs to check (with --fill-gaps)");
     }

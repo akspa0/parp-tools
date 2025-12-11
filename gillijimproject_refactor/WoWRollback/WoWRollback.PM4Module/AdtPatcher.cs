@@ -61,19 +61,34 @@ public sealed class AdtPatcher
         }
     }
 
-    // Reversed signatures as they appear on disk
-    private const string SIG_MVER = "REVM";
-    private const string SIG_MHDR = "RDHM";
-    private const string SIG_MCIN = "NICM";
-    private const string SIG_MTEX = "XETM";
-    private const string SIG_MMDX = "XDMM";
-    private const string SIG_MMID = "DIMM";
-    private const string SIG_MWMO = "OMWM";
-    private const string SIG_MWID = "DIWM";
-    private const string SIG_MDDF = "FDDM";
-    private const string SIG_MODF = "FDOM";
-    private const string SIG_MCNK = "KNCM";
-    private const string SIG_MH2O = "O2HM";
+    // Readable signatures (Internal use)
+    // On disk they are reversed (little-endian uint read as string), but we reverse them on load.
+    private const string SIG_MVER = "MVER";
+    private const string SIG_MHDR = "MHDR";
+    private const string SIG_MCIN = "MCIN";
+    private const string SIG_MTEX = "MTEX";
+    private const string SIG_MMDX = "MMDX";
+    private const string SIG_MMID = "MMID";
+    private const string SIG_MWMO = "MWMO";
+    private const string SIG_MWID = "MWID";
+    private const string SIG_MDDF = "MDDF";
+    private const string SIG_MODF = "MODF";
+    private const string SIG_MCNK = "MCNK";
+    private const string SIG_MH2O = "MH2O";
+    private const string SIG_MFBO = "MFBO"; // Added constant for consistency
+
+    // Subchunk signatures
+    private const string SUB_MCVT = "MCVT";
+    private const string SUB_MCCV = "MCCV";
+    private const string SUB_MCNR = "MCNR";
+    private const string SUB_MCLY = "MCLY";
+    private const string SUB_MCRF = "MCRF";
+    private const string SUB_MCAL = "MCAL";
+    private const string SUB_MCSH = "MCSH";
+    private const string SUB_MCRD = "MCRD";
+    private const string SUB_MCRW = "MCRW";
+    private const string SUB_MCSE = "MCSE";
+    private const string SUB_MCLQ = "MCLQ";
 
     /// <summary>
     /// Normalize paths in a chunk containing null-terminated path strings.
@@ -101,6 +116,17 @@ public sealed class AdtPatcher
     }
 
     /// <summary>
+    /// Helper to reverse a string (e.g. "REVM" -> "MVER" or vice versa)
+    /// </summary>
+    private static string ReverseSig(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        char[] charArray = s.ToCharArray();
+        Array.Reverse(charArray);
+        return new string(charArray);
+    }
+
+    /// <summary>
     /// Parse an ADT file into mutable chunks.
     /// </summary>
     public ParsedAdt ParseAdt(byte[] data)
@@ -110,21 +136,25 @@ public sealed class AdtPatcher
 
         while (pos < data.Length - 8)
         {
-            string sig = Encoding.ASCII.GetString(data, pos, 4);
+            // Read 4-byte signature from disk (e.g. "REVM")
+            string rawSig = Encoding.ASCII.GetString(data, pos, 4);
             int size = BitConverter.ToInt32(data, pos + 4);
 
             if (size < 0 || pos + 8 + size > data.Length)
             {
-                Console.WriteLine($"[WARN] Invalid chunk at {pos}: sig={sig}, size={size}");
+                Console.WriteLine($"[WARN] Invalid chunk at {pos}: sig={rawSig}, size={size}");
                 break;
             }
 
             var chunkData = new byte[size];
             Buffer.BlockCopy(data, pos + 8, chunkData, 0, size);
 
+            // Reverse signature to Readable format (e.g. "REVM" -> "MVER")
+            string readableSig = ReverseSig(rawSig);
+            
             result.Chunks.Add(new AdtChunk
             {
-                Signature = sig,
+                Signature = readableSig,
                 Data = chunkData
             });
 
@@ -140,6 +170,7 @@ public sealed class AdtPatcher
     /// </summary>
     public ParsedAdt ParseSplitAdt(string rootPath, string? obj0Path = null, string? tex0Path = null)
     {
+        // ... (File loading logic remains same) ...
         if (!File.Exists(rootPath))
             throw new FileNotFoundException($"Root ADT not found: {rootPath}");
 
@@ -162,6 +193,22 @@ public sealed class AdtPatcher
         // Build merged ADT with correct chunk ordering
         var merged = new ParsedAdt();
 
+        // Helper to select chunk with logging
+        AdtChunk? SelectChunk(string sig, string name, bool preferTex0 = false, bool preferObj0 = false)
+        {
+            AdtChunk? c = null;
+            string source = "none";
+
+            if (preferTex0 && tex0 != null) { c = tex0.FindChunk(sig); if (c != null) source = "tex0"; }
+            if (c == null && preferObj0 && obj0 != null) { c = obj0.FindChunk(sig); if (c != null) source = "obj0"; }
+            if (c == null) { c = root.FindChunk(sig); if (c != null) source = "root"; }
+
+            if (c != null && c.Data.Length > 0)
+                Console.WriteLine($"  {name}: {c.Data.Length} bytes (from {source})");
+            
+            return c;
+        }
+
         // 1. MVER (from root)
         var mver = root.FindChunk(SIG_MVER);
         if (mver != null) merged.Chunks.Add(mver);
@@ -170,69 +217,68 @@ public sealed class AdtPatcher
         var mhdr = root.FindChunk(SIG_MHDR);
         if (mhdr != null) merged.Chunks.Add(mhdr);
 
-        // 3. MCIN - always include (will be regenerated on write with correct offsets)
-        // Split ADTs don't have MCIN, so create placeholder with 256 entries (16 bytes each = 4096 bytes)
+        // 3. MCIN - always include
         var mcin = root.FindChunk(SIG_MCIN);
         if (mcin != null)
             merged.Chunks.Add(mcin);
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MCIN, Data = new byte[256 * 16] });
 
-        // 4. MTEX (from tex0 first, fallback to root) - normalize paths
-        var mtex = tex0?.FindChunk(SIG_MTEX) ?? root.FindChunk(SIG_MTEX);
+        // 4. MTEX (from tex0 first, fallback to root)
+        var mtex = SelectChunk(SIG_MTEX, "MTEX", preferTex0: true);
         if (mtex != null && mtex.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MTEX, Data = NormalizePathChunk(mtex.Data) });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MTEX, Data = Array.Empty<byte>() });
 
-        // 5. MMDX (from obj0 first, fallback to root) - normalize paths
-        var mmdx = obj0?.FindChunk(SIG_MMDX) ?? root.FindChunk(SIG_MMDX);
+        // 5. MMDX (from obj0 first, fallback to root)
+        var mmdx = SelectChunk(SIG_MMDX, "MMDX", preferObj0: true);
         if (mmdx != null && mmdx.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MMDX, Data = NormalizePathChunk(mmdx.Data) });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MMDX, Data = Array.Empty<byte>() });
 
         // 6. MMID (from obj0 first, fallback to root)
-        var mmid = obj0?.FindChunk(SIG_MMID) ?? root.FindChunk(SIG_MMID);
+        var mmid = SelectChunk(SIG_MMID, "MMID", preferObj0: true);
         if (mmid != null && mmid.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MMID, Data = mmid.Data });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MMID, Data = Array.Empty<byte>() });
 
-        // 7. MWMO (from obj0 first, fallback to root) - normalize paths
-        var mwmo = obj0?.FindChunk(SIG_MWMO) ?? root.FindChunk(SIG_MWMO);
+        // 7. MWMO (from obj0 first, fallback to root)
+        var mwmo = SelectChunk(SIG_MWMO, "MWMO", preferObj0: true);
         if (mwmo != null && mwmo.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MWMO, Data = NormalizePathChunk(mwmo.Data) });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MWMO, Data = Array.Empty<byte>() });
 
         // 8. MWID (from obj0 first, fallback to root)
-        var mwid = obj0?.FindChunk(SIG_MWID) ?? root.FindChunk(SIG_MWID);
+        var mwid = SelectChunk(SIG_MWID, "MWID", preferObj0: true);
         if (mwid != null && mwid.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MWID, Data = mwid.Data });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MWID, Data = Array.Empty<byte>() });
 
         // 9. MDDF (from obj0 first, fallback to root)
-        var mddf = obj0?.FindChunk(SIG_MDDF) ?? root.FindChunk(SIG_MDDF);
+        var mddf = SelectChunk(SIG_MDDF, "MDDF", preferObj0: true);
         if (mddf != null && mddf.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MDDF, Data = mddf.Data });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MDDF, Data = Array.Empty<byte>() });
 
         // 10. MODF (from obj0 first, fallback to root)
-        var modf = obj0?.FindChunk(SIG_MODF) ?? root.FindChunk(SIG_MODF);
+        var modf = SelectChunk(SIG_MODF, "MODF", preferObj0: true);
         if (modf != null && modf.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MODF, Data = modf.Data });
         else
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MODF, Data = Array.Empty<byte>() });
 
-        // 11. MH2O (from root, if present)
+        // 11. MH2O (from root)
         var mh2o = root.FindChunk(SIG_MH2O);
         if (mh2o != null && mh2o.Data.Length > 0)
             merged.Chunks.Add(new AdtChunk { Signature = SIG_MH2O, Data = mh2o.Data });
 
-        // 12. MCNK x 256 - merge from root, tex0, and obj0
+        // 12. MCNK x 256
         var rootMcnks = root.Chunks.Where(c => c.Signature == SIG_MCNK).ToList();
         var tex0Mcnks = tex0?.Chunks.Where(c => c.Signature == SIG_MCNK).ToList() ?? new List<AdtChunk>();
         var obj0Mcnks = obj0?.Chunks.Where(c => c.Signature == SIG_MCNK).ToList() ?? new List<AdtChunk>();
@@ -249,12 +295,55 @@ public sealed class AdtPatcher
             merged.Chunks.Add(mergedMcnk);
         }
 
-        // 13. MFBO (from root, if present)
-        var mfbo = root.FindChunk("OBFM"); // MFBO reversed
+        // 13. MFBO
+        var mfbo = root.FindChunk(SIG_MFBO);
         if (mfbo != null && mfbo.Data.Length > 0)
-            merged.Chunks.Add(new AdtChunk { Signature = "OBFM", Data = mfbo.Data });
+            merged.Chunks.Add(new AdtChunk { Signature = SIG_MFBO, Data = mfbo.Data });
 
         return merged;
+    }
+
+    /// <summary>
+    /// Parse MCNK data into subchunks.
+    /// Root MCNK has 128-byte header before subchunks.
+    /// Tex0/Obj0 MCNKs have NO header - subchunks start immediately.
+    /// </summary>
+    private Dictionary<string, byte[]> ParseMcnkSubchunks(byte[] mcnkData, bool hasHeader = true)
+    {
+        var result = new Dictionary<string, byte[]>();
+        
+        int headerSize = hasHeader ? 128 : 0;
+        if (mcnkData.Length < headerSize) return result;
+
+        int pos = headerSize;
+        while (pos < mcnkData.Length - 8)
+        {
+            string rawSig = Encoding.ASCII.GetString(mcnkData, pos, 4);
+            int size = BitConverter.ToInt32(mcnkData, pos + 4);
+
+            // Validate size - must be non-negative and fit within remaining data
+            if (size < 0 || size > 10_000_000 || pos + 8 + size > mcnkData.Length)
+            {
+                // Console.WriteLine($"[WARN] Malformed subchunk at {pos}: {rawSig} size={size}");
+                break;
+            }
+
+            try
+            {
+                var data = new byte[size];
+                Buffer.BlockCopy(mcnkData, pos + 8, data, 0, size);
+                // Reverse to readable (e.g. "TVCM" -> "MCVT")
+                result[ReverseSig(rawSig)] = data;
+            }
+            catch (Exception)
+            {
+                break;
+            }
+
+            pos += 8 + size;
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -278,45 +367,36 @@ public sealed class AdtPatcher
             if (rootMcnk.Data.Length >= 128)
                 Buffer.BlockCopy(rootMcnk.Data, 0, header, 0, 128);
 
-            // Build merged MCNK with all subchunks, tracking offsets
             using var ms = new MemoryStream();
             ms.Write(header, 0, header.Length);
 
-            // Track subchunk offsets (relative to MCNK chunk start, which is 8 bytes before data)
-            // Offsets in header are relative to MCNK chunk start (before the 8-byte chunk header)
-            // So offset 0x80 (128) = first subchunk position
             var subchunkOffsets = new Dictionary<string, uint>();
 
             // Write subchunks in correct order for monolithic ADT
-            // Order: MCVT, MCCV, MCNR, MCLY, MCRF, MCAL, MCSH, MCSE, MCLQ
-            WriteSubchunkTracked(ms, "TVCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCVT - heights
-            WriteSubchunkTracked(ms, "VCCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCCV - vertex colors
-            WriteSubchunkTracked(ms, "RNCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCNR - normals
-            WriteSubchunkTracked(ms, "YLCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCLY - texture layers (from tex0)
-            WriteSubchunkTracked(ms, "FRCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRF - doodad/WMO refs
-            WriteSubchunkTracked(ms, "DRCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRD - doodad refs (from obj0)
-            WriteSubchunkTracked(ms, "WRCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRW - WMO refs (from obj0)
-            WriteSubchunkTracked(ms, "LACM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCAL - alpha maps (from tex0)
-            WriteSubchunkTracked(ms, "HSCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCSH - shadows (from tex0)
-            WriteSubchunkTracked(ms, "ESCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCSE - sound emitters
-            WriteSubchunkTracked(ms, "QLCM", rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCLQ - liquids
+            // Using READABLE signatures
+            WriteSubchunkTracked(ms, SUB_MCVT, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCVT
+            WriteSubchunkTracked(ms, SUB_MCCV, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCCV
+            WriteSubchunkTracked(ms, SUB_MCNR, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCNR
+            WriteSubchunkTracked(ms, SUB_MCLY, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCLY
+            
+            // MCRF - fallback
+            if (!obj0Subs.ContainsKey(SUB_MCRF) && !rootSubs.ContainsKey(SUB_MCRF)) { }
+            WriteSubchunkTracked(ms, SUB_MCRF, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRF
+            
+            WriteSubchunkTracked(ms, SUB_MCRD, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRD
+            WriteSubchunkTracked(ms, SUB_MCRW, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCRW
+            
+            // MCAL - fallback
+            if (!tex0Subs.ContainsKey(SUB_MCAL) && rootSubs.ContainsKey(SUB_MCAL)) { }
+            WriteSubchunkTracked(ms, SUB_MCAL, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCAL
+            
+            WriteSubchunkTracked(ms, SUB_MCSH, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCSH
+            WriteSubchunkTracked(ms, SUB_MCSE, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCSE
+            WriteSubchunkTracked(ms, SUB_MCLQ, rootSubs, tex0Subs, obj0Subs, subchunkOffsets); // MCLQ
 
             var result = ms.ToArray();
 
             // Update MCNK header offsets
-            // MCNK header structure (offsets relative to MCNK chunk start = 8 bytes before data):
-            // 0x14: ofsHeight (MCVT)
-            // 0x18: ofsNormal (MCNR)
-            // 0x1C: ofsLayer (MCLY)
-            // 0x20: ofsRefs (MCRF)
-            // 0x24: ofsAlpha (MCAL)
-            // 0x28: sizeAlpha
-            // 0x2C: ofsShadow (MCSH)
-            // 0x30: sizeShadow
-            // 0x58: ofsSndEmitters (MCSE)
-            // 0x60: ofsLiquid (MCLQ)
-            // 0x74: ofsMCCV
-            
             void WriteOffset(int headerOffset, string sig)
             {
                 uint ofs = subchunkOffsets.TryGetValue(sig, out var o) ? o : 0u;
@@ -327,35 +407,32 @@ public sealed class AdtPatcher
             {
                 uint ofs = subchunkOffsets.TryGetValue(sig, out var o) ? o : 0u;
                 BitConverter.GetBytes(ofs).CopyTo(result, headerOffset);
-                // Size is the subchunk data size (without 8-byte header)
                 if (ofs > 0)
                 {
-                    // Find size from the subchunk at that offset
                     byte[]? subData = null;
-                    if (rootSubs.TryGetValue(sig, out var rd)) subData = rd;
-                    else if (tex0Subs.TryGetValue(sig, out var td)) subData = td;
+                    if (tex0Subs.TryGetValue(sig, out var td)) subData = td;
+                    else if (rootSubs.TryGetValue(sig, out var rd)) subData = rd;
                     else if (obj0Subs.TryGetValue(sig, out var od)) subData = od;
                     uint size = subData != null ? (uint)subData.Length : 0;
                     BitConverter.GetBytes(size).CopyTo(result, sizeOffset);
                 }
             }
 
-            WriteOffset(0x14, "TVCM");      // ofsHeight -> MCVT
-            WriteOffset(0x18, "RNCM");      // ofsNormal -> MCNR
-            WriteOffset(0x1C, "YLCM");      // ofsLayer -> MCLY
-            WriteOffset(0x20, "FRCM");      // ofsRefs -> MCRF
-            WriteOffsetAndSize(0x24, 0x28, "LACM"); // ofsAlpha, sizeAlpha -> MCAL
-            WriteOffsetAndSize(0x2C, 0x30, "HSCM"); // ofsShadow, sizeShadow -> MCSH
-            WriteOffset(0x58, "ESCM");      // ofsSndEmitters -> MCSE
-            WriteOffset(0x60, "QLCM");      // ofsLiquid -> MCLQ
-            WriteOffset(0x74, "VCCM");      // ofsMCCV -> MCCV
+            WriteOffset(0x14, SUB_MCVT);
+            WriteOffset(0x18, SUB_MCNR);
+            WriteOffset(0x1C, SUB_MCLY);
+            WriteOffset(0x20, SUB_MCRF);
+            WriteOffsetAndSize(0x24, 0x28, SUB_MCAL);
+            WriteOffsetAndSize(0x2C, 0x30, SUB_MCSH);
+            WriteOffset(0x58, SUB_MCSE);
+            WriteOffset(0x60, SUB_MCLQ);
+            WriteOffset(0x74, SUB_MCCV);
 
-            // Set has_mccv flag (bit 6 = 0x40) in MCNK header flags at offset 0x00
-            // This tells the client that MCCV vertex colors are present
-            if (subchunkOffsets.TryGetValue("VCCM", out var mccvOfs) && mccvOfs > 0)
+            // Set has_mccv flag
+            if (subchunkOffsets.TryGetValue(SUB_MCCV, out var mccvOfs) && mccvOfs > 0)
             {
                 uint flags = BitConverter.ToUInt32(result, 0);
-                flags |= 0x40; // has_mccv flag
+                flags |= 0x40;
                 BitConverter.GetBytes(flags).CopyTo(result, 0);
             }
 
@@ -364,13 +441,12 @@ public sealed class AdtPatcher
         catch (Exception ex)
         {
             Console.WriteLine($"[WARN] Failed to merge MCNK: {ex.Message}, using root only");
-            return rootMcnk; // Fall back to root MCNK if merge fails
+            return rootMcnk;
         }
     }
 
     /// <summary>
     /// Write a subchunk and track its offset.
-    /// For MCCV, generates default vertex colors (neutral 0x7F7F7F00) if none exist.
     /// </summary>
     private void WriteSubchunkTracked(MemoryStream ms, string sig,
         Dictionary<string, byte[]> rootSubs,
@@ -380,43 +456,24 @@ public sealed class AdtPatcher
     {
         byte[]? data = null;
 
-        // Texture-related chunks prefer tex0
-        if (sig == "YLCM" || sig == "LACM" || sig == "HSCM") // MCLY, MCAL, MCSH
-        {
+        if (sig == SUB_MCLY || sig == SUB_MCAL || sig == SUB_MCSH)
             data = tex0Subs.GetValueOrDefault(sig) ?? rootSubs.GetValueOrDefault(sig);
-        }
-        // Object-related chunks prefer obj0
-        else if (sig == "DRCM" || sig == "WRCM") // MCRD, MCRW
-        {
+        else if (sig == SUB_MCRD || sig == SUB_MCRW)
             data = obj0Subs.GetValueOrDefault(sig) ?? rootSubs.GetValueOrDefault(sig);
-        }
-        // Everything else from root first
         else
-        {
             data = rootSubs.GetValueOrDefault(sig) ?? tex0Subs.GetValueOrDefault(sig) ?? obj0Subs.GetValueOrDefault(sig);
-        }
 
-        // MCCV special handling: generate default vertex colors if none exist
-        // MCCV format: 145 entries of BGRA (4 bytes each), 0x7F = 1.0 (neutral)
-        // WoW uses BGRA order: blue, green, red, alpha
-        if (sig == "VCCM" && (data == null || data.Length == 0))
-        {
+        if (sig == SUB_MCCV && (data == null || data.Length == 0))
             data = GenerateDefaultMccv();
-        }
 
-        // Always write the subchunk (even if empty) so offsets are valid
-        // Record offset (position in stream = offset from MCNK data start)
-        // MCNK header offsets are relative to chunk start (8 bytes before data)
-        // So we add 8 to convert from data offset to chunk offset
         offsets[sig] = (uint)ms.Position + 8;
         
-        ms.Write(Encoding.ASCII.GetBytes(sig), 0, 4);
+        // Write REVERSED signature to stream (e.g. "MCVT" -> "TVCM")
+        ms.Write(Encoding.ASCII.GetBytes(ReverseSig(sig)), 0, 4);
         int size = data?.Length ?? 0;
         ms.Write(BitConverter.GetBytes(size), 0, 4);
         if (data != null && data.Length > 0)
-        {
             ms.Write(data, 0, data.Length);
-        }
     }
 
     /// <summary>
@@ -440,46 +497,6 @@ public sealed class AdtPatcher
         }
         
         return data;
-    }
-
-    /// <summary>
-    /// Parse MCNK data into subchunks.
-    /// Root MCNK has 128-byte header before subchunks.
-    /// Tex0/Obj0 MCNKs have NO header - subchunks start immediately.
-    /// </summary>
-    private Dictionary<string, byte[]> ParseMcnkSubchunks(byte[] mcnkData, bool hasHeader = true)
-    {
-        var result = new Dictionary<string, byte[]>();
-        
-        int headerSize = hasHeader ? 128 : 0;
-        if (mcnkData.Length < headerSize) return result;
-
-        int pos = headerSize;
-        while (pos < mcnkData.Length - 8)
-        {
-            string sig = Encoding.ASCII.GetString(mcnkData, pos, 4);
-            int size = BitConverter.ToInt32(mcnkData, pos + 4);
-
-            // Validate size - must be non-negative and fit within remaining data
-            if (size < 0 || size > 10_000_000 || pos + 8 + size > mcnkData.Length)
-                break;
-
-            try
-            {
-                var data = new byte[size];
-                Buffer.BlockCopy(mcnkData, pos + 8, data, 0, size);
-                result[sig] = data;
-            }
-            catch (Exception)
-            {
-                // Skip corrupted subchunk
-                break;
-            }
-
-            pos += 8 + size;
-        }
-
-        return result;
     }
 
     /// <summary>
@@ -738,7 +755,8 @@ public sealed class AdtPatcher
 
         foreach (var chunk in adt.Chunks)
         {
-            writer.Write(Encoding.ASCII.GetBytes(chunk.Signature));
+            // Write reversed signature (e.g. "MVER" -> "REVM")
+            writer.Write(Encoding.ASCII.GetBytes(ReverseSig(chunk.Signature)));
             writer.Write(chunk.Data.Length);
             writer.Write(chunk.Data);
         }
@@ -748,6 +766,7 @@ public sealed class AdtPatcher
 
     private void UpdateMhdrOffsets(ParsedAdt adt, AdtChunk mhdrChunk, Dictionary<int, long> chunkPositions)
     {
+        // ... (logic remains same as it relies on internal Readable signatures) ...
         // MHDR structure (offsets relative to end of MHDR header, i.e., start of MHDR data + 8)
         // 0x00: flags
         // 0x04: ofsMcin
@@ -853,6 +872,7 @@ public sealed class AdtPatcher
 
         // MMID - empty M2 offsets
         adt.Chunks.Add(new AdtChunk { Signature = SIG_MMID, Data = Array.Empty<byte>() });
+
 
         // MWMO - empty WMO list
         adt.Chunks.Add(new AdtChunk { Signature = SIG_MWMO, Data = Array.Empty<byte>() });
@@ -989,6 +1009,16 @@ public sealed class AdtPatcher
         File.WriteAllBytes(outputPath, outputData);
         
         Console.WriteLine($"[INFO] Written {outputData.Length:N0} bytes");
+    }
+
+    /// <summary>
+    /// Merge split ADTs into monolithic 3.3.5 ADT and return bytes.
+    /// Drop-in replacement for SplitAdtMerger.MergeSplitAdt().
+    /// </summary>
+    public byte[] MergeSplitAdt(string rootAdtPath, string? obj0Path, string? tex0Path)
+    {
+        var adt = ParseSplitAdt(rootAdtPath, obj0Path, tex0Path);
+        return WriteAdt(adt);
     }
 
     /// <summary>

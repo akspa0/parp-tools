@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: always_off
 ---
 
 # 🧭 Windsurf Rules — DBCTool Concise C# (net9.0)

@@ -1,28 +1,23 @@
 # Project Brief
 
 ## Mission
-**WoWRollback** is a comprehensive toolchain designed to **read, write, and convert** all file formats for the **World of Warcraft Alpha 0.5.3 (3368)** client. The primary goal is to enable full bidirectional asset transfer: bringing modern WoW content into the Alpha client and extracting Alpha content for analysis or use in modern clients.
+Bidirectional WoW format conversion between **Alpha 0.5.3** and **LK 3.3.5** clients.
 
-## Core Objectives
-1.  **Full Read/Write Support**: Implement robust readers and writers for all key Alpha formats:
-    *   **WDT/ADT**: Monolithic format with embedded tiles (MCNK) and legacy liquids (MCLQ).
-    *   **WMO**: Alpha v14 format (monolithic).
-    *   **M2/MDX**: Alpha MDX format.
-    *   **BLP**: BLP2 format with DXT compression.
-2.  **Bidirectional Conversion**:
-    *   **Modern → Alpha**: Downporting assets (LK 3.3.5 and newer) to 0.5.3 specifications.
-    *   **Alpha → Modern**: Up-porting historical assets to 3.3.5+ formats.
-3.  **Diagnostic Tooling**: Provide a standalone toolchain (`AlphaWdtInspector`) to diagnose format issues, verify packing integrity, and ensure "byte-perfect" output where possible.
-4.  **No Guesswork**: Maintain definitive, verified specifications (`memory-bank/specs/Alpha-0.5.3-Format.md`) derived from clean-room analysis and battle-tested code.
+## Scope
+- **Read/Write**: WDT, ADT, WMO, M2/MDX, BLP formats for both versions
+- **Convert**: Modern → Alpha (retroporting) and Alpha → Modern (analysis)
+- **Validate**: Roundtrip integrity, in-game client testing
 
-## Key Components
-- **WoWRollback.Core**: Shared library for format handling.
-- **AlphaLkToAlphaStandalone**: Dedicated LK → Alpha converter and roundtrip validator.
-- **AlphaWdtInspector**: Diagnostic CLI for WDT/ADT analysis.
-- **BlpResizer**: Batch texture converter/resizer for Alpha compatibility.
+## Current Reality (Dec 2025)
+**Input parsers work. Output writers are broken.**
+
+We have standardized libraries that correctly read both Alpha and LK formats. Yet our output files fail despite having working writers in standalone tools (BlpResizer, AlphaWdtInspector). The bug is in the write path integration, not the format understanding.
 
 ## Success Criteria
-- **In-Game Validation**: Converted worlds and assets load and render correctly in the original 0.5.3 client without crashes.
-- **Data Integrity**: Roundtrip conversions (Alpha → LK → Alpha) preserve critical metadata like AreaIDs, liquid types, and object placements.
-- **Deterministic Output**: Toolchains produce consistent, reproducible results.
+1. **Merged ADTs** match expected size (not half)
+2. **Roundtrip** Alpha → LK → Alpha preserves all data
+3. **In-game** loading without crashes
+4. **No reversed FourCC** literals in code (normalize on read, reverse only on write)
 
+## Key Constraint
+Fix the output path before adding features. No new functionality until writers work.

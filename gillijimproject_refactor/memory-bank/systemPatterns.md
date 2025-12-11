@@ -1,41 +1,46 @@
 # System Patterns
 
-## Alpha Format Patterns
+## FourCC Handling (CRITICAL)
 
-### Monolithic WDT Pattern
-- **Single File**: The `.wdt` file acts as a container for the entire map.
-- **Embedded Tiles**: MHDR, MCIN, and 256 MCNKs are written inline for each tile referenced by MAIN.
-- **Global Metadata**: MDNM (M2 names) and MONM (WMO names) are global to the map and reside in the WDT header.
-- **Relative Offsets**: MHDR offsets (`offsInfo`, `offsTex`, etc.) are relative to `MHDR.data` (start + 8).
-- **Absolute Offsets**: MCIN and MAIN use absolute file offsets.
+### The Rule
+```
+READ:  Reverse on disk → Forward in memory (XETM → MTEX)
+WRITE: Forward in memory → Reverse on disk (MTEX → XETM)
+```
 
-### Format Parity Pattern
-- **Byte-Perfect Goals**: Where possible, output should match the original Alpha client's expectations exactly (e.g., WMO name counting with trailing empty string).
-- **Reversed FourCC**: Writers must reverse FourCCs on disk (`KNCM`, `YLCM`) to match Alpha's big-endian-like expectations on little-endian systems (or vice-versa legacy artifact).
-- **Raw Chunk Data**: MCVT, MCNR, MCSH, MCAL, MCSE are written as raw data blobs without headers in the MCNK stream.
+### In Code
+- **Never** use reversed literals (`XETM`, `KNCM`) except in the lowest-level writer
+- **Always** normalize to readable form immediately after reading
+- **Only** reverse at the moment of writing bytes to disk
 
-## Architecture
-- Standalone, self-contained CLI with two phases:
-  - Phase A: `export-lk` – export LK ADTs from an original Alpha WDT.
-  - Phase B: `pack-alpha` – pack Alpha WDT from LK ADTs with toggles to isolate issues.
-- Destination-based MCRF re-bucketing: compute destination tile/chunk in Alpha coords, aggregate refs per target tile/chunk, then write per-tile MCRF.
-- MCLQ synthesis: detect MH2O via forward FourCC with reversed fallback; synthesize MCLQ where appropriate.
-- MCSE scan: hardened, bounded scan that accepts both offset-based and linear scan approaches.
-- CSV diagnostics emitted consistently: `mcnk_sizes.csv`, `placements_mddf.csv`, `placements_modf.csv`, `mcrf_diag.csv`.
+## ADT Structure
 
-## Standalone LK→Alpha Converter
-- Consumes LK 3.3.5 WDT/ADTs produced by `export-lk` / AlphaWDTAnalysisTool.
-- Applies reverse crosswalks (3.3.5→0.5.3) for M2/WMO paths, textures, and other metadata.
-- Rebuilds Alpha MPHD/MAIN/MDNM/MONM and per-tile ADTs with **no asset gating**.
-- Preserves all MDDF/MODF placements and WMO UniqueIDs; MCRF is rebuilt from per-chunk placement refs.
- - Provides a `roundtrip` orchestration in `AlphaLkToAlphaStandalone` that:
-   - Starts from an Alpha WDT/ADT set.
-   - Uses `AlphaWdtAnalyzer.Core.AdtExportPipeline` + DBCTool.V2 crosswalk CSVs to export LK 3.3.5 ADTs into a local `lk_export` tree.
-   - Feeds those LK ADTs into a standalone LK→Alpha pipeline for diagnostics and future full Alpha ADT reconstruction.
- - Emits `areaid_roundtrip.csv` as a numeric AreaID check, joining:
-   - Original Alpha per-MCNK "area IDs" (inferred from monolithic Alpha WDT via `AdtAlpha`).
-   - Crosswalked LK `McnkHeader.AreaId` values from the exported LK ADTs.
+### LK 3.3.5 (Split)
+```
+<map>_XX_YY.adt      — Root (terrain, MCNK headers)
+<map>_XX_YY_obj0.adt — Objects (MDDF, MODF placements)
+<map>_XX_YY_tex0.adt — Textures (MTEX, MCLY layers)
+```
 
-## Testing Strategy
-- Golden-file checks on representative tiles for CSV outputs and `tile-diff` subchunk parity.
-- A/B toggles (`--no-coord-xform`, `--dest-rebucket`, `--emit-mclq`, `--scan-mcse`) to isolate root causes deterministically.
+### Alpha 0.5.3 (Monolithic)
+```
+<map>.wdt — Contains EVERYTHING:
+  MPHD, MAIN, MDNM, MONM, then per-tile MHDR+MCIN+MCNKs
+```
+
+## Merge Priority
+When merging split → monolithic:
+1. `_tex0` data **overwrites** root texture data
+2. `_obj0` data **overwrites** root placement data
+3. Root provides base terrain (MCVT, MCNR)
+
+## Offset Conventions
+
+### Alpha WDT
+- **MHDR offsets**: Relative to `MHDR.data` start (after 8-byte header)
+- **MCIN offsets**: Absolute file positions
+- **MAIN offsets**: Absolute file positions
+
+### LK ADT
+- **MHDR offsets**: Relative to file start + 0x14 (Noggit convention)
+- **MCNK subchunk offsets**: Relative to MCNK chunk start

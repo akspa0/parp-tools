@@ -28,6 +28,7 @@ using AlphaWdtAnalyzer.Core.Dbc;
 using WoWRollback.Core.Services.AreaMapping;
 using DBCTool.V2.Cli;
 using WoWRollback.LkToAlphaModule;
+using WoWRollback.PM4Module;
 using WoWRollback.LkToAlphaModule.Writers;
 using MPQToTACT.MPQ;
 using WoWRollback.Core.Services.Assets;
@@ -210,6 +211,8 @@ internal static class Program
                     return RunPm4ExportModf(opts);
                 case "pm4-create-adt":
                     return RunPm4CreateAdt(opts);
+                case "compare-adt":
+                    return CompareAdtCommand.Execute(opts);
                 case "development-repair":
                     return DevelopmentRepairCommand.Execute(opts);
                 default:
@@ -6918,7 +6921,7 @@ internal static class Program
         Console.WriteLine();
 
         var injector = new AdtModfInjector();
-        var merger = new SplitAdtMerger();
+        var merger = new AdtPatcher();
         int created = 0;
         int merged = 0;
 

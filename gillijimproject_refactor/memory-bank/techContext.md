@@ -1,35 +1,59 @@
 # Tech Context
 
-## Languages & Frameworks
-- C# (.NET 9)
-- Console app CLI
+## Stack
+- **Runtime**: .NET 9, C#
+- **Build**: `dotnet build` / `dotnet run`
+- **Output**: Console CLI tools
 
 ## Key Projects
-- `AlphaWdtInspector/` (standalone diagnostics; no WoWRollback dependencies)
-- `AlphaLkToAlphaStandalone/` – dedicated LK→Alpha converter + Alpha↔LK roundtrip validator:
-  - `convert` command: LK ADT → stub Alpha WDT (occupancy-only), supports filesystem trees and MPQ 3.3.5 client roots.
-  - `roundtrip` command: Alpha WDT → LK ADTs (via `AdtExportPipeline` + DBCTool.V2 crosswalk CSVs) → LK→Alpha stub + AreaID CSV diagnostics.
 
-## Data & Path Auto-detection
-- `roundtrip` infers:
-  - Repo root by scanning upward for `test_data/` and `DBCTool.V2/`.
-  - `DBD` dir from `lib/WoWDBDefs/definitions`.
-  - Alpha DBC root from `test_data/<alias>/tree/DBFilesClient`.
-  - LK DBC root from `test_data/3.3.5/tree/DBFilesClient`.
-  - DBCTool.V2 outputs from `DBCTool.V2/dbctool_outputs`.
+| Project | Purpose |
+|---------|---------|
+| `WoWRollback.Core` | Shared format library |
+| `WoWRollback.Cli` | Main CLI entry point |
+| `WoWRollback.PM4Module` | ADT merger, PM4 tools, MCCV painting |
+| `AlphaWdtInspector` | Standalone diagnostics |
+| `BlpResizer` | Texture conversion |
+| `DBCTool.V2` | DBC/crosswalk generation |
 
-## Format Specifications (Source of Truth)
-- **Alpha 0.5.3**: `memory-bank/specs/Alpha-0.5.3-Format.md`
-  - Defines Monolithic WDT structure, chunk offsets, and legacy sub-chunk formats (MCLQ, etc.).
-  - Validated against 0.5.3.3368 client behavior.
+## Critical Files
 
-## External Libraries
-- Uses `WoWRollback.Core` MPQ/StormLib stack to support a pristine 3.3.5 install as LK input.
-- Uses `AlphaWdtAnalyzer.Core.AdtExportPipeline` and DBCTool.V2 loaders/crosswalks for Alpha→LK export and AreaID mapping.
+### ADT Merge/Generation
+- `WoWRollback.PM4Module/AdtPatcher.cs` — ✅ Single source of truth for merging
+- `WoWRollback.PM4Module/MccvPainter.cs` — ✅ Minimap→MCCV conversion
+- `WoWRollback.PM4Module/WdlToAdtProgram.cs` — WDL→ADT CLI with `--minimap` support
+- `WoWRollback.PM4Module/WdlToAdtTest.cs` — ADT generation logic
 
-## Test Utilities
-- Golden-file checks for CSVs and `tile-diff` outputs on representative tiles.
-- Example constants used throughout:
-  - `TILESIZE = 533.33333f`
-  - `WORLD_BASE = 32 * TILESIZE`
-- Packaging: single-file publish with simple run scripts; outputs in `out/<session_ts>/...`.
+### Format Specs
+- `memory-bank/specs/Alpha-0.5.3-Format.md` — Definitive Alpha spec
+- `memory-bank/coding_standards.md` — FourCC handling rules
+
+## Reference Libraries (USE THESE!)
+
+These libraries provide battle-tested ADT parsing/writing:
+
+| Library | Path | Key Classes |
+|---------|------|-------------|
+| **Warcraft.NET** | `lib/Warcraft.NET/` | `Files.ADT.Terrain.Wotlk.Terrain`, `MCNK`, all chunk types |
+| **MapUpconverter** | `lib/MapUpconverter/` | `ADT/Tex0.cs`, `ADT/Root.cs`, `ADT/Obj0.cs` |
+| **WoWFormatLib** | `lib/wow.tools.local/WoWFormatLib/` | Additional format utilities |
+
+### How MapUpconverter Works
+- Parses WotLK monolithic ADT using `Warcraft.NET.Files.ADT.Terrain.Wotlk.Terrain`
+- Extracts texture data → creates `_tex0.adt` (Legion/BfA format)
+- Extracts object data → creates `_obj0.adt`
+- **We need the REVERSE**: parse split files → combine → write monolithic
+
+## External Dependencies
+- **StormLib**: MPQ reading
+- **WoWFormatLib**: CASC support
+- **DBCD**: DBC parsing via `lib/wow.tools.local`
+- **SixLabors.ImageSharp**: Image loading for MCCV painting
+
+## Test Data Locations
+- `test_data/development/` — Development map split ADTs (root + _obj0 + _tex0)
+- `test_data/WoWMuseum/335-dev/` — Reference monolithic 3.3.5 ADTs
+- `test_data/development/World/Textures/Minimap/` — Minimap PNGs for MCCV
+- `PM4ADTs/clean/` — Merged ADTs (352 tiles)
+- `PM4ADTs/wdl_generated/` — Gap-fill terrain (1144 tiles)
+- `test_output/mccv_test/` — WDL→ADT with MCCV painting (1496 tiles)

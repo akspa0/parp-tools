@@ -29,6 +29,13 @@ public static class WdlToAdtGenerator
     /// Generate a complete 3.3.5 monolithic ADT from WDL tile heights.
     /// </summary>
     public static byte[] GenerateAdt(WdlTileData wdlTile, int tileX, int tileY)
+        => GenerateAdt(wdlTile, tileX, tileY, null);
+
+    /// <summary>
+    /// Generate a complete 3.3.5 monolithic ADT from WDL tile heights with optional minimap MCCV.
+    /// </summary>
+    /// <param name="mccvData">Optional array of 256 MCCV byte arrays (one per MCNK), or null for neutral gray.</param>
+    public static byte[] GenerateAdt(WdlTileData wdlTile, int tileX, int tileY, byte[][]? mccvData)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -76,7 +83,8 @@ public static class WdlToAdtGenerator
                 int idx = cy * 16 + cx;
                 mcnkOffsets[idx] = (uint)ms.Position;
                 
-                var mcnkData = GenerateMcnk(wdlTile, tileX, tileY, cx, cy);
+                var mcnkMccv = mccvData?[idx];
+                var mcnkData = GenerateMcnk(wdlTile, tileX, tileY, cx, cy, mcnkMccv);
                 WriteChunk(bw, "MCNK", mcnkData);
                 
                 mcnkSizes[idx] = (uint)mcnkData.Length;
@@ -140,7 +148,7 @@ public static class WdlToAdtGenerator
         return result;
     }
 
-    private static byte[] GenerateMcnk(WdlTileData wdlTile, int tileX, int tileY, int chunkX, int chunkY)
+    private static byte[] GenerateMcnk(WdlTileData wdlTile, int tileX, int tileY, int chunkX, int chunkY, byte[]? mccvData = null)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -217,16 +225,23 @@ public static class WdlToAdtGenerator
         for (int i = 0; i < 145; i++)
             bw.Write(heights[i] - baseZ);
 
-        // MCCV - vertex colors
+        // MCCV - vertex colors (from minimap or neutral gray)
         uint mccvOffset = (uint)ms.Position + 8;
         bw.Write(Encoding.ASCII.GetBytes("VCCM"));
         bw.Write(145 * 4);
-        for (int i = 0; i < 145; i++)
+        if (mccvData != null && mccvData.Length == 145 * 4)
         {
-            bw.Write((byte)0x7F);
-            bw.Write((byte)0x7F);
-            bw.Write((byte)0x7F);
-            bw.Write((byte)0x00);
+            bw.Write(mccvData);
+        }
+        else
+        {
+            for (int i = 0; i < 145; i++)
+            {
+                bw.Write((byte)0x7F);
+                bw.Write((byte)0x7F);
+                bw.Write((byte)0x7F);
+                bw.Write((byte)0x00);
+            }
         }
 
         // MCNR - normals

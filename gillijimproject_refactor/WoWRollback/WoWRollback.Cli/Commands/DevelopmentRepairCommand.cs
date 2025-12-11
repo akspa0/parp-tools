@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using WoWRollback.Core.Services.PM4;
 using WoWRollback.Core.Services.Archive;
+using WoWRollback.PM4Module;
 
 namespace WoWRollback.Cli.Commands;
 
@@ -117,7 +118,7 @@ public static class DevelopmentRepairCommand
 
         // 3. Create ADTs
         Console.WriteLine("[Step 3/3] Creating patched ADTs...");
-        var merger = new SplitAdtMerger();
+        var merger = new AdtPatcher();
         
         var entriesByTile = transformedEntries
             .GroupBy(e => GetTileForPosition(e.Position))

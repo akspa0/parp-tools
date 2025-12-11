@@ -11,17 +11,45 @@ if (args.Length > 0 && args[0] == "wdl-to-adt")
     return WdlToAdtProgram.Run(args.Skip(1).ToArray());
 }
 
+// Simple arg parser for adt-merge
+var opts = new Dictionary<string, string>();
+if (args.Length > 0 && args[0] == "adt-merge")
+{
+    // Skip command name
+    for (int i = 1; i < args.Length; i++)
+    {
+        if (args[i].StartsWith("--") && i + 1 < args.Length)
+        {
+            opts[args[i].Substring(2)] = args[i + 1];
+            i++;
+        }
+    }
+}
+else
+{
+    // Legacy support or direct run
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i].StartsWith("--") && i + 1 < args.Length)
+        {
+            opts[args[i].Substring(2)] = args[i + 1];
+            i++;
+        }
+    }
+}
+
 Console.WriteLine("=== ADT Merger - Clean LK ADT Generation ===\n");
 
-// Paths
-var sourceDir = @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\development\World\Maps\development";
-var outputDir = @"j:\wowDev\parp-tools\gillijimproject_refactor\PM4ADTs\clean";
-var mapName = "development";
+// Paths - Default or from Args
+var sourceDir = opts.GetValueOrDefault("in", @"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\development\World\Maps\development");
+var outputDir = opts.GetValueOrDefault("out", @"j:\wowDev\parp-tools\gillijimproject_refactor\PM4ADTs\clean");
+var mapName = opts.GetValueOrDefault("map", "development");
 
 // Create output directory
 Directory.CreateDirectory(outputDir);
 Console.WriteLine($"Source: {sourceDir}");
-Console.WriteLine($"Output: {outputDir}\n");
+Console.WriteLine($"Output: {outputDir}");
+Console.WriteLine($"Map:    {mapName}\n");
 
 // Find tiles that have both ADT and PM4 data (non-zero size)
 var tiles = new List<(int x, int y, long adtSize, long pm4Size, bool hasObj0, bool hasTex0)>();
