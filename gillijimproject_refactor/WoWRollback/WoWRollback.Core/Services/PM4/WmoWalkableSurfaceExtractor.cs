@@ -37,6 +37,7 @@ public sealed class WmoWalkableSurfaceExtractor
         public Vector3 BoundsMin { get; set; }
         public Vector3 BoundsMax { get; set; }
         public int GroupCount { get; set; }
+        public Dictionary<int, List<WmoTriangle>> TrianglesByGroup { get; set; } = new();
     }
 
     // MOPY flags from WoW format
@@ -332,6 +333,12 @@ public sealed class WmoWalkableSurfaceExtractor
             return;
         }
 
+        if (!result.TrianglesByGroup.TryGetValue(groupIndex, out var groupTris))
+        {
+            groupTris = new List<WmoTriangle>();
+            result.TrianglesByGroup[groupIndex] = groupTris;
+        }
+
         // Build triangles
         int triCount = indices.Count / 3;
         int walkableCount = 0;
@@ -373,6 +380,7 @@ public sealed class WmoWalkableSurfaceExtractor
                 result.WalkableVertices.Add(v1);
                 result.WalkableVertices.Add(v2);
                 walkableCount++;
+                groupTris.Add(tri);
             }
         }
     }
@@ -387,6 +395,12 @@ public sealed class WmoWalkableSurfaceExtractor
         List<Vector3> vertices = new();
         List<ushort> indices = new();
         List<(ushort flags, ushort materialId)> faceInfo = new();
+
+        if (!result.TrianglesByGroup.TryGetValue(0, out var groupTris))
+        {
+            groupTris = new List<WmoTriangle>();
+            result.TrianglesByGroup[0] = groupTris;
+        }
 
         int pos = 0;
         while (pos < data.Length - 8)
@@ -445,6 +459,7 @@ public sealed class WmoWalkableSurfaceExtractor
                 result.WalkableVertices.Add(v0);
                 result.WalkableVertices.Add(v1);
                 result.WalkableVertices.Add(v2);
+                groupTris.Add(tri);
             }
         }
     }
@@ -609,5 +624,56 @@ public sealed class WmoWalkableSurfaceExtractor
         }
 
         Console.WriteLine($"[INFO] Exported walkable floors ({walkableFloors.Count} triangles) to {outputPath}");
+    }
+
+    public void ExportPerFlagPerGroup(WmoWalkableData data, string outputDir)
+    {
+        Directory.CreateDirectory(outputDir);
+
+        if (data.TrianglesByGroup == null || data.TrianglesByGroup.Count == 0)
+        {
+            return;
+        }
+
+        var wmoBaseName = Path.GetFileNameWithoutExtension(data.WmoPath);
+
+        foreach (var groupEntry in data.TrianglesByGroup.OrderBy(g => g.Key))
+        {
+            int groupIndex = groupEntry.Key;
+            var triangles = groupEntry.Value;
+            if (triangles == null || triangles.Count == 0)
+                continue;
+
+            var byFlags = triangles.GroupBy(t => t.Flags);
+            foreach (var flagGroup in byFlags)
+            {
+                var flagTriangles = flagGroup.ToList();
+                if (flagTriangles.Count == 0)
+                    continue;
+
+                ushort flags = flagGroup.Key;
+                var fileName = $"{wmoBaseName}_g{groupIndex:D3}_flags_{flags:X2}.obj";
+                var path = Path.Combine(outputDir, fileName);
+
+                using var sw = new StreamWriter(path);
+                sw.WriteLine("# WMO Collision/Walkable Subset");
+                sw.WriteLine("# Group " + groupIndex + ", Flags 0x" + flags.ToString("X2"));
+                sw.WriteLine("# Triangles: " + flagTriangles.Count);
+                sw.WriteLine();
+
+                foreach (var tri in flagTriangles)
+                {
+                    sw.WriteLine($"v {tri.V0.X} {tri.V0.Y} {tri.V0.Z}");
+                    sw.WriteLine($"v {tri.V1.X} {tri.V1.Y} {tri.V1.Z}");
+                    sw.WriteLine($"v {tri.V2.X} {tri.V2.Y} {tri.V2.Z}");
+                }
+
+                for (int i = 0; i < flagTriangles.Count; i++)
+                {
+                    int baseIdx = i * 3 + 1;
+                    sw.WriteLine($"f {baseIdx} {baseIdx + 1} {baseIdx + 2}");
+                }
+            }
+        }
     }
 }

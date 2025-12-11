@@ -17,12 +17,15 @@
 ### Data Generation
 - **WDL→ADT**: ✅ Generates terrain from WDL heights
 - **MCCV Painting**: ✅ `MccvPainter.cs` generates vertex colors from minimap PNGs (interleaved layout fixed)
-- **PM4 MODF Reconstruction**: ✅ 1101 entries in `pm4-adt-test12/modf_reconstruction/`
+- **PM4 MODF Reconstruction (test12)**: ✅ 1101 entries in `pm4-adt-test12/modf_reconstruction/`
+- **PM4 MODF Reconstruction (test13)**: ✅ `pm4-reconstruct-modf` CLI wraps `Pm4ModfReconstructor` over `pm4-adt-test13/wmo_flags` → `pm4-adt-test13/modf_reconstruction/`
 
 ### PM4 Pipeline Components
 - **`Pm4ModfReconstructor`**: ✅ Matches PM4 objects to WMO library, generates MODF entries
 - **`Pm4WmoGeometryMatcher`**: ✅ Geometry-based WMO matching using principal extents
-- **`wmo_library.json`**: ✅ 352 WMO entries with pre-computed geometry stats
+- **`wmo-batch-extract`**: ✅ Extracts WMO collision geometry into per-WMO folders with one OBJ per group/flag (`pm4-adt-test13/wmo_flags/`)
+- **`pm4-reconstruct-modf` CLI**: ✅ Uses `Pm4ModfReconstructor` + `AdtModfInjector.ServerToAdtPosition` to write `modf_entries.csv`, `mwmo_names.csv`, and `placement_verification.json`
+- **`wmo_library.json` (legacy)**: ✅ 352 WMO entries with pre-computed geometry stats (test12 snapshot)
 
 ## ⚠️ Partial / Broken
 
@@ -72,5 +75,8 @@
 | Split Cata ADTs | `test_data/development/World/Maps/development/*.adt` | 466 root |
 | WoWMuseum ADTs | `test_data/WoWMuseum/335-dev/World/Maps/development/*.adt` | 2303 |
 | Minimap PNGs | `test_data/minimaps/development/*.png` | 2252 |
-| MODF entries | `pm4-adt-test12/modf_reconstruction/modf_entries.csv` | 1101 |
-| WMO names | `pm4-adt-test12/modf_reconstruction/mwmo_names.csv` | 352 |
+| MODF entries (test12) | `pm4-adt-test12/modf_reconstruction/modf_entries.csv` | 1101 |
+| WMO names (test12) | `pm4-adt-test12/modf_reconstruction/mwmo_names.csv` | 352 |
+| WMO collision (per-group/flag) | `pm4-adt-test13/wmo_flags/` | many OBJ files |
+| MODF entries (test13, current) | `pm4-adt-test13/modf_reconstruction/modf_entries.csv` | _current run_ |
+| WMO names (test13, current) | `pm4-adt-test13/modf_reconstruction/mwmo_names.csv` | _current run_ |

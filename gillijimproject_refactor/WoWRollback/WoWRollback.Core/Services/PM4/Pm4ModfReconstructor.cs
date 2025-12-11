@@ -74,8 +74,19 @@ public sealed class Pm4ModfReconstructor
             return library;
         }
 
-        var objFiles = Directory.GetFiles(wmoCollisionDir, "*_collision.obj", SearchOption.AllDirectories);
-        Console.WriteLine($"[INFO] Building WMO library from {objFiles.Length} collision files...");
+        var legacyCollisionFiles = Directory.GetFiles(wmoCollisionDir, "*_collision.obj", SearchOption.AllDirectories);
+        string[] objFiles;
+
+        if (legacyCollisionFiles.Length > 0)
+        {
+            objFiles = legacyCollisionFiles;
+            Console.WriteLine($"[INFO] Building WMO library from {objFiles.Length} legacy collision files (*_collision.obj)...");
+        }
+        else
+        {
+            objFiles = Directory.GetFiles(wmoCollisionDir, "*.obj", SearchOption.AllDirectories);
+            Console.WriteLine($"[INFO] Building WMO library from {objFiles.Length} OBJ files (per-group/per-flag layout)...");
+        }
 
         foreach (var objPath in objFiles)
         {
@@ -85,10 +96,30 @@ public sealed class Pm4ModfReconstructor
                 if (vertices.Count < 10) continue; // Skip tiny/empty files
 
                 var stats = _matcher.ComputeStats(vertices);
-                
-                // Derive WMO path from filename
+
+                // Derive WMO path from filename / folder.
+                // Legacy layout: <name>_collision.obj
+                // New layout:   <root>/<WmoName>/<WmoName>_gXYZ_flags_XX.obj
                 var fileName = Path.GetFileNameWithoutExtension(objPath);
-                var wmoName = fileName.Replace("_collision", "");
+                var dirName = Path.GetFileName(Path.GetDirectoryName(objPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? string.Empty);
+
+                string wmoName;
+                if (fileName.EndsWith("_collision", StringComparison.OrdinalIgnoreCase))
+                {
+                    wmoName = fileName.Replace("_collision", "");
+                }
+                else if (!string.IsNullOrEmpty(dirName))
+                {
+                    // Prefer folder name when using per-WMO subfolders
+                    wmoName = dirName;
+                }
+                else
+                {
+                    // Fallback: strip group/flag suffix if present
+                    var idx = fileName.IndexOf("_g", StringComparison.OrdinalIgnoreCase);
+                    wmoName = idx > 0 ? fileName.Substring(0, idx) : fileName;
+                }
+
                 var wmoPath = $"World\\wmo\\{wmoName}.wmo"; // Approximate path
 
                 library.Add(new WmoReference(wmoPath, objPath, stats));

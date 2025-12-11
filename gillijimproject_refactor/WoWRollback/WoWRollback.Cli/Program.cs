@@ -6676,11 +6676,11 @@ internal static class Program
             try
             {
                 var wmoName = Path.GetFileNameWithoutExtension(wmoPath);
-                var outputPath = Path.Combine(outDir, $"{wmoName}_collision.obj");
+                var wmoOutDir = Path.Combine(outDir, wmoName);
 
-                if (File.Exists(outputPath))
+                if (Directory.Exists(wmoOutDir) && Directory.EnumerateFiles(wmoOutDir, "*.obj").Any())
                 {
-                    Console.WriteLine($"  [SKIP] {wmoName} (already exists)");
+                    Console.WriteLine($"  [SKIP] {wmoName} (output folder already has OBJ files)");
                     success++;
                     continue;
                 }
@@ -6727,9 +6727,10 @@ internal static class Program
                     continue;
                 }
                 
-                extractor.ExportToObj(result, outputPath);
+                Directory.CreateDirectory(wmoOutDir);
+                extractor.ExportPerFlagPerGroup(result, wmoOutDir);
 
-                Console.WriteLine($" OK ({result.AllTriangles.Count} faces)");
+                Console.WriteLine($" OK ({result.AllTriangles.Count} faces, {result.TrianglesByGroup.Count} groups)");
                 success++;
             }
             catch (Exception ex)

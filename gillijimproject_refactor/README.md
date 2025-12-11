@@ -129,45 +129,85 @@ Notes:
 
 ---
 
-## Development Map Repair Pipeline
+## Development Map PM4 Pipeline (C# refactor)
 
-Automated pipeline to reconstruct the "development" map (The Vice) by extracting WMO geometry, matching against PM4 pathfinding objects, and patching clean 3.3.5 ADTs.
+End-to-end pipeline to reconstruct the "development" map using PM4 pathfinding output and WMO collision geometry, then inject the resulting WMO placements into clean 3.3.5 ADTs.
 
-### Usage
+### Canonical data locations
+
+These paths are fixed in this repo (see `.windsurf/rules/data-paths.md`):
+
+| Data | Path | Notes |
+|------|------|-------|
+| Split Cata ADTs + PM4 | `test_data/development/World/Maps/development` | 466 root ADTs, 616 PM4 files + PM4Faces output |
+| Minimap PNGs | `test_data/minimaps/development` | For MCCV painting |
+| WoWMuseum LK ADTs | `test_data/WoWMuseum/335-dev/World/Maps/development` | Clean 3.3.5 baseline |
+| WMO collision (per-group/flag) | `pm4-adt-test13/wmo_flags/` | One folder per WMO, one OBJ per group/flag |
+| MODF reconstruction (current) | `pm4-adt-test13/modf_reconstruction/` | `modf_entries.csv`, `mwmo_names.csv`, `placement_verification.json` |
+
+### Step 1 — Build base LK ADTs (terrain/textures/MCCV)
+
+Use the existing ADT tooling to produce a "clean" LK ADT set that has terrain, textures, and MCCV applied where needed:
+
+- `merge-split` — merge split LK ADTs (root + `_obj0` + `_tex0`) into monolithic form.
+- `merge-minimap` — MCCV-paint tiles that have no textures at all using minimap PNGs.
+- `merge-textures` — pull texture chunks from older monolithic ADTs when `_tex0` is missing.
+
+The result is a directory such as:
+
+- `PM4ADTs/clean_v3/` or `test_output/merged_minimap/`
+
+This directory is the **`--in`** argument for the MODF injector.
+
+### Step 2 — Reconstruct MODF from PM4 + WMO collision library
+
+Run the PM4 reconstruction CLI from the repo root:
 
 ```bash
-dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
-  --pm4-dir "path/to/development/pm4" \
-  --source-adt "path/to/clean_adts" \
-  --client-path "path/to/3.3.5/client" \
-  --out "output_dir" \
-  --cache-dir "work/cache" \
-  --listfile "listfile.txt" \
-  --dump-objs
+dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- pm4-reconstruct-modf \
+  --pm4 "test_data/development/World/Maps/development" \
+  --wmo "pm4-adt-test13/wmo_flags" \
+  --out "pm4-adt-test13/modf_reconstruction" \
+  --min-confidence 0.7
 ```
 
-### Arguments
+This will:
 
-| Argument | Description |
-|----------|-------------|
-| `--pm4-dir` | Path to extracted PM4 files (containing `.obj` geometry). |
-| `--source-adt` | Path to clean 3.3.5 ADTs (must have valid textures!). |
-| `--client-path` | Path to 3.3.5 client (for WMO extraction). |
-| `--out` | Output directory for patched ADTs and diagnostics. |
-| `--cache-dir` | **Highly Recommended**. Directory to store heavy cache files (`wmo_library.json`, `pm4_library.json`). Reusing this speeds up runs from 20m to 10s. |
-| `--listfile` | Listfile to filter WMO candidates (optional). |
-| `--dump-objs` | If set, dumps extracted `.obj` files to output for inspection. |
+- Load PM4 objects from all `ck_instances.csv` files under `--pm4`.
+- Load WMO collision geometry from the per-group/per-flag OBJ files under `--wmo`.
+- Match PM4 objects to WMOs, compute placement transforms, and apply the PM4→ADT world coordinate transform.
+- Write:
+  - `modf_entries.csv` — world-space MODF placements (post-transform).
+  - `mwmo_names.csv` — MWMO string table.
+  - `placement_verification.json` — per-tile/per-WMO summary for audits.
 
-### Output Structure
+### Step 3 — Inject MODF into base LK ADTs
 
-- `adt_335/`: The patched ADT files ready for Noggit.
-- `modf_reconstruction/`: CSVs detailing the matched placements.
-- `chunk_dump/`: **(Debug)** Raw binary dumps of `MTEX`, `MODF`, `MWMO` chunks for verification.
+With the reconstruction CSVs in place, inject MODF into your base ADT set:
 
-### Troubleshooting
+```bash
+dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- inject-modf \
+  --modf "pm4-adt-test13/modf_reconstruction/modf_entries.csv" \
+  --mwmo "pm4-adt-test13/modf_reconstruction/mwmo_names.csv" \
+  --in  "PM4ADTs/clean_v3" \
+  --out "PM4ADTs/museum_patched_test13" \
+  --map development
+```
 
-- **Empty Textures / Missing Objects**: Check `chunk_dump/` in the output. If `MTEX_....bin` or `MODF_....bin` are 0 bytes, the patching failed.
-- **"Domino Effect"**: If the input `--source-adt` files are corrupt (missing chunk sizes), the output will also be corrupt. Ensure source ADTs are generated with the latest `wdl-to-adt` and `adt-merge` tools.
+Notes:
+
+- `inject-modf` uses `MuseumAdtPatcher` / `AdtPatcher` to preserve all existing chunks and only modify `MWMO`, `MWID`, and `MODF`.
+- If a tile has no reconstructed placements in `modf_entries.csv`, its ADT is copied unchanged.
+- You can inspect on-disk MODF via:
+
+  ```bash
+  dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- dump-modf \
+    --in PM4ADTs/museum_patched_test13 --map development --tile 22_18
+  ```
+
+  and compare against `dump-modf-csv` for the same tile.
+
+The `PM4ADTs/museum_patched_test13/` directory is suitable for Noggit / 3.3.5 client testing once paired with an appropriate WDT.
 
 ---
 

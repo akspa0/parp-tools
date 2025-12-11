@@ -33,6 +33,9 @@ if (args.Length > 0)
         case "test-roundtrip":
             return RunTestRoundtrip(args.Skip(1).ToArray());
         
+        case "pm4-reconstruct-modf":
+            return RunPm4ReconstructModf(args.Skip(1).ToArray());
+
         case "inject-modf":
             return RunInjectModf(args.Skip(1).ToArray());
 
@@ -360,6 +363,104 @@ static int RunDumpModfCsv(string[] args)
     }
 
     Console.WriteLine($"Total entries for tile {tileX}_{tileY}: {count}");
+    return 0;
+}
+
+// pm4-reconstruct-modf command - run PM4 WMO matching and export MODF CSV/MWMO table
+static int RunPm4ReconstructModf(string[] args)
+{
+    Console.WriteLine("=== PM4 MODF Reconstruction ===\n");
+
+    string? pm4Dir = null;
+    string? wmoDir = null;
+    string? outDir = null;
+    string? minConfStr = null;
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Dir = args[++i]; break;
+            case "--wmo": wmoDir = args[++i]; break;
+            case "--out": outDir = args[++i]; break;
+            case "--min-confidence": minConfStr = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: pm4-reconstruct-modf --pm4 <pm4_dir> --wmo <wmo_collision_dir> --out <out_dir> [--min-confidence <0-1>]");
+                Console.WriteLine();
+                Console.WriteLine("  --pm4    Root directory containing PM4Faces ck_instances.csv + OBJ geometry");
+                Console.WriteLine("  --wmo    Root directory containing extracted WMO collision OBJ files (per-WMO folders OK)");
+                Console.WriteLine("  --out    Output directory for modf_entries.csv and mwmo_names.csv");
+                Console.WriteLine("  --min-confidence  Minimum match confidence (default 0.7)");
+                return 0;
+        }
+    }
+
+    if (string.IsNullOrEmpty(pm4Dir) || string.IsNullOrEmpty(wmoDir) || string.IsNullOrEmpty(outDir))
+    {
+        Console.Error.WriteLine("Error: --pm4, --wmo and --out are required. Use --help for usage.");
+        return 1;
+    }
+
+    if (!Directory.Exists(pm4Dir))
+    {
+        Console.Error.WriteLine($"Error: PM4 directory not found: {pm4Dir}");
+        return 1;
+    }
+
+    if (!Directory.Exists(wmoDir))
+    {
+        Console.Error.WriteLine($"Error: WMO collision directory not found: {wmoDir}");
+        return 1;
+    }
+
+    Directory.CreateDirectory(outDir);
+
+    float minConfidence = 0.7f;
+    if (!string.IsNullOrEmpty(minConfStr) && float.TryParse(minConfStr, out var parsedConf))
+        minConfidence = parsedConf;
+
+    var reconstructor = new Pm4ModfReconstructor();
+
+    Console.WriteLine($"[INFO] Loading WMO collision library from {wmoDir}...");
+    var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir);
+    if (wmoLibrary.Count == 0)
+    {
+        Console.Error.WriteLine("[ERROR] WMO library is empty. Check your --wmo path.");
+        return 1;
+    }
+
+    Console.WriteLine($"[INFO] Loading PM4 objects from {pm4Dir}...");
+    var pm4Objects = reconstructor.LoadPm4Objects(pm4Dir);
+    if (pm4Objects.Count == 0)
+    {
+        Console.Error.WriteLine("[ERROR] No PM4 objects found. Check your --pm4 path.");
+        return 1;
+    }
+
+    Console.WriteLine($"[INFO] Reconstructing MODF entries with min-confidence {minConfidence:F2}...");
+    var result = reconstructor.ReconstructModf(pm4Objects, wmoLibrary, minConfidence);
+
+    // Apply PM4->ADT world coordinate transform before exporting CSVs
+    Console.WriteLine("[INFO] Applying PM4->ADT coordinate transform (ServerToAdtPosition)...");
+    var transformedEntries = result.ModfEntries
+        .Select(e => e with { Position = AdtModfInjector.ServerToAdtPosition(e.Position) })
+        .ToList();
+    result = result with { ModfEntries = transformedEntries };
+
+    var modfCsvPath = Path.Combine(outDir, "modf_entries.csv");
+    var mwmoCsvPath = Path.Combine(outDir, "mwmo_names.csv");
+    var verifyJsonPath = Path.Combine(outDir, "placement_verification.json");
+
+    reconstructor.ExportToCsv(result, modfCsvPath);
+    reconstructor.ExportMwmo(result, mwmoCsvPath);
+    reconstructor.ExportVerificationJson(result, pm4Objects, wmoLibrary, verifyJsonPath);
+
+    Console.WriteLine("\n[RESULT]");
+    Console.WriteLine($"  MODF CSV: {modfCsvPath}");
+    Console.WriteLine($"  MWMO CSV: {mwmoCsvPath}");
+    Console.WriteLine($"  Verification JSON: {verifyJsonPath}");
+
     return 0;
 }
 
