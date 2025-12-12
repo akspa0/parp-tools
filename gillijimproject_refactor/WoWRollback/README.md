@@ -59,6 +59,8 @@ dotnet run --project WoWRollback.PM4Module -- patch-pipeline \
 | `--split-adt` | Directory with split ADT data (for WDL file) |
 | `--museum-adt` | WoWMuseum LK ADTs to patch (preserves terrain data) |
 | `--out` | Output directory for Noggit project |
+| `--wmo-filter` | *Optional*: Filter WMOs by path prefix (e.g., `Northrend` or `Kalimdor`) |
+| `--use-full-mesh` | *Optional*: Use full WMO mesh for matching (not just walkable surfaces) |
 
 ### Output Structure
 

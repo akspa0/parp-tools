@@ -83,10 +83,15 @@ public sealed class Pm4ModfReconstructor
     /// Extracts, converts, and analyzes WMOs (in-memory) to build fingerprints.
     /// Uses caching to avoid reprocessing.
     /// </summary>
-    public List<WmoReference> BuildWmoLibrary(string gamePath, string listfilePath, string outputRoot)
+    /// <param name="wmoPathFilter">Optional filter: only include WMOs with paths containing this string (e.g., "Northrend")</param>
+    /// <param name="useFullMesh">If true, use all WMO geometry; if false, use only walkable surfaces</param>
+    public List<WmoReference> BuildWmoLibrary(string gamePath, string listfilePath, string outputRoot, string? wmoPathFilter = null, bool useFullMesh = false)
     {
         Console.WriteLine("=== Building WMO Reference Library ===\n");
-        string cachePath = Path.Combine(outputRoot, "wmo_library_cache.json");
+        
+        // Cache path includes filter and mesh mode to avoid mixing different library builds
+        string cacheKey = $"{wmoPathFilter ?? "all"}_{(useFullMesh ? "full" : "walkable")}";
+        string cachePath = Path.Combine(outputRoot, $"wmo_library_cache_{cacheKey.Replace("/", "_").Replace("\\", "_")}.json");
 
         // 1. Try Cache
         if (File.Exists(cachePath))
@@ -114,6 +119,14 @@ public sealed class Pm4ModfReconstructor
             .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) 
                 && !System.Text.RegularExpressions.Regex.IsMatch(l, @"_\d{3}\.wmo$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) // Exclude group files
             .ToList();
+
+        // Apply path filter if specified
+        if (!string.IsNullOrEmpty(wmoPathFilter))
+        {
+            var originalCount = allWmos.Count;
+            allWmos = allWmos.Where(p => p.Contains(wmoPathFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+            Console.WriteLine($"Filtered WMOs: {originalCount} -> {allWmos.Count} (containing '{wmoPathFilter}')");
+        }
 
         Console.WriteLine($"Found {allWmos.Count} candidate WMOs in listfile.");
         
@@ -153,11 +166,13 @@ public sealed class Pm4ModfReconstructor
 
                 // Extract geometry
                 var walkableData = WmoWalkableSurfaceExtractor.ExtractFromBytes(wmoBytes, wmoPath, groupLoader);
-                if (walkableData.WalkableVertices.Count < 3) return;
+                
+                // Choose vertices based on mesh mode
+                var vertices = useFullMesh ? walkableData.AllVertices : walkableData.WalkableVertices;
+                if (vertices.Count < 3) return;
 
                 // Compute Stats
-                // Use extracted vertices directly (triangle soup is fine/consistent with previous OBJ workflow)
-                var stats = _matcher.ComputeStats(walkableData.WalkableVertices);
+                var stats = _matcher.ComputeStats(vertices);
                 references.Add(new WmoReference(wmoPath.Replace('/', '\\'), stats)); // Standardize path separator
 
                 System.Threading.Interlocked.Increment(ref processed);

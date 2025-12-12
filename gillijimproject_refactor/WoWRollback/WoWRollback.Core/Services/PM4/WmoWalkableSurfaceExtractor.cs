@@ -34,6 +34,12 @@ public sealed class WmoWalkableSurfaceExtractor
         public List<WmoTriangle> AllTriangles { get; set; } = new();
         public List<WmoTriangle> WalkableTriangles { get; set; } = new();
         public List<Vector3> WalkableVertices { get; set; } = new();
+        
+        /// <summary>
+        /// All vertices from all triangles (for full mesh matching)
+        /// </summary>
+        public List<Vector3> AllVertices => AllTriangles.SelectMany(t => new[] { t.V0, t.V1, t.V2 }).ToList();
+        
         public Vector3 BoundsMin { get; set; }
         public Vector3 BoundsMax { get; set; }
         public int GroupCount { get; set; }

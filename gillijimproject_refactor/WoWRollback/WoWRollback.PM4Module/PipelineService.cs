@@ -20,7 +20,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, bool useFullMesh = false)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -176,7 +176,11 @@ namespace WoWRollback.PM4Module
                 {
                     // Step 2: Build WMO reference library for matching
                     Console.WriteLine("[INFO] Building WMO reference library...");
-                    var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot);
+                    if (!string.IsNullOrEmpty(wmoFilter))
+                        Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
+                    if (useFullMesh)
+                        Console.WriteLine("[INFO] Using full WMO mesh for matching (not just walkable surfaces)");
+                    var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, useFullMesh);
                     
                     if (wmoLibrary.Count == 0)
                     {

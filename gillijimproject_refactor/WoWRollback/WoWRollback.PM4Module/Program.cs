@@ -1355,6 +1355,8 @@ static int RunPatchPipeline(string[] args)
     string? museumAdtPath = null;
     string? wdlPath = null;
     string? outputRoot = "PM4_to_ADT";
+    string? wmoFilter = null;        // Filter WMOs by path prefix (e.g., "Northrend")
+    bool useFullMesh = false;        // Use full WMO mesh instead of walkable surfaces
 
     for (int i = 0; i < args.Length; i++)
     {
@@ -1367,9 +1369,24 @@ static int RunPatchPipeline(string[] args)
             case "--museum-adt": museumAdtPath = args[++i]; break;
             case "--wdl": wdlPath = args[++i]; break;
             case "--out": outputRoot = args[++i]; break;
+            case "--wmo-filter": wmoFilter = args[++i]; break;
+            case "--use-full-mesh": useFullMesh = true; break;
             case "--help":
             case "-h":
-                Console.WriteLine("Usage: patch-pipeline --game <path> --listfile <path> --pm4 <dir> --split-adt <dir> --museum-adt <dir> [--wdl <file>] [--out <dir>]");
+                Console.WriteLine("Usage: patch-pipeline --game <path> --listfile <path> --pm4 <dir> --split-adt <dir> --museum-adt <dir> [options]");
+                Console.WriteLine();
+                Console.WriteLine("Required:");
+                Console.WriteLine("  --game <path>       Path to WoW 3.3.5 client (for WMO extraction from MPQs)");
+                Console.WriteLine("  --listfile <path>   Listfile with WMO paths");
+                Console.WriteLine("  --pm4 <dir>         Directory containing .pm4 files");
+                Console.WriteLine("  --split-adt <dir>   Directory with split ADT data (for WDL file)");
+                Console.WriteLine("  --museum-adt <dir>  WoWMuseum LK ADTs to patch");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --wdl <file>        Path to WDL file (optional, auto-detected from split-adt)");
+                Console.WriteLine("  --out <dir>         Output directory (default: PM4_to_ADT)");
+                Console.WriteLine("  --wmo-filter <path> Filter WMOs by path prefix (e.g., 'Northrend' or 'Kalimdor')");
+                Console.WriteLine("  --use-full-mesh     Use full WMO mesh for matching (not just walkable surfaces)");
                 return 0;
         }
     }
@@ -1384,7 +1401,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, useFullMesh);
         return 0;
     }
     catch (Exception ex)
