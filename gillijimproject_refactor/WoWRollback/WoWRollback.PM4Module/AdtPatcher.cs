@@ -563,6 +563,7 @@ public sealed class AdtPatcher
 
     /// <summary>
     /// Build MODF chunk data (64 bytes per entry).
+    /// MODF stores coordinates as XZY (X, Height, Y) not XYZ.
     /// </summary>
     public byte[] BuildModfData(List<ModfEntry> entries)
     {
@@ -574,17 +575,17 @@ public sealed class AdtPatcher
             bw.Write(e.NameId);
             bw.Write(e.UniqueId);
             bw.Write(e.Position.X);
+            bw.Write(e.Position.Z);  // Height (swapped with Y)
             bw.Write(e.Position.Y);
-            bw.Write(e.Position.Z);
             bw.Write(e.Rotation.X);
+            bw.Write(e.Rotation.Z);  // Swapped with Y
             bw.Write(e.Rotation.Y);
-            bw.Write(e.Rotation.Z);
             bw.Write(e.BoundsMin.X);
+            bw.Write(e.BoundsMin.Z);  // Swapped with Y
             bw.Write(e.BoundsMin.Y);
-            bw.Write(e.BoundsMin.Z);
             bw.Write(e.BoundsMax.X);
+            bw.Write(e.BoundsMax.Z);  // Swapped with Y
             bw.Write(e.BoundsMax.Y);
-            bw.Write(e.BoundsMax.Z);
             bw.Write(e.Flags);
             bw.Write(e.DoodadSet);
             bw.Write(e.NameSet);
@@ -711,20 +712,11 @@ public sealed class AdtPatcher
 
     /// <summary>
     /// Write patched ADT to bytes, fixing MCIN and MHDR offsets.
+    /// Uses iterative approach: calculate positions, update offset chunks, recalculate, then write.
     /// </summary>
     public byte[] WriteAdt(ParsedAdt adt)
     {
-        // First pass: calculate positions of all chunks
-        var chunkPositions = new Dictionary<int, long>(); // chunk index -> file offset
-        long pos = 0;
-
-        for (int i = 0; i < adt.Chunks.Count; i++)
-        {
-            chunkPositions[i] = pos;
-            pos += adt.Chunks[i].TotalSize;
-        }
-
-        // Find MCNK positions for MCIN
+        // Find MCNK indices once
         var mcnkIndices = new List<int>();
         for (int i = 0; i < adt.Chunks.Count; i++)
         {
@@ -732,9 +724,60 @@ public sealed class AdtPatcher
                 mcnkIndices.Add(i);
         }
 
-        // Update MCIN if present
-        var mcinChunk = adt.FindChunk(SIG_MCIN);
-        if (mcinChunk != null && mcnkIndices.Count == 256)
+        // Iterative offset calculation - may need multiple passes if MCIN/MHDR sizes change
+        Dictionary<int, long> chunkPositions;
+        for (int iteration = 0; iteration < 3; iteration++) // Max 3 iterations for convergence
+        {
+            // Calculate current positions based on current chunk sizes
+            chunkPositions = new Dictionary<int, long>();
+            long pos = 0;
+            for (int i = 0; i < adt.Chunks.Count; i++)
+            {
+                chunkPositions[i] = pos;
+                pos += adt.Chunks[i].TotalSize;
+            }
+
+            // Update MCIN if present (this may change MCIN's data size)
+            var mcinChunk = adt.FindChunk(SIG_MCIN);
+            if (mcinChunk != null && mcnkIndices.Count == 256)
+            {
+                using var ms = new MemoryStream();
+                using var bw = new BinaryWriter(ms);
+
+                for (int i = 0; i < 256; i++)
+                {
+                    int mcnkIdx = mcnkIndices[i];
+                    uint offset = (uint)chunkPositions[mcnkIdx];
+                    uint size = (uint)adt.Chunks[mcnkIdx].TotalSize;
+                    bw.Write(offset);
+                    bw.Write(size);
+                    bw.Write(0u); // flags
+                    bw.Write(0u); // asyncId
+                }
+
+                mcinChunk.Data = ms.ToArray();
+            }
+
+            // Update MHDR offsets if present (this may change MHDR's data size)
+            var mhdrChunk = adt.FindChunk(SIG_MHDR);
+            if (mhdrChunk != null && mhdrChunk.Data.Length >= 32)
+            {
+                UpdateMhdrOffsets(adt, mhdrChunk, chunkPositions);
+            }
+        }
+
+        // Final position calculation after all updates
+        chunkPositions = new Dictionary<int, long>();
+        long finalPos = 0;
+        for (int i = 0; i < adt.Chunks.Count; i++)
+        {
+            chunkPositions[i] = finalPos;
+            finalPos += adt.Chunks[i].TotalSize;
+        }
+
+        // Final MCIN update with correct positions
+        var finalMcinChunk = adt.FindChunk(SIG_MCIN);
+        if (finalMcinChunk != null && mcnkIndices.Count == 256)
         {
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
@@ -750,19 +793,17 @@ public sealed class AdtPatcher
                 bw.Write(0u); // asyncId
             }
 
-            mcinChunk.Data = ms.ToArray();
+            finalMcinChunk.Data = ms.ToArray();
         }
 
-        // Update MHDR offsets if present
-        var mhdrChunk = adt.FindChunk(SIG_MHDR);
-        if (mhdrChunk != null && mhdrChunk.Data.Length >= 64)
+        // Final MHDR update with correct positions
+        var finalMhdrChunk = adt.FindChunk(SIG_MHDR);
+        if (finalMhdrChunk != null && finalMhdrChunk.Data.Length >= 32)
         {
-            // MHDR contains offsets to various chunks relative to MHDR data start
-            // We need to recalculate these based on new chunk positions
-            UpdateMhdrOffsets(adt, mhdrChunk, chunkPositions);
+            UpdateMhdrOffsets(adt, finalMhdrChunk, chunkPositions);
         }
 
-        // Second pass: write all chunks
+        // Write all chunks
         using var output = new MemoryStream();
         using var writer = new BinaryWriter(output);
 

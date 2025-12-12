@@ -136,7 +136,7 @@ public sealed class Pm4ModfReconstructor
         int processed = 0;
         int failed = 0;
 
-        Parallel.ForEach(allWmos, new ParallelOptions { MaxDegreeOfParallelism = 4 }, wmoPath =>
+        Parallel.ForEach(allWmos, new ParallelOptions { MaxDegreeOfParallelism = 8 }, wmoPath =>
         {
             try
             {

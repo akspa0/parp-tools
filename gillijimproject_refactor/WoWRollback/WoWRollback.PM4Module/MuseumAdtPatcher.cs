@@ -136,8 +136,9 @@ namespace WoWRollback.PM4Module
 
         private static string NormalizePath(string path)
         {
-            var normalized = path.Replace('\\', '/');
-            return normalized.ToLowerInvariant();
+            // WoW expects UPPERCASE paths with backslashes
+            var normalized = path.Replace('/', '\\');
+            return normalized.ToUpperInvariant();
         }
     }
 }

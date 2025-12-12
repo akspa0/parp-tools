@@ -349,6 +349,31 @@ namespace WoWRollback.PM4Module
             }
             Console.WriteLine($"[INFO] Patched {patchedCount} Museum ADTs.");
 
+            // Stage 4b: Patch WDL-generated ADTs that have MODF data
+            // This creates pure WDL+MODF ADTs for testing (separate from Museum ADTs)
+            Console.WriteLine("\n[Stage 4b] Patching WDL-generated ADTs with MODF data...");
+
+            int wdlPatchedCount = 0;
+            foreach (var file in Directory.GetFiles(dirs.WdlPainted, "*.adt"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                var match = System.Text.RegularExpressions.Regex.Match(name, @"(\d+)_(\d+)$");
+                if (!match.Success) continue;
+
+                int tx = int.Parse(match.Groups[1].Value);
+                int ty = int.Parse(match.Groups[2].Value);
+
+                // Patch all WDL tiles that have MODF data (no skipping Museum tiles)
+                if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
+                {
+                    var outputPath = Path.Combine(dirs.WdlPainted, Path.GetFileName(file) + ".patched");
+                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries);
+                    File.Move(outputPath, file, true); // Replace original
+                    wdlPatchedCount++;
+                }
+            }
+            Console.WriteLine($"[INFO] Patched {wdlPatchedCount} WDL-generated ADTs with MODF data.");
+
 
             // Stage 5: Assembly & Noggit
             Console.WriteLine("\n[Stage 5] Assembling Project...");

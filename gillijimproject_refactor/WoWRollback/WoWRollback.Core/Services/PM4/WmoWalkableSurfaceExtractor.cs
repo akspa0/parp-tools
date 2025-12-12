@@ -89,7 +89,7 @@ public sealed class WmoWalkableSurfaceExtractor
             int groupCount = ParseMohdGroupCount(rootData);
             result.GroupCount = groupCount;
 
-            Console.WriteLine($"[INFO] WMO has {groupCount} groups");
+            // Verbose logging removed for performance
 
             // Load each group
             for (int i = 0; i < groupCount; i++)
@@ -120,7 +120,7 @@ public sealed class WmoWalkableSurfaceExtractor
                     result.WalkableVertices.Max(v => v.Z));
             }
 
-            Console.WriteLine($"[INFO] Extracted {result.WalkableTriangles.Count} walkable triangles from {result.AllTriangles.Count} total");
+            // Verbose logging removed for performance
         }
         catch (Exception ex)
         {
@@ -150,7 +150,7 @@ public sealed class WmoWalkableSurfaceExtractor
             int groupCount = ParseMohdGroupCount(rootData);
             result.GroupCount = groupCount;
 
-            Console.WriteLine($"[INFO] WMO has {groupCount} groups");
+            // Verbose logging removed for performance
 
             // Load each group file
             var basePath = Path.GetDirectoryName(wmoRootPath) ?? ".";
@@ -161,7 +161,7 @@ public sealed class WmoWalkableSurfaceExtractor
                 var groupPath = Path.Combine(basePath, $"{baseName}_{i:D3}.wmo");
                 if (!File.Exists(groupPath))
                 {
-                    Console.WriteLine($"[WARN] Group file not found: {groupPath}");
+                    // Skipping missing group file (normal for partial WMOs)
                     continue;
                 }
 
