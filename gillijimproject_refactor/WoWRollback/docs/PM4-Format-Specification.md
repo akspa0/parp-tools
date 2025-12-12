@@ -47,13 +47,12 @@ Transform: No change (standard coordinates)
 
 ### MSCN (Exterior Vertices)
 ```
-File: (X, Y, Z) → World: Apply 180° X-axis rotation + Y-negate
-Transform: 
-  correctedY = -vertex.Y
-  x = vertex.X
-  y = correctedY * cos(π) - vertex.Z * sin(π)  
-  z = correctedY * sin(π) + vertex.Z * cos(π)
+File: (Y, X, Z) → World: (X, Y, Z)
+Transform: new Vector3(vertex.Y, vertex.X, vertex.Z)
 ```
+> [!WARNING]
+> The 180° X rotation documented in Pm4CoordinateTransforms.cs is **WRONG**!
+> Visual verification proves MSCN uses same (Y,X,Z) ordering as MSVT.
 
 ### MPRL (Position References)
 ```

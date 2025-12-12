@@ -47,6 +47,9 @@ if (args.Length > 0)
 
         case "patch-pipeline":
             return RunPatchPipeline(args.Skip(1).ToArray());
+        
+        case "export-mscn":
+            return RunExportMscn(args.Skip(1).ToArray());
     }
 }
 
@@ -1410,4 +1413,168 @@ static int RunPatchPipeline(string[] args)
         Console.Error.WriteLine(ex.StackTrace);
         return 1;
     }
+}
+
+// export-mscn command - export MSCN data from PM4 files as OBJ for visualization
+static int RunExportMscn(string[] args)
+{
+    Console.WriteLine("=== MSCN Data Export (Phase 2 Investigation) ===\n");
+    
+    string? pm4Path = null;
+    string? outDir = null;
+    bool applyTransform = true;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Path = args[++i]; break;
+            case "--out": outDir = args[++i]; break;
+            case "--raw": applyTransform = false; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: export-mscn --pm4 <file|dir> --out <dir> [--raw]");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --pm4 <path>   Path to PM4 file or directory containing PM4 files");
+                Console.WriteLine("  --out <dir>    Output directory for OBJ files");
+                Console.WriteLine("  --raw          Export raw coordinates without transform (default: apply MSCN transform)");
+                Console.WriteLine();
+                Console.WriteLine("MSCN Transform: 180° X-axis rotation + Y-negate");
+                Console.WriteLine("  correctedY = -Y");
+                Console.WriteLine("  newY = correctedY * cos(π) - Z * sin(π)");
+                Console.WriteLine("  newZ = correctedY * sin(π) + Z * cos(π)");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Path))
+    {
+        Console.Error.WriteLine("Error: --pm4 is required. Use --help for usage.");
+        return 1;
+    }
+    
+    outDir ??= "mscn_export";
+    Directory.CreateDirectory(outDir);
+    
+    var pm4Files = new List<string>();
+    if (Directory.Exists(pm4Path))
+    {
+        pm4Files.AddRange(Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories));
+    }
+    else if (File.Exists(pm4Path))
+    {
+        pm4Files.Add(pm4Path);
+    }
+    else
+    {
+        Console.Error.WriteLine($"Error: PM4 path not found: {pm4Path}");
+        return 1;
+    }
+    
+    Console.WriteLine($"Found {pm4Files.Count} PM4 files");
+    Console.WriteLine($"Transform mode: {(applyTransform ? "MSCN transform (180° X rotation + Y-negate)" : "RAW coordinates")}\n");
+    
+    int totalMscnVerts = 0;
+    int filesWithMscn = 0;
+    
+    foreach (var file in pm4Files)
+    {
+        try
+        {
+            var pm4 = PM4File.FromFile(file);
+            var baseName = Path.GetFileNameWithoutExtension(file);
+            
+            if (pm4.ExteriorVertices.Count == 0)
+            {
+                Console.WriteLine($"[SKIP] {baseName}: No MSCN data");
+                continue;
+            }
+            
+            filesWithMscn++;
+            totalMscnVerts += pm4.ExteriorVertices.Count;
+            
+            // Export as OBJ point cloud
+            var objPath = Path.Combine(outDir, $"{baseName}_mscn.obj");
+            using var writer = new StreamWriter(objPath);
+            
+            writer.WriteLine($"# MSCN data from {baseName}");
+            writer.WriteLine($"# Vertices: {pm4.ExteriorVertices.Count}");
+            writer.WriteLine($"# Transform: {(applyTransform ? "MSCN (180° X rot + Y-negate)" : "RAW")}");
+            writer.WriteLine();
+            
+            foreach (var v in pm4.ExteriorVertices)
+            {
+                float x, y, z;
+                
+                if (applyTransform)
+                {
+                    // MSCN uses (Y,X,Z) file ordering + Y-axis mirror to match minimap
+                    // Visual proof: ships' masts point wrong way without Y negation
+                    x = v.Y;   // Y becomes X
+                    y = -v.X;  // X becomes -Y (negate to fix mirror)
+                    z = v.Z;   // Z unchanged
+                }
+                else
+                {
+                    x = v.X;
+                    y = v.Y;
+                    z = v.Z;
+                }
+                
+                writer.WriteLine($"v {x:F6} {y:F6} {z:F6}");
+            }
+            
+            Console.WriteLine($"[OK] {baseName}: {pm4.ExteriorVertices.Count} MSCN verts -> {objPath}");
+            
+            // Also export MSVT mesh for comparison if available
+            if (pm4.MeshVertices.Count > 0 && pm4.Surfaces.Count > 0)
+            {
+                var meshObjPath = Path.Combine(outDir, $"{baseName}_msvt.obj");
+                using var meshWriter = new StreamWriter(meshObjPath);
+                
+                meshWriter.WriteLine($"# MSVT mesh from {baseName}");
+                meshWriter.WriteLine($"# Vertices: {pm4.MeshVertices.Count}, Surfaces: {pm4.Surfaces.Count}");
+                meshWriter.WriteLine();
+                
+                // MSVT vertices need same Y-axis correction as MSCN for minimap alignment
+                // MSVT already swapped (Y,X,Z -> X,Y,Z) in PM4File.cs, now negate Y for mirror fix
+                foreach (var v in pm4.MeshVertices)
+                {
+                    meshWriter.WriteLine($"v {v.X:F6} {-v.Y:F6} {v.Z:F6}");
+                }
+                
+                // Triangulate surfaces using fan method
+                meshWriter.WriteLine();
+                foreach (var surf in pm4.Surfaces)
+                {
+                    if (surf.IndexCount < 3) continue;
+                    
+                    for (int i = 2; i < surf.IndexCount; i++)
+                    {
+                        uint i0 = pm4.MeshIndices[(int)surf.MsviFirstIndex];
+                        uint i1 = pm4.MeshIndices[(int)surf.MsviFirstIndex + i - 1];
+                        uint i2 = pm4.MeshIndices[(int)surf.MsviFirstIndex + i];
+                        
+                        // OBJ uses 1-indexed
+                        meshWriter.WriteLine($"f {i0+1} {i1+1} {i2+1}");
+                    }
+                }
+                
+                Console.WriteLine($"     + MSVT mesh: {pm4.MeshVertices.Count} verts, {pm4.Surfaces.Count} surfaces -> {meshObjPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] {Path.GetFileName(file)}: {ex.Message}");
+        }
+    }
+    
+    Console.WriteLine();
+    Console.WriteLine("=== Summary ===");
+    Console.WriteLine($"Files with MSCN: {filesWithMscn}/{pm4Files.Count}");
+    Console.WriteLine($"Total MSCN vertices: {totalMscnVerts}");
+    Console.WriteLine($"Output directory: {outDir}");
+    
+    return 0;
 }
