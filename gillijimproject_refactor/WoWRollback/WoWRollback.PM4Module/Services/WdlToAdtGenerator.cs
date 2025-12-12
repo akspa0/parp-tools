@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace WoWRollback.PM4Module;
+namespace WoWRollback.PM4Module.Services;
 
 /// <summary>
 /// Generates 3.3.5 (WotLK) ADT terrain files from WDL low-resolution height data.
@@ -16,7 +16,7 @@ public static class WdlToAdtGenerator
     private const float ChunkSize = TileSize / 16f;
 
     /// <summary>
-    /// Simple WDL tile data for testing.
+    /// Simple WDL tile data structure.
     /// </summary>
     public class WdlTileData
     {
@@ -113,23 +113,7 @@ public static class WdlToAdtGenerator
         }
 
         // Update MHDR offsets (relative to MHDR data start)
-        // Noggit adds 0x14 to these offsets to get absolute file position
-        // So offset = chunkPos - mhdrDataStart
         int mhdrDataStart = (int)mhdrPos + 8;
-        
-        // MHDR structure:
-        // 0x00: flags (0x01 = has MFBO)
-        // 0x04: ofsMcin
-        // 0x08: ofsMtex
-        // 0x0C: ofsMmdx
-        // 0x10: ofsMmid
-        // 0x14: ofsMwmo
-        // 0x18: ofsMwid
-        // 0x1C: ofsMddf
-        // 0x20: ofsModf
-        // 0x24: ofsMfbo
-        // 0x28: ofsMh2o
-        // 0x2C: ofsMtxf
         
         uint mhdrFlags = 0x01; // has MFBO
         BitConverter.GetBytes(mhdrFlags).CopyTo(result, mhdrDataStart + 0x00);
@@ -142,8 +126,6 @@ public static class WdlToAdtGenerator
         BitConverter.GetBytes((uint)(mddfPos - mhdrDataStart)).CopyTo(result, mhdrDataStart + 0x1C);
         BitConverter.GetBytes((uint)(modfPos - mhdrDataStart)).CopyTo(result, mhdrDataStart + 0x20);
         BitConverter.GetBytes((uint)(mfboPos - mhdrDataStart)).CopyTo(result, mhdrDataStart + 0x24);
-        // ofsMh2o = 0 (no water)
-        // ofsMtxf = 0 (no texture flags)
 
         return result;
     }
@@ -159,64 +141,35 @@ public static class WdlToAdtGenerator
         float[] heights = InterpolateChunkHeights(wdlTile, chunkX, chunkY);
         float baseZ = heights[0];
 
-        // MCNK header (128 bytes) - see MapChunkHeader in noggit
-        // 0x00: flags
+        // MCNK header (128 bytes)
         bw.Write(0x40u); // has_mccv flag
-        // 0x04: ix (chunk X)
         bw.Write((uint)chunkX);
-        // 0x08: iy (chunk Y)
         bw.Write((uint)chunkY);
-        // 0x0C: nLayers
-        bw.Write(0u);
-        // 0x10: nDoodadRefs
-        bw.Write(0u);
-        // 0x14: ofsHeight (placeholder)
-        bw.Write(0u);
-        // 0x18: ofsNormal (placeholder)
-        bw.Write(0u);
-        // 0x1C: ofsLayer (placeholder)
-        bw.Write(0u);
-        // 0x20: ofsRefs (placeholder)
-        bw.Write(0u);
-        // 0x24: ofsAlpha (placeholder)
-        bw.Write(0u);
-        // 0x28: sizeAlpha
-        bw.Write(0u);
-        // 0x2C: ofsShadow (placeholder)
-        bw.Write(0u);
-        // 0x30: sizeShadow
-        bw.Write(0u);
-        // 0x34: areaid
-        bw.Write(0u);
-        // 0x38: nMapObjRefs
-        bw.Write(0u);
-        // 0x3C: holes
-        bw.Write(0u);
-        // 0x40: doodadMapping[8] (16 bytes)
-        for (int i = 0; i < 8; i++) bw.Write((ushort)0);
-        // 0x50: doodadStencil[8] (8 bytes)
-        for (int i = 0; i < 8; i++) bw.Write((byte)0);
-        // 0x58: ofsSndEmitters (placeholder)
-        bw.Write(0u);
-        // 0x5C: nSndEmitters
-        bw.Write(0u);
-        // 0x60: ofsLiquid
-        bw.Write(0u);
-        // 0x64: sizeLiquid
-        bw.Write(0u);
-        // 0x68: zpos (actually X in WoW coords)
-        bw.Write(baseX);
-        // 0x6C: xpos (actually Z in WoW coords)
-        bw.Write(baseY);
-        // 0x70: ypos (height)
-        bw.Write(baseZ);
-        // 0x74: ofsMCCV (placeholder)
-        bw.Write(0u);
-        // 0x78: unused1
-        bw.Write(0u);
-        // 0x7C: unused2
-        bw.Write(0u);
-        // Total: 0x80 = 128 bytes
+        bw.Write(0u); // nLayers
+        bw.Write(0u); // nDoodadRefs
+        bw.Write(0u); // ofsHeight
+        bw.Write(0u); // ofsNormal
+        bw.Write(0u); // ofsLayer
+        bw.Write(0u); // ofsRefs
+        bw.Write(0u); // ofsAlpha
+        bw.Write(0u); // sizeAlpha
+        bw.Write(0u); // ofsShadow
+        bw.Write(0u); // sizeShadow
+        bw.Write(0u); // areaid
+        bw.Write(0u); // nMapObjRefs
+        bw.Write(0u); // holes
+        for (int i = 0; i < 8; i++) bw.Write((ushort)0); // doodadMapping
+        for (int i = 0; i < 8; i++) bw.Write((byte)0);   // doodadStencil
+        bw.Write(0u); // ofsSndEmitters
+        bw.Write(0u); // nSndEmitters
+        bw.Write(0u); // ofsLiquid
+        bw.Write(0u); // sizeLiquid
+        bw.Write(baseX); // zpos (WoW X)
+        bw.Write(baseY); // xpos (WoW Z)
+        bw.Write(baseZ); // ypos (WoW Y)
+        bw.Write(0u); // ofsMCCV
+        bw.Write(0u); // unused1
+        bw.Write(0u); // unused2
 
         // MCVT - height map
         uint mcvtOffset = (uint)ms.Position + 8;
@@ -225,7 +178,7 @@ public static class WdlToAdtGenerator
         for (int i = 0; i < 145; i++)
             bw.Write(heights[i] - baseZ);
 
-        // MCCV - vertex colors (from minimap or neutral gray)
+        // MCCV - vertex colors
         uint mccvOffset = (uint)ms.Position + 8;
         bw.Write(Encoding.ASCII.GetBytes("VCCM"));
         bw.Write(145 * 4);
@@ -274,7 +227,7 @@ public static class WdlToAdtGenerator
 
         var result = ms.ToArray();
 
-        // Update header offsets
+        // Update header offsets in MCNK
         BitConverter.GetBytes(mcvtOffset).CopyTo(result, 0x14);
         BitConverter.GetBytes(mcnrOffset).CopyTo(result, 0x18);
         BitConverter.GetBytes(mclyOffset).CopyTo(result, 0x1C);

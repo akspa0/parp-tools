@@ -80,7 +80,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from WMO data bytes (v17+ format).
     /// </summary>
-    public WmoWalkableData ExtractFromBytes(byte[] rootData, string wmoPath, Func<string, byte[]?>? groupLoader = null)
+    public static WmoWalkableData ExtractFromBytes(byte[] rootData, string wmoPath, Func<string, byte[]?>? groupLoader = null)
     {
         var result = new WmoWalkableData { WmoPath = wmoPath };
 
@@ -133,7 +133,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a WMO file (v17+ split format).
     /// </summary>
-    public WmoWalkableData ExtractFromWmoV17(string wmoRootPath)
+    public static WmoWalkableData ExtractFromWmoV17(string wmoRootPath)
     {
         var result = new WmoWalkableData { WmoPath = wmoRootPath };
 
@@ -195,7 +195,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a monolithic WMO v14 file.
     /// </summary>
-    public WmoWalkableData ExtractFromWmoV14(string wmoPath)
+    public static WmoWalkableData ExtractFromWmoV14(string wmoPath)
     {
         var result = new WmoWalkableData { WmoPath = wmoPath };
 
@@ -238,7 +238,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Parse MOHD chunk to get group count.
     /// </summary>
-    private int ParseMohdGroupCount(byte[] data)
+    private static int ParseMohdGroupCount(byte[] data)
     {
         // Scan for MOHD chunk
         for (int i = 0; i < data.Length - 8; i++)
@@ -268,7 +268,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a WMO group file.
     /// </summary>
-    private void ExtractGroupWalkableSurfaces(byte[] data, WmoWalkableData result, int groupIndex)
+    private static void ExtractGroupWalkableSurfaces(byte[] data, WmoWalkableData result, int groupIndex)
     {
         // Find MOVT (vertices), MOVI (indices), MOPY (material/flags per face)
         List<Vector3> vertices = new();
@@ -388,7 +388,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract from V14 monolithic WMO (all groups in MOMO container).
     /// </summary>
-    private void ExtractV14MonolithicWmo(byte[] data, WmoWalkableData result)
+    private static void ExtractV14MonolithicWmo(byte[] data, WmoWalkableData result)
     {
         // V14 has MOMO container with embedded groups
         // For now, do a simple scan for MOVT/MOVI/MOPY chunks
@@ -464,7 +464,7 @@ public sealed class WmoWalkableSurfaceExtractor
         }
     }
 
-    private string GetChunkId(byte[] data, int pos)
+    private static string GetChunkId(byte[] data, int pos)
     {
         if (pos + 4 > data.Length) return "";
         // Try forward
@@ -475,7 +475,7 @@ public sealed class WmoWalkableSurfaceExtractor
         return new string(new[] { c0, c1, c2, c3 });
     }
 
-    private List<Vector3> ParseMovt(byte[] data, int offset, int size)
+    private static List<Vector3> ParseMovt(byte[] data, int offset, int size)
     {
         var vertices = new List<Vector3>();
         int count = size / 12; // 3 floats per vertex
@@ -491,7 +491,7 @@ public sealed class WmoWalkableSurfaceExtractor
         return vertices;
     }
 
-    private List<ushort> ParseMovi(byte[] data, int offset, int size)
+    private static List<ushort> ParseMovi(byte[] data, int offset, int size)
     {
         var indices = new List<ushort>();
         int count = size / 2; // ushort per index
@@ -504,7 +504,7 @@ public sealed class WmoWalkableSurfaceExtractor
         return indices;
     }
 
-    private List<(ushort flags, ushort materialId)> ParseMopy(byte[] data, int offset, int size)
+    private static List<(ushort flags, ushort materialId)> ParseMopy(byte[] data, int offset, int size)
     {
         var faceInfo = new List<(ushort, ushort)>();
         // MOPY is 2 bytes per face: 1 byte flags (stored as ushort with high byte), 1 byte materialId
@@ -626,7 +626,11 @@ public sealed class WmoWalkableSurfaceExtractor
         Console.WriteLine($"[INFO] Exported walkable floors ({walkableFloors.Count} triangles) to {outputPath}");
     }
 
-    public void ExportPerFlagPerGroup(WmoWalkableData data, string outputDir)
+    /// <summary>
+    /// Export aggregated geometry for each flag type across ALL groups.
+    /// Creates files like: [WmoName]_flags_[FlagHex].obj
+    /// </summary>
+    public void ExportPerFlag(WmoWalkableData data, string outputDir)
     {
         Directory.CreateDirectory(outputDir);
 
@@ -637,43 +641,51 @@ public sealed class WmoWalkableSurfaceExtractor
 
         var wmoBaseName = Path.GetFileNameWithoutExtension(data.WmoPath);
 
-        foreach (var groupEntry in data.TrianglesByGroup.OrderBy(g => g.Key))
+        // Aggregate all triangles by flag
+        var trianglesByFlag = new Dictionary<ushort, List<WmoTriangle>>();
+
+        foreach (var groupEntry in data.TrianglesByGroup)
         {
-            int groupIndex = groupEntry.Key;
-            var triangles = groupEntry.Value;
-            if (triangles == null || triangles.Count == 0)
-                continue;
-
-            var byFlags = triangles.GroupBy(t => t.Flags);
-            foreach (var flagGroup in byFlags)
+            foreach (var tri in groupEntry.Value)
             {
-                var flagTriangles = flagGroup.ToList();
-                if (flagTriangles.Count == 0)
-                    continue;
-
-                ushort flags = flagGroup.Key;
-                var fileName = $"{wmoBaseName}_g{groupIndex:D3}_flags_{flags:X2}.obj";
-                var path = Path.Combine(outputDir, fileName);
-
-                using var sw = new StreamWriter(path);
-                sw.WriteLine("# WMO Collision/Walkable Subset");
-                sw.WriteLine("# Group " + groupIndex + ", Flags 0x" + flags.ToString("X2"));
-                sw.WriteLine("# Triangles: " + flagTriangles.Count);
-                sw.WriteLine();
-
-                foreach (var tri in flagTriangles)
+                if (!trianglesByFlag.TryGetValue(tri.Flags, out var list))
                 {
-                    sw.WriteLine($"v {tri.V0.X} {tri.V0.Y} {tri.V0.Z}");
-                    sw.WriteLine($"v {tri.V1.X} {tri.V1.Y} {tri.V1.Z}");
-                    sw.WriteLine($"v {tri.V2.X} {tri.V2.Y} {tri.V2.Z}");
+                    list = new List<WmoTriangle>();
+                    trianglesByFlag[tri.Flags] = list;
                 }
-
-                for (int i = 0; i < flagTriangles.Count; i++)
-                {
-                    int baseIdx = i * 3 + 1;
-                    sw.WriteLine($"f {baseIdx} {baseIdx + 1} {baseIdx + 2}");
-                }
+                list.Add(tri);
             }
         }
+
+        // Export one OBJ per flag
+        foreach (var entry in trianglesByFlag)
+        {
+            ushort flags = entry.Key;
+            var triangles = entry.Value;
+            
+            var fileName = $"{wmoBaseName}_flags_{flags:X2}.obj";
+            var path = Path.Combine(outputDir, fileName);
+
+            using var sw = new StreamWriter(path);
+            sw.WriteLine("# WMO Aggregated Geometry");
+            sw.WriteLine("# Source: " + wmoBaseName + ", Flags 0x" + flags.ToString("X2"));
+            sw.WriteLine("# Triangles: " + triangles.Count);
+            sw.WriteLine();
+
+            foreach (var tri in triangles)
+            {
+                sw.WriteLine($"v {tri.V0.X} {tri.V0.Y} {tri.V0.Z}");
+                sw.WriteLine($"v {tri.V1.X} {tri.V1.Y} {tri.V1.Z}");
+                sw.WriteLine($"v {tri.V2.X} {tri.V2.Y} {tri.V2.Z}");
+            }
+
+            for (int i = 0; i < triangles.Count; i++)
+            {
+                int baseIdx = i * 3 + 1;
+                sw.WriteLine($"f {baseIdx} {baseIdx + 1} {baseIdx + 2}");
+            }
+        }
+        
+        Console.WriteLine($"[INFO] Exported {trianglesByFlag.Count} aggregated flag types for {wmoBaseName}");
     }
 }

@@ -805,10 +805,6 @@ public sealed class AdtPatcher
         using var outMs = new MemoryStream();
         using var bw = new BinaryWriter(outMs);
 
-        // Read flags, keep them
-        uint flags = br.ReadUInt32();
-        bw.Write(flags);
-
         // Helper to find chunk offset relative to MHDR data
         uint GetRelativeOffset(string sig)
         {
@@ -816,6 +812,20 @@ public sealed class AdtPatcher
             if (idx < 0) return 0;
             return (uint)(chunkPositions[idx] - mhdrDataStart);
         }
+
+        // Read flags, then update them to reflect chunk presence
+        uint flags = br.ReadUInt32();
+        
+        if (GetRelativeOffset(SIG_MCIN) > 0) flags |= 0x1;
+        if (GetRelativeOffset(SIG_MTEX) > 0) flags |= 0x2;
+        if (GetRelativeOffset(SIG_MMDX) > 0) flags |= 0x4;
+        if (GetRelativeOffset(SIG_MMID) > 0) flags |= 0x8;
+        if (GetRelativeOffset(SIG_MWMO) > 0) flags |= 0x10;
+        if (GetRelativeOffset(SIG_MWID) > 0) flags |= 0x20;
+        if (GetRelativeOffset(SIG_MDDF) > 0) flags |= 0x40;
+        if (GetRelativeOffset(SIG_MODF) > 0) flags |= 0x80;
+
+        bw.Write(flags);
 
         bw.Write(GetRelativeOffset(SIG_MCIN));  // 0x04
         bw.Write(GetRelativeOffset(SIG_MTEX));  // 0x08

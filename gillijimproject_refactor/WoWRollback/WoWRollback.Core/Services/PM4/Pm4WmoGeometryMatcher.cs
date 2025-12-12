@@ -55,6 +55,35 @@ public sealed class Pm4WmoGeometryMatcher
     }
 
     /// <summary>
+    /// Load vertices from OBJ content string (in-memory).
+    /// </summary>
+    public List<Vector3> LoadObjVerticesFromText(string objContent)
+    {
+        var vertices = new List<Vector3>();
+        using var reader = new StringReader(objContent);
+        
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (line.StartsWith("v "))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 4)
+                {
+                    if (float.TryParse(parts[1], out float x) &&
+                        float.TryParse(parts[2], out float y) &&
+                        float.TryParse(parts[3], out float z))
+                    {
+                        vertices.Add(new Vector3(x, y, z));
+                    }
+                }
+            }
+        }
+        
+        return vertices;
+    }
+
+    /// <summary>
     /// Compute geometric statistics for a point cloud.
     /// </summary>
     public GeometryStats ComputeStats(List<Vector3> vertices)

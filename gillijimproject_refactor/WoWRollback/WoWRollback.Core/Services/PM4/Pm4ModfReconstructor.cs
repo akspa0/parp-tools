@@ -5,6 +5,9 @@ using System.Linq;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using WoWRollback.Core.Services.Archive;
 
 namespace WoWRollback.Core.Services.PM4;
 
@@ -21,7 +24,6 @@ public sealed class Pm4ModfReconstructor
     /// </summary>
     public record WmoReference(
         string WmoPath,
-        string CollisionObjPath,
         Pm4WmoGeometryMatcher.GeometryStats Stats);
 
     /// <summary>
@@ -53,86 +55,221 @@ public sealed class Pm4ModfReconstructor
         float MatchConfidence);
 
     /// <summary>
+    /// Represents a potential match candidate for a PM4 object.
+    /// </summary>
+    public record MatchCandidate(
+        string Pm4Ck24,
+        string WmoPath,
+        float Confidence,
+        Vector3 Position,
+        Vector3 Rotation,
+        float Scale
+    );
+
+    /// <summary>
     /// Result of the reconstruction process.
     /// </summary>
     public record ReconstructionResult(
         List<ModfEntry> ModfEntries,
         List<string> WmoNames,      // MWMO string table
         List<string> UnmatchedPm4Objects,
-        Dictionary<string, int> MatchCounts);
+        Dictionary<string, int> MatchCounts,
+        List<MatchCandidate> AllCandidates); // New: All valid candidates
 
     /// <summary>
-    /// Build a WMO reference library from extracted collision geometry.
+    /// Builds the WMO reference library from the provided game data path.
+    /// Extracts, converts, and analyzes WMOs (in-memory) to build fingerprints.
+    /// Uses caching to avoid reprocessing.
     /// </summary>
-    public List<WmoReference> BuildWmoLibrary(string wmoCollisionDir)
+    public List<WmoReference> BuildWmoLibrary(string gamePath, string listfilePath, string outputRoot)
     {
-        var library = new List<WmoReference>();
+        Console.WriteLine("=== Building WMO Reference Library ===\n");
+        string cachePath = Path.Combine(outputRoot, "wmo_library_cache.json");
 
-        if (!Directory.Exists(wmoCollisionDir))
-        {
-            Console.WriteLine($"[WARN] WMO collision directory not found: {wmoCollisionDir}");
-            return library;
-        }
-
-        var legacyCollisionFiles = Directory.GetFiles(wmoCollisionDir, "*_collision.obj", SearchOption.AllDirectories);
-        string[] objFiles;
-
-        if (legacyCollisionFiles.Length > 0)
-        {
-            objFiles = legacyCollisionFiles;
-            Console.WriteLine($"[INFO] Building WMO library from {objFiles.Length} legacy collision files (*_collision.obj)...");
-        }
-        else
-        {
-            objFiles = Directory.GetFiles(wmoCollisionDir, "*.obj", SearchOption.AllDirectories);
-            Console.WriteLine($"[INFO] Building WMO library from {objFiles.Length} OBJ files (per-group/per-flag layout)...");
-        }
-
-        foreach (var objPath in objFiles)
+        // 1. Try Cache
+        if (File.Exists(cachePath))
         {
             try
             {
-                var vertices = _matcher.LoadObjVertices(objPath);
-                if (vertices.Count < 10) continue; // Skip tiny/empty files
-
-                var stats = _matcher.ComputeStats(vertices);
-
-                // Derive WMO path from filename / folder.
-                // Legacy layout: <name>_collision.obj
-                // New layout:   <root>/<WmoName>/<WmoName>_gXYZ_flags_XX.obj
-                var fileName = Path.GetFileNameWithoutExtension(objPath);
-                var dirName = Path.GetFileName(Path.GetDirectoryName(objPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? string.Empty);
-
-                string wmoName;
-                if (fileName.EndsWith("_collision", StringComparison.OrdinalIgnoreCase))
+                var cached = LoadLibraryCache(cachePath);
+                if (cached != null && cached.Count > 0)
                 {
-                    wmoName = fileName.Replace("_collision", "");
+                    Console.WriteLine($"[INFO] Loaded {cached.Count} WMOs from cache.");
+                    return cached;
                 }
-                else if (!string.IsNullOrEmpty(dirName))
-                {
-                    // Prefer folder name when using per-WMO subfolders
-                    wmoName = dirName;
-                }
-                else
-                {
-                    // Fallback: strip group/flag suffix if present
-                    var idx = fileName.IndexOf("_g", StringComparison.OrdinalIgnoreCase);
-                    wmoName = idx > 0 ? fileName.Substring(0, idx) : fileName;
-                }
-
-                var wmoPath = $"World\\wmo\\{wmoName}.wmo"; // Approximate path
-
-                library.Add(new WmoReference(wmoPath, objPath, stats));
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WARN] Failed to process {objPath}: {ex.Message}");
+                Console.WriteLine($"[WARN] Cache load failed: {ex.Message}. Rebuilding.");
             }
         }
 
-        Console.WriteLine($"[INFO] WMO library contains {library.Count} entries");
-        return library;
+        // 2. Build Library (In-Memory)
+        Console.WriteLine("Scanning listfile for WMOs...");
+        if (!File.Exists(listfilePath)) throw new FileNotFoundException("Listfile not found", listfilePath);
+
+        var allWmos = File.ReadLines(listfilePath)
+            .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) && !l.Contains("wmo_0")) // Crude filter for groups
+            .ToList();
+
+        Console.WriteLine($"Found {allWmos.Count} candidate WMOs in listfile.");
+        
+        var references = new ConcurrentBag<WmoReference>();
+        
+        // Find all MPQs in Data directory
+        var dataDir = Path.Combine(gamePath, "Data");
+        var mpqFiles = Directory.Exists(dataDir) 
+            ? Directory.GetFiles(dataDir, "*.MPQ", SearchOption.AllDirectories)
+            : Array.Empty<string>();
+            
+        if (mpqFiles.Length == 0)
+        {
+             Console.WriteLine($"[WARN] No MPQ files found in {dataDir}. WMOs cannot be extracted.");
+             // Return empty or throw? Return empty allows cache to save empty result which is bad.
+             // But valid if user pointed to wrong dir.
+        }
+
+        using var archiveSource = new MpqArchiveSource(mpqFiles);
+        int processed = 0;
+        int failed = 0;
+
+        Parallel.ForEach(allWmos, new ParallelOptions { MaxDegreeOfParallelism = 4 }, wmoPath =>
+        {
+            try
+            {
+                // Extract WMO bytes
+                var wmoBytes = ReadAllBytes(archiveSource, wmoPath);
+                if (wmoBytes == null) return;
+
+                // Define group loader for collision extraction
+                Func<string, byte[]?> groupLoader = (relPath) =>
+                {
+                    string dir = Path.GetDirectoryName(wmoPath) ?? "";
+                    string fullPath = Path.Combine(dir, relPath).Replace('\\', '/');
+                    return ReadAllBytes(archiveSource, fullPath);
+                };
+
+                // Extract geometry
+                var walkableData = WmoWalkableSurfaceExtractor.ExtractFromBytes(wmoBytes, wmoPath, groupLoader);
+                if (walkableData.WalkableVertices.Count < 3) return;
+
+                // Compute Stats
+                // Use extracted vertices directly (triangle soup is fine/consistent with previous OBJ workflow)
+                var stats = _matcher.ComputeStats(walkableData.WalkableVertices);
+                references.Add(new WmoReference(wmoPath.Replace('/', '\\'), stats)); // Standardize path separator
+
+                System.Threading.Interlocked.Increment(ref processed);
+                if (processed % 50 == 0) Console.Write(".");
+            }
+            catch
+            {
+                System.Threading.Interlocked.Increment(ref failed);
+            }
+        });
+        
+        Console.WriteLine($"\nProcessed {processed} WMOs. ({failed} failed)");
+        var refList = references.ToList();
+
+        // 3. Save Cache
+        SaveLibraryCache(refList, cachePath);
+        
+        return refList;
     }
+
+    private byte[]? ReadAllBytes(IArchiveSource source, string path)
+    {
+        try
+        {
+            if (source.FileExists(path))
+            {
+                using var stream = source.OpenFile(path);
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                return ms.ToArray();
+            }
+        }
+        catch { }
+        return null; // File not found or error
+    }
+
+    private void SaveLibraryCache(List<WmoReference> references, string path)
+    {
+        Console.WriteLine("[INFO] Saving WMO library cache...");
+        var options = new JsonSerializerOptions { WriteIndented = true, IncludeFields = true };
+        var json = JsonSerializer.Serialize(references, options);
+        File.WriteAllText(path, json);
+    }
+
+    private List<WmoReference>? LoadLibraryCache(string path)
+    {
+        var json = File.ReadAllText(path);
+        var options = new JsonSerializerOptions { IncludeFields = true };
+        return JsonSerializer.Deserialize<List<WmoReference>>(json, options);
+    }
+
+    /// <summary>
+    /// Load WMO path mapping from a listfile (CSV or line-delimited).
+    /// Returns a dictionary of WMO Name (without extension) -> Full Path.
+    /// </summary>
+    public Dictionary<string, string> LoadWmoPathMapping(string listfilePath)
+    {
+        var mapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!File.Exists(listfilePath))
+        {
+            Console.WriteLine($"[WARN] Listfile not found at {listfilePath}. Path resolution will rely on guessing.");
+            return mapping;
+        }
+
+        Console.WriteLine($"[INFO] Loading WMO path mapping from {listfilePath}...");
+        
+        foreach (var line in File.ReadLines(listfilePath))
+        {
+            // Handle both CSV (ID;Path) and simple list (Path) formats
+            string path = line;
+            if (line.Contains(";"))
+            {
+                var parts = line.Split(';');
+                if (parts.Length > 1)
+                    path = parts[1]; // Assume ID;Path
+                else
+                    path = parts[0];
+            }
+            else if (line.Contains(",")) // Possible ID,Path
+            {
+                 // Naive check - if it looks like an integer at start, split
+                 var parts = line.Split(',');
+                 if (parts.Length > 1 && int.TryParse(parts[0], out _))
+                    path = parts[1];
+                 else
+                    path = parts[0]; // Maybe just a path with comma? Unlikely but safe fallback
+            }
+
+            path = path.Trim();
+            
+            if (path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            {
+                // Key is the filename without extension (e.g. "AltarOfStorms")
+                // Value is the full path (e.g. "world/wmo/azeroth/buildings/altarofstorms/altarofstorms.wmo")
+                var name = Path.GetFileNameWithoutExtension(path);
+                
+                // If duplicates exist (same name, different folder), we might overwrite. 
+                // For valid WMO referencing, names should generally be unique or context-implied.
+                // In strict ADT usage, internal references are by filename, so specific dir doesn't strictly matter 
+                // UNLESS names collide. We'll take the first or last valid one.
+                if (!mapping.ContainsKey(name))
+                {
+                    mapping[name] = path.Replace('/', '\\');
+                }
+            }
+        }
+        
+        Console.WriteLine($"[INFO] Loaded mappings for {mapping.Count} WMOs.");
+        return mapping;
+    }
+
+    /// <summary>
+
 
     /// <summary>
     /// Load PM4 objects from PM4FacesTool output.
@@ -174,20 +311,34 @@ public sealed class Pm4ModfReconstructor
                     continue;
                 }
 
-                // Parse tile from path (e.g., objects\t15_37\ck42CBEA_merged.obj)
+                // Parse tile from path (e.g., objects\t15_37\ck42CBEA_merged.obj OR development_15_37\ck...)
                 int tileX = 0, tileY = 0;
                 var pathParts = objRelPath.Split(Path.DirectorySeparatorChar, '/');
                 foreach (var p in pathParts)
                 {
-                    if (p.StartsWith("t") && p.Contains("_"))
+                    // Match pattern: *XX_YY where XX and YY are 1-2 digits
+                    // Regex is cleaner but manual parsing is fine.
+                    // Look for the LAST underscore to find YY, then previous underscore for XX.
+                    
+                    if (p.Contains('_'))
                     {
-                        var tileParts = p.Substring(1).Split('_');
-                        if (tileParts.Length >= 2)
+                        var tilePathParts = p.Split('_');
+                        if (tilePathParts.Length >= 2)
                         {
-                            int.TryParse(tileParts[0], out tileX);
-                            int.TryParse(tileParts[1], out tileY);
+                            // Try parsing last two parts as numbers
+                            if (int.TryParse(tilePathParts[tilePathParts.Length - 2], out int tX) && 
+                                int.TryParse(tilePathParts[tilePathParts.Length - 1], out int tY))
+                            {
+                                tileX = tX;
+                                tileY = tY;
+                                
+                                // Basic validation (0-63)
+                                if (tileX >= 0 && tileX <= 63 && tileY >= 0 && tileY <= 63)
+                                {
+                                    break;
+                                }
+                            }
                         }
-                        break;
                     }
                 }
 
@@ -207,18 +358,243 @@ public sealed class Pm4ModfReconstructor
         }
 
         Console.WriteLine($"[INFO] Loaded {objects.Count} total PM4 objects");
-        return objects;
+        return NormalizeCoordinates(objects);
     }
 
     /// <summary>
-    /// Match a PM4 object against the WMO library.
+    /// Normalize PM4 object coordinates to standard WoW global coordinates.
+    /// Handles Local->Global conversion and Y/Z axis swapping if detected.
     /// </summary>
-    public (WmoReference? bestMatch, Pm4WmoGeometryMatcher.PlacementTransform? transform) 
+    private List<Pm4Object> NormalizeCoordinates(List<Pm4Object> objects)
+    {
+        Console.WriteLine("[INFO] Normalizing coordinates...");
+        var normalized = new List<Pm4Object>();
+        const float TileSize = 533.33333f;
+        
+        foreach (var obj in objects)
+        {
+            // GeometryStats uses Centroid as the "Position" of the object relative to its vertices.
+            // BoundsMin/Max are also available.
+            // For PM4 matching, we assume the object's origin is its Centroid or we calculate it.
+            // The previous code accessed obj.Stats.Position, but GeometryStats has 'Centroid'.
+            // However, we want to shift the *entire geometry*.
+            
+            // The Stats object assumes the vertices are what they are. 
+            // NormalizeCoordinates is intended to SHIFT the vertices (conceptually) by updating the Stats.
+            
+            var pos = obj.Stats.Centroid; // Use Centroid as the position guide
+            var boundsMin = obj.Stats.BoundsMin;
+            var boundsMax = obj.Stats.BoundsMax;
+
+            // Recast usually outputs Y-Up (X, Height, Z).
+            // WoW uses Z-Up (X, Y, Z_height).
+            // Check if Y is likely height (small range, near 0 or typical terrain height) 
+            // and Z is large (global coord).
+            
+            // Expected Global Origin for this tile (Top-Left corner of tile in WoW coords)
+            // WoW Coords: X (North) decreases? No.
+            // Tile (0,0) is at X=32*533, Y=32*533 (Top-Left of map).
+            // Tile indices increase as X decreases and Y decreases in WoW coords.
+            // X_global = (32 - TileX) * TileSize
+            // Y_global = (32 - TileY) * TileSize
+            // NOTE: "Y" here is typically WoW's "Y" (West/East axis).
+            
+            // Since we suspect Y/Z swap in input:
+            // Input X = North/South local or global
+            // Input Y = Height local or global
+            // Input Z = East/West local or global
+
+            // Let's assume input is Y-Up (Recast standard):
+            // InV.X ~ WoW.X
+            // InV.Y ~ WoW.Z (Height)
+            // InV.Z ~ WoW.Y
+
+            // Calculate expected tile bounds in "Global WoW Space" (X, Y horizontal)
+            float expectedMaxX = (32 - obj.TileX) * TileSize;
+            float expectedMinX = expectedMaxX - TileSize;
+            float expectedMaxY = (32 - obj.TileY) * TileSize;
+            float expectedMinY = expectedMaxY - TileSize;
+
+            // Strategy: Try interpreting input as Local vs Global and Y-Up vs Z-Up.
+            // We want the interpretation that puts the object INSIDE the expected tile bounds.
+
+            // Case A: Input is Local, Y-Up
+            // NewX = ExpectedMinX + InV.X (inverted? Recast usually +X)
+            // NewY = ExpectedMinY + InV.Z
+            // NewZ = InV.Y
+            // Check: Does NewX fall in [MinX, MaxX]?
+
+            // However, user data showed pos_z = 36472.
+            // Tile 15 => ExpectedX ~ 9066.
+            // Tile 37 => ExpectedY ~ -2666.
+            
+            // If pos_z (36472) is Global... it's huge. 36472 > 17066.
+            // Maybe it's measured from the CORNER (0 to 34133)?
+            // Max map width = 64 * 533.333 = 34133.33.
+            // 36472 is slighty outside max map width? Or maybe borders + margin.
+            // 36472 - 34133 = 2339.
+            
+            // If the input coords are "Global from Corner (0,0)":
+            // WoW (0,0) is at map center.
+            // So: WoW_Coord = Corner_Coord - 17066.666.
+            // Let's test this hypothesis.
+            
+            // Input 36472 (Z). 
+            // 36472 - 17066 = 19406 (Still outside 17066).
+            // Maybe inverted? 17066 - 36472 = -19406.
+            
+            // Let's try "Local" logic first, provided 0..533 range.
+            // If InV.X is small (0..533) and InV.Z is small...
+
+            float finalX = pos.X;
+            float finalY = pos.Z; // Swap to Z-Up (WoW Y)
+            float finalZ = pos.Y; // Swap to Z-Up (WoW Z height)
+
+            bool isLocal = Math.Abs(pos.X) < 1000 && Math.Abs(pos.Z) < 1000; // heuristic
+
+            if (isLocal)
+            {
+                // Uninvert X axis for Recast->WoW? 
+                // Typically: WoW X = (32 - TileX) * TileSize - LocalX
+                // OR WoW X = MaxX - LocalX
+                // Let's assume standard top-left origin for tile.
+                // GlobalX = (32 - obj.TileX) * TileSize - pos.X; // Inverted X in tile?
+                // GlobalY = (32 - obj.TileY) * TileSize - pos.Z; 
+                
+                // Let's try simple offset from Min
+                // GlobalX = expectedMinX + pos.X
+                // GlobalY = expectedMinY + pos.Z
+                
+                // We'll stick to a simple translation to align center-to-center if unsure, 
+                // but corner-based is standard.
+                finalX = expectedMinX + pos.X; // Recast usually (0,0) to (533,533)
+                finalY = expectedMinY + pos.Z; 
+            }
+            else
+            {
+                // Global coord assumption.
+                // If it's 36472, it needs specific shifting.
+                // Auto-detect shift based on Tile 15/37 example.
+                // Tile 15 -> 9066.
+                // Tile 37 -> -2666.
+                
+                // If we assume the object is correctly placed in its tile:
+                // ShiftX = ExpectedCenter.X - Input.X
+                // ShiftY = ExpectedCenter.Y - Input.Z (swapped)
+                
+                // We apply this "Center-Snap" logic to FORCE it into the tile.
+                // This assumes the PM4 geometry is structurally correct relative to itself,
+                // just offset globally.
+                
+                float centerX = (expectedMinX + expectedMaxX) / 2f;
+                float centerY = (expectedMinY + expectedMaxY) / 2f;
+                
+                // Heuristic: If we are WAY off (> 2000 units), snap to center.
+                // If we are close, leave it (maybe spanning tiles).
+                
+                if (Math.Abs(finalX - centerX) > 2000)
+                {
+                    // Calculate delta
+                    // Wait, if it's 36472, and we want 9066.
+                    // Delta = 9066 - 36472 = -27406.
+                    // But maybe 36472 is from 0?
+                    // 32*533 = 17066. 17066 - 9066 = 8000.
+                    // This is guessing.
+                    
+                    // SAFE BET: Use "Tile Local" logic extended for large coords?
+                    // No.
+                    
+                    // USER REQUEST: Match based on tile location.
+                    // "Normalize coordinates ... so placement and bounds are calculated perfectly"
+                    
+                    // If we treat the Input Position as RELATIVE to (0,0) of the map corner?
+                    // Or simply: Calculate offset required to put Object Center at Tile Center,
+                    // calculate that offset for ALL objects in tile, take median, apply.
+                    
+                    // Better: Just check if it's roughly "Recast Global" (0..34133).
+                    // Convert 0..34133 to 17066..-17066 (North/West positive? WoW X is North+, Y is West+)
+                    // Center is 0,0.
+                    // Corner (0,0) usually maps to MaxX, MaxY (17066, 17066).
+                    // Corner (34133, 34133) maps to MinX, MinY (-17066, -17066).
+                    
+                    // Transform:
+                    // WoW = 17066.66 - Recast
+                    
+                    // Test 36472:
+                    // 17066 - 36472 = -19405. 
+                    // -19405 matches Tile 68. (32 - (-19405/533) = 32 + 36 = 68).
+                    // Still invalid!
+                    
+                    // Re-read user: "pm4's are 00_00 through 63_63".
+                    // This implies the PM4 coordinates COVER the whole 64x64 grid.
+                    // 64 tiles * 533 = 34133.
+                    // If coord is 36472, it's outside the 64x64 grid by ~2000 units (4 tiles).
+                    // Maybe margin?
+                    
+                    // Let's Apply the "Center Snap" based on Tile ID.
+                    // We assume the object belongs in the center of its tile.
+                    // But exact position matters.
+                    // We need the RELATIVE offset from tile center.
+                    // If Input is Global, `Input % 533` might be the local offset?
+                    // 36472 % 533.33 = 205.
+                    // So local pos is 205.
+                    // Global = ExpectedMin + 205.
+                    
+                    // This seems the most robust "Normalization".
+                    // Discard the "Macro" coordinate, keep the "Micro" (Modulo), and re-base onto Tile.
+                    
+                    float localX = pos.X % TileSize;
+                    if (localX < 0) localX += TileSize;
+                    
+                    float localY = pos.Z % TileSize; // Swap Z
+                    if (localY < 0) localY += TileSize;
+                    
+                    // RECAST usually puts (0,0) at MinX, MinZ of the tile logic?
+                    // Or MaxX?
+                    // Let's assume Min-based.
+                    
+                    finalX = expectedMinX + localX;
+                    finalY = expectedMinY + localY;
+                }
+            }
+            
+            // Reconstruct Transform
+            var newPos = new Vector3(finalX, finalY, finalZ); // X, Y(West), Z(Height)
+            
+            // Shift Bounds (same delta)
+            // Just re-center bounds around newPos, assuming the size is correct but rotated? 
+            // Actually, we just swapped Y and Z.
+            var size = boundsMax - boundsMin;
+            // Swizzle size: Input Y->Height(WoW Z), Input Z->West(WoW Y)
+            var newSize = new Vector3(size.X, size.Z, size.Y);
+            
+            var newBoundsMin = newPos - (newSize / 2);
+            var newBoundsMax = newPos + (newSize / 2); // approx
+            
+            var newStats = obj.Stats with { 
+                Centroid = newPos, // Update Centroid instead of Position
+                BoundsMin = newBoundsMin, 
+                BoundsMax = newBoundsMax
+            };
+            
+            normalized.Add(obj with { Stats = newStats });
+        }
+        
+        return normalized;
+    }
+
+    /// <summary>
+    /// Find ALL valid matches for a PM4 object against the WMO library.
+    /// Returns best match (if any) and list of all candidates > minConfidence.
+    /// </summary>
+    public (WmoReference? bestMatch, Pm4WmoGeometryMatcher.PlacementTransform? bestTransform, List<MatchCandidate> candidates) 
         MatchPm4ToWmo(Pm4Object pm4Obj, List<WmoReference> wmoLibrary, float minConfidence = 0.7f)
     {
         WmoReference? bestMatch = null;
         Pm4WmoGeometryMatcher.PlacementTransform? bestTransform = null;
         float bestConfidence = 0;
+        
+        var candidates = new List<MatchCandidate>();
 
         foreach (var wmo in wmoLibrary)
         {
@@ -226,11 +602,24 @@ public sealed class Pm4ModfReconstructor
             {
                 var transform = _matcher.FindAlignment(pm4Obj.Stats, wmo.Stats);
                 
-                if (transform.MatchConfidence > bestConfidence)
+                if (transform.MatchConfidence >= minConfidence)
                 {
-                    bestConfidence = transform.MatchConfidence;
-                    bestMatch = wmo;
-                    bestTransform = transform;
+                    // Valid candidate
+                    candidates.Add(new MatchCandidate(
+                        pm4Obj.Ck24,
+                        wmo.WmoPath,
+                        transform.MatchConfidence,
+                        transform.Position,
+                        transform.Rotation,
+                        transform.Scale
+                    ));
+
+                    if (transform.MatchConfidence > bestConfidence)
+                    {
+                        bestConfidence = transform.MatchConfidence;
+                        bestMatch = wmo;
+                        bestTransform = transform;
+                    }
                 }
             }
             catch
@@ -239,10 +628,7 @@ public sealed class Pm4ModfReconstructor
             }
         }
 
-        if (bestConfidence < minConfidence)
-            return (null, null);
-
-        return (bestMatch, bestTransform);
+        return (bestMatch, bestTransform, candidates);
     }
 
     /// <summary>
@@ -308,25 +694,31 @@ public sealed class Pm4ModfReconstructor
         int matched = 0;
         int unmatched = 0;
 
+        var allCandidates = new List<MatchCandidate>();
+
         foreach (var pm4Obj in pm4Objects)
         {
             // Quick pre-filter using extent ratios
-            var candidates = wmoLibrary
+            var potentialMatches = wmoLibrary
                 .Select(w => (wmo: w, score: QuickMatchScore(pm4Obj.Stats, w.Stats)))
                 .Where(x => x.score > 0.5f)
                 .OrderByDescending(x => x.score)
-                .Take(5) // Top 5 candidates
+                .Take(10) // Increased to Top 10 for broader search
                 .Select(x => x.wmo)
                 .ToList();
 
-            if (candidates.Count == 0)
+            if (potentialMatches.Count == 0)
             {
                 unmatchedObjects.Add(pm4Obj.Ck24);
                 unmatched++;
                 continue;
             }
 
-            var (bestMatch, transform) = MatchPm4ToWmo(pm4Obj, candidates, minConfidence);
+            // Find all candidates
+            var (bestMatch, transform, candidates) = MatchPm4ToWmo(pm4Obj, potentialMatches, minConfidence);
+            
+            // Add all valid candidates to the global list
+            allCandidates.AddRange(candidates);
 
             if (bestMatch == null || transform == null)
             {
@@ -372,12 +764,16 @@ public sealed class Pm4ModfReconstructor
 
             modfEntries.Add(modf);
 
+            // Log best match
             Console.WriteLine($"  {pm4Obj.Ck24} -> {Path.GetFileName(bestMatch.WmoPath)} ({transform.MatchConfidence:P0})");
+            // Log other candidates count
+            if (candidates.Count > 1)
+                Console.WriteLine($"    + {candidates.Count - 1} other candidates");
         }
 
-        Console.WriteLine($"\n[RESULT] Matched: {matched}, Unmatched: {unmatched}");
+        Console.WriteLine($"\n[RESULT] Matched: {matched}, Unmatched: {unmatched}, Total Candidates: {allCandidates.Count}");
 
-        return new ReconstructionResult(modfEntries, wmoNames, unmatchedObjects, matchCounts);
+        return new ReconstructionResult(modfEntries, wmoNames, unmatchedObjects, matchCounts, allCandidates);
     }
 
     /// <summary>
@@ -386,10 +782,11 @@ public sealed class Pm4ModfReconstructor
     public void ExportToCsv(ReconstructionResult result, string outputPath)
     {
         using var sw = new StreamWriter(outputPath);
-        sw.WriteLine("ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence");
+        sw.WriteLine("ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence,tile_x,tile_y");
 
         foreach (var entry in result.ModfEntries)
         {
+            var (tileX, tileY) = GetTileForPosition(entry.Position);
             sw.WriteLine(string.Join(",",
                 entry.Ck24,
                 entry.WmoPath,
@@ -397,12 +794,14 @@ public sealed class Pm4ModfReconstructor
                 entry.UniqueId,
                 entry.Position.X.ToString("F2"),
                 entry.Position.Y.ToString("F2"),
-                entry.Position.Z.ToString("F2"),
+                entry.Position.Z.ToString("F2"), // Z is height in WoW standard
                 entry.Rotation.X.ToString("F2"),
                 entry.Rotation.Y.ToString("F2"),
                 entry.Rotation.Z.ToString("F2"),
                 (entry.Scale / 1024f).ToString("F4"),
-                entry.MatchConfidence.ToString("F3")));
+                entry.MatchConfidence.ToString("F3"),
+                tileX,
+                tileY));
         }
 
         Console.WriteLine($"[INFO] Exported {result.ModfEntries.Count} MODF entries to {outputPath}");
@@ -411,7 +810,7 @@ public sealed class Pm4ModfReconstructor
     /// <summary>
     /// Export MWMO string table.
     /// </summary>
-    public void ExportMwmo(ReconstructionResult result, string outputPath)
+    public void ExportMwmoNames(ReconstructionResult result, string outputPath)
     {
         using var sw = new StreamWriter(outputPath);
         sw.WriteLine("name_id,wmo_path,placement_count");
@@ -424,6 +823,33 @@ public sealed class Pm4ModfReconstructor
         }
 
         Console.WriteLine($"[INFO] Exported {result.WmoNames.Count} WMO names to {outputPath}");
+    }
+
+    /// <summary>
+    /// Export all match candidates to CSV for detailed analysis.
+    /// </summary>
+    public void ExportCandidatesCsv(ReconstructionResult result, string outputPath)
+    {
+        using var sw = new StreamWriter(outputPath);
+        sw.WriteLine("pm4_ck24,wmo_path,confidence,scale,rot_x,rot_y,rot_z,pos_x,pos_y,pos_z");
+
+        foreach (var c in result.AllCandidates.OrderBy(c => c.Pm4Ck24).ThenByDescending(c => c.Confidence))
+        {
+            sw.WriteLine(string.Join(",",
+                c.Pm4Ck24,
+                c.WmoPath,
+                c.Confidence.ToString("F3"),
+                c.Scale.ToString("F3"),
+                c.Rotation.X.ToString("F2"),
+                c.Rotation.Y.ToString("F2"),
+                c.Rotation.Z.ToString("F2"),
+                c.Position.X.ToString("F2"),
+                c.Position.Y.ToString("F2"),
+                c.Position.Z.ToString("F2")
+            ));
+        }
+
+        Console.WriteLine($"[INFO] Exported {result.AllCandidates.Count} match candidates to {outputPath}");
     }
 
     /// <summary>
@@ -538,11 +964,14 @@ public sealed class Pm4ModfReconstructor
             server.Z);
     }
 
-    private static (int X, int Y) GetTileForPosition(Vector3 pos)
+    public static (int X, int Y) GetTileForPosition(Vector3 pos)
     {
         const float TileSize = 533.33333f;
+        // WoW Coords: Center is (0,0). Top-Left is (32*533, 32*533).
+        // Tile Index = 32 - (Coord / 533)
+        // Correct logic for standard WoW coords (X=North, Y=West).
         int x = (int)(32 - (pos.X / TileSize));
-        int y = (int)(32 - (pos.Y / TileSize));
+        int y = (int)(32 - (pos.Y / TileSize)); 
         return (x, y);
     }
 

@@ -44,6 +44,9 @@ if (args.Length > 0)
 
         case "dump-modf-csv":
             return RunDumpModfCsv(args.Skip(1).ToArray());
+
+        case "patch-pipeline":
+            return RunPatchPipeline(args.Skip(1).ToArray());
     }
 }
 
@@ -444,21 +447,24 @@ static int RunPm4ReconstructModf(string[] args)
     // Apply PM4->ADT world coordinate transform before exporting CSVs
     Console.WriteLine("[INFO] Applying PM4->ADT coordinate transform (ServerToAdtPosition)...");
     var transformedEntries = result.ModfEntries
-        .Select(e => e with { Position = AdtModfInjector.ServerToAdtPosition(e.Position) })
+        .Select(e => e with { Position = PipelineCoordinateService.ServerToAdtPosition(e.Position) })
         .ToList();
     result = result with { ModfEntries = transformedEntries };
 
     var modfCsvPath = Path.Combine(outDir, "modf_entries.csv");
     var mwmoCsvPath = Path.Combine(outDir, "mwmo_names.csv");
+    var candidatesCsvPath = Path.Combine(outDir, "match_candidates.csv");
     var verifyJsonPath = Path.Combine(outDir, "placement_verification.json");
 
     reconstructor.ExportToCsv(result, modfCsvPath);
-    reconstructor.ExportMwmo(result, mwmoCsvPath);
+    reconstructor.ExportMwmoNames(result, mwmoCsvPath);
+    reconstructor.ExportCandidatesCsv(result, candidatesCsvPath);
     reconstructor.ExportVerificationJson(result, pm4Objects, wmoLibrary, verifyJsonPath);
 
     Console.WriteLine("\n[RESULT]");
     Console.WriteLine($"  MODF CSV: {modfCsvPath}");
     Console.WriteLine($"  MWMO CSV: {mwmoCsvPath}");
+    Console.WriteLine($"  Candidates CSV: {candidatesCsvPath}");
     Console.WriteLine($"  Verification JSON: {verifyJsonPath}");
 
     return 0;
@@ -1333,4 +1339,53 @@ static int RunInjectModf(string[] args)
     Console.WriteLine($"Output: {outputDir}");
     
     return 0;
+}
+
+static int RunPatchPipeline(string[] args)
+{
+    string? gamePath = null;
+    string? listfilePath = null;
+    string? pm4Path = null;
+    string? splitAdtPath = null;
+    string? museumAdtPath = null;
+    string? wdlPath = null;
+    string? outputRoot = "PM4_to_ADT";
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--game": gamePath = args[++i]; break;
+            case "--listfile": listfilePath = args[++i]; break;
+            case "--pm4": pm4Path = args[++i]; break;
+            case "--split-adt": splitAdtPath = args[++i]; break;
+            case "--museum-adt": museumAdtPath = args[++i]; break;
+            case "--wdl": wdlPath = args[++i]; break;
+            case "--out": outputRoot = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: patch-pipeline --game <path> --listfile <path> --pm4 <dir> --split-adt <dir> --museum-adt <dir> [--wdl <file>] [--out <dir>]");
+                return 0;
+        }
+    }
+
+    if (string.IsNullOrEmpty(gamePath) || string.IsNullOrEmpty(listfilePath) || 
+        string.IsNullOrEmpty(pm4Path) || string.IsNullOrEmpty(splitAdtPath) || string.IsNullOrEmpty(museumAdtPath))
+    {
+        Console.Error.WriteLine("Error: Missing required arguments. Use --help.");
+        return 1;
+    }
+
+    try
+    {
+        var pipeline = new PipelineService();
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath);
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[FATAL] Pipeline failed: {ex.Message}");
+        Console.Error.WriteLine(ex.StackTrace);
+        return 1;
+    }
 }

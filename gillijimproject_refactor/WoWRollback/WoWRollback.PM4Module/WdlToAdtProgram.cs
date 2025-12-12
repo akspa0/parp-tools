@@ -3,6 +3,8 @@
 
 namespace WoWRollback.PM4Module;
 
+using WoWRollback.PM4Module.Services;
+
 public static class WdlToAdtProgram
 {
     public static int Run(string[] args)
