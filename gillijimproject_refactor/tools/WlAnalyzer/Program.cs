@@ -3,7 +3,7 @@
 
 using System.Numerics;
 
-var testDataRoot = @"I:\parp-tools\pm4next-branch\parp-tools\gillijimproject_refactor\test_data\2.0.0.5666\World\Maps";
+var testDataRoot = @"..\..\test_data\development\World\Maps\development";
 
 Console.WriteLine("=== WL* Liquid Conversion Test ===\n");
 

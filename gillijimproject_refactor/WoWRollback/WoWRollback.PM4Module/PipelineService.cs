@@ -75,6 +75,7 @@ namespace WoWRollback.PM4Module
                 Console.WriteLine($"[INFO] Found {wmoEntries.Count} Root WMOs to process.");
                 
                 int processed = 0;
+                int skipped = 0;
                 
                 // Group loader lambda for In-Memory reading
                 // variable capture of archiveSource is safe here as it's disposed after loop
@@ -97,6 +98,17 @@ namespace WoWRollback.PM4Module
                     {
                         if (!archiveSource.FileExists(wmoPath)) continue;
 
+                        // Check if OBJ output already exists - skip if so
+                        var wmoFileName = Path.GetFileName(wmoPath);
+                        var relativeDir = Path.GetDirectoryName(wmoPath);
+                        var objOutputDir = Path.Combine(dirs.WmoLib, relativeDir ?? "", wmoFileName);
+                        
+                        if (Directory.Exists(objOutputDir) && Directory.GetFiles(objOutputDir, "*.obj").Length > 0)
+                        {
+                            skipped++;
+                            continue; // Already extracted, skip
+                        }
+
                         byte[]? rootData = null;
                         using (var s = archiveSource.OpenFile(wmoPath))
                         {
@@ -108,15 +120,10 @@ namespace WoWRollback.PM4Module
                         
                         if (data.GroupCount > 0)
                         {
-                            var wmoFileName = Path.GetFileName(wmoPath); // e.g. "NSabbey.wmo"
-                            var relativeDir = Path.GetDirectoryName(wmoPath);
-                            // Structure: wmo_library/[OriginalPath]/[Name.wmo]/[Name]_flags_XX.obj
-                            var objOutputDir = Path.Combine(dirs.WmoLib, relativeDir ?? "", wmoFileName);
-                            
                             WmoWalkableSurfaceExtractor.ExportPerFlag(data, objOutputDir);
                             processed++;
                             
-                            if (processed % 10 == 0) Console.Write($"\r[INFO] Processed {processed} WMOs...");
+                            if (processed % 10 == 0) Console.Write($"\r[INFO] Processed {processed} WMOs (skipped {skipped} existing)...");
                         }
                     }
                     catch (Exception ex)
@@ -125,36 +132,80 @@ namespace WoWRollback.PM4Module
                         // Console.WriteLine($"[WARN] Failed {wmoPath}: {ex.Message}");
                     }
                 }
-                Console.WriteLine($"\n[INFO] WMO Processing Complete. Processed: {processed}");
+                Console.WriteLine($"\n[INFO] WMO Processing Complete. Processed: {processed}, Skipped (already exist): {skipped}");
             }
             else
             {
                 Console.WriteLine("[WARN] Game path or listfile missing, skipping WMO processing.");
             }
 
-            // Stage 2: PM4 Matching
-            Console.WriteLine("\n[Stage 2] PM4 Matching...");
-            var pm4Objects = _reconstructor.LoadPm4Objects(pm4Path);
+            // Stage 2: Direct PM4 Processing
+            Console.WriteLine("\n[Stage 2] Direct PM4 Processing...");
             
-            // Load path mappings
-            var pathMap = _reconstructor.LoadWmoPathMapping(listfilePath);
-            var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot);
-            
-            // Confidence raised to 88%
-            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f); 
-
-            var transformedEntries = result.ModfEntries
-                .Select(e => e with { Position = PipelineCoordinateService.ServerToAdtPosition(e.Position) })
-                .ToList();
-            
-            _reconstructor.ExportToCsv(result with { ModfEntries = transformedEntries }, Path.Combine(dirs.ModfCsv, "modf_entries.csv"));
-            // Export Mwmo Names
+            var modfCsvPath = Path.Combine(dirs.ModfCsv, "modf_entries.csv");
             var mwmoPath = Path.Combine(dirs.ModfCsv, "mwmo_names.csv");
-            _reconstructor.ExportMwmoNames(result, mwmoPath);
             
-            // Export Candidate List
-            var candidatesPath = Path.Combine(dirs.ModfCsv, "match_candidates.csv");
-            _reconstructor.ExportCandidatesCsv(result, candidatesPath);
+            List<Pm4ModfReconstructor.ModfEntry> transformedEntries = new();
+            List<string> wmoNames = new();
+            
+            // Check for existing MODF CSVs with actual data (more than just headers)
+            bool hasExistingModf = File.Exists(modfCsvPath) && new FileInfo(modfCsvPath).Length > 200;
+            bool hasExistingMwmo = File.Exists(mwmoPath) && new FileInfo(mwmoPath).Length > 50;
+            
+            if (hasExistingModf && hasExistingMwmo)
+            {
+                // REUSE existing MODF/MWMO data
+                Console.WriteLine($"[INFO] Found existing MODF data, reusing: {modfCsvPath}");
+                (transformedEntries, wmoNames) = LoadExistingModfCsv(modfCsvPath, mwmoPath);
+                Console.WriteLine($"[INFO] Loaded {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs from cache");
+            }
+            else
+            {
+                // Full PM4 matching pipeline: parse PM4 → match WMO geometry → generate MODF
+                Console.WriteLine("[INFO] Running PM4 → WMO matching pipeline...");
+                
+                // Step 1: Load PM4 objects directly from .pm4 files
+                var pm4Objects = LoadPm4ObjectsFromFiles(pm4Path);
+                
+                if (pm4Objects.Count == 0)
+                {
+                    Console.WriteLine("[WARN] No PM4 objects found. Ensure pm4 path contains .pm4 files.");
+                    Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
+                }
+                else
+                {
+                    // Step 2: Build WMO reference library for matching
+                    Console.WriteLine("[INFO] Building WMO reference library...");
+                    var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot);
+                    
+                    if (wmoLibrary.Count == 0)
+                    {
+                        Console.WriteLine("[WARN] WMO library is empty. Check game path and listfile.");
+                        Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
+                    }
+                    else
+                    {
+                        // Step 3: Match PM4 objects to WMOs and reconstruct MODF
+                        Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
+                        var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f);
+                        
+                        // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
+                        // so the result positions are already in correct coordinate space
+                        transformedEntries = result.ModfEntries;
+                        wmoNames = result.WmoNames;
+                        
+                        // Export CSVs for future cache
+                        _reconstructor.ExportToCsv(result with { ModfEntries = transformedEntries }, modfCsvPath);
+                        _reconstructor.ExportMwmoNames(result, mwmoPath);
+                        
+                        var candidatesPath = Path.Combine(dirs.ModfCsv, "match_candidates.csv");
+                        _reconstructor.ExportCandidatesCsv(result, candidatesPath);
+                        
+                        Console.WriteLine($"[INFO] Matched {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs");
+                        Console.WriteLine($"[INFO] Unmatched PM4 objects: {result.UnmatchedPm4Objects.Count}");
+                    }
+                }
+            }
 
 
             // Stage 3: WDL Generation
@@ -237,11 +288,12 @@ namespace WoWRollback.PM4Module
             }
 
             // Inject Modf
-             // Group by tiles
+             // Group by tiles - use TileX/TileY from PM4 filename (not calculated from position)
             var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
             foreach (var entry in transformedEntries)
             {
-                var (tx, ty) = Pm4ModfReconstructor.GetTileForPosition(entry.Position);
+                // Use tile from PM4 filename instead of calculating from position
+                var (tx, ty) = (entry.TileX, entry.TileY);
                 if (!modfByTile.TryGetValue((tx, ty), out var list))
                 {
                     list = new List<AdtPatcher.ModfEntry>();
@@ -282,11 +334,12 @@ namespace WoWRollback.PM4Module
                 int tx = int.Parse(match.Groups[1].Value);
                 int ty = int.Parse(match.Groups[2].Value);
 
-                List<string> wmoNames = File.ReadAllLines(mwmoPath).Skip(1).Select(l => l.Split(',')[1].Trim()).Take(result.WmoNames.Count).ToList();  
+                // Use the wmoNames we loaded/generated in Stage 2
+                var tileWmoNames = wmoNames;
 
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
-                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), wmoNames, tileEntries);
+                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries);
                     patchedCount++;
                 }
                 else
@@ -331,6 +384,196 @@ namespace WoWRollback.PM4Module
             Console.WriteLine("\n=== Pipeline Complete ===");
             Console.WriteLine($"Output: {outputRoot}");
             Console.WriteLine($"Noggit Project: {Path.Combine(outputRoot, "development.noggitproj")}");
+        }
+
+        /// <summary>
+        /// Load existing MODF/MWMO CSV data from cache.
+        /// </summary>
+        private (List<Pm4ModfReconstructor.ModfEntry>, List<string>) LoadExistingModfCsv(string modfPath, string mwmoPath)
+        {
+            var entries = new List<Pm4ModfReconstructor.ModfEntry>();
+            var wmoNames = new List<string>();
+
+            // Parse MWMO names
+            if (File.Exists(mwmoPath))
+            {
+                foreach (var line in File.ReadLines(mwmoPath).Skip(1)) // Skip header
+                {
+                    var parts = line.Split(',');
+                    if (parts.Length >= 2)
+                        wmoNames.Add(parts[1].Trim());
+                }
+            }
+
+            // Parse MODF entries
+            if (File.Exists(modfPath))
+            {
+                foreach (var line in File.ReadLines(modfPath).Skip(1)) // Skip header
+                {
+                    var parts = line.Split(',');
+                    if (parts.Length < 12) continue;
+
+                    try
+                    {
+                        entries.Add(new Pm4ModfReconstructor.ModfEntry(
+                            NameId: uint.Parse(parts[2]),
+                            UniqueId: uint.Parse(parts[3]),
+                            Position: new System.Numerics.Vector3(
+                                float.Parse(parts[4]), float.Parse(parts[5]), float.Parse(parts[6])),
+                            Rotation: new System.Numerics.Vector3(
+                                float.Parse(parts[7]), float.Parse(parts[8]), float.Parse(parts[9])),
+                            BoundsMin: System.Numerics.Vector3.Zero,
+                            BoundsMax: System.Numerics.Vector3.Zero,
+                            Flags: 0,
+                            DoodadSet: 0,
+                            NameSet: 0,
+                            Scale: (ushort)(float.Parse(parts[10]) * 1024),
+                            WmoPath: parts[1],
+                            Ck24: parts[0],
+                            MatchConfidence: parts.Length > 11 ? float.Parse(parts[11]) : 1.0f,
+                            TileX: parts.Length > 12 ? int.Parse(parts[12]) : 0,
+                            TileY: parts.Length > 13 ? int.Parse(parts[13]) : 0
+                        ));
+                    }
+                    catch { /* Skip malformed lines */ }
+                }
+            }
+
+            return (entries, wmoNames);
+        }
+
+        /// <summary>
+        /// Export MODF entries to CSV.
+        /// </summary>
+        private void ExportModfToCsv(List<Pm4ModfReconstructor.ModfEntry> entries, string path)
+        {
+            using var sw = new StreamWriter(path);
+            sw.WriteLine("ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence,tile_x,tile_y");
+            
+            foreach (var e in entries)
+            {
+                var (tileX, tileY) = Pm4ModfReconstructor.GetTileForPosition(e.Position);
+                sw.WriteLine(string.Join(",",
+                    e.Ck24,
+                    e.WmoPath,
+                    e.NameId,
+                    e.UniqueId,
+                    e.Position.X.ToString("F2"),
+                    e.Position.Y.ToString("F2"),
+                    e.Position.Z.ToString("F2"),
+                    e.Rotation.X.ToString("F2"),
+                    e.Rotation.Y.ToString("F2"),
+                    e.Rotation.Z.ToString("F2"),
+                    (e.Scale / 1024f).ToString("F4"),
+                    e.MatchConfidence.ToString("F3"),
+                    tileX,
+                    tileY
+                ));
+            }
+        }
+
+        /// <summary>
+        /// Export WMO names to CSV.
+        /// </summary>
+        private void ExportMwmoToCsv(List<string> wmoNames, string path)
+        {
+            using var sw = new StreamWriter(path);
+            sw.WriteLine("index,wmo_path");
+            
+            for (int i = 0; i < wmoNames.Count; i++)
+            {
+                sw.WriteLine($"{i},{wmoNames[i]}");
+            }
+        }
+
+        /// <summary>
+        /// Load PM4 objects directly from .pm4 files (no PM4FacesTool required).
+        /// Parses PM4 files, groups surfaces by CK24, and computes geometry stats.
+        /// </summary>
+        private List<Pm4ModfReconstructor.Pm4Object> LoadPm4ObjectsFromFiles(string pm4Directory)
+        {
+            var objects = new List<Pm4ModfReconstructor.Pm4Object>();
+            var matcher = new Pm4WmoGeometryMatcher();
+            
+            if (!Directory.Exists(pm4Directory))
+            {
+                Console.WriteLine($"[WARN] PM4 directory not found: {pm4Directory}");
+                return objects;
+            }
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            if (pm4Files.Length == 0)
+            {
+                Console.WriteLine($"[WARN] No .pm4 files found in {pm4Directory}");
+                return objects;
+            }
+            
+            Console.WriteLine($"[INFO] Found {pm4Files.Length} PM4 files to process...");
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    // Parse tile coordinates from filename (e.g., development_29_39.pm4)
+                    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var match = System.Text.RegularExpressions.Regex.Match(baseName, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    
+                    int tileX = int.Parse(match.Groups[1].Value);
+                    int tileY = int.Parse(match.Groups[2].Value);
+                    
+                    // Parse PM4 file using local PM4File class
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    if (pm4.Surfaces.Count == 0 || pm4.MeshVertices.Count == 0)
+                    {
+                        continue;
+                    }
+                    
+                    // Group surfaces by CK24 (WMO instance ID)
+                    var surfacesByCk24 = pm4.Surfaces
+                        .Where(s => !s.IsM2Bucket) // Skip M2/doodad surfaces
+                        .GroupBy(s => s.CK24)
+                        .Where(g => g.Key != 0) // Skip terrain (CK24=0)
+                        .ToList();
+                    
+                    foreach (var group in surfacesByCk24)
+                    {
+                        string ck24Hex = $"0x{group.Key:X6}";
+                        
+                        // Collect all vertices for this CK24 group
+                        var vertices = new List<System.Numerics.Vector3>();
+                        foreach (var surface in group)
+                        {
+                            // Each surface references MSVI indices which point to MSVT vertices
+                            for (int i = 0; i < surface.IndexCount && surface.MsviFirstIndex + i < pm4.MeshIndices.Count; i++)
+                            {
+                                uint vertIdx = pm4.MeshIndices[(int)surface.MsviFirstIndex + i];
+                                if (vertIdx < pm4.MeshVertices.Count)
+                                {
+                                    vertices.Add(pm4.MeshVertices[(int)vertIdx]);
+                                }
+                            }
+                        }
+                        
+                        if (vertices.Count < 10) continue; // Skip tiny objects
+                        
+                        // Per PM4FacesTool: PM4 MSVT vertices are already in global coordinates
+                        // No transformation needed - use raw coordinates for geometry matching
+                        var stats = matcher.ComputeStats(vertices);
+                        objects.Add(new Pm4ModfReconstructor.Pm4Object(ck24Hex, pm4Path, tileX, tileY, stats));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Failed to parse {pm4Path}: {ex.Message}");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Loaded {objects.Count} PM4 objects from {pm4Files.Length} files");
+            return objects;
         }
     }
 }

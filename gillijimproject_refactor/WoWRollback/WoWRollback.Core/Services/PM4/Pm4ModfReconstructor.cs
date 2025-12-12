@@ -52,7 +52,9 @@ public sealed class Pm4ModfReconstructor
         ushort Scale,          // 1024 = 1.0
         string WmoPath,        // For reference
         string Ck24,           // PM4 object ID
-        float MatchConfidence);
+        float MatchConfidence,
+        int TileX,             // Tile X from PM4 filename
+        int TileY);            // Tile Y from PM4 filename
 
     /// <summary>
     /// Represents a potential match candidate for a PM4 object.
@@ -109,7 +111,8 @@ public sealed class Pm4ModfReconstructor
         if (!File.Exists(listfilePath)) throw new FileNotFoundException("Listfile not found", listfilePath);
 
         var allWmos = File.ReadLines(listfilePath)
-            .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) && !l.Contains("wmo_0")) // Crude filter for groups
+            .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) 
+                && !System.Text.RegularExpressions.Regex.IsMatch(l, @"_\d{3}\.wmo$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) // Exclude group files
             .ToList();
 
         Console.WriteLine($"Found {allWmos.Count} candidate WMOs in listfile.");
@@ -142,11 +145,10 @@ public sealed class Pm4ModfReconstructor
                 if (wmoBytes == null) return;
 
                 // Define group loader for collision extraction
-                Func<string, byte[]?> groupLoader = (relPath) =>
+                // The extractor passes the full group path (e.g. "World/wmo/.../root_000.wmo")
+                Func<string, byte[]?> groupLoader = (groupPath) =>
                 {
-                    string dir = Path.GetDirectoryName(wmoPath) ?? "";
-                    string fullPath = Path.Combine(dir, relPath).Replace('\\', '/');
-                    return ReadAllBytes(archiveSource, fullPath);
+                    return ReadAllBytes(archiveSource, groupPath);
                 };
 
                 // Extract geometry
@@ -269,11 +271,10 @@ public sealed class Pm4ModfReconstructor
     }
 
     /// <summary>
-
-
-    /// <summary>
     /// Load PM4 objects from PM4FacesTool output.
     /// Recursively finds all ck_instances.csv files and aggregates objects.
+    /// NOTE: For direct .pm4 file parsing without PM4FacesTool, use
+    /// PipelineService.LoadPm4ObjectsFromFiles() instead.
     /// </summary>
     public List<Pm4Object> LoadPm4Objects(string pm4FacesOutputDir)
     {
@@ -760,7 +761,9 @@ public sealed class Pm4ModfReconstructor
                 Scale: (ushort)(transform.Scale * 1024),
                 WmoPath: bestMatch.WmoPath,
                 Ck24: pm4Obj.Ck24,
-                MatchConfidence: transform.MatchConfidence);
+                MatchConfidence: transform.MatchConfidence,
+                TileX: pm4Obj.TileX,
+                TileY: pm4Obj.TileY);
 
             modfEntries.Add(modf);
 
@@ -786,7 +789,7 @@ public sealed class Pm4ModfReconstructor
 
         foreach (var entry in result.ModfEntries)
         {
-            var (tileX, tileY) = GetTileForPosition(entry.Position);
+            // Use TileX/TileY from PM4 filename instead of calculating from position
             sw.WriteLine(string.Join(",",
                 entry.Ck24,
                 entry.WmoPath,
@@ -800,8 +803,8 @@ public sealed class Pm4ModfReconstructor
                 entry.Rotation.Z.ToString("F2"),
                 (entry.Scale / 1024f).ToString("F4"),
                 entry.MatchConfidence.ToString("F3"),
-                tileX,
-                tileY));
+                entry.TileX,
+                entry.TileY));
         }
 
         Console.WriteLine($"[INFO] Exported {result.ModfEntries.Count} MODF entries to {outputPath}");
@@ -967,11 +970,16 @@ public sealed class Pm4ModfReconstructor
     public static (int X, int Y) GetTileForPosition(Vector3 pos)
     {
         const float TileSize = 533.33333f;
-        // WoW Coords: Center is (0,0). Top-Left is (32*533, 32*533).
-        // Tile Index = 32 - (Coord / 533)
-        // Correct logic for standard WoW coords (X=North, Y=West).
-        int x = (int)(32 - (pos.X / TileSize));
-        int y = (int)(32 - (pos.Y / TileSize)); 
+        // PM4 MSVT vertices are in WoW server/world coordinates:
+        // - Center of map is (0,0)
+        // - X increases going south, Y increases going west
+        // - Tile (0,0) is at world coords (32*533, 32*533) = (17066, 17066)
+        // - Tile (32,32) is at world coords (0,0) = center
+        // - Tile (63,63) is at world coords (-31*533, -31*533)
+        // 
+        // WoW server coords to tile: tile = 32 - (coord / TileSize)
+        int x = Math.Clamp((int)(32 - (pos.X / TileSize)), 0, 63);
+        int y = Math.Clamp((int)(32 - (pos.Y / TileSize)), 0, 63);
         return (x, y);
     }
 
