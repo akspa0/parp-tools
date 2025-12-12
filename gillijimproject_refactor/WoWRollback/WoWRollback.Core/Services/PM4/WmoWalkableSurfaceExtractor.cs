@@ -528,7 +528,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Export walkable surfaces to OBJ file for visualization.
     /// </summary>
-    public void ExportToObj(WmoWalkableData data, string outputPath)
+    public static void ExportToObj(WmoWalkableData data, string outputPath)
     {
         using var sw = new StreamWriter(outputPath);
         sw.WriteLine("# WMO Collision/Portal Geometry");
@@ -560,7 +560,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Export ALL triangles (full render geometry) to OBJ file.
     /// </summary>
-    public void ExportAllToObj(WmoWalkableData data, string outputPath)
+    public static void ExportAllToObj(WmoWalkableData data, string outputPath)
     {
         using var sw = new StreamWriter(outputPath);
         sw.WriteLine("# WMO Full Render Geometry");
@@ -591,7 +591,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Export upward-facing render faces (potential walkable floors) to OBJ.
     /// </summary>
-    public void ExportWalkableFloorsToObj(WmoWalkableData data, string outputPath, float normalThreshold = 0.5f)
+    public static void ExportWalkableFloorsToObj(WmoWalkableData data, string outputPath, float normalThreshold = 0.5f)
     {
         // Filter for render faces (0x20) that are upward-facing
         var walkableFloors = data.AllTriangles
@@ -630,7 +630,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// Export aggregated geometry for each flag type across ALL groups.
     /// Creates files like: [WmoName]_flags_[FlagHex].obj
     /// </summary>
-    public void ExportPerFlag(WmoWalkableData data, string outputDir)
+    public static void ExportPerFlag(WmoWalkableData data, string outputDir)
     {
         Directory.CreateDirectory(outputDir);
 

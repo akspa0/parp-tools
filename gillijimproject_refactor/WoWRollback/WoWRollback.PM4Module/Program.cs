@@ -425,8 +425,13 @@ static int RunPm4ReconstructModf(string[] args)
 
     var reconstructor = new Pm4ModfReconstructor();
 
-    Console.WriteLine($"[INFO] Loading WMO collision library from {wmoDir}...");
-    var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir);
+    // NOTE: This command is redundant with the main pipeline but kept for standalone testing.
+    // It assumes wmoDir is the GAME PATH and we need a listfile.
+    // Since standalone usage is vague, we'll error if insufficient args or try best effort.
+    string listfile = "listfile.csv"; // Fallback
+    
+    Console.WriteLine($"[INFO] Building WMO library (Note: wmoDir argument treated as GamePath)...");
+    var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir, listfile, outDir);
     if (wmoLibrary.Count == 0)
     {
         Console.Error.WriteLine("[ERROR] WMO library is empty. Check your --wmo path.");

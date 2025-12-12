@@ -104,7 +104,7 @@ namespace WoWRollback.PM4Module
                              using (var ms = new MemoryStream()) { s.CopyTo(ms); rootData = ms.ToArray(); }
                         }
                         
-                        var data = wmoConverter.ExtractFromBytes(rootData, wmoPath, GroupLoader);
+                        var data = WmoWalkableSurfaceExtractor.ExtractFromBytes(rootData, wmoPath, GroupLoader);
                         
                         if (data.GroupCount > 0)
                         {
@@ -113,7 +113,7 @@ namespace WoWRollback.PM4Module
                             // Structure: wmo_library/[OriginalPath]/[Name.wmo]/[Name]_flags_XX.obj
                             var objOutputDir = Path.Combine(dirs.WmoLib, relativeDir ?? "", wmoFileName);
                             
-                            wmoConverter.ExportPerFlag(data, objOutputDir);
+                            WmoWalkableSurfaceExtractor.ExportPerFlag(data, objOutputDir);
                             processed++;
                             
                             if (processed % 10 == 0) Console.Write($"\r[INFO] Processed {processed} WMOs...");
@@ -138,7 +138,7 @@ namespace WoWRollback.PM4Module
             
             // Load path mappings
             var pathMap = _reconstructor.LoadWmoPathMapping(listfilePath);
-            var wmoLibrary = _reconstructor.BuildWmoLibrary(dirs.WmoLib, pathMap);
+            var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot);
             
             // Confidence raised to 88%
             var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f); 
