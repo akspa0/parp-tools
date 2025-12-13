@@ -22,8 +22,8 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 | MSVI | 4 bytes | Mesh indices → MSVT |
 | MSUR | 32 bytes | Surface definitions |
 | MSCN | 12 bytes | Exterior/collision vertices |
-| MPRL | 24 bytes | Position references |
-| MPRR | 4 bytes | Reference data |
+| **MPRL** | **24 bytes** | **Position references (may contain rotation!)** |
+| MPRR | Variable | Reference data (index sequences) |
 | MDBH/MDOS/MDSF | Variable | Destructible buildings |
 
 ---
@@ -50,18 +50,49 @@ Transform: No change (standard coordinates)
 File: (X, Y, Z) → World: (Y, -X, Z)
 Transform: new Vector3(vertex.Y, -vertex.X, vertex.Z)
 ```
-> [!WARNING]
-> The 180° X rotation documented in Pm4CoordinateTransforms.cs is **WRONG**!
-> Visual verification proves MSCN needs (Y, -X, Z) to match minimap orientation.
 
 ### MPRL (Position References)
 ```
-File: (X, Y, Z) → World: (X, -Z, Y)
-Transform Matrix: 
-  [1, 0,  0, 0]
-  [0, 0, -1, 0]
-  [0, 1,  0, 0]
-  [0, 0,  0, 1]
+File: floats stored directly as X, Y, Z
+Transform: May need (X, -Z, Y) based on wiki
+```
+
+---
+
+## MPRL Chunk (24 bytes/entry) - ROTATION INVESTIGATION
+
+> [!IMPORTANT]
+> MPRL may contain object rotation data in undecoded fields!
+
+### Structure
+
+| Offset | Size | Field | Status |
+|--------|------|-------|--------|
+| 0x00 | 2 | Unknown_0x00 | Always 0 |
+| 0x02 | 2 | Unknown_0x02 | -1 for "command" entries |
+| **0x04** | **2** | **Unknown_0x04** | **← ROTATION CANDIDATE** |
+| 0x06 | 2 | Unknown_0x06 | Always 0x8000 (constant) |
+| 0x08 | 4 | Position.X | Float |
+| 0x0C | 4 | Position.Y | Float |
+| 0x10 | 4 | Position.Z | Float |
+| **0x14** | **2** | **Unknown_0x14** | **← ROTATION CANDIDATE ("floor_offset")** |
+| 0x16 | 2 | Unknown_0x16 | Attribute flags |
+
+### Rotation Hypotheses
+
+**Unknown_0x04 (ushort):**
+- Could encode **heading angle** as 0-65535 → 0°-360°
+- Conversion: `heading = (Unknown0x04 / 65536.0f) * 360.0f`
+
+**Unknown_0x14 (short):**
+- Labeled "floor_offset" in old docs
+- Could encode **facing direction** or **pitch**
+- Worth correlating with known MODF rotations
+
+### Validation Constants (from MprrHypothesisAnalyzer)
+```csharp
+MPRL_UNK02_EXPECTED = -1;    // Command entry marker
+MPRL_UNK06_EXPECTED = 0x8000; // Always set
 ```
 
 ---
@@ -90,40 +121,35 @@ Transform Matrix:
 > [!WARNING]
 > Rotation is **NOT** swapped like position!
 
-**WRONG** (causes tilt instead of heading):
 ```csharp
+// WRONG (causes tilt instead of heading):
 bw.Write(rotation.X);
-bw.Write(rotation.Z);  // WRONG - heading goes to tilt!
+bw.Write(rotation.Z);  // heading goes to tilt!
 bw.Write(rotation.Y);
-```
 
-**CORRECT**:
-```csharp
+// CORRECT:
 bw.Write(rotation.X);  // pitch
 bw.Write(rotation.Y);  // heading (yaw)
 bw.Write(rotation.Z);  // roll
 ```
 
-Wiki placement matrix uses: `rotateY(rot[1]-270°)`, `rotateZ(-rot[0])`, `rotateX(rot[2]-90°)`
+### Position Calculation
 
-### UniqueId Requirements
-- Must be **globally unique** across ALL ADT tiles
-- Pre-scan all source ADTs to collect existing UniqueIds
-- Assign new IDs starting from high values (e.g., 100,000,000+)
+Use **bounding box center** instead of vertex centroid:
+```csharp
+var pm4BoundsCenter = (pm4Stats.BoundsMin + pm4Stats.BoundsMax) / 2;
+var wmoBoundsCenter = (wmoStats.BoundsMin + wmoStats.BoundsMax) / 2;
+var translation = pm4BoundsCenter - (wmoBoundsCenter * scale);
+```
 
----
+### Proximity Deduplication
 
-## WL* Liquid Files
-
-WL* files (WLW, WLM, WLQ, WLL) contain liquid height data for restoration.
-
-### Conversion to MH2O
-- WL* files use 4x4 vertex grids per block (360 bytes/block)
-- MH2O uses 9x9 height grids - requires bilinear upsampling
-- **MH2O serialization is complex** - format issues can crash Noggit
-
-> [!CAUTION]
-> Current MH2O serialization has format issues. Injection is disabled pending fix.
+Skip PM4 entries within 5 units of existing museum placements:
+```csharp
+const float PROXIMITY_THRESHOLD = 5.0f;
+if (distanceToExisting < PROXIMITY_THRESHOLD)
+    continue; // Prefer museum placement
+```
 
 ---
 
@@ -149,20 +175,6 @@ struct MSLKEntry {
 ### MSUR (32 bytes/entry)
 Surface definitions for triangulation.
 
-```c
-struct MSUREntry {
-    uint8_t  group_key;        // 0=M2 props, non-zero=walkable
-    uint8_t  index_count;      // Indices in MSVI for this surface
-    uint8_t  attribute_mask;   // bit7=liquid candidate
-    uint8_t  padding;
-    float    normal_x, normal_y, normal_z;  // Surface normal
-    float    height;           // Plane height (Y-world)
-    uint32_t msvi_first;       // Starting index in MSVI
-    uint32_t mdos_index;       // Link to destructibles
-    uint32_t packed_params;    // Contains CK24 key
-};
-```
-
 **CK24 Extraction:**
 ```csharp
 uint CK24 = (packed_params & 0xFFFFFF00) >> 8;
@@ -178,27 +190,15 @@ graph TD
     B --> C[MSUR Surfaces]
     B --> D[MSLK Links]
     B --> E[MSVT/MSVI Geometry]
+    B --> F[MPRL Positions]
     
-    C --> F[Extract CK24 Keys]
-    F --> G[Group Surfaces by CK24]
+    C --> G[Extract CK24 Keys]
+    G --> H[Group Surfaces by CK24]
+    H --> I[Triangulate Geometry]
     
-    G --> H[For Each CK24 Group]
-    H --> I[Read MSVI indices]
-    I --> J[Map to MSVT vertices]
-    J --> K[Apply Y,X,Z → X,Y,Z transform]
-    K --> L[Triangulate via fan]
-    L --> M[Extracted Object OBJ]
-```
-
-### Triangulation Method
-MSUR surfaces use **fan triangulation** from MSVI indices:
-```csharp
-for (int i = 2; i < surface.IndexCount; i++) {
-    int v0 = msvi[surface.MsviFirstIndex];      // Fan center
-    int v1 = msvi[surface.MsviFirstIndex + i - 1];
-    int v2 = msvi[surface.MsviFirstIndex + i];
-    EmitTriangle(msvt[v0], msvt[v1], msvt[v2]);
-}
+    F --> J[Extract Position + Unknown Fields]
+    J --> K[Correlate with MODF]
+    K --> L[Decode Rotation?]
 ```
 
 ---
@@ -207,11 +207,11 @@ for (int i = 2; i < surface.IndexCount; i++) {
 
 | Item | Status | Notes |
 |------|--------|-------|
-| MSCN segmentation | Unknown | Cannot split by CK24, may be unified collision |
-| MSHD header fields | Unknown | 8 uint32s, purpose TBD |
-| MPRL rotation data | Partial | May contain object orientation? |
-| MPRR purpose | Unknown | Reference data linking MPRL |
-| MH2O serialization | Broken | Instance structure needs wiki compliance |
+| MPRL Unknown_0x04 | **INVESTIGATE** | Potential heading angle |
+| MPRL Unknown_0x14 | **INVESTIGATE** | Potential facing/pitch |
+| MSCN segmentation | Unknown | Cannot split by CK24 |
+| MSHD header fields | Unknown | 8 uint32s |
+| MH2O serialization | Broken | SMLiquidInstance format wrong |
 
 ---
 
@@ -219,4 +219,4 @@ for (int i = 2; i < surface.IndexCount; i++) {
 
 - [wowdev.wiki/ADT#MODF_chunk](https://wowdev.wiki/ADT#MODF_chunk)
 - [wowdev.wiki/PM4](https://wowdev.wiki/PM4)
-- [WoWRollback.PM4Module](file:///J:/wowDev/parp-tools/gillijimproject_refactor/WoWRollback/WoWRollback.PM4Module/)
+- [MprrHypothesisAnalyzer.cs](file:///J:/wowDev/parp-tools/gillijimproject_refactor/WoWRollback/WMOv14/WMO2Q3/old_sources/src/WoWToolbox/WoWToolbox.AnalysisTool/MprrHypothesisAnalyzer.cs)

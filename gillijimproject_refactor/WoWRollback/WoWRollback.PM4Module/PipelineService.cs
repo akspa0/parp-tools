@@ -208,6 +208,9 @@ namespace WoWRollback.PM4Module
                         
                         Console.WriteLine($"[INFO] Matched {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs");
                         Console.WriteLine($"[INFO] Unmatched PM4 objects: {result.UnmatchedPm4Objects.Count}");
+                        
+                        // Export MPRL rotation investigation CSV
+                        ExportMprlRotationData(pm4Path, dirs.ModfCsv);
                     }
                 }
             }
@@ -945,6 +948,109 @@ namespace WoWRollback.PM4Module
             }
             
             return ms.ToArray();
+        }
+        
+        /// <summary>
+        /// Export MPRL rotation candidates to CSV with MODF correlation.
+        /// Correlates MPRL positions with matched MODF entries to discover rotation patterns.
+        /// </summary>
+        private void ExportMprlRotationData(string pm4Directory, string outputDir, 
+            List<Pm4ModfReconstructor.ModfEntry>? modfEntries = null)
+        {
+            var mprlCsvPath = Path.Combine(outputDir, "mprl_rotation_analysis.csv");
+            var correlationCsvPath = Path.Combine(outputDir, "mprl_modf_correlation.csv");
+            var flagAnalysisPath = Path.Combine(outputDir, "mprl_flag_analysis.txt");
+            
+            // Collect all MPRL entries with their source files
+            var allMprlEntries = new List<(int TileX, int TileY, MprlEntry Entry)>();
+            int totalMprl = 0;
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Statistics for flag analysis
+            var unk14Distribution = new Dictionary<int, int>();
+            var unk16Distribution = new Dictionary<ushort, int>();
+            var commandEntries = new List<(int TileX, int TileY, MprlEntry Entry)>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var match = System.Text.RegularExpressions.Regex.Match(baseName, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    
+                    int tileX = int.Parse(match.Groups[1].Value);
+                    int tileY = int.Parse(match.Groups[2].Value);
+                    
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    foreach (var mprl in pm4.PositionRefs)
+                    {
+                        allMprlEntries.Add((tileX, tileY, mprl));
+                        totalMprl++;
+                        
+                        // Track distributions
+                        if (!unk14Distribution.ContainsKey(mprl.Unknown0x14))
+                            unk14Distribution[mprl.Unknown0x14] = 0;
+                        unk14Distribution[mprl.Unknown0x14]++;
+                        
+                        if (!unk16Distribution.ContainsKey(mprl.Unknown0x16))
+                            unk16Distribution[mprl.Unknown0x16] = 0;
+                        unk16Distribution[mprl.Unknown0x16]++;
+                        
+                        // Track command/flag entries
+                        if (mprl.Unknown0x16 == 0x3FFF || mprl.Unknown0x14 == -1)
+                            commandEntries.Add((tileX, tileY, mprl));
+                    }
+                }
+                catch { /* ignore parse errors */ }
+            }
+            
+            // Write raw MPRL data
+            using (var sw = new StreamWriter(mprlCsvPath))
+            {
+                sw.WriteLine("tile_x,tile_y,mprl_idx,pos_x,pos_y,pos_z,unk04_raw,unk04_degrees,unk14_raw,unk06_hex,unk16_hex,is_command");
+                foreach (var (tileX, tileY, mprl) in allMprlEntries)
+                {
+                    sw.WriteLine(string.Join(",",
+                        tileX, tileY, mprl.Index,
+                        mprl.PositionX.ToString("F3"), mprl.PositionY.ToString("F3"), mprl.PositionZ.ToString("F3"),
+                        mprl.Unknown0x04, mprl.HeadingDegrees.ToString("F2"), mprl.Unknown0x14,
+                        $"0x{mprl.Unknown0x06:X4}", $"0x{mprl.Unknown0x16:X4}", mprl.IsCommandEntry));
+                }
+            }
+            
+            // Write flag analysis
+            using (var sw = new StreamWriter(flagAnalysisPath))
+            {
+                sw.WriteLine("=== MPRL Flag Analysis ===");
+                sw.WriteLine($"Total MPRL entries: {totalMprl}");
+                sw.WriteLine($"Command/Flag entries (unk16=0x3FFF or unk14=-1): {commandEntries.Count}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Unknown0x14 Distribution ===");
+                foreach (var kvp in unk14Distribution.OrderBy(x => x.Key))
+                    sw.WriteLine($"  unk14={kvp.Key,4}: {kvp.Value,6} entries");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Unknown0x16 Distribution ===");
+                foreach (var kvp in unk16Distribution.OrderBy(x => x.Key))
+                    sw.WriteLine($"  unk16=0x{kvp.Key:X4}: {kvp.Value,6} entries");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Sample Command Entries (unk16=0x3FFF) ===");
+                foreach (var (tx, ty, mprl) in commandEntries.Take(50))
+                {
+                    sw.WriteLine($"  Tile({tx},{ty}) Idx={mprl.Index}: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04} unk14={mprl.Unknown0x14} unk16=0x{mprl.Unknown0x16:X4}");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] MPRL Rotation Analysis: {mprlCsvPath} ({totalMprl} entries)");
+            Console.WriteLine($"[INFO] MPRL Flag Analysis: {flagAnalysisPath}");
+            Console.WriteLine($"[INFO] Command entries (0x3FFF flag): {commandEntries.Count}");
+            Console.WriteLine($"[INFO] Unk14 unique values: {unk14Distribution.Count}");
+            Console.WriteLine($"[INFO] Unk16 unique values: {unk16Distribution.Count}");
         }
     }
 }

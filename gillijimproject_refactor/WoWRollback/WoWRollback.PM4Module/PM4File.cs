@@ -21,6 +21,7 @@ public class PM4File
     public List<uint> MeshIndices { get; } = new();          // MSVI
     public List<MsurEntry> Surfaces { get; } = new();        // MSUR
     public List<Vector3> ExteriorVertices { get; } = new();  // MSCN
+    public List<MprlEntry> PositionRefs { get; } = new();    // MPRL (rotation investigation)
 
     public static PM4File FromFile(string path)
     {
@@ -72,6 +73,9 @@ public class PM4File
                     break;
                 case "MSCN":
                     ReadVectors(br, size, ExteriorVertices);
+                    break;
+                case "MPRL":
+                    ReadMprl(br, size);
                     break;
                 default:
                     // Skip unknown chunks
@@ -170,9 +174,30 @@ public class PM4File
         }
     }
 
+    private void ReadMprl(BinaryReader br, uint size)
+    {
+        int count = (int)(size / 24);
+        for (int i = 0; i < count; i++)
+        {
+            PositionRefs.Add(new MprlEntry
+            {
+                Index = i,
+                Unknown0x00 = br.ReadUInt16(),
+                Unknown0x02 = br.ReadInt16(),
+                Unknown0x04 = br.ReadUInt16(),  // ROTATION CANDIDATE
+                Unknown0x06 = br.ReadUInt16(),
+                PositionX = br.ReadSingle(),
+                PositionY = br.ReadSingle(),
+                PositionZ = br.ReadSingle(),
+                Unknown0x14 = br.ReadInt16(),   // ROTATION CANDIDATE ("floor_offset")
+                Unknown0x16 = br.ReadUInt16()
+            });
+        }
+    }
+
     public override string ToString()
     {
-        return $"PM4 v{Version}: {Surfaces.Count} surfaces, {MeshVertices.Count} verts, {ExteriorVertices.Count} MSCN verts, {LinkEntries.Count} links";
+        return $"PM4 v{Version}: {Surfaces.Count} surfaces, {MeshVertices.Count} verts, {ExteriorVertices.Count} MSCN verts, {LinkEntries.Count} links, {PositionRefs.Count} MPRL";
     }
 }
 
@@ -217,4 +242,34 @@ public class MsurEntry
 
     /// <summary>CK24 for grouping: (PackedParams & 0xFFFFFF00) >> 8</summary>
     public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
+}
+
+/// <summary>
+/// MPRL entry (24 bytes) - Position references with potential rotation data.
+/// Unknown0x04 and Unknown0x14 are rotation candidates under investigation.
+/// </summary>
+public class MprlEntry
+{
+    public int Index { get; set; }
+    public ushort Unknown0x00 { get; set; }    // Always 0
+    public short Unknown0x02 { get; set; }     // -1 for "command" entries
+    public ushort Unknown0x04 { get; set; }    // ROTATION CANDIDATE - heading?
+    public ushort Unknown0x06 { get; set; }    // Always 0x8000
+    public float PositionX { get; set; }
+    public float PositionY { get; set; }
+    public float PositionZ { get; set; }
+    public short Unknown0x14 { get; set; }     // ROTATION CANDIDATE - "floor_offset"?
+    public ushort Unknown0x16 { get; set; }    // Attribute flags
+
+    public Vector3 Position => new(PositionX, PositionY, PositionZ);
+    
+    /// <summary>
+    /// Experimental: Interpret Unknown0x04 as heading angle (0-65535 -> 0-360°)
+    /// </summary>
+    public float HeadingDegrees => (Unknown0x04 / 65536.0f) * 360.0f;
+    
+    /// <summary>
+    /// Is this a "command" entry (Unknown0x02 == -1)?
+    /// </summary>
+    public bool IsCommandEntry => Unknown0x02 == -1;
 }
