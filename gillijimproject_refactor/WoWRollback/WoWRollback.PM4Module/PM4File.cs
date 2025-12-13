@@ -22,7 +22,7 @@ public class PM4File
     public List<MsurEntry> Surfaces { get; } = new();        // MSUR
     public List<Vector3> ExteriorVertices { get; } = new();  // MSCN
     public List<MprlEntry> PositionRefs { get; } = new();    // MPRL
-    public List<ushort> MprrData { get; } = new();           // MPRR (raw ushorts)
+    public List<MprrEntry> MprrEntries { get; } = new();      // MPRR (4-byte entries: Value1, Value2)
     
     // Chunk inventory for debugging
     public Dictionary<string, uint> ChunkSizes { get; } = new();
@@ -102,11 +102,15 @@ public class PM4File
     
     private void ReadMprr(BinaryReader br, uint size)
     {
-        // MPRR contains sequences of ushorts terminated by 0xFFFF
-        int count = (int)(size / 2);
+        // MPRR: 4-byte entries (two ushorts)
+        // Value1=0xFFFF = sentinel marker for object boundaries
+        // Value2 = component type linking to MPRL/geometry
+        int count = (int)(size / 4);
         for (int i = 0; i < count; i++)
         {
-            MprrData.Add(br.ReadUInt16());
+            ushort val1 = br.ReadUInt16();
+            ushort val2 = br.ReadUInt16();
+            MprrEntries.Add(new MprrEntry(val1, val2));
         }
     }
 
@@ -296,4 +300,16 @@ public class MprlEntry
     /// Is this a "command" entry (Unknown0x02 == -1)?
     /// </summary>
     public bool IsCommandEntry => Unknown0x02 == -1;
+}
+
+/// <summary>
+/// MPRR entry (4 bytes) - Object grouping reference.
+/// Value1=0xFFFF acts as sentinel marking object boundaries.
+/// </summary>
+/// <param name="Value1">First ushort. 0xFFFF = sentinel (object boundary)</param>
+/// <param name="Value2">Second ushort. Component type linking to MPRL/geometry</param>
+public record MprrEntry(ushort Value1, ushort Value2)
+{
+    /// <summary>Is this a sentinel entry marking an object boundary?</summary>
+    public bool IsSentinel => Value1 == 0xFFFF;
 }

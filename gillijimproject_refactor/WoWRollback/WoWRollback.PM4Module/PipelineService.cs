@@ -1217,8 +1217,1218 @@ namespace WoWRollback.PM4Module
             Console.WriteLine($"[INFO] Type values: {typeDistribution.Count}, Subtype values: {subtypeDistribution.Count}");
             Console.WriteLine($"[INFO] Multi-CK24 groups (merged objects?): {groupIdToCk24s.Where(g => g.Value.Count > 1).Count()}");
             
+            // Cross-chunk correlation deep dive
+            ExportCrossChunkCorrelation(pm4Directory, outputDir);
+            
             // Chunk inventory to find missing data
             ExportChunkInventory(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Deep correlation analysis between MSLK, MPRL, and MPRR to find object linkage patterns.
+        /// Goal: Find the key that uniquely identifies each object instance.
+        /// </summary>
+        private void ExportCrossChunkCorrelation(string pm4Directory, string outputDir)
+        {
+            var correlationPath = Path.Combine(outputDir, "cross_chunk_correlation.txt");
+            
+            // Collect data across all files
+            var refIndexToMprlMatch = new Dictionary<string, int>(); // Does RefIndex < MPRL count?
+            var refIndexDistribution = new Dictionary<ushort, int>();
+            var groupIdDistribution = new Dictionary<uint, int>();
+            var mslkWithGeometry = 0;
+            var mslkWithoutGeometry = 0;
+            var totalMslk = 0;
+            var totalMprl = 0;
+            
+            // Sample entries for inspection
+            var sampleMatches = new List<(string File, int MslkIdx, MslkEntry Mslk, MprlEntry? Mprl)>();
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    totalMprl += pm4.PositionRefs.Count;
+                    
+                    for (int i = 0; i < pm4.LinkEntries.Count; i++)
+                    {
+                        var mslk = pm4.LinkEntries[i];
+                        totalMslk++;
+                        
+                        if (mslk.HasGeometry)
+                            mslkWithGeometry++;
+                        else
+                            mslkWithoutGeometry++;
+                        
+                        // Track RefIndex distribution
+                        if (!refIndexDistribution.ContainsKey(mslk.RefIndex))
+                            refIndexDistribution[mslk.RefIndex] = 0;
+                        refIndexDistribution[mslk.RefIndex]++;
+                        
+                        // Track GroupObjectId distribution
+                        if (!groupIdDistribution.ContainsKey(mslk.GroupObjectId))
+                            groupIdDistribution[mslk.GroupObjectId] = 0;
+                        groupIdDistribution[mslk.GroupObjectId]++;
+                        
+                        // Check if RefIndex is a valid MPRL index
+                        bool refInMprl = mslk.RefIndex < pm4.PositionRefs.Count;
+                        var key = refInMprl ? "RefIndex_valid" : "RefIndex_invalid";
+                        if (!refIndexToMprlMatch.ContainsKey(key))
+                            refIndexToMprlMatch[key] = 0;
+                        refIndexToMprlMatch[key]++;
+                        
+                        // Sample some entries with valid RefIndex -> MPRL link
+                        if (sampleMatches.Count < 50 && refInMprl && mslk.HasGeometry)
+                        {
+                            var mprl = pm4.PositionRefs[mslk.RefIndex];
+                            sampleMatches.Add((fileName, i, mslk, mprl));
+                        }
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            
+            using (var sw = new StreamWriter(correlationPath))
+            {
+                sw.WriteLine("=== Cross-Chunk Correlation Analysis ===");
+                sw.WriteLine($"Total MSLK entries: {totalMslk:N0}");
+                sw.WriteLine($"Total MPRL entries: {totalMprl:N0}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== MSLK Geometry Status ===");
+                sw.WriteLine($"  With geometry (MspiFirstIndex >= 0): {mslkWithGeometry:N0} ({100.0 * mslkWithGeometry / totalMslk:F1}%)");
+                sw.WriteLine($"  Without geometry (MspiFirstIndex = -1): {mslkWithoutGeometry:N0}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== MSLK.RefIndex → MPRL Correlation ===");
+                foreach (var (key, count) in refIndexToMprlMatch)
+                {
+                    sw.WriteLine($"  {key}: {count:N0} ({100.0 * count / totalMslk:F1}%)");
+                }
+                sw.WriteLine();
+                
+                sw.WriteLine("=== RefIndex Distribution (top 30) ===");
+                foreach (var (val, count) in refIndexDistribution.OrderByDescending(x => x.Value).Take(30))
+                {
+                    sw.WriteLine($"  RefIndex={val,5}: {count,7} MSLK entries");
+                }
+                sw.WriteLine($"  Unique RefIndex values: {refIndexDistribution.Count}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== GroupObjectId Distribution ===");
+                sw.WriteLine($"  Unique GroupObjectId values: {groupIdDistribution.Count}");
+                var topGroups = groupIdDistribution.OrderByDescending(x => x.Value).Take(10).ToList();
+                sw.WriteLine("  Top 10 most common:");
+                foreach (var (id, count) in topGroups)
+                {
+                    sw.WriteLine($"    GroupId=0x{id:X8}: {count,6} MSLK entries");
+                }
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Sample MSLK → MPRL Links (RefIndex as index) ===");
+                foreach (var (file, idx, mslk, mprl) in sampleMatches)
+                {
+                    if (mprl != null)
+                    {
+                        sw.WriteLine($"  {file} MSLK[{idx}]:");
+                        sw.WriteLine($"    MSLK: Type={mslk.TypeFlags} Subtype={mslk.Subtype} GroupId=0x{mslk.GroupObjectId:X8} RefIdx={mslk.RefIndex}");
+                        sw.WriteLine($"    MPRL[{mslk.RefIndex}]: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04} unk14={mprl.Unknown0x14}");
+                        sw.WriteLine();
+                    }
+                }
+                
+                sw.WriteLine("=== Hypothesis ===");
+                sw.WriteLine("If RefIndex_valid is high, MSLK.RefIndex IS an index into MPRL!");
+                sw.WriteLine("This would link object catalog entries to world positions.");
+                sw.WriteLine("Combined with CK24/GroupObjectId, this could enable proper object grouping.");
+            }
+            
+            Console.WriteLine($"[INFO] Cross-Chunk Correlation: {correlationPath}");
+            Console.WriteLine($"[INFO] MSLK->MPRL valid links: {refIndexToMprlMatch.GetValueOrDefault("RefIndex_valid", 0):N0} / {totalMslk:N0}");
+            
+            // Deep dive on invalid RefIndex - are they cross-tile?
+            ExportInvalidRefIndexAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Analyze invalid RefIndex values to understand if they're cross-tile references.
+        /// </summary>
+        private void ExportInvalidRefIndexAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "refindex_invalid_analysis.txt");
+            
+            // Build global MPRL index across all tiles
+            var globalMprl = new List<(string File, int LocalIdx, MprlEntry Entry)>();
+            var perFileMprlCounts = new Dictionary<string, int>();
+            var invalidRefStats = new Dictionary<string, int>(); // category -> count
+            var linkIdPatterns = new Dictionary<uint, int>();
+            var sampleInvalid = new List<(string File, int MslkIdx, MslkEntry Mslk)>();
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories)
+                .OrderBy(f => f).ToList();
+            
+            // First pass: build global MPRL list
+            int globalOffset = 0;
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    perFileMprlCounts[fileName] = pm4.PositionRefs.Count;
+                    
+                    for (int i = 0; i < pm4.PositionRefs.Count; i++)
+                    {
+                        globalMprl.Add((fileName, i, pm4.PositionRefs[i]));
+                    }
+                    globalOffset += pm4.PositionRefs.Count;
+                }
+                catch { }
+            }
+            
+            int totalGlobalMprl = globalMprl.Count;
+            
+            // Second pass: analyze invalid RefIndex
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    int localMprlCount = pm4.PositionRefs.Count;
+                    
+                    for (int i = 0; i < pm4.LinkEntries.Count; i++)
+                    {
+                        var mslk = pm4.LinkEntries[i];
+                        
+                        // Track LinkId patterns
+                        if (!linkIdPatterns.ContainsKey(mslk.LinkId))
+                            linkIdPatterns[mslk.LinkId] = 0;
+                        linkIdPatterns[mslk.LinkId]++;
+                        
+                        if (mslk.RefIndex >= localMprlCount)
+                        {
+                            // Invalid local reference - what is it?
+                            string category;
+                            if (mslk.RefIndex < totalGlobalMprl)
+                                category = "could_be_global";
+                            else if (mslk.RefIndex == 0xFFFF)
+                                category = "is_sentinel";
+                            else if (mslk.RefIndex > 50000)
+                                category = "very_large";
+                            else
+                                category = "medium_range";
+                            
+                            if (!invalidRefStats.ContainsKey(category))
+                                invalidRefStats[category] = 0;
+                            invalidRefStats[category]++;
+                            
+                            // Sample some invalid entries
+                            if (sampleInvalid.Count < 30 && mslk.RefIndex != 0xFFFF)
+                            {
+                                sampleInvalid.Add((fileName, i, mslk));
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("=== Invalid RefIndex Deep Analysis ===");
+                sw.WriteLine($"Total MPRL entries (global): {totalGlobalMprl:N0}");
+                sw.WriteLine($"PM4 files analyzed: {pm4Files.Count}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Invalid RefIndex Categories ===");
+                foreach (var (cat, count) in invalidRefStats.OrderByDescending(x => x.Value))
+                {
+                    sw.WriteLine($"  {cat}: {count:N0}");
+                }
+                sw.WriteLine();
+                
+                sw.WriteLine("=== LinkId Pattern Analysis ===");
+                sw.WriteLine($"  Unique LinkId values: {linkIdPatterns.Count}");
+                sw.WriteLine("  Top 20 most common:");
+                foreach (var (id, count) in linkIdPatterns.OrderByDescending(x => x.Value).Take(20))
+                {
+                    // Parse LinkId: 0xFFFFYYXX format for cross-tile
+                    byte xx = (byte)(id & 0xFF);
+                    byte yy = (byte)((id >> 8) & 0xFF);
+                    uint highWord = (id >> 16);
+                    string interpretation = highWord == 0xFFFF ? $"cross-tile to ({xx},{yy})" : 
+                                           id == 0 ? "local (no cross-tile)" : 
+                                           $"unknown pattern";
+                    sw.WriteLine($"    LinkId=0x{id:X8}: {count,6} ({interpretation})");
+                }
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Sample Invalid RefIndex Entries ===");
+                foreach (var (file, idx, mslk) in sampleInvalid)
+                {
+                    sw.WriteLine($"  {file} MSLK[{idx}]:");
+                    sw.WriteLine($"    Type={mslk.TypeFlags} Subtype={mslk.Subtype} GroupId=0x{mslk.GroupObjectId:X8}");
+                    sw.WriteLine($"    RefIdx={mslk.RefIndex} (invalid) LinkId=0x{mslk.LinkId:X8}");
+                    sw.WriteLine();
+                }
+                
+                sw.WriteLine("=== Key Findings ===");
+                sw.WriteLine("If 'could_be_global' is high → RefIndex might be a global/cumulative index");
+                sw.WriteLine("If LinkId has cross-tile patterns (0xFFFFYYXX) → Object spans multiple tiles");
+                sw.WriteLine("If 'is_sentinel' is high → 0xFFFF means 'no reference'");
+            }
+            
+            Console.WriteLine($"[INFO] Invalid RefIndex Analysis: {analysisPath}");
+            Console.WriteLine($"[INFO] Global MPRL pool: {totalGlobalMprl:N0} entries across {pm4Files.Count} files");
+            
+            // Cross-tile MPRL resolution test
+            ExportCrossTileMprlResolution(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Test if RefIndex references MPRL in the target tile specified by LinkId.
+        /// LinkId format: 0x00FFXXYY where XX=tile X, YY=tile Y (or reversed).
+        /// </summary>
+        private void ExportCrossTileMprlResolution(string pm4Directory, string outputDir)
+        {
+            var resolutionPath = Path.Combine(outputDir, "cross_tile_mprl_resolution.txt");
+            
+            // Build per-tile MPRL lookup
+            var tileMprl = new Dictionary<(int X, int Y), List<MprlEntry>>();
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Parse tile coords from filename (e.g., development_14_37.pm4)
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var fileName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var parts = fileName.Split('_');
+                    if (parts.Length >= 3 && int.TryParse(parts[^2], out int tileX) && int.TryParse(parts[^1], out int tileY))
+                    {
+                        var pm4Data = File.ReadAllBytes(pm4Path);
+                        var pm4 = new PM4File(pm4Data);
+                        tileMprl[(tileX, tileY)] = pm4.PositionRefs.ToList();
+                    }
+                }
+                catch { }
+            }
+            
+            // Test RefIndex resolution via LinkId target tile
+            int resolved = 0;
+            int unresolved = 0;
+            var sampleResolved = new List<(string SrcFile, int MslkIdx, MslkEntry Mslk, string TgtTile, MprlEntry Mprl)>();
+            var sampleUnresolved = new List<(string SrcFile, int MslkIdx, MslkEntry Mslk, string TargetTile, string Reason)>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var srcFileName = Path.GetFileName(pm4Path);
+                    int localMprlCount = pm4.PositionRefs.Count;
+                    
+                    for (int i = 0; i < pm4.LinkEntries.Count; i++)
+                    {
+                        var mslk = pm4.LinkEntries[i];
+                        
+                        // Only process entries with invalid local RefIndex
+                        if (mslk.RefIndex >= localMprlCount && mslk.RefIndex != 0xFFFF)
+                        {
+                            // Parse target tile from LinkId (0x00FFXXYY format)
+                            // Try both XY and YX interpretation
+                            byte linkByte0 = (byte)(mslk.LinkId & 0xFF);
+                            byte linkByte1 = (byte)((mslk.LinkId >> 8) & 0xFF);
+                            
+                            // Interpretation 1: byte0=X, byte1=Y
+                            var tgtTileA = (linkByte0, linkByte1);
+                            // Interpretation 2: byte0=Y, byte1=X  
+                            var tgtTileB = (linkByte1, linkByte0);
+                            
+                            MprlEntry? resolvedMprl = null;
+                            string targetTileStr = "";
+                            
+                            if (tileMprl.TryGetValue(tgtTileA, out var mprlListA) && mslk.RefIndex < mprlListA.Count)
+                            {
+                                resolvedMprl = mprlListA[mslk.RefIndex];
+                                targetTileStr = $"({tgtTileA.Item1},{tgtTileA.Item2})";
+                            }
+                            else if (tileMprl.TryGetValue(tgtTileB, out var mprlListB) && mslk.RefIndex < mprlListB.Count)
+                            {
+                                resolvedMprl = mprlListB[mslk.RefIndex];
+                                targetTileStr = $"({tgtTileB.Item1},{tgtTileB.Item2})";
+                            }
+                            
+                            if (resolvedMprl != null)
+                            {
+                                resolved++;
+                                if (sampleResolved.Count < 20)
+                                {
+                                    sampleResolved.Add((srcFileName, i, mslk, targetTileStr, resolvedMprl));
+                                }
+                            }
+                            else
+                            {
+                                unresolved++;
+                                if (sampleUnresolved.Count < 10)
+                                {
+                                    string reason = tileMprl.ContainsKey(tgtTileA) ? 
+                                        $"RefIdx {mslk.RefIndex} >= {tileMprl[tgtTileA].Count}" :
+                                        $"tile ({linkByte0},{linkByte1}) not found";
+                                    sampleUnresolved.Add((srcFileName, i, mslk, $"({linkByte0},{linkByte1})", reason));
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(resolutionPath))
+            {
+                sw.WriteLine("=== Cross-Tile MPRL Resolution Test ===");
+                sw.WriteLine($"Tiles loaded: {tileMprl.Count}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Resolution Results ===");
+                sw.WriteLine($"  Resolved via target tile: {resolved:N0}");
+                sw.WriteLine($"  Unresolved: {unresolved:N0}");
+                sw.WriteLine($"  Resolution rate: {100.0 * resolved / Math.Max(1, resolved + unresolved):F1}%");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Sample Resolved Entries ===");
+                foreach (var (src, idx, mslk, tgt, mprl) in sampleResolved)
+                {
+                    sw.WriteLine($"  {src} MSLK[{idx}] → target tile {tgt}:");
+                    sw.WriteLine($"    MSLK: GroupId=0x{mslk.GroupObjectId:X8} RefIdx={mslk.RefIndex} LinkId=0x{mslk.LinkId:X8}");
+                    sw.WriteLine($"    MPRL: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04}");
+                    sw.WriteLine();
+                }
+                
+                if (sampleUnresolved.Count > 0)
+                {
+                    sw.WriteLine("=== Sample Unresolved Entries ===");
+                    foreach (var (src, idx, mslk, tgt, reason) in sampleUnresolved)
+                    {
+                        sw.WriteLine($"  {src} MSLK[{idx}] → {tgt}: {reason}");
+                    }
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Cross-Tile MPRL Resolution: {resolutionPath}");
+            Console.WriteLine($"[INFO] Resolved: {resolved:N0} / {resolved + unresolved:N0} ({100.0 * resolved / Math.Max(1, resolved + unresolved):F1}%)");
+            
+            // MSHD header analysis
+            ExportMshdAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Dump MSHD header values to understand their meaning.
+        /// </summary>
+        private void ExportMshdAnalysis(string pm4Directory, string outputDir)
+        {
+            var mshdPath = Path.Combine(outputDir, "mshd_header_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories)
+                .OrderBy(f => f).ToList();
+            
+            // Track value distributions
+            var fieldDistributions = new Dictionary<string, Dictionary<uint, int>>();
+            for (int i = 0; i < 8; i++)
+                fieldDistributions[$"Unk{i * 4:X2}"] = new Dictionary<uint, int>();
+            
+            var sampleHeaders = new List<(string File, PM4Header Header, int MprlCount, int MslkCount)>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    if (pm4.Header != null)
+                    {
+                        // Track field distributions
+                        var values = new[]
+                        {
+                            pm4.Header.Unk00, pm4.Header.Unk04, pm4.Header.Unk08, pm4.Header.Unk0C,
+                            pm4.Header.Unk10, pm4.Header.Unk14, pm4.Header.Unk18, pm4.Header.Unk1C
+                        };
+                        
+                        for (int i = 0; i < 8; i++)
+                        {
+                            var field = $"Unk{i * 4:X2}";
+                            if (!fieldDistributions[field].ContainsKey(values[i]))
+                                fieldDistributions[field][values[i]] = 0;
+                            fieldDistributions[field][values[i]]++;
+                        }
+                        
+                        // Sample some headers
+                        if (sampleHeaders.Count < 30)
+                        {
+                            sampleHeaders.Add((fileName, pm4.Header, pm4.PositionRefs.Count, pm4.LinkEntries.Count));
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(mshdPath))
+            {
+                sw.WriteLine("=== MSHD Header Analysis ===");
+                sw.WriteLine($"Files analyzed: {pm4Files.Count}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Field Value Distributions ===");
+                foreach (var (field, dist) in fieldDistributions)
+                {
+                    sw.WriteLine($"\n{field}:");
+                    foreach (var (val, count) in dist.OrderByDescending(x => x.Value).Take(10))
+                    {
+                        sw.WriteLine($"  0x{val:X8} ({val,10}): {count,4} files");
+                    }
+                    if (dist.Count > 10)
+                        sw.WriteLine($"  ... {dist.Count - 10} more unique values");
+                }
+                
+                sw.WriteLine("\n\n=== Sample Headers (with chunk counts) ===");
+                sw.WriteLine("File                          | Unk00    Unk04    Unk08    Unk0C    | MPRL   MSLK");
+                sw.WriteLine("------------------------------|----------------------------------------|---------------");
+                foreach (var (file, h, mprl, mslk) in sampleHeaders)
+                {
+                    sw.WriteLine($"{file,-30}| {h.Unk00,8} {h.Unk04,8} {h.Unk08,8} {h.Unk0C,8} | {mprl,6} {mslk,6}");
+                }
+                
+                sw.WriteLine("\n\n=== Hypothesis ===");
+                sw.WriteLine("Look for:");
+                sw.WriteLine("  - Values that match chunk counts (MPRL, MSLK, MSUR)");
+                sw.WriteLine("  - Values that could be cumulative offsets");
+                sw.WriteLine("  - Values that correlate with tile coordinates");
+            }
+            
+            Console.WriteLine($"[INFO] MSHD Header Analysis: {mshdPath}");
+            
+            // Comprehensive relationship analysis
+            ExportComprehensiveRelationshipAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Comprehensive analysis of PM4 chunk relationships including CK24 decomposition.
+        /// Treats PM4 as a database with chunks as tables and indexes as foreign keys.
+        /// </summary>
+        private void ExportComprehensiveRelationshipAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "pm4_relationship_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // CK24 component analysis
+            var ck24Byte0 = new Dictionary<byte, int>(); // Low byte
+            var ck24Byte1 = new Dictionary<byte, int>(); // Mid byte  
+            var ck24Byte2 = new Dictionary<byte, int>(); // High byte
+            var ck24ByZ = new Dictionary<int, List<(uint CK24, float AvgZ)>>();
+            
+            // Index field ranges  
+            int maxMspiFirst = 0, maxMsviFirst = 0, maxRefIndex = 0;
+            var allMspiCounts = new List<byte>();
+            var allIndexCounts = new List<byte>();
+            
+            // Relationship samples
+            var mslkToMspv = new Dictionary<int, List<int>>(); // MSLK -> MSPV via MSPI
+            var msurToMsvt = new Dictionary<int, List<int>>(); // MSUR -> MSVT via MSVI
+            var sampleChains = new List<string>();
+            
+            foreach (var pm4Path in pm4Files.Take(20)) // Sample first 20 files
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    // CK24 decomposition
+                    foreach (var surf in pm4.Surfaces)
+                    {
+                        uint ck24 = surf.CK24;
+                        byte b0 = (byte)(ck24 & 0xFF);
+                        byte b1 = (byte)((ck24 >> 8) & 0xFF);
+                        byte b2 = (byte)((ck24 >> 16) & 0xFF);
+                        
+                        if (!ck24Byte0.ContainsKey(b0)) ck24Byte0[b0] = 0;
+                        if (!ck24Byte1.ContainsKey(b1)) ck24Byte1[b1] = 0;
+                        if (!ck24Byte2.ContainsKey(b2)) ck24Byte2[b2] = 0;
+                        ck24Byte0[b0]++;
+                        ck24Byte1[b1]++;
+                        ck24Byte2[b2]++;
+                    }
+                    
+                    // Track index ranges
+                    foreach (var mslk in pm4.LinkEntries)
+                    {
+                        if (mslk.MspiFirstIndex > maxMspiFirst) maxMspiFirst = mslk.MspiFirstIndex;
+                        if (mslk.RefIndex > maxRefIndex && mslk.RefIndex != 0xFFFF) maxRefIndex = mslk.RefIndex;
+                        allMspiCounts.Add(mslk.MspiIndexCount);
+                    }
+                    
+                    foreach (var surf in pm4.Surfaces)
+                    {
+                        if (surf.MsviFirstIndex > maxMsviFirst) maxMsviFirst = (int)surf.MsviFirstIndex;
+                        allIndexCounts.Add(surf.IndexCount);
+                    }
+                    
+                    // Sample a few relationship chains
+                    if (sampleChains.Count < 10 && pm4.LinkEntries.Count > 0 && pm4.PathIndices.Count > 0)
+                    {
+                        var mslk = pm4.LinkEntries[0];
+                        if (mslk.MspiFirstIndex >= 0 && mslk.MspiFirstIndex + mslk.MspiIndexCount <= pm4.PathIndices.Count)
+                        {
+                            var pathIndices = new List<uint>();
+                            for (int i = 0; i < mslk.MspiIndexCount; i++)
+                                pathIndices.Add(pm4.PathIndices[mslk.MspiFirstIndex + i]);
+                            
+                            sampleChains.Add($"{fileName} MSLK[0] -> MSPI[{mslk.MspiFirstIndex}:{mslk.MspiIndexCount}] -> paths:{string.Join(",", pathIndices.Take(5))}");
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+                sw.WriteLine("║        PM4 COMPREHENSIVE RELATIONSHIP ANALYSIS                 ║");
+                sw.WriteLine("║  Treating PM4 as a database with chunks as tables              ║");
+                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine();
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CHUNK RELATIONSHIP MAP (Database Schema)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+    ┌──────────────────────────────────────────────────────────────┐
+    │                      PM4 SCENE GRAPH                         │
+    └──────────────────────────────────────────────────────────────┘
+    
+    MSHD (Header)
+      │
+      ├─► MSLK[n] ──┬──► MSPI[first:count] ──► MSPV (Path vertices)
+      │   │         │     (navigation paths)
+      │   │         │
+      │   │         └──► RefIndex ──► MPRL? (position reference?)
+      │   │
+      │   ├── TypeFlags (object type: 1=walkable, 2=wall, etc.)
+      │   ├── Subtype (floor level 0-18)
+      │   ├── GroupObjectId (local grouping)
+      │   └── LinkId (cross-tile reference: 0x00FFXXYY)
+      │
+      ├─► MSUR[n] ──┬──► MSVI[first:count] ──► MSVT (Mesh vertices)
+      │   │         │     (renderable surfaces)
+      │   │         │
+      │   │         └──► CK24 (object grouping key from PackedParams)
+      │   │
+      │   ├── Normal (surface orientation)
+      │   ├── Height (Z level)
+      │   └── AttributeMask (bit7 = liquid?)
+      │
+      ├─► MPRL[n] (Position references)
+      │   ├── Position (X, Y, Z)
+      │   ├── Unk14 (floor level, -1 = command)
+      │   ├── Unk16 (0x3FFF = terminator)
+      │   └── Unk04 (NOT rotation - varies at same position)
+      │
+      ├─► MPRR[n] (Object boundaries)  
+      │   ├── Value1 (0xFFFF = SENTINEL)
+      │   └── Value2 (component type)
+      │
+      └─► MSCN[n] (Exterior vertices for collision hull)
+");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CK24 BYTE DECOMPOSITION (Testing Z-layer hypothesis)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CK24 = ((PackedParams >> 8) & 0xFFFFFF)");
+                sw.WriteLine("Decomposed: [Byte2][Byte1][Byte0]");
+                sw.WriteLine();
+                
+                sw.WriteLine("Byte 0 (Low byte) distribution:");
+                foreach (var (val, count) in ck24Byte0.OrderByDescending(x => x.Value).Take(15))
+                    sw.WriteLine($"  0x{val:X2}: {count,6}");
+                sw.WriteLine($"  Unique values: {ck24Byte0.Count}");
+                
+                sw.WriteLine("\nByte 1 (Mid byte) distribution:");
+                foreach (var (val, count) in ck24Byte1.OrderByDescending(x => x.Value).Take(15))
+                    sw.WriteLine($"  0x{val:X2}: {count,6}");
+                sw.WriteLine($"  Unique values: {ck24Byte1.Count}");
+                
+                sw.WriteLine("\nByte 2 (High byte) distribution:");
+                foreach (var (val, count) in ck24Byte2.OrderByDescending(x => x.Value).Take(15))
+                    sw.WriteLine($"  0x{val:X2}: {count,6}");
+                sw.WriteLine($"  Unique values: {ck24Byte2.Count}");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("INDEX FIELD ANALYSIS");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine($"MSLK.MspiFirstIndex max: {maxMspiFirst}");
+                sw.WriteLine($"MSLK.MspiIndexCount distribution: min={allMspiCounts.DefaultIfEmpty((byte)0).Min()}, max={allMspiCounts.DefaultIfEmpty((byte)0).Max()}, avg={allMspiCounts.Select(x => (double)x).DefaultIfEmpty(0).Average():F1}");
+                sw.WriteLine($"MSLK.RefIndex max (excl 0xFFFF): {maxRefIndex}");
+                sw.WriteLine($"MSUR.MsviFirstIndex max: {maxMsviFirst}");
+                sw.WriteLine($"MSUR.IndexCount distribution: min={allIndexCounts.DefaultIfEmpty((byte)0).Min()}, max={allIndexCounts.DefaultIfEmpty((byte)0).Max()}, avg={allIndexCounts.Select(x => (double)x).DefaultIfEmpty(0).Average():F1}");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("SAMPLE RELATIONSHIP CHAINS");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                foreach (var chain in sampleChains)
+                    sw.WriteLine($"  {chain}");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("UNKNOWN/UNMAPPED RELATIONSHIPS");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+  ❓ MSLK.RefIndex → What does it reference when > local MPRL count?
+     - NOT cross-tile via LinkId (0% resolution rate)
+     - NOT global cumulative index
+     - Could be: object definition ID? WMO file hash? External reference?
+  
+  ❓ MSLK.GroupObjectId → Relationship to CK24?
+     - No direct correlation found
+     - Could be: local scene graph node ID
+  
+  ❓ MPRR Value1/Value2 → What geometry do they reference?
+     - Value1=0xFFFF marks boundaries
+     - Value2 meaning unknown (component type?)
+  
+  ❓ MPRL.Unk04 → Multiple values at same position
+     - NOT rotation angle
+     - Could be: LOD level? Animation state? Event trigger?
+  
+  ❓ CK24 byte components → Z-layer separation?
+     - User hypothesis: different bytes = different Z levels
+     - Need to test: group surfaces by CK24 byte, check Z ranges
+  
+  ❓ MSHD fields → Index offsets into global data?
+     - Unk00, Unk04, Unk08 have non-zero values
+     - Could be: cumulative offsets, tile metadata, grid dimensions
+");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("NEXT INVESTIGATION TARGETS");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+  1. CK24 Z-Layer Test: Group surfaces by CK24 byte, compute Z ranges
+  2. MPRR-MSUR Correlation: Do MPRR entries count match MSUR surfaces?
+  3. GroupObjectId-MPRL: Test if GroupObjectId indexes into MPRL
+  4. RefIndex Pattern: Analyze RefIndex values as possible file hashes
+  5. MSHD Cumulative: Test if MSHD values are cumulative across tiles
+");
+            }
+            
+            Console.WriteLine($"[INFO] PM4 Relationship Analysis: {analysisPath}");
+            
+            // CK24 Z-layer correlation test
+            ExportCk24ZLayerAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Test if CK24 Byte2 (type flags) correlates with Z-levels.
+        /// Hypothesis: Different Byte2 values = different floor/height layers.
+        /// </summary>
+        private void ExportCk24ZLayerAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "ck24_z_layer_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Track Z ranges by CK24 Byte2
+            var zByByte2 = new Dictionary<byte, List<float>>();
+            // Track full CK24 with Z values
+            var ck24ZSamples = new Dictionary<uint, (float MinZ, float MaxZ, int Count)>();
+            // Track Byte0+Byte1 combinations for same Byte2
+            var lowByteCombos = new Dictionary<byte, HashSet<ushort>>();
+            
+            int totalSurfaces = 0;
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    // Get Z values from MSUR height/normal
+                    foreach (var surf in pm4.Surfaces)
+                    {
+                        uint ck24 = surf.CK24;
+                        byte b0 = (byte)(ck24 & 0xFF);
+                        byte b1 = (byte)((ck24 >> 8) & 0xFF);
+                        byte b2 = (byte)((ck24 >> 16) & 0xFF);
+                        ushort lowBytes = (ushort)(ck24 & 0xFFFF); // Byte0 + Byte1
+                        
+                        float z = surf.Height; // Height field as Z
+                        
+                        // Track Z by Byte2 type
+                        if (!zByByte2.ContainsKey(b2))
+                            zByByte2[b2] = new List<float>();
+                        zByByte2[b2].Add(z);
+                        
+                        // Track low byte combinations per Byte2
+                        if (!lowByteCombos.ContainsKey(b2))
+                            lowByteCombos[b2] = new HashSet<ushort>();
+                        lowByteCombos[b2].Add(lowBytes);
+                        
+                        // Track per-CK24 Z ranges
+                        if (!ck24ZSamples.ContainsKey(ck24))
+                            ck24ZSamples[ck24] = (z, z, 0);
+                        var (minZ, maxZ, count) = ck24ZSamples[ck24];
+                        ck24ZSamples[ck24] = (Math.Min(minZ, z), Math.Max(maxZ, z), count + 1);
+                        
+                        totalSurfaces++;
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+                sw.WriteLine("║         CK24 Z-LAYER CORRELATION ANALYSIS                      ║");
+                sw.WriteLine("║  Testing: Does Byte2 (type flag) correlate with Z height?     ║");
+                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine();
+                sw.WriteLine($"Total surfaces analyzed: {totalSurfaces:N0}");
+                sw.WriteLine();
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("Z RANGES BY BYTE2 (Type Flag)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("Byte2  |  Count   |   Min Z   |   Max Z   |  Z Range  | LowByte Combos");
+                sw.WriteLine("-------|----------|-----------|-----------|-----------|---------------");
+                
+                foreach (var (b2, zList) in zByByte2.OrderByDescending(x => x.Value.Count))
+                {
+                    if (zList.Count == 0) continue;
+                    float minZ = zList.Min();
+                    float maxZ = zList.Max();
+                    float range = maxZ - minZ;
+                    int combos = lowByteCombos.GetValueOrDefault(b2, new HashSet<ushort>()).Count;
+                    
+                    sw.WriteLine($"0x{b2:X2}   | {zList.Count,8} | {minZ,9:F1} | {maxZ,9:F1} | {range,9:F1} | {combos,5}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("INTERPRETATION");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+If Z ranges for different Byte2 values are NON-OVERLAPPING:
+  → Byte2 encodes FLOOR/LAYER index (Z-layer hypothesis CONFIRMED)
+  
+If Z ranges for different Byte2 values OVERLAP significantly:
+  → Byte2 encodes OBJECT TYPE (geometry classification flag)
+  → Byte0+Byte1 = object instance identifier
+");
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("TOP CK24 VALUES BY SURFACE COUNT");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CK24       | Count | Min Z   | Max Z   | Z Span | Byte2 | Byte1 | Byte0");
+                sw.WriteLine("-----------|-------|---------|---------|--------|-------|-------|------");
+                
+                foreach (var (ck24, stats) in ck24ZSamples.OrderByDescending(x => x.Value.Count).Take(30))
+                {
+                    byte b0 = (byte)(ck24 & 0xFF);
+                    byte b1 = (byte)((ck24 >> 8) & 0xFF);
+                    byte b2 = (byte)((ck24 >> 16) & 0xFF);
+                    float span = stats.MaxZ - stats.MinZ;
+                    
+                    sw.WriteLine($"0x{ck24:X6} | {stats.Count,5} | {stats.MinZ,7:F1} | {stats.MaxZ,7:F1} | {span,6:F1} | 0x{b2:X2}  | 0x{b1:X2}  | 0x{b0:X2}");
+                }
+                
+                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("KEY QUESTIONS ANSWERED");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                // Calculate overlap
+                var byte2Ranges = zByByte2.Where(x => x.Value.Count > 100)
+                    .ToDictionary(x => x.Key, x => (Min: x.Value.Min(), Max: x.Value.Max()));
+                
+                bool hasSignificantOverlap = false;
+                var overlaps = new List<string>();
+                
+                var sortedTypes = byte2Ranges.OrderBy(x => x.Value.Min).ToList();
+                for (int i = 0; i < sortedTypes.Count - 1; i++)
+                {
+                    for (int j = i + 1; j < sortedTypes.Count; j++)
+                    {
+                        var a = sortedTypes[i];
+                        var b = sortedTypes[j];
+                        // Check overlap
+                        if (a.Value.Max > b.Value.Min && b.Value.Max > a.Value.Min)
+                        {
+                            float overlap = Math.Min(a.Value.Max, b.Value.Max) - Math.Max(a.Value.Min, b.Value.Min);
+                            if (overlap > 10) // Significant overlap (> 10 units)
+                            {
+                                hasSignificantOverlap = true;
+                                overlaps.Add($"0x{a.Key:X2} ↔ 0x{b.Key:X2}: {overlap:F1} units overlap");
+                            }
+                        }
+                    }
+                }
+                
+                if (hasSignificantOverlap)
+                {
+                    sw.WriteLine("❌ Z-Layer Hypothesis: REJECTED (significant overlaps found)");
+                    sw.WriteLine("   Byte2 appears to encode OBJECT TYPE, not floor level.");
+                    sw.WriteLine("\n   Overlapping types:");
+                    foreach (var o in overlaps.Take(10))
+                        sw.WriteLine($"     {o}");
+                }
+                else
+                {
+                    sw.WriteLine("✓ Z-Layer Hypothesis: POSSIBLE (no significant overlaps)");
+                    sw.WriteLine("   Byte2 may encode floor/layer index!");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] CK24 Z-Layer Analysis: {analysisPath}");
+            
+            // CK24 ObjectID grouping analysis
+            ExportCk24ObjectIdAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Test if CK24 Byte0+Byte1 (ObjectID) can identify distinct geometry groups.
+        /// Hypothesis: Same ObjectID = same building/object with compact bounding box.
+        /// </summary>
+        private void ExportCk24ObjectIdAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "ck24_objectid_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Track per-ObjectID (Byte0+Byte1) geometry stats
+            // Key: (Byte2, ObjectID) to keep type+id separate
+            var objectGroups = new Dictionary<(byte Type, ushort ObjectId), ObjectStats>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    foreach (var surf in pm4.Surfaces)
+                    {
+                        uint ck24 = surf.CK24;
+                        byte b2 = (byte)((ck24 >> 16) & 0xFF);  // Type
+                        ushort objId = (ushort)(ck24 & 0xFFFF); // ObjectId
+                        
+                        var key = (b2, objId);
+                        if (!objectGroups.ContainsKey(key))
+                            objectGroups[key] = new ObjectStats();
+                        
+                        var stats = objectGroups[key];
+                        stats.SurfaceCount++;
+                        stats.IndexCount += surf.IndexCount;
+                        
+                        // Track bounding box from height
+                        float z = surf.Height;
+                        if (stats.MinZ > z) stats.MinZ = z;
+                        if (stats.MaxZ < z) stats.MaxZ = z;
+                        
+                        // Track file distribution
+                        if (!stats.Files.Contains(fileName))
+                            stats.Files.Add(fileName);
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+                sw.WriteLine("║       CK24 OBJECTID GROUPING ANALYSIS                          ║");
+                sw.WriteLine("║  Testing: Does Byte0+Byte1 identify distinct objects?          ║");
+                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine();
+                sw.WriteLine($"Total object groups (Type+ObjectID): {objectGroups.Count:N0}");
+                sw.WriteLine();
+                
+                // Group by type
+                var byType = objectGroups.GroupBy(x => x.Key.Type)
+                    .OrderByDescending(g => g.Sum(x => x.Value.SurfaceCount));
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("SUMMARY BY TYPE (Byte2)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("Type   | Objects | Total Surfs | Avg Surfs/Obj | Multi-File Objs");
+                sw.WriteLine("-------|---------|-------------|---------------|----------------");
+                
+                foreach (var typeGroup in byType)
+                {
+                    int objCount = typeGroup.Count();
+                    int totalSurfs = typeGroup.Sum(x => x.Value.SurfaceCount);
+                    float avgSurfs = objCount > 0 ? (float)totalSurfs / objCount : 0;
+                    int multiFile = typeGroup.Count(x => x.Value.Files.Count > 1);
+                    
+                    sw.WriteLine($"0x{typeGroup.Key:X2}   | {objCount,7} | {totalSurfs,11} | {avgSurfs,13:F1} | {multiFile,14}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("OBJECT SIZE DISTRIBUTION");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                var sizeGroups = objectGroups.Values
+                    .GroupBy(o => o.SurfaceCount switch { < 10 => "1-9", < 50 => "10-49", < 100 => "50-99", < 500 => "100-499", _ => "500+" })
+                    .OrderBy(g => g.Key);
+                
+                foreach (var sg in sizeGroups)
+                {
+                    sw.WriteLine($"  {sg.Key} surfaces: {sg.Count()} objects");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("TOP 30 LARGEST OBJECTS (by surface count)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("Type+ObjID  | Surfaces | Indices | Z Span   | Files | Could be");
+                sw.WriteLine("------------|----------|---------|----------|-------|----------");
+                
+                foreach (var (key, stats) in objectGroups.OrderByDescending(x => x.Value.SurfaceCount).Take(30))
+                {
+                    float zSpan = stats.MaxZ - stats.MinZ;
+                    string guess = GuessObjectType(key.Type, stats);
+                    sw.WriteLine($"0x{key.Type:X2}:{key.ObjectId:X4}  | {stats.SurfaceCount,8} | {stats.IndexCount,7} | {zSpan,8:F0} | {stats.Files.Count,5} | {guess}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CROSS-TILE OBJECTS (span multiple files)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                var crossTile = objectGroups.Where(x => x.Value.Files.Count > 1)
+                    .OrderByDescending(x => x.Value.Files.Count).Take(15);
+                
+                foreach (var (key, stats) in crossTile)
+                {
+                    sw.WriteLine($"  0x{key.Type:X2}:{key.ObjectId:X4}: {stats.SurfaceCount} surfaces across {stats.Files.Count} tiles");
+                    sw.WriteLine($"    Files: {string.Join(", ", stats.Files.Take(5))}{(stats.Files.Count > 5 ? "..." : "")}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("INTERPRETATION");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+CK24 Structure (CONFIRMED):
+  ┌────────────────────────────────────────┐
+  │ Byte2  │  Byte1  │  Byte0             │
+  │ (Type) │  (ObjectID high)  (low)      │
+  └────────────────────────────────────────┘
+
+Type flags (Byte2):
+  - 0x40 bit = has pathfinding mesh
+  - 0x80 bit = exterior/outdoor
+  - 0x00 = terrain/default (no object ID)
+
+ObjectID (Byte0+Byte1):
+  - 16-bit identifier for unique object
+  - Same ID across tiles = same building spanning tiles
+  - Use with Type for unique key
+");
+            }
+            
+            Console.WriteLine($"[INFO] CK24 ObjectID Analysis: {analysisPath}");
+            
+            // RefIndex alternative hypothesis analysis
+            ExportRefIndexAlternativeAnalysis(pm4Directory, outputDir);
+        }
+        
+        private string GuessObjectType(byte type, ObjectStats stats)
+        {
+            if (type == 0x00) return "terrain";
+            if (stats.Files.Count > 10) return "large building";
+            if (stats.SurfaceCount > 1000) return "major structure";
+            if (stats.SurfaceCount > 100) return "building";
+            if ((type & 0x80) != 0) return "exterior obj";
+            return "interior obj";
+        }
+        
+        private class ObjectStats
+        {
+            public int SurfaceCount;
+            public int IndexCount;
+            public float MinZ = float.MaxValue;
+            public float MaxZ = float.MinValue;
+            public List<string> Files = new List<string>();
+        }
+        
+        /// <summary>
+        /// Test alternative hypotheses for what MSLK.RefIndex references.
+        /// </summary>
+        private void ExportRefIndexAlternativeAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "refindex_alternative_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Hypothesis tracking
+            int refMatchesMsur = 0, refMatchesMsvt = 0, refMatchesMsvi = 0;
+            int refMatchesGroupId = 0, refInvalidButPatternedCount = 0;
+            int totalInvalid = 0, totalValid = 0;
+            
+            // Track RefIndex value patterns
+            var refIndexBitPatterns = new Dictionary<string, int>();
+            var refIndexByHighByte = new Dictionary<byte, int>();
+            var samplePatterns = new List<(string File, int MslkIdx, MslkEntry Mslk, int LocalMprl, int Msur, int Msvt)>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    var fileName = Path.GetFileName(pm4Path);
+                    
+                    int mprlCount = pm4.PositionRefs.Count;
+                    int msurCount = pm4.Surfaces.Count;
+                    int msvtCount = pm4.MeshVertices.Count;
+                    int msviCount = pm4.MeshIndices.Count;
+                    
+                    for (int i = 0; i < pm4.LinkEntries.Count; i++)
+                    {
+                        var mslk = pm4.LinkEntries[i];
+                        ushort refIdx = mslk.RefIndex;
+                        
+                        if (refIdx == 0xFFFF) continue; // Skip sentinel
+                        
+                        // Valid local MPRL?
+                        if (refIdx < mprlCount)
+                        {
+                            totalValid++;
+                        }
+                        else
+                        {
+                            totalInvalid++;
+                            
+                            // Test alternative targets
+                            if (refIdx < msurCount) refMatchesMsur++;
+                            if (refIdx < msvtCount) refMatchesMsvt++;
+                            if (refIdx < msviCount) refMatchesMsvi++;
+                            
+                            // Does it match GroupObjectId?
+                            if (refIdx == (ushort)(mslk.GroupObjectId & 0xFFFF)) refMatchesGroupId++;
+                            
+                            // Analyze bit patterns
+                            byte highByte = (byte)((refIdx >> 8) & 0xFF);
+                            if (!refIndexByHighByte.ContainsKey(highByte))
+                                refIndexByHighByte[highByte] = 0;
+                            refIndexByHighByte[highByte]++;
+                            
+                            // Sample for analysis
+                            if (samplePatterns.Count < 20)
+                            {
+                                samplePatterns.Add((fileName, i, mslk, mprlCount, msurCount, msvtCount));
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+                sw.WriteLine("║       REFINDEX ALTERNATIVE HYPOTHESIS ANALYSIS                 ║");
+                sw.WriteLine("║  What does RefIndex reference when > local MPRL count?         ║");
+                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine();
+                sw.WriteLine($"Valid (< MPRL count): {totalValid:N0}");
+                sw.WriteLine($"Invalid (>= MPRL count): {totalInvalid:N0}");
+                sw.WriteLine();
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("ALTERNATIVE TARGET TESTS");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine($"  RefIndex < MSUR count: {refMatchesMsur:N0} ({100.0 * refMatchesMsur / Math.Max(1, totalInvalid):F1}%)");
+                sw.WriteLine($"  RefIndex < MSVT count: {refMatchesMsvt:N0} ({100.0 * refMatchesMsvt / Math.Max(1, totalInvalid):F1}%)");
+                sw.WriteLine($"  RefIndex < MSVI count: {refMatchesMsvi:N0} ({100.0 * refMatchesMsvi / Math.Max(1, totalInvalid):F1}%)");
+                sw.WriteLine($"  RefIndex == GroupObjectId low word: {refMatchesGroupId:N0} ({100.0 * refMatchesGroupId / Math.Max(1, totalInvalid):F1}%)");
+                sw.WriteLine();
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("REFINDEX HIGH BYTE DISTRIBUTION (for invalid refs)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("High Byte | Count    | Could mean");
+                sw.WriteLine("----------|----------|-------------------------------------------");
+                
+                foreach (var (hb, count) in refIndexByHighByte.OrderByDescending(x => x.Value).Take(15))
+                {
+                    string interpretation = hb switch
+                    {
+                        0x00 => "low values (10xx - 40xx range)",
+                        0x01 => "values 256-511",
+                        0x02 => "values 512-767",
+                        0x0F => "values 3840-4095",
+                        0x10 => "values 4096-4351",
+                        >= 0x80 => "high bit set - could be flag",
+                        _ => ""
+                    };
+                    sw.WriteLine($"0x{hb:X2}      | {count,8} | {interpretation}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("SAMPLE INVALID REFINDEX WITH CONTEXT");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                foreach (var (file, idx, mslk, mprl, msur, msvt) in samplePatterns)
+                {
+                    sw.WriteLine($"  {file} MSLK[{idx}]:");
+                    sw.WriteLine($"    RefIdx={mslk.RefIndex} (0x{mslk.RefIndex:X4})");
+                    sw.WriteLine($"    Local counts: MPRL={mprl}, MSUR={msur}, MSVT={msvt}");
+                    sw.WriteLine($"    GroupObjId=0x{mslk.GroupObjectId:X8} Type={mslk.TypeFlags} Subtype={mslk.Subtype}");
+                    sw.WriteLine();
+                }
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("HYPOTHESES");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine(@"
+1. RefIndex is a GLOBAL index:
+   - Into a master MPRL table combining all tiles
+   - Requires knowing tile ordering/offsets
+
+2. RefIndex is a PACKED value:
+   - High byte = type/flag, Low byte = index
+   - Or: X/Y grid coordinate packed
+
+3. RefIndex references DIFFERENT chunk:
+   - Test: does it fit MSUR, MSVT, MSVI counts?
+
+4. RefIndex is EXTERNAL reference:
+   - Points to WMO internal data
+   - Or: PD4 file reference
+
+5. RefIndex has SPECIAL meaning for certain TypeFlags:
+   - Maybe only valid for certain MSLK types
+");
+            }
+            
+            Console.WriteLine($"[INFO] RefIndex Alternative Analysis: {analysisPath}");
         }
         
         /// <summary>
@@ -1260,10 +2470,10 @@ namespace WoWRollback.PM4Module
                     }
                     
                     // MPRR statistics
-                    if (pm4.MprrData.Count > 0)
+                    if (pm4.MprrEntries.Count > 0)
                     {
-                        int sequences = pm4.MprrData.Count(v => v == 0xFFFF);
-                        mprrStats.Add((Path.GetFileName(pm4Path), pm4.MprrData.Count, sequences));
+                        int sentinels = pm4.MprrEntries.Count(e => e.IsSentinel);
+                        mprrStats.Add((Path.GetFileName(pm4Path), pm4.MprrEntries.Count, sentinels));
                     }
                 }
                 catch { /* ignore */ }
@@ -1317,19 +2527,20 @@ namespace WoWRollback.PM4Module
         }
         
         /// <summary>
-        /// Deep analysis of MPRR sequences to understand reference patterns.
-        /// MPRR is 67MB of data organized into 0xFFFF-terminated sequences.
+        /// Deep analysis of MPRR entries to understand object grouping.
+        /// MPRR entries are 4-byte (Value1, Value2) pairs where Value1=0xFFFF marks object boundaries.
         /// </summary>
         private void ExportMprrAnalysis(string pm4Directory, string outputDir)
         {
             var mprrAnalysisPath = Path.Combine(outputDir, "mprr_deep_analysis.txt");
             
-            // Track sequence patterns
-            var sequenceLengths = new Dictionary<int, int>();
-            var valueDistribution = new Dictionary<ushort, int>();
-            var sampleSequences = new List<(string File, int SeqIdx, List<ushort> Values)>();
-            int totalSequences = 0;
-            int maxValueSeen = 0;
+            // Track patterns
+            var value1Distribution = new Dictionary<ushort, int>();
+            var value2Distribution = new Dictionary<ushort, int>();
+            var objectSizes = new List<int>();  // Entries per object (between sentinels)
+            var sampleObjects = new List<(string File, int ObjIdx, List<MprrEntry> Entries)>();
+            int totalSentinels = 0;
+            int totalEntries = 0;
             
             var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
             
@@ -1340,49 +2551,47 @@ namespace WoWRollback.PM4Module
                     var pm4Data = File.ReadAllBytes(pm4Path);
                     var pm4 = new PM4File(pm4Data);
                     
-                    if (pm4.MprrData.Count == 0) continue;
+                    if (pm4.MprrEntries.Count == 0) continue;
+                    totalEntries += pm4.MprrEntries.Count;
                     
-                    // Parse sequences (terminated by 0xFFFF)
-                    var currentSeq = new List<ushort>();
-                    int seqIdx = 0;
-                    
-                    foreach (var val in pm4.MprrData)
+                    // Track value distributions
+                    foreach (var entry in pm4.MprrEntries)
                     {
-                        if (val == 0xFFFF)
+                        if (!value1Distribution.ContainsKey(entry.Value1))
+                            value1Distribution[entry.Value1] = 0;
+                        value1Distribution[entry.Value1]++;
+                        
+                        if (!value2Distribution.ContainsKey(entry.Value2))
+                            value2Distribution[entry.Value2] = 0;
+                        value2Distribution[entry.Value2]++;
+                    }
+                    
+                    // Parse objects (separated by sentinels where Value1=0xFFFF)
+                    var currentObject = new List<MprrEntry>();
+                    int objIdx = 0;
+                    
+                    foreach (var entry in pm4.MprrEntries)
+                    {
+                        if (entry.IsSentinel)
                         {
-                            // End of sequence
-                            if (currentSeq.Count > 0)
+                            // Sentinel marks object boundary
+                            if (currentObject.Count > 0)
                             {
-                                int len = currentSeq.Count;
-                                if (!sequenceLengths.ContainsKey(len))
-                                    sequenceLengths[len] = 0;
-                                sequenceLengths[len]++;
+                                objectSizes.Add(currentObject.Count);
                                 
-                                // Sample first few sequences from each file
-                                if (sampleSequences.Count < 100 && seqIdx < 5)
+                                // Sample first few objects
+                                if (sampleObjects.Count < 50 && objIdx < 3)
                                 {
-                                    sampleSequences.Add((Path.GetFileName(pm4Path), seqIdx, new List<ushort>(currentSeq)));
+                                    sampleObjects.Add((Path.GetFileName(pm4Path), objIdx, new List<MprrEntry>(currentObject)));
                                 }
-                                
-                                totalSequences++;
-                                seqIdx++;
+                                objIdx++;
                             }
-                            currentSeq.Clear();
+                            totalSentinels++;
+                            currentObject.Clear();
                         }
                         else
                         {
-                            currentSeq.Add(val);
-                            
-                            // Track value distribution (sample for large files)
-                            if (totalSequences < 10000 || currentSeq.Count < 20)
-                            {
-                                if (!valueDistribution.ContainsKey(val))
-                                    valueDistribution[val] = 0;
-                                valueDistribution[val]++;
-                            }
-                            
-                            if (val > maxValueSeen && val < 0xFFFF)
-                                maxValueSeen = val;
+                            currentObject.Add(entry);
                         }
                     }
                 }
@@ -1391,54 +2600,70 @@ namespace WoWRollback.PM4Module
             
             using (var sw = new StreamWriter(mprrAnalysisPath))
             {
-                sw.WriteLine("=== MPRR Deep Analysis ===");
-                sw.WriteLine($"Total sequences: {totalSequences:N0}");
-                sw.WriteLine($"Max value seen (excl 0xFFFF): {maxValueSeen} (0x{maxValueSeen:X4})");
+                sw.WriteLine("=== MPRR Deep Analysis (CORRECTED) ===");
+                sw.WriteLine($"Total entries: {totalEntries:N0}");
+                sw.WriteLine($"Total sentinels (object boundaries): {totalSentinels:N0}");
+                sw.WriteLine($"Estimated objects: {objectSizes.Count:N0}");
                 sw.WriteLine();
                 
-                sw.WriteLine("=== Sequence Length Distribution ===");
-                foreach (var (len, count) in sequenceLengths.OrderBy(x => x.Key).Take(50))
-                {
-                    var pct = 100.0 * count / totalSequences;
-                    sw.WriteLine($"  Length {len,3}: {count,7} sequences ({pct:F2}%)");
-                }
-                
-                if (sequenceLengths.Count > 50)
-                    sw.WriteLine($"  ... and {sequenceLengths.Count - 50} more length values");
-                
+                sw.WriteLine("=== Structure ===");
+                sw.WriteLine("Each MPRR entry is 4 bytes: (ushort Value1, ushort Value2)");
+                sw.WriteLine("Value1=0xFFFF (65535) = SENTINEL marking object boundary");
+                sw.WriteLine("Between sentinels = entries for one object");
                 sw.WriteLine();
-                sw.WriteLine("=== Value Frequency (top 30) ===");
-                foreach (var (val, count) in valueDistribution.OrderByDescending(x => x.Value).Take(30))
-                {
-                    sw.WriteLine($"  Value {val,5} (0x{val:X4}): {count,7} occurrences");
-                }
                 
-                sw.WriteLine();
-                sw.WriteLine("=== Sample Sequences ===");
-                foreach (var (file, seqIdx, values) in sampleSequences.Take(30))
+                sw.WriteLine("=== Object Size Distribution ===");
+                if (objectSizes.Count > 0)
                 {
-                    var valStr = string.Join(", ", values.Take(15).Select(v => v.ToString()));
-                    if (values.Count > 15) valStr += $", ... ({values.Count} total)";
-                    sw.WriteLine($"  {file} seq[{seqIdx}]: [{valStr}]");
+                    sw.WriteLine($"  Min entries/object: {objectSizes.Min()}");
+                    sw.WriteLine($"  Max entries/object: {objectSizes.Max()}");
+                    sw.WriteLine($"  Avg entries/object: {objectSizes.Average():F1}");
+                    
+                    var sizeGroups = objectSizes.GroupBy(s => s / 10 * 10)
+                        .OrderBy(g => g.Key).Take(20);
+                    sw.WriteLine("  Size distribution (by 10s):");
+                    foreach (var g in sizeGroups)
+                        sw.WriteLine($"    {g.Key,4}-{g.Key + 9,4}: {g.Count(),6} objects");
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("=== Hypothesis ===");
-                sw.WriteLine("MPRR sequences might be:");
-                sw.WriteLine("  - MPRL index references (if max val < MPRL count)");
-                sw.WriteLine("  - MSLK index references (if max val < MSLK count)");
-                sw.WriteLine("  - MSUR surface references (if max val < MSUR count)");
-                sw.WriteLine("  - Vertex/edge connectivity");
+                sw.WriteLine("=== Value1 Frequency (top 20) ===");
+                foreach (var (val, count) in value1Distribution.OrderByDescending(x => x.Value).Take(20))
+                {
+                    var marker = val == 0xFFFF ? " ← SENTINEL" : "";
+                    sw.WriteLine($"  {val,5} (0x{val:X4}): {count,8} entries{marker}");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Value2 Frequency (top 20) ===");
+                foreach (var (val, count) in value2Distribution.OrderByDescending(x => x.Value).Take(20))
+                {
+                    sw.WriteLine($"  {val,5} (0x{val:X4}): {count,8} entries");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Sample Objects ===");
+                foreach (var (file, objI, entries) in sampleObjects.Take(15))
+                {
+                    var entryStr = string.Join(", ", entries.Take(8).Select(e => $"({e.Value1},{e.Value2})"));
+                    if (entries.Count > 8) entryStr += $" ... ({entries.Count} total)";
+                    sw.WriteLine($"  {file} obj[{objI}]: [{entryStr}]");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Key Discovery ===");
+                sw.WriteLine("MPRR contains object boundaries using sentinel values (Value1=65535).");
+                sw.WriteLine("This is the most effective method for grouping PM4 geometry into buildings.");
             }
             
             Console.WriteLine($"[INFO] MPRR Deep Analysis: {mprrAnalysisPath}");
-            Console.WriteLine($"[INFO] MPRR sequences: {totalSequences:N0}, max value: {maxValueSeen}");
+            Console.WriteLine($"[INFO] MPRR: {totalEntries:N0} entries, {totalSentinels:N0} sentinels (objects)");
             
             // Per-file correlation with chunk counts
             var correlationPath = Path.Combine(outputDir, "mprr_correlation.csv");
             using (var sw = new StreamWriter(correlationPath))
             {
-                sw.WriteLine("file,mprl_count,mslk_count,msur_count,mprr_count,mprr_max,mprr_in_mprl,mprr_in_mslk,mprr_in_msur,mprr_seq_count");
+                sw.WriteLine("file,mprl_count,mslk_count,msur_count,mprr_count,sentinel_count,max_value1,max_value2");
                 
                 foreach (var pm4Path in pm4Files)
                 {
@@ -1447,29 +2672,21 @@ namespace WoWRollback.PM4Module
                         var pm4Data = File.ReadAllBytes(pm4Path);
                         var pm4 = new PM4File(pm4Data);
                         
-                        if (pm4.MprrData.Count == 0) continue;
+                        if (pm4.MprrEntries.Count == 0) continue;
                         
                         int mprlCount = pm4.PositionRefs.Count;
                         int mslkCount = pm4.LinkEntries.Count;
                         int msurCount = pm4.Surfaces.Count;
                         
-                        // Find max MPRR value (excluding 0xFFFF)
-                        ushort mprrMax = pm4.MprrData.Where(v => v < 0xFFFF).DefaultIfEmpty((ushort)0).Max();
-                        
-                        // Count sequences
-                        int seqCount = pm4.MprrData.Count(v => v == 0xFFFF);
-                        
-                        // Check if max fits within each chunk
-                        bool inMprl = mprrMax < mprlCount;
-                        bool inMslk = mprrMax < mslkCount;
-                        bool inMsur = mprrMax < msurCount;
+                        int sentinels = pm4.MprrEntries.Count(e => e.IsSentinel);
+                        ushort maxV1 = pm4.MprrEntries.Where(e => !e.IsSentinel).Select(e => e.Value1).DefaultIfEmpty((ushort)0).Max();
+                        ushort maxV2 = pm4.MprrEntries.Select(e => e.Value2).DefaultIfEmpty((ushort)0).Max();
                         
                         sw.WriteLine(string.Join(",",
                             Path.GetFileName(pm4Path),
                             mprlCount, mslkCount, msurCount,
-                            pm4.MprrData.Count, mprrMax,
-                            inMprl, inMslk, inMsur,
-                            seqCount));
+                            pm4.MprrEntries.Count, sentinels,
+                            maxV1, maxV2));
                     }
                     catch { /* ignore */ }
                 }

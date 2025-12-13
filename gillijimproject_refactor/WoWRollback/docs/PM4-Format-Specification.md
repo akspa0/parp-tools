@@ -42,23 +42,57 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 
 ---
 
-## CK24 - Object Grouping Key
+## CK24 - Object Grouping Key (CONFIRMED)
 
 > [!IMPORTANT]
-> CK24 is the primary key for grouping surfaces into objects.
+> CK24 is the primary key for grouping surfaces into WMO objects.
 
 **Source:** `MSUR.PackedParams`
 ```csharp
 public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 ```
 
-**Properties:**
-- 24-bit value extracted from MSUR's 32-bit PackedParams
-- Groups all surfaces belonging to one **object instance**
-- CK24=0 typically means terrain/non-object surfaces
-- **NOT directly in MSLK** - MSLK references geometry via MSPI
+### Byte Structure (Confirmed December 2024)
+```
+┌────────────────────────────────────────┐
+│ Byte2  │  Byte1  │  Byte0             │
+│ (Type) │  (ObjectID high + low)       │
+└────────────────────────────────────────┘
+```
 
-**Known issue:** CK24 groups sometimes contain **multiple merged objects**. Sub-object segmentation remains unsolved.
+**Type Flags (Byte2):**
+| Bit | Mask | Meaning |
+|-----|------|---------|
+| 6 | 0x40 | Has pathfinding mesh (WMO interior) |
+| 7 | 0x80 | Exterior/outdoor object |
+| 0 | 0x00 | **M2/doodad geometry** (NOT WMO) |
+
+**Common Type Values:**
+| Type | Count | Interpretation |
+|------|-------|----------------|
+| 0x00 | 186K | M2/doodads (terrain props, all in one group) |
+| 0x42 | 112K | WMO interior with pathfinding |
+| 0x43 | 108K | WMO interior type 2 |
+| 0x41 | 32K | WMO interior type 1 |
+| 0xC0 | 26K | Exterior WMO |
+| 0xC1 | 16K | Exterior WMO type 2 |
+
+**ObjectID (Byte0+Byte1):**
+- 16-bit unique identifier for WMO instance
+- Same ObjectID across tiles = same building spanning tiles
+- Use `(Type, ObjectID)` as composite key for unique objects
+
+### Real-World Examples
+| CK24 | Surfaces | Tiles | Identified As |
+|------|----------|-------|---------------|
+| `0x42CBEA` | 33,587 | 8 | **StormwindHarbor.wmo** |
+| `0x432D68` | 29,084 | 1 | Large structure |
+| `0x43A8BC` | 6,401 | 8 | Multi-tile building |
+| `0x000000` | 186,060 | 291 | M2 props (non-WMO) |
+
+### Key Finding: CK24=0 is M2, not WMO
+CK24=0x000000 contains M2/doodad geometry that spans multiple objects. For WMO matching, **filter to CK24 != 0**.
+
 
 ---
 
@@ -165,6 +199,43 @@ struct MSUREntry {
 ```
 
 ---
+## MPRR Chunk (4 bytes/entry)
+
+Object boundary and grouping data. **67MB of data** across 616 files.
+
+> [!IMPORTANT]
+> Found in old parpToolbox code: MPRR contains **object boundaries**!
+
+```c
+struct MPRREntry {
+    uint16_t value1;  // 0xFFFF = SENTINEL (object boundary)
+    uint16_t value2;  // Component type linking to MPRL/geometry
+};
+```
+
+### Key Discovery
+```
+Value1 = 0xFFFF (65535) → SENTINEL marking object boundary
+Between sentinels = entries for one complete object
+```
+
+**From parpToolbox comments:**
+> "MPRR contains the true object boundaries using sentinel values (Value1=65535) that separate geometry into complete building objects. This is the most effective method for grouping PM4 geometry into coherent building-scale objects."
+
+### Object Grouping
+- ~15,000+ sentinel markers per development map
+- Each object between sentinels = complete building (38K-654K triangles)
+- Value2 after sentinel identifies component type
+
+### Value Statistics
+| Field | Most Common Values |
+|-------|-------------------|
+| Value1 | 0xFFFF (sentinel), 0, 768, 1280 |
+| Value2 | 0, 768, 1280, 4352 |
+
+This is **NOT** the same as CK24 grouping! MPRR provides **building-scale** objects while CK24 provides **surface-scale** groups.
+
+---
 
 ## Chunk Relationships
 
@@ -229,11 +300,29 @@ var translation = pm4Center - (wmoCenter * scale);
 | Item | Status | Notes |
 |------|--------|-------|
 | Rotation source | **UNSOLVED** | Not in MPRL.unk04 |
-| CK24 sub-segmentation | **UNSOLVED** | Merged objects issue |
+| ~~CK24 sub-segmentation~~ | **SOLVED** | Byte2=Type, Byte0+1=ObjectID |
 | MSLK TypeFlags meaning | Hypothesis | Type 1/2 = main, others special |
 | MSLK Subtype meaning | Hypothesis | Floor/level within building |
 | MPRL unk04 purpose | **NOT rotation** | Index or ID, varies on commands |
+| MSLK RefIndex (67% invalid) | **UNSOLVED** | Not cross-tile via LinkId |
 | MH2O serialization | Broken | SMLiquidInstance format wrong |
+
+---
+
+## Analysis Outputs
+
+The pipeline generates these analysis files in `modf_csv/`:
+
+| File | Purpose |
+|------|---------|
+| `pm4_relationship_analysis.txt` | Scene graph diagram and relationship map |
+| `ck24_z_layer_analysis.txt` | CK24 Byte2 Z-correlation test |
+| `ck24_objectid_analysis.txt` | CK24 ObjectID grouping with cross-tile objects |
+| `cross_chunk_correlation.txt` | MSLK→MPRL link validation |
+| `refindex_invalid_analysis.txt` | Invalid RefIndex categorization |
+| `mshd_header_analysis.txt` | MSHD field distributions |
+| `mprr_deep_analysis.txt` | MPRR sentinel/object boundary analysis |
+| `mprl_flag_analysis.txt` | MPRL Unk14/Unk16 distributions |
 
 ---
 
@@ -241,3 +330,4 @@ var translation = pm4Center - (wmoCenter * scale);
 
 - [wowdev.wiki/ADT#MODF_chunk](https://wowdev.wiki/ADT#MODF_chunk)
 - [wowdev.wiki/PM4](https://wowdev.wiki/PM4)
+
