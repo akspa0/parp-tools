@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
   </ItemGroup>
   
   <ItemGroup>

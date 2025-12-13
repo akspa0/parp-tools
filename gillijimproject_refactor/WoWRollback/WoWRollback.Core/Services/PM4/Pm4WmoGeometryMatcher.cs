@@ -292,14 +292,17 @@ public sealed class Pm4WmoGeometryMatcher
             Console.WriteLine($"\nEstimated scale: {scale:F4}");
         }
 
-        // QUICK WIN: Zero all rotation until matching is properly calibrated
-        // Many WMOs are axis-aligned, so this gets them sitting on ground correctly
-        // TODO: Implement proper footprint-based heading detection
+        // ROTATION: Zero for now - heading calculation was producing wrong orientations
+        // TODO: Investigate why principal axis rotation doesn't match MODF rotation format
         var eulerDegrees = new Vector3(0, 0, 0);
-        Console.WriteLine($"Estimated rotation: ({eulerDegrees.X:F1}°, {eulerDegrees.Y:F1}°, {eulerDegrees.Z:F1}°) [ZEROED FOR NOW]");
+        Console.WriteLine($"Estimated rotation: ({eulerDegrees.X:F1}°, {eulerDegrees.Y:F1}°, {eulerDegrees.Z:F1}°) [ZEROED]");
 
-        // Compute translation without rotation
-        var translation = pm4Stats.Centroid - (wmoStats.Centroid * scale);
+        // Compute translation using bounding box centers
+        // BB center is more accurate than vertex centroid because WMO origin is typically
+        // near the geometric center of the bounding box, not the average of walkable vertices
+        var pm4BoundsCenter = (pm4Stats.BoundsMin + pm4Stats.BoundsMax) / 2;
+        var wmoBoundsCenter = (wmoStats.BoundsMin + wmoStats.BoundsMax) / 2;
+        var translation = pm4BoundsCenter - (wmoBoundsCenter * scale);
         Console.WriteLine($"Estimated translation: ({translation.X:F1}, {translation.Y:F1}, {translation.Z:F1})");
 
         // Compute match confidence

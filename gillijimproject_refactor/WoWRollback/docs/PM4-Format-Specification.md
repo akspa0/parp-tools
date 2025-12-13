@@ -66,6 +66,67 @@ Transform Matrix:
 
 ---
 
+## ADT Patching (MODF Chunk)
+
+> [!IMPORTANT]
+> Critical findings from ADT patching implementation.
+
+### MODF Entry Structure (64 bytes)
+
+| Offset | Size | Field | Notes |
+|--------|------|-------|-------|
+| 0x00 | 4 | NameId | Index into MWID |
+| 0x04 | 4 | UniqueId | **Must be globally unique!** |
+| 0x08 | 12 | Position | C3Vector XZY (Y/Z swapped) |
+| 0x14 | 12 | Rotation | C3Vector **XYZ (NOT swapped!)** |
+| 0x20 | 24 | Extents | CAaBox (min/max) XZY |
+| 0x38 | 2 | Flags | |
+| 0x3A | 2 | DoodadSet | |
+| 0x3C | 2 | NameSet | |
+| 0x3E | 2 | Scale | **3.3.5: padding=0, Legion+: scale/1024** |
+
+### Rotation Order Fix
+
+> [!WARNING]
+> Rotation is **NOT** swapped like position!
+
+**WRONG** (causes tilt instead of heading):
+```csharp
+bw.Write(rotation.X);
+bw.Write(rotation.Z);  // WRONG - heading goes to tilt!
+bw.Write(rotation.Y);
+```
+
+**CORRECT**:
+```csharp
+bw.Write(rotation.X);  // pitch
+bw.Write(rotation.Y);  // heading (yaw)
+bw.Write(rotation.Z);  // roll
+```
+
+Wiki placement matrix uses: `rotateY(rot[1]-270°)`, `rotateZ(-rot[0])`, `rotateX(rot[2]-90°)`
+
+### UniqueId Requirements
+- Must be **globally unique** across ALL ADT tiles
+- Pre-scan all source ADTs to collect existing UniqueIds
+- Assign new IDs starting from high values (e.g., 100,000,000+)
+
+---
+
+## WL* Liquid Files
+
+WL* files (WLW, WLM, WLQ, WLL) contain liquid height data for restoration.
+
+### Conversion to MH2O
+- WL* files use 4x4 vertex grids per block (360 bytes/block)
+- MH2O uses 9x9 height grids - requires bilinear upsampling
+- **MH2O serialization is complex** - format issues can crash Noggit
+
+> [!CAUTION]
+> Current MH2O serialization has format issues. Injection is disabled pending fix.
+
+---
+
 ## Key Chunk Details
 
 ### MSLK (20 bytes/entry)
@@ -84,12 +145,6 @@ struct MSLKEntry {
     uint16_t system_flag;      // Always 0x8000
 };
 ```
-
-**Key Properties:**
-- `HasGeometry`: `mspi_first >= 0`
-- `LinkId`: Encodes tile crossing (YY=Y tile, XX=X tile)
-
----
 
 ### MSUR (32 bytes/entry)
 Surface definitions for triangulation.
@@ -112,43 +167,6 @@ struct MSUREntry {
 ```csharp
 uint CK24 = (packed_params & 0xFFFFFF00) >> 8;
 ```
-
-CK24 groups surfaces belonging to the same object.
-
----
-
-### MSCN (12 bytes/vertex)
-Exterior boundary vertices for collision/pathing.
-
-> [!WARNING]
-> MSCN has **no linking metadata** to segment by object (CK24). It may represent a **unified collision network** spanning all tiles.
-
-```c
-struct MSCNVertex {
-    float x, y, z;  // Requires complex transform (see above)
-};
-```
-
----
-
-### MPRL (24 bytes/entry)
-Position/placement reference data.
-
-```c
-struct MPRLEntry {
-    uint16_t unk_0x00;    // Always 0
-    int16_t  unk_0x02;    // -1 for command entries
-    uint16_t unk_0x04;
-    uint16_t unk_0x06;
-    int32_t  pos_x, pos_y, pos_z;  // C3Vectori position
-    int16_t  floor_offset;
-    uint16_t attribute_flags;
-};
-```
-
-**Entry Types:**
-- Position entries: `unk_0x02 != -1`
-- Command entries: `unk_0x02 == -1`
 
 ---
 
@@ -175,7 +193,6 @@ graph TD
 ### Triangulation Method
 MSUR surfaces use **fan triangulation** from MSVI indices:
 ```csharp
-// For surface with IndexCount indices starting at MsviFirstIndex
 for (int i = 2; i < surface.IndexCount; i++) {
     int v0 = msvi[surface.MsviFirstIndex];      // Fan center
     int v1 = msvi[surface.MsviFirstIndex + i - 1];
@@ -192,15 +209,14 @@ for (int i = 2; i < surface.IndexCount; i++) {
 |------|--------|-------|
 | MSCN segmentation | Unknown | Cannot split by CK24, may be unified collision |
 | MSHD header fields | Unknown | 8 uint32s, purpose TBD |
-| MPRL attribute_flags | Partial | Some bits decoded, others unknown |
+| MPRL rotation data | Partial | May contain object orientation? |
 | MPRR purpose | Unknown | Reference data linking MPRL |
+| MH2O serialization | Broken | Instance structure needs wiki compliance |
 
 ---
 
 ## References
 
-- [next/parpDocumentation/pm4-specification.md](file:///J:/wowDev/parp-tools/gillijimproject_refactor/next/parpDocumentation/pm4-specification.md)
-- [reference_data/wowdev.wiki/PM4.md](file:///J:/wowDev/parp-tools/gillijimproject_refactor/reference_data/wowdev.wiki/PM4.md)
-- [reference_data/wowdev.wiki/PD4.md](file:///J:/wowDev/parp-tools/gillijimproject_refactor/reference_data/wowdev.wiki/PD4.md)
-- [WoWRollback.PM4Module/PM4File.cs](file:///J:/wowDev/parp-tools/gillijimproject_refactor/WoWRollback/WoWRollback.PM4Module/PM4File.cs)
-- [Pm4CoordinateTransforms.cs](file:///J:/wowDev/parp-tools/gillijimproject_refactor/WoWRollback/WMOv14/WMO2Q3/old_sources/src/WoWToolbox/WoWToolbox.Core.v2/Foundation/Transforms/Pm4CoordinateTransforms.cs)
+- [wowdev.wiki/ADT#MODF_chunk](https://wowdev.wiki/ADT#MODF_chunk)
+- [wowdev.wiki/PM4](https://wowdev.wiki/PM4)
+- [WoWRollback.PM4Module](file:///J:/wowDev/parp-tools/gillijimproject_refactor/WoWRollback/WoWRollback.PM4Module/)

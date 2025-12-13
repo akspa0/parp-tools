@@ -6,6 +6,7 @@ using System.Text.Json;
 using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.PM4;
 using WoWRollback.PM4Module.Services;
+using GillijimProject.WowFiles.Wl;
 
 namespace WoWRollback.PM4Module
 {
@@ -291,16 +292,82 @@ namespace WoWRollback.PM4Module
                 File.Copy(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), true);
             }
 
+            // PRE-SCAN: Collect ALL existing UniqueIds AND positions from ALL museum ADTs
+            // This enables: 1) UniqueId deduplication, 2) Proximity-based skip for existing placements
+            var globalUsedUniqueIds = new HashSet<uint>();
+            var existingPlacements = new List<System.Numerics.Vector3>(); // All existing MODF positions
+            Console.WriteLine("[INFO] Pre-scanning museum ADTs for existing placements...");
+            foreach (var file in Directory.GetFiles(museumAdtPath, "*.adt"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (name.Contains("_obj") || name.Contains("_tex")) continue;
+                
+                try
+                {
+                    var bytes = File.ReadAllBytes(file);
+                    var str = System.Text.Encoding.ASCII.GetString(bytes);
+                    int modfIdx = str.IndexOf("FDOM"); // MODF reversed
+                    if (modfIdx > 0 && modfIdx + 8 <= bytes.Length)
+                    {
+                        int modfSize = BitConverter.ToInt32(bytes, modfIdx + 4);
+                        int entriesStart = modfIdx + 8;
+                        int entryCount = modfSize / 64;
+                        
+                        for (int i = 0; i < entryCount; i++)
+                        {
+                            int entryOffset = entriesStart + i * 64;
+                            if (entryOffset + 20 <= bytes.Length)
+                            {
+                                // UniqueId at byte 4
+                                uint existingId = BitConverter.ToUInt32(bytes, entryOffset + 4);
+                                globalUsedUniqueIds.Add(existingId);
+                                
+                                // Position at bytes 8-20 (3 floats, stored as X,Z,Y)
+                                float posX = BitConverter.ToSingle(bytes, entryOffset + 8);
+                                float posZ = BitConverter.ToSingle(bytes, entryOffset + 12); // Height
+                                float posY = BitConverter.ToSingle(bytes, entryOffset + 16);
+                                existingPlacements.Add(new System.Numerics.Vector3(posX, posY, posZ));
+                            }
+                        }
+                    }
+                }
+                catch { /* ignore parse errors */ }
+            }
+            Console.WriteLine($"[INFO] Found {globalUsedUniqueIds.Count} existing UniqueIds, {existingPlacements.Count} placements in museum ADTs");
+
             // Inject Modf
             // Group by tiles - use TileX/TileY from PM4 filename (not calculated from position)
             // GLOBAL UniqueId tracking: IDs must be unique across ALL tiles, not just per-tile
+            // Also track proximity to existing placements to avoid duplicates
             var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
-            var globalUsedUniqueIds = new HashSet<uint>(); // Track UniqueIds across ALL tiles
             uint nextAvailableUniqueId = 100_000_000; // Start high to avoid conflicts with existing IDs
             int reassignedCount = 0;
+            int proximitySkipCount = 0;
+            const float PROXIMITY_THRESHOLD = 5.0f; // Skip PM4 entries within 5 units of existing
             
             foreach (var entry in transformedEntries)
             {
+                // PROXIMITY CHECK: Skip if too close to an existing museum placement
+                bool tooCloseToExisting = false;
+                foreach (var existingPos in existingPlacements)
+                {
+                    float dx = entry.Position.X - existingPos.X;
+                    float dy = entry.Position.Y - existingPos.Y;
+                    float dz = entry.Position.Z - existingPos.Z;
+                    float distSq = dx*dx + dy*dy + dz*dz;
+                    if (distSq < PROXIMITY_THRESHOLD * PROXIMITY_THRESHOLD)
+                    {
+                        tooCloseToExisting = true;
+                        break;
+                    }
+                }
+                
+                if (tooCloseToExisting)
+                {
+                    proximitySkipCount++;
+                    continue; // Skip this PM4 entry - museum already has it
+                }
+                
                 // Use tile from PM4 filename instead of calculating from position
                 var (tx, ty) = (entry.TileX, entry.TileY);
                 if (!modfByTile.TryGetValue((tx, ty), out var list))
@@ -336,6 +403,9 @@ namespace WoWRollback.PM4Module
                     Scale = entry.Scale
                 });
             }
+            
+            if (proximitySkipCount > 0)
+                Console.WriteLine($"[INFO] Skipped {proximitySkipCount} PM4 entries (within {PROXIMITY_THRESHOLD} units of existing museum placements)");
             
             if (reassignedCount > 0)
                 Console.WriteLine($"[INFO] Reassigned {reassignedCount} duplicate UniqueIds to ensure global uniqueness");
@@ -431,6 +501,124 @@ namespace WoWRollback.PM4Module
                 }
             }
             Console.WriteLine($"[INFO] Patched {wdlPatchedCount} WDL-generated ADTs with MODF data.");
+
+            // Stage 4c: WL* → MH2O Liquid Conversion
+            // TEMPORARILY DISABLED: MH2O serialization has format issues causing Noggit crashes
+            // TODO: Fix SMLiquidInstance structure to match wiki spec
+            bool enableMh2oInjection = false;
+            Console.WriteLine("\n[Stage 4c] Processing WL* files for liquid restoration...");
+            if (!enableMh2oInjection)
+            {
+                Console.WriteLine("[WARN] MH2O injection is temporarily disabled due to format issues");
+                Console.WriteLine("[INFO] WL* files will be scanned but not injected into ADTs");
+            }
+            
+            // Check for WL* files in the split-adt path (same as pm4Path typically)
+            var wlPath = splitAdtPath; // WL* files are usually alongside split ADTs
+            var wlFiles = new[] { "wlw", "wlm", "wlq", "wll" }
+                .SelectMany(ext => Directory.GetFiles(wlPath, $"*.{ext}", SearchOption.TopDirectoryOnly))
+                .ToList();
+            
+            if (wlFiles.Count > 0)
+            {
+                Console.WriteLine($"[INFO] Found {wlFiles.Count} WL* files");
+                
+                var wlConverter = new WlToMh2oConverter();
+                var mh2oByTile = new Dictionary<(int x, int y), WlToMh2oConverter.Mh2oTileData>();
+                int blocksProcessed = 0;
+                
+                foreach (var wlFilePath in wlFiles)
+                {
+                    try
+                    {
+                        var wlFile = WlFile.Read(wlFilePath);
+                        var result = wlConverter.Convert(wlFile, Path.GetFileName(wlFilePath));
+                        
+                        foreach (var (tile, data) in result.TileData)
+                        {
+                            if (!mh2oByTile.ContainsKey(tile))
+                                mh2oByTile[tile] = data;
+                            else
+                            {
+                                // Merge chunks from this file into existing tile data
+                                var existing = mh2oByTile[tile];
+                                for (int cx = 0; cx < 16; cx++)
+                                for (int cy = 0; cy < 16; cy++)
+                                {
+                                    if (existing.Chunks[cx, cy] == null && data.Chunks[cx, cy] != null)
+                                        existing.Chunks[cx, cy] = data.Chunks[cx, cy];
+                                }
+                            }
+                            blocksProcessed++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARN] Failed to process {Path.GetFileName(wlFilePath)}: {ex.Message}");
+                    }
+                }
+                
+                Console.WriteLine($"[INFO] Converted {blocksProcessed} liquid blocks across {mh2oByTile.Count} tiles");
+                
+                // Write liquid tiles list for verification (even if injection disabled)
+                var liquidTilesList = new List<(int x, int y, string adtName, int chunkCount)>();
+                foreach (var (tile, tileData) in mh2oByTile)
+                {
+                    var adtFileName = $"development_{tile.x:D2}_{tile.y:D2}.adt";
+                    liquidTilesList.Add((tile.x, tile.y, adtFileName, tileData.ChunkCount));
+                }
+                
+                var liquidListPath = Path.Combine(dirs.Root, "liquid_tiles.txt");
+                using (var writer = new StreamWriter(liquidListPath))
+                {
+                    writer.WriteLine($"# Liquid tiles from WL* files ({mh2oByTile.Count} tiles)");
+                    writer.WriteLine($"# Source WL* files: {wlFiles.Count}");
+                    writer.WriteLine($"# MH2O Injection: {(enableMh2oInjection ? "ENABLED" : "DISABLED")}");
+                    writer.WriteLine($"# Format: tile_x, tile_y, adt_filename, liquid_chunks");
+                    foreach (var (x, y, adtName, chunkCount) in liquidTilesList.OrderBy(t => t.x).ThenBy(t => t.y))
+                        writer.WriteLine($"{x},{y},{adtName},{chunkCount}");
+                }
+                Console.WriteLine($"[INFO] Liquid tile list: {liquidListPath}");
+                
+                // Only inject if enabled
+                if (enableMh2oInjection)
+                {
+                    int liquidPatchedCount = 0;
+                    foreach (var (tile, tileData) in mh2oByTile)
+                    {
+                        var adtFileName = $"development_{tile.x:D2}_{tile.y:D2}.adt";
+                        var adtPath = Path.Combine(dirs.PatchedMuseum, adtFileName);
+                        
+                        if (!File.Exists(adtPath))
+                        {
+                            adtPath = Path.Combine(dirs.WdlPainted, adtFileName);
+                            if (!File.Exists(adtPath)) continue;
+                        }
+                        
+                        try
+                        {
+                            var adtBytes = File.ReadAllBytes(adtPath);
+                            var mh2oData = WlToMh2oConverter.SerializeMh2oTile(tileData);
+                            
+                            var patchedBytes = InjectMh2oChunk(adtBytes, mh2oData);
+                            if (patchedBytes != null)
+                            {
+                                File.WriteAllBytes(adtPath, patchedBytes);
+                                liquidPatchedCount++;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[WARN] Failed to inject MH2O into {adtFileName}: {ex.Message}");
+                        }
+                    }
+                    Console.WriteLine($"[INFO] Injected MH2O liquid data into {liquidPatchedCount} ADTs");
+                }
+            }
+            else
+            {
+                Console.WriteLine("[INFO] No WL* files found, skipping liquid restoration");
+            }
 
 
             // Stage 5: Assembly & Noggit
@@ -697,6 +885,66 @@ namespace WoWRollback.PM4Module
             
             Console.WriteLine($"[INFO] Loaded {objects.Count} PM4 objects from {pm4Files.Length} files");
             return objects;
+        }
+
+        /// <summary>
+        /// Injects MH2O chunk data into an ADT file.
+        /// </summary>
+        private byte[]? InjectMh2oChunk(byte[] adtBytes, byte[] mh2oData)
+        {
+            var str = System.Text.Encoding.ASCII.GetString(adtBytes);
+            
+            // Find MHDR chunk to update offset
+            int mhdrIdx = str.IndexOf("RDHM"); // MHDR reversed
+            if (mhdrIdx < 0) return null;
+            
+            // Find existing MH2O chunk
+            int mh2oIdx = str.IndexOf("O2HM"); // MH2O reversed
+            
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
+            
+            if (mh2oIdx > 0)
+            {
+                // Replace existing MH2O chunk
+                int existingSize = BitConverter.ToInt32(adtBytes, mh2oIdx + 4);
+                int chunkEnd = mh2oIdx + 8 + existingSize;
+                
+                // Write everything up to MH2O
+                ms.Write(adtBytes, 0, mh2oIdx);
+                
+                // Write new MH2O chunk
+                bw.Write(System.Text.Encoding.ASCII.GetBytes("O2HM"));
+                bw.Write(mh2oData.Length);
+                bw.Write(mh2oData);
+                
+                // Write everything after old MH2O
+                ms.Write(adtBytes, chunkEnd, adtBytes.Length - chunkEnd);
+            }
+            else
+            {
+                // Insert MH2O chunk after MHDR (before MCIN)
+                int mcinIdx = str.IndexOf("NICM"); // MCIN reversed
+                if (mcinIdx < 0)
+                {
+                    // Fallback: insert after MHDR chunk
+                    int mhdrSize = BitConverter.ToInt32(adtBytes, mhdrIdx + 4);
+                    mcinIdx = mhdrIdx + 8 + mhdrSize;
+                }
+                
+                // Write everything up to insertion point
+                ms.Write(adtBytes, 0, mcinIdx);
+                
+                // Write new MH2O chunk
+                bw.Write(System.Text.Encoding.ASCII.GetBytes("O2HM"));
+                bw.Write(mh2oData.Length);
+                bw.Write(mh2oData);
+                
+                // Write remainder of file
+                ms.Write(adtBytes, mcinIdx, adtBytes.Length - mcinIdx);
+            }
+            
+            return ms.ToArray();
         }
     }
 }

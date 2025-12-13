@@ -579,8 +579,8 @@ public sealed class AdtPatcher
             bw.Write(e.Position.Z);  // Height (swapped with Y)
             bw.Write(e.Position.Y);
             bw.Write(e.Rotation.X);
-            bw.Write(e.Rotation.Z);  // Swapped with Y
-            bw.Write(e.Rotation.Y);
+            bw.Write(e.Rotation.Y);  // Heading - NOT swapped like position!
+            bw.Write(e.Rotation.Z);  // MODF rotation order: [0]=pitch, [1]=heading, [2]=roll
             bw.Write(e.BoundsMin.X);
             bw.Write(e.BoundsMin.Z);  // Swapped with Y
             bw.Write(e.BoundsMin.Y);
