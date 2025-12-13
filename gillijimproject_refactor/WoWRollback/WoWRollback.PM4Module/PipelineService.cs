@@ -1051,6 +1051,171 @@ namespace WoWRollback.PM4Module
             Console.WriteLine($"[INFO] Command entries (0x3FFF flag): {commandEntries.Count}");
             Console.WriteLine($"[INFO] Unk14 unique values: {unk14Distribution.Count}");
             Console.WriteLine($"[INFO] Unk16 unique values: {unk16Distribution.Count}");
+            
+            // Deep MSLK-CK24 correlation analysis
+            ExportMslkCk24Analysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Deep analysis of MSLK ↔ CK24 relationships to find sub-object segmentation patterns.
+        /// Explores how MSLK TypeFlags, Subtype, GroupObjectId correlate with CK24 groups.
+        /// </summary>
+        private void ExportMslkCk24Analysis(string pm4Directory, string outputDir)
+        {
+            var mslkAnalysisPath = Path.Combine(outputDir, "mslk_ck24_analysis.txt");
+            var mslkCsvPath = Path.Combine(outputDir, "mslk_detail.csv");
+            
+            // Track patterns across all PM4 files
+            var typeDistribution = new Dictionary<byte, int>();
+            var subtypeDistribution = new Dictionary<byte, int>();
+            var groupIdToCk24s = new Dictionary<uint, HashSet<uint>>();  // GroupObjectId -> CK24s
+            var ck24ToMslkCount = new Dictionary<uint, int>();          // CK24 -> MSLK entry count
+            var typeFlagCombos = new Dictionary<(byte type, byte subtype), int>();
+            
+            int totalMslk = 0;
+            int totalSurfaces = 0;
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // Per-file detailed data
+            var allMslkEntries = new List<(string File, int TileX, int TileY, MslkEntry Entry, List<uint> AssociatedCk24s)>();
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var match = System.Text.RegularExpressions.Regex.Match(baseName, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    
+                    int tileX = int.Parse(match.Groups[1].Value);
+                    int tileY = int.Parse(match.Groups[2].Value);
+                    
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    totalSurfaces += pm4.Surfaces.Count;
+                    
+                    // Build CK24 -> MSUR surface mapping
+                    var ck24Surfaces = pm4.Surfaces
+                        .Where(s => !s.IsM2Bucket && s.CK24 != 0)
+                        .GroupBy(s => s.CK24)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+                    
+                    foreach (var mslk in pm4.LinkEntries)
+                    {
+                        totalMslk++;
+                        
+                        // Track distributions
+                        if (!typeDistribution.ContainsKey(mslk.TypeFlags))
+                            typeDistribution[mslk.TypeFlags] = 0;
+                        typeDistribution[mslk.TypeFlags]++;
+                        
+                        if (!subtypeDistribution.ContainsKey(mslk.Subtype))
+                            subtypeDistribution[mslk.Subtype] = 0;
+                        subtypeDistribution[mslk.Subtype]++;
+                        
+                        var combo = (mslk.TypeFlags, mslk.Subtype);
+                        if (!typeFlagCombos.ContainsKey(combo))
+                            typeFlagCombos[combo] = 0;
+                        typeFlagCombos[combo]++;
+                        
+                        // Find associated CK24s (surfaces that share GroupObjectId bits)
+                        var associatedCk24s = new List<uint>();
+                        
+                        // Strategy 1: Check if GroupObjectId matches any CK24 directly
+                        if (ck24Surfaces.ContainsKey(mslk.GroupObjectId))
+                            associatedCk24s.Add(mslk.GroupObjectId);
+                        
+                        // Strategy 2: Check CK24 derived from GroupObjectId (high 24 bits)
+                        uint derivedCk24 = (mslk.GroupObjectId & 0xFFFFFF00) >> 8;
+                        if (derivedCk24 != 0 && ck24Surfaces.ContainsKey(derivedCk24))
+                            associatedCk24s.Add(derivedCk24);
+                        
+                        // Track Group->CK24 relationships
+                        if (!groupIdToCk24s.ContainsKey(mslk.GroupObjectId))
+                            groupIdToCk24s[mslk.GroupObjectId] = new HashSet<uint>();
+                        foreach (var ck24 in associatedCk24s)
+                            groupIdToCk24s[mslk.GroupObjectId].Add(ck24);
+                        
+                        allMslkEntries.Add((baseName, tileX, tileY, mslk, associatedCk24s));
+                    }
+                }
+                catch { /* ignore parse errors */ }
+            }
+            
+            // Write detailed CSV
+            using (var sw = new StreamWriter(mslkCsvPath))
+            {
+                sw.WriteLine("file,tile_x,tile_y,idx,type,subtype,group_id,group_id_hex,mspi_first,mspi_count,link_id_hex,ref_idx,sys_flag_hex,has_geo,ck24_matches");
+                foreach (var (file, tx, ty, m, ck24s) in allMslkEntries)
+                {
+                    var idx = pm4Files.ToList().FindIndex(f => Path.GetFileNameWithoutExtension(f) == file);
+                    sw.WriteLine(string.Join(",",
+                        file, tx, ty, idx,
+                        m.TypeFlags, m.Subtype,
+                        m.GroupObjectId, $"0x{m.GroupObjectId:X8}",
+                        m.MspiFirstIndex, m.MspiIndexCount,
+                        $"0x{m.LinkId:X6}", m.RefIndex, $"0x{m.SystemFlag:X4}",
+                        m.HasGeometry,
+                        string.Join(";", ck24s.Select(c => $"0x{c:X6}"))));
+                }
+            }
+            
+            // Write analysis report
+            using (var sw = new StreamWriter(mslkAnalysisPath))
+            {
+                sw.WriteLine("=== MSLK ↔ CK24 Deep Analysis ===");
+                sw.WriteLine($"Total MSLK entries: {totalMslk}");
+                sw.WriteLine($"Total MSUR surfaces: {totalSurfaces}");
+                sw.WriteLine($"PM4 files analyzed: {pm4Files.Length}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== TypeFlags Distribution (potential object type) ===");
+                foreach (var kvp in typeDistribution.OrderBy(x => x.Key))
+                    sw.WriteLine($"  Type {kvp.Key,2}: {kvp.Value,6} entries ({100.0 * kvp.Value / totalMslk:F1}%)");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Subtype Distribution (potential sub-object layer?) ===");
+                foreach (var kvp in subtypeDistribution.OrderBy(x => x.Key))
+                    sw.WriteLine($"  Subtype {kvp.Key,3}: {kvp.Value,6} entries ({100.0 * kvp.Value / totalMslk:F1}%)");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Type+Subtype Combinations (top 30) ===");
+                foreach (var kvp in typeFlagCombos.OrderByDescending(x => x.Value).Take(30))
+                    sw.WriteLine($"  Type={kvp.Key.type,2} Subtype={kvp.Key.subtype,3}: {kvp.Value,6} entries");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== GroupObjectId → CK24 Correlation ===");
+                var multiCk24Groups = groupIdToCk24s.Where(g => g.Value.Count > 1).ToList();
+                var singleCk24Groups = groupIdToCk24s.Where(g => g.Value.Count == 1).ToList();
+                var noCk24Groups = groupIdToCk24s.Where(g => g.Value.Count == 0).ToList();
+                sw.WriteLine($"  Groups with 1 CK24: {singleCk24Groups.Count}");
+                sw.WriteLine($"  Groups with multiple CK24s: {multiCk24Groups.Count}");
+                sw.WriteLine($"  Groups with no CK24 match: {noCk24Groups.Count}");
+                
+                if (multiCk24Groups.Count > 0)
+                {
+                    sw.WriteLine();
+                    sw.WriteLine("=== Sample Multi-CK24 Groups (potential merged objects) ===");
+                    foreach (var g in multiCk24Groups.Take(20))
+                    {
+                        sw.WriteLine($"  GroupId 0x{g.Key:X8}: CK24s = {string.Join(", ", g.Value.Select(c => $"0x{c:X6}"))}");
+                    }
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Hypothesis: Sub-object Segmentation ===");
+                sw.WriteLine("If TypeFlags or Subtype correlate with object boundaries:");
+                sw.WriteLine("- Type values might distinguish WMO vs M2 vs terrain");
+                sw.WriteLine("- Subtype might indicate floors/levels within a building");
+                sw.WriteLine("- RefIndex might point to parent/child relationships");
+                sw.WriteLine("- GroupObjectId high bits might encode object instance ID");
+            }
+            
+            Console.WriteLine($"[INFO] MSLK-CK24 Analysis: {mslkAnalysisPath}");
+            Console.WriteLine($"[INFO] MSLK Detail CSV: {mslkCsvPath}");
+            Console.WriteLine($"[INFO] Type values: {typeDistribution.Count}, Subtype values: {subtypeDistribution.Count}");
+            Console.WriteLine($"[INFO] Multi-CK24 groups (merged objects?): {groupIdToCk24s.Where(g => g.Value.Count > 1).Count()}");
         }
     }
 }
