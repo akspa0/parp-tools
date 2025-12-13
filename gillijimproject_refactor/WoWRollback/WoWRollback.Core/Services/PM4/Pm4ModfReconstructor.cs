@@ -717,7 +717,7 @@ public sealed class Pm4ModfReconstructor
             // Quick pre-filter using extent ratios
             var potentialMatches = wmoLibrary
                 .Select(w => (wmo: w, score: QuickMatchScore(pm4Obj.Stats, w.Stats)))
-                .Where(x => x.score > 0.5f)
+                .Where(x => x.score > 0.92f)
                 .OrderByDescending(x => x.score)
                 .Take(10) // Increased to Top 10 for broader search
                 .Select(x => x.wmo)
@@ -767,7 +767,7 @@ public sealed class Pm4ModfReconstructor
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
                 Position: transform.Position,
-                Rotation: transform.Rotation,
+                Rotation: transform.Rotation, // Matcher now correctly computes ground-plane heading
                 BoundsMin: boundsMin,
                 BoundsMax: boundsMax,
                 Flags: 0,

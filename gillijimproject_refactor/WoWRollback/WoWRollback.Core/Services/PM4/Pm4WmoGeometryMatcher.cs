@@ -292,12 +292,25 @@ public sealed class Pm4WmoGeometryMatcher
             Console.WriteLine($"\nEstimated scale: {scale:F4}");
         }
 
-        // Find rotation by matching principal axes
-        var rotation = FindRotationBetweenAxes(wmoStats.PrincipalAxes, pm4Stats.PrincipalAxes);
-        var eulerDegrees = QuaternionToEulerDegrees(rotation);
+        // Find rotation by matching principal axes - CONSTRAIN TO GROUND PLANE
+        // WMOs sit flat on ground, so we only compute heading rotation around UP (Z) axis
+        // Project principal axes onto XY plane and compute 2D angle difference
+        var pm4GroundAxis = Vector3.Normalize(new Vector3(pm4Stats.PrincipalAxes[0].X, pm4Stats.PrincipalAxes[0].Y, 0));
+        var wmoGroundAxis = Vector3.Normalize(new Vector3(wmoStats.PrincipalAxes[0].X, wmoStats.PrincipalAxes[0].Y, 0));
+        
+        // Compute heading angle: angle between the two ground-plane projections
+        float headingAngle = MathF.Atan2(
+            pm4GroundAxis.X * wmoGroundAxis.Y - pm4GroundAxis.Y * wmoGroundAxis.X,
+            pm4GroundAxis.X * wmoGroundAxis.X + pm4GroundAxis.Y * wmoGroundAxis.Y);
+        float headingDegrees = headingAngle * 180f / MathF.PI;
+        
+        // Euler angles for MODF: X=tilt, Y=heading, Z=roll
+        // Set tilt and roll to 0, only heading varies
+        var eulerDegrees = new Vector3(0, headingDegrees, 0);
         Console.WriteLine($"Estimated rotation: ({eulerDegrees.X:F1}°, {eulerDegrees.Y:F1}°, {eulerDegrees.Z:F1}°)");
 
-        // Compute translation using unit scale for WMOs
+        // Compute translation - use ground-plane rotation only
+        var rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, headingAngle);
         var rotatedWmoCentroid = Vector3.Transform(wmoStats.Centroid * scale, rotation);
         var translation = pm4Stats.Centroid - rotatedWmoCentroid;
         Console.WriteLine($"Estimated translation: ({translation.X:F1}, {translation.Y:F1}, {translation.Z:F1})");

@@ -564,6 +564,7 @@ public sealed class AdtPatcher
     /// <summary>
     /// Build MODF chunk data (64 bytes per entry).
     /// MODF stores coordinates as XZY (X, Height, Y) not XYZ.
+    /// Note: For 3.3.5, offset 0x3E is padding (0), not scale. Scale was added in Legion+.
     /// </summary>
     public byte[] BuildModfData(List<ModfEntry> entries)
     {
@@ -589,7 +590,7 @@ public sealed class AdtPatcher
             bw.Write(e.Flags);
             bw.Write(e.DoodadSet);
             bw.Write(e.NameSet);
-            bw.Write(e.Scale);
+            bw.Write((ushort)0);  // 3.3.5: padding (not scale - that's Legion+)
         }
 
         return ms.ToArray();

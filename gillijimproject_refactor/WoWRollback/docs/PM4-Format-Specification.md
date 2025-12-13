@@ -47,12 +47,12 @@ Transform: No change (standard coordinates)
 
 ### MSCN (Exterior Vertices)
 ```
-File: (Y, X, Z) → World: (X, Y, Z)
-Transform: new Vector3(vertex.Y, vertex.X, vertex.Z)
+File: (X, Y, Z) → World: (Y, -X, Z)
+Transform: new Vector3(vertex.Y, -vertex.X, vertex.Z)
 ```
 > [!WARNING]
 > The 180° X rotation documented in Pm4CoordinateTransforms.cs is **WRONG**!
-> Visual verification proves MSCN uses same (Y,X,Z) ordering as MSVT.
+> Visual verification proves MSCN needs (Y, -X, Z) to match minimap orientation.
 
 ### MPRL (Position References)
 ```

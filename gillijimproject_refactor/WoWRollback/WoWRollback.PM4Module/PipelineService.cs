@@ -292,8 +292,13 @@ namespace WoWRollback.PM4Module
             }
 
             // Inject Modf
-             // Group by tiles - use TileX/TileY from PM4 filename (not calculated from position)
+            // Group by tiles - use TileX/TileY from PM4 filename (not calculated from position)
+            // GLOBAL UniqueId tracking: IDs must be unique across ALL tiles, not just per-tile
             var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
+            var globalUsedUniqueIds = new HashSet<uint>(); // Track UniqueIds across ALL tiles
+            uint nextAvailableUniqueId = 100_000_000; // Start high to avoid conflicts with existing IDs
+            int reassignedCount = 0;
+            
             foreach (var entry in transformedEntries)
             {
                 // Use tile from PM4 filename instead of calculating from position
@@ -304,11 +309,23 @@ namespace WoWRollback.PM4Module
                     modfByTile[(tx, ty)] = list;
                 }
                 
-                // Map Core ModfEntry to AdtPatcher ModfEntry
+                // Ensure UniqueId is globally unique - if already used, assign a new one
+                uint uniqueId = entry.UniqueId;
+                if (globalUsedUniqueIds.Contains(uniqueId))
+                {
+                    // Find next available unique ID
+                    while (globalUsedUniqueIds.Contains(nextAvailableUniqueId))
+                        nextAvailableUniqueId++;
+                    uniqueId = nextAvailableUniqueId++;
+                    reassignedCount++;
+                }
+                globalUsedUniqueIds.Add(uniqueId);
+                
+                // Map Core ModfEntry to AdtPatcher ModfEntry with guaranteed unique ID
                 list.Add(new AdtPatcher.ModfEntry
                 {
                     NameId = entry.NameId,
-                    UniqueId = entry.UniqueId,
+                    UniqueId = uniqueId,
                     Position = entry.Position,
                     Rotation = entry.Rotation,
                     BoundsMin = entry.BoundsMin,
@@ -319,9 +336,15 @@ namespace WoWRollback.PM4Module
                     Scale = entry.Scale
                 });
             }
+            
+            if (reassignedCount > 0)
+                Console.WriteLine($"[INFO] Reassigned {reassignedCount} duplicate UniqueIds to ensure global uniqueness");
 
-            // Patch
+            // Patch Museum ADTs - SKIP tiles that already have MODF entries (have existing objects)
             int patchedCount = 0;
+            int emptyTileCount = 0; // Tiles without existing MODF - good for reference
+            var patchedTiles = new List<(int x, int y, string wmoPath, int entryCount, bool hadExisting)>();
+            
             foreach (var file in Directory.GetFiles(museumAdtPath, "*.adt"))
             {
                 var name = Path.GetFileNameWithoutExtension(file);
@@ -338,20 +361,51 @@ namespace WoWRollback.PM4Module
                 int tx = int.Parse(match.Groups[1].Value);
                 int ty = int.Parse(match.Groups[2].Value);
 
+                // Track if tile has existing objects (for stats - we patch anyway)
+                bool hasExistingTileModf = false;
+                try
+                {
+                    var bytes = File.ReadAllBytes(file);
+                    var str = System.Text.Encoding.ASCII.GetString(bytes);
+                    int modfIdx = str.IndexOf("FDOM"); // MODF reversed
+                    if (modfIdx > 0)
+                    {
+                        int modfSize = BitConverter.ToInt32(bytes, modfIdx + 4);
+                        if (modfSize > 0) hasExistingTileModf = true;
+                    }
+                }
+                catch { /* ignore */ }
+
                 // Use the wmoNames we loaded/generated in Stage 2
                 var tileWmoNames = wmoNames;
 
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
                     _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries);
+                    patchedTiles.Add((tx, ty, Path.GetFileName(file), tileEntries.Count, hasExistingTileModf));
                     patchedCount++;
+                    if (!hasExistingTileModf) emptyTileCount++;
                 }
                 else
                 {
                     File.Copy(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), true);
                 }
             }
-            Console.WriteLine($"[INFO] Patched {patchedCount} Museum ADTs.");
+            
+            // Write patched tiles list for easy verification
+            var patchedListPath = Path.Combine(dirs.Root, "patched_tiles.txt");
+            using (var writer = new StreamWriter(patchedListPath))
+            {
+                writer.WriteLine($"# Patched Museum ADTs ({patchedCount} tiles, {emptyTileCount} were empty - good reference tiles)");
+                writer.WriteLine($"# Empty tiles (no existing MODF - pure PM4 placements):");
+                foreach (var (x, y, fileName, cnt, hadExisting) in patchedTiles.Where(t => !t.hadExisting).OrderBy(t => t.x).ThenBy(t => t.y))
+                    writer.WriteLine($"#   {x},{y} -> {fileName} ({cnt} new entries)");
+                writer.WriteLine($"# Format: tile_x, tile_y, filename, entry_count, had_existing");
+                foreach (var (x, y, fileName, cnt, hadExisting) in patchedTiles.OrderBy(t => t.x).ThenBy(t => t.y))
+                    writer.WriteLine($"{x},{y},{fileName},{cnt},{hadExisting}");
+            }
+            Console.WriteLine($"[INFO] Patched {patchedCount} Museum ADTs ({emptyTileCount} empty tiles = reference).");
+            Console.WriteLine($"[INFO] Patched tile list: {patchedListPath}");
 
             // Stage 4b: Patch WDL-generated ADTs that have MODF data
             // This creates pure WDL+MODF ADTs for testing (separate from Museum ADTs)
@@ -589,8 +643,48 @@ namespace WoWRollback.PM4Module
                         
                         if (vertices.Count < 10) continue; // Skip tiny objects
                         
-                        // Per PM4FacesTool: PM4 MSVT vertices are already in global coordinates
-                        // No transformation needed - use raw coordinates for geometry matching
+                        // MSCN Enhancement: Add nearby exterior vertices to enrich geometry fingerprint
+                        // MSCN lacks CK24, so we use proximity-based association (5-10 yard margin)
+                        if (pm4.ExteriorVertices.Count > 0)
+                        {
+                            // Compute MSVT bounds first
+                            var minBound = new System.Numerics.Vector3(float.MaxValue);
+                            var maxBound = new System.Numerics.Vector3(float.MinValue);
+                            foreach (var v in vertices)
+                            {
+                                minBound = System.Numerics.Vector3.Min(minBound, v);
+                                maxBound = System.Numerics.Vector3.Max(maxBound, v);
+                            }
+                            
+                            // Expand bounds by ~7 yards (WoW units are roughly yards)
+                            const float MscnMargin = 7.0f;
+                            minBound -= new System.Numerics.Vector3(MscnMargin);
+                            maxBound += new System.Numerics.Vector3(MscnMargin);
+                            
+                            int mscnAdded = 0;
+                            foreach (var mscnVert in pm4.ExteriorVertices)
+                            {
+                                // Apply MSCN transform: (Y, -X, Z) to match minimap orientation
+                                var transformed = new System.Numerics.Vector3(mscnVert.Y, -mscnVert.X, mscnVert.Z);
+                                
+                                // Check if within expanded bounds
+                                if (transformed.X >= minBound.X && transformed.X <= maxBound.X &&
+                                    transformed.Y >= minBound.Y && transformed.Y <= maxBound.Y &&
+                                    transformed.Z >= minBound.Z && transformed.Z <= maxBound.Z)
+                                {
+                                    vertices.Add(transformed);
+                                    mscnAdded++;
+                                }
+                            }
+                            
+                            // Log significant MSCN additions
+                            if (mscnAdded > 50)
+                            {
+                                Console.WriteLine($"[MSCN] {ck24Hex}: +{mscnAdded} exterior verts (total: {vertices.Count})");
+                            }
+                        }
+                        
+                        // Compute stats on combined MSVT + MSCN vertices
                         var stats = matcher.ComputeStats(vertices);
                         objects.Add(new Pm4ModfReconstructor.Pm4Object(ck24Hex, pm4Path, tileX, tileY, stats));
                     }

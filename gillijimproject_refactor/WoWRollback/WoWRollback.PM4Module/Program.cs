@@ -50,6 +50,9 @@ if (args.Length > 0)
         
         case "export-mscn":
             return RunExportMscn(args.Skip(1).ToArray());
+        
+        case "test-wl-convert":
+            return RunTestWlConvert(args.Skip(1).ToArray());
     }
 }
 
@@ -1575,6 +1578,140 @@ static int RunExportMscn(string[] args)
     Console.WriteLine($"Files with MSCN: {filesWithMscn}/{pm4Files.Count}");
     Console.WriteLine($"Total MSCN vertices: {totalMscnVerts}");
     Console.WriteLine($"Output directory: {outDir}");
+    
+    return 0;
+}
+
+// test-wl-convert command - Test WL* file parsing and MH2O conversion
+static int RunTestWlConvert(string[] args)
+{
+    Console.WriteLine("=== WL* to MH2O Conversion Test ===\n");
+    
+    string? wlDir = null;
+    string? outDir = null;
+    bool verbose = false;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--wl": wlDir = args[++i]; break;
+            case "--out": outDir = args[++i]; break;
+            case "-v":
+            case "--verbose": verbose = true; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: test-wl-convert --wl <dir> [--out <dir>] [--verbose]");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --wl <dir>   Directory containing WL* files (WLW/WLM/WLQ)");
+                Console.WriteLine("  --out <dir>  Output directory for MH2O data (default: <wl>/mh2o_test)");
+                Console.WriteLine("  --verbose    Show detailed block/chunk info");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(wlDir) || !Directory.Exists(wlDir))
+    {
+        Console.Error.WriteLine("Error: --wl <dir> is required and must exist");
+        return 1;
+    }
+    
+    outDir ??= Path.Combine(wlDir, "mh2o_test");
+    Directory.CreateDirectory(outDir);
+    
+    // Find all WL* files
+    var wlFiles = Directory.GetFiles(wlDir, "*.wlw", SearchOption.AllDirectories)
+        .Concat(Directory.GetFiles(wlDir, "*.wlm", SearchOption.AllDirectories))
+        .Concat(Directory.GetFiles(wlDir, "*.wlq", SearchOption.AllDirectories))
+        .Concat(Directory.GetFiles(wlDir, "*.wll", SearchOption.AllDirectories))
+        .ToList();
+    
+    Console.WriteLine($"Found {wlFiles.Count} WL* files in {wlDir}");
+    
+    if (wlFiles.Count == 0)
+    {
+        Console.WriteLine("No WL* files found.");
+        return 0;
+    }
+    
+    // Summary stats
+    var tileMap = new Dictionary<(int, int), List<string>>();
+    int totalBlocks = 0;
+    int parseErrors = 0;
+    
+    foreach (var wlPath in wlFiles)
+    {
+        try
+        {
+            var wl = GillijimProject.WowFiles.Wl.WlFile.Read(wlPath);
+            string fileName = Path.GetFileName(wlPath);
+            
+            Console.WriteLine($"\n[{fileName}]");
+            Console.WriteLine($"  Type: {wl.Header.FileType}, Version: {wl.Header.Version}");
+            Console.WriteLine($"  Liquid: {wl.Header.LiquidType} (raw: {wl.Header.RawLiquidType})");
+            Console.WriteLine($"  Blocks: {wl.Blocks.Count}");
+            
+            totalBlocks += wl.Blocks.Count;
+            
+            // Convert to MH2O and check tile mapping
+            var converter = new GillijimProject.WowFiles.Wl.WlToMh2oConverter();
+            var result = converter.Convert(wl, fileName);
+            
+            Console.WriteLine($"  Maps to {result.TileData.Count} ADT tiles:");
+            foreach (var kvp in result.TileData)
+            {
+                var (tx, ty) = kvp.Key;
+                var tileData = kvp.Value;
+                int chunkCount = tileData.ChunkCount;
+                Console.WriteLine($"    ({tx},{ty}): {chunkCount} chunks with water");
+                
+                if (!tileMap.ContainsKey((tx, ty)))
+                    tileMap[(tx, ty)] = new List<string>();
+                tileMap[(tx, ty)].Add(fileName);
+                
+                if (verbose)
+                {
+                    for (int cy = 0; cy < 16; cy++)
+                    {
+                        for (int cx = 0; cx < 16; cx++)
+                        {
+                            var chunk = tileData.Chunks[cx, cy];
+                            if (chunk != null)
+                            {
+                                Console.WriteLine($"      Chunk ({cx},{cy}): heights {chunk.MinHeight:F1}-{chunk.MaxHeight:F1}, type={chunk.LiquidTypeId}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] {Path.GetFileName(wlPath)}: {ex.Message}");
+            parseErrors++;
+        }
+    }
+    
+    // Write summary
+    Console.WriteLine();
+    Console.WriteLine("=== Summary ===");
+    Console.WriteLine($"Files processed: {wlFiles.Count - parseErrors}/{wlFiles.Count}");
+    Console.WriteLine($"Total liquid blocks: {totalBlocks}");
+    Console.WriteLine($"ADT tiles with water: {tileMap.Count}");
+    
+    // Write tile mapping to CSV
+    var csvPath = Path.Combine(outDir, "wl_tile_mapping.csv");
+    using (var writer = new StreamWriter(csvPath))
+    {
+        writer.WriteLine("tile_x,tile_y,wl_files");
+        foreach (var kvp in tileMap.OrderBy(k => k.Key.Item1).ThenBy(k => k.Key.Item2))
+        {
+            var (tx, ty) = kvp.Key;
+            writer.WriteLine($"{tx},{ty},\"{string.Join("; ", kvp.Value)}\"");
+        }
+    }
+    Console.WriteLine($"Tile mapping written to: {csvPath}");
     
     return 0;
 }
