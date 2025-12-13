@@ -1216,6 +1216,266 @@ namespace WoWRollback.PM4Module
             Console.WriteLine($"[INFO] MSLK Detail CSV: {mslkCsvPath}");
             Console.WriteLine($"[INFO] Type values: {typeDistribution.Count}, Subtype values: {subtypeDistribution.Count}");
             Console.WriteLine($"[INFO] Multi-CK24 groups (merged objects?): {groupIdToCk24s.Where(g => g.Value.Count > 1).Count()}");
+            
+            // Chunk inventory to find missing data
+            ExportChunkInventory(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Inventory all PM4 chunks to discover unparsed/unknown data.
+        /// </summary>
+        private void ExportChunkInventory(string pm4Directory, string outputDir)
+        {
+            var inventoryPath = Path.Combine(outputDir, "pm4_chunk_inventory.txt");
+            
+            var chunkTotals = new Dictionary<string, long>();
+            var unparsedChunks = new Dictionary<string, int>();
+            var mprrStats = new List<(string File, int Count, int Sequences)>();
+            int totalFiles = 0;
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    totalFiles++;
+                    
+                    // Aggregate chunk sizes
+                    foreach (var (chunk, size) in pm4.ChunkSizes)
+                    {
+                        if (!chunkTotals.ContainsKey(chunk))
+                            chunkTotals[chunk] = 0;
+                        chunkTotals[chunk] += size;
+                    }
+                    
+                    // Track unparsed chunks
+                    foreach (var unparsed in pm4.UnparsedChunks)
+                    {
+                        if (!unparsedChunks.ContainsKey(unparsed.Split(':')[0]))
+                            unparsedChunks[unparsed.Split(':')[0]] = 0;
+                        unparsedChunks[unparsed.Split(':')[0]]++;
+                    }
+                    
+                    // MPRR statistics
+                    if (pm4.MprrData.Count > 0)
+                    {
+                        int sequences = pm4.MprrData.Count(v => v == 0xFFFF);
+                        mprrStats.Add((Path.GetFileName(pm4Path), pm4.MprrData.Count, sequences));
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            
+            using (var sw = new StreamWriter(inventoryPath))
+            {
+                sw.WriteLine("=== PM4 Chunk Inventory ===");
+                sw.WriteLine($"Files analyzed: {totalFiles}");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Chunk Sizes (Total across all files) ===");
+                foreach (var (chunk, totalSize) in chunkTotals.OrderByDescending(x => x.Value))
+                {
+                    var sizeKb = totalSize / 1024.0;
+                    sw.WriteLine($"  {chunk}: {totalSize:N0} bytes ({sizeKb:F1} KB)");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Unparsed Chunks (potential missing data!) ===");
+                if (unparsedChunks.Count == 0)
+                {
+                    sw.WriteLine("  None - all chunks are being parsed!");
+                }
+                else
+                {
+                    foreach (var (chunk, count) in unparsedChunks.OrderByDescending(x => x.Value))
+                    {
+                        sw.WriteLine($"  {chunk}: found in {count} files (NOT PARSED!)");
+                    }
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== MPRR Statistics ===");
+                sw.WriteLine($"  Files with MPRR: {mprrStats.Count}");
+                if (mprrStats.Count > 0)
+                {
+                    var totalMprr = mprrStats.Sum(x => x.Count);
+                    var totalSeq = mprrStats.Sum(x => x.Sequences);
+                    sw.WriteLine($"  Total MPRR ushorts: {totalMprr:N0}");
+                    sw.WriteLine($"  Total sequences (terminated by 0xFFFF): {totalSeq:N0}");
+                    sw.WriteLine($"  Average entries per sequence: {(double)totalMprr / Math.Max(1, totalSeq):F1}");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Chunk Inventory: {inventoryPath}");
+            Console.WriteLine($"[INFO] Unparsed chunks: {unparsedChunks.Count}");
+            
+            // Deep MPRR analysis
+            ExportMprrAnalysis(pm4Directory, outputDir);
+        }
+        
+        /// <summary>
+        /// Deep analysis of MPRR sequences to understand reference patterns.
+        /// MPRR is 67MB of data organized into 0xFFFF-terminated sequences.
+        /// </summary>
+        private void ExportMprrAnalysis(string pm4Directory, string outputDir)
+        {
+            var mprrAnalysisPath = Path.Combine(outputDir, "mprr_deep_analysis.txt");
+            
+            // Track sequence patterns
+            var sequenceLengths = new Dictionary<int, int>();
+            var valueDistribution = new Dictionary<ushort, int>();
+            var sampleSequences = new List<(string File, int SeqIdx, List<ushort> Values)>();
+            int totalSequences = 0;
+            int maxValueSeen = 0;
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    if (pm4.MprrData.Count == 0) continue;
+                    
+                    // Parse sequences (terminated by 0xFFFF)
+                    var currentSeq = new List<ushort>();
+                    int seqIdx = 0;
+                    
+                    foreach (var val in pm4.MprrData)
+                    {
+                        if (val == 0xFFFF)
+                        {
+                            // End of sequence
+                            if (currentSeq.Count > 0)
+                            {
+                                int len = currentSeq.Count;
+                                if (!sequenceLengths.ContainsKey(len))
+                                    sequenceLengths[len] = 0;
+                                sequenceLengths[len]++;
+                                
+                                // Sample first few sequences from each file
+                                if (sampleSequences.Count < 100 && seqIdx < 5)
+                                {
+                                    sampleSequences.Add((Path.GetFileName(pm4Path), seqIdx, new List<ushort>(currentSeq)));
+                                }
+                                
+                                totalSequences++;
+                                seqIdx++;
+                            }
+                            currentSeq.Clear();
+                        }
+                        else
+                        {
+                            currentSeq.Add(val);
+                            
+                            // Track value distribution (sample for large files)
+                            if (totalSequences < 10000 || currentSeq.Count < 20)
+                            {
+                                if (!valueDistribution.ContainsKey(val))
+                                    valueDistribution[val] = 0;
+                                valueDistribution[val]++;
+                            }
+                            
+                            if (val > maxValueSeen && val < 0xFFFF)
+                                maxValueSeen = val;
+                        }
+                    }
+                }
+                catch { /* ignore */ }
+            }
+            
+            using (var sw = new StreamWriter(mprrAnalysisPath))
+            {
+                sw.WriteLine("=== MPRR Deep Analysis ===");
+                sw.WriteLine($"Total sequences: {totalSequences:N0}");
+                sw.WriteLine($"Max value seen (excl 0xFFFF): {maxValueSeen} (0x{maxValueSeen:X4})");
+                sw.WriteLine();
+                
+                sw.WriteLine("=== Sequence Length Distribution ===");
+                foreach (var (len, count) in sequenceLengths.OrderBy(x => x.Key).Take(50))
+                {
+                    var pct = 100.0 * count / totalSequences;
+                    sw.WriteLine($"  Length {len,3}: {count,7} sequences ({pct:F2}%)");
+                }
+                
+                if (sequenceLengths.Count > 50)
+                    sw.WriteLine($"  ... and {sequenceLengths.Count - 50} more length values");
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Value Frequency (top 30) ===");
+                foreach (var (val, count) in valueDistribution.OrderByDescending(x => x.Value).Take(30))
+                {
+                    sw.WriteLine($"  Value {val,5} (0x{val:X4}): {count,7} occurrences");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Sample Sequences ===");
+                foreach (var (file, seqIdx, values) in sampleSequences.Take(30))
+                {
+                    var valStr = string.Join(", ", values.Take(15).Select(v => v.ToString()));
+                    if (values.Count > 15) valStr += $", ... ({values.Count} total)";
+                    sw.WriteLine($"  {file} seq[{seqIdx}]: [{valStr}]");
+                }
+                
+                sw.WriteLine();
+                sw.WriteLine("=== Hypothesis ===");
+                sw.WriteLine("MPRR sequences might be:");
+                sw.WriteLine("  - MPRL index references (if max val < MPRL count)");
+                sw.WriteLine("  - MSLK index references (if max val < MSLK count)");
+                sw.WriteLine("  - MSUR surface references (if max val < MSUR count)");
+                sw.WriteLine("  - Vertex/edge connectivity");
+            }
+            
+            Console.WriteLine($"[INFO] MPRR Deep Analysis: {mprrAnalysisPath}");
+            Console.WriteLine($"[INFO] MPRR sequences: {totalSequences:N0}, max value: {maxValueSeen}");
+            
+            // Per-file correlation with chunk counts
+            var correlationPath = Path.Combine(outputDir, "mprr_correlation.csv");
+            using (var sw = new StreamWriter(correlationPath))
+            {
+                sw.WriteLine("file,mprl_count,mslk_count,msur_count,mprr_count,mprr_max,mprr_in_mprl,mprr_in_mslk,mprr_in_msur,mprr_seq_count");
+                
+                foreach (var pm4Path in pm4Files)
+                {
+                    try
+                    {
+                        var pm4Data = File.ReadAllBytes(pm4Path);
+                        var pm4 = new PM4File(pm4Data);
+                        
+                        if (pm4.MprrData.Count == 0) continue;
+                        
+                        int mprlCount = pm4.PositionRefs.Count;
+                        int mslkCount = pm4.LinkEntries.Count;
+                        int msurCount = pm4.Surfaces.Count;
+                        
+                        // Find max MPRR value (excluding 0xFFFF)
+                        ushort mprrMax = pm4.MprrData.Where(v => v < 0xFFFF).DefaultIfEmpty((ushort)0).Max();
+                        
+                        // Count sequences
+                        int seqCount = pm4.MprrData.Count(v => v == 0xFFFF);
+                        
+                        // Check if max fits within each chunk
+                        bool inMprl = mprrMax < mprlCount;
+                        bool inMslk = mprrMax < mslkCount;
+                        bool inMsur = mprrMax < msurCount;
+                        
+                        sw.WriteLine(string.Join(",",
+                            Path.GetFileName(pm4Path),
+                            mprlCount, mslkCount, msurCount,
+                            pm4.MprrData.Count, mprrMax,
+                            inMprl, inMslk, inMsur,
+                            seqCount));
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+            
+            Console.WriteLine($"[INFO] MPRR Correlation: {correlationPath}");
         }
     }
 }

@@ -21,7 +21,12 @@ public class PM4File
     public List<uint> MeshIndices { get; } = new();          // MSVI
     public List<MsurEntry> Surfaces { get; } = new();        // MSUR
     public List<Vector3> ExteriorVertices { get; } = new();  // MSCN
-    public List<MprlEntry> PositionRefs { get; } = new();    // MPRL (rotation investigation)
+    public List<MprlEntry> PositionRefs { get; } = new();    // MPRL
+    public List<ushort> MprrData { get; } = new();           // MPRR (raw ushorts)
+    
+    // Chunk inventory for debugging
+    public Dictionary<string, uint> ChunkSizes { get; } = new();
+    public List<string> UnparsedChunks { get; } = new();
 
     public static PM4File FromFile(string path)
     {
@@ -44,6 +49,10 @@ public class PM4File
             string sig = Encoding.ASCII.GetString(sigBytes);
             uint size = br.ReadUInt32();
             long dataStart = br.BaseStream.Position;
+            
+            // Track all chunks for debugging
+            ChunkSizes[sig] = size;
+            bool parsed = true;
 
             switch (sig)
             {
@@ -77,12 +86,27 @@ public class PM4File
                 case "MPRL":
                     ReadMprl(br, size);
                     break;
+                case "MPRR":
+                    ReadMprr(br, size);
+                    break;
                 default:
-                    // Skip unknown chunks
+                    // Track unparsed chunks for investigation
+                    UnparsedChunks.Add($"{sig}:{size}");
+                    parsed = false;
                     break;
             }
 
             br.BaseStream.Position = dataStart + size;
+        }
+    }
+    
+    private void ReadMprr(BinaryReader br, uint size)
+    {
+        // MPRR contains sequences of ushorts terminated by 0xFFFF
+        int count = (int)(size / 2);
+        for (int i = 0; i < count; i++)
+        {
+            MprrData.Add(br.ReadUInt16());
         }
     }
 
