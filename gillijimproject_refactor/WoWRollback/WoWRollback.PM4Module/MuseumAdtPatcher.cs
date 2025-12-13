@@ -75,15 +75,51 @@ namespace WoWRollback.PM4Module
             mwidChunk.Data = _adtPatcher.BuildMwidData(allNames);
 
             // Adjust NameId for new MODF entries and append them to any existing MODF data.
+            // CRITICAL: Also check for UniqueId collisions with existing MODF entries!
+            var existingModfData = modfChunk.Data ?? Array.Empty<byte>();
+            
+            // Parse existing MODF entries to collect their UniqueIds
+            var existingUniqueIds = new HashSet<uint>();
+            if (existingModfData.Length >= 64)
+            {
+                int entryCount = existingModfData.Length / 64;
+                for (int i = 0; i < entryCount; i++)
+                {
+                    int offset = i * 64 + 4; // UniqueId is at byte 4 in each 64-byte entry
+                    if (offset + 4 <= existingModfData.Length)
+                    {
+                        uint existingId = BitConverter.ToUInt32(existingModfData, offset);
+                        existingUniqueIds.Add(existingId);
+                    }
+                }
+            }
+            
+            // Prepare new entries with adjusted NameId and conflict-free UniqueIds
             var adjustedEntries = new List<AdtPatcher.ModfEntry>(newModfEntries.Count);
+            uint nextAvailableId = 200_000_000; // High base to avoid conflicts
+            int reassignedCount = 0;
+            
             foreach (var entry in newModfEntries)
             {
                 var adjusted = entry;
                 adjusted.NameId = (uint)(existingCount + entry.NameId);
+                
+                // Check for UniqueId collision with existing entries
+                if (existingUniqueIds.Contains(adjusted.UniqueId))
+                {
+                    // Find next available ID
+                    while (existingUniqueIds.Contains(nextAvailableId))
+                        nextAvailableId++;
+                    adjusted.UniqueId = nextAvailableId++;
+                    reassignedCount++;
+                }
+                existingUniqueIds.Add(adjusted.UniqueId);
                 adjustedEntries.Add(adjusted);
             }
+            
+            if (reassignedCount > 0)
+                Console.WriteLine($"[INFO] Reassigned {reassignedCount} UniqueIds to avoid conflicts with existing MODF entries");
 
-            var existingModfData = modfChunk.Data ?? Array.Empty<byte>();
             var newModfData = _adtPatcher.BuildModfData(adjustedEntries);
 
             var combined = new byte[existingModfData.Length + newModfData.Length];
