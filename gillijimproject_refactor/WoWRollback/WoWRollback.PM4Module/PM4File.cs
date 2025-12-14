@@ -134,18 +134,26 @@ public class PM4File
         int count = (int)(size / 20);
         for (int i = 0; i < count; i++)
         {
-            LinkEntries.Add(new MslkEntry
+            var entry = new MslkEntry
             {
                 TypeFlags = br.ReadByte(),
                 Subtype = br.ReadByte(),
                 Padding = br.ReadUInt16(),
-                GroupObjectId = br.ReadUInt32(),
-                MspiFirstIndex = br.ReadInt32(),
-                MspiIndexCount = br.ReadByte(),
-                LinkIdBytes = br.ReadBytes(3),
-                RefIndex = br.ReadUInt16(),
-                SystemFlag = br.ReadUInt16()
-            });
+                GroupObjectId = br.ReadUInt32()
+            };
+
+            // Read Int24 for MspiFirstIndex
+            byte[] b = br.ReadBytes(3);
+            int mspiFirst = b[0] | (b[1] << 8) | (b[2] << 16);
+            if ((mspiFirst & 0x800000) != 0) mspiFirst |= unchecked((int)0xFF000000);
+            entry.MspiFirstIndex = mspiFirst;
+
+            entry.MspiIndexCount = br.ReadByte();
+            entry.LinkIdBytes = br.ReadBytes(4);
+            entry.RefIndex = br.ReadUInt16();
+            entry.SystemFlag = br.ReadUInt16();
+            
+            LinkEntries.Add(entry);
         }
     }
 
@@ -242,12 +250,12 @@ public class MslkEntry
     public uint GroupObjectId { get; set; }
     public int MspiFirstIndex { get; set; }
     public byte MspiIndexCount { get; set; }
-    public byte[] LinkIdBytes { get; set; } = new byte[3];
+    public byte[] LinkIdBytes { get; set; } = new byte[4];
     public ushort RefIndex { get; set; }
     public ushort SystemFlag { get; set; }
 
-    public uint LinkId => (uint)((LinkIdBytes[2] << 16) | (LinkIdBytes[1] << 8) | LinkIdBytes[0]);
-    public bool HasGeometry => MspiFirstIndex >= 0;
+    public uint LinkId => BitConverter.ToUInt32(LinkIdBytes, 0);
+    public bool HasGeometry => MspiFirstIndex != -1; // 0xFFFFFF (int24) is -1
 }
 
 public class MsurEntry

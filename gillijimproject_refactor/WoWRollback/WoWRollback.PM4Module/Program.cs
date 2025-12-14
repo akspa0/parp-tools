@@ -53,6 +53,9 @@ if (args.Length > 0)
         
         case "test-wl-convert":
             return RunTestWlConvert(args.Skip(1).ToArray());
+
+        case "analyze-pm4":
+            return RunAnalyzePm4(args.Skip(1).ToArray());
     }
 }
 
@@ -1713,5 +1716,76 @@ static int RunTestWlConvert(string[] args)
     }
     Console.WriteLine($"Tile mapping written to: {csvPath}");
     
+    return 0;
+}
+
+// analyze-pm4 command - run dedicated PM4 analysis tools
+static int RunAnalyzePm4(string[] args)
+{
+    Console.WriteLine("=== PM4 Structure Analysis ===\n");
+    
+    string? pm4Dir = null;
+    string? outputDir = null;
+    string? wmoDir = null;
+    string? gamePath = null;
+    string? listfilePath = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Dir = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--wmo": wmoDir = args[++i]; break;
+            case "--game": gamePath = args[++i]; break;
+            case "--listfile": listfilePath = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: analyze-pm4 --pm4 <dir> --out <dir> [--wmo <dir>] [--game <dir> --listfile <file>]");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Dir) || !Directory.Exists(pm4Dir))
+    {
+        Console.Error.WriteLine("Error: --pm4 <dir> is required and must exist");
+        return 1;
+    }
+    
+    outputDir ??= Path.Combine(Directory.GetCurrentDirectory(), "pm4_analysis");
+    Directory.CreateDirectory(outputDir);
+    
+    Console.WriteLine($"PM4 Source: {pm4Dir}");
+    Console.WriteLine($"Output Dir: {outputDir}");
+    if (!string.IsNullOrEmpty(wmoDir)) Console.WriteLine($"WMO Library: {wmoDir}");
+    if (!string.IsNullOrEmpty(gamePath)) Console.WriteLine($"Game Path: {gamePath} (Listfile: {listfilePath})");
+    Console.WriteLine();
+    
+    var pipeline = new PipelineService();
+    
+    Console.WriteLine("[1/7] Comprehensive Relationship Analysis...");
+    pipeline.ExportComprehensiveRelationshipAnalysis(pm4Dir, outputDir);
+    
+    Console.WriteLine("[2/7] MPRL Rotation & Flag Data...");
+    pipeline.ExportMprlRotationData(pm4Dir, outputDir);
+    
+    Console.WriteLine("[3/7] CK24 Z-Layer Correlation...");
+    pipeline.ExportCk24ZLayerAnalysis(pm4Dir, outputDir);
+    
+    Console.WriteLine("[4/7] CK24 ObjectId Grouping...");
+    pipeline.ExportCk24ObjectIdAnalysis(pm4Dir, outputDir);
+    
+    Console.WriteLine("[5/7] RefIndex Alternative Hypothesis...");
+    pipeline.ExportRefIndexAlternativeAnalysis(pm4Dir, outputDir);
+    
+    Console.WriteLine("[6/7] Geometric Type Correlation...");
+    pipeline.ExportGeometricAnalysis(pm4Dir, outputDir);
+
+    Console.WriteLine("[7/7] Geometric Rotation Analysis...");
+    string rotationOut = Path.Combine(outputDir, "rotation_analysis.txt");
+    string typeCorrelationOut = Path.Combine(outputDir, "type_flag_correlation.csv");
+    pipeline.AnalyzeRotationCandidatesV2(pm4Dir, wmoDir ?? "", rotationOut, typeCorrelationOut, gamePath, listfilePath);
+    
+    Console.WriteLine("\n[DONE] Analysis complete. Check output directory.");
     return 0;
 }

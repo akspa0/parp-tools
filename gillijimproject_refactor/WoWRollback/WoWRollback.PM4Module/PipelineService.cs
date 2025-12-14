@@ -7,6 +7,7 @@ using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.PM4;
 using WoWRollback.PM4Module.Services;
 using GillijimProject.WowFiles.Wl;
+using System.Numerics;
 
 namespace WoWRollback.PM4Module
 {
@@ -954,7 +955,7 @@ namespace WoWRollback.PM4Module
         /// Export MPRL rotation candidates to CSV with MODF correlation.
         /// Correlates MPRL positions with matched MODF entries to discover rotation patterns.
         /// </summary>
-        private void ExportMprlRotationData(string pm4Directory, string outputDir, 
+        public void ExportMprlRotationData(string pm4Directory, string outputDir, 
             List<Pm4ModfReconstructor.ModfEntry>? modfEntries = null)
         {
             var mprlCsvPath = Path.Combine(outputDir, "mprl_rotation_analysis.csv");
@@ -1060,7 +1061,7 @@ namespace WoWRollback.PM4Module
         /// Deep analysis of MSLK ↔ CK24 relationships to find sub-object segmentation patterns.
         /// Explores how MSLK TypeFlags, Subtype, GroupObjectId correlate with CK24 groups.
         /// </summary>
-        private void ExportMslkCk24Analysis(string pm4Directory, string outputDir)
+        public void ExportMslkCk24Analysis(string pm4Directory, string outputDir)
         {
             var mslkAnalysisPath = Path.Combine(outputDir, "mslk_ck24_analysis.txt");
             var mslkCsvPath = Path.Combine(outputDir, "mslk_detail.csv");
@@ -1228,7 +1229,7 @@ namespace WoWRollback.PM4Module
         /// Deep correlation analysis between MSLK, MPRL, and MPRR to find object linkage patterns.
         /// Goal: Find the key that uniquely identifies each object instance.
         /// </summary>
-        private void ExportCrossChunkCorrelation(string pm4Directory, string outputDir)
+        public void ExportCrossChunkCorrelation(string pm4Directory, string outputDir)
         {
             var correlationPath = Path.Combine(outputDir, "cross_chunk_correlation.txt");
             
@@ -1359,7 +1360,7 @@ namespace WoWRollback.PM4Module
         /// <summary>
         /// Analyze invalid RefIndex values to understand if they're cross-tile references.
         /// </summary>
-        private void ExportInvalidRefIndexAnalysis(string pm4Directory, string outputDir)
+        public void ExportInvalidRefIndexAnalysis(string pm4Directory, string outputDir)
         {
             var analysisPath = Path.Combine(outputDir, "refindex_invalid_analysis.txt");
             
@@ -1499,7 +1500,7 @@ namespace WoWRollback.PM4Module
         /// Test if RefIndex references MPRL in the target tile specified by LinkId.
         /// LinkId format: 0x00FFXXYY where XX=tile X, YY=tile Y (or reversed).
         /// </summary>
-        private void ExportCrossTileMprlResolution(string pm4Directory, string outputDir)
+        public void ExportCrossTileMprlResolution(string pm4Directory, string outputDir)
         {
             var resolutionPath = Path.Combine(outputDir, "cross_tile_mprl_resolution.txt");
             
@@ -1636,7 +1637,7 @@ namespace WoWRollback.PM4Module
         /// <summary>
         /// Dump MSHD header values to understand their meaning.
         /// </summary>
-        private void ExportMshdAnalysis(string pm4Directory, string outputDir)
+        public void ExportMshdAnalysis(string pm4Directory, string outputDir)
         {
             var mshdPath = Path.Combine(outputDir, "mshd_header_analysis.txt");
             
@@ -1728,7 +1729,7 @@ namespace WoWRollback.PM4Module
         /// Comprehensive analysis of PM4 chunk relationships including CK24 decomposition.
         /// Treats PM4 as a database with chunks as tables and indexes as foreign keys.
         /// </summary>
-        private void ExportComprehensiveRelationshipAnalysis(string pm4Directory, string outputDir)
+        public void ExportComprehensiveRelationshipAnalysis(string pm4Directory, string outputDir)
         {
             var analysisPath = Path.Combine(outputDir, "pm4_relationship_analysis.txt");
             
@@ -1944,7 +1945,7 @@ namespace WoWRollback.PM4Module
         /// Test if CK24 Byte2 (type flags) correlates with Z-levels.
         /// Hypothesis: Different Byte2 values = different floor/height layers.
         /// </summary>
-        private void ExportCk24ZLayerAnalysis(string pm4Directory, string outputDir)
+        public void ExportCk24ZLayerAnalysis(string pm4Directory, string outputDir)
         {
             var analysisPath = Path.Combine(outputDir, "ck24_z_layer_analysis.txt");
             
@@ -2111,7 +2112,7 @@ If Z ranges for different Byte2 values OVERLAP significantly:
         /// Test if CK24 Byte0+Byte1 (ObjectID) can identify distinct geometry groups.
         /// Hypothesis: Same ObjectID = same building/object with compact bounding box.
         /// </summary>
-        private void ExportCk24ObjectIdAnalysis(string pm4Directory, string outputDir)
+        public void ExportCk24ObjectIdAnalysis(string pm4Directory, string outputDir)
         {
             var analysisPath = Path.Combine(outputDir, "ck24_objectid_analysis.txt");
             
@@ -2279,7 +2280,7 @@ ObjectID (Byte0+Byte1):
         /// <summary>
         /// Test alternative hypotheses for what MSLK.RefIndex references.
         /// </summary>
-        private void ExportRefIndexAlternativeAnalysis(string pm4Directory, string outputDir)
+        public void ExportRefIndexAlternativeAnalysis(string pm4Directory, string outputDir)
         {
             var analysisPath = Path.Combine(outputDir, "refindex_alternative_analysis.txt");
             
@@ -2694,5 +2695,715 @@ ObjectID (Byte0+Byte1):
             
             Console.WriteLine($"[INFO] MPRR Correlation: {correlationPath}");
         }
+
+        /// <summary>
+        /// Analyze geometric properties of MSLK and MSUR types to determine their physical meaning.
+        /// Correlates Types with Normal Vectors (Flat vs Vertical).
+        /// </summary>
+        public void ExportGeometricAnalysis(string pm4Directory, string outputDir)
+        {
+            var analysisPath = Path.Combine(outputDir, "geometric_type_analysis.txt");
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            
+            // MSLK Type analysis
+            var mslkStats = new Dictionary<byte, (long Count, double SumNormalZ, double SumArea, double MaxZ, double MinZ)>();
+            
+            // MSUR CK24 Type analysis
+            var ck24Stats = new Dictionary<byte, (long Count, double SumNormalZ, double SumArea)>();
+            
+            int filesAnalyzed = 0;
+            
+            // Debug counters
+            long totalMslkSkippedNoGeom = 0;
+            long totalMslkSkippedLowCount = 0;
+            long totalMslkSkippedOutOfBounds = 0;
+            long totalMslkProcessed = 0;
+            
+            var failureSamples = new List<string>();
+
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var pm4 = new PM4File(pm4Data);
+                    
+                    // --- MSLK Analysis ---
+                    // MSLK -> MSPI -> MSPV (triangles)
+                    // We need to parse MSPI and MSPV which aren't fully exposed in PM4File public model details
+                    // Assuming PM4File populates PathVertices (MSPV) and PathIndices (MSPI)
+                    
+                    if (pm4.LinkEntries != null && pm4.PathIndices != null && pm4.PathVertices != null)
+                    {
+                        foreach (var mslk in pm4.LinkEntries)
+                        {
+                            if (mslk.MspiFirstIndex < 0) { totalMslkSkippedNoGeom++; continue; }
+                            if (mslk.MspiIndexCount < 3) { totalMslkSkippedLowCount++; continue; }
+                            if (mslk.MspiFirstIndex + mslk.MspiIndexCount > pm4.PathIndices.Count) 
+                            { 
+                                totalMslkSkippedOutOfBounds++; 
+                                if (failureSamples.Count < 10)
+                                {
+                                    failureSamples.Add($"File: {Path.GetFileName(pm4Path)} | First: {mslk.MspiFirstIndex} + Count: {mslk.MspiIndexCount} > MSPI: {pm4.PathIndices.Count}");
+                                }
+                                continue; 
+                            }
+                            
+                            totalMslkProcessed++;
+
+                            // Process triangles
+                            for (int i = 0; i < mslk.MspiIndexCount - 2; i += 3) // Assuming triangle list
+                            {
+                                // Indices into MSPV
+                                var idx0 = pm4.PathIndices[mslk.MspiFirstIndex + i];
+                                var idx1 = pm4.PathIndices[mslk.MspiFirstIndex + i + 1];
+                                var idx2 = pm4.PathIndices[mslk.MspiFirstIndex + i + 2];
+                                
+                                if (idx0 >= pm4.PathVertices.Count || idx1 >= pm4.PathVertices.Count || idx2 >= pm4.PathVertices.Count) continue;
+                                
+                                var v0 = pm4.PathVertices[(int)idx0];
+                                var v1 = pm4.PathVertices[(int)idx1];
+                                var v2 = pm4.PathVertices[(int)idx2];
+                                
+                                // Calc normal
+                                var edge1 = v1 - v0;
+                                var edge2 = v2 - v0;
+                                var normal = System.Numerics.Vector3.Cross(edge1, edge2);
+                                float area = normal.Length() * 0.5f;
+                                if (area > 0) normal = System.Numerics.Vector3.Normalize(normal);
+                                
+                                // Update stats
+                                if (!mslkStats.ContainsKey(mslk.TypeFlags))
+                                    mslkStats[mslk.TypeFlags] = (0, 0, 0, double.MinValue, double.MaxValue);
+                                    
+                                var s = mslkStats[mslk.TypeFlags];
+                                mslkStats[mslk.TypeFlags] = (s.Count + 1, s.SumNormalZ + Math.Abs(normal.Z), s.SumArea + area, Math.Max(s.MaxZ, v0.Z), Math.Min(s.MinZ, v0.Z)); // Z is Up standard
+                            }
+                        }
+                    }
+                    
+                    // --- CK24 Analysis ---
+                    // MSUR -> Normal (pre-calculated)
+                    foreach (var surf in pm4.Surfaces)
+                    {
+                         uint ck24 = surf.CK24;
+                         byte type = (byte)((ck24 >> 16) & 0xFF);
+                         
+                         // Surface normal is stored directly
+                         // Y is Up in MSUR? Let's check spec again.
+                         // Spec says: MSUR has normal_x, normal_y, normal_z
+                         // Assuming Z is up for MSUR based on 'Height' field being separate
+                         
+                         float normalZ = Math.Abs(surf.Normal.Z); // Assuming Z is up
+                         
+                         if (!ck24Stats.ContainsKey(type))
+                             ck24Stats[type] = (0, 0, 0);
+                             
+                         var s = ck24Stats[type];
+                         ck24Stats[type] = (s.Count + 1, s.SumNormalZ + normalZ, s.SumArea + 0); // No area readily available without indices
+                    }
+                    
+                    filesAnalyzed++;
+                    if (filesAnalyzed % 50 == 0) Console.Write(".");
+                }
+                catch {}
+            }
+            Console.WriteLine();
+            
+            using (var sw = new StreamWriter(analysisPath))
+            {
+                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
+                sw.WriteLine("║        GEOMETRIC TYPE CORRELATION ANALYSIS                     ║");
+                sw.WriteLine("║  Validating 'Type' meaning via Physical Properties             ║");
+                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine();
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("MSLK TYPE (Pathfinding Mesh)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("MSLK TYPE (Pathfinding Mesh)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                
+                // Debug info
+                sw.WriteLine($"[DEBUG] Total MSLK analyzed: {filesAnalyzed}");
+                sw.WriteLine($"[DEBUG] Skipped (No Geom/FirstIndex<0): {totalMslkSkippedNoGeom}");
+                sw.WriteLine($"[DEBUG] Skipped (Low Count < 3): {totalMslkSkippedLowCount}");
+                sw.WriteLine($"[DEBUG] Skipped (Out of Bounds): {totalMslkSkippedOutOfBounds}");
+                sw.WriteLine($"[DEBUG] Processed Successfully: {totalMslkProcessed}");
+
+                if (totalMslkSkippedOutOfBounds > 0)
+                {
+                    sw.WriteLine();
+                    sw.WriteLine("[DEBUG] OUT OF BOUNDS DIAGNOSIS");
+                    sw.WriteLine("Sample failures (FirstIndex + Count > MSPI Count):");
+                    foreach (var s in failureSamples)
+                        sw.WriteLine("  " + s);
+                }
+                
+                sw.WriteLine("Type | Triangles | Avg Normal Z (Up) | Avg Area | Z Range | Prediction");
+                sw.WriteLine("-----|-----------|-------------------|----------|---------|-----------");
+                
+                foreach (var kvp in mslkStats.OrderByDescending(x => x.Value.Count))
+                {
+                    double avgNorm = kvp.Value.SumNormalZ / Math.Max(1, kvp.Value.Count);
+                    double avgArea = kvp.Value.SumArea / Math.Max(1, kvp.Value.Count);
+                    double zRange = kvp.Value.MaxZ - kvp.Value.MinZ;
+                    
+                    string prediction = avgNorm > 0.8 ? "FLATS (Floor)" : (avgNorm < 0.2 ? "WALLS (Vertical)" : "SLOPES");
+                    
+                    sw.WriteLine($"{kvp.Key,4} | {kvp.Value.Count,9} | {avgNorm,17:F3} | {avgArea,8:F2} | {zRange,7:F0} | {prediction}");
+                }
+
+
+
+
+                sw.WriteLine();
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("CK24 TYPE (Surface Grouping)");
+                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("Type | Surfaces | Avg Normal Z (Up) | Prediction");
+                sw.WriteLine("-----|----------|-------------------|-----------");
+                
+                foreach (var kvp in ck24Stats.OrderByDescending(x => x.Value.Count))
+                {
+                    double avgNorm = kvp.Value.SumNormalZ / Math.Max(1, kvp.Value.Count);
+                    string prediction = avgNorm > 0.8 ? "FLATS" : (avgNorm < 0.2 ? "WALLS" : "COMPLEX");
+                    
+                    sw.WriteLine($"0x{kvp.Key:X2} | {kvp.Value.Count,8} | {avgNorm,17:F3} | {prediction}");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Geometric Analysis: {analysisPath}");
+        }
+
+
+
+
+        public void AnalyzeRotationCandidates(string pm4Directory, string wmoLibraryPath, string outPath, string? mpqPath = null, string? listfilePath = null)
+        {
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+
+            // Output writer
+            using var sw = new StreamWriter(outPath);
+            sw.WriteLine("PM4 Rotation Analysis");
+            sw.WriteLine("=====================");
+
+            // 1. Calculate PM4 Dominant Wall Angles per Object (Grouped by Type/Id)
+            var pm4Objects = new Dictionary<uint, List<Vector3>>(); // CompositeKey -> Wall Normals
+
+            foreach (var pm4Path in pm4Files)
+            {
+                // Load PM4
+                var pm4 = PM4File.FromFile(pm4Path);
+
+            for (int i = 0; i < pm4.LinkEntries.Count; i++)
+            {
+                var entry = pm4.LinkEntries[i];
+                // Only look at "Wall" types (Type 2, 4, 10, 12 from previous analysis)
+                // Or generically: any surface with normal.Z ~ 0
+                if (!entry.HasGeometry) continue;
+
+                uint key = ((uint)entry.TypeFlags << 24) | (entry.GroupObjectId & 0xFFFFFF);
+
+                if (!pm4Objects.ContainsKey(key))
+                    pm4Objects[key] = new List<Vector3>();
+
+                int start = entry.MspiFirstIndex;
+                int count = entry.MspiIndexCount;
+
+                if (start < 0 || start + count > pm4.PathIndices.Count) continue;
+
+                for (int j = 0; j < count; j += 3)
+                {
+                     if (start + j + 2 >= pm4.PathIndices.Count) break;
+
+                    int i0 = (int)pm4.PathIndices[start + j];
+                    int i1 = (int)pm4.PathIndices[start + j + 1];
+                    int i2 = (int)pm4.PathIndices[start + j + 2];
+
+                    if (i0 >= pm4.PathVertices.Count || i1 >= pm4.PathVertices.Count || i2 >= pm4.PathVertices.Count) continue;
+
+                    var v0 = pm4.PathVertices[i0];
+                    var v1 = pm4.PathVertices[i1];
+                    var v2 = pm4.PathVertices[i2];
+
+                    var edge1 = v1 - v0;
+                    var edge2 = v2 - v0;
+                    var normal = Vector3.Normalize(Vector3.Cross(edge1, edge2));
+
+                    // Check if Wall (Standard Z-up: Abs(Z) < 0.5)
+                    if (Math.Abs(normal.Z) < 0.5f)
+                    {
+                        pm4Objects[key].Add(normal);
+                    }
+                }
+            }
+            }
+
+            // 2. Compute Dominant Angle for each PM4 Object
+            sw.WriteLine("Object ID | Type | Wall Tris | Dominant Angle | Confidence");
+            sw.WriteLine("----------|------|-----------|----------------|-----------");
+
+            foreach (var kvp in pm4Objects)
+            {
+                 if (kvp.Value.Count < 10) continue; // Skip noise
+
+                 // Histogram 5-deg bins
+                 float[] bins = new float[72];
+                 foreach(var norm in kvp.Value)
+                 {
+                     float angle = (float)Math.Atan2(norm.Y, norm.X) * (180f / (float)Math.PI);
+                     if (angle < 0) angle += 360f;
+                     int bin = (int)(angle / 5) % 72;
+                     bins[bin] += 1.0f; // Weight by count for now (could do area)
+                 }
+
+                 int bestBin = -1;
+                 float maxVal = 0;
+                 for(int i=0; i<72; i++)
+                 {
+                     if(bins[i] > maxVal) { maxVal = bins[i]; bestBin = i; }
+                 }
+
+                 float domAngle = bestBin * 5f + 2.5f;
+                 float confidence = maxVal / kvp.Value.Count;
+
+                 uint type = kvp.Key >> 24;
+                 uint id = kvp.Key & 0xFFFFFF;
+
+                sw.WriteLine($"{id,9} | {type,4} | {kvp.Value.Count,9} | {domAngle,14:F1} | {confidence,9:F2}");
+            }
+
+            // 3. WMO Analysis (If path provided)
+            if (!string.IsNullOrEmpty(wmoLibraryPath) && Directory.Exists(wmoLibraryPath))
+            {
+                sw.WriteLine();
+                sw.WriteLine("WMO Rotation Analysis");
+                sw.WriteLine("=====================");
+                sw.WriteLine("WMO Name                                   | Wall Tris | Dominant Angle | Size");
+                sw.WriteLine("-------------------------------------------|-----------|----------------|------");
+
+                var wmoFiles = Directory.GetFiles(wmoLibraryPath, "*.wmo", SearchOption.AllDirectories)
+                    .Where(f => !f.EndsWith("_000.wmo") && !f.Contains("_00")) // Filter group files if possible, keep root
+                    .ToList();
+
+
+                sw.WriteLine($"Found {wmoFiles.Count} WMO files in library.");
+
+                foreach (var wmoPath in wmoFiles)
+                {
+                    try
+                    {
+                        // We need to use WmoPathfindingExtractor directly or via service
+                        // Since WmoExtractorService might not expose PathfindingExtractor directly, let's instantiate it.
+                        var pfExtractor = new WmoPathfindingExtractor();
+                        var pfData = pfExtractor.ExtractFromWmo(wmoPath);
+
+                        if (pfData.Aggregate != null && pfData.Aggregate.WallSurfaces.Count > 0)
+                        {
+                            string name = Path.GetFileName(wmoPath);
+                            // Truncate name for display
+                            if (name.Length > 42) name = name.Substring(0, 39) + "...";
+
+                            sw.WriteLine($"{name,-42} | {pfData.Aggregate.WallCount,9} | {pfData.Aggregate.DominantWallAngle,14:F1} | {pfData.Aggregate.Size.X:F0}x{pfData.Aggregate.Size.Y:F0}x{pfData.Aggregate.Size.Z:F0}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        sw.WriteLine($"[ERROR] {Path.GetFileName(wmoPath)}: {ex.Message}");
+                    }
+                }
+            }
+            
+            // 4. MPQ Analysis
+            if (!string.IsNullOrEmpty(mpqPath) && File.Exists(mpqPath) && 
+                !string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
+            {
+                sw.WriteLine();
+                sw.WriteLine("WMO Rotation Analysis (MPQ Source)");
+                sw.WriteLine("=====================");
+                sw.WriteLine("Archive: " + Path.GetFileName(mpqPath));
+                sw.WriteLine("WMO Name                                   | Wall Tris | Dominant Angle | Size");
+                sw.WriteLine("-------------------------------------------|-----------|----------------|------");
+                
+                using var archive = new WoWRollback.Core.Services.Archive.MpqArchiveSource(new[] { mpqPath });
+                
+                var wmoFiles = File.ReadLines(listfilePath)
+                    .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+                    .Where(l => !l.Contains("_00")) // Exclude group files
+                    .ToList();
+                    
+                sw.WriteLine($"Found {wmoFiles.Count} WMO candidates in listfile.");
+                
+                int processed = 0;
+                foreach (var wmoFile in wmoFiles)
+                {
+                    // Normalize path
+                    string wmoPath = wmoFile.Replace('/', '\\');
+                    
+                    if (!archive.FileExists(wmoPath)) continue;
+                    
+                    try
+                    {
+                        var pfExtractor = new WmoPathfindingExtractor();
+                        var structure = pfExtractor.ExtractStructureFromMpq(archive, wmoPath);
+
+                        if (structure.Aggregate != null && structure.Aggregate.WallSurfaces.Count > 0)
+                        {
+                            string name = Path.GetFileName(wmoPath);
+                            if (name.Length > 42) name = name.Substring(0, 39) + "...";
+                            sw.WriteLine($"{name,-42} | {structure.Aggregate.WallCount,9} | {structure.Aggregate.DominantWallAngle,14:F1} | {structure.Aggregate.Size.X:F0}x{structure.Aggregate.Size.Y:F0}x{structure.Aggregate.Size.Z:F0}");
+                            processed++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // sw.WriteLine($"[ERROR] {Path.GetFileName(wmoPath)}: {ex.Message}");
+                    }
+                    
+                    if (processed % 100 == 0 && processed > 0) Console.Write(".");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Rotation Analysis: {outPath}");
+        }
+        public void AnalyzeRotationCandidatesV2(string pm4Directory, string wmoLibraryPath, string outPath, string typeOutPath, string? gamePath = null, string? listfilePath = null)
+        {
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+
+            // Output writer
+            using var sw = new StreamWriter(outPath);
+            sw.WriteLine("Geometric Rotation & Matching Analysis");
+            sw.WriteLine("====================================");
+            sw.WriteLine($"Generated: {DateTime.Now}");
+            sw.WriteLine();
+
+            // ---------------------------------------------------------
+            // 1. Calculate PM4 Object Fingerprints (Wall Angle + bounds)
+            // ---------------------------------------------------------
+            Console.WriteLine("[INFO] Fingerprinting PM4 Objects...");
+            
+            var pm4Candidates = new Dictionary<uint, Pm4Candidate>(); 
+
+            foreach (var pm4Path in pm4Files)
+            {
+                var pm4 = PM4File.FromFile(pm4Path);
+
+                for (int i = 0; i < pm4.LinkEntries.Count; i++)
+                {
+                    var entry = pm4.LinkEntries[i];
+                    if (!entry.HasGeometry) continue;
+
+                    uint key = ((uint)entry.TypeFlags << 24) | (entry.GroupObjectId & 0xFFFFFF);
+
+                    if (!pm4Candidates.TryGetValue(key, out var candidate))
+                    {
+                        candidate = new Pm4Candidate { Id = entry.GroupObjectId & 0xFFFFFF, Type = (uint)entry.TypeFlags };
+                        pm4Candidates[key] = candidate;
+                    }
+
+                    int start = entry.MspiFirstIndex;
+                    int count = entry.MspiIndexCount;
+
+                    if (start < 0 || start + count > pm4.PathIndices.Count) continue;
+
+                    for (int j = 0; j < count; j += 3)
+                    {
+                        if (start + j + 2 >= pm4.PathIndices.Count) break;
+
+                        int i0 = (int)pm4.PathIndices[start + j];
+                        int i1 = (int)pm4.PathIndices[start + j + 1];
+                        int i2 = (int)pm4.PathIndices[start + j + 2];
+
+                        if (i0 >= pm4.PathVertices.Count || i1 >= pm4.PathVertices.Count || i2 >= pm4.PathVertices.Count) continue;
+
+                        var v0 = pm4.PathVertices[i0];
+                        var v1 = pm4.PathVertices[i1];
+                        var v2 = pm4.PathVertices[i2];
+                        
+                        // Update Bounds
+                        candidate.Min = Vector3.Min(candidate.Min, v0);
+                        candidate.Min = Vector3.Min(candidate.Min, v1);
+                        candidate.Min = Vector3.Min(candidate.Min, v2);
+                        candidate.Max = Vector3.Max(candidate.Max, v0);
+                        candidate.Max = Vector3.Max(candidate.Max, v1);
+                        candidate.Max = Vector3.Max(candidate.Max, v2);
+
+                        // Calculate Normal
+                        var edge1 = v1 - v0;
+                        var edge2 = v2 - v0;
+                        var normal = Vector3.Normalize(Vector3.Cross(edge1, edge2));
+
+                        if (Math.Abs(normal.Z) < 0.5f)
+                        {
+                            candidate.WallNormals.Add(normal);
+                        }
+                        else if (normal.Z > 0.5f)
+                        {
+                            candidate.FloorNormals.Add(normal);
+                        }
+                    }
+                }
+            }
+            
+            // Process PM4 Candidates (calc angles)
+            var validPm4 = new List<Pm4Candidate>();
+            foreach (var cand in pm4Candidates.Values)
+            {
+                if (cand.WallNormals.Count < 5) continue; // Filter noise
+
+                float[] bins = new float[72];
+                foreach (var norm in cand.WallNormals)
+                {
+                    float angle = (float)Math.Atan2(norm.Y, norm.X) * (180f / (float)Math.PI);
+                    if (angle < 0) angle += 360f;
+                    int bin = (int)(angle / 5) % 72;
+                    bins[bin] += 1.0f;
+                }
+
+                int bestBin = -1;
+                float maxVal = 0;
+                for (int i = 0; i < 72; i++)
+                {
+                    if (bins[i] > maxVal) { maxVal = bins[i]; bestBin = i; }
+                }
+
+                cand.DominantAngle = bestBin * 5f + 2.5f;
+                validPm4.Add(cand);
+            }
+            
+            sw.WriteLine($"Found {validPm4.Count} valid PM4 Objects (with walls).");
+            Console.WriteLine($"[INFO] Found {validPm4.Count} valid PM4 Objects.");
+
+            // ---------------------------------------------------------
+            // 2. Extract WMO Fingerprints (from MPQ)
+            // ---------------------------------------------------------
+            var validWmos = new List<WoWRollback.PM4Module.WmoPathfindingData>();
+
+            if (!string.IsNullOrEmpty(gamePath) && Directory.Exists(gamePath) && 
+                !string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
+            {
+                Console.WriteLine("[INFO] extracting WMO fingerprints from MPQ...");
+                
+                var mpqFiles = Directory.GetFiles(Path.Combine(gamePath, "Data"), "*.MPQ", SearchOption.AllDirectories);
+                using var archive = new WoWRollback.Core.Services.Archive.MpqArchiveSource(mpqFiles);
+                
+                var wmoEntries = File.ReadLines(listfilePath)
+                    .Where(l => l.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+                    .Where(l => !l.Contains("_00")) // Skip sub-groups
+                    .ToList();
+                
+                int processed = 0;
+                
+                // Single thread for safety.
+                foreach (var wmoFile in wmoEntries)
+                {
+                    string wmoPath = wmoFile.Replace('/', '\\');
+                    if (!archive.FileExists(wmoPath)) continue;
+
+                    try
+                    {
+                        var pfExtractor = new WmoPathfindingExtractor();
+                        var structure = pfExtractor.ExtractStructureFromMpq(archive, wmoPath);
+                        
+                        // Add Groups
+                        foreach (var g in structure.Groups) 
+                        {
+                            if (g.WallCount > 0) validWmos.Add(g);
+                        }
+                        
+                        // Add Aggregate
+                        if (structure.Aggregate != null && structure.Aggregate.WallCount > 0)
+                        {
+                            validWmos.Add(structure.Aggregate);
+                        }
+                    }
+                    catch { /* ignore */ }
+                    
+                    processed++;
+                    if (processed % 200 == 0) Console.Write(".");
+                }
+                Console.WriteLine();
+            }
+            
+            sw.WriteLine($"Found {validWmos.Count} valid WMO candidates (with walls).");
+            Console.WriteLine($"[INFO] Found {validWmos.Count} valid WMO candidates.");
+
+            // ---------------------------------------------------------
+            // 3. Perform Matching
+            // ---------------------------------------------------------
+            sw.WriteLine();
+            sw.WriteLine("Matching Analysis (Size Tolerance: 15%)");
+            sw.WriteLine("PM4 ID    | Type | Size (WxDxH)   | WMO Name                                 | WMO Size       | Rot Delta | Conf");
+            sw.WriteLine("----------|------|----------------|------------------------------------------|----------------|-----------|-----");
+            
+            foreach (var pm4 in validPm4.OrderBy(p => p.Type).ThenBy(p => p.Id))
+            {
+                // Find candidates
+                var matches = new List<(WmoPathfindingData wmo, float rot, float sizeDiff)>();
+                
+                foreach (var wmo in validWmos)
+                {
+                    // Check Height match (important barrier for false positives)
+                    if (Math.Abs(pm4.Size.Z - wmo.Size.Z) > pm4.Size.Z * 0.25f + 5.0f && pm4.Size.Z > 10) continue; 
+
+                    bool matchRaw = IsSizeMatch(pm4.Size.X, pm4.Size.Y, wmo.Size.X, wmo.Size.Y);
+                    bool matchRot = IsSizeMatch(pm4.Size.X, pm4.Size.Y, wmo.Size.Y, wmo.Size.X); // 90 deg rotated
+                    
+                    if (matchRaw || matchRot)
+                    {
+                        // Calculate Rotation Delta
+                        // RotDelta = PM4 - WMO
+                        float delta = pm4.DominantAngle - wmo.DominantWallAngle;
+                        
+                        // Normalize delta to 0..360
+                        while (delta < 0) delta += 360f;
+                        while (delta >= 360) delta -= 360f;
+                        
+                        // Check if alignment is near 0, 90, 180, 270
+                        if (IsCardinal(delta, out float cardinal))
+                        {
+                            matches.Add((wmo, cardinal, Vector3.Distance(pm4.Size, wmo.Size)));
+                        }
+                    }
+                }
+                
+                if (matches.Count > 0)
+                {
+                    // Sort by size difference
+                    var best = matches.OrderBy(m => m.sizeDiff).Take(5);
+                    
+                    foreach (var m in best)
+                    {
+                        string wmoName = Path.GetFileName(m.wmo.WmoPath);
+                        if (wmoName.Length > 40) wmoName = wmoName.Substring(0, 37) + "...";
+                        
+                        sw.WriteLine($"{pm4.Id,9} | {pm4.Type,4} | {pm4.Size.X,4:F0}x{pm4.Size.Y,4:F0}x{pm4.Size.Z,4:F0} | {wmoName,-40} | {m.wmo.Size.X,4:F0}x{m.wmo.Size.Y,4:F0}x{m.wmo.Size.Z,4:F0} | {m.rot,9:F1} | HIGH");
+                    }
+                }
+            }
+
+            // Export Type Correlation Analysis
+            string matchCsvPath = Path.Combine(Path.GetDirectoryName(outPath), "matches.csv");
+            File.WriteAllText(matchCsvPath, "PM4_ID,WMO_Name,PosX,PosY,PosZ,RotBox_X,RotBox_Y,RotBox_Z\n");
+
+            using (var typeSw = new StreamWriter(typeOutPath))
+            {
+                typeSw.WriteLine("PM4_Type,WMO_Name,WMO_Flags_Hex,Start_Indoor,Start_Outdoor,WMO_Size,Dominant_MOPY_Byte");
+                
+                foreach (var pm4 in validPm4.OrderBy(p => p.Type).ThenBy(p => p.Id))
+                {
+                    // Reuse match logic logic (simplified for correlation)
+                     foreach (var wmo in validWmos)
+                    {
+                        if (Math.Abs(pm4.Size.Z - wmo.Size.Z) > pm4.Size.Z * 0.25f + 5.0f && pm4.Size.Z > 10) continue;
+                        
+                        bool matchRaw = IsSizeMatch(pm4.Size.X, pm4.Size.Y, wmo.Size.X, wmo.Size.Y);
+                        bool matchRot = IsSizeMatch(pm4.Size.X, pm4.Size.Y, wmo.Size.Y, wmo.Size.X);
+                        
+                        // Strict sizing for correlation to avoid noise
+                        if (matchRaw || matchRot)
+                        {
+                            // Check rotation alignment
+                            float delta = pm4.DominantAngle - wmo.DominantWallAngle;
+                            while (delta < 0) delta += 360f;
+                            while (delta >= 360) delta -= 360f;
+                            
+                            if (IsCardinal(delta, out _))
+                            {
+                                // Found a high-confidence match
+                                uint combinedFlags = 0;
+                                foreach (var f in wmo.GroupFlags) combinedFlags |= f;
+                                
+                                bool startIndoor = (combinedFlags & 0x2000) != 0;
+                                bool startOutdoor = (combinedFlags & 0x8) != 0;
+                                
+                                string wmoName = Path.GetFileName(wmo.WmoPath);
+                                typeSw.WriteLine($"{pm4.Type},{wmoName},0x{combinedFlags:X},{startIndoor},{startOutdoor},{wmo.Size.X:F0}x{wmo.Size.Y:F0}x{wmo.Size.Z:F0},0x{wmo.DominantMopyFlag:X}");
+                                
+                                // Calculate TILT (Pitch/Roll) from Floor Normals
+                                Vector3 avgFloor = Vector3.UnitZ;
+                                if (pm4.FloorNormals.Count > 0)
+                                {
+                                    Vector3 sum = Vector3.Zero;
+                                    foreach (var n in pm4.FloorNormals) sum += n;
+                                    avgFloor = Vector3.Normalize(sum);
+                                }
+                                
+                                // Eulers
+                                // Eulers
+                                // 1. Yaw (Heading) from Cardinal Match
+                                float yaw = delta; // This is the delta we calculated
+                                
+                                // 2. Pitch/Roll from Floor Normal
+                                // Simple approach: Tilt around axis perpendicular to Z and FloorNormal
+                                // But combining with Yaw is tricky.
+                                // Let's simplify: WMO is defined in local space.
+                                // Position: Center of Bounds? Or (0,0,0) of PM4? 
+                                // PM4 coords are absolute.
+                                // WMO coords are relative.
+                                // We place WMO at Center(PM4).
+                                
+                                // For CSV, just output Raw Eulers if possible, or components.
+                                // Let's output the Floor Normal and the Yaw. 
+                                // The Patcher can do the Quaternion math.
+                                
+                                // But user asked to ENCODE it.
+                                // Let's estimate Pitch/Roll.
+                                float pitch = -(float)Math.Asin(avgFloor.Y); // Approx
+                                float roll = -(float)Math.Asin(avgFloor.X);  // Approx
+                                // Accurate conversion requires Quaternion.
+                                
+                                // matches.csv content
+                                // ID, WMO, PosX, PosY, PosZ, RotX, RotY, RotZ
+                                Vector3 center = (pm4.Min + pm4.Max) * 0.5f;
+                                File.AppendAllText(Path.Combine(Path.GetDirectoryName(outPath), "matches.csv"), 
+                                    $"{pm4.Id},{wmoName},{center.X},{center.Y},{center.Z},{pitch},{yaw},{roll}\n");
+
+                                // One high-confidence match per PM4 is enough for correlation stats
+                                break; 
+                            }
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine($"[INFO] Analysis Complete. Saved to {outPath}");
+        }
+
+        private class Pm4Candidate {
+            public uint Id;
+            public uint Type;
+            public List<Vector3> WallNormals = new();
+            public List<Vector3> FloorNormals = new();
+            public Vector3 Min = new Vector3(float.MaxValue);
+            public Vector3 Max = new Vector3(float.MinValue);
+            public float DominantAngle;
+            public Vector3 Size => Max - Min;
+        }
+
+        private bool IsSizeMatch(float w1, float d1, float w2, float d2)
+        {
+             // 15% tolerance
+             float tol = 0.15f;
+             if (Math.Abs(w1 - w2) / (w2 + 0.1f) > tol) return false;
+             if (Math.Abs(d1 - d2) / (d2 + 0.1f) > tol) return false;
+             return true;
+        }
+
+        private bool IsCardinal(float angle, out float cleanAngle)
+        {
+            float tol = 10f; // 10 degree slop
+            cleanAngle = 0;
+            
+            if (Math.Abs(angle - 0) < tol || Math.Abs(angle - 360) < tol) { cleanAngle = 0; return true; }
+            if (Math.Abs(angle - 90) < tol) { cleanAngle = 90; return true; }
+            if (Math.Abs(angle - 180) < tol) { cleanAngle = 180; return true; }
+            if (Math.Abs(angle - 270) < tol) { cleanAngle = 270; return true; }
+            return false;
     }
+}
 }
