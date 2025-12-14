@@ -59,6 +59,12 @@ if (args.Length > 0)
 
         case "convert-matches-to-modf":
             return RunConvertMatchesToModf(args.Skip(1).ToArray());
+
+        case "dump-pm4-geometry":
+            return RunDumpPm4Geometry(args.Skip(1).ToArray());
+
+        case "convert-ck24-to-wmo":
+            return RunConvertCk24ToWmo(args.Skip(1).ToArray());
     }
 }
 
@@ -1964,5 +1970,142 @@ static int RunConvertMatchesToModf(string[] args)
     Console.WriteLine($"referenced {mwmoList.Count} unique WMOs.");
     Console.WriteLine($"Output: {outputDir}");
     
+    return 0;
+}
+
+// dump-pm4-geometry command
+static int RunDumpPm4Geometry(string[] args)
+{
+    if (args.Length < 2)
+    {
+        Console.WriteLine("Usage: dump-pm4-geometry <pm4_file_or_dir> <output_dir>");
+        return 1;
+    }
+
+    string inputPath = args[0];
+    string outputDir = args[1];
+    var dumper = new WoWRollback.PM4Module.Analysis.Pm4GeometryDumper();
+
+    if (File.Exists(inputPath))
+    {
+        dumper.Dump(inputPath, outputDir);
+    }
+    else if (Directory.Exists(inputPath))
+    {
+        foreach (var file in Directory.GetFiles(inputPath, "*.pm4"))
+        {
+            dumper.Dump(file, outputDir);
+        }
+    }
+    else
+    {
+        Console.Error.WriteLine($"Input not found: {inputPath}");
+        return 1;
+    }
+    return 0;
+}
+
+// convert-ck24-to-wmo command
+static int RunConvertCk24ToWmo(string[] args)
+{
+    if (args.Length < 2)
+    {
+        Console.WriteLine("Usage: convert-ck24-to-wmo <pm4_file> <output_dir>");
+        return 1;
+    }
+
+    string pm4Path = args[0];
+    string outputRootDir = args[1];
+
+    if (!File.Exists(pm4Path))
+    {
+        Console.Error.WriteLine($"File not found: {pm4Path}");
+        return 1;
+    }
+
+    Console.WriteLine($"Loading PM4: {pm4Path}");
+    var pm4 = PM4File.FromFile(pm4Path);
+    var writer = new WoWRollback.PM4Module.Analysis.Pm4WmoWriter();
+    
+    // Create correct folder structure: World/wmo/pm4/
+    string wmoSubDir = Path.Combine("World", "wmo", "pm4");
+    string wmoOutputDir = Path.Combine(outputRootDir, wmoSubDir);
+    Directory.CreateDirectory(wmoOutputDir);
+
+    // Prepare CSV for injection
+    var csvEntries = new List<string>();
+    // Header format compatible with inject-modf (similar to modf_entries.csv)
+    // ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale
+    csvEntries.Add("ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale");
+
+    var groups = pm4.Surfaces
+        .GroupBy(s => s.CK24)
+        .Where(g => g.Key != 0) 
+        .ToList();
+
+    Console.WriteLine($"Found {groups.Count} CK24 objects. Generating WMOs in {wmoOutputDir}...");
+
+    int count = 0;
+    uint uniqueIdCounter = 7000000; // Safe range
+
+    foreach (var group in groups)
+    {
+        uint ck24 = group.Key;
+        var surfaces = group.ToList();
+
+        // Collect geometry
+        var vertices = new List<Vector3>();
+        var indices = new List<int>();
+        int vertexOffset = 0;
+
+        foreach (var surf in surfaces)
+        {
+            uint startIdx = surf.MsviFirstIndex;
+            uint indexCount = surf.IndexCount;
+
+            if (startIdx + indexCount > pm4.MeshIndices.Count) continue;
+
+            for (int i = 0; i < indexCount; i++)
+            {
+                uint meshIdx = pm4.MeshIndices[(int)(startIdx + i)];
+                if (meshIdx >= pm4.MeshVertices.Count) continue;
+                
+                var v = pm4.MeshVertices[(int)meshIdx];
+                vertices.Add(v);
+                indices.Add(vertexOffset++);
+            }
+        }
+
+        if (vertices.Count > 0)
+        {
+            string wmoName = $"ck24_{ck24:X6}";
+            // Write WMO and get centroid (World Position)
+            Vector3 centroid = writer.WriteWmo(wmoOutputDir, wmoName, vertices, indices);
+            
+            // Generate CSV entry
+            // Path relative to game root? Usually "World\wmo\pm4\..."
+            string wmoGamePath = Path.Combine(wmoSubDir, $"{wmoName}.wmo").Replace('/', '\\');
+            
+            // NameID 0 (will be resolved by injector if mwmo_names.csv is used, or we just generate unique IDs)
+            // Injector requires name_id.
+            // We'll treat name_id as index 0 for now? No, unique per WMO.
+            // Actually, we'll need to generate mwmo_names.csv too if we want robust injection.
+            // But let's just output raw data first.
+            
+            // CSV: ck24, wmo_path, name_id (0), unique_id, x, y, z, rot...
+            // Centroid is standard WoW coords (X, Y, Z).
+            string line = $"{ck24:X6},{wmoGamePath},0,{uniqueIdCounter++},{centroid.X:F4},{centroid.Y:F4},{centroid.Z:F4},0,0,0,1";
+            csvEntries.Add(line);
+
+            count++;
+            if (count % 100 == 0) Console.Write(".");
+        }
+    }
+
+    string csvPath = Path.Combine(outputRootDir, "generated_wmo_placements.csv");
+    File.WriteAllLines(csvPath, csvEntries);
+
+    Console.WriteLine($"\nGenerated {count} WMOs.");
+    Console.WriteLine($"Placements CSV written to: {csvPath}");
     return 0;
 }
