@@ -765,7 +765,7 @@ namespace WoWRollback.PM4Module
         /// Load PM4 objects directly from .pm4 files (no PM4FacesTool required).
         /// Parses PM4 files, groups surfaces by CK24, and computes geometry stats.
         /// </summary>
-        private List<Pm4ModfReconstructor.Pm4Object> LoadPm4ObjectsFromFiles(string pm4Directory)
+        public List<Pm4ModfReconstructor.Pm4Object> LoadPm4ObjectsFromFiles(string pm4Directory)
         {
             var objects = new List<Pm4ModfReconstructor.Pm4Object>();
             var matcher = new Pm4WmoGeometryMatcher();
@@ -807,14 +807,13 @@ namespace WoWRollback.PM4Module
                         continue;
                     }
                     
-                    // Group surfaces by CK24 (WMO instance ID)
-                    var surfacesByCk24 = pm4.Surfaces
-                        .Where(s => !s.IsM2Bucket) // Skip M2/doodad surfaces
+                    // 1. Process WMO Candidates (CK24 != 0)
+                    var wmoSurfaces = pm4.Surfaces
+                        .Where(s => !s.IsM2Bucket && s.CK24 != 0)
                         .GroupBy(s => s.CK24)
-                        .Where(g => g.Key != 0) // Skip terrain (CK24=0)
                         .ToList();
                     
-                    foreach (var group in surfacesByCk24)
+                    foreach (var group in wmoSurfaces)
                     {
                         string ck24Hex = $"0x{group.Key:X6}";
                         
@@ -835,11 +834,9 @@ namespace WoWRollback.PM4Module
                         
                         if (vertices.Count < 10) continue; // Skip tiny objects
                         
-                        // MSCN Enhancement: Add nearby exterior vertices to enrich geometry fingerprint
-                        // MSCN lacks CK24, so we use proximity-based association (5-10 yard margin)
+                        // MSCN Enhancement (Same as before)
                         if (pm4.ExteriorVertices.Count > 0)
                         {
-                            // Compute MSVT bounds first
                             var minBound = new System.Numerics.Vector3(float.MaxValue);
                             var maxBound = new System.Numerics.Vector3(float.MinValue);
                             foreach (var v in vertices)
@@ -848,37 +845,52 @@ namespace WoWRollback.PM4Module
                                 maxBound = System.Numerics.Vector3.Max(maxBound, v);
                             }
                             
-                            // Expand bounds by ~7 yards (WoW units are roughly yards)
                             const float MscnMargin = 7.0f;
                             minBound -= new System.Numerics.Vector3(MscnMargin);
                             maxBound += new System.Numerics.Vector3(MscnMargin);
                             
-                            int mscnAdded = 0;
                             foreach (var mscnVert in pm4.ExteriorVertices)
                             {
-                                // Apply MSCN transform: (Y, -X, Z) to match minimap orientation
                                 var transformed = new System.Numerics.Vector3(mscnVert.Y, -mscnVert.X, mscnVert.Z);
-                                
-                                // Check if within expanded bounds
                                 if (transformed.X >= minBound.X && transformed.X <= maxBound.X &&
                                     transformed.Y >= minBound.Y && transformed.Y <= maxBound.Y &&
                                     transformed.Z >= minBound.Z && transformed.Z <= maxBound.Z)
                                 {
                                     vertices.Add(transformed);
-                                    mscnAdded++;
                                 }
-                            }
-                            
-                            // Log significant MSCN additions
-                            if (mscnAdded > 50)
-                            {
-                                Console.WriteLine($"[MSCN] {ck24Hex}: +{mscnAdded} exterior verts (total: {vertices.Count})");
                             }
                         }
                         
-                        // Compute stats on combined MSVT + MSCN vertices
                         var stats = matcher.ComputeStats(vertices);
                         objects.Add(new Pm4ModfReconstructor.Pm4Object(ck24Hex, pm4Path, tileX, tileY, stats));
+                    }
+
+                    // 2. Process M2 Candidates (GroupKey == 0 / IsM2Bucket)
+                    // These are often multiple distinct objects merged into one "bucket".
+                    // We must cluster them to find individual candidates.
+                    var m2Surfaces = pm4.Surfaces.Where(s => s.IsM2Bucket).ToList();
+                    
+                    if (m2Surfaces.Count > 0)
+                    {
+                        var clusters = Pm4GeometryClusterer.ClusterSurfaces(m2Surfaces, pm4.MeshIndices, pm4.MeshVertices);
+                        int m2Count = 0;
+                        
+                        foreach (var cluster in clusters)
+                        {
+                            // Filter noise: very small clusters (e.g. < 10 tris) or very large (terrain?)
+                            if (cluster.TriangleCount < 10) continue; 
+                            if (cluster.TriangleCount > 5000) continue; // Likely terrain patch
+                            
+                            // Create a unique ID for this candidate
+                            string candidateId = $"M2_{tileX}_{tileY}_{m2Count++}";
+                            
+                            // Compute stats for the cluster
+                            var stats = matcher.ComputeStats(cluster.Vertices);
+                            objects.Add(new Pm4ModfReconstructor.Pm4Object(candidateId, pm4Path, tileX, tileY, stats));
+                        }
+                        
+                        if (m2Count > 0)
+                            Console.WriteLine($"[INFO] Extracted {m2Count} M2 candidates from {baseName}");
                     }
                 }
                 catch (Exception ex)

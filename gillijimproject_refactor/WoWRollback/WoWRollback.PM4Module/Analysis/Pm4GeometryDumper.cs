@@ -22,40 +22,65 @@ public class Pm4GeometryDumper
         // 1. Dump MSVT (Render Geometry)
         if (pm4.MeshVertices.Count > 0)
         {
-            string objPath = Path.Combine(outDir, $"{baseName}_msvt.obj");
-            using var sw = new StreamWriter(objPath);
-            sw.WriteLine($"# MSVT Geometry from {baseName}");
-            sw.WriteLine($"# Vertices: {pm4.MeshVertices.Count}");
-            sw.WriteLine($"# Indices: {pm4.MeshIndices.Count}");
+            using var swWmo = new StreamWriter(Path.Combine(outDir, $"{baseName}_msvt_wmo.obj"));
+            using var swM2 = new StreamWriter(Path.Combine(outDir, $"{baseName}_msvt_m2.obj"));
 
+            // Write Headers
+            swWmo.WriteLine($"# {baseName} MSVT WMO Geometry (CK24!=0, GroupKey!=0)");
+            swM2.WriteLine($"# {baseName} MSVT M2/Residual Geometry (GroupKey=0)");
+
+            // Write all vertices to BOTH files (simplest way to keep indices valid)
+            // Optimization: Could re-index, but file size impact is negligible for this tool.
             foreach (var v in pm4.MeshVertices)
             {
                 // Convert Y-Up (PM4) to Z-Up (WoW/Tools)
-                // PM4 X -> WoW X
-                // PM4 Y -> WoW Z (Height)
-                // PM4 Z -> WoW Y
-                sw.WriteLine($"v {v.X:F4} {v.Z:F4} {v.Y:F4}");
+                string vLine = $"v {v.X:F4} {v.Z:F4} {v.Y:F4}";
+                swWmo.WriteLine(vLine);
+                swM2.WriteLine(vLine);
             }
 
-            sw.WriteLine("g MSVT_Mesh");
-            // Assuming 'count' refers to pm4.MeshIndices.Count and 'start' refers to 0 for the full list.
-            // This change introduces 'count' and 'start' variables which are not defined in the original context.
-            // For the file to be syntactically correct, these would need to be defined.
-            // Based on the original loop, 'count' would be pm4.MeshIndices.Count and 'start' would be 0.
-            int count = pm4.MeshIndices.Count;
-            int start = 0;
-            for (int i = 0; i < count; i += 3)
+            // Group surfaces by CK24
+            var groups = pm4.Surfaces.GroupBy(s => s.CK24).ToList();
+            
+            foreach (var group in groups)
             {
-                if (i + 2 >= count) break;
+                // Start a new group in OBJs
+                swWmo.WriteLine($"g ck24_{group.Key:X6}");
+                swM2.WriteLine($"g ck24_{group.Key:X6}");
+                
+                foreach (var surf in group)
+                {
+                    uint start = surf.MsviFirstIndex;
+                    uint count = surf.IndexCount;
 
-                uint idx1 = pm4.MeshIndices[(int)(start + i)];
-                uint idx2 = pm4.MeshIndices[(int)(start + i + 1)];
-                uint idx3 = pm4.MeshIndices[(int)(start + i + 2)];
+                    // Determine if this is WMO or M2 data
+                    // Filter: WMO = GroupKey != 0 (and usually CK24 != 0, though we keep groups for structure)
+                    bool isWmo = (surf.GroupKey != 0);
 
-                sw.WriteLine($"f {idx1 + 1} {idx2 + 1} {idx3 + 1}");
+                    var targetSw = isWmo ? swWmo : swM2;
+                    targetSw.WriteLine($"# Surface: Key={surf.GroupKey} Mask={surf.AttributeMask:X} Count={count}");
+
+                    // PM4 topology is Triangle List (3 indices per face)
+                    for (int i = 0; i < count; i += 3)
+                    {
+                        if (start + i + 2 >= pm4.MeshIndices.Count) break;
+
+                        uint idx1 = pm4.MeshIndices[(int)(start + i)];
+                        uint idx2 = pm4.MeshIndices[(int)(start + i + 1)];
+                        uint idx3 = pm4.MeshIndices[(int)(start + i + 2)];
+
+                        // Validate vertex indices
+                        if (idx1 < pm4.MeshVertices.Count && 
+                            idx2 < pm4.MeshVertices.Count && 
+                            idx3 < pm4.MeshVertices.Count)
+                        {
+                            targetSw.WriteLine($"f {idx1 + 1} {idx2 + 1} {idx3 + 1}");
+                        }
+                    }
+                }
             }
-
-            Console.WriteLine($"[INFO] Wrote {objPath}");
+            Console.WriteLine($"[INFO] Wrote {baseName}_msvt_wmo.obj");
+            Console.WriteLine($"[INFO] Wrote {baseName}_msvt_m2.obj");
         }
 
         // 2. Dump MSCN (Point Cloud)

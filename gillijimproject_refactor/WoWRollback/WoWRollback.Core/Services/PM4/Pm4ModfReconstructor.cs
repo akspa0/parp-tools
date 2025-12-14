@@ -27,6 +27,15 @@ public sealed class Pm4ModfReconstructor
         Pm4WmoGeometryMatcher.GeometryStats Stats);
 
     /// <summary>
+    /// Represents an M2 in the reference library.
+    /// </summary>
+    public record M2Reference(
+        uint FileDataId,
+        string M2Path,
+        string FileName,
+        Pm4WmoGeometryMatcher.GeometryStats Stats);
+
+    /// <summary>
     /// Represents a PM4 object with geometry stats.
     /// </summary>
     public record Pm4Object(
@@ -57,6 +66,22 @@ public sealed class Pm4ModfReconstructor
         int TileY);            // Tile Y from PM4 filename
 
     /// <summary>
+    /// Reconstructed MDDF entry (M2 placement).
+    /// </summary>
+    public record MddfEntry(
+        uint NameId,           // Index into MMDX string table
+        uint UniqueId,
+        Vector3 Position,
+        Vector3 Rotation,      // Euler angles
+        ushort Scale,          // 1024 = 1.0 (Fixed point)
+        ushort Flags,
+        string M2Path,
+        string Ck24,
+        float MatchConfidence,
+        int TileX,
+        int TileY);
+
+    /// <summary>
     /// Represents a potential match candidate for a PM4 object.
     /// </summary>
     public record MatchCandidate(
@@ -77,6 +102,16 @@ public sealed class Pm4ModfReconstructor
         List<string> UnmatchedPm4Objects,
         Dictionary<string, int> MatchCounts,
         List<MatchCandidate> AllCandidates); // New: All valid candidates
+
+    /// <summary>
+    /// Result of M2 reconstruction.
+    /// </summary>
+    public record MddfReconstructionResult(
+        List<MddfEntry> MddfEntries,
+        List<string> M2Names,
+        List<string> UnmatchedPm4Objects,
+        Dictionary<string, int> MatchCounts,
+        List<MatchCandidate> AllCandidates);
 
     /// <summary>
     /// Builds the WMO reference library from the provided game data path.
@@ -222,6 +257,29 @@ public sealed class Pm4ModfReconstructor
         var json = File.ReadAllText(path);
         var options = new JsonSerializerOptions { IncludeFields = true };
         return JsonSerializer.Deserialize<List<WmoReference>>(json, options);
+    }
+
+    public List<M2Reference> LoadM2Library(string cachePath)
+    {
+        if (!File.Exists(cachePath))
+        {
+            Console.WriteLine($"[WARN] M2 library cache not found at {cachePath}");
+            return new List<M2Reference>();
+        }
+
+        try 
+        {
+            var json = File.ReadAllText(cachePath);
+            var options = new JsonSerializerOptions { IncludeFields = true };
+            var list = JsonSerializer.Deserialize<List<M2Reference>>(json, options);
+            Console.WriteLine($"[INFO] Loaded {list?.Count ?? 0} M2s from library.");
+            return list ?? new List<M2Reference>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Failed to load M2 library: {ex.Message}");
+            return new List<M2Reference>();
+        }
     }
 
     /// <summary>
@@ -767,7 +825,7 @@ public sealed class Pm4ModfReconstructor
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
                 Position: transform.Position,
-                Rotation: transform.Rotation, // Matcher now correctly computes ground-plane heading
+                Rotation: new Vector3(-transform.Rotation.Y, -transform.Rotation.Z, -transform.Rotation.X), // Swap & Negate: (Pitch, Yaw, Roll) <- (-Pitch, -Yaw, -Roll)
                 BoundsMin: boundsMin,
                 BoundsMax: boundsMax,
                 Flags: 0,
@@ -792,6 +850,165 @@ public sealed class Pm4ModfReconstructor
         Console.WriteLine($"\n[RESULT] Matched: {matched}, Unmatched: {unmatched}, Total Candidates: {allCandidates.Count}");
 
         return new ReconstructionResult(modfEntries, wmoNames, unmatchedObjects, matchCounts, allCandidates);
+    }
+
+    /// <summary>
+    /// Reconstruct MDDF entries (M2 placements) for a list of PM4 objects.
+    /// </summary>
+    public MddfReconstructionResult ReconstructMddf(
+        List<Pm4Object> pm4Objects, 
+        List<M2Reference> m2Library,
+        float minConfidence = 0.7f)
+    {
+        var mddfEntries = new List<MddfEntry>();
+        var m2Names = new List<string>();
+        var m2NameToId = new Dictionary<string, uint>();
+        var unmatchedObjects = new List<string>();
+        var matchCounts = new Dictionary<string, int>();
+
+        const uint UniqueIdBase = 11_000_000; // Distinct from WMO base
+        uint nextUniqueId = UniqueIdBase;
+
+        Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {m2Library.Count} M2s...\n");
+
+        int matched = 0;
+        int unmatched = 0;
+        var allCandidates = new List<MatchCandidate>();
+
+        foreach (var pm4Obj in pm4Objects)
+        {
+            // Pre-filter: Matches must have similar Aspect Ratios (since scale varies but shape doesn't).
+            // M2 QuickMatchScore uses scale-invariant metric.
+            
+            var potentialMatches = m2Library
+                .Select(m => (m2: m, score: QuickMatchScoreM2(pm4Obj.Stats, m.Stats)))
+                .Where(x => x.score > 0.85f) // Slightly lower threshold for M2 due to scale var
+                .OrderByDescending(x => x.score)
+                .Take(20) // Broader search for M2s
+                .Select(x => x.m2)
+                .ToList();
+
+            if (potentialMatches.Count == 0)
+            {
+                unmatchedObjects.Add(pm4Obj.Ck24);
+                unmatched++;
+                continue;
+            }
+
+            // Find best match allowing scaling
+            var (bestMatch, transform, candidates) = MatchPm4ToM2(pm4Obj, potentialMatches, minConfidence);
+            allCandidates.AddRange(candidates);
+
+            if (bestMatch == null || transform == null)
+            {
+                unmatchedObjects.Add(pm4Obj.Ck24);
+                unmatched++;
+                continue;
+            }
+
+            matched++;
+
+            // M2 Name ID
+            if (!m2NameToId.TryGetValue(bestMatch.M2Path, out var nameId))
+            {
+                nameId = (uint)m2Names.Count;
+                m2Names.Add(bestMatch.M2Path);
+                m2NameToId[bestMatch.M2Path] = nameId;
+            }
+
+            if (!matchCounts.ContainsKey(bestMatch.M2Path)) matchCounts[bestMatch.M2Path] = 0;
+            matchCounts[bestMatch.M2Path]++;
+
+            // MDDF Scale is fixed point 1024 = 1.0
+            ushort scaleFixed = (ushort)(Math.Clamp(transform.Scale, 0.001f, 10.0f) * 1024);
+
+            var mddf = new MddfEntry(
+                NameId: nameId,
+                UniqueId: nextUniqueId++,
+                Position: transform.Position,
+                Rotation: new Vector3(-transform.Rotation.Y, -transform.Rotation.Z, -transform.Rotation.X), // Same coord conversion
+                Scale: scaleFixed,
+                Flags: 0,
+                M2Path: bestMatch.M2Path,
+                Ck24: pm4Obj.Ck24,
+                MatchConfidence: transform.MatchConfidence,
+                TileX: pm4Obj.TileX,
+                TileY: pm4Obj.TileY);
+
+            mddfEntries.Add(mddf);
+            Console.WriteLine($"  {pm4Obj.Ck24} -> {bestMatch.FileName} ({transform.MatchConfidence:P0}, Scale: {transform.Scale:F2})");
+        }
+
+        Console.WriteLine($"\n[RESULT] Matched M2s: {matched}, Unmatched: {unmatched}");
+        return new MddfReconstructionResult(mddfEntries, m2Names, unmatchedObjects, matchCounts, allCandidates);
+    }
+
+    private (M2Reference? bestMatch, Pm4WmoGeometryMatcher.PlacementTransform? bestTransform, List<MatchCandidate> candidates) 
+        MatchPm4ToM2(Pm4Object pm4Obj, List<M2Reference> library, float minConfidence)
+    {
+        M2Reference? bestMatch = null;
+        Pm4WmoGeometryMatcher.PlacementTransform? bestTransform = null;
+        float bestConfidence = 0;
+        var candidates = new List<MatchCandidate>();
+
+        foreach (var m2 in library)
+        {
+            try
+            {
+                // Find alignment allowing scaling (forceUnitScale: false)
+                var transform = _matcher.FindAlignment(pm4Obj.Stats, m2.Stats, forceUnitScale: false);
+                
+                if (transform.MatchConfidence >= minConfidence)
+                {
+                    candidates.Add(new MatchCandidate(
+                        pm4Obj.Ck24,
+                        m2.M2Path,
+                        transform.MatchConfidence,
+                        transform.Position,
+                        transform.Rotation,
+                        transform.Scale
+                    ));
+
+                    if (transform.MatchConfidence > bestConfidence)
+                    {
+                        bestConfidence = transform.MatchConfidence;
+                        bestMatch = m2;
+                        bestTransform = transform;
+                    }
+                }
+            }
+            catch {}
+        }
+
+        return (bestMatch, bestTransform, candidates);
+    }
+
+    /// <summary>
+    /// Quick match score for M2s (Scale Invariant).
+    /// </summary>
+    public float QuickMatchScoreM2(Pm4WmoGeometryMatcher.GeometryStats pm4Stats, 
+                                   Pm4WmoGeometryMatcher.GeometryStats m2Stats)
+    {
+        // For M2s, we can't compare absolute extents because scale varies.
+        // We compare Aspect Ratios of the Principal Extents.
+        
+        var pm4Extents = pm4Stats.PrincipalExtents.OrderByDescending(x => x).ToArray();
+        var m2Extents = m2Stats.PrincipalExtents.OrderByDescending(x => x).ToArray();
+
+        if (m2Extents[0] < 0.001f || pm4Extents[0] < 0.001f) return 0;
+
+        // Normalize by the largest extent to get shape profile
+        var pm4Ratios = new[] { 1.0f, pm4Extents[1] / pm4Extents[0], pm4Extents[2] / pm4Extents[0] };
+        var m2Ratios = new[] { 1.0f, m2Extents[1] / m2Extents[0], m2Extents[2] / m2Extents[0] };
+
+        // Compare ratios
+        float diff1 = Math.Abs(pm4Ratios[1] - m2Ratios[1]); // Max possible diff is around 1.0
+        float diff2 = Math.Abs(pm4Ratios[2] - m2Ratios[2]);
+        
+        float avgDiff = (diff1 + diff2) / 2;
+        
+        // Score: 0 diff -> 1.0 score. 0.5 diff -> 0 score.
+        return Math.Max(0, 1 - avgDiff * 2);
     }
 
     /// <summary>
@@ -823,6 +1040,23 @@ public sealed class Pm4ModfReconstructor
         }
 
         Console.WriteLine($"[INFO] Exported {result.ModfEntries.Count} MODF entries to {outputPath}");
+    }
+
+    /// <summary>
+    /// Export MDDF reconstruction results to CSV.
+    /// </summary>
+    public void ExportMddfToCsv(MddfReconstructionResult result, string outputPath)
+    {
+        using var sw = new StreamWriter(outputPath);
+        sw.WriteLine("UniqueId,Ck24,M2Path,PositionX,PositionY,PositionZ,RotX,RotY,RotZ,Scale,Confidence");
+
+        foreach (var entry in result.MddfEntries)
+        {
+            sw.WriteLine($"{entry.UniqueId},{entry.Ck24},{entry.M2Path},{entry.Position.X:F4},{entry.Position.Y:F4},{entry.Position.Z:F4}," +
+                         $"{entry.Rotation.X:F4},{entry.Rotation.Y:F4},{entry.Rotation.Z:F4},{(entry.Scale / 1024.0f):F4}, {entry.MatchConfidence:F4}");
+        }
+
+        Console.WriteLine($"[INFO] Exported {result.MddfEntries.Count} MDDF placement entries to {outputPath}");
     }
 
     /// <summary>

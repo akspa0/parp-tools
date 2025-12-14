@@ -33,14 +33,13 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 > [!CAUTION]
 > Different chunks use different coordinate systems!
 
-| Chunk | File Order | Transform |
-|-------|------------|-----------|
-| MSVT | (Y, X, Z) | `new Vector3(vertex.Y, vertex.X, vertex.Z)` |
-| MSPV | (X, Y, Z) | No change |
-| MSPV | (X, Y, Z) | No change |
-| MSCN | (X, Y, Z) | `new Vector3(vertex.Y, -vertex.X, vertex.Z)` (Requires transform!) |
-| MPRL | (X, Y, Z) | Direct floats |
-| MPRL | (X, Y, Z) | Direct floats |
+| Chunk | Stored As  | Loaded As | To Global Align | To Z-Up World |
+|-------|------------|-----------|-----------------|---------------|
+| MSVT  | Y, X, Z    | X, Y, Z   | (Identity)      | X, Z, Y       |
+| MSCN  | X, Y, Z    | X, Y, Z   | **Y, X, Z**     | Y, Z, X       |
+| MSPV  | X, Y, Z    | X, Y, Z   | (Identity)      | X, Z, Y       |
+
+*(Note: The MSCN transform effectively swaps the first two components to match the MSVT schema before vertical orientation).*
 
 ---
 
@@ -54,7 +53,7 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 ```
 
-### Byte Structure (Confirmed December 2024)
+### Byte Structure (Confirmed December 2025)
 ```
 ┌────────────────────────────────────────┐
 │ Byte2  │  Byte1  │  Byte0             │
@@ -62,27 +61,29 @@ public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 └────────────────────────────────────────┘
 ```
 
-**Type Flags (Byte2):**
-| Bit | Mask | Meaning |
-|-----|------|---------|
-| 6 | 0x40 | Has pathfinding mesh (WMO interior) |
-| 7 | 0x80 | Exterior/outdoor object |
-| 0 | 0x00 | **M2/doodad geometry** (NOT WMO) |
+**Type Flags (Byte2) - OBSERVATIONS ONLY:**
+> [!WARNING]
+> These flags are derived from statistical observation on development maps. **NOT VERIFIED**.
 
-**Common Type Values:**
-| Type | Count | Interpretation |
+| Bit | Mask | Hypothetical Meaning |
+|-----|------|---------|
+| 6 | 0x40 | Observed in WMO interiors |
+| 7 | 0x80 | Observed in Exterior objects |
+| 0 | 0x00 | Low-index surfaces (Portals?) / Non-WMO |
+
+**Observed Type Values:**
+| Type | Count | Context (Hypothesis) |
 |------|-------|----------------|
-| 0x00 | 186K | M2/doodads (terrain props, all in one group) |
-| 0x42 | 112K | WMO interior with pathfinding |
-| 0x43 | 108K | WMO interior type 2 |
-| 0x41 | 32K | WMO interior type 1 |
+| 0x00 | 186K | Graph Nodes / Portals / Terrain Links |
+| 0x42 | 112K | WMO Interior (Type A) |
+| 0x43 | 108K | WMO Interior (Type B) |
+| 0x41 | 32K | WMO Interior (Type C) |
 | 0xC0 | 26K | Exterior WMO |
-| 0xC1 | 16K | Exterior WMO type 2 |
+| 0xC1 | 16K | Exterior WMO (Type B) |
 
 **ObjectID (Byte0+Byte1):**
-- 16-bit unique identifier for WMO instance
-- Same ObjectID across tiles = same building spanning tiles
-- Use `(Type, ObjectID)` as composite key for unique objects
+- Appears to act as a unique identifier for WMO structure instances.
+- *Hypothesis*: (Type, ObjectID) forms a composite key.
 
 ### Real-World Examples
 | CK24 | Surfaces | Tiles | Identified As |
@@ -90,13 +91,29 @@ public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 | `0x42CBEA` | 33,587 | 8 | **StormwindHarbor.wmo** |
 | `0x432D68` | 29,084 | 1 | Large structure |
 | `0x43A8BC` | 6,401 | 8 | Multi-tile building |
-| `0x43A8BC` | 6,401 | 8 | Multi-tile building |
-| `0x000000` | 186,060 | 291 | **Link Objects** (M2 props / Terrain glue) |
+| `0x000000` | 186,060 | 291 | **Graph Nodes** (Portals between areas) |
 
-### Key Finding: CK24=0 is "Link Object"
-CK24=0x000000 contains M2/doodad geometry that often spans multiple objects or links terrain. 
-- **WMO Matching**: Filter to **CK24 != 0**.
-- **M2 Matching**: These likely correlate with **MSCN** nodes.
+### Scene Graph Structure (Data-Driven Hypothesis)
+Recent rigorous analysis of `development_15_37.pm4` (Dec 2025) provides evidence for the following structure, though exact game-logic roles remain to be confirmed.
+
+1.  **WMO Geometry (`CK24 != 0`)**:
+    - **Status: Verified**.
+    - WMO candidates consumed **100%** of the associated MSVT vertices in `30_22` and `15_37`.
+    - **Conclusion**: CK24 groups correlate 1:1 with WMO geometry.
+
+2.  **MSCN Residuals ("Connector Nodes")**:
+    - **Status: Strong Evidence**.
+    - In `15_37`, **37** MSCN points remained after WMO subtraction.
+    - **65%** (24/37) were located within 1 yard of the tile boundary.
+    - **Observation**: High correlation with tile edges suggests a role in **Inter-Tile Connectivity** (snapping nodes).
+    - The remaining 35% may represent intra-tile graph connections (e.g. height transitions).
+
+3.  **Low-Index Surfaces (`CK24 == 0`)**:
+    - **Status: Strong Evidence (Portals?)**.
+    - Found **~40** surfaces in `15_37` with `CK24=0` and `GroupKey!=0`.
+    - **Geometry Analysis**: A significant portion are **Quads** (4 indices) or simple Triangles (3 indices).
+    - **Observation**: This low-poly geometry is characteristic of **Portals**, **Triggers**, or **Navigation Links** rather than visual props.
+    - *Correction*: Previous claim of "M2 Doodads" is likely incorrect based on this geometry profile.
 
 
 ---

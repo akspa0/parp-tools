@@ -292,23 +292,34 @@ public sealed class Pm4WmoGeometryMatcher
             Console.WriteLine($"\nEstimated scale: {scale:F4}");
         }
 
-        // ROTATION: Zero for now - heading calculation was producing wrong orientations
-        // TODO: Investigate why principal axis rotation doesn't match MODF rotation format
-        var eulerDegrees = new Vector3(0, 0, 0);
-        Console.WriteLine($"Estimated rotation: ({eulerDegrees.X:F1}°, {eulerDegrees.Y:F1}°, {eulerDegrees.Z:F1}°) [ZEROED]");
+        // Compute Rotation using PCA Axes
+        // This finds the rotation R that maps WMO Principal Axes to PM4 Principal Axes
+        var rotationQuat = FindRotationBetweenAxes(wmoStats.PrincipalAxes, pm4Stats.PrincipalAxes);
+        var eulerDegrees = QuaternionToEulerDegrees(rotationQuat);
+        Console.WriteLine($"Estimated rotation: ({eulerDegrees.X:F1}°, {eulerDegrees.Y:F1}°, {eulerDegrees.Z:F1}°) [PCA]");
 
-        // Compute translation using bounding box centers
-        // BB center is more accurate than vertex centroid because WMO origin is typically
-        // near the geometric center of the bounding box, not the average of walkable vertices
+        // Compute Translation
+        // We strictly use CENTROIDS for alignment because Bounds change with rotation.
+        // Formula: T = Centroid_PM4 - (Rotation * Centroid_WMO * Scale)
+        var wmoCentroidScaled = wmoStats.Centroid * scale;
+        var wmoCentroidRotated = Vector3.Transform(wmoCentroidScaled, rotationQuat);
+        var translation = pm4Stats.Centroid - wmoCentroidRotated;
+        
+        // Bounds-based center for reference (debugging only)
         var pm4BoundsCenter = (pm4Stats.BoundsMin + pm4Stats.BoundsMax) / 2;
-        var wmoBoundsCenter = (wmoStats.BoundsMin + wmoStats.BoundsMax) / 2;
-        var translation = pm4BoundsCenter - (wmoBoundsCenter * scale);
-        Console.WriteLine($"Estimated translation: ({translation.X:F1}, {translation.Y:F1}, {translation.Z:F1})");
+        Console.WriteLine($"Estimated translation: ({translation.X:F4}, {translation.Y:F4}, {translation.Z:F4})");
+        Console.WriteLine($"  (Centroid Delta: {translation})");
 
         // Compute match confidence
         // For WMOs (unit scale): confidence based on how close extents match at 1:1
-        // For M2s (variable scale): confidence based on ratio consistency
+        // and how well the axes aligned (dot products)
         float confidence;
+        float axisAlignmentScore = 0;
+        
+        // Calculate axis alignment score (how orthogonal/parallel the best fit was)
+        // ... (This is implicitly handled by FindRotationBetweenAxes picking the best fit, 
+        // but we could re-evaluate the dot products of the aligned axes here if needed)
+
         if (forceUnitScale)
         {
             // For WMOs: extents should match closely at 1:1 scale
@@ -319,12 +330,11 @@ public sealed class Pm4WmoGeometryMatcher
             float avgDiff = (extentDiff1 + extentDiff2 + extentDiff3) / 3;
             
             // Confidence decreases as difference increases
-            // 0% diff = 100% confidence, 50% diff = 0% confidence
             confidence = Math.Max(0, 1 - avgDiff * 2);
         }
         else
         {
-            // For M2s: ratios should be consistent (same scale across all axes)
+            // For M2s (variable scale): ratios should be consistent
             float extentRatio1 = pm4Extents[0] / wmoExtents[0];
             float extentRatio2 = pm4Extents[1] / wmoExtents[1];
             float extentRatio3 = pm4Extents[2] / wmoExtents[2];
@@ -473,19 +483,20 @@ public sealed class Pm4WmoGeometryMatcher
     /// <summary>
     /// Full analysis pipeline: load both OBJs, compute stats, find alignment, export transformed WMO.
     /// </summary>
-    public PlacementTransform AnalyzeAndAlign(string pm4ObjPath, string wmoObjPath, string? outputTransformedPath = null)
+    public PlacementTransform AnalyzeAndAlign(string pm4ObjPath, string wmoObjPath, string? outputTransformedPath = null, bool allowScaling = false)
     {
         Console.WriteLine("Loading PM4 geometry...");
         var pm4Verts = LoadObjVertices(pm4ObjPath);
         var pm4Stats = ComputeStats(pm4Verts);
         Console.WriteLine($"  {pm4Verts.Count} vertices, bounds: {pm4Stats.BoundsMin} to {pm4Stats.BoundsMax}");
 
-        Console.WriteLine("Loading WMO geometry...");
+        Console.WriteLine("Loading WMO or M2 geometry...");
         var wmoVerts = LoadObjVertices(wmoObjPath);
         var wmoStats = ComputeStats(wmoVerts);
         Console.WriteLine($"  {wmoVerts.Count} vertices, bounds: {wmoStats.BoundsMin} to {wmoStats.BoundsMax}");
 
-        var transform = FindAlignment(pm4Stats, wmoStats);
+        // For M2s, we allow scaling. For WMOs, we force unit scale.
+        var transform = FindAlignment(pm4Stats, wmoStats, forceUnitScale: !allowScaling);
 
         if (!string.IsNullOrEmpty(outputTransformedPath))
         {

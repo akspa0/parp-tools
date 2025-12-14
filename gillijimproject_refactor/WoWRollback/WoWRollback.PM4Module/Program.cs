@@ -65,6 +65,15 @@ if (args.Length > 0)
 
         case "convert-ck24-to-wmo":
             return RunConvertCk24ToWmo(args.Skip(1).ToArray());
+
+        case "analyze-pm4-scene":
+            return RunAnalyzePm4Scene(args.Skip(1).ToArray());
+
+        case "analyze-m2-library":
+            return RunAnalyzeM2Library(args.Skip(1).ToArray());
+
+        case "reconstruct-mddf":
+            return RunReconstructMddf(args.Skip(1).ToArray());
     }
 }
 
@@ -2060,6 +2069,9 @@ static int RunConvertCk24ToWmo(string[] args)
 
         foreach (var surf in surfaces)
         {
+            // Filter out non-walkable/M2 props to match dumper logic
+            if (surf.GroupKey == 0) continue;
+
             uint startIdx = surf.MsviFirstIndex;
             uint indexCount = surf.IndexCount;
 
@@ -2107,5 +2119,176 @@ static int RunConvertCk24ToWmo(string[] args)
 
     Console.WriteLine($"\nGenerated {count} WMOs.");
     Console.WriteLine($"Placements CSV written to: {csvPath}");
+    return 0;
+}
+
+static int RunAnalyzePm4Scene(string[] args)
+{
+    if (args.Length < 3)
+    {
+        Console.WriteLine("Usage: analyze-pm4-scene <pm4_file> <placements_csv> <output_dir>");
+        return 1;
+    }
+
+    string pm4Path = args[0];
+    string csvPath = args[1];
+    string outputDir = args[2];
+
+    if (!File.Exists(pm4Path))
+    {
+        Console.Error.WriteLine($"File not found: {pm4Path}");
+        return 1;
+    }
+    if (!File.Exists(csvPath))
+    {
+        Console.Error.WriteLine($"File not found: {csvPath}");
+        return 1;
+    }
+
+    var analyzer = new WoWRollback.PM4Module.Analysis.Pm4SceneAnalyzer();
+    analyzer.Analyze(pm4Path, csvPath, outputDir);
+    return 0;
+}
+
+// analyze-m2-library command
+static int RunAnalyzeM2Library(string[] args)
+{
+    Console.WriteLine("=== M2 Library Analysis ===\n");
+    
+    string? m2Dir = null;
+    string? outDir = null;
+    string? listfilePath = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--m2": m2Dir = args[++i]; break;
+            case "--out": outDir = args[++i]; break;
+            case "--listfile": listfilePath = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: analyze-m2-library --m2 <m2_root_dir> --out <output_dir> [--listfile <listfile.csv>]");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(m2Dir) || string.IsNullOrEmpty(outDir))
+    {
+        Console.Error.WriteLine("Error: --m2 and --out are required.");
+        return 1;
+    }
+    
+    if (!Directory.Exists(m2Dir))
+    {
+        Console.Error.WriteLine($"Error: M2 directory not found: {m2Dir}");
+        return 1;
+    }
+
+    if (string.IsNullOrEmpty(listfilePath) && File.Exists("listfile.csv"))
+    {
+         // Default to listfile.csv in CWD if not provided
+         listfilePath = "listfile.csv";
+         Console.WriteLine($"[INFO] Using default listfile: {listfilePath}");
+    }
+    
+    Directory.CreateDirectory(outDir);
+    var cachePath = Path.Combine(outDir, "m2_library_cache.json");
+    
+    var builder = new M2LibraryBuilder();
+    var library = builder.BuildLibrary(m2Dir, listfilePath ?? "", cachePath);
+    
+    Console.WriteLine($"\n[SUCCESS] Library built with {library.Count} entries.");
+    Console.WriteLine($"Cache saved to: {cachePath}");
+    
+    return 0;
+}
+
+// reconstruct-mddf command (M2 matching)
+static int RunReconstructMddf(string[] args)
+{
+    Console.WriteLine("=== MDDF Reconstruction (M2 Matching) ===\n");
+    
+    string? pm4FacesDir = null;
+    string? m2LibraryPath = null;
+    string? outCsv = null;
+    float minConfidence = 0.7f;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--faces": pm4FacesDir = args[++i]; break;
+            case "--library": m2LibraryPath = args[++i]; break;
+            case "--out": outCsv = args[++i]; break;
+            case "--confidence": float.TryParse(args[++i], out minConfidence); break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: reconstruct-mddf --faces <dir> --library <m2_library.json> --out <output.csv> [--confidence 0.7]");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4FacesDir) || string.IsNullOrEmpty(m2LibraryPath) || string.IsNullOrEmpty(outCsv))
+    {
+        Console.Error.WriteLine("Error: --faces, --library, and --out are required.");
+        return 1;
+    }
+    
+    if (!Directory.Exists(pm4FacesDir))
+    {
+        Console.Error.WriteLine($"Error: PM4 faces directory not found: {pm4FacesDir}");
+        return 1;
+    }
+    
+    if (!File.Exists(m2LibraryPath))
+    {
+        Console.Error.WriteLine($"Error: M2 library not found: {m2LibraryPath}");
+        return 1;
+    }
+    
+    var reconstructor = new Pm4ModfReconstructor();
+    
+    // Load library
+    Console.WriteLine($"Loading M2 Library from {m2LibraryPath}...");
+    var library = reconstructor.LoadM2Library(m2LibraryPath);
+    if (library.Count == 0)
+    {
+        Console.Error.WriteLine("Error: M2 library is empty or failed to load.");
+        return 1;
+    }
+    
+    // Load PM4 objects
+    List<Pm4ModfReconstructor.Pm4Object> objects;
+    
+    // Method 1: Load from extracted CSV (legacy)
+    if (File.Exists(Path.Combine(pm4FacesDir, "ck_instances.csv")))
+    {
+        Console.WriteLine($"Loading PM4 objects from CSV in {pm4FacesDir}...");
+        objects = reconstructor.LoadPm4Objects(pm4FacesDir);
+    }
+    // Method 2: Load directly from .pm4 files (native)
+    else
+    {
+        Console.WriteLine($"Loading PM4 files directly from {pm4FacesDir}...");
+        // Ensure PipelineService is accessible. It's in the same project/namespace usually.
+        objects = new PipelineService().LoadPm4ObjectsFromFiles(pm4FacesDir);
+    }
+
+    if (objects.Count == 0)
+    {
+        Console.Error.WriteLine("Error: No PM4 objects found.");
+        return 1;
+    }
+    
+    // Perform reconstruction
+    Console.WriteLine($"Starting matching (Min Conf: {minConfidence:P0})...");
+    var result = reconstructor.ReconstructMddf(objects, library, minConfidence);
+    
+    // Export
+    Directory.CreateDirectory(Path.GetDirectoryName(outCsv)!);
+    reconstructor.ExportMddfToCsv(result, outCsv);
+    
+    Console.WriteLine("\nMDDF reconstruction complete.");
     return 0;
 }
