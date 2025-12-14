@@ -56,6 +56,9 @@ if (args.Length > 0)
 
         case "analyze-pm4":
             return RunAnalyzePm4(args.Skip(1).ToArray());
+
+        case "convert-matches-to-modf":
+            return RunConvertMatchesToModf(args.Skip(1).ToArray());
     }
 }
 
@@ -1787,5 +1790,179 @@ static int RunAnalyzePm4(string[] args)
     pipeline.AnalyzeRotationCandidatesV2(pm4Dir, wmoDir ?? "", rotationOut, typeCorrelationOut, gamePath, listfilePath);
     
     Console.WriteLine("\n[DONE] Analysis complete. Check output directory.");
+    return 0;
+}
+
+// convert-matches-to-modf command - bridge matches.csv to modf_entries.csv
+static int RunConvertMatchesToModf(string[] args)
+{
+    Console.WriteLine("=== Matches CSV to MODF Conversion ===\n");
+
+    string? matchesPath = null;
+    string? listfilePath = null;
+    string? outputDir = null;
+
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--matches": matchesPath = args[++i]; break;
+            case "--listfile": listfilePath = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: convert-matches-to-modf --matches <csv> --listfile <csv> --out <dir>");
+                return 0;
+        }
+    }
+
+    if (string.IsNullOrEmpty(matchesPath) || string.IsNullOrEmpty(listfilePath) || string.IsNullOrEmpty(outputDir))
+    {
+        Console.Error.WriteLine("Error: --matches, --listfile and --out are required.");
+        return 1;
+    }
+
+    Directory.CreateDirectory(outputDir);
+
+    // 1. Load Listfile for Path Resolution (Basename -> FullPath)
+    // We want to be careful with duplicates.
+    var wmoPathLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    if (File.Exists(listfilePath))
+    {
+        Console.WriteLine($"Loading listfile: {listfilePath}");
+        foreach (var line in File.ReadLines(listfilePath))
+        {
+            // Assuming simplified listfile (one path per line) or CSV ID;PATH
+            var path = line.Trim();
+            if (path.Contains(',')) path = path.Split(',')[1].Trim(); // Handle CSV format if needed
+            
+            if (path.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            {
+                var name = Path.GetFileName(path);
+                if (!wmoPathLookup.ContainsKey(name))
+                    wmoPathLookup[name] = path;
+            }
+        }
+        Console.WriteLine($"Loaded {wmoPathLookup.Count} WMO paths.");
+    }
+
+    // 2. Read Matches CSV
+    Console.WriteLine($"Reading matches: {matchesPath}");
+    var modfEntries = new List<string>();
+    var wmoSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    
+    // Header for output MODF CSV
+    // ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence
+    modfEntries.Add("ck24,wmo_path,name_id,unique_id,pos_x,pos_y,pos_z,rot_x,rot_y,rot_z,scale,confidence");
+
+    using (var reader = new StreamReader(matchesPath))
+    {
+        // Skip header: PM4_ID,WMO_Name,PosX,PosY,PosZ,RotBox_X,RotBox_Y,RotBox_Z
+        var header = reader.ReadLine(); 
+        
+        while (!reader.EndOfStream)
+        {
+            var line = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var cols = line.Split(',');
+            if (cols.Length < 8) continue;
+            
+            var pm4IdStr = cols[0];
+            var wmoName = cols[1];
+            
+            // Resolve Full Path
+            string fullPath = wmoName;
+            if (wmoPathLookup.TryGetValue(wmoName, out var p)) fullPath = p;
+            else 
+            {
+                // Fallback: try to construct if known prefix? No, just use name and hope patcher handles it or warn.
+                // Or maybe the user provided full path in listfile that matches basename.
+                // Let's stick to normalized paths.
+                fullPath = "World\\wmo\\" + wmoName; // Generic Fallback
+            }
+            // Normalize separators
+            fullPath = fullPath.Replace('/', '\\');
+            
+            wmoSet.Add(fullPath);
+            
+            // Parse coords (ADT Placement Space from PM4)
+            float placX = float.Parse(cols[2]);
+            float placY = float.Parse(cols[3]); // Height
+            float placZ = float.Parse(cols[4]);
+
+            // Convert to Game World Coordinates for inject-modf
+            // World X = 17066.666 - Plac Z
+            // World Y = 17066.666 - Plac X
+            // World Z = Plac Y
+            const float MapExtent = 17066.66656f;
+            float worldX = MapExtent - placZ;
+            float worldY = MapExtent - placX;
+            float worldZ = placY;
+            
+            // Parse Rotations (Pitch, Yaw, Roll)
+            float pitch = float.Parse(cols[5]);
+            float yaw   = float.Parse(cols[6]);
+            float roll  = float.Parse(cols[7]);
+
+            // Fix -0
+            if (pitch == -0.0f) pitch = 0.0f;
+            if (yaw == -0.0f) yaw = 0.0f;
+            if (roll == -0.0f) roll = 0.0f;
+            
+            // MODF CSV Format:
+            // ck24 = 0 (placeholder)
+            // wmo_path = fullPath
+            // name_id = 0 (will be resolved by inject-modf via mwmo map)
+            // unique_id = pm4Id
+            // pos/rot = World Coords
+            // scale = 1.0
+            
+            modfEntries.Add($"0,{fullPath},0,{pm4IdStr},{worldX},{worldY},{worldZ},{pitch},{yaw},{roll},1.0,1.0");
+        }
+    }
+    
+    // 3. Write mwmo_names.csv
+    // ID,Path
+    var mwmoList = wmoSet.OrderBy(x => x).ToList();
+    var mwmoPath = Path.Combine(outputDir, "mwmo_names.csv");
+    using (var sw = new StreamWriter(mwmoPath))
+    {
+        sw.WriteLine("ID,Path");
+        for (int i = 0; i < mwmoList.Count; i++)
+        {
+            sw.WriteLine($"{i},{mwmoList[i]}");
+        }
+    }
+    
+    // 4. Write modf_entries.csv
+    // But wait, inject-modf expects name_id to match the index in mwmo_names.csv!
+    // We need to re-map name_id in the entries.
+    
+    var finalModfEntries = new List<string>();
+    finalModfEntries.Add(modfEntries[0]); // Header
+    
+    var wmoToIndex = mwmoList.Select((val, idx) => (val, idx)).ToDictionary(x => x.val, x => x.idx);
+    
+    for (int i = 1; i < modfEntries.Count; i++) // Skip header in loop
+    {
+        var raw = modfEntries[i];
+        var parts = raw.Split(',');
+        var path = parts[1];
+        if (wmoToIndex.TryGetValue(path, out int idx))
+        {
+            // Reconstruct line with correct name_id
+            // parts[2] is name_id
+            parts[2] = idx.ToString();
+            finalModfEntries.Add(string.Join(",", parts));
+        }
+    }
+    
+    var modfPath = Path.Combine(outputDir, "modf_entries.csv");
+    File.WriteAllLines(modfPath, finalModfEntries);
+    
+    Console.WriteLine($"Generated {finalModfEntries.Count-1} MODF entries.");
+    Console.WriteLine($"referenced {mwmoList.Count} unique WMOs.");
+    Console.WriteLine($"Output: {outputDir}");
+    
     return 0;
 }

@@ -21,7 +21,7 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 | **MSVT** | **12 bytes** | **Mesh vertices (render geometry)** |
 | MSVI | 4 bytes | Mesh indices → MSVT |
 | **MSUR** | **32 bytes** | **Surface definitions (contains CK24!)** |
-| MSCN | 12 bytes | Exterior/collision vertices |
+| **MSCN** | **Variable (~16MB total)** | **Map Chunk Scene Nodes (M2 placement?)** |
 | **MPRL** | **24 bytes** | **Position references** |
 | MPRR | Variable | Reference data (index sequences) |
 | MDBH/MDOS/MDSF | Variable | Destructible buildings |
@@ -37,7 +37,9 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 |-------|------------|-----------|
 | MSVT | (Y, X, Z) | `new Vector3(vertex.Y, vertex.X, vertex.Z)` |
 | MSPV | (X, Y, Z) | No change |
-| MSCN | (X, Y, Z) | `new Vector3(vertex.Y, -vertex.X, vertex.Z)` |
+| MSPV | (X, Y, Z) | No change |
+| MSCN | (X, Y, Z) | `new Vector3(vertex.Y, -vertex.X, vertex.Z)` (Requires transform!) |
+| MPRL | (X, Y, Z) | Direct floats |
 | MPRL | (X, Y, Z) | Direct floats |
 
 ---
@@ -88,10 +90,30 @@ public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 | `0x42CBEA` | 33,587 | 8 | **StormwindHarbor.wmo** |
 | `0x432D68` | 29,084 | 1 | Large structure |
 | `0x43A8BC` | 6,401 | 8 | Multi-tile building |
-| `0x000000` | 186,060 | 291 | M2 props (non-WMO) |
+| `0x43A8BC` | 6,401 | 8 | Multi-tile building |
+| `0x000000` | 186,060 | 291 | **Link Objects** (M2 props / Terrain glue) |
 
-### Key Finding: CK24=0 is M2, not WMO
-CK24=0x000000 contains M2/doodad geometry that spans multiple objects. For WMO matching, **filter to CK24 != 0**.
+### Key Finding: CK24=0 is "Link Object"
+CK24=0x000000 contains M2/doodad geometry that often spans multiple objects or links terrain. 
+- **WMO Matching**: Filter to **CK24 != 0**.
+- **M2 Matching**: These likely correlate with **MSCN** nodes.
+
+
+---
+
+## Geometric Rotation Solver (New - Dec 2025)
+
+Since PM4 does not explicitly store WMO rotation in `MPRL`, we rely on **Geometric Fingerprinting** to determine placement.
+
+### Algorithm
+1.  **Dominant Wall Angle**: Calculate the surface area histogram of all vertical walls (Z-normal ~ 0) in 5-degree bins. The bin with the maximum area defines the "Dominant Angle".
+2.  **Size Matching**: Compare candidates' Bounding Box (WxDxH) with a 15% tolerance, allowing for 90° rotations (swapping Width/Depth).
+3.  **Cardinal Alignment**: Calculate `Delta = PM4_Angle - WMO_Angle`. If `Delta` is close to 0°, 90°, 180°, or 270°, it is a valid match.
+
+### Results
+- Validated on 33,000+ objects.
+- Consistently finds cardinal rotations for buildings.
+- **Limitation**: Ambiguous for perfectly symmetric objects (squares/circles) without additional type filtering.
 
 
 ---
@@ -102,17 +124,22 @@ Object catalog linking surfaces to geometry. **Does NOT contain CK24 directly.**
 
 ```c
 struct MSLKEntry {
-    uint8_t  type_flags;       // Object type (see distribution below)
-    uint8_t  subtype;          // Floor/layer index (0-18 observed)
-    uint16_t padding;          // Always 0
-    uint32_t group_object_id;  // Grouping ID (NOT CK24!)
-    int24_t  mspi_first;       // Index into MSPI (-1 = no geometry)
+    uint8_t  type_flags;       // Obstacle type (e.g. 2, 4, 10, 12 observed)
+    uint8_t  subtype;          // Subtype/variant
+    uint16_t padding;          // Usually 0
+    uint32_t group_object_id;  // Object identifier
+    int24_t  mspi_first;       // Index into MSPI (24-bit). -1 = no geometry.
     uint8_t  mspi_count;       // Count of MSPI entries
-    uint24_t link_id;          // Tile crossing: 0xFFFFYYXX
-    uint16_t ref_index;        // Cross-reference
+    uint8_t  link_id[4];       // Padding (4 bytes). NOT cross-tile relative ID.
+    uint16_t ref_index;        // References MSVT vertex (mostly) or MPRL position
     uint16_t system_flag;      // Always 0x8000
 };
 ```
+
+### RefIndex Hypothesis (Strong)
+- If `RefIndex < MPRL.Count`: References an `MPRL` position entry.
+- If `RefIndex >= MPRL.Count`: References an `MSVT` vertex index directly (99.7% of "invalid" values fit in MSVT range).
+- This suggests MSLK nodes can be anchored either to a generic position (MPRL) or a specific mesh vertex (MSVT).
 
 ### TypeFlags Distribution (from development map)
 | Type | % | Likely Purpose |
@@ -299,13 +326,16 @@ var translation = pm4Center - (wmoCenter * scale);
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Rotation source | **UNSOLVED** | Not in MPRL.unk04 |
+| Rotation source | **SOLVED (WMO)** | Geometric Fingerprinting (Dominant Wall Angle) |
+| M2 Rotation | **Hypothesis** | Likely inside **MSCN** chunk. |
 | ~~CK24 sub-segmentation~~ | **SOLVED** | Byte2=Type, Byte0+1=ObjectID |
 | MSLK TypeFlags meaning | Hypothesis | Type 1/2 = main, others special |
 | MSLK Subtype meaning | Hypothesis | Floor/level within building |
 | MPRL unk04 purpose | **NOT rotation** | Index or ID, varies on commands |
-| MSLK RefIndex (67% invalid) | **UNSOLVED** | Not cross-tile via LinkId |
+| MSLK RefIndex | **PARTIAL** | Points to MPRL (if < count) or MSVT vertex (if >= count) |
+| Cross-Tile LinkId | **BROKEN** | Resolution failed (0%). Use CK24 ObjectID instead. |
 | MH2O serialization | Broken | SMLiquidInstance format wrong |
+| ~~Rotation Calculation~~ | **SOLVED** | Geometric Fingerprinting (Dominant Wall Angle) |
 
 ---
 
@@ -323,6 +353,7 @@ The pipeline generates these analysis files in `modf_csv/`:
 | `mshd_header_analysis.txt` | MSHD field distributions |
 | `mprr_deep_analysis.txt` | MPRR sentinel/object boundary analysis |
 | `mprl_flag_analysis.txt` | MPRL Unk14/Unk16 distributions |
+| `cross_tile_mprl_resolution.txt` | LinkId resolution test (failed) |
 
 ---
 

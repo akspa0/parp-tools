@@ -3360,6 +3360,11 @@ ObjectID (Byte0+Byte1):
                                 // matches.csv content
                                 // ID, WMO, PosX, PosY, PosZ, RotX, RotY, RotZ
                                 Vector3 center = (pm4.Min + pm4.Max) * 0.5f;
+                                // Sanitize -0
+                                if (pitch == -0.0f) pitch = 0.0f;
+                                if (yaw == -0.0f) yaw = 0.0f;
+                                if (roll == -0.0f) roll = 0.0f;
+
                                 File.AppendAllText(Path.Combine(Path.GetDirectoryName(outPath), "matches.csv"), 
                                     $"{pm4.Id},{wmoName},{center.X},{center.Y},{center.Z},{pitch},{yaw},{roll}\n");
 
