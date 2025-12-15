@@ -69,18 +69,25 @@ public class Pm4WmoWriter
         // MOHD
         bw.Write(ToFourCC("DHOM")); // MOHD
         bw.Write(64); // Size
-        bw.Write(0); // nTextures
+        bw.Write(0); // nTextures = 0 (no materials - simplest WMO)
         bw.Write(1); // nGroups
         bw.Write(0); // nPortals
         bw.Write(0); // nLights
         bw.Write(0); // nModels
         bw.Write(0); // nDoodads
         bw.Write(0); // nDoodadSets
-        bw.Write(0x00FF00FF); // ambColor?
+        bw.Write(0x007F7F7F); // ambColor (neutral gray)
         bw.Write(0); // wmoID
         WriteBounds(bw, bounds);
-        bw.Write((short)0); // flags?
-        bw.Write((short)0); // padding?
+        bw.Write((short)0); // flags
+        bw.Write((short)0); // padding
+
+        // MOTX (Texture Names) - Empty for minimal WMO
+        WriteChunkHeader(bw, "XTOM", 0);
+
+        // MOMT (Materials) - Empty for minimal WMO
+        WriteChunkHeader(bw, "TMOM", 0);
+
 
         // MOGN (Group Names) - Empty
         WriteChunkHeader(bw, "NGOM", 0);
@@ -136,22 +143,21 @@ public class Pm4WmoWriter
 
         long startPos = fs.Position;
         
-        // MOGP Body (68 bytes)
-        bw.Write(0); // nameOffset
-        bw.Write(0); // descriptiveNameOffset
-        bw.Write(0); // flags
-        WriteBounds(bw, bounds);
-        bw.Write((short)0); // portalStart
-        bw.Write((short)0); // portalCount
-        bw.Write((short)0); // transBatchCount
-        bw.Write((short)0); // intBatchCount
-        bw.Write((short)0); // extBatchCount
-        bw.Write((short)0); // padding
-        bw.Write((byte)0); bw.Write((byte)0); bw.Write((byte)0); bw.Write((byte)0); // fogIndices
-        bw.Write(0); // liquidType
-        bw.Write(0); // wmoID
-        bw.Write(0); // flags2
-        bw.Write(0); // unk
+        // MOGP Body - header structure from WMOLoader.js (68 bytes total before sub-chunks)
+        bw.Write(0);        // nameOfs (uint32) - offset into MOGN
+        bw.Write(0);        // descOfs (uint32) - offset into MOGN  
+        bw.Write(0);        // flags (uint32)
+        WriteBounds(bw, bounds); // boundingBox1 + boundingBox2 (24 bytes)
+        bw.Write((ushort)0); // ofsPortals
+        bw.Write((ushort)0); // numPortals
+        bw.Write((ushort)1); // numBatchesA - exterior batches (we have 1 batch)
+        bw.Write((ushort)0); // numBatchesB - interior batches
+        bw.Write((uint)0);   // numBatchesC - unknown batches (uint32, NOT 2x uint16!)
+        bw.Write(0);         // unused (uint32)
+        bw.Write(0);         // liquidType (uint32)
+        bw.Write(0);         // groupID (uint32)
+        bw.Write(0);         // unknown1 (uint32)  
+        bw.Write(0);         // unknown2 (uint32) - total 68 bytes header
 
         // MOPY (Material Info) - 2 bytes per triangle
         bw.Write(ToFourCC("YPOM"));
@@ -209,16 +215,19 @@ public class Pm4WmoWriter
             bw.Write(0f);
         }
 
-        // MOBA (Render Batches)
+        // MOBA (Render Batches) - 24 bytes per batch
         bw.Write(ToFourCC("ABOM"));
-        bw.Write(24);
-        bw.Write((short)0); bw.Write((short)0); bw.Write((short)0); 
-        bw.Write((short)0); // rX
-        bw.Write(0); // startIndex
-        bw.Write((ushort)(indices.Count)); // count
+        bw.Write(24); // 1 batch * 24 bytes
+        // Bounding box for culling (6 shorts = 12 bytes)
+        bw.Write((short)bounds.Min.X); bw.Write((short)bounds.Min.Y); bw.Write((short)bounds.Min.Z);
+        bw.Write((short)bounds.Max.X); bw.Write((short)bounds.Max.Y); bw.Write((short)bounds.Max.Z);
+        bw.Write((uint)0); // startIndex (uint32 for 3.3.5)
+        bw.Write((ushort)indices.Count); // count
         bw.Write((ushort)0); // minIndex
-        bw.Write((ushort)vertices.Count); // maxIndex
-        bw.Write((byte)0); bw.Write((byte)0); bw.Write((short)0);
+        bw.Write((ushort)(vertices.Count - 1)); // maxIndex (inclusive)
+        bw.Write((byte)0); // flags
+        bw.Write((byte)0); // material_id = 0 (references MOMT[0])
+
 
         // Fix MOGP size
         long endPos = fs.Position;

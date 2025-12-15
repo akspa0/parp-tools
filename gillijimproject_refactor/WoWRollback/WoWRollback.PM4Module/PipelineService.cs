@@ -364,6 +364,144 @@ namespace WoWRollback.PM4Module
             }
 
 
+            // Stage 2b: Generate Debug WMOs from CK24 Objects (for visual verification)
+            Console.WriteLine("\n[Stage 2b] Generating debug WMOs from CK24 objects...");
+            var debugWmoEntries = new List<(string path, Vector3 position, int tileX, int tileY)>();
+            var pm4WmoWriter = new Analysis.Pm4WmoWriter();
+            string debugWmoDir = Path.Combine(outputRoot, "World", "wmo", "pm4_debug");
+            Directory.CreateDirectory(debugWmoDir);
+            
+            // Process each PM4 file and extract CK24 objects
+            int debugWmoCount = 0;
+            foreach (var pm4File in Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var pm4 = PM4File.FromFile(pm4File);
+                    if (pm4.Surfaces == null || pm4.Surfaces.Count == 0) continue;
+                    
+                    // Extract tile coordinates from PM4 filename (e.g., development_31_32.pm4 → 31,32)
+                    var pm4FileName = Path.GetFileNameWithoutExtension(pm4File);
+                    var tileMatch = System.Text.RegularExpressions.Regex.Match(pm4FileName, @"_(\d+)_(\d+)$");
+                    int fileTileX = tileMatch.Success ? int.Parse(tileMatch.Groups[1].Value) : 0;
+                    int fileTileY = tileMatch.Success ? int.Parse(tileMatch.Groups[2].Value) : 0;
+                    
+                    var groups = pm4.Surfaces
+                        .GroupBy(s => s.CK24)
+                        .Where(g => g.Key != 0) // Include ALL CK24 objects (not just 0x40 type)
+                        .ToList();
+                    
+                    foreach (var group in groups)
+                    {
+                        uint ck24 = group.Key;
+                        var surfaces = group.ToList();
+                        
+                        var vertices = new List<Vector3>();
+                        var indices = new List<int>();
+                        int vertexOffset = 0;
+                        
+                        foreach (var surf in surfaces)
+                        {
+                            if (surf.GroupKey == 0) continue;
+                            
+                            uint startIdx = surf.MsviFirstIndex;
+                            uint indexCount = surf.IndexCount;
+                            
+                            if (startIdx + indexCount > pm4.MeshIndices.Count) continue;
+                            
+                            for (int i = 0; i < indexCount; i++)
+                            {
+                                uint meshIdx = pm4.MeshIndices[(int)(startIdx + i)];
+                                if (meshIdx >= pm4.MeshVertices.Count) continue;
+                                
+                                var v = pm4.MeshVertices[(int)meshIdx];
+                                vertices.Add(v);
+                                indices.Add(vertexOffset++);
+                            }
+                        }
+                        
+                        if (vertices.Count >= 3)
+                        {
+                            string wmoName = $"ck24_{ck24:X6}";
+                            Vector3 centroid = pm4WmoWriter.WriteWmo(debugWmoDir, wmoName, vertices, indices);
+                            // WoW expects forward slashes in paths
+                            string wmoGamePath = $"world/wmo/pm4_debug/{wmoName}.wmo";
+                            // Store tile from PM4 filename with the entry
+                            debugWmoEntries.Add((wmoGamePath, centroid, fileTileX, fileTileY));
+                            debugWmoCount++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Failed to process {Path.GetFileName(pm4File)}: {ex.Message}");
+                }
+            }
+            Console.WriteLine($"[INFO] Generated {debugWmoCount} debug WMOs from CK24 objects");
+            
+            // Add debug WMO paths to wmoNames and create MODF entries for injection
+            int debugNameIdStart = wmoNames.Count; // NameIds for debug WMOs start after existing ones
+            foreach (var (wmoPath, _, _, _) in debugWmoEntries) // Only need path for wmoNames
+            {
+                wmoNames.Add(wmoPath);
+            }
+            
+            // Create MODF entries for debug WMOs (will be added to modfByTile in Stage 4)
+            var debugModfEntries = new List<Pm4ModfReconstructor.ModfEntry>();
+            uint debugUniqueIdBase = 8_000_000; // Different range from matched WMOs
+            const float DEBUG_TILESIZE = 533.33333f;
+            for (int i = 0; i < debugWmoEntries.Count; i++)
+            {
+                var (debugWmoPath, centroid, tileX, tileY) = debugWmoEntries[i]; // Now includes tile from PM4 filename
+                
+                // Transform centroid from PM4 world coords to ADT placement coords
+                // ADT placement: PlacementX = 32*TILESIZE - WorldY, PlacementZ = 32*TILESIZE - WorldX, PlacementY = WorldZ
+                const float HalfMap = 533.33333f * 32f;
+                var adtPosition = new Vector3(
+                    HalfMap - centroid.Y, // Placement X
+                    centroid.Z,            // Placement Y (Height)
+                    HalfMap - centroid.X   // Placement Z
+                );
+                
+                // TileX and TileY come from PM4 filename (same as matched WMOs)
+                // No longer calculating from position                
+                debugModfEntries.Add(new Pm4ModfReconstructor.ModfEntry(
+                    NameId: (uint)(debugNameIdStart + i),
+                    UniqueId: debugUniqueIdBase + (uint)i,
+                    Position: adtPosition,
+                    Rotation: Vector3.Zero,
+                    BoundsMin: adtPosition - new Vector3(50, 50, 50),
+                    BoundsMax: adtPosition + new Vector3(50, 50, 50),
+                    Flags: 0,
+                    DoodadSet: 0,
+                    NameSet: 0,
+                    Scale: 1024,
+                    WmoPath: debugWmoPath,
+                    Ck24: $"debug_{i:X6}",
+                    MatchConfidence: 1.0f,  // Debug WMOs are 100% "matched" (we made them)
+                    TileX: tileX,
+                    TileY: tileY
+                ));
+            }
+            transformedEntries.AddRange(debugModfEntries);
+            Console.WriteLine($"[INFO] Added {debugModfEntries.Count} debug WMO placements to MODF injection queue");
+            
+            // Export debug WMO placements CSV for verification
+            var debugWmoCsvPath = Path.Combine(outputRoot, "debug_wmo_placements.csv");
+            using (var sw = new StreamWriter(debugWmoCsvPath))
+            {
+                sw.WriteLine("WmoPath,TileX,TileY,PosX,PosY,PosZ,NameId,UniqueId");
+                foreach (var entry in debugModfEntries)
+                {
+                    sw.WriteLine($"{entry.WmoPath},{entry.TileX},{entry.TileY},{entry.Position.X:F2},{entry.Position.Y:F2},{entry.Position.Z:F2},{entry.NameId},{entry.UniqueId}");
+                }
+            }
+            Console.WriteLine($"[INFO] Debug WMO placements exported to: {debugWmoCsvPath}");
+            
+            // Log tile distribution
+            var tileDistribution = debugModfEntries.GroupBy(e => (e.TileX, e.TileY)).OrderBy(g => g.Key.TileX).ThenBy(g => g.Key.TileY).Take(20);
+            Console.WriteLine($"[INFO] Debug WMO tile distribution (first 20): {string.Join(", ", tileDistribution.Select(g => $"({g.Key.TileX},{g.Key.TileY})={g.Count()}"))}");
+
             // Stage 3: WDL Generation
             Console.WriteLine("\n[Stage 3] Generating WDL ADTs...");
             var wdlService = new WdlService();
@@ -654,12 +792,7 @@ namespace WoWRollback.PM4Module
             Console.WriteLine($"[INFO] Patched {wdlPatchedCount} WDL-generated ADTs with MODF data.");
 
             // Stage 4e: MDDF Injection (M2/Doodad placements)
-            // TEMPORARILY DISABLED: MDDF patching causes Noggit crashes due to non-compliant ADT structure
             Console.WriteLine("\n[Stage 4e] Injecting MDDF (M2/Doodad) placements...");
-            Console.WriteLine("[WARN] MDDF injection is DISABLED - ADT structure non-compliant");
-            Console.WriteLine($"[INFO] Would have injected {mddfEntries.Count} M2 placements");
-            // Skip MDDF injection until ADT structure issues are resolved
-            if (false) {
             // Group MDDF entries by tile - use TileX/TileY from the entry
             var mddfByTile = new Dictionary<(int x, int y), List<AdtPatcher.MddfEntry>>();
             int mddfReassignedCount = 0;
@@ -737,7 +870,7 @@ namespace WoWRollback.PM4Module
             }
             
             Console.WriteLine($"[INFO] Patched {mddfPatchedCount} ADTs with MDDF data ({mddfEntries.Count} total M2 placements)");
-            } // End if(false) - MDDF injection disabled
+
 
             // Stage 4c: WL* → MH2O Liquid Conversion
             // TEMPORARILY DISABLED: MH2O serialization has format issues causing Noggit crashes
