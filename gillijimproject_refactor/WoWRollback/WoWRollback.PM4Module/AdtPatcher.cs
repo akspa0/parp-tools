@@ -855,17 +855,19 @@ public sealed class AdtPatcher
             return (uint)(chunkPositions[idx] - mhdrDataStart);
         }
 
-        // Read flags, then update them to reflect chunk presence
+        // Read original flags - MHDR flags have specific meanings:
+        // 0x1 = mhdr_MFBO (contains MFBO chunk)
+        // 0x2 = mhdr_northrend (set for some Northrend maps)
+        // These are NOT chunk presence bitmasks! Preserve original flags.
         uint flags = br.ReadUInt32();
         
-        if (GetRelativeOffset(SIG_MCIN) > 0) flags |= 0x1;
-        if (GetRelativeOffset(SIG_MTEX) > 0) flags |= 0x2;
-        if (GetRelativeOffset(SIG_MMDX) > 0) flags |= 0x4;
-        if (GetRelativeOffset(SIG_MMID) > 0) flags |= 0x8;
-        if (GetRelativeOffset(SIG_MWMO) > 0) flags |= 0x10;
-        if (GetRelativeOffset(SIG_MWID) > 0) flags |= 0x20;
-        if (GetRelativeOffset(SIG_MDDF) > 0) flags |= 0x40;
-        if (GetRelativeOffset(SIG_MODF) > 0) flags |= 0x80;
+        // Only update the MFBO flag based on chunk presence
+        if (GetRelativeOffset(SIG_MFBO) > 0)
+            flags |= 0x1;
+        else
+            flags &= ~0x1u;
+        
+        // Preserve other flags (e.g., 0x2 for Northrend) as-is from original MHDR
 
         bw.Write(flags);
 

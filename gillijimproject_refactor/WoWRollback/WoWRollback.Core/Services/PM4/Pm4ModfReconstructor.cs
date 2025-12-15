@@ -825,7 +825,10 @@ public sealed class Pm4ModfReconstructor
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
                 Position: transform.Position,
-                Rotation: new Vector3(-transform.Rotation.Y, -transform.Rotation.Z, -transform.Rotation.X), // Swap & Negate: (Pitch, Yaw, Roll) <- (-Pitch, -Yaw, -Roll)
+                // Rotation: Output (0, 0, 0) for flat placement
+                // Geometry matching doesn't reliably compute rotations
+                // Users can adjust yaw (Y axis) manually in Noggit if needed
+                Rotation: Vector3.Zero,
                 BoundsMin: boundsMin,
                 BoundsMax: boundsMax,
                 Flags: 0,
@@ -925,8 +928,8 @@ public sealed class Pm4ModfReconstructor
             var mddf = new MddfEntry(
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
-                Position: transform.Position,
-                Rotation: new Vector3(-transform.Rotation.Y, -transform.Rotation.Z, -transform.Rotation.X), // Same coord conversion
+                Position: ServerToAdtPosition(transform.Position),
+                Rotation: new Vector3(transform.Rotation.Y, transform.Rotation.Z, transform.Rotation.X), // Map Pitch->RotX, Yaw->RotY, Roll->RotZ
                 Scale: scaleFixed,
                 Flags: 0,
                 M2Path: bestMatch.M2Path,
@@ -1201,19 +1204,37 @@ public sealed class Pm4ModfReconstructor
     private static float[] Vec3ToArray(Vector3 v) => new[] { v.X, v.Y, v.Z };
 
     /// <summary>
-    /// Convert PM4/server-space coordinates (origin near a map corner, range ~[0 .. 64 * TileSize])
-    /// into ADT world coordinates as described in ADT_v18 (origin at map center, range
-    /// approximately [-17066.66 .. +17066.66]).
+    /// Convert PM4/server-space coordinates into ADT placement coordinates.
+    /// Based on ADT_v18 docs:
+    /// x' (Placement X) = 32 * TILESIZE - x (World X?) -> Wait, mapping X to Y?
+    /// Let's use the explicit axis mapping:
+    /// Placement X (West/East) corresponds to World Y (West/East).
+    /// Placement Z (North/South) corresponds to World X (North/South).
+    /// Placement Y (Up) corresponds to World Z (Up).
+    /// 
+    /// Formula:
+    /// Placement X = 32 * TILESIZE - World Y
+    /// Placement Z = 32 * TILESIZE - World X
+    /// Placement Y = World Z
     /// </summary>
     private static Vector3 ServerToAdtPosition(Vector3 server)
     {
         const float TileSize = 533.33333f;
-        const float HalfMap = TileSize * 32f; // 32 tiles from center to edge
+        const float HalfMap = TileSize * 32f; // ~17066.666
 
+        // Inputs (server) are World Coordinates: X (North), Y (West), Z (Up)
+        // Outputs are Placement Coordinates: X (West), Y (Up), Z (North) ?
+        
+        // Doc: x' = 32*TILESIZE - x. 
+        // If 'x' in doc refers to the coordinate along the corresponding axis:
+        // Placement X corresponds to World Y axis. So P_X = 32*T - W_Y.
+        // Placement Z corresponds to World X axis. So P_Z = 32*T - W_X.
+        
         return new Vector3(
-            server.X - HalfMap,
-            server.Y - HalfMap,
-            server.Z);
+            HalfMap - server.Y, // Placement X
+            server.Z,           // Placement Y (Up)
+            HalfMap - server.X  // Placement Z
+        );
     }
 
     public static (int X, int Y) GetTileForPosition(Vector3 pos)

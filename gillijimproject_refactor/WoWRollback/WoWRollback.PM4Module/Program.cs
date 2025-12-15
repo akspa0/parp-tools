@@ -118,7 +118,7 @@ static int RunMergeSplit(string[] args)
     }
     
     mapName ??= "development";
-    outputDir ??= Path.Combine(inputDir, "merged");
+    outputDir ??= Path.Combine(inputDir!, "merged");
     
     var merger = new SplitAdtMerger();
     
@@ -133,9 +133,9 @@ static int RunMergeSplit(string[] args)
         }
         
         var baseName = $"{mapName}_{singleTile}";
-        var rootPath = Path.Combine(inputDir, $"{baseName}.adt");
-        var obj0Path = Path.Combine(inputDir, $"{baseName}_obj0.adt");
-        var tex0Path = Path.Combine(inputDir, $"{baseName}_tex0.adt");
+        var rootPath = Path.Combine(inputDir!, $"{baseName}.adt");
+        var obj0Path = Path.Combine(inputDir!, $"{baseName}_obj0.adt");
+        var tex0Path = Path.Combine(inputDir!, $"{baseName}_tex0.adt");
         
         Directory.CreateDirectory(outputDir);
         
@@ -225,7 +225,7 @@ static int RunDumpModf(string[] args)
             return 1;
         }
 
-        adtPath = Path.Combine(adtDir, $"{mapName}_{tx}_{ty}.adt");
+        adtPath = Path.Combine(adtDir!, $"{mapName}_{tx}_{ty}.adt");
     }
 
     if (!File.Exists(adtPath))
@@ -483,10 +483,10 @@ static int RunPm4ReconstructModf(string[] args)
         .ToList();
     result = result with { ModfEntries = transformedEntries };
 
-    var modfCsvPath = Path.Combine(outDir, "modf_entries.csv");
-    var mwmoCsvPath = Path.Combine(outDir, "mwmo_names.csv");
-    var candidatesCsvPath = Path.Combine(outDir, "match_candidates.csv");
-    var verifyJsonPath = Path.Combine(outDir, "placement_verification.json");
+    var modfCsvPath = Path.Combine(outDir!, "modf_entries.csv");
+    var mwmoCsvPath = Path.Combine(outDir!, "mwmo_names.csv");
+    var candidatesCsvPath = Path.Combine(outDir!, "match_candidates.csv");
+    var verifyJsonPath = Path.Combine(outDir!, "placement_verification.json");
 
     reconstructor.ExportToCsv(result, modfCsvPath);
     reconstructor.ExportMwmoNames(result, mwmoCsvPath);
@@ -546,7 +546,7 @@ static int RunMergeWithMinimap(string[] args)
     }
     
     mapName ??= "development";
-    outputDir ??= Path.Combine(inputDir, "merged_minimap");
+    outputDir ??= Path.Combine(inputDir!, "merged_minimap");
     
     Directory.CreateDirectory(outputDir);
     
@@ -573,7 +573,7 @@ static int RunMergeWithMinimap(string[] args)
     else
     {
         // Find all root ADT files
-        foreach (var file in Directory.GetFiles(inputDir, $"{mapName}_*.adt"))
+        foreach (var file in Directory.GetFiles(inputDir!, $"{mapName}_*.adt"))
         {
             var name = Path.GetFileNameWithoutExtension(file);
             if (name.Contains("_obj") || name.Contains("_tex")) continue;
@@ -594,9 +594,9 @@ static int RunMergeWithMinimap(string[] args)
     foreach (var (x, y) in tiles.OrderBy(t => t.x).ThenBy(t => t.y))
     {
         var baseName = $"{mapName}_{x}_{y}";
-        var rootPath = Path.Combine(inputDir, $"{baseName}.adt");
-        var obj0Path = Path.Combine(inputDir, $"{baseName}_obj0.adt");
-        var tex0Path = Path.Combine(inputDir, $"{baseName}_tex0.adt");
+        var rootPath = Path.Combine(inputDir!, $"{baseName}.adt");
+        var obj0Path = Path.Combine(inputDir!, $"{baseName}_obj0.adt");
+        var tex0Path = Path.Combine(inputDir!, $"{baseName}_tex0.adt");
         var outputPath = Path.Combine(outputDir, $"{baseName}.adt");
         
         bool hasTex0 = File.Exists(tex0Path) && new FileInfo(tex0Path).Length > 0;
@@ -770,7 +770,7 @@ static int RunExtractMpq(string[] args)
                 return 1;
             }
             
-            var outputPath = Path.Combine(outputDir, $"{mapName}_{x}_{y}.adt");
+            var outputPath = Path.Combine(outputDir!, $"{mapName}_{x}_{y}.adt");
             if (extractor.ExtractAdt(mapName, x, y, outputPath))
             {
                 Console.WriteLine($"[SUCCESS] Extracted to: {outputPath}");
@@ -784,8 +784,8 @@ static int RunExtractMpq(string[] args)
         }
         else
         {
-            int count = extractor.ExtractMapAdts(mapName, outputDir);
-            Console.WriteLine($"\n[DONE] Extracted {count} ADTs to: {outputDir}");
+            int count = extractor.ExtractMapAdts(mapName, outputDir!);
+            Console.WriteLine($"\n[DONE] Extracted {count} ADTs to: {outputDir!}");
             return count > 0 ? 0 : 1;
         }
     }
@@ -853,7 +853,7 @@ static int RunMergeTextures(string[] args)
     }
     
     mapName ??= "development";
-    outputDir ??= Path.Combine(splitDir, "merged_with_textures");
+    outputDir ??= Path.Combine(splitDir!, "merged_with_textures");
     
     Directory.CreateDirectory(outputDir);
     
@@ -881,7 +881,7 @@ static int RunMergeTextures(string[] args)
     }
     else
     {
-        foreach (var file in Directory.GetFiles(splitDir, $"{mapName}_*.adt"))
+        foreach (var file in Directory.GetFiles(splitDir!, $"{mapName}_*.adt"))
         {
             var name = Path.GetFileNameWithoutExtension(file);
             if (name.Contains("_obj") || name.Contains("_tex")) continue;
@@ -903,11 +903,11 @@ static int RunMergeTextures(string[] args)
     foreach (var (x, y) in tiles.OrderBy(t => t.x).ThenBy(t => t.y))
     {
         var baseName = $"{mapName}_{x}_{y}";
-        var rootPath = Path.Combine(splitDir, $"{baseName}.adt");
-        var obj0Path = Path.Combine(splitDir, $"{baseName}_obj0.adt");
-        var tex0Path = Path.Combine(splitDir, $"{baseName}_tex0.adt");
-        var monoPath = Path.Combine(textureDir, $"{baseName}.adt");
-        var outputPath = Path.Combine(outputDir, $"{baseName}.adt");
+        var rootPath = Path.Combine(splitDir!, $"{baseName}.adt");
+        var obj0Path = Path.Combine(splitDir!, $"{baseName}_obj0.adt");
+        var tex0Path = Path.Combine(splitDir!, $"{baseName}_tex0.adt");
+        var monoPath = Path.Combine(textureDir!, $"{baseName}.adt");
+        var outputPath = Path.Combine(outputDir!, $"{baseName}.adt");
         
         bool hasTex0 = File.Exists(tex0Path) && new FileInfo(tex0Path).Length > 0;
         bool hasMono = File.Exists(monoPath) && new FileInfo(monoPath).Length > 0;
@@ -1383,6 +1383,7 @@ static int RunPatchPipeline(string[] args)
     string? wdlPath = null;
     string? outputRoot = "PM4_to_ADT";
     string? wmoFilter = null;        // Filter WMOs by path prefix (e.g., "Northrend")
+    string? m2Filter = null;         // Filter M2s by path prefix (e.g., "development")
     bool useFullMesh = false;        // Use full WMO mesh instead of walkable surfaces
 
     for (int i = 0; i < args.Length; i++)
@@ -1397,6 +1398,7 @@ static int RunPatchPipeline(string[] args)
             case "--wdl": wdlPath = args[++i]; break;
             case "--out": outputRoot = args[++i]; break;
             case "--wmo-filter": wmoFilter = args[++i]; break;
+            case "--m2-filter": m2Filter = args[++i]; break;
             case "--use-full-mesh": useFullMesh = true; break;
             case "--help":
             case "-h":
@@ -1413,6 +1415,7 @@ static int RunPatchPipeline(string[] args)
                 Console.WriteLine("  --wdl <file>        Path to WDL file (optional, auto-detected from split-adt)");
                 Console.WriteLine("  --out <dir>         Output directory (default: PM4_to_ADT)");
                 Console.WriteLine("  --wmo-filter <path> Filter WMOs by path prefix (e.g., 'Northrend' or 'Kalimdor')");
+                Console.WriteLine("  --m2-filter <path>  Filter M2s by path prefix (e.g., 'development')");
                 Console.WriteLine("  --use-full-mesh     Use full WMO mesh for matching (not just walkable surfaces)");
                 return 0;
         }
@@ -1428,7 +1431,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, useFullMesh);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh);
         return 0;
     }
     catch (Exception ex)
@@ -2153,9 +2156,10 @@ static int RunAnalyzePm4Scene(string[] args)
 // analyze-m2-library command
 static int RunAnalyzeM2Library(string[] args)
 {
-    Console.WriteLine("=== M2 Library Analysis ===\n");
+    Console.WriteLine("=== M2 Library Builder ===\n");
     
     string? m2Dir = null;
+    string? mpqArchive = null;
     string? outDir = null;
     string? listfilePath = null;
     
@@ -2164,39 +2168,60 @@ static int RunAnalyzeM2Library(string[] args)
         switch (args[i])
         {
             case "--m2": m2Dir = args[++i]; break;
+            case "--mpq": mpqArchive = args[++i]; break;
             case "--out": outDir = args[++i]; break;
             case "--listfile": listfilePath = args[++i]; break;
             case "--help":
             case "-h":
-                Console.WriteLine("Usage: analyze-m2-library --m2 <m2_root_dir> --out <output_dir> [--listfile <listfile.csv>]");
+                Console.WriteLine("Usage: analyze-m2-library [--m2 <dir> | --mpq <archive>] --out <output_dir> [--listfile <listfile.csv>]");
                 return 0;
         }
     }
     
-    if (string.IsNullOrEmpty(m2Dir) || string.IsNullOrEmpty(outDir))
+    if (string.IsNullOrEmpty(outDir))
     {
-        Console.Error.WriteLine("Error: --m2 and --out are required.");
+        Console.Error.WriteLine("Error: --out is required.");
         return 1;
     }
+
+    if (string.IsNullOrEmpty(m2Dir) && string.IsNullOrEmpty(mpqArchive))
+    {
+         Console.Error.WriteLine("Error: Either --m2 <dir> or --mpq <archive> must be specified.");
+         return 1;
+    }
     
-    if (!Directory.Exists(m2Dir))
+    if (!string.IsNullOrEmpty(m2Dir) && !Directory.Exists(m2Dir))
     {
         Console.Error.WriteLine($"Error: M2 directory not found: {m2Dir}");
         return 1;
     }
 
+    if (!string.IsNullOrEmpty(mpqArchive) && !File.Exists(mpqArchive))
+    {
+         Console.Error.WriteLine($"Error: MPQ archive not found: {mpqArchive}");
+         return 1;
+    }
+
     if (string.IsNullOrEmpty(listfilePath) && File.Exists("listfile.csv"))
     {
-         // Default to listfile.csv in CWD if not provided
          listfilePath = "listfile.csv";
          Console.WriteLine($"[INFO] Using default listfile: {listfilePath}");
     }
     
-    Directory.CreateDirectory(outDir);
-    var cachePath = Path.Combine(outDir, "m2_library_cache.json");
+    Directory.CreateDirectory(outDir!);
+    var cachePath = Path.Combine(outDir!, "m2_library_cache.json");
     
     var builder = new M2LibraryBuilder();
-    var library = builder.BuildLibrary(m2Dir, listfilePath ?? "", cachePath);
+    Dictionary<string, M2Reference> library;
+
+    if (!string.IsNullOrEmpty(mpqArchive))
+    {
+        library = builder.BuildLibraryFromMpq(mpqArchive, listfilePath ?? "", cachePath);
+    }
+    else
+    {
+        library = builder.BuildLibrary(m2Dir!, listfilePath ?? "", cachePath);
+    }
     
     Console.WriteLine($"\n[SUCCESS] Library built with {library.Count} entries.");
     Console.WriteLine($"Cache saved to: {cachePath}");
@@ -2262,17 +2287,17 @@ static int RunReconstructMddf(string[] args)
     List<Pm4ModfReconstructor.Pm4Object> objects;
     
     // Method 1: Load from extracted CSV (legacy)
-    if (File.Exists(Path.Combine(pm4FacesDir, "ck_instances.csv")))
+    if (File.Exists(Path.Combine(pm4FacesDir!, "ck_instances.csv")))
     {
         Console.WriteLine($"Loading PM4 objects from CSV in {pm4FacesDir}...");
-        objects = reconstructor.LoadPm4Objects(pm4FacesDir);
+        objects = reconstructor.LoadPm4Objects(pm4FacesDir!);
     }
     // Method 2: Load directly from .pm4 files (native)
     else
     {
         Console.WriteLine($"Loading PM4 files directly from {pm4FacesDir}...");
         // Ensure PipelineService is accessible. It's in the same project/namespace usually.
-        objects = new PipelineService().LoadPm4ObjectsFromFiles(pm4FacesDir);
+        objects = new PipelineService().LoadPm4ObjectsFromFiles(pm4FacesDir!);
     }
 
     if (objects.Count == 0)

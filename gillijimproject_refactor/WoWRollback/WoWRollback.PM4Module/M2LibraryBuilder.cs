@@ -126,6 +126,103 @@ namespace WoWRollback.PM4Module
             return library;
         }
 
+        /// <summary>
+        /// Scan M2 files in the given MPQ archive and build a geometry library cache.
+        /// </summary>
+        public Dictionary<string, M2Reference> BuildLibraryFromMpq(string mpqPath, string listfilePath, string cachePath)
+        {
+            // Try load cache first
+            var library = LoadLibraryCache(cachePath);
+            if (library != null)
+            {
+                Console.WriteLine($"[INFO] Loaded M2 Library Cache ({library.Count} entries)");
+                return library;
+            }
+
+            Console.WriteLine($"[INFO] Building M2 Library from MPQ: {mpqPath}...");
+            library = new Dictionary<string, M2Reference>(StringComparer.OrdinalIgnoreCase);
+            var listfileMap = ParseListfile(listfilePath);
+
+            try
+            {
+                using var mpq = new MpqAdtExtractor(mpqPath);
+                
+                // M2s are scattered. We should iterate listfile or scan MPQ?
+                // Scanning MPQ is better if listfile is incomplete, but MPQ requires Listfile for names usually?
+                // StormLib `FindFirstFile` works if internal listfile is present.
+                // Or if we provide `(listfile)`? SFileFindFirstFile takes szListFile.
+                // The wrapper passes null.
+                
+                // Let's rely on listfileMap from parsing the external listfile first?
+                // But we want to process ALL M2s in MPQ.
+                
+                // If the user provides a comprehensive listfile, we can just iterate that and checking HasFile.
+                // That's safer for MPQs than scanning unknown hashes.
+                // "we need to pull the m2s out of the mpq's".
+                
+                // Let's use ListFiles("*.m2") from the wrapper?
+                // The wrapper implementation passes null for szListFile in SFileFindFirstFile.
+                // So it relies on StormLib's internal listfile or brute force?
+                // StormLib usually needs an external listfile for full enumeration if not in archive.
+                
+                Console.WriteLine("Scanning MPQ for .m2 files...");
+                var m2Files = mpq.ListFiles("*.m2");
+                Console.WriteLine($"Found {m2Files.Count} .m2 files in MPQ.");
+                
+                if (m2Files.Count == 0 && listfileMap.Count > 0)
+                {
+                    // Fallback: Use external listfile to check existence
+                    Console.WriteLine("MPQ scan empty (maybe no internal listfile). Checking known paths from listfile...");
+                    m2Files = listfileMap.Keys.Where(k => k.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                                              .Where(k => mpq.HasFile(k))
+                                              .ToList();
+                    Console.WriteLine($"Found {m2Files.Count} .m2 files via listfile check.");
+                }
+
+                int processed = 0;
+                int skipped = 0;
+                object lockObj = new object();
+
+                System.Threading.Tasks.Parallel.ForEach(m2Files, (gamePath) =>
+                {
+                    try
+                    {
+                        var data = mpq.ReadFile(gamePath);
+                        if (data == null || data.Length < 64) return;
+
+                        var m2File = new M2File(data); // Will parse from byte[]
+                        if (m2File.Vertices.Count < 3) return;
+
+                        var stats = _matcher.ComputeStats(m2File.Vertices);
+                        
+                        // Normalize path
+                        var normalizedPath = gamePath.Replace('\\', '/');
+                        uint fileDataId = listfileMap.GetValueOrDefault(normalizedPath, 0u);
+
+                        var reference = new M2Reference(fileDataId, normalizedPath, Path.GetFileName(normalizedPath), stats);
+
+                        lock (lockObj)
+                        {
+                            library[normalizedPath] = reference;
+                            processed++;
+                            if (processed % 100 == 0)
+                                Console.Write($"\rProcessed {processed}/{m2Files.Count} M2s...");
+                        }
+                    }
+                    catch { /* Ignore invalid M2s */ }
+                });
+
+                Console.WriteLine($"\n[INFO] M2 Library built: {library.Count} entries.");
+                SaveLibraryCache(cachePath, library);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] MPQ processing failed: {ex.Message}");
+            }
+
+            return library;
+        }
+
         private Dictionary<string, uint> ParseListfile(string path)
         {
             var map = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
@@ -137,8 +234,6 @@ namespace WoWRollback.PM4Module
                 if (parts.Length >= 2 && uint.TryParse(parts[0], out var id))
                 {
                     var name = parts[1].Trim().Replace('\\', '/');
-                    // Handle "File Name;File Path" format? No, usually ID;Path.
-                    // Or ID;Path;Size...
                     map[name] = id;
                 }
             }

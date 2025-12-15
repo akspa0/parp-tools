@@ -173,8 +173,131 @@ namespace WoWRollback.PM4Module
         private static string NormalizePath(string path)
         {
             // WoW expects UPPERCASE paths with backslashes
-            var normalized = path.Replace('/', '\\');
-            return normalized.ToUpperInvariant();
+            // WoW paths use forward slashes and lowercase
+            var normalized = path.Replace('\\', '/');
+            return normalized.ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Patches doodad (M2) placements into an ADT's MDDF chunk.
+        /// Similar to PatchWmoPlacements but for MMDX/MMID/MDDF instead of MWMO/MWID/MODF.
+        /// </summary>
+        public void PatchDoodadPlacements(
+            string inputAdtPath,
+            string outputAdtPath,
+            IReadOnlyList<string> m2Names,
+            IReadOnlyList<AdtPatcher.MddfEntry> newMddfEntries)
+        {
+            if (string.IsNullOrWhiteSpace(inputAdtPath))
+                throw new ArgumentException("Input ADT path is required", nameof(inputAdtPath));
+            if (string.IsNullOrWhiteSpace(outputAdtPath))
+                throw new ArgumentException("Output ADT path is required", nameof(outputAdtPath));
+            if (m2Names is null)
+                throw new ArgumentNullException(nameof(m2Names));
+            if (newMddfEntries is null)
+                throw new ArgumentNullException(nameof(newMddfEntries));
+
+            // If no new placements for this tile, don't modify (or copy unchanged).
+            if (newMddfEntries.Count == 0)
+            {
+                // Don't copy - let caller decide (MODF patch may have already created output)
+                return;
+            }
+
+            var bytes = File.ReadAllBytes(inputAdtPath);
+            var parsed = _adtPatcher.ParseAdt(bytes);
+
+            // Ensure doodad-related chunks exist in canonical order.
+            // Order: MVER, MHDR, MCIN, MTEX, MMDX, MMID, MWMO, MWID, MDDF, MODF...
+            EnsureChunkExists(parsed, "MMDX", "MTEX");
+            EnsureChunkExists(parsed, "MMID", "MMDX");
+            EnsureChunkExists(parsed, "MDDF", "MWID");
+
+            var mmdxChunk = parsed.FindChunk("MMDX");
+            var mmidChunk = parsed.FindChunk("MMID");
+            var mddfChunk = parsed.FindChunk("MDDF");
+
+            if (mmdxChunk == null || mmidChunk == null || mddfChunk == null)
+                throw new InvalidOperationException("Failed to ensure required doodad chunks (MMDX/MMID/MDDF).");
+
+            // Parse existing MMDX names from the chunk payload (null-terminated strings).
+            var existingNames = ParseNullTerminatedStrings(mmdxChunk.Data);
+            int existingCount = existingNames.Count;
+
+            // Build full M2 name list: existing names + new PM4-derived names (normalized).
+            var allNames = new List<string>(existingNames.Count + m2Names.Count);
+            allNames.AddRange(existingNames);
+
+            foreach (var name in m2Names)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    allNames.Add(string.Empty);
+                    continue;
+                }
+
+                allNames.Add(NormalizePath(name));
+            }
+
+            // Rebuild MMDX / MMID using AdtPatcher helper methods.
+            mmdxChunk.Data = _adtPatcher.BuildMmdxData(allNames);
+            mmidChunk.Data = _adtPatcher.BuildMmidData(allNames);
+
+            // Parse existing MDDF entries to collect their UniqueIds
+            var existingMddfData = mddfChunk.Data ?? Array.Empty<byte>();
+            var existingUniqueIds = new HashSet<uint>();
+            if (existingMddfData.Length >= 36)
+            {
+                int entryCount = existingMddfData.Length / 36;
+                for (int i = 0; i < entryCount; i++)
+                {
+                    int offset = i * 36 + 4; // UniqueId is at byte 4 in each 36-byte entry
+                    if (offset + 4 <= existingMddfData.Length)
+                    {
+                        uint existingId = BitConverter.ToUInt32(existingMddfData, offset);
+                        existingUniqueIds.Add(existingId);
+                    }
+                }
+            }
+
+            // Prepare new entries with adjusted NameId and conflict-free UniqueIds
+            var adjustedEntries = new List<AdtPatcher.MddfEntry>(newMddfEntries.Count);
+            uint nextAvailableId = 200_000_000; // Same base as MODF to ensure IDs in valid range
+            int reassignedCount = 0;
+
+            foreach (var entry in newMddfEntries)
+            {
+                var adjusted = entry;
+                adjusted.NameId = (uint)(existingCount + entry.NameId);
+
+                // Check for UniqueId collision with existing entries
+                if (existingUniqueIds.Contains(adjusted.UniqueId))
+                {
+                    // Find next available ID
+                    while (existingUniqueIds.Contains(nextAvailableId))
+                        nextAvailableId++;
+                    adjusted.UniqueId = nextAvailableId++;
+                    reassignedCount++;
+                }
+                existingUniqueIds.Add(adjusted.UniqueId);
+                adjustedEntries.Add(adjusted);
+            }
+
+            if (reassignedCount > 0)
+                Console.WriteLine($"[INFO] Reassigned {reassignedCount} MDDF UniqueIds to avoid conflicts");
+
+            var newMddfData = _adtPatcher.BuildMddfData(adjustedEntries);
+
+            var combined = new byte[existingMddfData.Length + newMddfData.Length];
+            Buffer.BlockCopy(existingMddfData, 0, combined, 0, existingMddfData.Length);
+            Buffer.BlockCopy(newMddfData, 0, combined, existingMddfData.Length, newMddfData.Length);
+            mddfChunk.Data = combined;
+
+            // Serialize ADT with recalculated MHDR/MCIN offsets.
+            var outputBytes = _adtPatcher.WriteAdt(parsed);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outputAdtPath)!);
+            File.WriteAllBytes(outputAdtPath, outputBytes);
         }
     }
 }

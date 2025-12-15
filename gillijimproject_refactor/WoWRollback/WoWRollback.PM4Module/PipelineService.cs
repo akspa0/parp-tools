@@ -22,7 +22,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, bool useFullMesh = false)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -52,6 +52,10 @@ namespace WoWRollback.PM4Module
             Directory.CreateDirectory(dirs.PatchedWdlUnpainted);
             Directory.CreateDirectory(dirs.PatchedWdlPainted);
             Directory.CreateDirectory(dirs.FinalAssembly);
+
+            // M2 library - declared at method level so it's accessible in Stage 2b and 4e
+            var m2LibraryCachePath = Path.Combine(dirs.Root, "m2_library_cache.json");
+            Dictionary<string, Pm4ModfReconstructor.M2Reference> m2Library = new();
 
             // Stage 1: WMO Extraction
             // User requested full rebuild support.
@@ -98,6 +102,14 @@ namespace WoWRollback.PM4Module
                 {
                     try
                     {
+                        // Apply WMO path filter if specified
+                        if (!string.IsNullOrEmpty(wmoFilter) && 
+                            !wmoPath.Contains(wmoFilter, StringComparison.OrdinalIgnoreCase))
+                        {
+                            skipped++;
+                            continue;
+                        }
+                        
                         if (!archiveSource.FileExists(wmoPath)) continue;
 
                         // Check if OBJ output already exists - skip if so
@@ -135,10 +147,100 @@ namespace WoWRollback.PM4Module
                     }
                 }
                 Console.WriteLine($"\n[INFO] WMO Processing Complete. Processed: {processed}, Skipped (already exist): {skipped}");
+                
+                // Stage 1b: M2 Library Building (In-Memory from MPQ)
+                Console.WriteLine("\n[Stage 1b] Building M2 Reference Library from MPQ...");
+                
+                if (File.Exists(m2LibraryCachePath))
+                {
+                    Console.WriteLine($"[INFO] Loading M2 library from cache: {m2LibraryCachePath}");
+                    try
+                    {
+                        var json = File.ReadAllText(m2LibraryCachePath);
+                        var list = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json);
+                        if (list != null)
+                            m2Library = list.ToDictionary(x => x.M2Path, x => x, StringComparer.OrdinalIgnoreCase);
+                        Console.WriteLine($"[INFO] Loaded {m2Library.Count} M2s from cache");
+                    }
+                    catch { Console.WriteLine("[WARN] Failed to load M2 cache, rebuilding..."); }
+                }
+                
+                if (m2Library.Count == 0)
+                {
+                    // Build M2 library in-memory from MPQ (just like WMOs)
+                    var m2Entries = File.ReadLines(listfilePath)
+                        .Where(l => l.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                        .Select(l => l.Replace('/', '\\'))
+                        .ToList();
+                    
+                    Console.WriteLine($"[INFO] Found {m2Entries.Count} M2 files to process from listfile...");
+                    
+                    var m2Builder = new M2LibraryBuilder();
+                    var matcher = new Pm4WmoGeometryMatcher();
+                    int m2Processed = 0;
+                    int m2Skipped = 0;
+                    object m2Lock = new object();
+                    
+                    // Process M2s in parallel (like WMOs)
+                    System.Threading.Tasks.Parallel.ForEach(m2Entries, m2Path =>
+                    {
+                        try
+                        {
+                            // Apply M2 path filter if specified
+                            if (!string.IsNullOrEmpty(m2Filter) && 
+                                !m2Path.Contains(m2Filter, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return; // Skip M2s not matching filter
+                            }
+                            
+                            if (!archiveSource.FileExists(m2Path)) return;
+                            
+                            byte[]? data = null;
+                            using (var s = archiveSource.OpenFile(m2Path))
+                            {
+                                if (s == null) return;
+                                using (var ms = new MemoryStream()) { s.CopyTo(ms); data = ms.ToArray(); }
+                            }
+                            
+                            if (data == null || data.Length < 64) return;
+                            
+                            var m2File = new M2File(data);
+                            if (m2File.Vertices.Count < 3) return;
+                            
+                            var stats = matcher.ComputeStats(m2File.Vertices);
+                            var normalizedPath = m2Path.Replace('\\', '/');
+                            var reference = new Pm4ModfReconstructor.M2Reference(0, normalizedPath, Path.GetFileName(normalizedPath), stats);
+                            
+                            lock (m2Lock)
+                            {
+                                m2Library[normalizedPath] = reference;
+                                m2Processed++;
+                                if (m2Processed % 500 == 0)
+                                    Console.Write($"\r[INFO] Processed {m2Processed} M2s...");
+                            }
+                        }
+                        catch { /* ignore invalid M2s */ }
+                    });
+                    
+                    Console.WriteLine($"\n[INFO] M2 Processing Complete. Processed: {m2Processed}");
+                    
+                    // Cache the M2 library
+                    if (m2Library.Count > 0)
+                    {
+                        try
+                        {
+                            var options = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+                            var json = System.Text.Json.JsonSerializer.Serialize(m2Library.Values.ToList(), options);
+                            File.WriteAllText(m2LibraryCachePath, json);
+                            Console.WriteLine($"[INFO] Saved M2 library cache: {m2LibraryCachePath}");
+                        }
+                        catch { }
+                    }
+                }
             }
             else
             {
-                Console.WriteLine("[WARN] Game path or listfile missing, skipping WMO processing.");
+                Console.WriteLine("[WARN] Game path or listfile missing, skipping WMO/M2 processing.");
             }
 
             // Stage 2: Direct PM4 Processing
@@ -146,13 +248,18 @@ namespace WoWRollback.PM4Module
             
             var modfCsvPath = Path.Combine(dirs.ModfCsv, "modf_entries.csv");
             var mwmoPath = Path.Combine(dirs.ModfCsv, "mwmo_names.csv");
+            var mddfCsvPath = Path.Combine(dirs.MddfCsv, "mddf_entries.csv");
+            var m2NamesPath = Path.Combine(dirs.MddfCsv, "m2_names.csv");
             
             List<Pm4ModfReconstructor.ModfEntry> transformedEntries = new();
             List<string> wmoNames = new();
+            List<Pm4ModfReconstructor.MddfEntry> mddfEntries = new();
+            List<string> m2Names = new();
             
             // Check for existing MODF CSVs with actual data (more than just headers)
             bool hasExistingModf = File.Exists(modfCsvPath) && new FileInfo(modfCsvPath).Length > 200;
             bool hasExistingMwmo = File.Exists(mwmoPath) && new FileInfo(mwmoPath).Length > 50;
+            bool hasExistingMddf = File.Exists(mddfCsvPath) && new FileInfo(mddfCsvPath).Length > 200;
             
             if (hasExistingModf && hasExistingMwmo)
             {
@@ -212,6 +319,46 @@ namespace WoWRollback.PM4Module
                         
                         // Export MPRL rotation investigation CSV
                         ExportMprlRotationData(pm4Path, dirs.ModfCsv);
+                    }
+                    
+                    // Step 4: M2 Matching (Stage 2b)
+                    // M2 objects exist in any CK24 group, not just 0x000000
+                    // Use all PM4 objects for M2 matching
+                    var m2Candidates = pm4Objects.ToList();
+                    Console.WriteLine($"\n[Stage 2b] Processing M2 candidates ({m2Candidates.Count} PM4 objects)...");
+                    
+                    // Load M2 library from cache if we didn't build it in Stage 1b
+                    if (m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
+                    {
+                        try
+                        {
+                            var json = File.ReadAllText(m2LibraryCachePath);
+                            var list = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json);
+                            if (list != null)
+                                m2Library = list.ToDictionary(x => x.M2Path, x => x, StringComparer.OrdinalIgnoreCase);
+                        }
+                        catch { }
+                    }
+                    
+                    if (m2Candidates.Count > 0 && m2Library.Count > 0)
+                    {
+                        Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
+                        var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f);
+                        mddfEntries = mddfResult.MddfEntries;
+                        m2Names = mddfResult.M2Names;
+                        
+                        // Export MDDF CSV
+                        _reconstructor.ExportMddfToCsv(mddfResult, mddfCsvPath);
+                        
+                        Console.WriteLine($"[INFO] Matched {mddfEntries.Count} MDDF entries, {m2Names.Count} unique M2s");
+                    }
+                    else if (m2Candidates.Count == 0)
+                    {
+                        Console.WriteLine("[INFO] No PM4 objects found for M2 matching");
+                    }
+                    else
+                    {
+                        Console.WriteLine("[WARN] M2 library empty, skipping M2 matching");
                     }
                 }
             }
@@ -506,6 +653,92 @@ namespace WoWRollback.PM4Module
             }
             Console.WriteLine($"[INFO] Patched {wdlPatchedCount} WDL-generated ADTs with MODF data.");
 
+            // Stage 4e: MDDF Injection (M2/Doodad placements)
+            // TEMPORARILY DISABLED: MDDF patching causes Noggit crashes due to non-compliant ADT structure
+            Console.WriteLine("\n[Stage 4e] Injecting MDDF (M2/Doodad) placements...");
+            Console.WriteLine("[WARN] MDDF injection is DISABLED - ADT structure non-compliant");
+            Console.WriteLine($"[INFO] Would have injected {mddfEntries.Count} M2 placements");
+            // Skip MDDF injection until ADT structure issues are resolved
+            if (false) {
+            // Group MDDF entries by tile - use TileX/TileY from the entry
+            var mddfByTile = new Dictionary<(int x, int y), List<AdtPatcher.MddfEntry>>();
+            int mddfReassignedCount = 0;
+            
+            foreach (var entry in mddfEntries)
+            {
+                // NOTE: TileX/TileY are swapped - entries were stored as (Y,X) not (X,Y)
+                var (tx, ty) = (entry.TileY, entry.TileX);  // Swap X,Y for correct tile
+                if (!mddfByTile.TryGetValue((tx, ty), out var list))
+                {
+                    list = new List<AdtPatcher.MddfEntry>();
+                    mddfByTile[(tx, ty)] = list;
+                }
+                
+                // Ensure UniqueId is globally unique (across both MODF AND MDDF)
+                uint uniqueId = entry.UniqueId;
+                if (globalUsedUniqueIds.Contains(uniqueId))
+                {
+                    while (globalUsedUniqueIds.Contains(nextAvailableUniqueId))
+                        nextAvailableUniqueId++;
+                    uniqueId = nextAvailableUniqueId++;
+                    mddfReassignedCount++;
+                }
+                globalUsedUniqueIds.Add(uniqueId);
+                
+                // Map Core MddfEntry to AdtPatcher MddfEntry
+                // Per ADT v18 spec, MDDF position encoding is:
+                //   mddf.position.X = 32 * TILESIZE - world.X
+                //   mddf.position.Y = world.Y (height unchanged)
+                //   mddf.position.Z = 32 * TILESIZE - world.Z
+                // This is same formula as MODF but note axis layout is XYZ where Y is height
+                const float TILESIZE = 533.33333f;
+                const float MAP_CENTER = 32.0f * TILESIZE; // 17066.666...
+                var mddfPosition = new Vector3(
+                    MAP_CENTER - entry.Position.X,  // X transform
+                    entry.Position.Y,                // Y (height) unchanged
+                    MAP_CENTER - entry.Position.Z   // Z transform
+                );
+                
+                list.Add(new AdtPatcher.MddfEntry
+                {
+                    NameId = entry.NameId,
+                    UniqueId = uniqueId,
+                    Position = mddfPosition,
+                    Rotation = entry.Rotation,
+                    // Clamp scale to reasonable range: 512-2048 (0.5x - 2.0x)
+                    // Computed scales can be insane (100x+) due to geometry matching issues
+                    Scale = Math.Clamp(entry.Scale, (ushort)512, (ushort)2048),
+                    Flags = entry.Flags
+                });
+            }
+            
+            if (mddfReassignedCount > 0)
+                Console.WriteLine($"[INFO] Reassigned {mddfReassignedCount} MDDF UniqueIds for global uniqueness");
+            
+            // Patch MDDF into Museum ADTs (already created by MODF patching)
+            int mddfPatchedCount = 0;
+            foreach (var file in Directory.GetFiles(dirs.PatchedMuseum, "*.adt"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                if (name.Contains("_obj") || name.Contains("_tex")) continue;
+
+                var match = System.Text.RegularExpressions.Regex.Match(name, @"(\d+)_(\d+)$");
+                if (!match.Success) continue;
+
+                int tx = int.Parse(match.Groups[1].Value);
+                int ty = int.Parse(match.Groups[2].Value);
+
+                if (mddfByTile.TryGetValue((tx, ty), out var tileEntries) && tileEntries.Count > 0)
+                {
+                    // Patch MDDF into the already-patched ADT (in place)
+                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries);
+                    mddfPatchedCount++;
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Patched {mddfPatchedCount} ADTs with MDDF data ({mddfEntries.Count} total M2 placements)");
+            } // End if(false) - MDDF injection disabled
+
             // Stage 4c: WL* → MH2O Liquid Conversion
             // TEMPORARILY DISABLED: MH2O serialization has format issues causing Noggit crashes
             // TODO: Fix SMLiquidInstance structure to match wiki spec
@@ -622,6 +855,93 @@ namespace WoWRollback.PM4Module
             else
             {
                 Console.WriteLine("[INFO] No WL* files found, skipping liquid restoration");
+            }
+
+            // Stage 4f: Global UniqueID Deduplication
+            // TEMPORARILY DISABLED: Corrupting MDDF data by finding false chunk matches
+            Console.WriteLine("\n[Stage 4f] Reassigning UniqueIds for global uniqueness...");
+            Console.WriteLine("[WARN] UniqueID reassignment is DISABLED - caused MDDF corruption");
+            // TODO: Fix FindChunkPosition to not find false matches within strings
+            if (false)  // DISABLED
+            {
+                var globalNextId = 1u; // Start from 1
+                
+                // Get ADT files from PatchedMuseum
+                var adtFiles = Directory.GetFiles(dirs.PatchedMuseum, "*.adt")
+                    .Where(f => !Path.GetFileName(f).Contains("_obj") && !Path.GetFileName(f).Contains("_tex"))
+                    .OrderBy(f => f)
+                    .ToList();
+                
+                Console.WriteLine($"[DEBUG] Found {adtFiles.Count} ADT files in {dirs.PatchedMuseum}");
+                
+                int totalModfReassigned = 0;
+                int totalMddfReassigned = 0;
+                
+                foreach (var adtPath in adtFiles)
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(adtPath);
+                        bool modified = false;
+                        
+                        // Scan for MODF chunk and reassign UniqueIds (bytes 4-7 of each 64-byte entry)
+                        int modfPos = FindChunkPosition(bytes, "MODF");
+                        
+                        // Debug: log first file's chunk findings
+                        if (adtPath == adtFiles[0])
+                        {
+                            Console.WriteLine($"[DEBUG] First file: {Path.GetFileName(adtPath)}, size: {bytes.Length} bytes");
+                            Console.WriteLine($"[DEBUG] MODF pos: {modfPos}, MDDF pos: {FindChunkPosition(bytes, "MDDF")}");
+                        }
+                        
+                        if (modfPos >= 0)
+                        {
+                            int modfSize = BitConverter.ToInt32(bytes, modfPos + 4);
+                            int modfDataStart = modfPos + 8;
+                            int entryCount = modfSize / 64;
+                            for (int i = 0; i < entryCount; i++)
+                            {
+                                int offset = modfDataStart + i * 64 + 4; // UniqueId at byte 4
+                                if (offset + 4 <= bytes.Length)
+                                {
+                                    var newIdBytes = BitConverter.GetBytes(globalNextId++);
+                                    Buffer.BlockCopy(newIdBytes, 0, bytes, offset, 4);
+                                    totalModfReassigned++;
+                                    modified = true;
+                                }
+                            }
+                        }
+                        
+                        // Scan for MDDF chunk and reassign UniqueIds (bytes 4-7 of each 36-byte entry)
+                        int mddfPos = FindChunkPosition(bytes, "MDDF");
+                        if (mddfPos >= 0)
+                        {
+                            int mddfSize = BitConverter.ToInt32(bytes, mddfPos + 4);
+                            int mddfDataStart = mddfPos + 8;
+                            int entryCount = mddfSize / 36;
+                            for (int i = 0; i < entryCount; i++)
+                            {
+                                int offset = mddfDataStart + i * 36 + 4; // UniqueId at byte 4
+                                if (offset + 4 <= bytes.Length)
+                                {
+                                    var newIdBytes = BitConverter.GetBytes(globalNextId++);
+                                    Buffer.BlockCopy(newIdBytes, 0, bytes, offset, 4);
+                                    totalMddfReassigned++;
+                                    modified = true;
+                                }
+                            }
+                        }
+                        
+                        if (modified)
+                            File.WriteAllBytes(adtPath, bytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARN] Failed to reassign UniqueIds in {Path.GetFileName(adtPath)}: {ex.Message}");
+                    }
+                }
+                
+                Console.WriteLine($"[INFO] Reassigned {totalModfReassigned} MODF + {totalMddfReassigned} MDDF UniqueIds (total: {globalNextId - 1})");
             }
 
 
@@ -3421,6 +3741,31 @@ ObjectID (Byte0+Byte1):
             if (Math.Abs(angle - 180) < tol) { cleanAngle = 180; return true; }
             if (Math.Abs(angle - 270) < tol) { cleanAngle = 270; return true; }
             return false;
+    }
+    
+    /// <summary>
+    /// Find the position of a chunk by its 4-character signature in raw bytes.
+    /// Returns -1 if not found.
+    /// </summary>
+    private static int FindChunkPosition(byte[] data, string signature)
+    {
+        if (data.Length < 8 || signature.Length != 4)
+            return -1;
+            
+        // ADT chunks store signatures in reverse byte order (little-endian)
+        // So "MODF" is stored as "FDOM" (bytes reversed)
+        byte[] sig = System.Text.Encoding.ASCII.GetBytes(signature);
+        Array.Reverse(sig);  // Reverse for little-endian ADT format
+        
+        for (int i = 0; i <= data.Length - 8; i++)
+        {
+            if (data[i] == sig[0] && data[i + 1] == sig[1] && 
+                data[i + 2] == sig[2] && data[i + 3] == sig[3])
+            {
+                return i;
+            }
+        }
+        return -1;
     }
 }
 }
