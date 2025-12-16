@@ -16,8 +16,8 @@ public class Pm4WmoWriter
 {
     /// <summary>
     /// Writes WMO files and returns the centroid (World Position) of the object.
-    /// Input vertices are assumed to be in PM4 space (Y-Up).
-    /// Output WMO is Z-Up centered.
+    /// Input vertices are assumed to be in PM4 space (right-handed, Y-Up).
+    /// Output WMO is left-handed Z-Up centered.
     /// Returned centroid is Z-Up world space.
     /// </summary>
     public Vector3 WriteWmo(string outputDir, string baseName, List<Vector3> pm4Vertices, List<int> indices)
@@ -27,12 +27,22 @@ public class Pm4WmoWriter
         // Ensure output directory
         Directory.CreateDirectory(outputDir);
         
-        // 1. Convert to Z-Up (X, Y, Z) -> (X, Z, Y)
-        // PM4 (Y-up): (x, height, z)
-        // WoW (Z-up): (x, z, height)
-        var wowVertices = pm4Vertices.Select(v => new Vector3(v.X, v.Z, v.Y)).ToList();
+        // 1. Convert PM4 (right-handed Y-up) to WoW (left-handed Z-up)
+        // PM4: (X, Y_height, Z) -> WoW: (-X, Z, Y_height)
+        // The -X flip converts from right-handed to left-handed coordinate system
+        var wowVertices = pm4Vertices.Select(v => new Vector3(-v.X, v.Z, v.Y)).ToList();
+        
+        // 2. Reverse triangle winding to preserve face normals after X-flip
+        // (indices come in sets of 3 for triangles)
+        var fixedIndices = new List<int>(indices.Count);
+        for (int i = 0; i + 2 < indices.Count; i += 3)
+        {
+            fixedIndices.Add(indices[i]);
+            fixedIndices.Add(indices[i + 2]); // Swap winding: 0,1,2 -> 0,2,1
+            fixedIndices.Add(indices[i + 1]);
+        }
 
-        // 2. Calculate Centroid (World Position)
+        // 3. Calculate Centroid (World Position)
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
         foreach (var v in wowVertices)
@@ -42,17 +52,17 @@ public class Pm4WmoWriter
         }
         Vector3 centroid = (min + max) / 2f;
 
-        // 3. Center Vertices (Local Space)
+        // 4. Center Vertices (Local Space)
         var localVertices = wowVertices.Select(v => v - centroid).ToList();
         
-        // 4. Calculate Local Bounds
+        // 5. Calculate Local Bounds
         var bounds = CalculateBounds(localVertices);
         
         // Write Group File first (_000.wmo)
         string groupFileName = $"{baseName}_000.wmo";
         string rootFileName = $"{baseName}.wmo";
         
-        WriteGroupFile(Path.Combine(outputDir, groupFileName), localVertices, indices, bounds);
+        WriteGroupFile(Path.Combine(outputDir, groupFileName), localVertices, fixedIndices, bounds);
         WriteRootFile(Path.Combine(outputDir, rootFileName), bounds);
 
         return centroid;
@@ -69,25 +79,45 @@ public class Pm4WmoWriter
         // MOHD
         bw.Write(ToFourCC("DHOM")); // MOHD
         bw.Write(64); // Size
-        bw.Write(0); // nTextures = 0 (no materials - simplest WMO)
+        bw.Write(1); // nTextures = 1 (we have one material)
         bw.Write(1); // nGroups
         bw.Write(0); // nPortals
         bw.Write(0); // nLights
-        bw.Write(0); // nModels
-        bw.Write(0); // nDoodads
+        bw.Write(0); // nDoodadNames
+        bw.Write(0); // nDoodadDefs
         bw.Write(0); // nDoodadSets
         bw.Write(0x007F7F7F); // ambColor (neutral gray)
         bw.Write(0); // wmoID
         WriteBounds(bw, bounds);
-        bw.Write((short)0); // flags
-        bw.Write((short)0); // padding
+        bw.Write((ushort)0); // flags
+        bw.Write((ushort)0); // numLod
 
-        // MOTX (Texture Names) - Empty for minimal WMO
-        WriteChunkHeader(bw, "XTOM", 0);
+        // MOTX (Texture Names) - Real texture that exists in game
+        string defaultTex = "tileset\\generic\\black.blp\0";
+        bw.Write(ToFourCC("XTOM")); // MOTX
+        bw.Write(defaultTex.Length);
+        bw.Write(System.Text.Encoding.ASCII.GetBytes(defaultTex));
 
-        // MOMT (Materials) - Empty for minimal WMO
-        WriteChunkHeader(bw, "TMOM", 0);
-
+        // MOMT (Materials) - 64 bytes per material, 1 material for v17
+        // See WMO.md SMOMaterial structure
+        bw.Write(ToFourCC("TMOM")); // MOMT
+        bw.Write(64); // 1 material * 64 bytes
+        bw.Write((uint)0); // flags (F_UNLIT, etc.)
+        bw.Write((uint)0); // shader
+        bw.Write((uint)0); // blendMode
+        bw.Write((uint)0); // texture_1 (offset into MOTX)
+        bw.Write((uint)0xFF7F7F7F); // sidnColor (CImVector)
+        bw.Write((uint)0xFF7F7F7F); // frameSidnColor
+        bw.Write((uint)0); // texture_2
+        bw.Write((uint)0xFFFFFFFF); // diffColor (white)
+        bw.Write((uint)0); // ground_type
+        bw.Write((uint)0); // texture_3
+        bw.Write((uint)0); // color_2
+        bw.Write((uint)0); // flags_2
+        bw.Write((uint)0); // runTimeData[0]
+        bw.Write((uint)0); // runTimeData[1]
+        bw.Write((uint)0); // runTimeData[2]
+        bw.Write((uint)0); // runTimeData[3]
 
         // MOGN (Group Names) - Empty
         WriteChunkHeader(bw, "NGOM", 0);
@@ -99,8 +129,8 @@ public class Pm4WmoWriter
         WriteBounds(bw, bounds);
         bw.Write(-1); // nameIndex
 
-        // MOSI (Skybox) - empty
-        WriteChunkHeader(bw, "ISOM", 0);
+        // MOSB (Skybox) - empty (Noggit expects MOSB, not MOSI!)
+        WriteChunkHeader(bw, "BSOM", 0);
         
         // MOPV (Portal Verts) - empty
         WriteChunkHeader(bw, "VPOM", 0);
@@ -110,6 +140,12 @@ public class Pm4WmoWriter
 
         // MOPR (Portal Refs) - empty
         WriteChunkHeader(bw, "RPOM", 0);
+
+        // MOVV (Visible Block Vertices) - empty (Noggit expects this!)
+        WriteChunkHeader(bw, "VVOM", 0);
+
+        // MOVB (Visible Blocks) - empty (Noggit expects this!)
+        WriteChunkHeader(bw, "BVOM", 0);
 
         // MOLT (Lights) - empty
         WriteChunkHeader(bw, "TLOM", 0);
@@ -123,8 +159,22 @@ public class Pm4WmoWriter
         // MODD (Doodad Defs) - empty
         WriteChunkHeader(bw, "DDOM", 0);
 
-        // MFOG (Fog) - empty
-        WriteChunkHeader(bw, "GOFM", 0);
+        // MFOG (Fog) - MUST have at least 1 entry or Noggit crashes!
+        // Structure: 48 bytes (0x30) per fog entry
+        bw.Write(ToFourCC("GOFM")); // MFOG
+        bw.Write(48); // 1 fog entry * 48 bytes
+        bw.Write(0); // flags
+        bw.Write(0f); bw.Write(0f); bw.Write(0f); // pos (3 floats)
+        bw.Write(0f); // smaller_radius (start)
+        bw.Write(0f); // larger_radius (end)
+        // Fog structure (end, start_scalar, color)
+        bw.Write(444.4445f); // fog end
+        bw.Write(0.25f); // fog start_scalar
+        bw.Write(0x00000000); // fog color (black)
+        // Underwater fog
+        bw.Write(222.2222f); // underwater fog end
+        bw.Write(-0.5f); // underwater fog start_scalar
+        bw.Write(0x00000000); // underwater fog color
     }
 
     private void WriteGroupFile(string path, List<Vector3> vertices, List<int> indices, BoundingBox bounds)
@@ -143,21 +193,22 @@ public class Pm4WmoWriter
 
         long startPos = fs.Position;
         
-        // MOGP Body - header structure from WMOLoader.js (68 bytes total before sub-chunks)
-        bw.Write(0);        // nameOfs (uint32) - offset into MOGN
-        bw.Write(0);        // descOfs (uint32) - offset into MOGN  
-        bw.Write(0);        // flags (uint32)
-        WriteBounds(bw, bounds); // boundingBox1 + boundingBox2 (24 bytes)
-        bw.Write((ushort)0); // ofsPortals
-        bw.Write((ushort)0); // numPortals
-        bw.Write((ushort)1); // numBatchesA - exterior batches (we have 1 batch)
-        bw.Write((ushort)0); // numBatchesB - interior batches
-        bw.Write((uint)0);   // numBatchesC - unknown batches (uint32, NOT 2x uint16!)
-        bw.Write(0);         // unused (uint32)
-        bw.Write(0);         // liquidType (uint32)
-        bw.Write(0);         // groupID (uint32)
-        bw.Write(0);         // unknown1 (uint32)  
-        bw.Write(0);         // unknown2 (uint32) - total 68 bytes header
+        // MOGP Body - must match wmo_group_header exactly (68 bytes)
+        bw.Write(0);        // group_name (uint32) - offset into MOGN
+        bw.Write(0);        // descriptive_group_name (uint32) - offset into MOGN  
+        bw.Write(0);        // flags (uint32) - wmo_group_flags
+        WriteBounds(bw, bounds); // box1[3] + box2[3] = 24 bytes
+        bw.Write((ushort)0); // portal_start
+        bw.Write((ushort)0); // portal_count
+        bw.Write((ushort)0); // transparency_batches_count (trans batches)
+        bw.Write((ushort)0); // interior_batch_count
+        bw.Write((ushort)1); // exterior_batch_count - we have 1 exterior batch
+        bw.Write((ushort)0); // padding_or_batch_type_d
+        bw.Write((byte)0); bw.Write((byte)0); bw.Write((byte)0); bw.Write((byte)0); // fogs[4] - 4 fog indices
+        bw.Write(0);         // group_liquid (uint32)
+        bw.Write(0);         // id (uint32)
+        bw.Write(0);         // unk2 (int32)  
+        bw.Write(0);         // unk3 (int32) - total 68 bytes
 
         // MOPY (Material Info) - 2 bytes per triangle
         bw.Write(ToFourCC("YPOM"));

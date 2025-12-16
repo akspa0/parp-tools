@@ -364,15 +364,23 @@ namespace WoWRollback.PM4Module
             }
 
 
-            // Stage 2b: Generate Debug WMOs from CK24 Objects (for visual verification)
-            Console.WriteLine("\n[Stage 2b] Generating debug WMOs from CK24 objects...");
-            var debugWmoEntries = new List<(string path, Vector3 position, int tileX, int tileY)>();
-            var pm4WmoWriter = new Analysis.Pm4WmoWriter();
-            string debugWmoDir = Path.Combine(outputRoot, "World", "wmo", "pm4_debug");
-            Directory.CreateDirectory(debugWmoDir);
+            // Stage 2b: Generate Debug M2s from CK24 Objects (for visual verification)
+            // TEMPORARILY DISABLED: M2 format may be incorrect, causing Noggit crashes
+            bool enableDebugM2s = false;
+            Console.WriteLine("\n[Stage 2b] Generating debug M2s from CK24 objects...");
+            var debugM2Entries = new List<(string path, Vector3 position, int tileX, int tileY)>();
+            if (!enableDebugM2s)
+            {
+                Console.WriteLine("[WARN] Debug M2 generation is DISABLED - M2 format needs fixing");
+            }
+            else
+            {
+            var pm4M2Writer = new Analysis.Pm4M2Writer();
+            string debugM2Dir = Path.Combine(outputRoot, "World", "m2", "pm4_debug");
+            Directory.CreateDirectory(debugM2Dir);
             
             // Process each PM4 file and extract CK24 objects
-            int debugWmoCount = 0;
+            int debugM2Count = 0;
             foreach (var pm4File in Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories))
             {
                 try
@@ -396,39 +404,73 @@ namespace WoWRollback.PM4Module
                         uint ck24 = group.Key;
                         var surfaces = group.ToList();
                         
+                        // Use proper indexed mesh extraction (like PM4FacesTool)
+                        // Each CK24 object: collect all unique vertices and build triangle list
+                        var vertexMap = new Dictionary<int, int>(); // MSVT index -> local vertex index
                         var vertices = new List<Vector3>();
-                        var indices = new List<int>();
-                        int vertexOffset = 0;
+                        var triangles = new List<int>(); // Triangle indices (3 per triangle)
                         
                         foreach (var surf in surfaces)
                         {
                             if (surf.GroupKey == 0) continue;
                             
-                            uint startIdx = surf.MsviFirstIndex;
-                            uint indexCount = surf.IndexCount;
+                            int first = (int)surf.MsviFirstIndex;
+                            int count = surf.IndexCount;
+                            if (first < 0 || count < 3) continue;
+                            if (first + count > pm4.MeshIndices.Count) continue;
                             
-                            if (startIdx + indexCount > pm4.MeshIndices.Count) continue;
-                            
-                            for (int i = 0; i < indexCount; i++)
+                            // Build polygon vertex list for this surface
+                            int[] poly = new int[count];
+                            bool valid = true;
+                            for (int k = 0; k < count && valid; k++)
                             {
-                                uint meshIdx = pm4.MeshIndices[(int)(startIdx + i)];
-                                if (meshIdx >= pm4.MeshVertices.Count) continue;
+                                uint meshIdx = pm4.MeshIndices[first + k];
+                                if (meshIdx >= pm4.MeshVertices.Count) { valid = false; break; }
                                 
-                                var v = pm4.MeshVertices[(int)meshIdx];
-                                vertices.Add(v);
-                                indices.Add(vertexOffset++);
+                                // Map MSVT index to local vertex list
+                                int msvtIdx = (int)meshIdx;
+                                if (!vertexMap.TryGetValue(msvtIdx, out int localIdx))
+                                {
+                                    localIdx = vertices.Count;
+                                    vertexMap[msvtIdx] = localIdx;
+                                    vertices.Add(pm4.MeshVertices[msvtIdx]);
+                                }
+                                poly[k] = localIdx;
+                            }
+                            if (!valid) continue;
+                            
+                            // Triangulate polygon as fan (PM4FacesTool pattern):
+                            // tri: 0-1-2
+                            // quad: 0-1-2, 0-2-3
+                            // n-gon: 0-1-2, 0-2-3, 0-3-4, ...
+                            if (count == 3)
+                            {
+                                triangles.Add(poly[0]); triangles.Add(poly[1]); triangles.Add(poly[2]);
+                            }
+                            else if (count == 4)
+                            {
+                                triangles.Add(poly[0]); triangles.Add(poly[1]); triangles.Add(poly[2]);
+                                triangles.Add(poly[0]); triangles.Add(poly[2]); triangles.Add(poly[3]);
+                            }
+                            else
+                            {
+                                // N-gon fan triangulation
+                                for (int i = 1; i + 1 < count; i++)
+                                {
+                                    triangles.Add(poly[0]); triangles.Add(poly[i]); triangles.Add(poly[i + 1]);
+                                }
                             }
                         }
                         
-                        if (vertices.Count >= 3)
+                        if (vertices.Count >= 3 && triangles.Count >= 3)
                         {
-                            string wmoName = $"ck24_{ck24:X6}";
-                            Vector3 centroid = pm4WmoWriter.WriteWmo(debugWmoDir, wmoName, vertices, indices);
-                            // WoW expects forward slashes in paths
-                            string wmoGamePath = $"world/wmo/pm4_debug/{wmoName}.wmo";
+                            string m2Name = $"ck24_{ck24:X6}";
+                            Vector3 centroid = pm4M2Writer.WriteM2(debugM2Dir, m2Name, vertices, triangles);
+                            // WoW expects forward slashes and lowercase paths, .m2 extension
+                            string m2GamePath = $"world\\m2\\pm4_debug\\{m2Name}.m2";
                             // Store tile from PM4 filename with the entry
-                            debugWmoEntries.Add((wmoGamePath, centroid, fileTileX, fileTileY));
-                            debugWmoCount++;
+                            debugM2Entries.Add((m2GamePath, centroid, fileTileX, fileTileY));
+                            debugM2Count++;
                         }
                     }
                 }
@@ -437,25 +479,25 @@ namespace WoWRollback.PM4Module
                     Console.WriteLine($"[WARN] Failed to process {Path.GetFileName(pm4File)}: {ex.Message}");
                 }
             }
-            Console.WriteLine($"[INFO] Generated {debugWmoCount} debug WMOs from CK24 objects");
+            Console.WriteLine($"[INFO] Generated {debugM2Count} debug M2s from CK24 objects");
+            } // End if (enableDebugM2s)
             
-            // Add debug WMO paths to wmoNames and create MODF entries for injection
-            int debugNameIdStart = wmoNames.Count; // NameIds for debug WMOs start after existing ones
-            foreach (var (wmoPath, _, _, _) in debugWmoEntries) // Only need path for wmoNames
+            // Add debug M2 paths to m2Names and create MDDF entries for injection
+            // These will be automatically added to mddfEntries and patched via Stage 4e
+            int debugM2NameIdStart = m2Names.Count; // NameIds for debug M2s start after existing ones
+            foreach (var (m2Path, _, _, _) in debugM2Entries)
             {
-                wmoNames.Add(wmoPath);
+                m2Names.Add(m2Path);
             }
             
-            // Create MODF entries for debug WMOs (will be added to modfByTile in Stage 4)
-            var debugModfEntries = new List<Pm4ModfReconstructor.ModfEntry>();
-            uint debugUniqueIdBase = 8_000_000; // Different range from matched WMOs
-            const float DEBUG_TILESIZE = 533.33333f;
-            for (int i = 0; i < debugWmoEntries.Count; i++)
+            // Create MDDF entries for debug M2s (will be injected via Stage 4e)
+            uint debugM2UniqueIdBase = 9_000_000; // Different range from matched M2s
+            for (int i = 0; i < debugM2Entries.Count; i++)
             {
-                var (debugWmoPath, centroid, tileX, tileY) = debugWmoEntries[i]; // Now includes tile from PM4 filename
+                var (debugM2Path, centroid, tileX, tileY) = debugM2Entries[i];
                 
-                // Transform centroid from PM4 world coords to ADT placement coords
-                // ADT placement: PlacementX = 32*TILESIZE - WorldY, PlacementZ = 32*TILESIZE - WorldX, PlacementY = WorldZ
+                // Transform centroid from WoW world coords (already transformed by M2Writer) to ADT placement coords
+                // ADT MDDF placement: same as MODF - PlacementX = 32*TILESIZE - WorldY, PlacementZ = 32*TILESIZE - WorldX
                 const float HalfMap = 533.33333f * 32f;
                 var adtPosition = new Vector3(
                     HalfMap - centroid.Y, // Placement X
@@ -463,44 +505,39 @@ namespace WoWRollback.PM4Module
                     HalfMap - centroid.X   // Placement Z
                 );
                 
-                // TileX and TileY come from PM4 filename (same as matched WMOs)
-                // No longer calculating from position                
-                debugModfEntries.Add(new Pm4ModfReconstructor.ModfEntry(
-                    NameId: (uint)(debugNameIdStart + i),
-                    UniqueId: debugUniqueIdBase + (uint)i,
+                // Add to mddfEntries - these get injected in Stage 4e
+                mddfEntries.Add(new Pm4ModfReconstructor.MddfEntry(
+                    NameId: (uint)(debugM2NameIdStart + i),
+                    UniqueId: debugM2UniqueIdBase + (uint)i,
                     Position: adtPosition,
                     Rotation: Vector3.Zero,
-                    BoundsMin: adtPosition - new Vector3(50, 50, 50),
-                    BoundsMax: adtPosition + new Vector3(50, 50, 50),
-                    Flags: 0,
-                    DoodadSet: 0,
-                    NameSet: 0,
                     Scale: 1024,
-                    WmoPath: debugWmoPath,
+                    Flags: 0,
+                    M2Path: debugM2Path,
                     Ck24: $"debug_{i:X6}",
-                    MatchConfidence: 1.0f,  // Debug WMOs are 100% "matched" (we made them)
+                    MatchConfidence: 1.0f,  // Debug M2s are 100% "matched" (we made them)
                     TileX: tileX,
                     TileY: tileY
                 ));
             }
-            transformedEntries.AddRange(debugModfEntries);
-            Console.WriteLine($"[INFO] Added {debugModfEntries.Count} debug WMO placements to MODF injection queue");
+            Console.WriteLine($"[INFO] Added {debugM2Entries.Count} debug M2 placements to MDDF injection queue");
             
-            // Export debug WMO placements CSV for verification
-            var debugWmoCsvPath = Path.Combine(outputRoot, "debug_wmo_placements.csv");
-            using (var sw = new StreamWriter(debugWmoCsvPath))
+            // Export debug M2 placements CSV for verification
+            var debugM2CsvPath = Path.Combine(outputRoot, "debug_m2_placements.csv");
+            using (var sw = new StreamWriter(debugM2CsvPath))
             {
-                sw.WriteLine("WmoPath,TileX,TileY,PosX,PosY,PosZ,NameId,UniqueId");
-                foreach (var entry in debugModfEntries)
+                sw.WriteLine("M2Path,TileX,TileY,PosX,PosY,PosZ,NameId,UniqueId");
+                foreach (var (m2Path, centroid, tileX, tileY) in debugM2Entries)
                 {
-                    sw.WriteLine($"{entry.WmoPath},{entry.TileX},{entry.TileY},{entry.Position.X:F2},{entry.Position.Y:F2},{entry.Position.Z:F2},{entry.NameId},{entry.UniqueId}");
+                    const float HalfMap = 533.33333f * 32f;
+                    sw.WriteLine($"{m2Path},{tileX},{tileY},{HalfMap - centroid.Y:F2},{centroid.Z:F2},{HalfMap - centroid.X:F2},{debugM2NameIdStart + debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))},{debugM2UniqueIdBase + (uint)debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))}");
                 }
             }
-            Console.WriteLine($"[INFO] Debug WMO placements exported to: {debugWmoCsvPath}");
+            Console.WriteLine($"[INFO] Debug M2 placements exported to: {debugM2CsvPath}");
             
             // Log tile distribution
-            var tileDistribution = debugModfEntries.GroupBy(e => (e.TileX, e.TileY)).OrderBy(g => g.Key.TileX).ThenBy(g => g.Key.TileY).Take(20);
-            Console.WriteLine($"[INFO] Debug WMO tile distribution (first 20): {string.Join(", ", tileDistribution.Select(g => $"({g.Key.TileX},{g.Key.TileY})={g.Count()}"))}");
+            var m2TileDistribution = debugM2Entries.GroupBy(e => (e.tileX, e.tileY)).OrderBy(g => g.Key.tileX).ThenBy(g => g.Key.tileY).Take(20);
+            Console.WriteLine($"[INFO] Debug M2 tile distribution (first 20): {string.Join(", ", m2TileDistribution.Select(g => $"({g.Key.tileX},{g.Key.tileY})={g.Count()}"))}");
 
             // Stage 3: WDL Generation
             Console.WriteLine("\n[Stage 3] Generating WDL ADTs...");
@@ -524,8 +561,10 @@ namespace WoWRollback.PM4Module
             if (!string.IsNullOrEmpty(actualWdlFile) && File.Exists(actualWdlFile))
             {
                 Console.WriteLine($"[INFO] Found WDL: {Path.GetFileName(actualWdlFile)}");
+                string mapName = Path.GetFileNameWithoutExtension(actualWdlFile);
                 
                 int generated = 0;
+                int textured = 0;
                 for (int y = 0; y < 64; y++)
                 {
                     for (int x = 0; x < 64; x++)
@@ -533,23 +572,33 @@ namespace WoWRollback.PM4Module
                         var tileData = wdlService.GetTileData(actualWdlFile, x, y);
                         if (tileData != null)
                         {
-                            // Generate ADT bytes
-                            var adtBytes = WdlToAdtGenerator.GenerateAdt(tileData, x, y);
-                            
-                            // Naming: MapName_X_Y.adt. Assume MapName from WDL filename.
-                            string mapName = Path.GetFileNameWithoutExtension(actualWdlFile);
+                            // Generate unpainted ADT (from WDL, no textures)
+                            var adtBytesUnpainted = WdlToAdtGenerator.GenerateAdt(tileData, x, y);
                             string adtName = $"{mapName}_{x}_{y}.adt";
                             
-                            // Save unpainted
-                            File.WriteAllBytes(Path.Combine(dirs.WdlUnpainted, adtName), adtBytes);
-                            // Save painted (copy for now, theoretically would add textures)
-                            File.WriteAllBytes(Path.Combine(dirs.WdlPainted, adtName), adtBytes);
+                            // Save unpainted (WDL-based)
+                            File.WriteAllBytes(Path.Combine(dirs.WdlUnpainted, adtName), adtBytesUnpainted);
+                            
+                            // For painted: if museum ADT exists, just copy it directly
+                            // This preserves the original terrain + textures intact
+                            string museumAdtFile = Path.Combine(museumAdtPath, adtName);
+                            if (File.Exists(museumAdtFile))
+                            {
+                                // Copy museum ADT directly for painted version
+                                File.Copy(museumAdtFile, Path.Combine(dirs.WdlPainted, adtName), true);
+                                textured++;
+                            }
+                            else
+                            {
+                                // No museum ADT, use WDL-generated unpainted
+                                File.WriteAllBytes(Path.Combine(dirs.WdlPainted, adtName), adtBytesUnpainted);
+                            }
                             
                             generated++;
                         }
                     }
                 }
-                Console.WriteLine($"[INFO] Generated {generated} ADTs from WDL.");
+                Console.WriteLine($"[INFO] Generated {generated} ADTs from WDL ({textured} copied from museum).");
                 
                 // Copy WDL ADTs to Patched folders as base (to be overwritten/merged later)
                 // If we want WDL-based ADTs to be the primary output for unvisited areas.

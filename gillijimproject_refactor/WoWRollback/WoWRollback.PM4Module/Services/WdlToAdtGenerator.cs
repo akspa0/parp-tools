@@ -36,6 +36,15 @@ public static class WdlToAdtGenerator
     /// </summary>
     /// <param name="mccvData">Optional array of 256 MCCV byte arrays (one per MCNK), or null for neutral gray.</param>
     public static byte[] GenerateAdt(WdlTileData wdlTile, int tileX, int tileY, byte[][]? mccvData)
+        => GenerateAdt(wdlTile, tileX, tileY, mccvData, null);
+
+    /// <summary>
+    /// Generate a complete 3.3.5 monolithic ADT from WDL tile heights with museum texturing.
+    /// </summary>
+    /// <param name="mccvData">Optional array of 256 MCCV byte arrays, or null for neutral gray.</param>
+    /// <param name="museumTexture">Museum texture data (MTEX, MCLY, MCAL, MCCV), or null for no textures.</param>
+    public static byte[] GenerateAdt(WdlTileData wdlTile, int tileX, int tileY, byte[][]? mccvData, 
+        MuseumTextureExtractor.MuseumTextureData? museumTexture)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -51,8 +60,16 @@ public static class WdlToAdtGenerator
         long mcinPos = ms.Position;
         WriteChunk(bw, "MCIN", new byte[256 * 16]);
 
+        // MTEX - use museum textures if available
         long mtexPos = ms.Position;
-        WriteChunk(bw, "MTEX", Array.Empty<byte>());
+        if (museumTexture != null && museumTexture.MtexData.Length > 0)
+        {
+            WriteChunk(bw, "MTEX", museumTexture.MtexData);
+        }
+        else
+        {
+            WriteChunk(bw, "MTEX", Array.Empty<byte>());
+        }
 
         long mmdxPos = ms.Position;
         WriteChunk(bw, "MMDX", Array.Empty<byte>());
@@ -83,8 +100,14 @@ public static class WdlToAdtGenerator
                 int idx = cy * 16 + cx;
                 mcnkOffsets[idx] = (uint)ms.Position;
                 
-                var mcnkMccv = mccvData?[idx];
-                var mcnkData = GenerateMcnk(wdlTile, tileX, tileY, cx, cy, mcnkMccv);
+                // Get per-chunk data from museum (prefer museum data over WDL)
+                var mcnkMccv = museumTexture?.MccvPerChunk[idx] ?? mccvData?[idx];
+                var mcnkMcly = museumTexture?.MclyPerChunk[idx];
+                var mcnkMcal = museumTexture?.McalPerChunk[idx];
+                var mcnkMcvt = museumTexture?.McvtPerChunk[idx]; // Museum heights
+                int nLayers = museumTexture?.NLayersPerChunk[idx] ?? 0;
+                
+                var mcnkData = GenerateMcnk(wdlTile, tileX, tileY, cx, cy, mcnkMccv, mcnkMcly, mcnkMcal, mcnkMcvt, nLayers);
                 WriteChunk(bw, "MCNK", mcnkData);
                 
                 mcnkSizes[idx] = (uint)mcnkData.Length;
@@ -130,7 +153,8 @@ public static class WdlToAdtGenerator
         return result;
     }
 
-    private static byte[] GenerateMcnk(WdlTileData wdlTile, int tileX, int tileY, int chunkX, int chunkY, byte[]? mccvData = null)
+    private static byte[] GenerateMcnk(WdlTileData wdlTile, int tileX, int tileY, int chunkX, int chunkY, 
+        byte[]? mccvData = null, byte[]? mclyData = null, byte[]? mcalData = null, byte[]? mcvtData = null, int nLayers = 0)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -138,14 +162,37 @@ public static class WdlToAdtGenerator
         float baseX = (32 - tileX) * TileSize - chunkX * ChunkSize;
         float baseY = (32 - tileY) * TileSize - chunkY * ChunkSize;
         
-        float[] heights = InterpolateChunkHeights(wdlTile, chunkX, chunkY);
-        float baseZ = heights[0];
+        // Use museum MCVT heights if available, otherwise interpolate from WDL
+        float baseZ;
+        byte[]? mcvtBytes = null;
+        
+        if (mcvtData != null && mcvtData.Length == 145 * 4)
+        {
+            // Use museum heights directly
+            mcvtBytes = mcvtData;
+            // Get baseZ from first height value in museum MCVT
+            baseZ = BitConverter.ToSingle(mcvtData, 0);
+        }
+        else
+        {
+            // Fall back to WDL interpolation
+            float[] heights = InterpolateChunkHeights(wdlTile, chunkX, chunkY);
+            baseZ = heights[0];
+            
+            // Convert heights to bytes
+            using var heightMs = new MemoryStream();
+            using var heightBw = new BinaryWriter(heightMs);
+            for (int i = 0; i < 145; i++)
+                heightBw.Write(heights[i] - baseZ);
+            mcvtBytes = heightMs.ToArray();
+        }
 
         // MCNK header (128 bytes)
-        bw.Write(0x40u); // has_mccv flag
+        uint flags = 0x40u; // has_mccv flag
+        bw.Write(flags);
         bw.Write((uint)chunkX);
         bw.Write((uint)chunkY);
-        bw.Write(0u); // nLayers
+        bw.Write((uint)nLayers); // nLayers from museum
         bw.Write(0u); // nDoodadRefs
         bw.Write(0u); // ofsHeight
         bw.Write(0u); // ofsNormal
@@ -172,11 +219,12 @@ public static class WdlToAdtGenerator
         bw.Write(0u); // unused2
 
         // MCVT - height map
+        // Note: offsets are relative to MCNK chunk start (including 8-byte chunk header)
+        // WriteChunk adds the 8-byte header, so we add 8 to our data positions
         uint mcvtOffset = (uint)ms.Position + 8;
         bw.Write(Encoding.ASCII.GetBytes("TVCM"));
         bw.Write(145 * 4);
-        for (int i = 0; i < 145; i++)
-            bw.Write(heights[i] - baseZ);
+        bw.Write(mcvtBytes!);
 
         // MCCV - vertex colors
         uint mccvOffset = (uint)ms.Position + 8;
@@ -209,15 +257,36 @@ public static class WdlToAdtGenerator
         }
         for (int i = 0; i < 13; i++) bw.Write((byte)0);
 
-        // Empty subchunks
+        // MCLY - texture layers (use museum data if available)
         uint mclyOffset = (uint)ms.Position + 8;
-        bw.Write(Encoding.ASCII.GetBytes("YLCM")); bw.Write(0);
+        bw.Write(Encoding.ASCII.GetBytes("YLCM"));
+        if (mclyData != null && mclyData.Length > 0)
+        {
+            bw.Write(mclyData.Length);
+            bw.Write(mclyData);
+        }
+        else
+        {
+            bw.Write(0);
+        }
         
         uint mcrfOffset = (uint)ms.Position + 8;
         bw.Write(Encoding.ASCII.GetBytes("FRCM")); bw.Write(0);
         
+        // MCAL - alpha maps (use museum data if available)
         uint mcalOffset = (uint)ms.Position + 8;
-        bw.Write(Encoding.ASCII.GetBytes("LACM")); bw.Write(0);
+        int mcalSize = 0;
+        bw.Write(Encoding.ASCII.GetBytes("LACM"));
+        if (mcalData != null && mcalData.Length > 0)
+        {
+            mcalSize = mcalData.Length;
+            bw.Write(mcalSize);
+            bw.Write(mcalData);
+        }
+        else
+        {
+            bw.Write(0);
+        }
         
         uint mcshOffset = (uint)ms.Position + 8;
         bw.Write(Encoding.ASCII.GetBytes("HSCM")); bw.Write(0);
@@ -233,6 +302,7 @@ public static class WdlToAdtGenerator
         BitConverter.GetBytes(mclyOffset).CopyTo(result, 0x1C);
         BitConverter.GetBytes(mcrfOffset).CopyTo(result, 0x20);
         BitConverter.GetBytes(mcalOffset).CopyTo(result, 0x24);
+        BitConverter.GetBytes((uint)mcalSize).CopyTo(result, 0x28); // sizeAlpha
         BitConverter.GetBytes(mcshOffset).CopyTo(result, 0x2C);
         BitConverter.GetBytes(mcseOffset).CopyTo(result, 0x58);
         BitConverter.GetBytes(mccvOffset).CopyTo(result, 0x74);
@@ -244,11 +314,13 @@ public static class WdlToAdtGenerator
     {
         var heights = new float[145];
         
+        // Get the 4 corner heights for this chunk from WDL 17x17 grid
         float h00 = wdlTile.Height17[chunkY, chunkX];
         float h10 = wdlTile.Height17[chunkY, Math.Min(chunkX + 1, 16)];
         float h01 = wdlTile.Height17[Math.Min(chunkY + 1, 16), chunkX];
         float h11 = wdlTile.Height17[Math.Min(chunkY + 1, 16), Math.Min(chunkX + 1, 16)];
 
+        // Use Height16 center if available for better accuracy
         float hCenter = (chunkX < 16 && chunkY < 16) 
             ? wdlTile.Height16[chunkY, chunkX] 
             : (h00 + h10 + h01 + h11) / 4f;
@@ -273,7 +345,10 @@ public static class WdlToAdtGenerator
                     v = row / 16f;
                 }
 
+                // Simple bilinear interpolation - stable and doesn't cause distortion
                 float height = BilinearInterpolate(h00, h10, h01, h11, u, v);
+                
+                // Blend with center height for better accuracy
                 float centerWeight = 1f - 2f * Math.Max(Math.Abs(u - 0.5f), Math.Abs(v - 0.5f));
                 centerWeight = Math.Max(0f, centerWeight);
                 height = height * (1f - centerWeight * 0.3f) + hCenter * (centerWeight * 0.3f);
