@@ -86,7 +86,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from WMO data bytes (v17+ format).
     /// </summary>
-    public static WmoWalkableData ExtractFromBytes(byte[] rootData, string wmoPath, Func<string, byte[]?>? groupLoader = null)
+    public static WmoWalkableData ExtractFromBytes(byte[] rootData, string wmoPath, Func<string, byte[]?>? groupLoader = null, bool onlyFootprint = false)
     {
         var result = new WmoWalkableData { WmoPath = wmoPath };
 
@@ -94,8 +94,6 @@ public sealed class WmoWalkableSurfaceExtractor
         {
             int groupCount = ParseMohdGroupCount(rootData);
             result.GroupCount = groupCount;
-
-            // Verbose logging removed for performance
 
             // Load each group
             for (int i = 0; i < groupCount; i++)
@@ -110,7 +108,7 @@ public sealed class WmoWalkableSurfaceExtractor
                 if (groupData == null || groupData.Length == 0)
                     continue;
 
-                ExtractGroupWalkableSurfaces(groupData, result, i);
+                ExtractGroupWalkableSurfaces(groupData, result, i, onlyFootprint);
             }
 
             // Compute bounds
@@ -125,8 +123,6 @@ public sealed class WmoWalkableSurfaceExtractor
                     result.WalkableVertices.Max(v => v.Y),
                     result.WalkableVertices.Max(v => v.Z));
             }
-
-            // Verbose logging removed for performance
         }
         catch (Exception ex)
         {
@@ -139,7 +135,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a WMO file (v17+ split format).
     /// </summary>
-    public static WmoWalkableData ExtractFromWmoV17(string wmoRootPath)
+    public static WmoWalkableData ExtractFromWmoV17(string wmoRootPath, bool onlyFootprint = false)
     {
         var result = new WmoWalkableData { WmoPath = wmoRootPath };
 
@@ -156,8 +152,6 @@ public sealed class WmoWalkableSurfaceExtractor
             int groupCount = ParseMohdGroupCount(rootData);
             result.GroupCount = groupCount;
 
-            // Verbose logging removed for performance
-
             // Load each group file
             var basePath = Path.GetDirectoryName(wmoRootPath) ?? ".";
             var baseName = Path.GetFileNameWithoutExtension(wmoRootPath);
@@ -172,7 +166,7 @@ public sealed class WmoWalkableSurfaceExtractor
                 }
 
                 var groupData = File.ReadAllBytes(groupPath);
-                ExtractGroupWalkableSurfaces(groupData, result, i);
+                ExtractGroupWalkableSurfaces(groupData, result, i, onlyFootprint);
             }
 
             // Compute bounds
@@ -201,7 +195,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a monolithic WMO v14 file.
     /// </summary>
-    public static WmoWalkableData ExtractFromWmoV14(string wmoPath)
+    public static WmoWalkableData ExtractFromWmoV14(string wmoPath, bool onlyFootprint = false)
     {
         var result = new WmoWalkableData { WmoPath = wmoPath };
 
@@ -216,7 +210,7 @@ public sealed class WmoWalkableSurfaceExtractor
             var data = File.ReadAllBytes(wmoPath);
             
             // V14 is monolithic - all groups in one file inside MOMO container
-            ExtractV14MonolithicWmo(data, result);
+            ExtractV14MonolithicWmo(data, result, onlyFootprint);
 
             // Compute bounds
             if (result.WalkableVertices.Count > 0)
@@ -274,7 +268,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract walkable surfaces from a WMO group file.
     /// </summary>
-    private static void ExtractGroupWalkableSurfaces(byte[] data, WmoWalkableData result, int groupIndex)
+    private static void ExtractGroupWalkableSurfaces(byte[] data, WmoWalkableData result, int groupIndex, bool onlyFootprint)
     {
         // Find MOVT (vertices), MOVI (indices), MOPY (material/flags per face)
         List<Vector3> vertices = new();
@@ -371,17 +365,31 @@ public sealed class WmoWalkableSurfaceExtractor
             }
 
             bool isCollision = IsCollisionFace(flags);
-            // Walkable logic preserved for reference but we extract everything now
-            bool isWalkable = isCollision && IsWalkableByNormal(v0, v1, v2);
+            bool isRender = IsRenderFace(flags);
+            // Strict walkable check for footprints: collision AND upward facing with threshold 0.7
+            bool isWalkable = isCollision && IsWalkableByNormal(v0, v1, v2, 0.7f);
 
             var tri = new WmoTriangle(v0, v1, v2, materialId, flags, isCollision, isWalkable);
             result.AllTriangles.Add(tri);
 
-            // User Request: Extract whole WMO data, not just walkable
-            // We treat any collision or render face as part of the shape
-            if (isCollision || IsRenderFace(flags)) 
+            // Conditional inclusion based on onlyFootprint flag
+            bool include = false;
+            
+            if (onlyFootprint)
             {
-                result.WalkableTriangles.Add(tri); // Reusing this list for "Matching Candidates"
+                // Only include verifiable walkable surfaces (floors)
+                // We use isWalkable which checks Normal.Y > 0.7
+                if (isWalkable) include = true;
+            }
+            else
+            {
+                // Original logic: include all collision or render faces (raw geometry)
+                if (isCollision || isRender) include = true;
+            }
+
+            if (include) 
+            {
+                result.WalkableTriangles.Add(tri); 
                 result.WalkableVertices.Add(v0);
                 result.WalkableVertices.Add(v1);
                 result.WalkableVertices.Add(v2);
@@ -394,7 +402,7 @@ public sealed class WmoWalkableSurfaceExtractor
     /// <summary>
     /// Extract from V14 monolithic WMO (all groups in MOMO container).
     /// </summary>
-    private static void ExtractV14MonolithicWmo(byte[] data, WmoWalkableData result)
+    private static void ExtractV14MonolithicWmo(byte[] data, WmoWalkableData result, bool onlyFootprint)
     {
         // V14 has MOMO container with embedded groups
         // For now, do a simple scan for MOVT/MOVI/MOPY chunks
@@ -454,12 +462,24 @@ public sealed class WmoWalkableSurfaceExtractor
 
             var (flags, materialId) = faceInfo[i];
             bool isCollision = IsCollisionFace(flags);
-            bool isWalkable = isCollision && IsWalkableByNormal(v0, v1, v2);
+            // Strict walkable check
+            bool isWalkable = isCollision && IsWalkableByNormal(v0, v1, v2, 0.7f);
 
             var tri = new WmoTriangle(v0, v1, v2, materialId, flags, isCollision, isWalkable);
             result.AllTriangles.Add(tri);
+            
+            bool include = false;
+            
+            if (onlyFootprint)
+            {
+                if (isWalkable) include = true;
+            }
+            else
+            {
+                if (isCollision) include = true;
+            }
 
-            if (isWalkable)
+            if (include)
             {
                 result.WalkableTriangles.Add(tri);
                 result.WalkableVertices.Add(v0);

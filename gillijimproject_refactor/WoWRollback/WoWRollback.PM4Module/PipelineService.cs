@@ -22,7 +22,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -630,6 +630,94 @@ namespace WoWRollback.PM4Module
                 File.Copy(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), true);
             }
 
+            // STAGE 0: Restore Original UniqueIDs from Original Split ADTs (if provided)
+            // This step reads the ORIGINAL development split ADTs (e.g., from WoW Client data)
+            // and extracts ALL UniqueIDs. These are used to:
+            // 1. Match/restore IDs in Museum ADTs (based on position + name)
+            // 2. Reserve these IDs so new PM4 placements don't conflict
+            var originalIdsByTile = new Dictionary<(int x, int y), List<(uint uniqueId, Vector3 position, uint nameId)>>();
+            if (!string.IsNullOrEmpty(originalSplitPath) && Directory.Exists(originalSplitPath))
+            {
+                Console.WriteLine("\n[Stage 0] Scanning Original Split ADTs for UniqueID restoration...");
+                var obj0Files = Directory.GetFiles(originalSplitPath, "*_obj0.adt", SearchOption.AllDirectories);
+                int totalOriginalIds = 0;
+                
+                foreach (var obj0File in obj0Files)
+                {
+                    var name = Path.GetFileNameWithoutExtension(obj0File).Replace("_obj0", "");
+                    var match = System.Text.RegularExpressions.Regex.Match(name, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    
+                    int tx = int.Parse(match.Groups[1].Value);
+                    int ty = int.Parse(match.Groups[2].Value);
+                    
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(obj0File);
+                        var parsed = new AdtPatcher().ParseAdt(bytes);
+                        
+                        // Extract MODF entries
+                        var modfChunk = parsed.FindChunk("MODF");
+                        if (modfChunk?.Data != null && modfChunk.Data.Length >= 64)
+                        {
+                            var tileEntries = new List<(uint uniqueId, Vector3 position, uint nameId)>();
+                            int entryCount = modfChunk.Data.Length / 64;
+                            
+                            for (int i = 0; i < entryCount; i++)
+                            {
+                                int offset = i * 64;
+                                uint nameId = BitConverter.ToUInt32(modfChunk.Data, offset);
+                                uint uniqueId = BitConverter.ToUInt32(modfChunk.Data, offset + 4);
+                                float posX = BitConverter.ToSingle(modfChunk.Data, offset + 8);
+                                float posZ = BitConverter.ToSingle(modfChunk.Data, offset + 12);
+                                float posY = BitConverter.ToSingle(modfChunk.Data, offset + 16);
+                                
+                                tileEntries.Add((uniqueId, new Vector3(posX, posY, posZ), nameId));
+                                totalOriginalIds++;
+                            }
+                            
+                            if (tileEntries.Count > 0)
+                                originalIdsByTile[(tx, ty)] = tileEntries;
+                        }
+                        
+                        // Extract MDDF entries
+                        var mddfChunk = parsed.FindChunk("MDDF");
+                        if (mddfChunk?.Data != null && mddfChunk.Data.Length >= 36)
+                        {
+                            if (!originalIdsByTile.TryGetValue((tx, ty), out var existingList))
+                            {
+                                existingList = new List<(uint, Vector3, uint)>();
+                                originalIdsByTile[(tx, ty)] = existingList;
+                            }
+                            
+                            int entryCount = mddfChunk.Data.Length / 36;
+                            for (int i = 0; i < entryCount; i++)
+                            {
+                                int offset = i * 36;
+                                uint nameId = BitConverter.ToUInt32(mddfChunk.Data, offset);
+                                uint uniqueId = BitConverter.ToUInt32(mddfChunk.Data, offset + 4);
+                                float posX = BitConverter.ToSingle(mddfChunk.Data, offset + 8);
+                                float posZ = BitConverter.ToSingle(mddfChunk.Data, offset + 12);
+                                float posY = BitConverter.ToSingle(mddfChunk.Data, offset + 16);
+                                
+                                existingList.Add((uniqueId, new Vector3(posX, posY, posZ), nameId));
+                                totalOriginalIds++;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WARN] Failed to parse {obj0File}: {ex.Message}");
+                    }
+                }
+                
+                Console.WriteLine($"[INFO] Loaded {totalOriginalIds} original UniqueIDs from {originalIdsByTile.Count} tiles.");
+            }
+            else
+            {
+                Console.WriteLine("[INFO] No --original-split provided. Skipping Stage 0 (OriginalID restoration).");
+            }
+
             // PRE-SCAN: Collect ALL existing UniqueIds AND positions from ALL museum ADTs
             // This enables: 1) UniqueId deduplication, 2) Proximity-based skip for existing placements
             var globalUsedUniqueIds = new HashSet<uint>();
@@ -673,12 +761,22 @@ namespace WoWRollback.PM4Module
             }
             Console.WriteLine($"[INFO] Found {globalUsedUniqueIds.Count} existing UniqueIds, {existingPlacements.Count} placements in museum ADTs");
 
+            // Add all original IDs (from Stage 0) to the global set to prevent conflicts
+            foreach (var tileData in originalIdsByTile.Values)
+            {
+                foreach (var (uniqueId, _, _) in tileData)
+                {
+                    globalUsedUniqueIds.Add(uniqueId);
+                }
+            }
+            Console.WriteLine($"[INFO] After Stage 0 integration: {globalUsedUniqueIds.Count} total reserved UniqueIds");
+
             // Inject Modf
             // Group by tiles - use TileX/TileY from PM4 filename (not calculated from position)
             // GLOBAL UniqueId tracking: IDs must be unique across ALL tiles, not just per-tile
             // Also track proximity to existing placements to avoid duplicates
             var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
-            uint nextAvailableUniqueId = 100_000_000; // Start high to avoid conflicts with existing IDs
+            uint nextAvailableUniqueId = 75_000_000; // Start at 75M to be safe from Retail/Cata ranges (60M) and keep original data intact
             int reassignedCount = 0;
             int proximitySkipCount = 0;
             const float PROXIMITY_THRESHOLD = 5.0f; // Skip PM4 entries within 5 units of existing
@@ -789,7 +887,7 @@ namespace WoWRollback.PM4Module
 
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
-                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries);
+                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries, ref nextAvailableUniqueId);
                     patchedTiles.Add((tx, ty, Path.GetFileName(file), tileEntries.Count, hasExistingTileModf));
                     patchedCount++;
                     if (!hasExistingTileModf) emptyTileCount++;
@@ -833,7 +931,7 @@ namespace WoWRollback.PM4Module
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
                     var outputPath = Path.Combine(dirs.WdlPainted, Path.GetFileName(file) + ".patched");
-                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries);
+                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries, ref nextAvailableUniqueId);
                     File.Move(outputPath, file, true); // Replace original
                     wdlPatchedCount++;
                 }
@@ -848,8 +946,9 @@ namespace WoWRollback.PM4Module
             
             foreach (var entry in mddfEntries)
             {
-                // NOTE: TileX/TileY are swapped - entries were stored as (Y,X) not (X,Y)
-                var (tx, ty) = (entry.TileY, entry.TileX);  // Swap X,Y for correct tile
+                // NOTE: TileX/TileY are correct from PM4 parsing (Group 1 is X, Group 2 is Y)
+                // NO SWAP needed.
+                var (tx, ty) = (entry.TileX, entry.TileY);
                 if (!mddfByTile.TryGetValue((tx, ty), out var list))
                 {
                     list = new List<AdtPatcher.MddfEntry>();
@@ -913,7 +1012,7 @@ namespace WoWRollback.PM4Module
                 if (mddfByTile.TryGetValue((tx, ty), out var tileEntries) && tileEntries.Count > 0)
                 {
                     // Patch MDDF into the already-patched ADT (in place)
-                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries);
+                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries, ref nextAvailableUniqueId);
                     mddfPatchedCount++;
                 }
             }
@@ -1329,7 +1428,11 @@ namespace WoWRollback.PM4Module
                                 uint vertIdx = pm4.MeshIndices[(int)surface.MsviFirstIndex + i];
                                 if (vertIdx < pm4.MeshVertices.Count)
                                 {
-                                    vertices.Add(pm4.MeshVertices[(int)vertIdx]);
+                                    // Verify: WMOs require (Y, X, Z) to match correctly, while M2s require (X, Y, Z).
+                                    // This suggests an inconsistency in the PM4 generator or our matching libraries.
+                                    // We manually swap WMO vertices here to restore the "working" state for them.
+                                    var v = pm4.MeshVertices[(int)vertIdx];
+                                    vertices.Add(new Vector3(v.Y, v.X, v.Z));
                                 }
                             }
                         }

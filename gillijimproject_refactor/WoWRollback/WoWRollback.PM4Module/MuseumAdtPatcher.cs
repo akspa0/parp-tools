@@ -17,7 +17,8 @@ namespace WoWRollback.PM4Module
             string inputAdtPath,
             string outputAdtPath,
             IReadOnlyList<string> pm4WmoNames,
-            IReadOnlyList<AdtPatcher.ModfEntry> newModfEntries)
+            IReadOnlyList<AdtPatcher.ModfEntry> newModfEntries,
+            ref uint nextGlobalUniqueId)
         {
             if (string.IsNullOrWhiteSpace(inputAdtPath))
                 throw new ArgumentException("Input ADT path is required", nameof(inputAdtPath));
@@ -52,29 +53,65 @@ namespace WoWRollback.PM4Module
                 throw new InvalidOperationException("Failed to ensure required placement chunks (MWMO/MWID/MODF).");
 
             // Parse existing MWMO names from the chunk payload (null-terminated strings).
+            // Dictionary to map WMO path -> NameId (index in MWMO)
+            var nameToIndex = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            var mergedNames = new List<string>();
+
+            // Parse existing MWMO names
             var existingNames = ParseNullTerminatedStrings(mwmoChunk.Data);
-            int existingCount = existingNames.Count;
 
-            // Build full WMO name list: existing names + PM4-derived names (normalized).
-            var allNames = new List<string>(existingNames.Count + pm4WmoNames.Count);
-            allNames.AddRange(existingNames);
-
-            foreach (var name in pm4WmoNames)
+            // 1. Index existing names
+            for (int i = 0; i < existingNames.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(name))
+                var name = existingNames[i];
+                if (!nameToIndex.ContainsKey(name)) // Handle potential existing duplicates gracefully
                 {
-                    allNames.Add(string.Empty);
+                    nameToIndex[name] = (uint)i;
+                    mergedNames.Add(name);
+                }
+                else
+                {
+                    // Existing duplicate found in source ADT - pointing to first instance
+                    mergedNames.Add(name); 
+                }
+            }
+            // Note: We keep 'mergedNames' as 'existingNames' logic for minimal disruption, 
+            // but for new entries we strictly check 'nameToIndex'.
+            
+            // 2. Add pm4WmoNames if they don't exist
+            // We need a map from 'index in pm4WmoNames' -> 'final NameId'
+            var pm4IndexToFinalId = new uint[pm4WmoNames.Count];
+
+            for (int i = 0; i < pm4WmoNames.Count; i++)
+            {
+                var rawName = pm4WmoNames[i];
+                if (string.IsNullOrWhiteSpace(rawName))
+                {
+                    pm4IndexToFinalId[i] = 0; // Point to empty string or 0 index? fallback
                     continue;
                 }
 
-                allNames.Add(NormalizePath(name));
+                var normName = NormalizePath(rawName);
+                
+                if (nameToIndex.TryGetValue(normName, out uint existingId))
+                {
+                    pm4IndexToFinalId[i] = existingId;
+                }
+                else
+                {
+                    // New name
+                    uint newId = (uint)mergedNames.Count;
+                    mergedNames.Add(normName);
+                    nameToIndex[normName] = newId;
+                    pm4IndexToFinalId[i] = newId;
+                }
             }
 
             // Rebuild MWMO / MWID using AdtPatcher helper methods.
-            mwmoChunk.Data = _adtPatcher.BuildMwmoData(allNames);
-            mwidChunk.Data = _adtPatcher.BuildMwidData(allNames);
+            mwmoChunk.Data = _adtPatcher.BuildMwmoData(mergedNames);
+            mwidChunk.Data = _adtPatcher.BuildMwidData(mergedNames);
 
-            // Adjust NameId for new MODF entries and append them to any existing MODF data.
+            // Adjust NameId for new MODF entries using the mapping
             // CRITICAL: Also check for UniqueId collisions with existing MODF entries!
             var existingModfData = modfChunk.Data ?? Array.Empty<byte>();
             
@@ -96,21 +133,30 @@ namespace WoWRollback.PM4Module
             
             // Prepare new entries with adjusted NameId and conflict-free UniqueIds
             var adjustedEntries = new List<AdtPatcher.ModfEntry>(newModfEntries.Count);
-            uint nextAvailableId = 200_000_000; // High base to avoid conflicts
             int reassignedCount = 0;
             
             foreach (var entry in newModfEntries)
             {
                 var adjusted = entry;
-                adjusted.NameId = (uint)(existingCount + entry.NameId);
                 
+                // Map the input NameId (which was index into pm4WmoNames) to final merged ID
+                if (entry.NameId < pm4IndexToFinalId.Length)
+                {
+                    adjusted.NameId = pm4IndexToFinalId[entry.NameId];
+                }
+                else
+                {
+                    // Fallback should not happen if logic is correct
+                    adjusted.NameId = 0; 
+                }
+
                 // Check for UniqueId collision with existing entries
                 if (existingUniqueIds.Contains(adjusted.UniqueId))
                 {
-                    // Find next available ID
-                    while (existingUniqueIds.Contains(nextAvailableId))
-                        nextAvailableId++;
-                    adjusted.UniqueId = nextAvailableId++;
+                    // Find next available ID using GLOBAL counter
+                    while (existingUniqueIds.Contains(nextGlobalUniqueId))
+                        nextGlobalUniqueId++;
+                    adjusted.UniqueId = nextGlobalUniqueId++;
                     reassignedCount++;
                 }
                 existingUniqueIds.Add(adjusted.UniqueId);
@@ -186,7 +232,8 @@ namespace WoWRollback.PM4Module
             string inputAdtPath,
             string outputAdtPath,
             IReadOnlyList<string> m2Names,
-            IReadOnlyList<AdtPatcher.MddfEntry> newMddfEntries)
+            IReadOnlyList<AdtPatcher.MddfEntry> newMddfEntries,
+            ref uint nextGlobalUniqueId)
         {
             if (string.IsNullOrWhiteSpace(inputAdtPath))
                 throw new ArgumentException("Input ADT path is required", nameof(inputAdtPath));
@@ -221,27 +268,57 @@ namespace WoWRollback.PM4Module
                 throw new InvalidOperationException("Failed to ensure required doodad chunks (MMDX/MMID/MDDF).");
 
             // Parse existing MMDX names from the chunk payload (null-terminated strings).
+            // Dictionary to map M2 path -> NameId (index in MMDX)
+            var nameToIndex = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            var mergedNames = new List<string>();
+
+            // Parse existing MMDX names
             var existingNames = ParseNullTerminatedStrings(mmdxChunk.Data);
-            int existingCount = existingNames.Count;
 
-            // Build full M2 name list: existing names + new PM4-derived names (normalized).
-            var allNames = new List<string>(existingNames.Count + m2Names.Count);
-            allNames.AddRange(existingNames);
-
-            foreach (var name in m2Names)
+            // 1. Index existing names
+            for (int i = 0; i < existingNames.Count; i++)
             {
-                if (string.IsNullOrWhiteSpace(name))
+                var name = existingNames[i];
+                if (!nameToIndex.ContainsKey(name))
                 {
-                    allNames.Add(string.Empty);
+                    nameToIndex[name] = (uint)i;
+                    mergedNames.Add(name);
+                }
+                else
+                {
+                    mergedNames.Add(name);
+                }
+            }
+
+            // 2. Add new names if they don't exist
+            var m2IndexToFinalId = new uint[m2Names.Count];
+
+            foreach (var wrapper in m2Names.Select((name, index) => new { name, index }))
+            {
+                if (string.IsNullOrWhiteSpace(wrapper.name))
+                {
+                    m2IndexToFinalId[wrapper.index] = 0;
                     continue;
                 }
 
-                allNames.Add(NormalizePath(name));
+                var normName = NormalizePath(wrapper.name);
+
+                if (nameToIndex.TryGetValue(normName, out uint existingId))
+                {
+                    m2IndexToFinalId[wrapper.index] = existingId;
+                }
+                else
+                {
+                    uint newId = (uint)mergedNames.Count;
+                    mergedNames.Add(normName);
+                    nameToIndex[normName] = newId;
+                    m2IndexToFinalId[wrapper.index] = newId;
+                }
             }
 
             // Rebuild MMDX / MMID using AdtPatcher helper methods.
-            mmdxChunk.Data = _adtPatcher.BuildMmdxData(allNames);
-            mmidChunk.Data = _adtPatcher.BuildMmidData(allNames);
+            mmdxChunk.Data = _adtPatcher.BuildMmdxData(mergedNames);
+            mmidChunk.Data = _adtPatcher.BuildMmidData(mergedNames);
 
             // Parse existing MDDF entries to collect their UniqueIds
             var existingMddfData = mddfChunk.Data ?? Array.Empty<byte>();
@@ -262,21 +339,29 @@ namespace WoWRollback.PM4Module
 
             // Prepare new entries with adjusted NameId and conflict-free UniqueIds
             var adjustedEntries = new List<AdtPatcher.MddfEntry>(newMddfEntries.Count);
-            uint nextAvailableId = 200_000_000; // Same base as MODF to ensure IDs in valid range
             int reassignedCount = 0;
 
             foreach (var entry in newMddfEntries)
             {
                 var adjusted = entry;
-                adjusted.NameId = (uint)(existingCount + entry.NameId);
+                
+                // Map the input NameId to final merged ID
+                if (entry.NameId < m2IndexToFinalId.Length)
+                {
+                    adjusted.NameId = m2IndexToFinalId[entry.NameId];
+                }
+                else
+                {
+                    adjusted.NameId = 0;
+                }
 
                 // Check for UniqueId collision with existing entries
                 if (existingUniqueIds.Contains(adjusted.UniqueId))
                 {
-                    // Find next available ID
-                    while (existingUniqueIds.Contains(nextAvailableId))
-                        nextAvailableId++;
-                    adjusted.UniqueId = nextAvailableId++;
+                    // Find next available ID using GLOBAL counter
+                    while (existingUniqueIds.Contains(nextGlobalUniqueId))
+                        nextGlobalUniqueId++;
+                    adjusted.UniqueId = nextGlobalUniqueId++;
                     reassignedCount++;
                 }
                 existingUniqueIds.Add(adjusted.UniqueId);

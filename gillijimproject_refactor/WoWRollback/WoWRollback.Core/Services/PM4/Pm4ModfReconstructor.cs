@@ -200,7 +200,9 @@ public sealed class Pm4ModfReconstructor
                 };
 
                 // Extract geometry
-                var walkableData = WmoWalkableSurfaceExtractor.ExtractFromBytes(wmoBytes, wmoPath, groupLoader);
+                // improved-matching: If NOT using full mesh, we strictly want footprints (floors) for better rotation alignment
+                bool onlyFootprint = !useFullMesh; 
+                var walkableData = WmoWalkableSurfaceExtractor.ExtractFromBytes(wmoBytes, wmoPath, groupLoader, onlyFootprint);
                 
                 // Choose vertices based on mesh mode
                 var vertices = useFullMesh ? walkableData.AllVertices : walkableData.WalkableVertices;

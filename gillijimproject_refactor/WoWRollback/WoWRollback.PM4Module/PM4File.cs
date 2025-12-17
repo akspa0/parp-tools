@@ -184,20 +184,13 @@ public class PM4File
         int count = (int)(size / 12);
         for (int i = 0; i < count; i++)
         {
-            if (isMsvt)
-            {
-                // MSVT vertices are stored as (Y, X, Z) in the file
-                // Per parpToolbox MsvtChunk, we must reorder to (X, Y, Z)
-                float y = br.ReadSingle();
-                float x = br.ReadSingle();
-                float z = br.ReadSingle();
-                list.Add(new Vector3(x, y, z));
-            }
-            else
-            {
-                // Other vector chunks (MSPV, MSCN) use standard X,Y,Z order
-                list.Add(new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
-            }
+            // MSVT and other vector chunks: read as X, Y, Z directly.
+            // Previous assumption of (Y, X, Z) based on old docs was incorrect
+            // and caused tile coordinate swapping (objects on 22_18 appearing on 18_22).
+            float x = br.ReadSingle();
+            float y = br.ReadSingle();
+            float z = br.ReadSingle();
+            list.Add(new Vector3(x, y, z));
         }
     }
 

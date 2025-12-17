@@ -1319,6 +1319,7 @@ static int RunInjectModf(string[] args)
     
     // Process each ADT using MuseumAdtPatcher (manual chunk-preserving path)
     var patcher = new MuseumAdtPatcher();
+    uint nextAvailableUniqueId = 200_000_000; // Start high to avoid conflicts
     int processed = 0;
     int injected = 0;
     int copied = 0;
@@ -1344,7 +1345,7 @@ static int RunInjectModf(string[] args)
             Console.WriteLine($"[INJECT] {fileName}: {entries.Count} WMO placements");
             try
             {
-                patcher.PatchWmoPlacements(adtPath, outputPath, wmoNames, entries);
+                patcher.PatchWmoPlacements(adtPath, outputPath, wmoNames, entries, ref nextAvailableUniqueId);
                 injected++;
             }
             catch (Exception ex)
@@ -1380,6 +1381,7 @@ static int RunPatchPipeline(string[] args)
     string? pm4Path = null;
     string? splitAdtPath = null;
     string? museumAdtPath = null;
+    string? originalSplitPath = null; // Original development split ADTs for UniqueID restoration
     string? wdlPath = null;
     string? outputRoot = "PM4_to_ADT";
     string? wmoFilter = null;        // Filter WMOs by path prefix (e.g., "Northrend")
@@ -1395,6 +1397,7 @@ static int RunPatchPipeline(string[] args)
             case "--pm4": pm4Path = args[++i]; break;
             case "--split-adt": splitAdtPath = args[++i]; break;
             case "--museum-adt": museumAdtPath = args[++i]; break;
+            case "--original-split": originalSplitPath = args[++i]; break;
             case "--wdl": wdlPath = args[++i]; break;
             case "--out": outputRoot = args[++i]; break;
             case "--wmo-filter": wmoFilter = args[++i]; break;
@@ -1412,6 +1415,7 @@ static int RunPatchPipeline(string[] args)
                 Console.WriteLine("  --museum-adt <dir>  WoWMuseum LK ADTs to patch");
                 Console.WriteLine();
                 Console.WriteLine("Options:");
+                Console.WriteLine("  --original-split <dir>  Directory with ORIGINAL development split ADTs (for UniqueID restoration)");
                 Console.WriteLine("  --wdl <file>        Path to WDL file (optional, auto-detected from split-adt)");
                 Console.WriteLine("  --out <dir>         Output directory (default: PM4_to_ADT)");
                 Console.WriteLine("  --wmo-filter <path> Filter WMOs by path prefix (e.g., 'Northrend' or 'Kalimdor')");
@@ -1431,7 +1435,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath);
         return 0;
     }
     catch (Exception ex)
