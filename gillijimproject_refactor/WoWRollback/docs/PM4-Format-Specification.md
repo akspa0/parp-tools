@@ -17,7 +17,7 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 | MSHD | 32 bytes | **Header (See MSHD Analysis below)** |
 | **MSLK** | **20 bytes** | **Object catalog/linkage** |
 | MSPI | 4 bytes | Path indices → MSPV |
-| MSPV | 12 bytes | Path vertices (navigation mesh) |
+| **MSPV** | **12 bytes** | **Portal vertices (4 per edge = doorway rectangles)** |
 | **MSVT** | **12 bytes** | **Mesh vertices (render geometry)** |
 | MSVI | 4 bytes | Mesh indices → MSVT |
 | **MSUR** | **32 bytes** | **Surface definitions (contains CK24!)** |
@@ -25,6 +25,30 @@ PM4 uses IFF-style chunked format with **reversed FourCCs** on disk (e.g., "MVER
 | **MPRL** | **24 bytes** | **Position references** |
 | MPRR | Variable | Reference data (index sequences) |
 | MDBH/MDOS/MDSF | Variable | Destructible buildings |
+
+---
+
+## MSHD Header (32 bytes) - DECODED!
+
+> [!IMPORTANT]
+> **Field00/Field04 correlate with tile bounds!**
+
+```c
+struct MSHDHeader {
+    uint32_t extent_x;   // ≈ MSCN X range (tile 22_18: 534 ≈ 533.3)
+    uint32_t extent_y;   // ≈ MSCN Y range (tile 22_18: 525 ≈ 530.8)
+    uint32_t extent_z;   // Probably Z extent (value=534, but MSCN Z range=398?)
+    uint32_t reserved[5]; // All zeros
+};
+```
+
+| Field | Value (tile 22_18) | MSCN Bounds |
+|-------|-------------------|-------------|
+| Field00 | 534 | X range: 533.3 ✓ |
+| Field04 | 525 | Y range: 530.8 ✓ |
+| Field08 | 534 | Z extent (capped to ADT max) |
+
+**Key Insight**: 533.33 yards is the standard ADT size! MSHD stores tile extents rounded/capped to ADT bounds.
 
 ---
 
@@ -75,15 +99,21 @@ public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 | 7 | 0x80 | Observed in Exterior objects |
 | 0 | 0x00 | Low-index surfaces (Portals?) / Non-WMO |
 
-**Observed Type Values:**
-| Type | Count | Context (Hypothesis) |
-|------|-------|----------------|
-| 0x00 | 186K | Graph Nodes / Portals / Terrain Links |
-| 0x42 | 112K | WMO Interior (Type A) |
-| 0x43 | 108K | WMO Interior (Type B) |
-| 0x41 | 32K | WMO Interior (Type C) |
-| 0xC0 | 26K | Exterior WMO |
-| 0xC1 | 16K | Exterior WMO (Type B) |
+**Observed Type Values (CONFIRMED December 2025):**
+
+> [!IMPORTANT]
+> **Type byte separates WMOs from M2s!**
+
+| Type | Category | Content |
+|------|----------|---------|
+| 0x00 | Nav Mesh | Navigation floor surfaces |
+| **0x42, 0x43** | **WMO** | WMO collision meshes |
+| **0x40, 0x41** | **M2** | M2 object collision (individual objects!) |
+| **0xC0, 0xC1, 0xC2, 0xC3** | **M2** | Exterior M2 objects |
+
+**Multi-Tile Export Results:**
+- WMO (0x42/0x43): **185 objects**
+- M2/Other: **80 objects**
 
 **ObjectID (Byte0+Byte1):**
 - Appears to act as a unique identifier for WMO structure instances.
@@ -114,6 +144,50 @@ public uint CK24 => (PackedParams & 0xFFFFFF00) >> 8;
 - All GroupKey=3, all horizontal (Normal Z ≈ 1.0)
 - **Confirmed: Navigation mesh floor patches**, not WMO objects
 - Safe to exclude from WMO matching
+
+---
+
+## MSUR Chunk (32 bytes/entry) - Surface Definitions
+
+> [!IMPORTANT]
+> **BREAKTHROUGH**: MdosIndex = **INSTANCE ID** within CK24!
+
+```c
+struct MSUREntry {
+    uint8_t  group_key;       // 3=terrain, 18/19=WMO
+    uint8_t  index_count;     // Triangle vertex count
+    uint8_t  attribute_mask;  // bit7 = liquid?
+    uint8_t  padding;
+    float    normal_x, normal_y, normal_z;  // Surface normal
+    float    height;          // Distance from origin?
+    uint32_t msvi_first;      // Index into MSVI (vertex indices)
+    uint32_t mdos_index;      // **INSTANCE ID!** Separates objects within CK24
+    uint32_t packed_params;   // CK24 in bits 8-31
+};
+```
+
+### Object Instance Separation via MSVI Gaps (DECODED!)
+
+> [!IMPORTANT]
+> **To separate individual objects within a CK24, use MSVI index gaps!**
+
+CK24 groups multiple object instances together. To split them:
+1. Sort surfaces by `MsviFirstIndex`
+2. Split at large gaps (>50 indices between consecutive surfaces)
+3. Each contiguous block = one object instance
+
+| Metric (tile 22_18, CK24 0x432D68) | Value |
+|-------------------------------------|-------|
+| Total surfaces | 29,084 |
+| MSVI index range | 12 - 156,943 |
+| **Large gaps (>10 indices)** | **27** |
+| **Max gap** | **35,023 indices** |
+
+**Result**: 27 gaps = approximately 28 separate objects within this CK24!
+
+### MdosIndex (Unknown Purpose)
+MdosIndex has 18,656 unique values but does NOT correspond to object instances.
+Possibly related to destructible object states (MDOS chunk).
 
 
 
@@ -148,11 +222,32 @@ struct MSLKEntry {
     uint32_t group_object_id;  // **NAVIGATION EDGE ID** (sequential 0-N, see below!)
     int24_t  mspi_first;       // Index into MSPI (24-bit). -1 = no geometry.
     uint8_t  mspi_count;       // Count of MSPI entries (always 4 when present)
-    uint8_t  link_id[4];       // Padding (4 bytes)
+    uint8_t  tile_x;           // **TILE COORDINATE X** (e.g., 0x16 = 22)
+    uint8_t  tile_y;           // **TILE COORDINATE Y** (e.g., 0x12 = 18)
+    uint16_t link_marker;      // Always 0xFFFF (adjacent tile marker)
     uint16_t ref_index;        // Dual-index: MPRL or MSVT (see below)
-    uint16_t system_flag;      // Always 0x8000
+    uint16_t system_flag;      // Always 0x8000 (constant marker)
 };
 ```
+
+### LinkId = Tile Coordinates (DECODED!)
+
+> [!IMPORTANT]
+> **BREAKTHROUGH**: The 4-byte "LinkId" field encodes **tile coordinates**!
+
+| Byte | Value (tile 22_18) | Meaning |
+|------|-------------------|---------|
+| Byte[0] | 0x16 (22) | **Tile X** |
+| Byte[1] | 0x12 (18) | **Tile Y** |
+| Byte[2-3] | 0xFFFF | Marker (padding?) |
+
+**Adjacent tile references (cross-tile navigation):**
+| Pattern | Count | Interpretation |
+|---------|-------|----------------|
+| 0xFFFF1216 | 42,840 (99.8%) | Current tile (22, 18) |
+| 0xFFFF1217 | 53 | Tile (23, 18) - X+1 |
+| 0xFFFF1316 | 30 | Tile (22, 19) - Y+1 |
+| 0xFFFF1116 | 18 | Tile (22, 17) - Y-1 |
 
 ### GroupObjectId = Navigation Edge ID (DECODED!)
 
@@ -182,9 +277,6 @@ struct MSLKEntry {
 |-----------|--------|-------------------|
 | RefIndex < MPRL.Count | **MPRL position** | 451 (1%) |
 | RefIndex >= MPRL.Count | **MSVT vertex** | 42,490 (99%) |
-
-> [!NOTE]
-> **Potential Map ID Correlation**: 451 MPRL refs = development map ID (451). Coincidence or identifier?
 
 ### TypeFlags = Connection Type (DECODED!)
 

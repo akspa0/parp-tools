@@ -36,6 +36,16 @@ class Program
         {
             return RunSceneGraphTrace(args[1]);
         }
+        
+        if (args[0] == "--export-obj" && args.Length > 1)
+        {
+            return ExportObjPerCk24(args[1], args.Length > 2 ? args[2] : null);
+        }
+        
+        if (args[0] == "--multi-tile" && args.Length > 1)
+        {
+            return RunMultiTileAnalysis(args[1], args.Length > 2 ? args[2] : null);
+        }
 
         string path = args[0];
         
@@ -422,6 +432,335 @@ class Program
         return 0;
     }
     
+    static int RunMultiTileAnalysis(string directory, string? outputDir)
+    {
+        var pm4Files = Directory.GetFiles(directory, "*.pm4", SearchOption.AllDirectories);
+        Console.WriteLine($"=== Multi-Tile PM4 Analysis ===");
+        Console.WriteLine($"Found {pm4Files.Length} PM4 files\n");
+        
+        outputDir ??= Path.Combine(Path.GetTempPath(), "pm4_multi_tile");
+        Directory.CreateDirectory(outputDir);
+        
+        // Global data structures
+        var globalCK24 = new Dictionary<uint, List<(string tile, int surfaceCount, Vector3 minBound, Vector3 maxBound)>>();
+        var allTileSurfaces = new Dictionary<string, List<MsurEntry>>();
+        var allTileVertices = new Dictionary<string, List<Vector3>>();
+        var allTileIndices = new Dictionary<string, List<uint>>();
+        
+        // Parse all tiles
+        foreach (var file in pm4Files)
+        {
+            try
+            {
+                var pm4 = Pm4File.Parse(File.ReadAllBytes(file));
+                string tileName = Path.GetFileNameWithoutExtension(file);
+                
+                allTileSurfaces[tileName] = pm4.Surfaces;
+                allTileVertices[tileName] = pm4.MeshVertices;
+                allTileIndices[tileName] = pm4.MeshIndices;
+                
+                // Group surfaces by CK24
+                var byCk24 = pm4.Surfaces.GroupBy(s => s.CK24);
+                foreach (var grp in byCk24)
+                {
+                    if (!globalCK24.ContainsKey(grp.Key))
+                        globalCK24[grp.Key] = new List<(string, int, Vector3, Vector3)>();
+                    
+                    // Compute bounds for this tile's CK24 group
+                    var verts = new List<Vector3>();
+                    foreach (var surf in grp)
+                    {
+                        for (int i = 0; i < surf.IndexCount; i++)
+                        {
+                            uint msviIdx = surf.MsviFirstIndex + (uint)i;
+                            if (msviIdx < pm4.MeshIndices.Count)
+                            {
+                                int msvtIdx = (int)pm4.MeshIndices[(int)msviIdx];
+                                if (msvtIdx < pm4.MeshVertices.Count)
+                                    verts.Add(pm4.MeshVertices[msvtIdx]);
+                            }
+                        }
+                    }
+                    
+                    if (verts.Count > 0)
+                    {
+                        var bounds = ComputeBounds(verts);
+                        globalCK24[grp.Key].Add((tileName, grp.Count(), bounds.min, bounds.max));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  Error parsing {file}: {ex.Message}");
+            }
+        }
+        
+        // Report cross-tile CK24s
+        Console.WriteLine("=== Cross-Tile CK24 Analysis ===");
+        Console.WriteLine($"Total unique CK24 values: {globalCK24.Count}\n");
+        
+        var multiTileCK24 = globalCK24.Where(kv => kv.Value.Count > 1).OrderByDescending(kv => kv.Value.Count).Take(20).ToList();
+        Console.WriteLine($"CK24 values spanning multiple tiles: {multiTileCK24.Count}\n");
+        
+        foreach (var (ck24, tiles) in multiTileCK24)
+        {
+            int totalSurfaces = tiles.Sum(t => t.surfaceCount);
+            Console.WriteLine($"  CK24 0x{ck24:X6}: {tiles.Count} tiles, {totalSurfaces} total surfaces");
+            foreach (var (tile, count, min, max) in tiles.Take(3))
+            {
+                Console.WriteLine($"    {tile}: {count} surfaces at ({min.X:F0}, {min.Y:F0})");
+            }
+            if (tiles.Count > 3)
+                Console.WriteLine($"    ... and {tiles.Count - 3} more tiles");
+        }
+        
+        // Export combined OBJs for ALL multi-tile CK24s, separated by type
+        Console.WriteLine("\n=== Exporting ALL Multi-Tile CK24 Objects ===");
+        
+        // Create subdirs for WMO vs Other
+        var wmoDir = Path.Combine(outputDir, "WMO");
+        var otherDir = Path.Combine(outputDir, "Other");
+        Directory.CreateDirectory(wmoDir);
+        Directory.CreateDirectory(otherDir);
+        
+        int exported = 0;
+        // Process ALL CK24s that span multiple tiles (skip CK24=0 nav mesh)
+        var allMultiTileCK24 = globalCK24.Where(kv => kv.Value.Count > 1 && kv.Key != 0)
+            .OrderByDescending(kv => kv.Value.Sum(t => t.surfaceCount));
+        
+        Console.WriteLine($"  Processing {allMultiTileCK24.Count()} multi-tile objects...\n");
+        
+        foreach (var (ck24, tiles) in allMultiTileCK24)
+        {
+            var allVerts = new List<Vector3>();
+            var allFaces = new List<int[]>();
+            var vertexMap = new Dictionary<(string tile, int idx), int>();
+            
+            foreach (var (tileName, _, _, _) in tiles)
+            {
+                if (!allTileSurfaces.ContainsKey(tileName)) continue;
+                var surfs = allTileSurfaces[tileName].Where(s => s.CK24 == ck24);
+                var indices = allTileIndices[tileName];
+                var verts = allTileVertices[tileName];
+                
+                foreach (var surf in surfs)
+                {
+                    var faceIndices = new List<int>();
+                    for (int i = 0; i < surf.IndexCount; i++)
+                    {
+                        uint msviIdx = surf.MsviFirstIndex + (uint)i;
+                        if (msviIdx < indices.Count)
+                        {
+                            int msvtIdx = (int)indices[(int)msviIdx];
+                            var key = (tileName, msvtIdx);
+                            if (!vertexMap.ContainsKey(key))
+                            {
+                                vertexMap[key] = allVerts.Count + 1;
+                                if (msvtIdx < verts.Count)
+                                    allVerts.Add(verts[msvtIdx]);
+                            }
+                            faceIndices.Add(vertexMap[key]);
+                        }
+                    }
+                    if (faceIndices.Count >= 3)
+                        allFaces.Add(faceIndices.ToArray());
+                }
+            }
+            
+            if (allVerts.Count > 0)
+            {
+                // Determine type from high byte of CK24
+                int typeByte = (int)((ck24 >> 16) & 0xFF);
+                bool isWmo = typeByte == 0x42 || typeByte == 0x43;
+                var targetDir = isWmo ? wmoDir : otherDir;
+                string typeLabel = isWmo ? "WMO" : "Other";
+                
+                var objPath = Path.Combine(targetDir, $"CK24_{ck24:X6}_{tiles.Count}tiles.obj");
+                using var sw = new StreamWriter(objPath);
+                sw.WriteLine($"# Multi-tile CK24 0x{ck24:X6} ({typeLabel})");
+                sw.WriteLine($"# Type byte: 0x{typeByte:X2}");
+                sw.WriteLine($"# Tiles: {tiles.Count}");
+                sw.WriteLine($"# Vertices: {allVerts.Count}");
+                sw.WriteLine($"# Faces: {allFaces.Count}");
+                sw.WriteLine();
+                foreach (var v in allVerts)
+                    sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+                sw.WriteLine();
+                foreach (var f in allFaces)
+                    sw.WriteLine($"f {string.Join(" ", f)}");
+                
+                Console.WriteLine($"  [{typeLabel}] CK24_{ck24:X6}_{tiles.Count}tiles.obj ({allVerts.Count} verts)");
+                exported++;
+            }
+        }
+        
+        Console.WriteLine($"\nExported {exported} multi-tile OBJ files to {outputDir}");
+        return 0;
+    }
+    
+    static int ExportObjPerCk24(string pm4Path, string? outputDir)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        // NEVER write to source data folders - use temp or explicit path
+        outputDir ??= Path.Combine(Path.GetTempPath(), "pm4_obj_export");
+        Directory.CreateDirectory(outputDir);
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== Exporting OBJ files from {baseName} ===");
+        Console.WriteLine($"Output directory: {outputDir}");
+        
+        int totalExported = 0;
+        
+        // Export 1: Full tile
+        Console.WriteLine("\n--- Full Tile ---");
+        ExportSurfacesToObj(pm4, pm4.Surfaces.ToList(), 
+            Path.Combine(outputDir, $"{baseName}_FULL.obj"), "Full Tile");
+        totalExported++;
+        
+        // === VERTEX CONNECTIVITY GROUPING ===
+        Console.WriteLine("\n--- Vertex Connectivity Grouping (Union-Find) ---");
+        
+        // For largest CK24, group surfaces by shared vertices
+        var largestCk24 = pm4.Surfaces.Where(s => s.CK24 != 0)
+            .GroupBy(s => s.CK24).OrderByDescending(g => g.Count()).First();
+        var ck24Surfaces = largestCk24.ToList();
+        uint ck24Val = largestCk24.Key;
+        
+        Console.WriteLine($"  Analyzing CK24 0x{ck24Val:X6}: {ck24Surfaces.Count} surfaces");
+        
+        // Build vertex -> surface mappings
+        var vertexToSurfaces = new Dictionary<int, List<int>>(); // msvtIdx -> surface indices
+        for (int si = 0; si < ck24Surfaces.Count; si++)
+        {
+            var surf = ck24Surfaces[si];
+            for (int i = 0; i < surf.IndexCount; i++)
+            {
+                uint msviIdx = surf.MsviFirstIndex + (uint)i;
+                if (msviIdx < pm4.MeshIndices.Count)
+                {
+                    int msvtIdx = (int)pm4.MeshIndices[(int)msviIdx];
+                    if (!vertexToSurfaces.ContainsKey(msvtIdx))
+                        vertexToSurfaces[msvtIdx] = new List<int>();
+                    vertexToSurfaces[msvtIdx].Add(si);
+                }
+            }
+        }
+        
+        // Union-Find: group surfaces that share vertices
+        int[] parent = new int[ck24Surfaces.Count];
+        for (int i = 0; i < parent.Length; i++) parent[i] = i;
+        
+        int Find(int x) {
+            if (parent[x] != x) parent[x] = Find(parent[x]);
+            return parent[x];
+        }
+        void Union(int a, int b) {
+            int ra = Find(a), rb = Find(b);
+            if (ra != rb) parent[ra] = rb;
+        }
+        
+        // Union surfaces that share any vertex
+        foreach (var (_, surfaceIndices) in vertexToSurfaces)
+        {
+            for (int i = 1; i < surfaceIndices.Count; i++)
+            {
+                Union(surfaceIndices[0], surfaceIndices[i]);
+            }
+        }
+        
+        // Group surfaces by their root
+        var groups = new Dictionary<int, List<MsurEntry>>();
+        for (int i = 0; i < ck24Surfaces.Count; i++)
+        {
+            int root = Find(i);
+            if (!groups.ContainsKey(root))
+                groups[root] = new List<MsurEntry>();
+            groups[root].Add(ck24Surfaces[i]);
+        }
+        
+        Console.WriteLine($"  Found {groups.Count} connected components (objects)");
+        
+        // Export top 20 largest groups
+        int objNum = 0;
+        foreach (var grp in groups.Values.OrderByDescending(g => g.Count).Take(20))
+        {
+            ExportSurfacesToObj(pm4, grp, 
+                Path.Combine(outputDir, $"{baseName}_CK24_{ck24Val:X6}_connected_{objNum:D2}.obj"), 
+                $"Connected component {objNum}");
+            objNum++;
+            totalExported++;
+        }
+        
+        Console.WriteLine($"\nExported {totalExported} OBJ files to {outputDir}");
+        return 0;
+    }
+    
+    static void ExportSurfacesToObj(Pm4File pm4, List<MsurEntry> surfaces, string objPath, string description)
+    {
+        var usedVertices = new Dictionary<int, int>();
+        var outputVerts = new List<Vector3>();
+        var faces = new List<int[]>();
+        
+        foreach (var surf in surfaces)
+        {
+            var faceIndices = new List<int>();
+            for (int i = 0; i < surf.IndexCount; i++)
+            {
+                uint msviIdx = surf.MsviFirstIndex + (uint)i;
+                if (msviIdx < pm4.MeshIndices.Count)
+                {
+                    int msvtIdx = (int)pm4.MeshIndices[(int)msviIdx];
+                    if (msvtIdx < pm4.MeshVertices.Count)
+                    {
+                        if (!usedVertices.TryGetValue(msvtIdx, out int newIdx))
+                        {
+                            newIdx = outputVerts.Count + 1;
+                            usedVertices[msvtIdx] = newIdx;
+                            outputVerts.Add(pm4.MeshVertices[msvtIdx]);
+                        }
+                        faceIndices.Add(newIdx);
+                    }
+                }
+            }
+            if (faceIndices.Count >= 3)
+            {
+                faces.Add(faceIndices.ToArray());
+            }
+        }
+        
+        if (outputVerts.Count == 0) 
+        {
+            Console.WriteLine($"  SKIP: {description} (no vertices)");
+            return;
+        }
+        
+        var bounds = ComputeBounds(outputVerts);
+        
+        using var sw = new StreamWriter(objPath);
+        sw.WriteLine($"# PM4 Export: {description}");
+        sw.WriteLine($"# Surfaces: {surfaces.Count}");
+        sw.WriteLine($"# Vertices: {outputVerts.Count}");
+        sw.WriteLine($"# Faces: {faces.Count}");
+        sw.WriteLine($"# Bounds: ({bounds.min.X:F1}, {bounds.min.Y:F1}, {bounds.min.Z:F1}) to ({bounds.max.X:F1}, {bounds.max.Y:F1}, {bounds.max.Z:F1})");
+        sw.WriteLine();
+        
+        foreach (var v in outputVerts)
+            sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+        sw.WriteLine();
+        
+        foreach (var f in faces)
+            sw.WriteLine($"f {string.Join(" ", f)}");
+        
+        Console.WriteLine($"  Exported: {Path.GetFileName(objPath)} ({outputVerts.Count} verts, {faces.Count} faces)");
+    }
+    
     static (Vector3 min, Vector3 max) ComputeSurfaceBounds(Pm4File pm4, List<MsurEntry> surfaces)
     {
         var min = new Vector3(float.MaxValue);
@@ -514,6 +853,23 @@ class Program
                     int mprrSentinels = pm4.MprrEntries.Count(r => r.Value1 == 0xFFFF);
                     Console.WriteLine($"    Field00 == MPRR sentinels? {h.Field00 == mprrSentinels} (count={mprrSentinels})");
                     
+                    // Tile coordinate analysis
+                    var match = System.Text.RegularExpressions.Regex.Match(path, @"(\d+)_(\d+)\.pm4$");
+                    if (match.Success)
+                    {
+                        int tileX = int.Parse(match.Groups[1].Value);
+                        int tileY = int.Parse(match.Groups[2].Value);
+                        Console.WriteLine($"\n  Tile coordinate analysis (tile {tileX}_{tileY}):");
+                        Console.WriteLine($"    Field00 (534) vs tileX*24 ({tileX * 24}): {h.Field00 == tileX * 24}");
+                        Console.WriteLine($"    Field04 (525) vs tileY*30 ({tileY * 30}): {h.Field04 == tileY * 30}");
+                        Console.WriteLine($"    Field00 / 2 = {h.Field00 / 2}, Field04 / 2 = {h.Field04 / 2}");
+                        Console.WriteLine($"    sqrt(Field00) = {Math.Sqrt(h.Field00):F1}, sqrt(Field04) = {Math.Sqrt(h.Field04):F1}");
+                        
+                        // Check if related to grid subdivisions
+                        long gridCells = ((long)h.Field00 + 1) * (h.Field04 + 1);
+                        Console.WriteLine($"    Grid cells if (F00+1)*(F04+1) = {gridCells}");
+                    }
+                    
                     Console.WriteLine($"    Raw hex: {BitConverter.ToString(h.RawBytes).Replace("-", " ")}");
                 }
                 
@@ -562,6 +918,84 @@ class Program
                     var ck24Zero = gk.Count(s => s.CK24 == 0);
                     Console.WriteLine($"    GroupKey={gk.Key}: {gk.Count(),5} surfaces, {uniqueCk24} unique CK24s, CK24=0: {ck24Zero}");
                 }
+                
+                // === DEEP CK24 BIT STRUCTURE ANALYSIS ===
+                Console.WriteLine("\n=== CK24 Deep Bit Structure Analysis ===");
+                
+                // Get all non-zero CK24 values
+                var allCk24 = pm4.Surfaces.Where(s => s.CK24 != 0).Select(s => s.CK24).Distinct().OrderBy(x => x).ToList();
+                Console.WriteLine($"  Non-zero CK24 values: {allCk24.Count}");
+                
+                // Try different bit interpretations
+                Console.WriteLine("\n  Interpretation 1: [Type:8][ObjectID:16]");
+                var byType8 = allCk24.GroupBy(ck => (ck >> 16) & 0xFF);
+                foreach (var g in byType8.OrderByDescending(g => g.Count()))
+                {
+                    Console.WriteLine($"    Type 0x{g.Key:X2}: {g.Count()} unique ObjectIDs");
+                }
+                
+                Console.WriteLine("\n  Interpretation 2: [Type:8][GroupA:8][GroupB:8]");
+                var parsed = allCk24.Select(ck => new {
+                    CK24 = ck,
+                    Byte2 = (ck >> 16) & 0xFF,
+                    Byte1 = (ck >> 8) & 0xFF,
+                    Byte0 = ck & 0xFF
+                }).ToList();
+                
+                var uniqueByte2 = parsed.Select(p => p.Byte2).Distinct().Count();
+                var uniqueByte1 = parsed.Select(p => p.Byte1).Distinct().Count();
+                var uniqueByte0 = parsed.Select(p => p.Byte0).Distinct().Count();
+                Console.WriteLine($"    Unique Byte2 (top): {uniqueByte2}");
+                Console.WriteLine($"    Unique Byte1 (mid): {uniqueByte1}");
+                Console.WriteLine($"    Unique Byte0 (low): {uniqueByte0}");
+                
+                // Check if lower bytes are sequential or follow patterns
+                Console.WriteLine("\n  Byte distribution within largest CK24 type (0x43):");
+                var type43 = parsed.Where(p => p.Byte2 == 0x43).ToList();
+                if (type43.Count > 0)
+                {
+                    var byte1Dist = type43.GroupBy(p => p.Byte1).OrderByDescending(g => g.Count()).Take(5);
+                    Console.WriteLine($"    Byte1 distribution:");
+                    foreach (var g in byte1Dist)
+                        Console.WriteLine($"      0x{g.Key:X2}: {g.Count()} CK24 values");
+                    
+                    var byte0Dist = type43.GroupBy(p => p.Byte0).OrderByDescending(g => g.Count()).Take(5);
+                    Console.WriteLine($"    Byte0 distribution:");
+                    foreach (var g in byte0Dist)
+                        Console.WriteLine($"      0x{g.Key:X2}: {g.Count()} CK24 values");
+                }
+                
+                // Check surface distribution WITHIN a single CK24
+                Console.WriteLine("\n  Surface count per CK24 (top 10):");
+                var surfPerCk24 = pm4.Surfaces.Where(s => s.CK24 != 0).GroupBy(s => s.CK24).OrderByDescending(g => g.Count()).Take(10);
+                foreach (var g in surfPerCk24)
+                {
+                    uint ck24 = g.Key;
+                    Console.WriteLine($"    CK24 0x{ck24:X6}: {g.Count()} surfaces, Byte2=0x{(ck24>>16)&0xFF:X2}, Byte1=0x{(ck24>>8)&0xFF:X2}, Byte0=0x{ck24&0xFF:X2}");
+                }
+                
+                // Check: Does MsviFirstIndex group surfaces?
+                Console.WriteLine("\n  === MSVI Grouping Within CK24 ===");
+                var largestCk24Surfaces = pm4.Surfaces.Where(s => s.CK24 != 0).GroupBy(s => s.CK24).OrderByDescending(g => g.Count()).First();
+                Console.WriteLine($"  Analyzing largest CK24: 0x{largestCk24Surfaces.Key:X6} ({largestCk24Surfaces.Count()} surfaces)");
+                
+                // Check if MsviFirstIndex is contiguous or has gaps
+                var msviIndices = largestCk24Surfaces.Select(s => (int)s.MsviFirstIndex).OrderBy(x => x).ToList();
+                int msviGaps = 0;
+                int msviMaxGap = 0;
+                for (int i = 1; i < msviIndices.Count; i++)
+                {
+                    int gap = msviIndices[i] - msviIndices[i-1];
+                    if (gap > 10) 
+                    {
+                        msviGaps++;
+                        msviMaxGap = Math.Max(msviMaxGap, gap);
+                    }
+                }
+                Console.WriteLine($"    MSVI index range: {msviIndices.First()} - {msviIndices.Last()}");
+                Console.WriteLine($"    Large gaps (>10 indices): {msviGaps}");
+                Console.WriteLine($"    Max gap: {msviMaxGap}");
+                Console.WriteLine($"    (Large gaps could indicate object boundaries!)");
                 
                 // MSLK Analysis - The connector chunk!
                 Console.WriteLine("\n=== MSLK Analysis (The Connector Chunk!) ===");
@@ -888,6 +1322,201 @@ class Program
                     Console.WriteLine($"  ... and {surfacesByCk24.Count - 16} more objects");
                 }
                 
+                // === INSTANCE DETECTION WITHIN CK24 ===
+                Console.WriteLine("\n=== Instance Detection Analysis ===");
+                Console.WriteLine("  Checking if CK24 contains multiple spatially-separated instances...\n");
+                
+                // Pick the largest non-zero CK24 and check for spatial clusters
+                var largestCk24 = surfacesByCk24.Where(kv => kv.Key != 0).OrderByDescending(kv => kv.Value.Count).FirstOrDefault();
+                if (largestCk24.Value != null && largestCk24.Value.Count > 0)
+                {
+                    Console.WriteLine($"  Analyzing CK24 0x{largestCk24.Key:X6} ({largestCk24.Value.Count} surfaces):");
+                    
+                    // Get centroid of each surface
+                    var surfaceCentroids = new List<(MsurEntry surf, Vector3 centroid)>();
+                    foreach (var s in largestCk24.Value)
+                    {
+                        var verts = GetSurfaceVertices(pm4, s);
+                        if (verts.Count > 0)
+                        {
+                            var centroid = new Vector3(
+                                verts.Average(v => v.X),
+                                verts.Average(v => v.Y),
+                                verts.Average(v => v.Z)
+                            );
+                            surfaceCentroids.Add((s, centroid));
+                        }
+                    }
+                    
+                    // Simple clustering: find distinct XY position groups (>20 units apart)
+                    var clusters = new List<List<(MsurEntry surf, Vector3 centroid)>>();
+                    float clusterDistance = 20f;
+                    
+                    foreach (var sc in surfaceCentroids)
+                    {
+                        var nearestCluster = clusters.FirstOrDefault(c => 
+                            c.Any(cs => Vector2.Distance(new Vector2(cs.centroid.X, cs.centroid.Y), 
+                                                          new Vector2(sc.centroid.X, sc.centroid.Y)) < clusterDistance));
+                        if (nearestCluster != null)
+                        {
+                            nearestCluster.Add(sc);
+                        }
+                        else
+                        {
+                            clusters.Add(new List<(MsurEntry, Vector3)> { sc });
+                        }
+                    }
+                    
+                    Console.WriteLine($"    Found {clusters.Count} spatial clusters (separation: {clusterDistance} units)");
+                    
+                    // Show cluster info
+                    foreach (var (cluster, idx) in clusters.OrderByDescending(c => c.Count).Take(5).Select((c, i) => (c, i)))
+                    {
+                        var clusterBounds = ComputeBounds(cluster.Select(c => c.centroid).ToList());
+                        Console.WriteLine($"    Cluster {idx + 1}: {cluster.Count} surfaces at ({clusterBounds.min.X:F0}, {clusterBounds.min.Y:F0})");
+                    }
+                    
+                    if (clusters.Count > 5)
+                        Console.WriteLine($"    ... and {clusters.Count - 5} more clusters");
+                    
+                    Console.WriteLine($"\n    ⚡ If clusters > 1, CK24 contains MULTIPLE object instances!");
+                }
+                
+                // === MSUR.MdosIndex INVESTIGATION (potential instance ID?) ===
+                Console.WriteLine("\n=== MSUR.MdosIndex Investigation ===");
+                var mdosValues = pm4.Surfaces.GroupBy(s => s.MdosIndex).OrderByDescending(g => g.Count());
+                Console.WriteLine($"  Unique MdosIndex values: {mdosValues.Count()}");
+                Console.WriteLine("  Top 10 MdosIndex values:");
+                foreach (var g in mdosValues.Take(10))
+                {
+                    var ck24s = g.Select(s => s.CK24).Distinct().Count();
+                    Console.WriteLine($"    MdosIndex 0x{g.Key:X8}: {g.Count()} surfaces, {ck24s} unique CK24s");
+                }
+                
+                // Check if MdosIndex could be instance ID
+                var nonZeroMdos = pm4.Surfaces.Where(s => s.MdosIndex != 0).ToList();
+                Console.WriteLine($"\n  Non-zero MdosIndex: {nonZeroMdos.Count} / {pm4.Surfaces.Count}");
+                
+                if (nonZeroMdos.Count > 0)
+                {
+                    // Check if MdosIndex subdivides within CK24
+                    var largestCk24Surfs = surfacesByCk24.Where(kv => kv.Key != 0).OrderByDescending(kv => kv.Value.Count).First();
+                    var mdosWithinCk24 = largestCk24Surfs.Value.GroupBy(s => s.MdosIndex).Count();
+                    Console.WriteLine($"  MdosIndex unique values within largest CK24: {mdosWithinCk24}");
+                    Console.WriteLine($"    (If > 1, MdosIndex might separate instances within CK24!)");
+                }
+                
+                // === MPRR GROUP → GEOMETRY TRACING ===
+                Console.WriteLine("\n=== MPRR Group → Geometry Tracing ===");
+                
+                // === MSLK → MSVT → MSUR Connection Analysis ===
+                Console.WriteLine("\n=== MSLK → MSVT → MSUR Connection Analysis ===");
+                Console.WriteLine("  Attempting to link MSLK.GroupObjectId to MSUR surfaces via shared MSVT vertices...\n");
+                
+                // Build a map: MSVT index → which GroupObjectIds reference it
+                var msvtToGroupIds = new Dictionary<int, HashSet<uint>>();
+                foreach (var lnk in pm4.LinkEntries)
+                {
+                    // RefIndex >= MPRL.Count means it points to MSVT directly!
+                    // The value IS the MSVT index (no offset subtraction needed)
+                    if (lnk.RefIndex >= pm4.PositionRefs.Count && lnk.RefIndex < pm4.PositionRefs.Count + pm4.MeshVertices.Count)
+                    {
+                        int msvtIdx = lnk.RefIndex;  // Try direct index first
+                        if (msvtIdx < pm4.MeshVertices.Count)
+                        {
+                            if (!msvtToGroupIds.ContainsKey(msvtIdx))
+                                msvtToGroupIds[msvtIdx] = new HashSet<uint>();
+                            msvtToGroupIds[msvtIdx].Add(lnk.GroupObjectId);
+                        }
+                    }
+                }
+                Console.WriteLine($"  MSVT vertices referenced by MSLK: {msvtToGroupIds.Count} / {pm4.MeshVertices.Count}");
+                
+                // Build map: MSUR → which MSVT indices it uses
+                var msurToMsvt = new Dictionary<MsurEntry, HashSet<int>>();
+                foreach (var surf in pm4.Surfaces)
+                {
+                    var msvtIndices = new HashSet<int>();
+                    for (int i = 0; i < surf.IndexCount; i++)
+                    {
+                        uint msviIdx = surf.MsviFirstIndex + (uint)i;
+                        if (msviIdx < pm4.MeshIndices.Count)
+                        {
+                            msvtIndices.Add((int)pm4.MeshIndices[(int)msviIdx]);
+                        }
+                    }
+                    msurToMsvt[surf] = msvtIndices;
+                }
+                
+                // For each MSUR, find which GroupObjectIds its vertices belong to
+                var msurToGroupIds = new Dictionary<MsurEntry, HashSet<uint>>();
+                int surfacesWithGroupId = 0;
+                foreach (var (surf, msvtIndices) in msurToMsvt)
+                {
+                    var groupIds = new HashSet<uint>();
+                    foreach (var msvtIdx in msvtIndices)
+                    {
+                        if (msvtToGroupIds.TryGetValue(msvtIdx, out var gids))
+                            groupIds.UnionWith(gids);
+                    }
+                    if (groupIds.Count > 0)
+                    {
+                        msurToGroupIds[surf] = groupIds;
+                        surfacesWithGroupId++;
+                    }
+                }
+                
+                Console.WriteLine($"  MSUR surfaces linked to GroupObjectId: {surfacesWithGroupId} / {pm4.Surfaces.Count} ({100.0 * surfacesWithGroupId / pm4.Surfaces.Count:F1}%)");
+                
+                // Check within largest CK24 - how many unique GroupObjectIds?
+                var largestCk24Surfs2 = pm4.Surfaces.Where(s => s.CK24 != 0).GroupBy(s => s.CK24).OrderByDescending(g => g.Count()).First();
+                var groupIdsInLargestCk24 = new HashSet<uint>();
+                foreach (var surf in largestCk24Surfs2)
+                {
+                    if (msurToGroupIds.TryGetValue(surf, out var gids))
+                        groupIdsInLargestCk24.UnionWith(gids);
+                }
+                Console.WriteLine($"\n  Within largest CK24 (0x{largestCk24Surfs2.Key:X6}):");
+                Console.WriteLine($"    Surfaces: {largestCk24Surfs2.Count()}");
+                Console.WriteLine($"    Unique GroupObjectIds linked: {groupIdsInLargestCk24.Count}");
+                Console.WriteLine($"    ⚡ GroupObjectId could be the object instance separator!");
+                // Parse MPRR into groups
+                var mprrGroups = new List<List<MprrEntry>>();
+                var currentGroup = new List<MprrEntry>();
+                foreach (var e in pm4.MprrEntries)
+                {
+                    if (e.Value1 == 0xFFFF)
+                    {
+                        if (currentGroup.Count > 0) mprrGroups.Add(currentGroup);
+                        currentGroup = new List<MprrEntry>();
+                    }
+                    else
+                    {
+                        currentGroup.Add(e);
+                    }
+                }
+                if (currentGroup.Count > 0) mprrGroups.Add(currentGroup);
+                
+                Console.WriteLine($"  Total MPRR groups: {mprrGroups.Count}");
+                
+                // Sample a few groups
+                Console.WriteLine("\n  Sample MPRR groups (first 5):");
+                foreach (var (grp, idx) in mprrGroups.Take(5).Select((g, i) => (g, i)))
+                {
+                    var grpMprlRefs = grp.Count(e => e.Value1 < pm4.PositionRefs.Count);
+                    var grpMsvtRefs = grp.Count(e => e.Value1 >= pm4.PositionRefs.Count);
+                    Console.WriteLine($"    Group {idx}: {grp.Count} entries ({grpMprlRefs} MPRL, {grpMsvtRefs} MSVT refs)");
+                    
+                    // If has MPRL refs, show position
+                    var firstMprl = grp.FirstOrDefault(e => e.Value1 < pm4.PositionRefs.Count);
+                    if (firstMprl != null)
+                    {
+                        var mprl = pm4.PositionRefs[firstMprl.Value1];
+                        float rot = 360f * mprl.Unknown0x04 / 65536f;
+                        Console.WriteLine($"      → MPRL pos: ({mprl.PositionX:F0}, {mprl.PositionY:F0}, {mprl.PositionZ:F0}), Rot: {rot:F0}°");
+                    }
+                }
+                
                 // Analyze MPRR sentinels
                 Console.WriteLine("\n=== MPRR Analysis ===");
                 int sentinelCount = pm4.MprrEntries.Count(e => e.Value1 == 0xFFFF);
@@ -1000,6 +1629,19 @@ class Program
                 
                 Console.WriteLine($"      When Value1 → MPRL: Value2 != 0 count: {mprlRefs.Count(e => e.Value2 != 0)} / {mprlRefs.Count}");
                 Console.WriteLine($"      When Value1 → MSVT: Value2 != 0 count: {msvtRefs.Count(e => e.Value2 != 0)} / {msvtRefs.Count}");
+                
+                // Decode Value2 high byte - check if it correlates with floor level
+                Console.WriteLine("\n    === Value2 High Byte vs MPRL Floor Level ===");
+                var v2FloorCorr = mprlRefs
+                    .Where(e => e.Value1 < pm4.PositionRefs.Count)
+                    .GroupBy(e => (HiByte: (int)(e.Value2 >> 8), Floor: pm4.PositionRefs[e.Value1].Unknown0x14))
+                    .OrderByDescending(g => g.Count())
+                    .Take(10);
+                
+                foreach (var g in v2FloorCorr)
+                {
+                    Console.WriteLine($"      V2 HiByte=0x{g.Key.HiByte:X2}, Floor={g.Key.Floor}: {g.Count()} entries");
+                }
                 
                 // Sample entries with common Value2 patterns
                 Console.WriteLine("\n    Sample entries by Value2 type:");
@@ -1122,6 +1764,69 @@ class Program
                 {
                     float angle = 360.0f * e.Unknown0x04 / 65536.0f;
                     Console.WriteLine($"    Pos=({e.PositionX:F1}, {e.PositionY:F1}, {e.PositionZ:F1}), Unk04={e.Unknown0x04} ({angle:F1}°), Floor={e.Unknown0x14}");
+                }
+                
+                // === 0x8000 FLAG INVESTIGATION ===
+                Console.WriteLine("\n=== 0x8000 Flag Investigation ===");
+                
+                // MPRL Unknown0x06
+                var mprlUnk06 = pm4.PositionRefs.GroupBy(e => e.Unknown0x06).OrderByDescending(g => g.Count());
+                Console.WriteLine("  MPRL.Unknown0x06 distribution:");
+                foreach (var g in mprlUnk06)
+                {
+                    Console.WriteLine($"    0x{g.Key:X4}: {g.Count()} entries ({100.0 * g.Count() / pm4.PositionRefs.Count:F1}%)");
+                }
+                
+                // MSLK SystemFlag
+                var mslkSysFlag = pm4.LinkEntries.GroupBy(e => e.SystemFlag).OrderByDescending(g => g.Count());
+                Console.WriteLine("\n  MSLK.SystemFlag distribution:");
+                foreach (var g in mslkSysFlag)
+                {
+                    Console.WriteLine($"    0x{g.Key:X4}: {g.Count()} entries ({100.0 * g.Count() / pm4.LinkEntries.Count:F1}%)");
+                }
+                
+                // Are they always the same?
+                bool allMprl8000 = pm4.PositionRefs.All(e => e.Unknown0x06 == 0x8000);
+                bool allMslk8000 = pm4.LinkEntries.All(e => e.SystemFlag == 0x8000);
+                Console.WriteLine($"\n  All MPRL Unknown0x06 == 0x8000? {allMprl8000}");
+                Console.WriteLine($"  All MSLK SystemFlag == 0x8000? {allMslk8000}");
+                
+                // === MSLK LINK_ID BYTES INVESTIGATION ===
+                Console.WriteLine("\n=== MSLK LinkId[4] Bytes Investigation ===");
+                
+                // Check if link_id is all zeros
+                int allZeros = pm4.LinkEntries.Count(e => e.LinkId == 0);
+                Console.WriteLine($"  All zeros: {allZeros} / {pm4.LinkEntries.Count} ({100.0 * allZeros / pm4.LinkEntries.Count:F1}%)");
+                
+                // Distribution of non-zero patterns
+                var linkIdPatterns = pm4.LinkEntries
+                    .GroupBy(e => e.LinkId)
+                    .OrderByDescending(g => g.Count())
+                    .Take(10);
+                Console.WriteLine("\n  Top LinkId patterns:");
+                foreach (var g in linkIdPatterns)
+                {
+                    byte[] bytes = BitConverter.GetBytes(g.Key);
+                    Console.WriteLine($"    0x{g.Key:X8} [{bytes[0]:X2} {bytes[1]:X2} {bytes[2]:X2} {bytes[3]:X2}]: {g.Count()} entries");
+                }
+                
+                // Check byte-by-byte
+                Console.WriteLine("\n  Byte analysis:");
+                for (int b = 0; b < 4; b++)
+                {
+                    int shift = b * 8;
+                    var byteVals = pm4.LinkEntries.Select(e => (byte)((e.LinkId >> shift) & 0xFF)).Distinct().Count();
+                    int nonZero = pm4.LinkEntries.Count(e => ((e.LinkId >> shift) & 0xFF) != 0);
+                    Console.WriteLine($"    Byte[{b}]: {byteVals} unique values, {nonZero} non-zero ({100.0 * nonZero / pm4.LinkEntries.Count:F1}%)");
+                }
+                
+                // Sample non-zero link_id entries
+                var nonZeroLinkId = pm4.LinkEntries.Where(e => e.LinkId != 0).Take(5);
+                Console.WriteLine("\n  Sample non-zero LinkId entries:");
+                foreach (var e in nonZeroLinkId)
+                {
+                    byte[] bytes = BitConverter.GetBytes(e.LinkId);
+                    Console.WriteLine($"    Type={e.TypeFlags}, Floor={e.Subtype}, GroupId=0x{e.GroupObjectId:X}, LinkId=0x{e.LinkId:X8} [{bytes[0]:X2} {bytes[1]:X2} {bytes[2]:X2} {bytes[3]:X2}]");
                 }
                 
                 // MSCN Scene Nodes Investigation
