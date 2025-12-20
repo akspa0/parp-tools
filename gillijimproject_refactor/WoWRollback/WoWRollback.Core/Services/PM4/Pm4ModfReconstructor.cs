@@ -778,15 +778,15 @@ public sealed class Pm4ModfReconstructor
             var mddf = new MddfEntry(
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
-                Position: ServerToAdtPosition(transform.Position),
+                Position: ServerToAdtPosition(transform.Position),  // Use original position (tile swap should handle placement)
                 Rotation: new Vector3(transform.Rotation.Y, transform.Rotation.Z, transform.Rotation.X), // Map Pitch->RotX, Yaw->RotY, Roll->RotZ
                 Scale: scaleFixed,
                 Flags: 0,
                 M2Path: bestMatch.M2Path,
                 Ck24: pm4Obj.Ck24,
                 MatchConfidence: transform.MatchConfidence,
-                TileX: pm4Obj.TileX,
-                TileY: pm4Obj.TileY);
+                TileX: pm4Obj.TileX,  // Original - no swap
+                TileY: pm4Obj.TileY); // Original - no swap
 
             mddfEntries.Add(mddf);
             Console.WriteLine($"  {pm4Obj.Ck24} -> {bestMatch.FileName} ({transform.MatchConfidence:P0}, Scale: {transform.Scale:F2})");

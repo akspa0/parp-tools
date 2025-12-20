@@ -521,8 +521,8 @@ namespace WoWRollback.PM4Module
                     M2Path: debugM2Path,
                     Ck24: $"debug_{i:X6}",
                     MatchConfidence: 1.0f,  // Debug M2s are 100% "matched" (we made them)
-                    TileX: tileX,
-                    TileY: tileY
+                    TileX: tileY,  // SWAP: M2 bucket tiles appear swapped in PM4 vs WMOs
+                    TileY: tileX   // SWAP: M2 bucket tiles appear swapped in PM4 vs WMOs
                 ));
             }
             Console.WriteLine($"[INFO] Added {debugM2Entries.Count} debug M2 placements to MDDF injection queue");
@@ -535,7 +535,7 @@ namespace WoWRollback.PM4Module
                 foreach (var (m2Path, centroid, tileX, tileY) in debugM2Entries)
                 {
                     const float HalfMap = 533.33333f * 32f;
-                    sw.WriteLine($"{m2Path},{tileX},{tileY},{HalfMap - centroid.Y:F2},{centroid.Z:F2},{HalfMap - centroid.X:F2},{debugM2NameIdStart + debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))},{debugM2UniqueIdBase + (uint)debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))}");
+                    sw.WriteLine($"{m2Path},{tileY},{tileX},{HalfMap - centroid.Y:F2},{centroid.Z:F2},{HalfMap - centroid.X:F2},{debugM2NameIdStart + debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))},{debugM2UniqueIdBase + (uint)debugM2Entries.IndexOf((m2Path, centroid, tileX, tileY))}");  // SWAP tileX/tileY in CSV output
                 }
             }
             Console.WriteLine($"[INFO] Debug M2 placements exported to: {debugM2CsvPath}");
@@ -1495,6 +1495,18 @@ namespace WoWRollback.PM4Module
                             
                             // Compute stats for the cluster
                             var stats = matcher.ComputeStats(cluster.Vertices);
+                            
+                            // DEBUG: Log M2 centroid coordinates to understand tile mapping
+                            const float TileSize = 533.33333f;
+                            int computedTileX = Math.Clamp((int)(32 - (cluster.Centroid.X / TileSize)), 0, 63);
+                            int computedTileY = Math.Clamp((int)(32 - (cluster.Centroid.Y / TileSize)), 0, 63);
+                            
+                            if (computedTileX != tileX || computedTileY != tileY)
+                            {
+                                Console.WriteLine($"[DEBUG M2] {candidateId} raw centroid=({cluster.Centroid.X:F1},{cluster.Centroid.Y:F1},{cluster.Centroid.Z:F1}) computed=({computedTileX},{computedTileY}) vs filename=({tileX},{tileY})");
+                            }
+                            
+                            // Use filename tiles (not computed) since WMO works with filename tiles
                             objects.Add(new Pm4ModfReconstructor.Pm4Object(candidateId, pm4Path, tileX, tileY, stats));
                         }
                         
