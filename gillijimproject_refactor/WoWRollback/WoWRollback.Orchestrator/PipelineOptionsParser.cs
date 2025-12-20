@@ -103,6 +103,10 @@ internal static class PipelineOptionsParser
         parsed.TryGetValue("noggit-client-path", out var noggitClientPathRaw);
         parsed.TryGetValue("area-overrides", out var areaOverrides);
         parsed.TryGetValue("mpq-path", out var mpqPath);
+        parsed.TryGetValue("minimap-root", out var minimapRoot);
+        parsed.TryGetValue("mpq-locales", out var mpqLocales);
+        parsed.TryGetValue("viewer-label", out var viewerLabel);
+        parsed.TryGetValue("viewer-assets", out var viewerAssetsPath);
         var noggitClientPath = !string.IsNullOrWhiteSpace(noggitClientPathRaw)
             ? noggitClientPathRaw
             : DefaultNoggitClientPath;
@@ -136,7 +140,11 @@ internal static class PipelineOptionsParser
             Serve: flags.Contains("serve"),
             Port: port,
             Verbose: flags.Contains("verbose"),
-            MpqPath: mpqPath);
+            MpqPath: mpqPath,
+            MinimapRoot: minimapRoot,
+            MpqLocales: mpqLocales,
+            ViewerLabel: viewerLabel,
+            ViewerAssetsPath: viewerAssetsPath);
 
         return true;
     }

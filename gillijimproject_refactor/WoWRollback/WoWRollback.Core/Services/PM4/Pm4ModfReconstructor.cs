@@ -439,218 +439,65 @@ public sealed class Pm4ModfReconstructor
 
     /// <summary>
     /// Normalize PM4 object coordinates to standard WoW global coordinates.
-    /// Handles Local->Global conversion and Y/Z axis swapping if detected.
+    /// Handles Local->Global conversion by mapping PM4 Global (Corner-Relative, Inverted-X) to WoW Global (Center-Relative).
     /// </summary>
     private List<Pm4Object> NormalizeCoordinates(List<Pm4Object> objects)
     {
-        Console.WriteLine("[INFO] Normalizing coordinates...");
+        Console.WriteLine("[INFO] Normalizing coordinates: PM4 Global -> WoW Global...");
         var normalized = new List<Pm4Object>();
-        const float TileSize = 533.33333f;
+        const float CenterOffset = 17066.6666f; // 32 * 533.33333f
         
         foreach (var obj in objects)
         {
-            // GeometryStats uses Centroid as the "Position" of the object relative to its vertices.
-            // BoundsMin/Max are also available.
-            // For PM4 matching, we assume the object's origin is its Centroid or we calculate it.
-            // The previous code accessed obj.Stats.Position, but GeometryStats has 'Centroid'.
-            // However, we want to shift the *entire geometry*.
+
+
+            // PM4FacesTool output is generally Z-Up (X, Y, Z_Height) but with some transforms applied.
+            // Specifically, X is flipped (-X) and coordinates are relative to map corner (0..34133 scale).
             
-            // The Stats object assumes the vertices are what they are. 
-            // NormalizeCoordinates is intended to SHIFT the vertices (conceptually) by updating the Stats.
-            
-            var pos = obj.Stats.Centroid; // Use Centroid as the position guide
+            var pos = obj.Stats.Centroid;
             var boundsMin = obj.Stats.BoundsMin;
             var boundsMax = obj.Stats.BoundsMax;
-
-            // Recast usually outputs Y-Up (X, Height, Z).
-            // WoW uses Z-Up (X, Y, Z_height).
-            // Check if Y is likely height (small range, near 0 or typical terrain height) 
-            // and Z is large (global coord).
             
-            // Expected Global Origin for this tile (Top-Left corner of tile in WoW coords)
-            // WoW Coords: X (North) decreases? No.
-            // Tile (0,0) is at X=32*533, Y=32*533 (Top-Left of map).
-            // Tile indices increase as X decreases and Y decreases in WoW coords.
-            // X_global = (32 - TileX) * TileSize
-            // Y_global = (32 - TileY) * TileSize
-            // NOTE: "Y" here is typically WoW's "Y" (West/East axis).
+            // Formula derived:
+            // WoW_X = CenterOffset + Input_X (Input X is negative due to flip, so this subtracts magnitude)
+            // WoW_Y = CenterOffset - Input_Y
+            // WoW_Z = Input_Z (Height)
             
-            // Since we suspect Y/Z swap in input:
-            // Input X = North/South local or global
-            // Input Y = Height local or global
-            // Input Z = East/West local or global
-
-            // Let's assume input is Y-Up (Recast standard):
-            // InV.X ~ WoW.X
-            // InV.Y ~ WoW.Z (Height)
-            // InV.Z ~ WoW.Y
-
-            // Calculate expected tile bounds in "Global WoW Space" (X, Y horizontal)
-            float expectedMaxX = (32 - obj.TileX) * TileSize;
-            float expectedMinX = expectedMaxX - TileSize;
-            float expectedMaxY = (32 - obj.TileY) * TileSize;
-            float expectedMinY = expectedMaxY - TileSize;
-
-            // Strategy: Try interpreting input as Local vs Global and Y-Up vs Z-Up.
-            // We want the interpretation that puts the object INSIDE the expected tile bounds.
-
-            // Case A: Input is Local, Y-Up
-            // NewX = ExpectedMinX + InV.X (inverted? Recast usually +X)
-            // NewY = ExpectedMinY + InV.Z
-            // NewZ = InV.Y
-            // Check: Does NewX fall in [MinX, MaxX]?
-
-            // However, user data showed pos_z = 36472.
-            // Tile 15 => ExpectedX ~ 9066.
-            // Tile 37 => ExpectedY ~ -2666.
+            // We use 533.33333f * 32 as the center offset.
             
-            // If pos_z (36472) is Global... it's huge. 36472 > 17066.
-            // Maybe it's measured from the CORNER (0 to 34133)?
-            // Max map width = 64 * 533.333 = 34133.33.
-            // 36472 is slighty outside max map width? Or maybe borders + margin.
-            // 36472 - 34133 = 2339.
+            float finalX = CenterOffset + pos.X;
+            float finalY = CenterOffset - pos.Y;
+            float finalZ = pos.Z; 
             
-            // If the input coords are "Global from Corner (0,0)":
-            // WoW (0,0) is at map center.
-            // So: WoW_Coord = Corner_Coord - 17066.666.
-            // Let's test this hypothesis.
+            var newPos = new Vector3(finalX, finalY, finalZ);
             
-            // Input 36472 (Z). 
-            // 36472 - 17066 = 19406 (Still outside 17066).
-            // Maybe inverted? 17066 - 36472 = -19406.
-            
-            // Let's try "Local" logic first, provided 0..533 range.
-            // If InV.X is small (0..533) and InV.Z is small...
+            // Transform Bounds:
 
-            float finalX = pos.X;
-            float finalY = pos.Z; // Swap to Z-Up (WoW Y)
-            float finalZ = pos.Y; // Swap to Z-Up (WoW Z height)
-
-            bool isLocal = Math.Abs(pos.X) < 1000 && Math.Abs(pos.Z) < 1000; // heuristic
-
-            if (isLocal)
-            {
-                // Uninvert X axis for Recast->WoW? 
-                // Typically: WoW X = (32 - TileX) * TileSize - LocalX
-                // OR WoW X = MaxX - LocalX
-                // Let's assume standard top-left origin for tile.
-                // GlobalX = (32 - obj.TileX) * TileSize - pos.X; // Inverted X in tile?
-                // GlobalY = (32 - obj.TileY) * TileSize - pos.Z; 
-                
-                // Let's try simple offset from Min
-                // GlobalX = expectedMinX + pos.X
-                // GlobalY = expectedMinY + pos.Z
-                
-                // We'll stick to a simple translation to align center-to-center if unsure, 
-                // but corner-based is standard.
-                finalX = expectedMinX + pos.X; // Recast usually (0,0) to (533,533)
-                finalY = expectedMinY + pos.Z; 
-            }
-            else
-            {
-                // Global coord assumption.
-                // If it's 36472, it needs specific shifting.
-                // Auto-detect shift based on Tile 15/37 example.
-                // Tile 15 -> 9066.
-                // Tile 37 -> -2666.
-                
-                // If we assume the object is correctly placed in its tile:
-                // ShiftX = ExpectedCenter.X - Input.X
-                // ShiftY = ExpectedCenter.Y - Input.Z (swapped)
-                
-                // We apply this "Center-Snap" logic to FORCE it into the tile.
-                // This assumes the PM4 geometry is structurally correct relative to itself,
-                // just offset globally.
-                
-                float centerX = (expectedMinX + expectedMaxX) / 2f;
-                float centerY = (expectedMinY + expectedMaxY) / 2f;
-                
-                // Heuristic: If we are WAY off (> 2000 units), snap to center.
-                // If we are close, leave it (maybe spanning tiles).
-                
-                if (Math.Abs(finalX - centerX) > 2000)
-                {
-                    // Calculate delta
-                    // Wait, if it's 36472, and we want 9066.
-                    // Delta = 9066 - 36472 = -27406.
-                    // But maybe 36472 is from 0?
-                    // 32*533 = 17066. 17066 - 9066 = 8000.
-                    // This is guessing.
-                    
-                    // SAFE BET: Use "Tile Local" logic extended for large coords?
-                    // No.
-                    
-                    // USER REQUEST: Match based on tile location.
-                    // "Normalize coordinates ... so placement and bounds are calculated perfectly"
-                    
-                    // If we treat the Input Position as RELATIVE to (0,0) of the map corner?
-                    // Or simply: Calculate offset required to put Object Center at Tile Center,
-                    // calculate that offset for ALL objects in tile, take median, apply.
-                    
-                    // Better: Just check if it's roughly "Recast Global" (0..34133).
-                    // Convert 0..34133 to 17066..-17066 (North/West positive? WoW X is North+, Y is West+)
-                    // Center is 0,0.
-                    // Corner (0,0) usually maps to MaxX, MaxY (17066, 17066).
-                    // Corner (34133, 34133) maps to MinX, MinY (-17066, -17066).
-                    
-                    // Transform:
-                    // WoW = 17066.66 - Recast
-                    
-                    // Test 36472:
-                    // 17066 - 36472 = -19405. 
-                    // -19405 matches Tile 68. (32 - (-19405/533) = 32 + 36 = 68).
-                    // Still invalid!
-                    
-                    // Re-read user: "pm4's are 00_00 through 63_63".
-                    // This implies the PM4 coordinates COVER the whole 64x64 grid.
-                    // 64 tiles * 533 = 34133.
-                    // If coord is 36472, it's outside the 64x64 grid by ~2000 units (4 tiles).
-                    // Maybe margin?
-                    
-                    // Let's Apply the "Center Snap" based on Tile ID.
-                    // We assume the object belongs in the center of its tile.
-                    // But exact position matters.
-                    // We need the RELATIVE offset from tile center.
-                    // If Input is Global, `Input % 533` might be the local offset?
-                    // 36472 % 533.33 = 205.
-                    // So local pos is 205.
-                    // Global = ExpectedMin + 205.
-                    
-                    // This seems the most robust "Normalization".
-                    // Discard the "Macro" coordinate, keep the "Micro" (Modulo), and re-base onto Tile.
-                    
-                    float localX = pos.X % TileSize;
-                    if (localX < 0) localX += TileSize;
-                    
-                    float localY = pos.Z % TileSize; // Swap Z
-                    if (localY < 0) localY += TileSize;
-                    
-                    // RECAST usually puts (0,0) at MinX, MinZ of the tile logic?
-                    // Or MaxX?
-                    // Let's assume Min-based.
-                    
-                    finalX = expectedMinX + localX;
-                    finalY = expectedMinY + localY;
-                }
-            }
+            // X axis: X' = C + X (Preserves direction if X was -Recast)
+            // Y axis: Y' = C - Y (Inverts direction)
             
-            // Reconstruct Transform
-            var newPos = new Vector3(finalX, finalY, finalZ); // X, Y(West), Z(Height)
+            // For Y, Min becomes Max and Max becomes Min.
             
-            // Shift Bounds (same delta)
-            // Just re-center bounds around newPos, assuming the size is correct but rotated? 
-            // Actually, we just swapped Y and Z.
-            var size = boundsMax - boundsMin;
-            // Swizzle size: Input Y->Height(WoW Z), Input Z->West(WoW Y)
-            var newSize = new Vector3(size.X, size.Z, size.Y);
+            var newBoundsMin = new Vector3(
+                CenterOffset + boundsMin.X,
+                CenterOffset - boundsMax.Y,
+                boundsMin.Z
+            );
             
-            var newBoundsMin = newPos - (newSize / 2);
-            var newBoundsMax = newPos + (newSize / 2); // approx
+            var newBoundsMax = new Vector3(
+                CenterOffset + boundsMax.X,
+                CenterOffset - boundsMin.Y,
+                boundsMax.Z
+            );
+            
+            // Ensure Min < Max after inversion
+            var finalMin = Vector3.Min(newBoundsMin, newBoundsMax);
+            var finalMax = Vector3.Max(newBoundsMin, newBoundsMax);
             
             var newStats = obj.Stats with { 
-                Centroid = newPos, // Update Centroid instead of Position
-                BoundsMin = newBoundsMin, 
-                BoundsMax = newBoundsMax
+                Centroid = newPos, 
+                BoundsMin = finalMin, 
+                BoundsMax = finalMax
             };
             
             normalized.Add(obj with { Stats = newStats });
@@ -742,10 +589,11 @@ public sealed class Pm4ModfReconstructor
     public ReconstructionResult ReconstructModf(
         string pm4FacesOutputDir, 
         List<WmoReference> wmoLibrary,
-        float minConfidence = 0.7f)
+        float minConfidence = 0.7f,
+        uint startingUniqueId = 66_000_000)
     {
         var pm4Objects = LoadPm4Objects(pm4FacesOutputDir);
-        return ReconstructModf(pm4Objects, wmoLibrary, minConfidence);
+        return ReconstructModf(pm4Objects, wmoLibrary, minConfidence, startingUniqueId);
     }
 
     /// <summary>
@@ -754,7 +602,8 @@ public sealed class Pm4ModfReconstructor
     public ReconstructionResult ReconstructModf(
         List<Pm4Object> pm4Objects, 
         List<WmoReference> wmoLibrary,
-        float minConfidence = 0.7f)
+        float minConfidence = 0.7f,
+        uint startingUniqueId = 66_000_000)
     {
         var modfEntries = new List<ModfEntry>();
         var wmoNames = new List<string>();
@@ -762,8 +611,7 @@ public sealed class Pm4ModfReconstructor
         var unmatchedObjects = new List<string>();
         var matchCounts = new Dictionary<string, int>();
 
-        const uint UniqueIdBase = 66_000_000;
-        uint nextUniqueId = UniqueIdBase;
+        uint nextUniqueId = startingUniqueId;
 
         Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {wmoLibrary.Count} WMOs...\n");
 
@@ -863,7 +711,8 @@ public sealed class Pm4ModfReconstructor
     public MddfReconstructionResult ReconstructMddf(
         List<Pm4Object> pm4Objects, 
         List<M2Reference> m2Library,
-        float minConfidence = 0.7f)
+        float minConfidence = 0.7f,
+        uint startingUniqueId = 11_000_000)
     {
         var mddfEntries = new List<MddfEntry>();
         var m2Names = new List<string>();
@@ -871,8 +720,7 @@ public sealed class Pm4ModfReconstructor
         var unmatchedObjects = new List<string>();
         var matchCounts = new Dictionary<string, int>();
 
-        const uint UniqueIdBase = 11_000_000; // Distinct from WMO base
-        uint nextUniqueId = UniqueIdBase;
+        uint nextUniqueId = startingUniqueId; // Distinct from WMO base
 
         Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {m2Library.Count} M2s...\n");
 
@@ -1081,6 +929,11 @@ public sealed class Pm4ModfReconstructor
 
         Console.WriteLine($"[INFO] Exported {result.WmoNames.Count} WMO names to {outputPath}");
     }
+
+    /// <summary>
+    /// Export MWMO string table (Alias for ExportMwmoNames to match CLI).
+    /// </summary>
+    public void ExportMwmo(ReconstructionResult result, string outputPath) => ExportMwmoNames(result, outputPath);
 
     /// <summary>
     /// Export all match candidates to CSV for detailed analysis.

@@ -6237,7 +6237,7 @@ internal static class Program
         Console.WriteLine($"Client: {clientPath}");
         Console.WriteLine();
 
-        var extractor = new WmoWalkableSurfaceExtractor();
+        // WmoWalkableSurfaceExtractor methods are static
         WmoWalkableSurfaceExtractor.WmoWalkableData data;
 
         // If client-path provided, load from MPQ
@@ -6291,18 +6291,18 @@ internal static class Program
                 return ms.ToArray();
             }
 
-            data = extractor.ExtractFromBytes(rootData, wmoPath, LoadGroup);
+            data = WmoWalkableSurfaceExtractor.ExtractFromBytes(rootData, wmoPath, LoadGroup);
         }
         else if (File.Exists(wmoPath))
         {
             // Load from local file
             if (v14)
             {
-                data = extractor.ExtractFromWmoV14(wmoPath);
+                data = WmoWalkableSurfaceExtractor.ExtractFromWmoV14(wmoPath);
             }
             else
             {
-                data = extractor.ExtractFromWmoV17(wmoPath);
+                data = WmoWalkableSurfaceExtractor.ExtractFromWmoV17(wmoPath);
             }
         }
         else
@@ -6334,15 +6334,15 @@ internal static class Program
         // Export based on mode
         if (exportAll)
         {
-            extractor.ExportAllToObj(data, outPath);
+            WmoWalkableSurfaceExtractor.ExportAllToObj(data, outPath);
         }
         else if (exportFloors)
         {
-            extractor.ExportWalkableFloorsToObj(data, outPath);
+            WmoWalkableSurfaceExtractor.ExportWalkableFloorsToObj(data, outPath);
         }
         else if (data.WalkableTriangles.Count > 0)
         {
-            extractor.ExportToObj(data, outPath);
+            WmoWalkableSurfaceExtractor.ExportToObj(data, outPath);
         }
         else
         {
@@ -6500,7 +6500,7 @@ internal static class Program
         var reconstructor = new Pm4ModfReconstructor();
 
         // Build WMO library
-        var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir);
+        var wmoLibrary = reconstructor.BuildWmoLibrary(wmoDir, "", wmoDir);
         if (wmoLibrary.Count == 0)
         {
             Console.Error.WriteLine("[ERROR] No WMOs found in library");
@@ -6667,7 +6667,7 @@ internal static class Program
             Console.WriteLine($"[INFO] Limited to {limit} WMOs");
         }
 
-        var extractor = new WmoWalkableSurfaceExtractor();
+        // WmoWalkableSurfaceExtractor methods are static
         int success = 0;
         int failed = 0;
 
@@ -6718,7 +6718,7 @@ internal static class Program
                 };
 
                 // Extract collision geometry
-                var result = extractor.ExtractFromBytes(rootBytes, wmoPath, groupLoader);
+                var result = WmoWalkableSurfaceExtractor.ExtractFromBytes(rootBytes, wmoPath, groupLoader);
                 
                 if (result.AllTriangles.Count == 0)
                 {
@@ -6728,7 +6728,7 @@ internal static class Program
                 }
                 
                 Directory.CreateDirectory(wmoOutDir);
-                extractor.ExportPerFlagPerGroup(result, wmoOutDir);
+                WmoWalkableSurfaceExtractor.ExportPerFlag(result, wmoOutDir);
 
                 Console.WriteLine($" OK ({result.AllTriangles.Count} faces, {result.TrianglesByGroup.Count} groups)");
                 success++;
@@ -7057,7 +7057,9 @@ internal static class Program
                 Scale: 1024,
                 WmoPath: parts[1],
                 Ck24: parts[0],
-                MatchConfidence: float.Parse(parts[11])
+                MatchConfidence: float.Parse(parts[11]),
+                TileX: 0,
+                TileY: 0
             );
 
             modfEntries.Add(entry);
@@ -7076,7 +7078,8 @@ internal static class Program
             modfEntries,
             wmoNames,
             new List<string>(),
-            new Dictionary<string, int>()
+            new Dictionary<string, int>(),
+            new List<Pm4ModfReconstructor.MatchCandidate>()
         );
 
         // Export per-tile

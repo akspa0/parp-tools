@@ -256,6 +256,9 @@ namespace WoWRollback.PM4Module
             List<Pm4ModfReconstructor.MddfEntry> mddfEntries = new();
             List<string> m2Names = new();
             
+            // Global UniqueID counter to prevent duplicates across WMOs and M2s
+            uint globalNextUniqueId = 75_000_000; // Start at 75M to avoid conflicts with existing IDs
+            
             // Check for existing MODF CSVs with actual data (more than just headers)
             bool hasExistingModf = File.Exists(modfCsvPath) && new FileInfo(modfCsvPath).Length > 200;
             bool hasExistingMwmo = File.Exists(mwmoPath) && new FileInfo(mwmoPath).Length > 50;
@@ -300,7 +303,8 @@ namespace WoWRollback.PM4Module
                     {
                         // Step 3: Match PM4 objects to WMOs and reconstruct MODF
                         Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
-                        var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f);
+                        var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f, globalNextUniqueId);
+                        globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
                         
                         // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
                         // so the result positions are already in correct coordinate space
@@ -343,7 +347,8 @@ namespace WoWRollback.PM4Module
                     if (m2Candidates.Count > 0 && m2Library.Count > 0)
                     {
                         Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
-                        var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f);
+                        var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f, globalNextUniqueId);
+                        globalNextUniqueId += (uint)mddfResult.MddfEntries.Count; // Reserve IDs for M2s
                         mddfEntries = mddfResult.MddfEntries;
                         m2Names = mddfResult.M2Names;
                         
@@ -776,7 +781,6 @@ namespace WoWRollback.PM4Module
             // GLOBAL UniqueId tracking: IDs must be unique across ALL tiles, not just per-tile
             // Also track proximity to existing placements to avoid duplicates
             var modfByTile = new Dictionary<(int x, int y), List<AdtPatcher.ModfEntry>>();
-            uint nextAvailableUniqueId = 75_000_000; // Start at 75M to be safe from Retail/Cata ranges (60M) and keep original data intact
             int reassignedCount = 0;
             int proximitySkipCount = 0;
             const float PROXIMITY_THRESHOLD = 5.0f; // Skip PM4 entries within 5 units of existing
@@ -817,9 +821,9 @@ namespace WoWRollback.PM4Module
                 if (globalUsedUniqueIds.Contains(uniqueId))
                 {
                     // Find next available unique ID
-                    while (globalUsedUniqueIds.Contains(nextAvailableUniqueId))
-                        nextAvailableUniqueId++;
-                    uniqueId = nextAvailableUniqueId++;
+                    while (globalUsedUniqueIds.Contains(globalNextUniqueId))
+                        globalNextUniqueId++;
+                    uniqueId = globalNextUniqueId++;
                     reassignedCount++;
                 }
                 globalUsedUniqueIds.Add(uniqueId);
@@ -887,7 +891,7 @@ namespace WoWRollback.PM4Module
 
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
-                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries, ref nextAvailableUniqueId);
+                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries, ref globalNextUniqueId);
                     patchedTiles.Add((tx, ty, Path.GetFileName(file), tileEntries.Count, hasExistingTileModf));
                     patchedCount++;
                     if (!hasExistingTileModf) emptyTileCount++;
@@ -931,7 +935,7 @@ namespace WoWRollback.PM4Module
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
                     var outputPath = Path.Combine(dirs.WdlPainted, Path.GetFileName(file) + ".patched");
-                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries, ref nextAvailableUniqueId);
+                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries, ref globalNextUniqueId);
                     File.Move(outputPath, file, true); // Replace original
                     wdlPatchedCount++;
                 }
@@ -959,9 +963,9 @@ namespace WoWRollback.PM4Module
                 uint uniqueId = entry.UniqueId;
                 if (globalUsedUniqueIds.Contains(uniqueId))
                 {
-                    while (globalUsedUniqueIds.Contains(nextAvailableUniqueId))
-                        nextAvailableUniqueId++;
-                    uniqueId = nextAvailableUniqueId++;
+                    while (globalUsedUniqueIds.Contains(globalNextUniqueId))
+                        globalNextUniqueId++;
+                    uniqueId = globalNextUniqueId++;
                     mddfReassignedCount++;
                 }
                 globalUsedUniqueIds.Add(uniqueId);
@@ -1012,7 +1016,7 @@ namespace WoWRollback.PM4Module
                 if (mddfByTile.TryGetValue((tx, ty), out var tileEntries) && tileEntries.Count > 0)
                 {
                     // Patch MDDF into the already-patched ADT (in place)
-                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries, ref nextAvailableUniqueId);
+                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries, ref globalNextUniqueId);
                     mddfPatchedCount++;
                 }
             }

@@ -6,6 +6,7 @@ using System.Text.Json;
 using WoWRollback.Core.Logging;
 using WoWRollback.Core.Services.Viewer;
 using WoWRollback.Mpq;
+using WoWRollback.ViewerModule;
 
 namespace WoWRollback.Orchestrator;
 

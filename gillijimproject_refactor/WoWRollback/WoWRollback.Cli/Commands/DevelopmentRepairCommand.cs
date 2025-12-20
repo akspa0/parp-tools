@@ -346,7 +346,9 @@ public static class DevelopmentRepairCommand
                     (ushort)(scale * 1024.0f),
                     wmoPath,
                     ck24,
-                    confidence
+                    confidence,
+                    0, // TileX (not loaded from minimal CSV)
+                    0  // TileY
                 ));
             }
             catch (Exception ex)
@@ -407,7 +409,7 @@ public static class DevelopmentRepairCommand
         }
 
         var library = new List<Pm4ModfReconstructor.WmoReference>();
-        var extractor = new WmoWalkableSurfaceExtractor();
+        // WmoWalkableSurfaceExtractor methods are static
         var matcher = new Pm4WmoGeometryMatcher(); // Helper to compute stats
 
         // Setup archive
@@ -439,7 +441,7 @@ public static class DevelopmentRepairCommand
                 }
 
                 byte[]? LoadGroup(string p) => src.FileExists(p) ? ReadAllBytes(src, p) : null;
-                var data = extractor.ExtractFromBytes(rootData, wmo, LoadGroup);
+                var data = WmoWalkableSurfaceExtractor.ExtractFromBytes(rootData, wmo, LoadGroup);
 
                 // We want to match against substantial geometry
                 if (data.WalkableVertices.Count < 3) continue;
@@ -450,7 +452,7 @@ public static class DevelopmentRepairCommand
                 // Add to library with REAL PATH
                 // Normalize path to backslashes for client consistency
                 var realPath = wmo.Replace('/', '\\');
-                library.Add(new Pm4ModfReconstructor.WmoReference(realPath, "", stats));
+                library.Add(new Pm4ModfReconstructor.WmoReference(realPath, stats));
 
                 processed++;
 
@@ -458,7 +460,7 @@ public static class DevelopmentRepairCommand
                 if (dumpDir != null)
                 {
                     var safeName = wmo.Replace('\\', '_').Replace('/', '_') + "_collision.obj";
-                    extractor.ExportToObj(data, Path.Combine(dumpDir, safeName));
+                    WmoWalkableSurfaceExtractor.ExportToObj(data, Path.Combine(dumpDir, safeName));
                 }
             }
             catch {}

@@ -488,12 +488,8 @@ public sealed class AdtModfInjector
     /// </summary>
     public static Vector3 ServerToAdtPosition(Vector3 serverPos)
     {
-        // Transform: worldX = serverX + extent, worldY = extent - serverY
-        const float WorldExtent = 17066.666666666668f;
-        return new Vector3(
-            serverPos.X + WorldExtent,
-            WorldExtent - serverPos.Y,
-            serverPos.Z
-        );
+        // Transform: Identity (WoW Server Coords == ADT World Coords for 3.3.5)
+        // MODF chunks use standard world coordinates.
+        return serverPos;
     }
 }

@@ -17,8 +17,13 @@ internal sealed record PipelineOptions(
     bool Serve,
     int Port,
     bool Verbose,
-    string? MpqPath)
+    string? MpqPath,
+    string? MinimapRoot,
+    string? MpqLocales,
+    string? ViewerLabel,
+    string? ViewerAssetsPath)
 {
     public bool HasLkDbcDirectory => !string.IsNullOrWhiteSpace(LkDbcDirectory);
     public bool HasMpqPath => !string.IsNullOrWhiteSpace(MpqPath);
+    public string? MpqRoot => MpqPath; // Alias for ViewerBuildStageRunner
 }
