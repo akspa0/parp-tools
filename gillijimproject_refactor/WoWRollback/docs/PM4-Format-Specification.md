@@ -531,6 +531,41 @@ var translation = pm4Center - (wmoCenter * scale);
 | Cross-Tile LinkId | **BROKEN** | Resolution failed (0%). Use CK24 ObjectID instead. |
 | MH2O serialization | Broken | SMLiquidInstance format wrong |
 | ~~Rotation Calculation~~ | **SOLVED** | Geometric Fingerprinting (Dominant Wall Angle) |
+| **MSCN→Object Link** | **UNKNOWN** | 98% of MSCN points not in MSVT - missing geometry! |
+
+---
+
+## December 2025 Breakthroughs
+
+### MSCN Unique Geometry Discovery
+
+> [!IMPORTANT]
+> **MSCN contains 98% unique geometry NOT in MSVT!**
+
+| Metric | Value |
+|--------|-------|
+| MSCN total points | 68,511 |
+| Points also in MSVT | 1,325 (1.9%) |
+| **Unique MSCN points** | **67,186 (98.1%)** |
+
+This ~35% additional geometry fills gaps in MSVT mesh - likely vertical walls and object details.
+
+### Multi-Tile Object Aggregation
+
+> [!IMPORTANT]  
+> **Aggregate PM4 files by CK24 to get complete WMO collision meshes!**
+
+| CK24 | Tiles | Result |
+|------|-------|--------|
+| 0x000000 | 291 | Complete navigation mesh |
+| 0x42CBEA | 8 | **Stormwind Harbor** ✅ |
+| 0x43A8BC | 8 | Complete WMO |
+
+**Command**: `dotnet run -- --multi-tile <directory>`
+
+### Instance Separation via Vertex Connectivity
+
+Each CK24 contains ALL instances of same object type. Use Union-Find vertex connectivity to separate individual placements for matching.
 
 ---
 

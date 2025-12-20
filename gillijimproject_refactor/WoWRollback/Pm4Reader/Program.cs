@@ -46,6 +46,11 @@ class Program
         {
             return RunMultiTileAnalysis(args[1], args.Length > 2 ? args[2] : null);
         }
+        
+        if (args[0] == "--export-mscn" && args.Length > 1)
+        {
+            return ExportMscnPoints(args[1], args.Length > 2 ? args[2] : null);
+        }
 
         string path = args[0];
         
@@ -446,6 +451,7 @@ class Program
         var allTileSurfaces = new Dictionary<string, List<MsurEntry>>();
         var allTileVertices = new Dictionary<string, List<Vector3>>();
         var allTileIndices = new Dictionary<string, List<uint>>();
+        var allTileSceneNodes = new Dictionary<string, List<Vector3>>(); // MSCN cache
         
         // Parse all tiles
         foreach (var file in pm4Files)
@@ -458,6 +464,7 @@ class Program
                 allTileSurfaces[tileName] = pm4.Surfaces;
                 allTileVertices[tileName] = pm4.MeshVertices;
                 allTileIndices[tileName] = pm4.MeshIndices;
+                allTileSceneNodes[tileName] = pm4.SceneNodes; // Cache MSCN
                 
                 // Group surfaces by CK24
                 var byCk24 = pm4.Surfaces.GroupBy(s => s.CK24);
@@ -536,12 +543,17 @@ class Program
             var allFaces = new List<int[]>();
             var vertexMap = new Dictionary<(string tile, int idx), int>();
             
+            // New: Collect MSCN points for vertical geometry
+            var allMscnPoints = new List<Vector3>();
+            var faceToMscnMap = new Dictionary<int, int>(); // Face Index -> MSCN Point Index
+            
             foreach (var (tileName, _, _, _) in tiles)
             {
                 if (!allTileSurfaces.ContainsKey(tileName)) continue;
                 var surfs = allTileSurfaces[tileName].Where(s => s.CK24 == ck24);
                 var indices = allTileIndices[tileName];
                 var verts = allTileVertices[tileName];
+                var sceneNodes = allTileSceneNodes[tileName];
                 
                 foreach (var surf in surfs)
                 {
@@ -563,7 +575,18 @@ class Program
                         }
                     }
                     if (faceIndices.Count >= 3)
+                    {
                         allFaces.Add(faceIndices.ToArray());
+                        int faceIndex = allFaces.Count - 1;
+                        
+                        // Collect linked MSCN node (vertical geometry/path node)
+                        if (surf.MdosIndex < sceneNodes.Count)
+                        {
+                            var mscn = sceneNodes[(int)surf.MdosIndex];
+                            allMscnPoints.Add(mscn);
+                            faceToMscnMap[faceIndex] = allMscnPoints.Count - 1; // 0-based index for internal storage
+                        }
+                    }
                 }
             }
             
@@ -575,26 +598,188 @@ class Program
                 var targetDir = isWmo ? wmoDir : otherDir;
                 string typeLabel = isWmo ? "WMO" : "Other";
                 
-                var objPath = Path.Combine(targetDir, $"CK24_{ck24:X6}_{tiles.Count}tiles.obj");
+                // === VERTEX CONNECTIVITY CLUSTERING: Proper instance separation ===
+                // Faces sharing vertices belong to same instance (Union-Find)
+                int[] faceParent = new int[allFaces.Count];
+                for (int i = 0; i < faceParent.Length; i++) faceParent[i] = i;
+                
+                int FindFace(int x) {
+                    if (faceParent[x] != x) faceParent[x] = FindFace(faceParent[x]);
+                    return faceParent[x];
+                }
+                void UnionFace(int a, int b) {
+                    int ra = FindFace(a), rb = FindFace(b);
+                    if (ra != rb) faceParent[ra] = rb;
+                }
+                
+                // Map vertices to faces that use them
+                var vertexToFaces = new Dictionary<int, List<int>>();
+                for (int fi = 0; fi < allFaces.Count; fi++)
+                {
+                    foreach (var vi in allFaces[fi])
+                    {
+                        if (!vertexToFaces.ContainsKey(vi))
+                            vertexToFaces[vi] = new List<int>();
+                        vertexToFaces[vi].Add(fi);
+                    }
+                }
+                
+                // Union faces that share vertices
+                foreach (var (_, faces) in vertexToFaces)
+                {
+                    for (int i = 1; i < faces.Count; i++)
+                        UnionFace(faces[0], faces[i]);
+                }
+                
+                // Group faces by root
+                var instanceGroups = new Dictionary<int, List<int>>();
+                for (int fi = 0; fi < allFaces.Count; fi++)
+                {
+                    int root = FindFace(fi);
+                    if (!instanceGroups.ContainsKey(root))
+                        instanceGroups[root] = new List<int>();
+                    instanceGroups[root].Add(fi);
+                }
+                
+                int numInstances = instanceGroups.Count;
+                
+                // Write OBJ with groups for each instance
+                var objPath = Path.Combine(targetDir, $"CK24_{ck24:X6}_{tiles.Count}tiles_{numInstances}inst.obj");
                 using var sw = new StreamWriter(objPath);
                 sw.WriteLine($"# Multi-tile CK24 0x{ck24:X6} ({typeLabel})");
                 sw.WriteLine($"# Type byte: 0x{typeByte:X2}");
                 sw.WriteLine($"# Tiles: {tiles.Count}");
-                sw.WriteLine($"# Vertices: {allVerts.Count}");
+                sw.WriteLine($"# Vertices: {allVerts.Count} (Mesh) + {allMscnPoints.Count} (MSCN)");
                 sw.WriteLine($"# Faces: {allFaces.Count}");
+                sw.WriteLine($"# Instances (spatial clusters): {numInstances}");
                 sw.WriteLine();
+                
+                // Write Mesh Vertices
                 foreach (var v in allVerts)
                     sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
-                sw.WriteLine();
-                foreach (var f in allFaces)
-                    sw.WriteLine($"f {string.Join(" ", f)}");
+                    
+                // Write MSCN Vertices (appended to vertex list)
+                foreach (var v in allMscnPoints)
+                    sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4} # MSCN");
                 
-                Console.WriteLine($"  [{typeLabel}] CK24_{ck24:X6}_{tiles.Count}tiles.obj ({allVerts.Count} verts)");
+                int mscnBaseIndex = allVerts.Count + 1; // OBJ indices are 1-based
+                
+                sw.WriteLine();
+                
+                // Write items grouped by instance
+                int grpNum = 0;
+                foreach (var grp in instanceGroups.Values.OrderByDescending(g => g.Count))
+                {
+                    sw.WriteLine($"g instance_{grpNum++}");
+                    
+                    // Faces
+                    foreach (var fi in grp)
+                        sw.WriteLine($"f {string.Join(" ", allFaces[fi])}");
+                        
+                    // MSCN Points
+                    var grpPoints = new HashSet<int>();
+                    foreach(var fi in grp)
+                    {
+                        if(faceToMscnMap.TryGetValue(fi, out int mscnLocalIdx))
+                            grpPoints.Add(mscnLocalIdx);
+                    }
+                    
+                    if (grpPoints.Count > 0)
+                    {
+                        sw.WriteLine($"# MSCN Points: {grpPoints.Count}");
+                        foreach(var pi in grpPoints)
+                            sw.WriteLine($"p {mscnBaseIndex + pi}");
+                    }
+                }
+                
+                Console.WriteLine($"  [{typeLabel}] CK24_{ck24:X6} ({allVerts.Count} verts, {numInstances} instances)");
                 exported++;
             }
         }
         
         Console.WriteLine($"\nExported {exported} multi-tile OBJ files to {outputDir}");
+        return 0;
+    }
+    
+    static int ExportMscnPoints(string pm4Path, string? outputDir)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        outputDir ??= Path.Combine(Path.GetTempPath(), "pm4_mscn");
+        Directory.CreateDirectory(outputDir);
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MSCN Export from {baseName} ===");
+        Console.WriteLine($"MSCN points: {pm4.SceneNodes.Count}");
+        Console.WriteLine($"MSVT vertices: {pm4.MeshVertices.Count}");
+        
+        // Build MSVT lookup set
+        var msvtSet = new HashSet<(float, float, float)>();
+        foreach (var v in pm4.MeshVertices)
+            msvtSet.Add((MathF.Round(v.X, 1), MathF.Round(v.Y, 1), MathF.Round(v.Z, 1)));
+        
+        // Separate MSCN into unique and shared
+        var uniqueMscn = new List<Vector3>();
+        var sharedMscn = new List<Vector3>();
+        
+        foreach (var n in pm4.SceneNodes)
+        {
+            if (msvtSet.Contains((MathF.Round(n.X, 1), MathF.Round(n.Y, 1), MathF.Round(n.Z, 1))))
+                sharedMscn.Add(n);
+            else
+                uniqueMscn.Add(n);
+        }
+        
+        Console.WriteLine($"\nUnique MSCN (not in MSVT): {uniqueMscn.Count}");
+        Console.WriteLine($"Shared MSCN (also in MSVT): {sharedMscn.Count}");
+        
+        // Export unique MSCN as point cloud
+        var objPath = Path.Combine(outputDir, $"{baseName}_MSCN_unique.obj");
+        using (var sw = new StreamWriter(objPath))
+        {
+            sw.WriteLine($"# MSCN unique points (not in MSVT)");
+            sw.WriteLine($"# Count: {uniqueMscn.Count}");
+            sw.WriteLine();
+            foreach (var v in uniqueMscn)
+                sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+            
+            // Create point elements (p command for point cloud)
+            for (int i = 1; i <= uniqueMscn.Count; i++)
+                sw.WriteLine($"p {i}");
+        }
+        Console.WriteLine($"\nExported: {objPath}");
+        
+        // Export full MSCN
+        var allPath = Path.Combine(outputDir, $"{baseName}_MSCN_all.obj");
+        using (var sw = new StreamWriter(allPath))
+        {
+            sw.WriteLine($"# All MSCN points");
+            sw.WriteLine($"# Count: {pm4.SceneNodes.Count}");
+            sw.WriteLine();
+            foreach (var v in pm4.SceneNodes)
+                sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+        }
+        Console.WriteLine($"Exported: {allPath}");
+        
+        // Export MSVT for comparison
+        var msvtPath = Path.Combine(outputDir, $"{baseName}_MSVT_all.obj");
+        using (var sw = new StreamWriter(msvtPath))
+        {
+            sw.WriteLine($"# All MSVT vertices");
+            sw.WriteLine($"# Count: {pm4.MeshVertices.Count}");
+            sw.WriteLine();
+            foreach (var v in pm4.MeshVertices)
+                sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+        }
+        Console.WriteLine($"Exported: {msvtPath}");
+        
+        Console.WriteLine($"\nOutput directory: {outputDir}");
         return 0;
     }
     
@@ -917,6 +1102,20 @@ class Program
                     var uniqueCk24 = gk.Select(s => s.CK24).Distinct().Count();
                     var ck24Zero = gk.Count(s => s.CK24 == 0);
                     Console.WriteLine($"    GroupKey={gk.Key}: {gk.Count(),5} surfaces, {uniqueCk24} unique CK24s, CK24=0: {ck24Zero}");
+                }
+                
+                // === GroupKey vs Type Byte analysis (M2 vs WMO?) ===
+                Console.WriteLine("\n=== GroupKey vs CK24 Type Byte (M2/WMO indicator?) ===");
+                var typeByteGroups = pm4.Surfaces.Where(s => s.CK24 != 0)
+                    .GroupBy(s => (s.CK24 >> 16) & 0xFF)
+                    .OrderByDescending(g => g.Count());
+                
+                foreach (var tbg in typeByteGroups.Take(10))
+                {
+                    var groupKeyDist = tbg.GroupBy(s => s.GroupKey)
+                        .Select(g => $"GK{g.Key}={g.Count()}")
+                        .Take(3);
+                    Console.WriteLine($"  Type 0x{tbg.Key:X2}: {tbg.Count()} surfaces, GroupKeys: {string.Join(", ", groupKeyDist)}");
                 }
                 
                 // === DEEP CK24 BIT STRUCTURE ANALYSIS ===
@@ -1829,6 +2028,43 @@ class Program
                     Console.WriteLine($"    Type={e.TypeFlags}, Floor={e.Subtype}, GroupId=0x{e.GroupObjectId:X}, LinkId=0x{e.LinkId:X8} [{bytes[0]:X2} {bytes[1]:X2} {bytes[2]:X2} {bytes[3]:X2}]");
                 }
                 
+                // === MDBH/MDOS Analysis (potential MSCN index?) ===
+                Console.WriteLine("\n=== MDBH/MDOS Analysis ===");
+                if (pm4.MdbhRaw != null)
+                {
+                    Console.WriteLine($"  MDBH size: {pm4.MdbhRaw.Length} bytes");
+                    if (pm4.MdbhRaw.Length >= 4)
+                    {
+                        int mdbhValue = BitConverter.ToInt32(pm4.MdbhRaw, 0);
+                        Console.WriteLine($"  MDBH[0-3] as int32: {mdbhValue}");
+                        Console.WriteLine($"  == MSCN.Count? {mdbhValue == pm4.SceneNodes.Count}");
+                        Console.WriteLine($"  == MDOS entries? maybe...");
+                    }
+                    Console.WriteLine($"  Raw hex: {BitConverter.ToString(pm4.MdbhRaw.Take(Math.Min(16, pm4.MdbhRaw.Length)).ToArray())}");
+                }
+                else
+                    Console.WriteLine("  MDBH: NOT PRESENT");
+                
+                if (pm4.MdosRaw != null)
+                {
+                    Console.WriteLine($"  MDOS size: {pm4.MdosRaw.Length} bytes");
+                    int mdosEntrySize = 8; // Hypothesis: 8 bytes per entry
+                    int mdosCount = pm4.MdosRaw.Length / mdosEntrySize;
+                    Console.WriteLine($"  Potential entry count (÷8): {mdosCount}");
+                    
+                    // Check if any field correlates with MSCN
+                    Console.WriteLine($"  Sample entries:");
+                    for (int i = 0; i < Math.Min(5, mdosCount); i++)
+                    {
+                        int offset = i * mdosEntrySize;
+                        uint val0 = BitConverter.ToUInt32(pm4.MdosRaw, offset);
+                        uint val1 = BitConverter.ToUInt32(pm4.MdosRaw, offset + 4);
+                        Console.WriteLine($"    [{i}] 0x{val0:X8} 0x{val1:X8}");
+                    }
+                }
+                else
+                    Console.WriteLine("  MDOS: NOT PRESENT");
+                
                 // MSCN Scene Nodes Investigation
                 Console.WriteLine("\n=== MSCN Scene Nodes Investigation ===");
                 Console.WriteLine($"  Total MSCN nodes: {pm4.SceneNodes.Count}");
@@ -1865,7 +2101,53 @@ class Program
                         (n.X % tileSize < 1 || n.X % tileSize > tileSize - 1) ||
                         (n.Y % tileSize < 1 || n.Y % tileSize > tileSize - 1));
                     Console.WriteLine($"\n  Tile-edge nodes: {edgeNodes} ({100.0 * edgeNodes / pm4.SceneNodes.Count:F1}%)");
+                    
+                    // === MSCN INDEX CORRELATION CHECK ===
+                    Console.WriteLine("\n  === MSCN Index Correlation Check ===");
+                    Console.WriteLine($"  MSCN count: {pm4.SceneNodes.Count}");
+                    Console.WriteLine($"  MSVT count: {pm4.MeshVertices.Count}");
+                    Console.WriteLine($"  MSVI count: {pm4.MeshIndices.Count}");
+                    Console.WriteLine($"  MSPV count: {pm4.PathVertices.Count}");
+                    Console.WriteLine($"  MSPI count: {pm4.PathIndices.Count}");
+                    
+                    // Check if any MSUR field could index MSCN
+                    var maxMsviFirst = pm4.Surfaces.Max(s => s.MsviFirstIndex);
+                    var maxMdosIndex = pm4.Surfaces.Max(s => s.MdosIndex);
+                    Console.WriteLine($"\n  MSUR max MsviFirstIndex: {maxMsviFirst} (MSCN={pm4.SceneNodes.Count})");
+                    Console.WriteLine($"  MSUR max MdosIndex: {maxMdosIndex}");
+                    
+                    // Check if MdosIndex could be MSCN index
+                    int mdosInMscnRange = pm4.Surfaces.Count(s => s.MdosIndex < pm4.SceneNodes.Count);
+                    Console.WriteLine($"  Surfaces with MdosIndex < MSCN.Count: {mdosInMscnRange} / {pm4.Surfaces.Count}");
+                    
+                    // Check MSLK RefIndex range vs MSCN
+                    var mslkMaxRef = pm4.LinkEntries.Max(e => e.RefIndex);
+                    Console.WriteLine($"\n  MSLK max RefIndex: {mslkMaxRef}");
+                    Console.WriteLine($"  Could RefIndex index MSCN? {mslkMaxRef < pm4.SceneNodes.Count}");
+                    
+                    // Vertical vs horizontal MSCN points
+                    // Compare MSCN to MSVT - are they different point sets?
+                    var msvtSet = new HashSet<(float, float, float)>();
+                    foreach (var v in pm4.MeshVertices)
+                        msvtSet.Add((MathF.Round(v.X, 1), MathF.Round(v.Y, 1), MathF.Round(v.Z, 1)));
+                    
+                    int mscnInMsvt = 0;
+                    int mscnNotInMsvt = 0;
+                    foreach (var n in pm4.SceneNodes)
+                    {
+                        if (msvtSet.Contains((MathF.Round(n.X, 1), MathF.Round(n.Y, 1), MathF.Round(n.Z, 1))))
+                            mscnInMsvt++;
+                        else
+                            mscnNotInMsvt++;
+                    }
+                    Console.WriteLine($"\n  MSCN vs MSVT comparison:");
+                    Console.WriteLine($"    MSCN points found in MSVT: {mscnInMsvt} ({100.0*mscnInMsvt/pm4.SceneNodes.Count:F1}%)");
+                    Console.WriteLine($"    MSCN points NOT in MSVT: {mscnNotInMsvt} ({100.0*mscnNotInMsvt/pm4.SceneNodes.Count:F1}%)");
+                    Console.WriteLine($"    ⚡ If NOT in MSVT > 0, MSCN has unique geometry!");
                 }
+                
+                // Detailed Link Analysis
+                AnalyzeMdosMscnLink(pm4, Path.Combine(Path.GetDirectoryName(path), "pm4_mscn_correlation"));
             }
             
             return stats;
@@ -1909,6 +2191,73 @@ class Program
         return verts;
     }
     
+    static void AnalyzeMdosMscnLink(Pm4File pm4, string? outputDir = null)
+    {
+        Console.WriteLine("\n=== MSCN Linkage Analysis (Field14/MdosIndex) ===");
+        
+        if (outputDir != null) Directory.CreateDirectory(outputDir);
+        
+        // ... (existing uniqueness check) ...
+        var uniqueMdos = pm4.Surfaces.Select(s => s.MdosIndex).Distinct().Count();
+        Console.WriteLine($"Total Surfaces: {pm4.Surfaces.Count}");
+        Console.WriteLine($"Unique MdosIndices: {uniqueMdos}");
+        
+        // Specific check for CK24 groups
+        var groups = pm4.Surfaces
+            .Where(s => s.CK24 != 0)
+            .GroupBy(s => s.CK24)
+            .OrderByDescending(g => g.Count())
+            .Take(10); // Take top 10
+
+        foreach (var g in groups)
+        {
+            var minMdos = g.Min(s => s.MdosIndex);
+            var maxMdos = g.Max(s => s.MdosIndex);
+            var countMdos = g.Select(s => s.MdosIndex).Distinct().Count();
+            
+            Console.WriteLine($"\nCK24 0x{g.Key:X6}:");
+            Console.WriteLine($"  Surfaces: {g.Count()}");
+            Console.WriteLine($"  MdosIndex Range: {minMdos} to {maxMdos} (Span: {maxMdos - minMdos})");
+            Console.WriteLine($"  Unique Mdos: {countMdos}");
+            
+            if (minMdos < pm4.SceneNodes.Count && maxMdos < pm4.SceneNodes.Count)
+            {
+                var points = new List<Vector3>();
+                foreach(var s in g)
+                    if (s.MdosIndex < pm4.SceneNodes.Count)
+                        points.Add(pm4.SceneNodes[(int)s.MdosIndex]);
+                
+                // Bounds check
+                var boundMin = new Vector3(float.MaxValue);
+                var boundMax = new Vector3(float.MinValue);
+                foreach(var p in points) {
+                    boundMin = Vector3.Min(boundMin, p);
+                    boundMax = Vector3.Max(boundMax, p);
+                }
+                Console.WriteLine($"  Referenced MSCN Bounds: {boundMin} to {boundMax}");
+                
+                // EXPORT OBJ
+                if (outputDir != null)
+                {
+                    string filename = Path.Combine(outputDir, $"CK24_{g.Key:X6}_{g.Count()}surf_MSCN.obj");
+                    using (var sw = new StreamWriter(filename))
+                    {
+                        sw.WriteLine($"# CK24 0x{g.Key:X6} MSCN points via MdosIndex");
+                        sw.WriteLine($"# Count: {points.Count}");
+                        foreach(var p in points)
+                            sw.WriteLine($"v {p.X:F4} {p.Y:F4} {p.Z:F4}");
+                        for(int i=1; i<=points.Count; i++)
+                            sw.WriteLine($"p {i}"); // Point cloud
+                    }
+                    Console.WriteLine($"  Exported: {filename}");
+                }
+            }
+        }
+    }
+        
+
+
+    
     static (Vector3 min, Vector3 max) ComputeBounds(List<Vector3> verts)
     {
         var min = new Vector3(float.MaxValue);
@@ -1949,6 +2298,8 @@ public class Pm4File
     public List<MprrEntry> MprrEntries { get; } = new();    // MPRR
     
     public Dictionary<string, uint> ChunkSizes { get; } = new();
+    public byte[]? MdbhRaw { get; set; }   // MDBH - Destructible Building Header
+    public byte[]? MdosRaw { get; set; }   // MDOS - Destructible Object State
     
     public static Pm4File Parse(byte[] data)
     {
@@ -2011,6 +2362,16 @@ public class Pm4File
                     
                 case "MPRR":
                     ReadMprr(br, size, pm4.MprrEntries);
+                    break;
+                    
+                case "MDBH":
+                    // Destructible Building Header - raw capture for analysis
+                    pm4.MdbhRaw = br.ReadBytes((int)size);
+                    break;
+                    
+                case "MDOS":
+                    // Destructible Object State - raw capture for analysis
+                    pm4.MdosRaw = br.ReadBytes((int)size);
                     break;
             }
             
