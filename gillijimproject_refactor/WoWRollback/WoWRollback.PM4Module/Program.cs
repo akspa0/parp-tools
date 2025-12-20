@@ -74,6 +74,9 @@ if (args.Length > 0)
 
         case "reconstruct-mddf":
             return RunReconstructMddf(args.Skip(1).ToArray());
+        
+        case "pm4-pipeline-v2":
+            return RunPm4PipelineV2(args.Skip(1).ToArray());
     }
 }
 
@@ -2320,4 +2323,91 @@ static int RunReconstructMddf(string[] args)
     
     Console.WriteLine("\nMDDF reconstruction complete.");
     return 0;
+}
+
+// pm4-pipeline-v2 command - Clean PM4 to ADT pipeline using new modular architecture
+static int RunPm4PipelineV2(string[] args)
+{
+    Console.WriteLine("=== PM4 Pipeline V2 (Clean Architecture) ===\n");
+    
+    string? pm4Dir = null;
+    string? outputDir = null;
+    string? wmoLibraryPath = null;
+    string? museumAdtDir = null;
+    string? singleTile = null;
+    float sizeTolerance = 0.15f;
+    bool exportCsv = true;
+    bool dryRun = false;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Dir = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--wmo-library": wmoLibraryPath = args[++i]; break;
+            case "--museum": museumAdtDir = args[++i]; break;
+            case "--tile": singleTile = args[++i]; break;
+            case "--tolerance": sizeTolerance = float.Parse(args[++i]); break;
+            case "--no-csv": exportCsv = false; break;
+            case "--dry-run": dryRun = true; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: pm4-pipeline-v2 --pm4 <dir> --out <dir> [options]");
+                Console.WriteLine();
+                Console.WriteLine("Required:");
+                Console.WriteLine("  --pm4             Directory containing .pm4 files");
+                Console.WriteLine("  --out             Output directory for patched ADTs");
+                Console.WriteLine();
+                Console.WriteLine("Optional:");
+                Console.WriteLine("  --wmo-library     Path to WMO library JSON cache");
+                Console.WriteLine("  --museum          Directory containing museum ADTs to patch");
+                Console.WriteLine("  --tile X_Y        Process only a single tile (e.g., '22_18')");
+                Console.WriteLine("  --tolerance       Size matching tolerance (default: 0.15)");
+                Console.WriteLine("  --no-csv          Skip CSV export");
+                Console.WriteLine("  --dry-run         Analyze only, don't patch ADTs");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Dir) || string.IsNullOrEmpty(outputDir))
+    {
+        Console.Error.WriteLine("Error: --pm4 and --out are required. Use --help for usage.");
+        return 1;
+    }
+    
+    if (!Directory.Exists(pm4Dir))
+    {
+        Console.Error.WriteLine($"Error: PM4 directory not found: {pm4Dir}");
+        return 1;
+    }
+    
+    // Create configuration
+    var config = new WoWRollback.PM4Module.Pipeline.PipelineConfig(
+        Pm4Directory: pm4Dir,
+        OutputDirectory: outputDir,
+        WmoLibraryPath: wmoLibraryPath,
+        MuseumAdtDirectory: museumAdtDir,
+        EnableM2Matching: false,  // M2 matching disabled for now
+        SizeTolerance: sizeTolerance,
+        SingleTile: singleTile,
+        ExportCsv: exportCsv,
+        DryRun: dryRun
+    );
+    
+    // Execute pipeline
+    var orchestrator = new WoWRollback.PM4Module.Pipeline.Pm4PipelineOrchestrator();
+    var result = orchestrator.Execute(config);
+    
+    // Summary
+    if (result.Errors.Count > 0)
+    {
+        Console.WriteLine("\n[ERRORS]");
+        foreach (var error in result.Errors)
+        {
+            Console.Error.WriteLine($"  - {error}");
+        }
+    }
+    
+    return result.FailedTiles > 0 ? 1 : 0;
 }

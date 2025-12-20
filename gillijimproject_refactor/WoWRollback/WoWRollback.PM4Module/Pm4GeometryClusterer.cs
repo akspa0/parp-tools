@@ -20,6 +20,11 @@ namespace WoWRollback.PM4Module
             public Vector3 BoundsMin { get; set; }
             public Vector3 BoundsMax { get; set; }
 
+            // MPRL-derived placement data
+            public float? MprlRotationDegrees { get; set; }  // Rotation from nearby MPRL (0-360)
+            public Vector3? MprlPlacementPosition { get; set; }  // Potential placement point from MPRL
+            public int? MprlFloorLevel { get; set; }  // Floor level from MPRL
+
             public int TriangleCount => Indices.Count / 3;
         }
 
@@ -180,6 +185,58 @@ namespace WoWRollback.PM4Module
                 map[globalIdx] = localIdx;
             }
             return (uint)localIdx;
+        }
+
+        /// <summary>
+        /// Populates MPRL-derived placement data for each cluster by finding nearby MPRL entries.
+        /// MPRL coordinates are stored as (Y, Z, X) and must be converted to (X, Y, Z).
+        /// </summary>
+        /// <param name="clusters">Clusters to populate with MPRL data.</param>
+        /// <param name="positionRefs">MPRL position references from PM4.</param>
+        /// <param name="searchRadius">Search radius in world units (default 50).</param>
+        public static void PopulateMprlData(
+            List<Cluster> clusters,
+            IReadOnlyList<MprlEntry> positionRefs,
+            float searchRadius = 50f)
+        {
+            if (positionRefs == null || positionRefs.Count == 0) return;
+
+            // Convert MPRL positions from YZX to XYZ and cache
+            var mprlConverted = positionRefs
+                .Where(p => p.Unknown0x16 == 0)  // Non-terminator entries only
+                .Select(p => new {
+                    Entry = p,
+                    // YZX → XYZ conversion
+                    X = p.PositionZ,  // stored Z is real X
+                    Y = p.PositionX,  // stored X is real Y
+                    Z = p.PositionY   // stored Y is real Z
+                })
+                .ToList();
+
+            foreach (var cluster in clusters)
+            {
+                // Find MPRL entries near cluster centroid
+                var nearby = mprlConverted
+                    .Where(m => 
+                        m.X >= cluster.BoundsMin.X - searchRadius && m.X <= cluster.BoundsMax.X + searchRadius &&
+                        m.Y >= cluster.BoundsMin.Y - searchRadius && m.Y <= cluster.BoundsMax.Y + searchRadius)
+                    .OrderBy(m => Vector3.Distance(new Vector3(m.X, m.Y, m.Z), cluster.Centroid))
+                    .ToList();
+
+                if (nearby.Count > 0)
+                {
+                    var closest = nearby.First();
+                    
+                    // Extract rotation (0-65535 → 0-360°)
+                    cluster.MprlRotationDegrees = 360.0f * closest.Entry.Unknown0x04 / 65536.0f;
+                    
+                    // Use converted XYZ position
+                    cluster.MprlPlacementPosition = new Vector3(closest.X, closest.Y, closest.Z);
+                    
+                    // Floor level
+                    cluster.MprlFloorLevel = closest.Entry.Unknown0x14;
+                }
+            }
         }
     }
 }
