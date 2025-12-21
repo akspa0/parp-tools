@@ -77,6 +77,9 @@ if (args.Length > 0)
         
         case "pm4-pipeline-v2":
             return RunPm4PipelineV2(args.Skip(1).ToArray());
+        
+        case "export-pm4-obj":
+            return RunExportPm4Obj(args.Skip(1).ToArray());
     }
 }
 
@@ -2410,4 +2413,80 @@ static int RunPm4PipelineV2(string[] args)
     }
     
     return result.FailedTiles > 0 ? 1 : 0;
+}
+
+// export-pm4-obj command - export PM4 candidates as OBJ files for verification
+static int RunExportPm4Obj(string[] args)
+{
+    Console.WriteLine("=== PM4 OBJ Export (Decoder Verification) ===\n");
+    
+    string? pm4Path = null;
+    string? outputDir = null;
+    string? singleTile = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Path = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--tile": singleTile = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: export-pm4-obj --pm4 <pm4_dir_or_file> --out <output_dir> [--tile X_Y]");
+                Console.WriteLine();
+                Console.WriteLine("  --pm4 <path>   PM4 file or directory containing PM4 files");
+                Console.WriteLine("  --out <dir>    Output directory for OBJ files");
+                Console.WriteLine("  --tile X_Y     Optional: process only a single tile");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Path))
+    {
+        Console.Error.WriteLine("Error: --pm4 is required. Use --help for usage.");
+        return 1;
+    }
+    
+    outputDir ??= Path.Combine(Path.GetDirectoryName(pm4Path) ?? ".", "pm4_obj_export");
+    Directory.CreateDirectory(outputDir);
+    
+    var extractor = new WoWRollback.PM4Module.Pipeline.Pm4ObjectExtractor();
+    IEnumerable<WoWRollback.PM4Module.Pipeline.Pm4WmoCandidate> candidates;
+    
+    if (File.Exists(pm4Path))
+    {
+        // Single file
+        Console.WriteLine($"Extracting from: {pm4Path}");
+        candidates = extractor.ExtractWmoCandidates(pm4Path);
+    }
+    else if (Directory.Exists(pm4Path))
+    {
+        // Directory
+        Console.WriteLine($"Extracting from directory: {pm4Path}");
+        candidates = extractor.ExtractAllWmoCandidates(pm4Path);
+    }
+    else
+    {
+        Console.Error.WriteLine($"Error: Path not found: {pm4Path}");
+        return 1;
+    }
+    
+    // Filter by tile if specified
+    if (!string.IsNullOrEmpty(singleTile))
+    {
+        var parts = singleTile.Split('_');
+        if (parts.Length == 2 && int.TryParse(parts[0], out int tx) && int.TryParse(parts[1], out int ty))
+        {
+            candidates = candidates.Where(c => c.TileX == tx && c.TileY == ty);
+            Console.WriteLine($"Filtering to tile: {singleTile}");
+        }
+    }
+    
+    WoWRollback.PM4Module.Pipeline.Pm4ObjectExtractor.ExportCandidatesToObj(candidates, outputDir);
+    
+    Console.WriteLine($"\nOutput directory: {outputDir}");
+    Console.WriteLine("Compare these OBJ files with Pm4Reader exports to verify decoder correctness.");
+    
+    return 0;
 }

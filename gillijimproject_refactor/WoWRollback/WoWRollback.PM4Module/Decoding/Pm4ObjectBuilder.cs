@@ -7,13 +7,14 @@ public class Pm4ObjectBuilder
 {
     /// <summary>
     /// Reconstructs WMO candidates from PM4 data.
-    /// Groups surfaces by CK24, then separates instances by vertex connectivity.
+    /// Groups surfaces by CK24, creates one candidate per CK24.
+    /// Instance separation is done via MPRL entries, not vertex connectivity.
     /// </summary>
     public static List<Pm4WmoCandidate> BuildCandidates(Pm4FileStructure pm4, int tileX, int tileY)
     {
         var candidates = new List<Pm4WmoCandidate>();
         
-        // Group surfaces by CK24 (excluding 0 which is nav mesh)
+        // Group surfaces by CK24 (excluding 0 which is nav mesh/terrain)
         var surfacesByCk24 = pm4.Surfaces
             .Where(s => s.CK24 != 0)
             .GroupBy(s => s.CK24);
@@ -22,104 +23,102 @@ public class Pm4ObjectBuilder
         {
             uint ck24 = group.Key;
             var surfaces = group.ToList();
-
-            // === INSTANCE SEPARATION ===
-            // Use Union-Find to group surfaces that share vertices (Mesh Indices refer to same Mesh Vertex)
-            // Note: We group by Vertex INDEX, not Vertex POSITION (topology based)
             
-            // Map: VertexIndex -> List of SurfaceIndices that use it
-            var vertexToSurfaces = new Dictionary<uint, List<int>>();
-            for (int si = 0; si < surfaces.Count; si++)
-            {
-                var surf = surfaces[si];
-                for (int i = 0; i < surf.IndexCount; i++)
-                {
-                    uint msviIdx = surf.MsviFirstIndex + (uint)i;
-                    if (msviIdx < pm4.MeshIndices.Count)
-                    {
-                        uint msvtIdx = pm4.MeshIndices[(int)msviIdx];
-                        if (!vertexToSurfaces.ContainsKey(msvtIdx))
-                            vertexToSurfaces[msvtIdx] = new List<int>();
-                        vertexToSurfaces[msvtIdx].Add(si);
-                    }
-                }
-            }
+            // Extract geometry for entire CK24 group (all surfaces merged)
+            var geometry = ExtractGeometry(surfaces, pm4);
+            
+            if (geometry.Vertices.Count < 3)
+                continue;
+            
+            // Calculate Dominant Angle
+            float domAngle = CalculateDominantAngle(surfaces);
 
-            // Union-Find setup
-            int n = surfaces.Count;
-            int[] parent = new int[n];
-            for (int i = 0; i < n; i++) parent[i] = i;
-
-            int Find(int x)
-            {
-                if (parent[x] != x) parent[x] = Find(parent[x]);
-                return parent[x];
-            }
-
-            void Union(int a, int b)
-            {
-                int rootA = Find(a);
-                int rootB = Find(b);
-                if (rootA != rootB) parent[rootA] = rootB;
-            }
-
-            // Union all surfaces sharing a vertex
-            foreach (var list in vertexToSurfaces.Values)
-            {
-                for (int i = 1; i < list.Count; i++)
-                {
-                    Union(list[0], list[i]);
-                }
-            }
-
-            // Group surfaces by root (Instance)
-            var instances = new Dictionary<int, List<MsurChunk>>();
-            for (int i = 0; i < n; i++)
-            {
-                int root = Find(i);
-                if (!instances.ContainsKey(root))
-                    instances[root] = new List<MsurChunk>();
-                instances[root].Add(surfaces[i]);
-            }
-
-            // Create a candidate for each instance
-            foreach (var instanceSurfs in instances.Values)
-            {
-                var geometry = ExtractGeometry(instanceSurfs, pm4);
-                
-                // Calculate Dominant Angle
-                float domAngle = CalculateDominantAngle(instanceSurfs);
-
-                // Find MPRL Data (Rotation/Position)
-                var (mprlRot, mprlPos) = FindMprlData(geometry.BoundsMin, geometry.BoundsMax, pm4.PositionRefs);
-
-                // Type Flags (Byte 2)
-                byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
-
-                // Create Candidate
-                var candidate = new Pm4WmoCandidate(
-                    CK24: ck24,
-                    InstanceId: instances.Values.ToList().IndexOf(instanceSurfs),
-                    TileX: tileX,
-                    TileY: tileY,
-                    BoundsMin: geometry.BoundsMin,
-                    BoundsMax: geometry.BoundsMax,
-                    DominantAngle: domAngle,
-                    SurfaceCount: instanceSurfs.Count,
-                    VertexCount: geometry.Vertices.Count, // Vertex count of the main mesh
-                    TypeFlags: typeFlags,
-                    MprlRotationDegrees: mprlRot,
-                    MprlPosition: mprlPos,
-                    DebugGeometry: geometry.Vertices,
-                    DebugFaces: geometry.Faces,
-                    DebugMscnVertices: geometry.MscnVertices
-                );
-
-                candidates.Add(candidate);
-            }
+            // Type Flags (Byte 2 of CK24)
+            byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
+            
+            // Find CLOSEST MPRL entry to use for position/rotation
+            var centroid = (geometry.BoundsMin + geometry.BoundsMax) / 2f;
+            var (mprlRot, mprlPos) = FindClosestMprl(centroid, pm4.PositionRefs);
+            
+            // Create ONE candidate per CK24 (the geometry determines the WMO type)
+            var candidate = new Pm4WmoCandidate(
+                CK24: ck24,
+                InstanceId: 0,
+                TileX: tileX,
+                TileY: tileY,
+                BoundsMin: geometry.BoundsMin,
+                BoundsMax: geometry.BoundsMax,
+                DominantAngle: domAngle,
+                SurfaceCount: surfaces.Count,
+                VertexCount: geometry.Vertices.Count,
+                TypeFlags: typeFlags,
+                MprlRotationDegrees: mprlRot,
+                MprlPosition: mprlPos ?? centroid, // Use centroid if no MPRL
+                DebugGeometry: geometry.Vertices,
+                DebugFaces: geometry.Faces,
+                DebugMscnVertices: geometry.MscnVertices
+            );
+            candidates.Add(candidate);
         }
 
         return candidates;
+    }
+    
+    /// <summary>
+    /// Find all MPRL entries near the object bounds - each is a placement instance.
+    /// </summary>
+    /// <summary>
+    /// Find the closest MPRL entry to a centroid point.
+    /// </summary>
+    private static (float? Rotation, Vector3? Position) FindClosestMprl(Vector3 centroid, List<MprlChunk> mprlList)
+    {
+        if (mprlList == null || mprlList.Count == 0) 
+            return (null, null);
+
+        var closest = mprlList
+            .Where(p => p.EntryType == 0) // Skip terminators
+            .Select(p => new {
+                Entry = p,
+                // MPRL coordinate swap (per spec)
+                Pos = new Vector3(p.Position.Z, p.Position.X, p.Position.Y)
+            })
+            .OrderBy(x => Vector3.DistanceSquared(x.Pos, centroid))
+            .FirstOrDefault();
+
+        if (closest != null && Vector3.Distance(closest.Pos, centroid) < 100) // Within 100 yards
+        {
+            float rot = 360f * closest.Entry.Rotation / 65536f;
+            return (rot, closest.Pos);
+        }
+
+        return (null, null);
+    }
+    
+    private static List<(float Rotation, Vector3 Position)> FindAllMprlPlacements(
+        Vector3 min, Vector3 max, List<MprlChunk> mprlList)
+    {
+        var placements = new List<(float, Vector3)>();
+        
+        if (mprlList == null || mprlList.Count == 0) 
+            return placements;
+
+        foreach (var p in mprlList)
+        {
+            if (p.EntryType != 0) continue; // Skip terminators
+            
+            // MPRL coordinate swap (per spec)
+            var pos = new Vector3(p.Position.Z, p.Position.X, p.Position.Y);
+            
+            // Check if within generous bounds
+            if (pos.X >= min.X - 50 && pos.X <= max.X + 50 &&
+                pos.Y >= min.Y - 50 && pos.Y <= max.Y + 50)
+            {
+                float rot = 360f * p.Rotation / 65536f;
+                placements.Add((rot, pos));
+            }
+        }
+
+        return placements;
     }
 
     private static (float? Rotation, Vector3? Position) FindMprlData(Vector3 min, Vector3 max, List<MprlChunk> mprlList)
@@ -181,9 +180,8 @@ public class Pm4ObjectBuilder
                         if (msvtIdx < pm4.MeshVertices.Count)
                         {
                             localIdx = vertices.Count;
-                            // SWAP X/Y to match World Space (Spec: Stored Y, X, Z -> World X, Y, Z)
-                            var rawV = pm4.MeshVertices[(int)msvtIdx];
-                            vertices.Add(new Vector3(rawV.Y, rawV.X, rawV.Z));
+                            // Use raw coordinates to match Pm4Reader and WMO coordinate system
+                            vertices.Add(pm4.MeshVertices[(int)msvtIdx]);
                             msvtToLocalMap[msvtIdx] = localIdx;
                         }
                     }
@@ -201,9 +199,8 @@ public class Pm4ObjectBuilder
         {
             if (surf.MdosIndex < pm4.SceneNodes.Count)
             {
-                var mscnNode = pm4.SceneNodes[(int)surf.MdosIndex];
-                // SWAP X/Y for MSCN as well to match MSVT frame
-                mscnVertices.Add(new Vector3(mscnNode.Y, mscnNode.X, mscnNode.Z));
+                // Use raw coordinates to match Pm4Reader and WMO coordinate system
+                mscnVertices.Add(pm4.SceneNodes[(int)surf.MdosIndex]);
             }
         }
 

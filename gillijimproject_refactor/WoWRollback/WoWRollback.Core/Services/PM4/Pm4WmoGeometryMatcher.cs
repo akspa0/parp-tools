@@ -505,4 +505,111 @@ public sealed class Pm4WmoGeometryMatcher
 
         return transform;
     }
+
+    /// <summary>
+    /// Verify a candidate match using MSCN points.
+    /// Returns verification score (0-1) based on how many MSCN points align with transformed WMO.
+    /// </summary>
+    /// <param name="mscnPoints">MSCN collision points from PM4 file</param>
+    /// <param name="wmoVertices">WMO collision mesh vertices</param>
+    /// <param name="transform">Proposed placement transform</param>
+    /// <param name="tolerance">Distance tolerance for point matching (yards)</param>
+    public float VerifyWithMscn(List<Vector3> mscnPoints, List<Vector3> wmoVertices, PlacementTransform transform, float tolerance = 2.0f)
+    {
+        if (mscnPoints == null || mscnPoints.Count == 0)
+            return 0f; // No MSCN data to verify against
+        
+        if (wmoVertices == null || wmoVertices.Count == 0)
+            return 0f;
+        
+        // Transform WMO vertices to world space using proposed transform
+        var rotation = Quaternion.CreateFromYawPitchRoll(
+            transform.Rotation.Z * MathF.PI / 180,
+            transform.Rotation.Y * MathF.PI / 180,
+            transform.Rotation.X * MathF.PI / 180);
+        
+        var transformedWmo = new List<Vector3>();
+        foreach (var v in wmoVertices)
+        {
+            var scaled = v * transform.Scale;
+            var rotated = Vector3.Transform(scaled, rotation);
+            var translated = rotated + transform.Position;
+            transformedWmo.Add(translated);
+        }
+        
+        // Build spatial grid from transformed WMO vertices for fast lookup
+        var grid = new Dictionary<(int, int, int), List<Vector3>>();
+        float cellSize = tolerance * 2;
+        
+        foreach (var v in transformedWmo)
+        {
+            var cell = ((int)(v.X / cellSize), (int)(v.Y / cellSize), (int)(v.Z / cellSize));
+            if (!grid.ContainsKey(cell))
+                grid[cell] = new List<Vector3>();
+            grid[cell].Add(v);
+        }
+        
+        // Count how many MSCN points are near a transformed WMO vertex
+        int matched = 0;
+        float toleranceSq = tolerance * tolerance;
+        
+        foreach (var mscnPt in mscnPoints)
+        {
+            var cell = ((int)(mscnPt.X / cellSize), (int)(mscnPt.Y / cellSize), (int)(mscnPt.Z / cellSize));
+            
+            // Check this cell and neighbors
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                var checkCell = (cell.Item1 + dx, cell.Item2 + dy, cell.Item3 + dz);
+                if (grid.TryGetValue(checkCell, out var cellVerts))
+                {
+                    foreach (var wmoV in cellVerts)
+                    {
+                        float distSq = Vector3.DistanceSquared(mscnPt, wmoV);
+                        if (distSq <= toleranceSq)
+                        {
+                            matched++;
+                            goto nextMscn; // Found a match, move to next MSCN point
+                        }
+                    }
+                }
+            }
+            nextMscn:;
+        }
+        
+        float score = (float)matched / mscnPoints.Count;
+        return score;
+    }
+    
+    /// <summary>
+    /// Enhanced matching using MSCN verification.
+    /// First finds geometric alignment, then verifies with MSCN overlap.
+    /// </summary>
+    public PlacementTransform FindAlignmentWithMscnVerification(
+        GeometryStats pm4Stats, 
+        GeometryStats wmoStats, 
+        List<Vector3>? mscnPoints,
+        List<Vector3>? wmoVertices,
+        bool forceUnitScale = true)
+    {
+        // First get the base geometric alignment
+        var baseTransform = FindAlignment(pm4Stats, wmoStats, forceUnitScale);
+        
+        // If we have MSCN data and WMO vertices, verify the match
+        if (mscnPoints != null && mscnPoints.Count > 0 && wmoVertices != null && wmoVertices.Count > 0)
+        {
+            float mscnScore = VerifyWithMscn(mscnPoints, wmoVertices, baseTransform);
+            Console.WriteLine($"MSCN verification score: {mscnScore:P1} ({mscnPoints.Count} MSCN points checked)");
+            
+            // Blend confidence: 50% geometric, 50% MSCN verification
+            float blendedConfidence = (baseTransform.MatchConfidence + mscnScore) / 2f;
+            
+            return baseTransform with { MatchConfidence = blendedConfidence };
+        }
+        
+        return baseTransform;
+    }
 }
+

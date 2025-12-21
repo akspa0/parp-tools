@@ -288,11 +288,12 @@ public class Pm4DebugWmoWriter
         bw.Write((byte)0);
         bw.Write((byte)0);
 
-        // MOGP Size - fixed header size for WMO v17 groups (68 bytes)
-        // Sub-chunks (MOPY, MOVI, etc.) follow MOGP, they are NOT inside it in standard parsers.
+        // MOGP Size - must include header + all sub-chunks
+        // In WMO v17, MOGP header is fixed but the SIZE field covers header + content
         long endPos = fs.Position;
+        uint mogpTotalSize = (uint)(endPos - startPos);
         fs.Position = sizePos;
-        bw.Write((uint)68); 
+        bw.Write(mogpTotalSize); 
         fs.Position = endPos;
     }
 

@@ -279,6 +279,11 @@ namespace WoWRollback.PM4Module
                 // Step 1: Load PM4 objects directly from .pm4 files
                 var pm4Objects = LoadPm4ObjectsFromFiles(pm4Path);
                 
+                // Step 1b: Export PM4 candidates as OBJ for decoder verification
+                var pm4ObjDebugDir = Path.Combine(outputRoot, "pm4_obj_debug");
+                Console.WriteLine($"[INFO] Exporting PM4 candidates to OBJ: {pm4ObjDebugDir}");
+                ExportPm4CandidatesToObj(pm4Path, pm4ObjDebugDir);
+                
                 if (pm4Objects.Count == 0)
                 {
                     Console.WriteLine("[WARN] No PM4 objects found. Ensure pm4 path contains .pm4 files.");
@@ -1367,8 +1372,26 @@ namespace WoWRollback.PM4Module
         }
 
         /// <summary>
-        /// Load PM4 objects directly from .pm4 files (no PM4FacesTool required).
-        /// Parses PM4 files, groups surfaces by CK24, and computes geometry stats.
+        /// Export PM4 candidates as OBJ files for decoder verification.
+        /// Uses Pm4Decoder + Pm4ObjectBuilder to extract geometry.
+        /// </summary>
+        private void ExportPm4CandidatesToObj(string pm4Directory, string outputDir)
+        {
+            try
+            {
+                var extractor = new Pipeline.Pm4ObjectExtractor();
+                var candidates = extractor.ExtractAllWmoCandidates(pm4Directory).ToList();
+                Pipeline.Pm4ObjectExtractor.ExportCandidatesToObj(candidates, outputDir);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WARN] Failed to export PM4 OBJs: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Load PM4 objects directly from .pm4 files using new Pm4Decoder + Pm4ObjectBuilder.
+        /// Uses MdosIndex-based MSCN linking (not bounding-box heuristics) for accurate geometry.
         /// </summary>
         public List<Pm4ModfReconstructor.Pm4Object> LoadPm4ObjectsFromFiles(string pm4Directory)
         {
@@ -1389,7 +1412,7 @@ namespace WoWRollback.PM4Module
                 return objects;
             }
             
-            Console.WriteLine($"[INFO] Found {pm4Files.Length} PM4 files to process...");
+            Console.WriteLine($"[INFO] Found {pm4Files.Length} PM4 files to process (using Pm4Decoder)...");
             
             foreach (var pm4Path in pm4Files)
             {
@@ -1403,115 +1426,52 @@ namespace WoWRollback.PM4Module
                     int tileX = int.Parse(match.Groups[1].Value);
                     int tileY = int.Parse(match.Groups[2].Value);
                     
-                    // Parse PM4 file using local PM4File class
+                    // Use new Pm4Decoder (with correct coordinate handling)
                     var pm4Data = File.ReadAllBytes(pm4Path);
-                    var pm4 = new PM4File(pm4Data);
+                    var decoded = Decoding.Pm4Decoder.Decode(pm4Data);
                     
-                    if (pm4.Surfaces.Count == 0 || pm4.MeshVertices.Count == 0)
-                    {
+                    if (decoded.Surfaces.Count == 0 || decoded.MeshVertices.Count == 0)
                         continue;
-                    }
                     
-                    // 1. Process WMO Candidates (CK24 != 0)
-                    var wmoSurfaces = pm4.Surfaces
-                        .Where(s => !s.IsM2Bucket && s.CK24 != 0)
-                        .GroupBy(s => s.CK24)
-                        .ToList();
+                    // Use Pm4ObjectBuilder (with MdosIndex-based MSCN linking)
+                    var candidates = Decoding.Pm4ObjectBuilder.BuildCandidates(decoded, tileX, tileY);
                     
-                    foreach (var group in wmoSurfaces)
+                    foreach (var candidate in candidates)
                     {
-                        string ck24Hex = $"0x{group.Key:X6}";
+                        if (candidate.DebugGeometry == null || candidate.DebugGeometry.Count < 10)
+                            continue;
                         
-                        // Collect all vertices for this CK24 group
-                        var vertices = new List<System.Numerics.Vector3>();
-                        foreach (var surface in group)
-                        {
-                            // Each surface references MSVI indices which point to MSVT vertices
-                            for (int i = 0; i < surface.IndexCount && surface.MsviFirstIndex + i < pm4.MeshIndices.Count; i++)
-                            {
-                                uint vertIdx = pm4.MeshIndices[(int)surface.MsviFirstIndex + i];
-                                if (vertIdx < pm4.MeshVertices.Count)
-                                {
-                                    // Verify: WMOs require (Y, X, Z) to match correctly, while M2s require (X, Y, Z).
-                                    // This suggests an inconsistency in the PM4 generator or our matching libraries.
-                                    // We manually swap WMO vertices here to restore the "working" state for them.
-                                    var v = pm4.MeshVertices[(int)vertIdx];
-                                    vertices.Add(new Vector3(v.Y, v.X, v.Z));
-                                }
-                            }
-                        }
+                        string ck24Hex = $"0x{candidate.CK24:X6}";
+                        var stats = matcher.ComputeStats(candidate.DebugGeometry);
                         
-                        if (vertices.Count < 10) continue; // Skip tiny objects
-                        
-                        // MSCN Enhancement (Same as before)
-                        if (pm4.ExteriorVertices.Count > 0)
-                        {
-                            var minBound = new System.Numerics.Vector3(float.MaxValue);
-                            var maxBound = new System.Numerics.Vector3(float.MinValue);
-                            foreach (var v in vertices)
-                            {
-                                minBound = System.Numerics.Vector3.Min(minBound, v);
-                                maxBound = System.Numerics.Vector3.Max(maxBound, v);
-                            }
-                            
-                            const float MscnMargin = 7.0f;
-                            minBound -= new System.Numerics.Vector3(MscnMargin);
-                            maxBound += new System.Numerics.Vector3(MscnMargin);
-                            
-                            foreach (var mscnVert in pm4.ExteriorVertices)
-                            {
-                                var transformed = new System.Numerics.Vector3(mscnVert.Y, -mscnVert.X, mscnVert.Z);
-                                if (transformed.X >= minBound.X && transformed.X <= maxBound.X &&
-                                    transformed.Y >= minBound.Y && transformed.Y <= maxBound.Y &&
-                                    transformed.Z >= minBound.Z && transformed.Z <= maxBound.Z)
-                                {
-                                    vertices.Add(transformed);
-                                }
-                            }
-                        }
-                        
-                        var stats = matcher.ComputeStats(vertices);
-                        objects.Add(new Pm4ModfReconstructor.Pm4Object(ck24Hex, pm4Path, tileX, tileY, stats));
+                        // Include MSCN points, MPRL rotation and position
+                        objects.Add(new Pm4ModfReconstructor.Pm4Object(
+                            ck24Hex, pm4Path, tileX, tileY, stats, 
+                            candidate.DebugMscnVertices,
+                            candidate.MprlRotationDegrees,
+                            candidate.MprlPosition));  // Pass MPRL position
                     }
-
-                    // 2. Process M2 Candidates (GroupKey == 0 / IsM2Bucket)
-                    // These are often multiple distinct objects merged into one "bucket".
-                    // We must cluster them to find individual candidates.
-                    var m2Surfaces = pm4.Surfaces.Where(s => s.IsM2Bucket).ToList();
                     
+                    // Also extract M2 candidates from IsM2Bucket surfaces (GroupKey == 0)
+                    var m2Surfaces = decoded.Surfaces.Where(s => s.GroupKey == 0).ToList();
                     if (m2Surfaces.Count > 0)
                     {
-                        var clusters = Pm4GeometryClusterer.ClusterSurfaces(m2Surfaces, pm4.MeshIndices, pm4.MeshVertices);
-                        int m2Count = 0;
+                        // Use existing PM4File for M2 clustering (reuse old logic for now)
+                        var pm4Legacy = new PM4File(pm4Data);
+                        var clusters = Pm4GeometryClusterer.ClusterSurfaces(
+                            pm4Legacy.Surfaces.Where(s => s.IsM2Bucket).ToList(),
+                            pm4Legacy.MeshIndices,
+                            pm4Legacy.MeshVertices);
                         
+                        int m2Count = 0;
                         foreach (var cluster in clusters)
                         {
-                            // Filter noise: very small clusters (e.g. < 10 tris) or very large (terrain?)
-                            if (cluster.TriangleCount < 10) continue; 
-                            if (cluster.TriangleCount > 5000) continue; // Likely terrain patch
+                            if (cluster.TriangleCount < 10 || cluster.TriangleCount > 5000) continue;
                             
-                            // Create a unique ID for this candidate
                             string candidateId = $"M2_{tileX}_{tileY}_{m2Count++}";
-                            
-                            // Compute stats for the cluster
                             var stats = matcher.ComputeStats(cluster.Vertices);
-                            
-                            // DEBUG: Log M2 centroid coordinates to understand tile mapping
-                            const float TileSize = 533.33333f;
-                            int computedTileX = Math.Clamp((int)(32 - (cluster.Centroid.X / TileSize)), 0, 63);
-                            int computedTileY = Math.Clamp((int)(32 - (cluster.Centroid.Y / TileSize)), 0, 63);
-                            
-                            if (computedTileX != tileX || computedTileY != tileY)
-                            {
-                                Console.WriteLine($"[DEBUG M2] {candidateId} raw centroid=({cluster.Centroid.X:F1},{cluster.Centroid.Y:F1},{cluster.Centroid.Z:F1}) computed=({computedTileX},{computedTileY}) vs filename=({tileX},{tileY})");
-                            }
-                            
-                            // Use filename tiles (not computed) since WMO works with filename tiles
                             objects.Add(new Pm4ModfReconstructor.Pm4Object(candidateId, pm4Path, tileX, tileY, stats));
                         }
-                        
-                        if (m2Count > 0)
-                            Console.WriteLine($"[INFO] Extracted {m2Count} M2 candidates from {baseName}");
                     }
                 }
                 catch (Exception ex)

@@ -43,7 +43,10 @@ public sealed class Pm4ModfReconstructor
         string ObjPath,
         int TileX,
         int TileY,
-        Pm4WmoGeometryMatcher.GeometryStats Stats);
+        Pm4WmoGeometryMatcher.GeometryStats Stats,
+        List<Vector3>? MscnPoints = null,           // MSCN points for verification
+        float? MprlRotationDegrees = null,          // MPRL rotation (0-360 degrees)
+        Vector3? MprlPosition = null);              // MPRL placement position
 
     /// <summary>
     /// Reconstructed MODF entry.
@@ -675,14 +678,20 @@ public sealed class Pm4ModfReconstructor
             var boundsMin = pm4Obj.Stats.BoundsMin;
             var boundsMax = pm4Obj.Stats.BoundsMax;
 
+            // Use MPRL data from PM4 when available (this is the ACTUAL placement data!)
+            // Fall back to computed values only when MPRL is not found
+            var position = pm4Obj.MprlPosition ?? transform.Position;
+            var rotation = pm4Obj.MprlRotationDegrees.HasValue 
+                ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0)
+                : Vector3.Zero;  // No rotation if no MPRL data
+            
+            bool usedMprl = pm4Obj.MprlPosition.HasValue;
+            
             var modf = new ModfEntry(
                 NameId: nameId,
                 UniqueId: nextUniqueId++,
-                Position: transform.Position,
-                // Rotation: Output (0, 0, 0) for flat placement
-                // Geometry matching doesn't reliably compute rotations
-                // Users can adjust yaw (Y axis) manually in Noggit if needed
-                Rotation: Vector3.Zero,
+                Position: position,
+                Rotation: rotation,
                 BoundsMin: boundsMin,
                 BoundsMax: boundsMax,
                 Flags: 0,

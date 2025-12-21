@@ -86,30 +86,30 @@ public class Pm4PipelineOrchestrator
             }
         }
 
-        // Step 3: Debug Export
-        if (config.ExportDebugWmos && !config.DryRun)
-        {
-            Console.WriteLine("\n[Step 2.5] Exporting Debug WMOs...");
-            var debugDir = Path.Combine(config.OutputDirectory, "debug_wmos");
-            
-            // Group by CK24 to handle instance ID
-            var byCk24 = candidates.GroupBy(c => c.CK24);
-            int exportedCount = 0;
-            
-            foreach (var group in byCk24)
-            {
-                int instanceIdx = 0;
-                foreach (var candidate in group)
-                {
-                    // Naming: Debug_{CK24}_{TileId}_{InstanceId}
-                    var name = $"Debug_{candidate.CK24:X6}_{candidate.TileId}_{instanceIdx}";
-                    _debugWriter.WriteWmo(candidate, debugDir, name);
-                    instanceIdx++;
-                    exportedCount++;
-                }
-            }
-            Console.WriteLine($"[INFO] Exported {exportedCount} Debug WMO files to {debugDir}");
-        }
+        // Step 3: Debug Export (DISABLED - focus on matching real WMOs)
+        // if (config.ExportDebugWmos && !config.DryRun)
+        // {
+        //     Console.WriteLine("\n[Step 2.5] Exporting Debug WMOs...");
+        //     var debugDir = Path.Combine(config.OutputDirectory, "debug_wmos");
+        //     
+        //     // Group by CK24 to handle instance ID
+        //     var byCk24 = candidates.GroupBy(c => c.CK24);
+        //     int exportedCount = 0;
+        //     
+        //     foreach (var group in byCk24)
+        //     {
+        //         int instanceIdx = 0;
+        //         foreach (var candidate in group)
+        //         {
+        //             // Naming: Debug_{CK24}_{TileId}_{InstanceId}
+        //             var name = $"Debug_{candidate.CK24:X6}_{candidate.TileId}_{instanceIdx}";
+        //             _debugWriter.WriteWmo(candidate, debugDir, name);
+        //             instanceIdx++;
+        //             exportedCount++;
+        //         }
+        //     }
+        //     Console.WriteLine($"[INFO] Exported {exportedCount} Debug WMO files to {debugDir}");
+        // }
         
         // Step 4: Load WMO library & Match
         if (string.IsNullOrEmpty(config.WmoLibraryPath))

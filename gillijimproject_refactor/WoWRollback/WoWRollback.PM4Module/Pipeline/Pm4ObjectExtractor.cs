@@ -148,4 +148,64 @@ public class Pm4ObjectExtractor
     // Legacy helpers removed - logic moved to Pm4ObjectBuilder
     
     #endregion
+    
+    #region OBJ Export (Debug/Verification)
+    
+    /// <summary>
+    /// Export candidates as OBJ files for verification.
+    /// Matches Pm4Reader output format for comparison.
+    /// </summary>
+    public static void ExportCandidatesToObj(IEnumerable<Pm4WmoCandidate> candidates, string outputDir)
+    {
+        Directory.CreateDirectory(outputDir);
+        int count = 0;
+        
+        foreach (var candidate in candidates)
+        {
+            if (candidate.DebugGeometry == null || candidate.DebugGeometry.Count < 3)
+                continue;
+            
+            string filename = $"CK24_{candidate.CK24:X6}_{candidate.TileId}_{candidate.InstanceId}.obj";
+            string objPath = Path.Combine(outputDir, filename);
+            
+            using var sw = new StreamWriter(objPath);
+            sw.WriteLine($"# PM4 Export - CK24: 0x{candidate.CK24:X6}");
+            sw.WriteLine($"# Tile: {candidate.TileX}_{candidate.TileY}");
+            sw.WriteLine($"# Instance: {candidate.InstanceId}");
+            sw.WriteLine($"# Vertices: {candidate.DebugGeometry.Count}");
+            sw.WriteLine($"# Faces: {candidate.DebugFaces?.Count ?? 0}");
+            sw.WriteLine($"# MSCN Points: {candidate.DebugMscnVertices?.Count ?? 0}");
+            sw.WriteLine($"# Bounds: ({candidate.BoundsMin.X:F1}, {candidate.BoundsMin.Y:F1}, {candidate.BoundsMin.Z:F1}) to ({candidate.BoundsMax.X:F1}, {candidate.BoundsMax.Y:F1}, {candidate.BoundsMax.Z:F1})");
+            sw.WriteLine();
+            
+            // Write vertices (mesh + MSCN)
+            foreach (var v in candidate.DebugGeometry)
+                sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+            
+            if (candidate.DebugMscnVertices != null)
+            {
+                sw.WriteLine("# MSCN vertices below:");
+                foreach (var v in candidate.DebugMscnVertices)
+                    sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+            }
+            
+            sw.WriteLine();
+            
+            // Write faces
+            if (candidate.DebugFaces != null)
+            {
+                foreach (var face in candidate.DebugFaces)
+                {
+                    if (face.Length >= 3)
+                        sw.WriteLine($"f {string.Join(" ", face.Select(i => i + 1))}"); // OBJ is 1-indexed
+                }
+            }
+            
+            count++;
+        }
+        
+        Console.WriteLine($"[INFO] Exported {count} OBJ files to {outputDir}");
+    }
+    
+    #endregion
 }
