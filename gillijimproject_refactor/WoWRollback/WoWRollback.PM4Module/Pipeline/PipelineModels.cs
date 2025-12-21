@@ -39,6 +39,9 @@ public record PipelineConfig(
     /// <summary>Export CSV files for debugging</summary>
     bool ExportCsv = true,
     
+    /// <summary>Export Debug WMO models for manual verification</summary>
+    bool ExportDebugWmos = false,
+    
     /// <summary>Dry run - don't write ADT files</summary>
     bool DryRun = false
 );
@@ -54,6 +57,9 @@ public record Pm4WmoCandidate(
     /// <summary>CK24 value (24-bit object grouping key from MSUR.PackedParams)</summary>
     uint CK24,
     
+    /// <summary>Instance ID (derived from MdosIndex or sequence)</summary>
+    int InstanceId,
+
     /// <summary>Tile X coordinate (0-63)</summary>
     int TileX,
     
@@ -82,7 +88,16 @@ public record Pm4WmoCandidate(
     float? MprlRotationDegrees = null,
     
     /// <summary>MPRL-derived placement position (XYZ corrected), null if not available</summary>
-    Vector3? MprlPosition = null
+    Vector3? MprlPosition = null,
+    
+    /// <summary>Complete debug geometry (Mesh only) for export</summary>
+    List<Vector3>? DebugGeometry = null,
+    
+    /// <summary>Faces for debug geometry (triangles)</summary>
+    List<int[]>? DebugFaces = null,
+    
+    /// <summary>MSCN (Scene Node) vertices for debug visualization</summary>
+    List<Vector3>? DebugMscnVertices = null
 )
 {
     /// <summary>Calculate bounding box center</summary>

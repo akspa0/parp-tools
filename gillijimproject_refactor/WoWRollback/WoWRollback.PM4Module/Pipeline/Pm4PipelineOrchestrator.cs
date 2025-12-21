@@ -8,6 +8,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
+using WoWRollback.PM4Module.Generation;
+
 namespace WoWRollback.PM4Module.Pipeline;
 
 /// <summary>
@@ -18,6 +20,7 @@ namespace WoWRollback.PM4Module.Pipeline;
 public class Pm4PipelineOrchestrator
 {
     private readonly Pm4ObjectExtractor _extractor = new();
+    private readonly Pm4DebugWmoWriter _debugWriter = new();
     private WmoMatcherService? _wmoMatcher;
     private readonly ModfEntryBuilder _modfBuilder = new();
     private readonly AdtPatcherV2 _adtPatcher = new();
@@ -58,15 +61,8 @@ public class Pm4PipelineOrchestrator
             }
         }
         
-        // Step 1: Load WMO library
-        Console.WriteLine("[Step 1] Loading WMO library...");
-        _wmoMatcher = new WmoMatcherService(config.WmoLibraryPath, config.SizeTolerance);
-        
-        if (_wmoMatcher.LibraryCount == 0)
-        {
-            errors.Add("WMO library is empty - cannot match");
-            return CreateResult(0, 0, 0, 0, tileResults, errors, stopwatch.Elapsed);
-        }
+        // Initialize matcher as null
+        _wmoMatcher = null;
         
         // Step 2: Extract PM4 objects
         Console.WriteLine("\n[Step 2] Extracting PM4 objects...");
@@ -89,9 +85,74 @@ public class Pm4PipelineOrchestrator
                 Console.WriteLine($"[INFO] Filtered to tile {config.SingleTile}: {candidates.Count} candidates");
             }
         }
+
+        // Step 3: Debug Export
+        if (config.ExportDebugWmos && !config.DryRun)
+        {
+            Console.WriteLine("\n[Step 2.5] Exporting Debug WMOs...");
+            var debugDir = Path.Combine(config.OutputDirectory, "debug_wmos");
+            
+            // Group by CK24 to handle instance ID
+            var byCk24 = candidates.GroupBy(c => c.CK24);
+            int exportedCount = 0;
+            
+            foreach (var group in byCk24)
+            {
+                int instanceIdx = 0;
+                foreach (var candidate in group)
+                {
+                    // Naming: Debug_{CK24}_{TileId}_{InstanceId}
+                    var name = $"Debug_{candidate.CK24:X6}_{candidate.TileId}_{instanceIdx}";
+                    _debugWriter.WriteWmo(candidate, debugDir, name);
+                    instanceIdx++;
+                    exportedCount++;
+                }
+            }
+            Console.WriteLine($"[INFO] Exported {exportedCount} Debug WMO files to {debugDir}");
+        }
         
-        // Step 3: Match to WMO library
-        Console.WriteLine("\n[Step 3] Matching to WMO library...");
+        // Step 4: Load WMO library & Match
+        if (string.IsNullOrEmpty(config.WmoLibraryPath))
+        {
+            Console.WriteLine("\n[INFO] No WMO library provided - skipping matching");
+            // Return success with extracted counts
+            return CreateResult(candidates.Count, 0, 0, 0, tileResults, errors, stopwatch.Elapsed);
+        }
+
+        Console.WriteLine("\n[Step 4] Loading WMO library...");
+        
+        // Check if library path is a directory or file
+        if (Directory.Exists(config.WmoLibraryPath))
+        {
+            // Scan directory and build cache
+            _wmoMatcher = new WmoMatcherService(null, config.SizeTolerance);
+            
+            // Check for existing cache file in the directory first
+            string cacheFile = Path.Combine(config.WmoLibraryPath, "wmo_library_cache.json");
+            if (File.Exists(cacheFile))
+            {
+                Console.WriteLine($"[INFO] Found existing cache: {cacheFile}");
+                _wmoMatcher.LoadLibrary(cacheFile);
+            }
+            else
+            {
+                // Build it
+                _wmoMatcher.BuildLibraryFromDirectory(config.WmoLibraryPath);
+            }
+        }
+        else
+        {
+            // Load from specific file
+            _wmoMatcher = new WmoMatcherService(config.WmoLibraryPath, config.SizeTolerance);
+        }
+        
+        if (_wmoMatcher.LibraryCount == 0)
+        {
+            errors.Add("WMO library is empty - cannot match");
+            return CreateResult(candidates.Count, 0, 0, 0, tileResults, errors, stopwatch.Elapsed);
+        }
+
+        Console.WriteLine("\n[Step 5] Matching to WMO library...");
         var matches = _wmoMatcher.FindAllMatches(candidates).ToList();
         Console.WriteLine($"[INFO] Matched {matches.Count} / {candidates.Count} candidates");
         
@@ -101,8 +162,8 @@ public class Pm4PipelineOrchestrator
             return CreateResult(candidates.Count, 0, 0, 0, tileResults, errors, stopwatch.Elapsed);
         }
         
-        // Step 4: Build MODF entries
-        Console.WriteLine("\n[Step 4] Building MODF entries...");
+        // Step 6: Build MODF entries
+        Console.WriteLine("\n[Step 6] Building MODF entries...");
         var modfEntries = _modfBuilder.CreateEntries(matches);
         var wmoNames = _modfBuilder.GetWmoNames();
         
@@ -114,8 +175,8 @@ public class Pm4PipelineOrchestrator
             _modfBuilder.ExportWmoNamesToCsv(Path.Combine(csvDir, "mwmo_names.csv"));
         }
         
-        // Step 5: Patch ADT files
-        Console.WriteLine("\n[Step 5] Patching ADT files...");
+        // Step 7: Patch ADT files
+        Console.WriteLine("\n[Step 7] Patching ADT files...");
         int totalWmosPlaced = 0;
         int tilesProcessed = 0;
         int failedTiles = 0;

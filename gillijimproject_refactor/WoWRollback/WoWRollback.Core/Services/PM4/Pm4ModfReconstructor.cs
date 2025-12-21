@@ -437,6 +437,10 @@ public sealed class Pm4ModfReconstructor
         return NormalizeCoordinates(objects);
     }
 
+    // NOTE: LoadPm4ObjectsDirect was removed because WoWRollback.Core cannot
+    // reference WoWRollback.PM4Module (circular dependency).
+    // Use Pm4ObjectExtractor from PM4Module.Pipeline directly in CLI instead.
+
     /// <summary>
     /// Normalize PM4 object coordinates to standard WoW global coordinates.
     /// Handles Local->Global conversion by mapping PM4 Global (Corner-Relative, Inverted-X) to WoW Global (Center-Relative).

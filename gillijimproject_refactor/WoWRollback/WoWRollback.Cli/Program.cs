@@ -219,6 +219,8 @@ internal static class Program
                     return VerifyPm4DataCommand(opts);
                 case "csv-to-json":
                     return CsvToJsonCommand(opts);
+                case "pm4-pipeline-v2":
+                    return RunPm4PipelineV2(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -6507,8 +6509,44 @@ internal static class Program
             return 1;
         }
 
-        // Reconstruct MODF
-        var result = reconstructor.ReconstructModf(pm4Dir, wmoLibrary, minConfidence);
+        // Load PM4 objects - use direct parsing if --parse-direct flag is set
+        bool parseDirect = opts.ContainsKey("parse-direct");
+        Pm4ModfReconstructor.ReconstructionResult result;
+        
+        if (parseDirect)
+        {
+            Console.WriteLine("[INFO] Using direct PM4 parsing (Pm4Decoder + Pm4ObjectBuilder)...");
+            
+            // Use Pm4ObjectExtractor from PM4Module.Pipeline
+            var extractor = new WoWRollback.PM4Module.Pipeline.Pm4ObjectExtractor();
+            var matcher = new WoWRollback.Core.Services.PM4.Pm4WmoGeometryMatcher();
+            var pm4Objects = new List<Pm4ModfReconstructor.Pm4Object>();
+            
+            foreach (var candidate in extractor.ExtractAllWmoCandidates(pm4Dir))
+            {
+                if (candidate.DebugGeometry == null || candidate.DebugGeometry.Count < 3)
+                    continue;
+                
+                var stats = matcher.ComputeStats(candidate.DebugGeometry);
+                string ck24Str = candidate.CK24.ToString("X6");
+                
+                pm4Objects.Add(new Pm4ModfReconstructor.Pm4Object(
+                    ck24Str,
+                    $"{candidate.TileX}_{candidate.TileY}",
+                    candidate.TileX,
+                    candidate.TileY,
+                    stats
+                ));
+            }
+            
+            Console.WriteLine($"[INFO] Extracted {pm4Objects.Count} PM4 objects directly.");
+            result = reconstructor.ReconstructModf(pm4Objects, wmoLibrary, minConfidence);
+        }
+        else
+        {
+            // Legacy: Load from PM4FacesTool CSV output
+            result = reconstructor.ReconstructModf(pm4Dir, wmoLibrary, minConfidence);
+        }
 
         // Apply Coordinate Transform (PM4 -> ADT World)
         Console.WriteLine("[INFO] Applying PM4->ADT coordinate transform (ServerToAdtPosition)...");
@@ -7326,5 +7364,63 @@ internal static class Program
         }
 
         return entries;
+    }
+
+    private static int RunPm4PipelineV2(Dictionary<string, string> opts)
+    {
+        var pm4Dir = opts.GetValueOrDefault("pm4-dir", "");
+        var outDir = opts.GetValueOrDefault("out", "");
+        var wmoDir = opts.GetValueOrDefault("wmo-dir", "");
+        var museumDir = opts.GetValueOrDefault("museum-dir", "");
+        
+        // Flags
+        bool debugWmos = opts.ContainsKey("debug-wmos");
+        bool csv = !opts.ContainsKey("no-csv");
+        bool dryRun = opts.ContainsKey("dry-run");
+        string singleTile = opts.GetValueOrDefault("single-tile", "");
+
+        if (string.IsNullOrEmpty(pm4Dir))
+        {
+            Console.WriteLine("Usage: pm4-pipeline-v2 --pm4-dir <path> --out <path> [options]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --pm4-dir     Path to input PM4 files");
+            Console.WriteLine("  --out         Output directory");
+            Console.WriteLine("  --wmo-dir     (Optional) Path to WMO library");
+            Console.WriteLine("  --museum-dir  (Optional) Path to source ADTs for patching");
+            Console.WriteLine("  --debug-wmos  Enable Debug WMO export (Debug_{CK24}.wmo)");
+            Console.WriteLine("  --single-tile Filter to tile X_Y (e.g. 30_22)");
+            Console.WriteLine("  --dry-run     Don't write final ADTs");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(outDir))
+            outDir = Path.Combine(pm4Dir, "pipeline_v2_output");
+
+        var config = new WoWRollback.PM4Module.Pipeline.PipelineConfig(
+            Pm4Directory: pm4Dir,
+            OutputDirectory: outDir,
+            WmoLibraryPath: string.IsNullOrEmpty(wmoDir) ? null : wmoDir,
+            MuseumAdtDirectory: string.IsNullOrEmpty(museumDir) ? null : museumDir,
+            SizeTolerance: 5.0f, // Default tolerance
+            SingleTile: singleTile,
+            ExportCsv: csv,
+            ExportDebugWmos: debugWmos,
+            DryRun: dryRun
+        );
+
+        var orchestrator = new WoWRollback.PM4Module.Pipeline.Pm4PipelineOrchestrator();
+        var result = orchestrator.Execute(config);
+
+        if (result.Errors.Count > 0)
+        {
+            Console.Error.WriteLine("\n[ERROR] Pipeline failed with errors:");
+            foreach (var err in result.Errors)
+            {
+                Console.Error.WriteLine($"  - {err}");
+            }
+        }
+
+        return result.FailedTiles == 0 ? 0 : 1;
     }
 }

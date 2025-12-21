@@ -78,6 +78,152 @@ public class WmoMatcherService
     /// </summary>
     public int LibraryCount => _library.Count;
     
+    /// <summary>
+    /// Build library by scanning a directory for WMO files.
+    /// caches the result to wmo_library_cache.json in the directory.
+    /// </summary>
+    public void BuildLibraryFromDirectory(string rootDirectory)
+    {
+        Console.WriteLine($"[INFO] Building WMO library from {rootDirectory}...");
+        var wmoFiles = Directory.GetFiles(rootDirectory, "*.wmo", SearchOption.AllDirectories);
+        
+        _library.Clear();
+        int processed = 0;
+        
+        foreach (var file in wmoFiles)
+        {
+            // Skip _xyz.wmo group files
+            if (FileIsGroupWmo(file)) continue;
+            
+            try 
+            {
+                var entry = ParseWmoHeader(file, rootDirectory);
+                if (entry != null)
+                {
+                    _library.Add(entry);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Console.WriteLine($"[WARN] Failed to parse {Path.GetFileName(file)}: {ex.Message}");
+            }
+            
+            processed++;
+            if (processed % 1000 == 0) Console.WriteLine($"[INFO] Scanned {processed} files...");
+        }
+        
+        Console.WriteLine($"[INFO] Built library with {_library.Count} entries.");
+        
+        // Save cache
+        try
+        {
+            var cachePath = Path.Combine(rootDirectory, "wmo_library_cache.json");
+            SaveLibrary(cachePath);
+            Console.WriteLine($"[INFO] Saved cache to {cachePath}");
+        }
+        catch {}
+    }
+
+    private bool FileIsGroupWmo(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        // Standard check: ends with _\d{3}
+        if (name.Length > 4 && name[^4] == '_' && char.IsDigit(name[^3]) && char.IsDigit(name[^2]) && char.IsDigit(name[^1]))
+            return true;
+        return false;
+    }
+
+    private WmoLibraryEntry? ParseWmoHeader(string filePath, string rootDir)
+    {
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+        using var br = new BinaryReader(fs);
+        
+        // Read chunks until MOHD
+        while (fs.Position < fs.Length)
+        {
+            if (fs.Position + 8 > fs.Length) break;
+            
+            // Read FourCC inverted
+            var fourCCBytes = br.ReadBytes(4);
+            var fourCC = System.Text.Encoding.ASCII.GetString(fourCCBytes.Reverse().ToArray());
+            var size = br.ReadUInt32();
+            
+            if (fourCC == "MOHD")
+            {
+                // Parse MOHD
+                // 36 bytes skip to bounds
+                // nTextures(4), nGroups(4), nPortals(4), nLights(4), nDoodadNames(4), nDoodadDefs(4), nDoodadSets(4), ambColor(4), wmoID(4) = 36 bytes
+                fs.Seek(36, SeekOrigin.Current);
+                
+                // Read Bounds (Min X, Z, Y, Max X, Z, Y) - 6 floats
+                var minX = br.ReadSingle();
+                var minZ = br.ReadSingle();
+                var minY = br.ReadSingle();
+                var maxX = br.ReadSingle();
+                var maxZ = br.ReadSingle();
+                var maxY = br.ReadSingle();
+                
+                // Convert Coordinate Space
+                // WMO File: X, Z(Up), Y(Depth)? (Based on Pm4WmoWriter)
+                // We want: X, Y(Depth), Z(Up) for our system to match PM4
+                // Let's assume standard WMO is Z-up.
+                // Our system uses Z-up.
+                // Wait, Pm4WmoWriter wrote: bw.Write(b.Min.X); bw.Write(b.Min.Z); bw.Write(b.Min.Y);
+                // Where b.Min was (X, Y=Depth, Z=Height).
+                // So File has (X, Height, Depth).
+                // So when reading:
+                // Read 1: X
+                // Read 2: Height (Z)
+                // Read 3: Depth (Y)
+                
+                var boundsMin = new Vector3(minX, minY, minZ); // Map file Z->Y(Height->Depth?? No.)
+                // File: X, Z_Up, Y_Depth
+                // Vector3: X, Y_Depth, Z_Up
+                // So: V.X = F.X, V.Y = F.Y_Depth (3rd), V.Z = F.Z_Up (2nd)
+                boundsMin = new Vector3(minX, minY, minZ);
+                var boundsMax = new Vector3(maxX, maxY, maxZ);
+                
+                var relPath = Path.GetRelativePath(rootDir, filePath).Replace("\\", "/");
+                
+                return new WmoLibraryEntry(
+                    Path: relPath,
+                    BoundsMin: boundsMin,
+                    BoundsMax: boundsMax,
+                    DominantAngle: 0f, // Cannot easily calc
+                    SurfaceCount: 0,
+                    VertexCount: 0
+                );
+            }
+            else
+            {
+                fs.Seek(size, SeekOrigin.Current);
+            }
+        }
+        return null;
+    }
+    
+    private void SaveLibrary(string path)
+    {
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        
+        // Convert to cache JSON format
+        var cacheEntries = _library.Select(e => new WmoLibraryJsonEntry
+        {
+            WmoPath = e.Path,
+            Stats = new WmoStatsJson
+            {
+                VertexCount = e.VertexCount,
+                BoundsMin = new Vector3Json { X = e.BoundsMin.X, Y = e.BoundsMin.Y, Z = e.BoundsMin.Z },
+                BoundsMax = new Vector3Json { X = e.BoundsMax.X, Y = e.BoundsMax.Y, Z = e.BoundsMax.Z },
+                PrincipalAxes = new[] { new Vector3Json { X = 1, Y = 0, Z = 0 } } // Dummy axis
+            }
+        }).ToList();
+        
+        var json = JsonSerializer.Serialize(cacheEntries, options);
+        File.WriteAllText(path, json);
+    }
+
+    
     #endregion
     
     #region Matching
@@ -148,6 +294,16 @@ public class WmoMatcherService
                         score *= 1.1f;
                     }
                     
+                    // Boost score if vertex counts are similar (using DebugGeometry count)
+                    if (candidate.DebugGeometry != null && entry.VertexCount > 0)
+                    {
+                        float vCountRatio = (float)candidate.DebugGeometry.Count / entry.VertexCount;
+                        if (vCountRatio > 0.8f && vCountRatio < 1.2f)
+                        {
+                            score *= 1.15f;
+                        }
+                    }
+                    
                     if (score > bestScore)
                     {
                         bestScore = score;
@@ -186,10 +342,88 @@ public class WmoMatcherService
         int matched = 0;
         int total = 0;
         
-        foreach (var candidate in candidates)
+        // Dictionary to track matched instances by CK24 (Object ID)
+        // If we match one instance with high confidence, we can reuse that match for others of same CK24
+        var confirmedMatches = new Dictionary<uint, WmoLibraryEntry>();
+        
+        var candidatesList = candidates.ToList();
+        
+        foreach (var candidate in candidatesList)
         {
             total++;
-            var match = FindBestMatch(candidate);
+            
+            WmoMatch? match = null;
+            
+            // Check if we already have a confirmed match for this CK24
+            if (confirmedMatches.TryGetValue(candidate.CK24, out var confirmedEntry))
+            {
+                // We have a confirmed match type!
+                // But we still need to calculate Position/Rotation specific to this instance
+                // Use the confirmed entry to calculate placement
+                
+                // For rotation, if we don't have MPRL, we might need to re-scan for best yaw
+                // But typically instances share orientation logic or have MPRL.
+                // Let's do a quick best-fit rotation for this specific instance using the confirmed entry
+                
+                float bestYaw = 0f;
+                float bestScore = 0f;
+                bool useMprl = candidate.HasMprlRotation;
+                float mprlYaw = candidate.MprlRotationDegrees ?? 0f;
+                
+                if (useMprl)
+                {
+                    bestYaw = mprlYaw;
+                    bestScore = 1.0f; 
+                }
+                else
+                {
+                    // Scan cardinal rotations for this instance against the confirmed WMO
+                    for (int rotIdx = 0; rotIdx < 4; rotIdx++)
+                    {
+                        var yaw = rotIdx * 90f;
+                        var rotatedSize = RotateSize(confirmedEntry.Size, yaw);
+                        if (IsSizeMatch(candidate.Size, rotatedSize, _sizeTolerance))
+                        {
+                            float score = CalculateSizeScore(candidate.Size, rotatedSize);
+                            if (score > bestScore)
+                            {
+                                bestScore = score;
+                                bestYaw = yaw;
+                            }
+                        }
+                    }
+                }
+                
+                var position = candidate.MprlPosition ?? CalculatePosition(candidate, confirmedEntry, bestYaw);
+                
+                match = new WmoMatch(
+                    WmoPath: confirmedEntry.Path,
+                    Position: position,
+                    Rotation: new Vector3(0f, bestYaw, 0f),
+                    Scale: 1.0f,
+                    ConfidenceScore: 0.95f, // High confidence due to propagation
+                    SourceCandidate: candidate,
+                    MatchedEntry: confirmedEntry
+                );
+                
+                Console.WriteLine($"[INFO] Propagated match {confirmedEntry.Path} for instance {candidate.InstanceId} of {candidate.CK24:X6}");
+            }
+            else
+            {
+                // No confirmed match yet, perform full search
+                match = FindBestMatch(candidate);
+                
+                // If we found a high confidence match, store it for propagation
+                if (match != null && match.ConfidenceScore > 0.85f)
+                {
+                    if (!confirmedMatches.ContainsKey(candidate.CK24))
+                    {
+                        confirmedMatches[candidate.CK24] = match.MatchedEntry;
+                        Console.WriteLine($"[INFO] Confirmed new match type {match.MatchedEntry.Path} for {candidate.CK24:X6}");
+                    }
+                }
+            }
+
             if (match != null)
             {
                 matched++;
