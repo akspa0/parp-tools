@@ -518,11 +518,12 @@ public sealed class Pm4ModfReconstructor
     /// Returns best match (if any) and list of all candidates > minConfidence.
     /// </summary>
     public (WmoReference? bestMatch, Pm4WmoGeometryMatcher.PlacementTransform? bestTransform, List<MatchCandidate> candidates) 
-        MatchPm4ToWmo(Pm4Object pm4Obj, List<WmoReference> wmoLibrary, float minConfidence = 0.7f)
+        MatchPm4ToWmo(Pm4Object pm4Obj, List<WmoReference> wmoLibrary, float minConfidence = 0.1f)
     {
         WmoReference? bestMatch = null;
         Pm4WmoGeometryMatcher.PlacementTransform? bestTransform = null;
         float bestConfidence = 0;
+        string? bestWmoPath = null;
         
         var candidates = new List<MatchCandidate>();
 
@@ -530,25 +531,32 @@ public sealed class Pm4ModfReconstructor
         {
             try
             {
-                var transform = _matcher.FindAlignment(pm4Obj.Stats, wmo.Stats);
+                // Use simple dimension matching (rotation-agnostic)
+                float score = SimpleDimensionMatchScore(pm4Obj.Stats, wmo.Stats);
                 
-                if (transform.MatchConfidence >= minConfidence)
+                if (score >= minConfidence)
                 {
-                    // Valid candidate
+                    // Use MPRL position/rotation directly instead of computing from geometry
+                    var position = pm4Obj.MprlPosition ?? pm4Obj.Stats.Centroid;
+                    var rotation = pm4Obj.MprlRotationDegrees.HasValue 
+                        ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0)  // MPRL is yaw only
+                        : Vector3.Zero;
+                    
                     candidates.Add(new MatchCandidate(
                         pm4Obj.Ck24,
                         wmo.WmoPath,
-                        transform.MatchConfidence,
-                        transform.Position,
-                        transform.Rotation,
-                        transform.Scale
+                        score,
+                        position,
+                        rotation,
+                        1.0f  // WMOs are always scale 1.0
                     ));
 
-                    if (transform.MatchConfidence > bestConfidence)
+                    if (score > bestConfidence)
                     {
-                        bestConfidence = transform.MatchConfidence;
+                        bestConfidence = score;
                         bestMatch = wmo;
-                        bestTransform = transform;
+                        bestTransform = new Pm4WmoGeometryMatcher.PlacementTransform(
+                            position, rotation, 1.0f, score);
                     }
                 }
             }
@@ -585,6 +593,37 @@ public sealed class Pm4ModfReconstructor
 
         // Score based on how close the extents match at 1:1 scale
         // 0% diff = 100% score, 50% diff = 0% score
+        float score = Math.Max(0, 1 - avgDiff * 2);
+
+        return score;
+    }
+
+    /// <summary>
+    /// 3D dimension-based matching - compares sorted XYZ dimensions.
+    /// Now includes MSCN wall data for full collision volume.
+    /// </summary>
+    public float SimpleDimensionMatchScore(Pm4WmoGeometryMatcher.GeometryStats pm4Stats, 
+                                            Pm4WmoGeometryMatcher.GeometryStats wmoStats)
+    {
+        // Compare all 3 dimensions (PM4 now includes MSCN walls for full 3D volume)
+        // Sort dimensions to make rotation-agnostic
+        var pm4Dims = new[] { pm4Stats.Dimensions.X, pm4Stats.Dimensions.Y, pm4Stats.Dimensions.Z }
+            .OrderByDescending(x => x).ToArray();
+        var wmoDims = new[] { wmoStats.Dimensions.X, wmoStats.Dimensions.Y, wmoStats.Dimensions.Z }
+            .OrderByDescending(x => x).ToArray();
+
+        // Skip tiny objects
+        if (wmoDims[0] < 0.5f || pm4Dims[0] < 0.5f) return 0;
+
+        // Compare all 3 sorted dimensions
+        float diff1 = Math.Abs(pm4Dims[0] - wmoDims[0]) / Math.Max(pm4Dims[0], wmoDims[0]);
+        float diff2 = Math.Abs(pm4Dims[1] - wmoDims[1]) / Math.Max(pm4Dims[1], wmoDims[1]);
+        float diff3 = Math.Abs(pm4Dims[2] - wmoDims[2]) / Math.Max(pm4Dims[2], wmoDims[2]);
+
+        // Average difference - lower is better
+        float avgDiff = (diff1 + diff2 + diff3) / 3;
+
+        // Score: 0% diff = 100%, 50% diff = 0%
         float score = Math.Max(0, 1 - avgDiff * 2);
 
         return score;
@@ -821,25 +860,39 @@ public sealed class Pm4ModfReconstructor
         {
             try
             {
-                // Find alignment allowing scaling (forceUnitScale: false)
-                var transform = _matcher.FindAlignment(pm4Obj.Stats, m2.Stats, forceUnitScale: false);
+                // Use simple aspect ratio matching (M2s can be scaled)
+                float score = SimpleM2MatchScore(pm4Obj.Stats, m2.Stats);
                 
-                if (transform.MatchConfidence >= minConfidence)
+                if (score >= minConfidence)
                 {
+                    // Calculate scale from dimension ratio
+                    var pm4Dims = new[] { pm4Obj.Stats.Dimensions.X, pm4Obj.Stats.Dimensions.Y, pm4Obj.Stats.Dimensions.Z }
+                        .OrderByDescending(x => x).ToArray();
+                    var m2Dims = new[] { m2.Stats.Dimensions.X, m2.Stats.Dimensions.Y, m2.Stats.Dimensions.Z }
+                        .OrderByDescending(x => x).ToArray();
+                    float scale = m2Dims[0] > 0.1f ? pm4Dims[0] / m2Dims[0] : 1.0f;
+                    
+                    // Use MPRL position/rotation
+                    var position = pm4Obj.MprlPosition ?? pm4Obj.Stats.Centroid;
+                    var rotation = pm4Obj.MprlRotationDegrees.HasValue 
+                        ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0)
+                        : Vector3.Zero;
+                    
                     candidates.Add(new MatchCandidate(
                         pm4Obj.Ck24,
                         m2.M2Path,
-                        transform.MatchConfidence,
-                        transform.Position,
-                        transform.Rotation,
-                        transform.Scale
+                        score,
+                        position,
+                        rotation,
+                        scale
                     ));
 
-                    if (transform.MatchConfidence > bestConfidence)
+                    if (score > bestConfidence)
                     {
-                        bestConfidence = transform.MatchConfidence;
+                        bestConfidence = score;
                         bestMatch = m2;
-                        bestTransform = transform;
+                        bestTransform = new Pm4WmoGeometryMatcher.PlacementTransform(
+                            position, rotation, scale, score);
                     }
                 }
             }
@@ -847,6 +900,34 @@ public sealed class Pm4ModfReconstructor
         }
 
         return (bestMatch, bestTransform, candidates);
+    }
+
+    /// <summary>
+    /// Simple M2 matching using aspect ratios (scale-invariant).
+    /// </summary>
+    private float SimpleM2MatchScore(Pm4WmoGeometryMatcher.GeometryStats pm4Stats, 
+                                      Pm4WmoGeometryMatcher.GeometryStats m2Stats)
+    {
+        // Get sorted dimensions
+        var pm4Dims = new[] { pm4Stats.Dimensions.X, pm4Stats.Dimensions.Y, pm4Stats.Dimensions.Z }
+            .OrderByDescending(x => x).ToArray();
+        var m2Dims = new[] { m2Stats.Dimensions.X, m2Stats.Dimensions.Y, m2Stats.Dimensions.Z }
+            .OrderByDescending(x => x).ToArray();
+
+        // Skip tiny objects
+        if (m2Dims[0] < 0.1f || pm4Dims[0] < 0.1f) return 0;
+
+        // Normalize to largest = 1.0
+        float[] pm4Aspect = { 1.0f, pm4Dims[1] / pm4Dims[0], pm4Dims[2] / pm4Dims[0] };
+        float[] m2Aspect = { 1.0f, m2Dims[1] / m2Dims[0], m2Dims[2] / m2Dims[0] };
+
+        // Compare aspect ratios
+        float diff1 = Math.Abs(pm4Aspect[1] - m2Aspect[1]);
+        float diff2 = Math.Abs(pm4Aspect[2] - m2Aspect[2]);
+        float avgDiff = (diff1 + diff2) / 2;
+
+        // Score: 0 diff = 100%, 0.5 diff = 0%
+        return Math.Max(0, 1 - avgDiff * 2);
     }
 
     /// <summary>

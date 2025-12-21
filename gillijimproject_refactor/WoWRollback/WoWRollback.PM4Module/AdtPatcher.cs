@@ -547,6 +547,9 @@ public sealed class AdtPatcher
     /// <summary>
     /// MODF entry for patching.
     /// </summary>
+    /// <summary>
+    /// MODF entry for patching.
+    /// </summary>
     public struct ModfEntry
     {
         public uint NameId;       // Index into MWMO
@@ -559,6 +562,26 @@ public sealed class AdtPatcher
         public ushort DoodadSet;
         public ushort NameSet;
         public ushort Scale;      // 1024 = 1.0
+        
+        // Internal use only - not written to file
+        public int TileX;
+        public int TileY;
+
+        public ModfEntry(uint uniqueId, uint nameId, Vector3 pos, Vector3 rot, Generation.Pm4DebugWmoWriter.BoundingBox bounds, ushort flags, ushort doodadSet, ushort nameSet, float scale)
+        {
+            UniqueId = uniqueId;
+            NameId = nameId;
+            Position = pos;
+            Rotation = rot;
+            BoundsMin = bounds.Min;
+            BoundsMax = bounds.Max;
+            Flags = flags;
+            DoodadSet = doodadSet;
+            NameSet = nameSet;
+            Scale = (ushort)(scale * 1024f);
+            TileX = 0;
+            TileY = 0;
+        }
     }
 
     /// <summary>

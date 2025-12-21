@@ -22,7 +22,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null, bool useDebugWmo = false)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -62,7 +62,7 @@ namespace WoWRollback.PM4Module
             // Stage 1 & 1.5: In-Memory WMO Processing & Conversion
             Console.WriteLine("\n[Stage 1 & 1.5] Processing WMOs (In-Memory)...");
 
-            if (!string.IsNullOrEmpty(gamePath) && !string.IsNullOrEmpty(listfilePath))
+            if (!useDebugWmo && !string.IsNullOrEmpty(gamePath) && !string.IsNullOrEmpty(listfilePath))
             {
                 var mpqFiles = Directory.GetFiles(Path.Combine(gamePath, "Data"), "*.MPQ", SearchOption.AllDirectories);
                 using var archiveSource = new MpqArchiveSource(mpqFiles);
@@ -134,7 +134,8 @@ namespace WoWRollback.PM4Module
                         
                         if (data.GroupCount > 0)
                         {
-                            WmoWalkableSurfaceExtractor.ExportPerFlag(data, objOutputDir);
+                            // Disabled verbose per-flag export
+                            // WmoWalkableSurfaceExtractor.ExportPerFlag(data, objOutputDir);
                             processed++;
                             
                             if (processed % 10 == 0) Console.Write($"\r[INFO] Processed {processed} WMOs (skipped {skipped} existing)...");
@@ -276,99 +277,114 @@ namespace WoWRollback.PM4Module
                 // Full PM4 matching pipeline: parse PM4 → match WMO geometry → generate MODF
                 Console.WriteLine("[INFO] Running PM4 → WMO matching pipeline...");
                 
-                // Step 1: Load PM4 objects directly from .pm4 files
-                var pm4Objects = LoadPm4ObjectsFromFiles(pm4Path);
-                
-                // Step 1b: Export PM4 candidates as OBJ for decoder verification
-                var pm4ObjDebugDir = Path.Combine(outputRoot, "pm4_obj_debug");
-                Console.WriteLine($"[INFO] Exporting PM4 candidates to OBJ: {pm4ObjDebugDir}");
-                ExportPm4CandidatesToObj(pm4Path, pm4ObjDebugDir);
-                
-                if (pm4Objects.Count == 0)
+                if (useDebugWmo)
                 {
-                    Console.WriteLine("[WARN] No PM4 objects found. Ensure pm4 path contains .pm4 files.");
-                    Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
+                    Console.WriteLine("\n[INFO] DEBUG WMO MODE: Generating placeholder WMOs from PM4 geometry...");
+                    Console.WriteLine("[INFO] Skipping WMO library matching.");
+                    
+                    GenerateDebugWmoPlacements(pm4Path, outputRoot, out transformedEntries, out wmoNames, ref globalNextUniqueId);
+                    
+                    // Export CSVs to allow reusing this "debug" state if run again
+                    var result = new Pm4ModfReconstructor.ReconstructionResult(transformedEntries, wmoNames, new List<string>(), new Dictionary<string, int>(), new List<Pm4ModfReconstructor.MatchCandidate>());
+                    _reconstructor.ExportToCsv(result, modfCsvPath);
+                    _reconstructor.ExportMwmoNames(result, mwmoPath);
                 }
                 else
                 {
-                    // Step 2: Build WMO reference library for matching
-                    Console.WriteLine("[INFO] Building WMO reference library...");
-                    if (!string.IsNullOrEmpty(wmoFilter))
-                        Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
-                    if (useFullMesh)
-                        Console.WriteLine("[INFO] Using full WMO mesh for matching (not just walkable surfaces)");
-                    var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, useFullMesh);
+                    // Step 1: Load PM4 objects directly from .pm4 files
+                    var pm4Objects = LoadPm4ObjectsFromFiles(pm4Path);
                     
-                    if (wmoLibrary.Count == 0)
+                    // Step 1b: Export PM4 candidates as OBJ for decoder verification
+                    var pm4ObjDebugDir = Path.Combine(outputRoot, "pm4_obj_debug");
+                    Console.WriteLine($"[INFO] Exporting PM4 candidates to OBJ: {pm4ObjDebugDir}");
+                    ExportPm4CandidatesToObj(pm4Path, pm4ObjDebugDir);
+                    
+                    if (pm4Objects.Count == 0)
                     {
-                        Console.WriteLine("[WARN] WMO library is empty. Check game path and listfile.");
+                        Console.WriteLine("[WARN] No PM4 objects found. Ensure pm4 path contains .pm4 files.");
                         Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
                     }
                     else
                     {
-                        // Step 3: Match PM4 objects to WMOs and reconstruct MODF
-                        Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
-                        var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.88f, globalNextUniqueId);
-                        globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
+                        // Step 2: Build WMO reference library for matching
+                        Console.WriteLine("[INFO] Building WMO reference library...");
+                        if (!string.IsNullOrEmpty(wmoFilter))
+                            Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
+                        if (useFullMesh)
+                            Console.WriteLine("[INFO] Using full WMO mesh for matching (not just walkable surfaces)");
+                        var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, useFullMesh);
                         
-                        // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
-                        // so the result positions are already in correct coordinate space
-                        transformedEntries = result.ModfEntries;
-                        wmoNames = result.WmoNames;
-                        
-                        // Export CSVs for future cache
-                        _reconstructor.ExportToCsv(result with { ModfEntries = transformedEntries }, modfCsvPath);
-                        _reconstructor.ExportMwmoNames(result, mwmoPath);
-                        
-                        var candidatesPath = Path.Combine(dirs.ModfCsv, "match_candidates.csv");
-                        _reconstructor.ExportCandidatesCsv(result, candidatesPath);
-                        
-                        Console.WriteLine($"[INFO] Matched {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs");
-                        Console.WriteLine($"[INFO] Unmatched PM4 objects: {result.UnmatchedPm4Objects.Count}");
-                        
-                        // Export MPRL rotation investigation CSV
-                        ExportMprlRotationData(pm4Path, dirs.ModfCsv);
-                    }
-                    
-                    // Step 4: M2 Matching (Stage 2b)
-                    // M2 objects exist in any CK24 group, not just 0x000000
-                    // Use all PM4 objects for M2 matching
-                    var m2Candidates = pm4Objects.ToList();
-                    Console.WriteLine($"\n[Stage 2b] Processing M2 candidates ({m2Candidates.Count} PM4 objects)...");
-                    
-                    // Load M2 library from cache if we didn't build it in Stage 1b
-                    if (m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
-                    {
-                        try
+                        if (wmoLibrary.Count == 0)
                         {
-                            var json = File.ReadAllText(m2LibraryCachePath);
-                            var list = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json);
-                            if (list != null)
-                                m2Library = list.ToDictionary(x => x.M2Path, x => x, StringComparer.OrdinalIgnoreCase);
+                            Console.WriteLine("[WARN] WMO library is empty. Check game path and listfile.");
+                            Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
                         }
-                        catch { }
-                    }
-                    
-                    if (m2Candidates.Count > 0 && m2Library.Count > 0)
-                    {
-                        Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
-                        var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f, globalNextUniqueId);
-                        globalNextUniqueId += (uint)mddfResult.MddfEntries.Count; // Reserve IDs for M2s
-                        mddfEntries = mddfResult.MddfEntries;
-                        m2Names = mddfResult.M2Names;
+                        else
+                        {
+                            // Step 3: Match PM4 objects to WMOs and reconstruct MODF
+                            Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
+                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.2f, globalNextUniqueId); // Reduced confidence threshold
+                            globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
+                            
+                            // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
+                            // so the result positions are already in correct coordinate space
+                            transformedEntries = result.ModfEntries;
+                            wmoNames = result.WmoNames;
+                            
+                            // Export CSVs for future cache
+                            _reconstructor.ExportToCsv(result with { ModfEntries = transformedEntries }, modfCsvPath);
+                            _reconstructor.ExportMwmoNames(result, mwmoPath);
+                            
+                            var candidatesPath = Path.Combine(dirs.ModfCsv, "match_candidates.csv");
+                            _reconstructor.ExportCandidatesCsv(result, candidatesPath);
+                            
+                            Console.WriteLine($"[INFO] Matched {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs");
+                            Console.WriteLine($"[INFO] Unmatched PM4 objects: {result.UnmatchedPm4Objects.Count}");
+                            
+                            // Export MPRL rotation investigation CSV
+                            ExportMprlRotationData(pm4Path, dirs.ModfCsv);
+                        }
                         
-                        // Export MDDF CSV
-                        _reconstructor.ExportMddfToCsv(mddfResult, mddfCsvPath);
+                        // Step 4: M2 Matching (Stage 2b)
+                        // M2 objects exist in any CK24 group, not just 0x000000
+                        // Use all PM4 objects for M2 matching
+                        var m2Candidates = pm4Objects.ToList();
+                        Console.WriteLine($"\n[Stage 2b] Processing M2 candidates ({m2Candidates.Count} PM4 objects)...");
                         
-                        Console.WriteLine($"[INFO] Matched {mddfEntries.Count} MDDF entries, {m2Names.Count} unique M2s");
-                    }
-                    else if (m2Candidates.Count == 0)
-                    {
-                        Console.WriteLine("[INFO] No PM4 objects found for M2 matching");
-                    }
-                    else
-                    {
-                        Console.WriteLine("[WARN] M2 library empty, skipping M2 matching");
+                        // Load M2 library from cache if we didn't build it in Stage 1b
+                        if (m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
+                        {
+                            try
+                            {
+                                var json = File.ReadAllText(m2LibraryCachePath);
+                                var list = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json);
+                                if (list != null)
+                                    m2Library = list.ToDictionary(x => x.M2Path, x => x, StringComparer.OrdinalIgnoreCase);
+                            }
+                            catch { }
+                        }
+                        
+                        if (m2Candidates.Count > 0 && m2Library.Count > 0)
+                        {
+                            Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
+                            var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f, globalNextUniqueId);
+                            globalNextUniqueId += (uint)mddfResult.MddfEntries.Count; // Reserve IDs for M2s
+                            mddfEntries = mddfResult.MddfEntries;
+                            m2Names = mddfResult.M2Names;
+                            
+                            // Export MDDF CSV
+                            _reconstructor.ExportMddfToCsv(mddfResult, mddfCsvPath);
+                            
+                            Console.WriteLine($"[INFO] Matched {mddfEntries.Count} MDDF entries, {m2Names.Count} unique M2s");
+                        }
+                        else if (m2Candidates.Count == 0)
+                        {
+                            Console.WriteLine("[INFO] No PM4 objects found for M2 matching");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[WARN] M2 library empty, skipping M2 matching");
+                        }
                     }
                 }
             }
@@ -1442,7 +1458,13 @@ namespace WoWRollback.PM4Module
                             continue;
                         
                         string ck24Hex = $"0x{candidate.CK24:X6}";
-                        var stats = matcher.ComputeStats(candidate.DebugGeometry);
+                        
+                        // Combine MSVT (floor) + MSCN (walls) for full collision volume
+                        var allVertices = candidate.DebugGeometry.ToList();
+                        if (candidate.DebugMscnVertices != null)
+                            allVertices.AddRange(candidate.DebugMscnVertices);
+                        
+                        var stats = matcher.ComputeStats(allVertices);
                         
                         // Include MSCN points, MPRL rotation and position
                         objects.Add(new Pm4ModfReconstructor.Pm4Object(
@@ -1452,27 +1474,7 @@ namespace WoWRollback.PM4Module
                             candidate.MprlPosition));  // Pass MPRL position
                     }
                     
-                    // Also extract M2 candidates from IsM2Bucket surfaces (GroupKey == 0)
-                    var m2Surfaces = decoded.Surfaces.Where(s => s.GroupKey == 0).ToList();
-                    if (m2Surfaces.Count > 0)
-                    {
-                        // Use existing PM4File for M2 clustering (reuse old logic for now)
-                        var pm4Legacy = new PM4File(pm4Data);
-                        var clusters = Pm4GeometryClusterer.ClusterSurfaces(
-                            pm4Legacy.Surfaces.Where(s => s.IsM2Bucket).ToList(),
-                            pm4Legacy.MeshIndices,
-                            pm4Legacy.MeshVertices);
-                        
-                        int m2Count = 0;
-                        foreach (var cluster in clusters)
-                        {
-                            if (cluster.TriangleCount < 10 || cluster.TriangleCount > 5000) continue;
-                            
-                            string candidateId = $"M2_{tileX}_{tileY}_{m2Count++}";
-                            var stats = matcher.ComputeStats(cluster.Vertices);
-                            objects.Add(new Pm4ModfReconstructor.Pm4Object(candidateId, pm4Path, tileX, tileY, stats));
-                        }
-                    }
+                    // No separate M2 extraction - all objects matched uniformly against both libraries
                 }
                 catch (Exception ex)
                 {
@@ -1650,6 +1652,133 @@ namespace WoWRollback.PM4Module
             ExportMslkCk24Analysis(pm4Directory, outputDir);
         }
         
+        /// <summary>
+        /// Scan PM4 files and generate placeholder WMOs for each object, skipping all matching logic.
+        /// </summary>
+        private void GenerateDebugWmoPlacements(string pm4Directory, string outputRoot, out List<Pm4ModfReconstructor.ModfEntry> modfEntries, out List<string> wmoNames, ref uint nextUniqueId)
+        {
+            modfEntries = new List<Pm4ModfReconstructor.ModfEntry>();
+            wmoNames = new List<string>();
+            var debugWriter = new Generation.Pm4DebugWmoWriter();
+            
+            // Output directory for generated WMOs
+            string wmoOutputDir = Path.Combine(outputRoot, "World/wmo/pm4_debug");
+            Directory.CreateDirectory(wmoOutputDir);
+            
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            Console.WriteLine($"[INFO] Scanning {pm4Files.Length} PM4 files for debug WMO generation...");
+            
+            var wmoPathMap = new Dictionary<string, int>(); // Path -> Index (mwmo offset)
+            int currentMwmoOffset = 0;
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                try
+                {
+                    // Parse filename for tile coords
+                    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var match = System.Text.RegularExpressions.Regex.Match(baseName, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    int tileX = int.Parse(match.Groups[1].Value);
+                    int tileY = int.Parse(match.Groups[2].Value);
+                    
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    // var pm4 = new PM4File(pm4Data); // Not needed for decoder
+                    
+                    // Decode PM4 with full geometry extraction
+                    var decoded = Decoding.Pm4Decoder.Decode(pm4Data);
+                    
+                    // Build candidates (grouping surfaces by CK24)
+                    var candidates = Decoding.Pm4ObjectBuilder.BuildCandidates(decoded, tileX, tileY);
+                    
+                    foreach (var candidate in candidates)
+                    {
+                        if (candidate.DebugGeometry == null || candidate.DebugGeometry.Count < 3)
+                            continue;
+                            
+                        // Generate a unique debug WMO for this candidate
+                        // Use CK24 and Tile coords to make it unique and traceable
+                        string wmoName = $"pm4_debug_adt{tileX}_{tileY}_{candidate.CK24:X6}";
+                        string wmoPath = $"World\\wmo\\pm4_debug\\{wmoName}.wmo"; // In-game path
+                        
+                        // Write the WMO files
+                        debugWriter.WriteWmo(candidate, wmoOutputDir, wmoName);
+                        
+                        // Register WMO name
+                        if (!wmoPathMap.ContainsKey(wmoPath))
+                        {
+                            wmoPathMap[wmoPath] = currentMwmoOffset;
+                            wmoNames.Add(wmoPath);
+                            currentMwmoOffset += wmoPath.Length + 1;
+                        }
+                        
+                        // Determine placement
+                        // Use MPRL position if available for accurate placement
+                        // Otherwise use geometric centroid (less accurate)
+                        Vector3 position = Vector3.Zero;
+                        Vector3 rotation = Vector3.Zero;
+                        
+                        if (candidate.MprlPosition.HasValue)
+                        {
+                            // MPRL position is raw (X, Y, Z) - verify if this needs swapping
+                            // Based on recent fixes, we assume raw coordinates are correct
+                            position = candidate.MprlPosition.Value;
+                            
+                            if (candidate.MprlRotationDegrees.HasValue)
+                            {
+                                // MPRL rotation is typically Yaw only (Y-axis)
+                                // Standard rotation in MODF is (Pitch, Yaw, Roll)
+                                rotation = new Vector3(0, candidate.MprlRotationDegrees.Value, 0);
+                            }
+                        }
+
+                        // Calculate Bounds for ModfEntry
+                        var min = new Vector3(float.MaxValue);
+                        var max = new Vector3(float.MinValue);
+                        foreach (var v in candidate.DebugGeometry)
+                        {
+                            min = Vector3.Min(min, v);
+                            max = Vector3.Max(max, v);
+                        }
+                        var bounds = new Generation.Pm4DebugWmoWriter.BoundingBox(min, max);
+
+                        // Fallback to centroid if no MPRL
+                        if (!candidate.MprlPosition.HasValue)
+                        {
+                            position = (min + max) / 2f;
+                        }
+                        
+                        // Create MODF Entry using Pm4ModfReconstructor type
+                        var entry = new Pm4ModfReconstructor.ModfEntry(
+                            (uint)wmoPathMap[wmoPath],
+                            nextUniqueId++,
+                            position,
+                            rotation,
+                            bounds.Min,
+                            bounds.Max,
+                            0, // Flags
+                            0, // DoodadSet
+                            0, // NameSet
+                            1024, // Scale 1.0
+                            wmoPath,
+                            candidate.CK24.ToString("X6"),
+                            1.0f, // Confidence
+                            tileX,
+                            tileY
+                        );
+                        
+                        modfEntries.Add(entry);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Failed to process {pm4Path}: {ex.Message}");
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Generated {modfEntries.Count} debug WMO placements.");
+        }
+
         /// <summary>
         /// Deep analysis of MSLK ↔ CK24 relationships to find sub-object segmentation patterns.
         /// Explores how MSLK TypeFlags, Subtype, GroupObjectId correlate with CK24 groups.

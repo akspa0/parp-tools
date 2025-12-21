@@ -61,6 +61,21 @@ dotnet run --project WoWRollback.PM4Module -- patch-pipeline \
 | `--out` | Output directory for Noggit project |
 | `--wmo-filter` | *Optional*: Filter WMOs by path prefix (e.g., `Northrend` or `Kalimdor`) |
 | `--use-full-mesh` | *Optional*: Use full WMO mesh for matching (not just walkable surfaces) |
+| `--use-debug-wmo` | *Optional*: Generate placeholder WMOs from extracted PM4 geometry (skips matching, useful for visual debug) |
+
+### Debugging Tools
+
+**Inspect ADT Placements**:
+List MDDF (M2) and MODF (WMO) chunks from an ADT file (supports reversed chunk headers like FDDM/FDOM).
+```powershell
+dotnet run --project WoWRollback.PM4Module -- inspect-adt --adt "path\to\file.adt"
+```
+
+**Export PM4 Geometry**:
+Extract PM4 objects as standard Wavefront OBJ files for verification.
+```powershell
+dotnet run --project WoWRollback.PM4Module -- export-pm4-obj --pm4 "path\to\pm4_dir" --out "output_dir" [--tile X_Y]
+```
 
 ### Output Structure
 

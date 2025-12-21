@@ -80,6 +80,9 @@ if (args.Length > 0)
         
         case "export-pm4-obj":
             return RunExportPm4Obj(args.Skip(1).ToArray());
+
+        case "inspect-adt":
+            return RunInspectAdt(args.Skip(1).ToArray());
     }
 }
 
@@ -1393,6 +1396,7 @@ static int RunPatchPipeline(string[] args)
     string? wmoFilter = null;        // Filter WMOs by path prefix (e.g., "Northrend")
     string? m2Filter = null;         // Filter M2s by path prefix (e.g., "development")
     bool useFullMesh = false;        // Use full WMO mesh instead of walkable surfaces
+    bool useDebugWmo = false;        // Generate placeholder WMOs instead of matching
 
     for (int i = 0; i < args.Length; i++)
     {
@@ -1409,6 +1413,7 @@ static int RunPatchPipeline(string[] args)
             case "--wmo-filter": wmoFilter = args[++i]; break;
             case "--m2-filter": m2Filter = args[++i]; break;
             case "--use-full-mesh": useFullMesh = true; break;
+            case "--use-debug-wmo": useDebugWmo = true; break;
             case "--help":
             case "-h":
                 Console.WriteLine("Usage: patch-pipeline --game <path> --listfile <path> --pm4 <dir> --split-adt <dir> --museum-adt <dir> [options]");
@@ -1427,6 +1432,7 @@ static int RunPatchPipeline(string[] args)
                 Console.WriteLine("  --wmo-filter <path> Filter WMOs by path prefix (e.g., 'Northrend' or 'Kalimdor')");
                 Console.WriteLine("  --m2-filter <path>  Filter M2s by path prefix (e.g., 'development')");
                 Console.WriteLine("  --use-full-mesh     Use full WMO mesh for matching (not just walkable surfaces)");
+                Console.WriteLine("  --use-debug-wmo     SKIP matching and generate placeholder WMOs from PM4 geometry");
                 return 0;
         }
     }
@@ -1441,7 +1447,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath, useDebugWmo);
         return 0;
     }
     catch (Exception ex)
@@ -2489,4 +2495,176 @@ static int RunExportPm4Obj(string[] args)
     Console.WriteLine("Compare these OBJ files with Pm4Reader exports to verify decoder correctness.");
     
     return 0;
+}
+
+// inspect-adt command - list MODF/MDDF from an ADT
+static int RunInspectAdt(string[] args)
+{
+    string? adtPath = null;
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--adt" || args[i] == "-f") adtPath = args[++i];
+    }
+
+    if (string.IsNullOrEmpty(adtPath))
+    {
+        Console.WriteLine("Usage: inspect-adt --adt <adt_file>");
+        return 1;
+    }
+
+    try 
+    {
+        var data = File.ReadAllBytes(adtPath);
+        Console.WriteLine($"\nFile: {Path.GetFileName(adtPath)}");
+        Console.WriteLine($"Size: {data.Length} bytes");
+        
+        // Dump header
+        Console.Write("Header: ");
+        for(int i=0; i<Math.Min(16, data.Length); i++) Console.Write($"{data[i]:X2} ");
+        Console.WriteLine();
+        Console.Write("ASCII:  ");
+        for(int i=0; i<Math.Min(16, data.Length); i++) Console.Write($"{(char)(data[i] > 31 && data[i] < 127 ? (char)data[i] : '.')}  ");
+        Console.WriteLine();
+
+        // Search for chunks
+        string[] searchChunks = new[] { "MVER", "MHDR", "MDDF", "MODF", "MCNK", "MH2O", "FDDM", "FDOM" }; // FDDM/FDOM are reversed MDDF/MODF
+        foreach (var chunk in searchChunks)
+        {
+            int offset = FindChunk(data, chunk);
+            if (offset != -1)
+            {
+                int size = BitConverter.ToInt32(data, offset + 4);
+                Console.WriteLine($"Found {chunk} at 0x{offset:X} (Size: {size})");
+            }
+            else
+            {
+                // Try reversed
+                var rev = new string(chunk.Reverse().ToArray());
+                int revOffset = FindChunk(data, rev);
+                if (revOffset != -1)
+                {
+                    int size = BitConverter.ToInt32(data, revOffset + 4);
+                    Console.WriteLine($"Found {rev} (Reversed {chunk}?) at 0x{revOffset:X} (Size: {size})");
+                }
+            }
+        }
+
+        int mddfOffset = FindChunk(data, "MDDF");
+        if (mddfOffset == -1) mddfOffset = FindChunk(data, "FDDM");
+
+        int modfOffset = FindChunk(data, "MODF");
+        if (modfOffset == -1) modfOffset = FindChunk(data, "FDOM");
+        
+        // String tables
+        var mmdx = ReadStringBlock(data, "MMDX"); 
+        var mwmo = ReadStringBlock(data, "MWMO");
+        var mmid = ReadOffsets(data, "MMID");
+        var mwid = ReadOffsets(data, "MWID"); 
+
+        if (mddfOffset != -1)
+        {
+            int size = BitConverter.ToInt32(data, mddfOffset + 4);
+            int count = size / 36;
+            Console.WriteLine($"\n[MDDF] {count} M2 Placements:");
+            for (int i = 0; i < count; i++)
+            {
+                int p = mddfOffset + 8 + (i * 36);
+                uint nameId = BitConverter.ToUInt32(data, p);
+                uint uniqueId = BitConverter.ToUInt32(data, p + 4);
+                float x = BitConverter.ToSingle(data, p + 8);
+                float y = BitConverter.ToSingle(data, p + 12);
+                float z = BitConverter.ToSingle(data, p + 16);
+                float scale = BitConverter.ToUInt16(data, p + 32) / 1024.0f;
+                
+                string name = GetName(mmdx, mmid, nameId);
+                Console.WriteLine($"  #{i+1}: ID={uniqueId}, NameID={nameId} ({name}), Pos=({x:F2}, {y:F2}, {z:F2}), Scale={scale:F2}");
+            }
+        }
+        else Console.WriteLine("\n[MDDF] Not Found");
+
+        if (modfOffset != -1)
+        {
+            int size = BitConverter.ToInt32(data, modfOffset + 4);
+            int count = size / 64;
+            Console.WriteLine($"\n[MODF] {count} WMO Placements:");
+            for (int i = 0; i < count; i++)
+            {
+                int p = modfOffset + 8 + (i * 64);
+                uint nameId = BitConverter.ToUInt32(data, p);
+                uint uniqueId = BitConverter.ToUInt32(data, p + 4);
+                float x = BitConverter.ToSingle(data, p + 8);
+                float y = BitConverter.ToSingle(data, p + 12);
+                float z = BitConverter.ToSingle(data, p + 16);
+                
+                string name = GetName(mwmo, mwid, nameId);
+                Console.WriteLine($"  #{i+1}: ID={uniqueId}, NameID={nameId} ({name}), Pos=({x:F2}, {y:F2}, {z:F2})");
+            }
+        }
+        else Console.WriteLine("\n[MODF] Not Found");
+
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error: {ex.Message}");
+        return 1;
+    }
+}
+
+static int FindChunk(byte[] data, string name)
+{
+    for (int i = 0; i < data.Length - 4; i++)
+    {
+        if (data[i] == name[0] && data[i+1] == name[1] && data[i+2] == name[2] && data[i+3] == name[3])
+            return i;
+    }
+    return -1;
+}
+
+static byte[] ReadStringBlock(byte[] data, string chunkName)
+{
+    int offset = FindChunk(data, chunkName);
+    if (offset == -1)
+    {
+         char[] arr = chunkName.ToCharArray();
+         Array.Reverse(arr);
+         offset = FindChunk(data, new string(arr));
+    }
+    if (offset == -1) return new byte[0];
+    int size = BitConverter.ToInt32(data, offset + 4);
+    byte[] block = new byte[size];
+    Array.Copy(data, offset + 8, block, 0, size);
+    return block;
+}
+
+static List<uint> ReadOffsets(byte[] data, string chunkName)
+{
+    var list = new List<uint>();
+    int offset = FindChunk(data, chunkName);
+    if (offset == -1)
+    {
+         char[] arr = chunkName.ToCharArray();
+         Array.Reverse(arr);
+         offset = FindChunk(data, new string(arr));
+    }
+    if (offset == -1) return list;
+    int size = BitConverter.ToInt32(data, offset + 4);
+    int count = size / 4;
+    for (int i = 0; i < count; i++)
+        list.Add(BitConverter.ToUInt32(data, offset + 8 + i * 4));
+    return list;
+}
+
+static string GetName(byte[] stringBlock, List<uint> offsets, uint nameId)
+{
+    if (stringBlock.Length == 0) return "<No Strings>";
+    if (nameId >= offsets.Count) return $"<InvalidID {nameId}>";
+    
+    uint offset = offsets[(int)nameId];
+    if (offset >= stringBlock.Length) return "<OutOfBounds>";
+
+    int end = (int)offset;
+    while (end < stringBlock.Length && stringBlock[end] != 0) end++;
+    
+    return System.Text.Encoding.ASCII.GetString(stringBlock, (int)offset, end - (int)offset);
 }

@@ -8,15 +8,14 @@ public class Pm4ObjectBuilder
     /// <summary>
     /// Reconstructs WMO candidates from PM4 data.
     /// Groups surfaces by CK24, creates one candidate per CK24.
-    /// Instance separation is done via MPRL entries, not vertex connectivity.
+    /// All CK24 groups matched against both WMO and M2 libraries.
     /// </summary>
     public static List<Pm4WmoCandidate> BuildCandidates(Pm4FileStructure pm4, int tileX, int tileY)
     {
         var candidates = new List<Pm4WmoCandidate>();
         
-        // Group surfaces by CK24 (excluding 0 which is nav mesh/terrain)
+        // Group ALL surfaces by CK24 (no filtering - PM4 doesn't distinguish WMO vs M2)
         var surfacesByCk24 = pm4.Surfaces
-            .Where(s => s.CK24 != 0)
             .GroupBy(s => s.CK24);
 
         foreach (var group in surfacesByCk24)
@@ -79,8 +78,8 @@ public class Pm4ObjectBuilder
             .Where(p => p.EntryType == 0) // Skip terminators
             .Select(p => new {
                 Entry = p,
-                // MPRL coordinate swap (per spec)
-                Pos = new Vector3(p.Position.Z, p.Position.X, p.Position.Y)
+                // Use raw coordinates to match Pm4Reader
+                Pos = p.Position
             })
             .OrderBy(x => Vector3.DistanceSquared(x.Pos, centroid))
             .FirstOrDefault();
@@ -106,8 +105,8 @@ public class Pm4ObjectBuilder
         {
             if (p.EntryType != 0) continue; // Skip terminators
             
-            // MPRL coordinate swap (per spec)
-            var pos = new Vector3(p.Position.Z, p.Position.X, p.Position.Y);
+            // Use raw coordinates to match Pm4Reader
+            var pos = p.Position;
             
             // Check if within generous bounds
             if (pos.X >= min.X - 50 && pos.X <= max.X + 50 &&
@@ -134,11 +133,8 @@ public class Pm4ObjectBuilder
             .Where(p => p.EntryType == 0) // Non-terminator
             .Select(p => new {
                 Entry = p,
-                // Apply Swap: X=Z_disk, Y=X_disk, Z=Y_disk
-                // Wait. Spec: Stored X, Z, Y -> Loaded X, Y, Z -> Swap.
-                // Pm4Decoder Raw: v.X, v.Y, v.Z.
-                // Legacy logic: X=RawZ, Y=RawX, Z=RawY.
-                Pos = new Vector3(p.Position.Z, p.Position.X, p.Position.Y)
+                // Use raw coordinates to match Pm4Reader
+                Pos = p.Position
             })
             .Where(x => 
                 x.Pos.X >= min.X - 50 && x.Pos.X <= max.X + 50 &&
