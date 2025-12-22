@@ -62,6 +62,7 @@ public class Pm4ObjectExtractor
     
     /// <summary>
     /// Extract all WMO candidates from all PM4 files in a directory.
+    /// LEGACY: Uses per-tile extraction. Use ExtractAllWmoCandidatesGlobal for cross-tile support.
     /// </summary>
     public IEnumerable<Pm4WmoCandidate> ExtractAllWmoCandidates(string pm4Directory)
     {
@@ -85,6 +86,55 @@ public class Pm4ObjectExtractor
         }
         
         Console.WriteLine($"[INFO] Extracted {totalCandidates} WMO candidates from {pm4Files.Length} files");
+    }
+    
+    /// <summary>
+    /// Extract all WMO candidates using global PM4 reader.
+    /// This approach properly handles cross-tile objects by loading all tiles first.
+    /// </summary>
+    /// <param name="pm4Directory">Directory containing PM4 files</param>
+    /// <returns>List of WMO candidates with proper tile handling</returns>
+    public List<Pm4WmoCandidate> ExtractAllWmoCandidatesGlobal(string pm4Directory)
+    {
+        var mapReader = new Pm4MapReader();
+        int tilesLoaded = mapReader.LoadDirectory(pm4Directory);
+        
+        if (tilesLoaded == 0)
+        {
+            Console.WriteLine($"[WARN] No tiles loaded from {pm4Directory}");
+            return new List<Pm4WmoCandidate>();
+        }
+        
+        // Report cross-tile objects
+        var crossTile = mapReader.GetCrossTileCk24s();
+        if (crossTile.Count > 0)
+        {
+            Console.WriteLine($"[INFO] Found {crossTile.Count} cross-tile CK24 objects:");
+            foreach (var ck24 in crossTile.Take(10))
+            {
+                var surfaces = mapReader.Ck24Objects[ck24];
+                var tiles = surfaces.Select(s => (s.TileX, s.TileY)).Distinct().ToList();
+                Console.WriteLine($"  - CK24 0x{ck24:X6}: {surfaces.Count} surfaces across {tiles.Count} tiles");
+            }
+            if (crossTile.Count > 10)
+                Console.WriteLine($"  ... and {crossTile.Count - 10} more");
+        }
+        
+        // Extract candidates using global pools
+        var candidates = mapReader.ExtractAllTileObjects().ToList();
+        Console.WriteLine($"[INFO] Extracted {candidates.Count} WMO candidates from {tilesLoaded} tiles (Global Mode)");
+        
+        return candidates;
+    }
+    
+    /// <summary>
+    /// Get the global PM4 map reader for direct access to pools and cross-tile analysis.
+    /// </summary>
+    public Pm4MapReader LoadGlobalMap(string pm4Directory)
+    {
+        var mapReader = new Pm4MapReader();
+        mapReader.LoadDirectory(pm4Directory);
+        return mapReader;
     }
     
     /// <summary>

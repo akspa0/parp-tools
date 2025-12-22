@@ -43,7 +43,10 @@ public record PipelineConfig(
     bool ExportDebugWmos = false,
     
     /// <summary>Dry run - don't write ADT files</summary>
-    bool DryRun = false
+    bool DryRun = false,
+    
+    /// <summary>Use global PM4 reader for cross-tile object support (recommended)</summary>
+    bool UseGlobalReader = true
 );
 
 #endregion

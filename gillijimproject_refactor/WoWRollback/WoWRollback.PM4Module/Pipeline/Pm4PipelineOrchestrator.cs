@@ -66,7 +66,19 @@ public class Pm4PipelineOrchestrator
         
         // Step 2: Extract PM4 objects
         Console.WriteLine("\n[Step 2] Extracting PM4 objects...");
-        var candidates = _extractor.ExtractAllWmoCandidates(config.Pm4Directory).ToList();
+        List<Pm4WmoCandidate> candidates;
+        
+        if (config.UseGlobalReader)
+        {
+            Console.WriteLine("[INFO] Using Global PM4 Reader (cross-tile support enabled)");
+            candidates = _extractor.ExtractAllWmoCandidatesGlobal(config.Pm4Directory);
+        }
+        else
+        {
+            Console.WriteLine("[INFO] Using Legacy per-tile extraction");
+            candidates = _extractor.ExtractAllWmoCandidates(config.Pm4Directory).ToList();
+        }
+        
         Console.WriteLine($"[INFO] Extracted {candidates.Count} WMO candidates");
         
         if (candidates.Count == 0)

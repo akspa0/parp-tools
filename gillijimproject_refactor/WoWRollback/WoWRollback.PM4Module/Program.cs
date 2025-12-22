@@ -87,6 +87,12 @@ if (args.Length > 0)
         
         case "correlate-pm4-adt":
             return RunCorrelatePm4Adt(args.Skip(1).ToArray());
+        
+        case "validate-adt":
+            return RunValidateAdt(args.Skip(1).ToArray());
+        
+        case "fix-uniqueids":
+            return RunFixUniqueIds(args.Skip(1).ToArray());
     }
 }
 
@@ -2940,6 +2946,116 @@ static int RunCorrelatePm4Adt(string[] args)
         Console.WriteLine($"Error: {ex.Message}\n{ex.StackTrace}");
         return 1;
     }
+}
+
+// validate-adt command - validate ADT chunk structure for corruption
+static int RunValidateAdt(string[] args)
+{
+    Console.WriteLine("=== ADT Chunk Structure Validator ===\n");
+    
+    string? adtPath = null;
+    string? adtDir = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--file": adtPath = args[++i]; break;
+            case "--dir": adtDir = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: validate-adt --file <adt> | --dir <directory>");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --file <adt>     Validate a single ADT file");
+                Console.WriteLine("  --dir <directory> Validate all ADT files + check cross-tile collisions");
+                return 0;
+        }
+    }
+    
+    var validator = new AdtChunkValidator();
+    
+    if (!string.IsNullOrEmpty(adtPath))
+    {
+        var result = validator.Validate(adtPath);
+        Console.WriteLine($"File: {result.FilePath}");
+        Console.WriteLine($"Status: {(result.IsValid ? "VALID" : "INVALID")}");
+        Console.WriteLine($"Stats: {result.Stats.MwmoCount} WMOs, {result.Stats.ModfCount} MODF, {result.Stats.MmdxCount} M2s, {result.Stats.MddfCount} MDDF");
+        
+        foreach (var err in result.Errors)
+            Console.WriteLine($"  ERROR: {err}");
+        
+        return result.IsValid ? 0 : 1;
+    }
+    else if (!string.IsNullOrEmpty(adtDir))
+    {
+        if (!Directory.Exists(adtDir))
+        {
+            Console.Error.WriteLine($"Error: Directory not found: {adtDir}");
+            return 1;
+        }
+        
+        var (results, collisions) = validator.ValidateDirectory(adtDir);
+        var invalid = results.Where(r => !r.IsValid).ToList();
+        
+        if (invalid.Count > 0)
+        {
+            Console.WriteLine($"\n=== Invalid ADTs ({invalid.Count}) ===");
+            foreach (var r in invalid.Take(10))
+            {
+                Console.WriteLine($"{Path.GetFileName(r.FilePath)}:");
+                foreach (var err in r.Errors.Take(3))
+                    Console.WriteLine($"  - {err}");
+            }
+        }
+        
+        return invalid.Count > 0 || collisions.Count > 0 ? 1 : 0;
+    }
+    else
+    {
+        Console.Error.WriteLine("Error: --file or --dir required. Use --help for usage.");
+        return 1;
+    }
+}
+
+// fix-uniqueids command - reassign all UniqueIDs globally across ADTs
+static int RunFixUniqueIds(string[] args)
+{
+    Console.WriteLine("=== Global UniqueID Fixer ===\n");
+    
+    string? adtDir = null;
+    uint startingId = 1;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--dir": adtDir = args[++i]; break;
+            case "--start": startingId = uint.Parse(args[++i]); break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: fix-uniqueids --dir <directory> [--start <id>]");
+                Console.WriteLine();
+                Console.WriteLine("Reassigns ALL MODF and MDDF UniqueIDs to be globally unique.");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --dir <directory>  Directory containing ADT files to fix");
+                Console.WriteLine("  --start <id>       Starting UniqueID (default: 1)");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(adtDir) || !Directory.Exists(adtDir))
+    {
+        Console.Error.WriteLine("Error: --dir is required and must exist.");
+        return 1;
+    }
+    
+    var fixer = new GlobalUniqueIdFixer();
+    int count = fixer.FixDirectory(adtDir, startingId);
+    
+    Console.WriteLine($"\n[DONE] Fixed {count} entries.");
+    return 0;
 }
 
 class ModfEntry

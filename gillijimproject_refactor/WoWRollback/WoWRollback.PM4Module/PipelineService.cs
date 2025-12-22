@@ -329,7 +329,7 @@ namespace WoWRollback.PM4Module
                             
                             // Step 3: Match PM4 objects to WMOs and reconstruct MODF
                             Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
-                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.85f, globalNextUniqueId); // High confidence threshold
+                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.70f, globalNextUniqueId); // Lowered threshold for more matches
                             globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
                             
                             // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
@@ -352,7 +352,7 @@ namespace WoWRollback.PM4Module
                         }
                         
                         // Step 4: M2 Matching (Stage 2b)
-                        // TEMPORARILY DISABLED: M2 matching produces invalid scale values
+                        // DISABLED: Scale calculation produces invalid values (1100x+ normal)
                         bool enableM2Matching = false;
                         
                         // Load M2 library from cache if we didn't build it in Stage 1b
@@ -912,12 +912,39 @@ namespace WoWRollback.PM4Module
                 }
                 catch { /* ignore */ }
 
-                // Use the wmoNames we loaded/generated in Stage 2
-                var tileWmoNames = wmoNames;
-
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
-                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, tileEntries, ref globalNextUniqueId);
+                    // CRITICAL FIX: Extract only the WMO names used by THIS tile's entries
+                    // and remap NameId indices to match the filtered list
+                    var usedNameIds = tileEntries.Select(e => (int)e.NameId).Distinct().OrderBy(x => x).ToList();
+                    var tileWmoNames = usedNameIds
+                        .Where(id => id >= 0 && id < wmoNames.Count)
+                        .Select(id => wmoNames[id])
+                        .ToList();
+                    
+                    // Build old NameId → new NameId mapping
+                    var nameIdMap = new Dictionary<uint, uint>();
+                    for (int i = 0; i < usedNameIds.Count && i < tileWmoNames.Count; i++)
+                    {
+                        nameIdMap[(uint)usedNameIds[i]] = (uint)i;
+                    }
+                    
+                    // Remap NameIds in entries to use the filtered list indices
+                    var remappedEntries = tileEntries.Select(e => new AdtPatcher.ModfEntry
+                    {
+                        NameId = nameIdMap.TryGetValue(e.NameId, out var newId) ? newId : e.NameId,
+                        UniqueId = e.UniqueId,
+                        Position = e.Position,
+                        Rotation = e.Rotation,
+                        BoundsMin = e.BoundsMin,
+                        BoundsMax = e.BoundsMax,
+                        Flags = e.Flags,
+                        DoodadSet = e.DoodadSet,
+                        NameSet = e.NameSet,
+                        Scale = e.Scale
+                    }).ToList();
+                    
+                    _adtPatcher.PatchWmoPlacements(file, Path.Combine(dirs.PatchedMuseum, Path.GetFileName(file)), tileWmoNames, remappedEntries, ref globalNextUniqueId);
                     patchedTiles.Add((tx, ty, Path.GetFileName(file), tileEntries.Count, hasExistingTileModf));
                     patchedCount++;
                     if (!hasExistingTileModf) emptyTileCount++;
@@ -960,8 +987,35 @@ namespace WoWRollback.PM4Module
                 // Patch all WDL tiles that have MODF data (no skipping Museum tiles)
                 if (modfByTile.TryGetValue((tx, ty), out var tileEntries))
                 {
+                    // CRITICAL FIX: Filter WMO names per-tile (same as Stage 4)
+                    var usedNameIds = tileEntries.Select(e => (int)e.NameId).Distinct().OrderBy(x => x).ToList();
+                    var tileWmoNames = usedNameIds
+                        .Where(id => id >= 0 && id < wmoNames.Count)
+                        .Select(id => wmoNames[id])
+                        .ToList();
+                    
+                    var nameIdMap = new Dictionary<uint, uint>();
+                    for (int i = 0; i < usedNameIds.Count && i < tileWmoNames.Count; i++)
+                    {
+                        nameIdMap[(uint)usedNameIds[i]] = (uint)i;
+                    }
+                    
+                    var remappedEntries = tileEntries.Select(e => new AdtPatcher.ModfEntry
+                    {
+                        NameId = nameIdMap.TryGetValue(e.NameId, out var newId) ? newId : e.NameId,
+                        UniqueId = e.UniqueId,
+                        Position = e.Position,
+                        Rotation = e.Rotation,
+                        BoundsMin = e.BoundsMin,
+                        BoundsMax = e.BoundsMax,
+                        Flags = e.Flags,
+                        DoodadSet = e.DoodadSet,
+                        NameSet = e.NameSet,
+                        Scale = e.Scale
+                    }).ToList();
+                    
                     var outputPath = Path.Combine(dirs.WdlPainted, Path.GetFileName(file) + ".patched");
-                    _adtPatcher.PatchWmoPlacements(file, outputPath, wmoNames, tileEntries, ref globalNextUniqueId);
+                    _adtPatcher.PatchWmoPlacements(file, outputPath, tileWmoNames, remappedEntries, ref globalNextUniqueId);
                     File.Move(outputPath, file, true); // Replace original
                     wdlPatchedCount++;
                 }
@@ -1041,8 +1095,31 @@ namespace WoWRollback.PM4Module
 
                 if (mddfByTile.TryGetValue((tx, ty), out var tileEntries) && tileEntries.Count > 0)
                 {
+                    // CRITICAL FIX: Filter M2 names per-tile (same fix as MODF)
+                    var usedNameIds = tileEntries.Select(e => (int)e.NameId).Distinct().OrderBy(x => x).ToList();
+                    var tileM2Names = usedNameIds
+                        .Where(id => id >= 0 && id < m2Names.Count)
+                        .Select(id => m2Names[id])
+                        .ToList();
+                    
+                    var nameIdMap = new Dictionary<uint, uint>();
+                    for (int i = 0; i < usedNameIds.Count && i < tileM2Names.Count; i++)
+                    {
+                        nameIdMap[(uint)usedNameIds[i]] = (uint)i;
+                    }
+                    
+                    var remappedEntries = tileEntries.Select(e => new AdtPatcher.MddfEntry
+                    {
+                        NameId = nameIdMap.TryGetValue(e.NameId, out var newId) ? newId : e.NameId,
+                        UniqueId = e.UniqueId,
+                        Position = e.Position,
+                        Rotation = e.Rotation,
+                        Scale = e.Scale,
+                        Flags = e.Flags
+                    }).ToList();
+                    
                     // Patch MDDF into the already-patched ADT (in place)
-                    _adtPatcher.PatchDoodadPlacements(file, file, m2Names, tileEntries, ref globalNextUniqueId);
+                    _adtPatcher.PatchDoodadPlacements(file, file, tileM2Names, remappedEntries, ref globalNextUniqueId);
                     mddfPatchedCount++;
                 }
             }
@@ -1169,91 +1246,11 @@ namespace WoWRollback.PM4Module
             }
 
             // Stage 4f: Global UniqueID Deduplication
-            // TEMPORARILY DISABLED: Corrupting MDDF data by finding false chunk matches
+            // Uses GlobalUniqueIdFixer which properly detects chunk signatures
             Console.WriteLine("\n[Stage 4f] Reassigning UniqueIds for global uniqueness...");
-            Console.WriteLine("[WARN] UniqueID reassignment is DISABLED - caused MDDF corruption");
-            // TODO: Fix FindChunkPosition to not find false matches within strings
-            if (false)  // DISABLED
-            {
-                var globalNextId = 1u; // Start from 1
-                
-                // Get ADT files from PatchedMuseum
-                var adtFiles = Directory.GetFiles(dirs.PatchedMuseum, "*.adt")
-                    .Where(f => !Path.GetFileName(f).Contains("_obj") && !Path.GetFileName(f).Contains("_tex"))
-                    .OrderBy(f => f)
-                    .ToList();
-                
-                Console.WriteLine($"[DEBUG] Found {adtFiles.Count} ADT files in {dirs.PatchedMuseum}");
-                
-                int totalModfReassigned = 0;
-                int totalMddfReassigned = 0;
-                
-                foreach (var adtPath in adtFiles)
-                {
-                    try
-                    {
-                        var bytes = File.ReadAllBytes(adtPath);
-                        bool modified = false;
-                        
-                        // Scan for MODF chunk and reassign UniqueIds (bytes 4-7 of each 64-byte entry)
-                        int modfPos = FindChunkPosition(bytes, "MODF");
-                        
-                        // Debug: log first file's chunk findings
-                        if (adtPath == adtFiles[0])
-                        {
-                            Console.WriteLine($"[DEBUG] First file: {Path.GetFileName(adtPath)}, size: {bytes.Length} bytes");
-                            Console.WriteLine($"[DEBUG] MODF pos: {modfPos}, MDDF pos: {FindChunkPosition(bytes, "MDDF")}");
-                        }
-                        
-                        if (modfPos >= 0)
-                        {
-                            int modfSize = BitConverter.ToInt32(bytes, modfPos + 4);
-                            int modfDataStart = modfPos + 8;
-                            int entryCount = modfSize / 64;
-                            for (int i = 0; i < entryCount; i++)
-                            {
-                                int offset = modfDataStart + i * 64 + 4; // UniqueId at byte 4
-                                if (offset + 4 <= bytes.Length)
-                                {
-                                    var newIdBytes = BitConverter.GetBytes(globalNextId++);
-                                    Buffer.BlockCopy(newIdBytes, 0, bytes, offset, 4);
-                                    totalModfReassigned++;
-                                    modified = true;
-                                }
-                            }
-                        }
-                        
-                        // Scan for MDDF chunk and reassign UniqueIds (bytes 4-7 of each 36-byte entry)
-                        int mddfPos = FindChunkPosition(bytes, "MDDF");
-                        if (mddfPos >= 0)
-                        {
-                            int mddfSize = BitConverter.ToInt32(bytes, mddfPos + 4);
-                            int mddfDataStart = mddfPos + 8;
-                            int entryCount = mddfSize / 36;
-                            for (int i = 0; i < entryCount; i++)
-                            {
-                                int offset = mddfDataStart + i * 36 + 4; // UniqueId at byte 4
-                                if (offset + 4 <= bytes.Length)
-                                {
-                                    var newIdBytes = BitConverter.GetBytes(globalNextId++);
-                                    Buffer.BlockCopy(newIdBytes, 0, bytes, offset, 4);
-                                    totalMddfReassigned++;
-                                    modified = true;
-                                }
-                            }
-                        }
-                        
-                        if (modified)
-                            File.WriteAllBytes(adtPath, bytes);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[WARN] Failed to reassign UniqueIds in {Path.GetFileName(adtPath)}: {ex.Message}");
-                    }
-                }
-                
-                Console.WriteLine($"[INFO] Reassigned {totalModfReassigned} MODF + {totalMddfReassigned} MDDF UniqueIds (total: {globalNextId - 1})");
-            }
+            var uniqueIdFixer = new GlobalUniqueIdFixer();
+            // Start from 5 million to avoid collisions with existing 3.3.5 content
+            uniqueIdFixer.FixDirectory(dirs.PatchedMuseum, 5_000_000);
 
 
             // Stage 5: Assembly & Noggit

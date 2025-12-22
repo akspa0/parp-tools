@@ -14,8 +14,10 @@ public class Pm4ObjectBuilder
     {
         var candidates = new List<Pm4WmoCandidate>();
         
-        // Group ALL surfaces by CK24 (no filtering - PM4 doesn't distinguish WMO vs M2)
+        // Group surfaces by CK24, EXCLUDING CK24=0 which is nav mesh terrain
+        // CK24=0x000000 spans ALL tiles and is NOT a WMO - matching it causes garbage placements
         var surfacesByCk24 = pm4.Surfaces
+            .Where(s => s.CK24 != 0)  // CRITICAL: Skip nav mesh
             .GroupBy(s => s.CK24);
 
         foreach (var group in surfacesByCk24)
