@@ -53,7 +53,8 @@ public class Pm4Decoder
                     break;
 
                 case "MSVT":
-                    ReadVectors(br, size, meshVerts);
+                    // MSVT stored as Y,X,Z on disk -> swap to X,Y,Z for WoW world coordinates
+                    ReadMsvtVectors(br, size, meshVerts);
                     break;
 
                 case "MSVI":
@@ -65,7 +66,9 @@ public class Pm4Decoder
                     break;
 
                 case "MSCN":
-                    ReadVectors(br, size, sceneNodes);
+                    // MSCN stored as X,Y,Z but needs Y,X,Z alignment to match MSVT
+                    // This means we swap stored X,Y -> Y,X (same as MSVT swap)
+                    ReadMsvtVectors(br, size, sceneNodes);
                     break;
 
                 case "MPRL":
@@ -186,6 +189,22 @@ public class Pm4Decoder
         for (int i = 0; i < count; i++)
         {
             list.Add(new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+        }
+    }
+
+    /// <summary>
+    /// Read MSVT vertices directly as X,Y,Z.
+    /// Matches original Pm4Reader behavior - no coordinate swapping.
+    /// </summary>
+    private static void ReadMsvtVectors(BinaryReader br, uint size, List<Vector3> list)
+    {
+        int count = (int)(size / 12);
+        for (int i = 0; i < count; i++)
+        {
+            float x = br.ReadSingle();
+            float y = br.ReadSingle();
+            float z = br.ReadSingle();
+            list.Add(new Vector3(x, y, z));
         }
     }
 

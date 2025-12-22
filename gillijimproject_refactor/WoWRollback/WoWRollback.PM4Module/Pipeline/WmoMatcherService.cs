@@ -14,10 +14,12 @@ namespace WoWRollback.PM4Module.Pipeline;
 /// <summary>
 /// Matches PM4 WMO candidates to WMO library entries using geometric fingerprinting.
 /// Uses bounding box dimensions and dominant wall angles for rotation calculation.
+/// Supports CK24 lookup table for pre-seeded high-confidence matches.
 /// </summary>
 public class WmoMatcherService
 {
     private readonly List<WmoLibraryEntry> _library = new();
+    private readonly Dictionary<uint, string> _ck24Lookup = new(); // CK24 -> WMO path lookup
     private readonly float _sizeTolerance;
     
     /// <summary>
@@ -77,6 +79,66 @@ public class WmoMatcherService
     /// Get number of entries in the library.
     /// </summary>
     public int LibraryCount => _library.Count;
+    
+    /// <summary>
+    /// Get number of entries in the CK24 lookup table.
+    /// </summary>
+    public int Ck24LookupCount => _ck24Lookup.Count;
+    
+    /// <summary>
+    /// Load CK24 -> WMO path mappings from a CSV file.
+    /// CSV format: CK24,WMO_Name,TypeFlags,MatchCount,Confidence
+    /// </summary>
+    public void LoadCk24Lookup(string csvPath)
+    {
+        if (!File.Exists(csvPath))
+        {
+            Console.WriteLine($"[WARN] CK24 lookup file not found: {csvPath}");
+            return;
+        }
+        
+        try
+        {
+            var lines = File.ReadAllLines(csvPath);
+            int loaded = 0;
+            
+            foreach (var line in lines.Skip(1)) // Skip header
+            {
+                var parts = line.Split(',');
+                if (parts.Length >= 2)
+                {
+                    // Parse CK24 (format: 0x3F9D43)
+                    var ck24Str = parts[0].Trim();
+                    if (ck24Str.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (uint.TryParse(ck24Str.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out uint ck24))
+                        {
+                            var wmoPath = parts[1].Trim();
+                            if (!_ck24Lookup.ContainsKey(ck24))
+                            {
+                                _ck24Lookup[ck24] = wmoPath;
+                                loaded++;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Loaded {loaded} CK24 -> WMO mappings from {Path.GetFileName(csvPath)}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Failed to load CK24 lookup: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Try to get a WMO path from the CK24 lookup table.
+    /// </summary>
+    public bool TryGetCk24Match(uint ck24, out string? wmoPath)
+    {
+        return _ck24Lookup.TryGetValue(ck24, out wmoPath);
+    }
     
     /// <summary>
     /// Build library by scanning a directory for WMO files.
@@ -336,15 +398,36 @@ public class WmoMatcherService
     
     /// <summary>
     /// Find matches for all candidates from a list.
+    /// Uses CK24 lookup table first, then confirmed matches, then geometric matching.
     /// </summary>
     public IEnumerable<WmoMatch> FindAllMatches(IEnumerable<Pm4WmoCandidate> candidates)
     {
         int matched = 0;
+        int matchedFromLookup = 0;
+        int matchedFromConfirmed = 0;
+        int matchedFromGeometric = 0;
         int total = 0;
         
         // Dictionary to track matched instances by CK24 (Object ID)
         // If we match one instance with high confidence, we can reuse that match for others of same CK24
         var confirmedMatches = new Dictionary<uint, WmoLibraryEntry>();
+        
+        // Pre-seed confirmedMatches from CK24 lookup table
+        foreach (var kvp in _ck24Lookup)
+        {
+            var entry = _library.FirstOrDefault(e => 
+                e.Path.Equals(kvp.Value, StringComparison.OrdinalIgnoreCase) ||
+                e.Path.EndsWith(Path.GetFileName(kvp.Value), StringComparison.OrdinalIgnoreCase));
+            if (entry != null && !confirmedMatches.ContainsKey(kvp.Key))
+            {
+                confirmedMatches[kvp.Key] = entry;
+            }
+        }
+        
+        if (_ck24Lookup.Count > 0)
+        {
+            Console.WriteLine($"[INFO] Pre-seeded {confirmedMatches.Count} matches from CK24 lookup table");
+        }
         
         var candidatesList = candidates.ToList();
         
@@ -353,8 +436,10 @@ public class WmoMatcherService
             total++;
             
             WmoMatch? match = null;
+            bool fromLookup = false;
+            bool fromConfirmed = false;
             
-            // Check if we already have a confirmed match for this CK24
+            // Check if we already have a confirmed match for this CK24 (from lookup or previous match)
             if (confirmedMatches.TryGetValue(candidate.CK24, out var confirmedEntry))
             {
                 // We have a confirmed match type!
@@ -401,12 +486,13 @@ public class WmoMatcherService
                     Position: position,
                     Rotation: new Vector3(0f, bestYaw, 0f),
                     Scale: 1.0f,
-                    ConfidenceScore: 0.95f, // High confidence due to propagation
+                    ConfidenceScore: _ck24Lookup.ContainsKey(candidate.CK24) ? 0.98f : 0.95f, // Higher confidence for lookup-based
                     SourceCandidate: candidate,
                     MatchedEntry: confirmedEntry
                 );
                 
-                Console.WriteLine($"[INFO] Propagated match {confirmedEntry.Path} for instance {candidate.InstanceId} of {candidate.CK24:X6}");
+                fromConfirmed = true;
+                if (_ck24Lookup.ContainsKey(candidate.CK24)) fromLookup = true;
             }
             else
             {
@@ -419,7 +505,6 @@ public class WmoMatcherService
                     if (!confirmedMatches.ContainsKey(candidate.CK24))
                     {
                         confirmedMatches[candidate.CK24] = match.MatchedEntry;
-                        Console.WriteLine($"[INFO] Confirmed new match type {match.MatchedEntry.Path} for {candidate.CK24:X6}");
                     }
                 }
             }
@@ -427,11 +512,20 @@ public class WmoMatcherService
             if (match != null)
             {
                 matched++;
+                if (fromLookup) matchedFromLookup++;
+                else if (fromConfirmed) matchedFromConfirmed++;
+                else matchedFromGeometric++;
                 yield return match;
             }
         }
         
         Console.WriteLine($"[INFO] Matched {matched}/{total} candidates ({100f * matched / total:F1}%)");
+        if (matched > 0)
+        {
+            Console.WriteLine($"       - From CK24 lookup: {matchedFromLookup}");
+            Console.WriteLine($"       - From propagation: {matchedFromConfirmed}");
+            Console.WriteLine($"       - From geometric:   {matchedFromGeometric}");
+        }
     }
     
     #endregion

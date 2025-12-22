@@ -1,23 +1,67 @@
 # WoWRollback Active Context
 
-## Current Blocker (Dec 2025)
-**Output writers produce corrupted files despite working input parsers.**
+## Current Focus: PM4 → ADT Pipeline (Dec 2025)
 
-### The Bug
-- Merged ADTs are half expected size
-- Chunks dropped silently
-- FourCC confusion (`MTEX` vs `XETM`) throughout codebase
+### Session Summary (2025-12-21)
 
-### Immediate Fix
-1. Audit for reversed FourCC literals — consolidate to single write point
-2. Merge `AdtPatcher.cs` + `SplitAdtMerger.cs` into one tested class
-3. Add verification against known-good reference files
-4. Regenerate test data with fixed code
+**Goal**: Match PM4 pathfinding geometry to WMOs and reconstruct ADT placements.
 
-### Key Insight
-> Split files (`_obj0`, `_tex0`) are overlay patches. Their data MUST take precedence over root ADT.
+**Fixes Applied**:
+1. ✅ CK24 Lookup CSV parsing - strip quotes from values
+2. ✅ WMO Full Mesh mode - enabled by default
+3. ✅ PM4 MSVT+MSCN combined geometry for matching
+4. ✅ Coordinate swap reverted in `Pm4Decoder` (X,Y,Z direct)
+5. ✅ **Skip CK24=0x000000** - nav mesh excluded from WMO matching
+
+**Root Cause of Noggit Crash**: CK24=0x000000 (nav mesh terrain) was matched to random WMOs and placed, creating garbage that crashed Noggit.
+
+---
+
+## Critical Insight: PM4 Scene Graph Architecture
+
+The PM4 format is a **hierarchical scene graph**:
+
+```
+PM4 Map Object (Global)
+├── Global Pools (MSVT, MSVI, MSCN, MPRL, MPRR)
+├── CK24 Object Groups (can span multiple tiles)
+└── Tile Manifests (which CK24s belong to which tile)
+```
+
+### Current Problem
+Reading tiles independently is **wrong**. Objects span tiles; vertex data is shared globally.
+
+### Next Step: Implement Global PM4 Reader
+1. Load ALL tiles into one unified `Pm4MapObject` 
+2. Build global vertex/index/MSCN pools with tile provenance
+3. Extract per-tile CK24 objects by referencing global pools
+4. Use MSCN as verification layer (compare matched WMO point cloud)
+
+**Implementation Plan**: See `implementation_plan.md` in artifacts.
+
+---
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `Pm4Decoder.cs` | Decodes single PM4 tile chunks |
+| `Pm4ObjectBuilder.cs` | Groups surfaces by CK24, splits by MSVI gaps |
+| `Pm4ModfReconstructor.cs` | Matches PM4 objects to WMOs |
+| `MuseumAdtPatcher.cs` | Injects MODF/MWMO into ADTs |
+| `Pm4Reader/Program.cs` | Original standalone reader (reference) |
+
+## CK24 Structure
+
+```
+CK24 = [Type:8bit][ObjectID:16bit]
+- 0x00XXXX = Nav mesh (SKIP)
+- 0x40XXXX = Has pathfinding data
+- 0x42XXXX / 0x43XXXX = WMO-type objects
+- 0xC0XXXX+ = Various object types
+```
 
 ## Do NOT
-- Add features until writers work
-- Trust `PM4ADTs/combined/` (corrupted)
-- Use reversed FourCC outside write path
+- Match CK24=0x000000 to WMOs (it's nav mesh)
+- Read PM4 tiles independently for cross-tile objects
+- Use coordinate swaps in `Pm4Decoder` (original format is X,Y,Z)

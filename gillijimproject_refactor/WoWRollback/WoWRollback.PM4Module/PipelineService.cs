@@ -22,7 +22,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null, bool useDebugWmo = false)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null, bool useDebugWmo = false, string? ck24LookupPath = null)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -307,12 +307,12 @@ namespace WoWRollback.PM4Module
                     else
                     {
                         // Step 2: Build WMO reference library for matching
-                        Console.WriteLine("[INFO] Building WMO reference library...");
+                        // FULL MESH is required to match PM4's full collision geometry (MSVT + MSCN)
+                        bool actualUseFullMesh = true; // Always use full mesh now
+                        Console.WriteLine("[INFO] Building WMO reference library (FULL MESH mode)...");
                         if (!string.IsNullOrEmpty(wmoFilter))
                             Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
-                        if (useFullMesh)
-                            Console.WriteLine("[INFO] Using full WMO mesh for matching (not just walkable surfaces)");
-                        var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, useFullMesh);
+                        var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, actualUseFullMesh);
                         
                         if (wmoLibrary.Count == 0)
                         {
@@ -321,9 +321,15 @@ namespace WoWRollback.PM4Module
                         }
                         else
                         {
+                            // Load CK24 lookup table if provided
+                            if (!string.IsNullOrEmpty(ck24LookupPath))
+                            {
+                                _reconstructor.LoadCk24Lookup(ck24LookupPath);
+                            }
+                            
                             // Step 3: Match PM4 objects to WMOs and reconstruct MODF
                             Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
-                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.2f, globalNextUniqueId); // Reduced confidence threshold
+                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.85f, globalNextUniqueId); // High confidence threshold
                             globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
                             
                             // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
@@ -346,13 +352,11 @@ namespace WoWRollback.PM4Module
                         }
                         
                         // Step 4: M2 Matching (Stage 2b)
-                        // M2 objects exist in any CK24 group, not just 0x000000
-                        // Use all PM4 objects for M2 matching
-                        var m2Candidates = pm4Objects.ToList();
-                        Console.WriteLine($"\n[Stage 2b] Processing M2 candidates ({m2Candidates.Count} PM4 objects)...");
+                        // TEMPORARILY DISABLED: M2 matching produces invalid scale values
+                        bool enableM2Matching = false;
                         
                         // Load M2 library from cache if we didn't build it in Stage 1b
-                        if (m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
+                        if (enableM2Matching && m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
                         {
                             try
                             {
@@ -364,8 +368,9 @@ namespace WoWRollback.PM4Module
                             catch { }
                         }
                         
-                        if (m2Candidates.Count > 0 && m2Library.Count > 0)
+                        if (enableM2Matching && m2Library.Count > 0)
                         {
+                            var m2Candidates = pm4Objects.ToList();
                             Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
                             var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f, globalNextUniqueId);
                             globalNextUniqueId += (uint)mddfResult.MddfEntries.Count; // Reserve IDs for M2s
@@ -377,9 +382,9 @@ namespace WoWRollback.PM4Module
                             
                             Console.WriteLine($"[INFO] Matched {mddfEntries.Count} MDDF entries, {m2Names.Count} unique M2s");
                         }
-                        else if (m2Candidates.Count == 0)
+                        else if (!enableM2Matching)
                         {
-                            Console.WriteLine("[INFO] No PM4 objects found for M2 matching");
+                            Console.WriteLine("[WARN] M2 matching is DISABLED - produces invalid scale values");
                         }
                         else
                         {
@@ -1460,13 +1465,14 @@ namespace WoWRollback.PM4Module
                         string ck24Hex = $"0x{candidate.CK24:X6}";
                         
                         // Combine MSVT (floor) + MSCN (walls) for full collision volume
+                        // WMO library now uses full mesh mode to match this
                         var allVertices = candidate.DebugGeometry.ToList();
-                        if (candidate.DebugMscnVertices != null)
+                        if (candidate.DebugMscnVertices != null && candidate.DebugMscnVertices.Count > 0)
                             allVertices.AddRange(candidate.DebugMscnVertices);
                         
                         var stats = matcher.ComputeStats(allVertices);
                         
-                        // Include MSCN points, MPRL rotation and position
+                        // Include MSCN points for verification, MPRL rotation and position
                         objects.Add(new Pm4ModfReconstructor.Pm4Object(
                             ck24Hex, pm4Path, tileX, tileY, stats, 
                             candidate.DebugMscnVertices,

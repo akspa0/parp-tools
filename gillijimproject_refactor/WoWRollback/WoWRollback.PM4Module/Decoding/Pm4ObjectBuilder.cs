@@ -7,7 +7,7 @@ public class Pm4ObjectBuilder
 {
     /// <summary>
     /// Reconstructs WMO candidates from PM4 data.
-    /// Groups surfaces by CK24, creates one candidate per CK24.
+    /// Groups surfaces by CK24, then splits by MSVI gaps to separate instances.
     /// All CK24 groups matched against both WMO and M2 libraries.
     /// </summary>
     public static List<Pm4WmoCandidate> BuildCandidates(Pm4FileStructure pm4, int tileX, int tileY)
@@ -23,41 +23,50 @@ public class Pm4ObjectBuilder
             uint ck24 = group.Key;
             var surfaces = group.ToList();
             
-            // Extract geometry for entire CK24 group (all surfaces merged)
-            var geometry = ExtractGeometry(surfaces, pm4);
+            // Split by MSVI gaps to separate individual object instances
+            var instances = MsViGapSplitter.SplitByMsviGaps(surfaces, gapThreshold: 50);
             
-            if (geometry.Vertices.Count < 3)
-                continue;
-            
-            // Calculate Dominant Angle
-            float domAngle = CalculateDominantAngle(surfaces);
+            // Create one candidate per instance
+            for (int instanceId = 0; instanceId < instances.Count; instanceId++)
+            {
+                var instanceSurfaces = instances[instanceId];
+                
+                // Extract geometry for this instance
+                var geometry = ExtractGeometry(instanceSurfaces, pm4);
+                
+                if (geometry.Vertices.Count < 3)
+                    continue;
+                
+                // Calculate Dominant Angle
+                float domAngle = CalculateDominantAngle(instanceSurfaces);
 
-            // Type Flags (Byte 2 of CK24)
-            byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
-            
-            // Find CLOSEST MPRL entry to use for position/rotation
-            var centroid = (geometry.BoundsMin + geometry.BoundsMax) / 2f;
-            var (mprlRot, mprlPos) = FindClosestMprl(centroid, pm4.PositionRefs);
-            
-            // Create ONE candidate per CK24 (the geometry determines the WMO type)
-            var candidate = new Pm4WmoCandidate(
-                CK24: ck24,
-                InstanceId: 0,
-                TileX: tileX,
-                TileY: tileY,
-                BoundsMin: geometry.BoundsMin,
-                BoundsMax: geometry.BoundsMax,
-                DominantAngle: domAngle,
-                SurfaceCount: surfaces.Count,
-                VertexCount: geometry.Vertices.Count,
-                TypeFlags: typeFlags,
-                MprlRotationDegrees: mprlRot,
-                MprlPosition: mprlPos ?? centroid, // Use centroid if no MPRL
-                DebugGeometry: geometry.Vertices,
-                DebugFaces: geometry.Faces,
-                DebugMscnVertices: geometry.MscnVertices
-            );
-            candidates.Add(candidate);
+                // Type Flags (Byte 2 of CK24)
+                byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
+                
+                // Find CLOSEST MPRL entry to use for position/rotation
+                var centroid = (geometry.BoundsMin + geometry.BoundsMax) / 2f;
+                var (mprlRot, mprlPos) = FindClosestMprl(centroid, pm4.PositionRefs);
+                
+                // Create candidate for this instance
+                var candidate = new Pm4WmoCandidate(
+                    CK24: ck24,
+                    InstanceId: instanceId,
+                    TileX: tileX,
+                    TileY: tileY,
+                    BoundsMin: geometry.BoundsMin,
+                    BoundsMax: geometry.BoundsMax,
+                    DominantAngle: domAngle,
+                    SurfaceCount: instanceSurfaces.Count,
+                    VertexCount: geometry.Vertices.Count,
+                    TypeFlags: typeFlags,
+                    MprlRotationDegrees: mprlRot,
+                    MprlPosition: mprlPos ?? centroid, // Use centroid if no MPRL
+                    DebugGeometry: geometry.Vertices,
+                    DebugFaces: geometry.Faces,
+                    DebugMscnVertices: geometry.MscnVertices
+                );
+                candidates.Add(candidate);
+            }
         }
 
         return candidates;

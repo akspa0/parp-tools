@@ -3,6 +3,7 @@
 // Also supports WDL to ADT generation for filling gaps
 
 using WoWRollback.PM4Module;
+using WoWRollback.PM4Module.Decoding;
 using WoWRollback.Core.Services.PM4;
 using System.Numerics;
 using System.Text;
@@ -83,6 +84,9 @@ if (args.Length > 0)
 
         case "inspect-adt":
             return RunInspectAdt(args.Skip(1).ToArray());
+        
+        case "correlate-pm4-adt":
+            return RunCorrelatePm4Adt(args.Skip(1).ToArray());
     }
 }
 
@@ -1395,6 +1399,7 @@ static int RunPatchPipeline(string[] args)
     string? outputRoot = "PM4_to_ADT";
     string? wmoFilter = null;        // Filter WMOs by path prefix (e.g., "Northrend")
     string? m2Filter = null;         // Filter M2s by path prefix (e.g., "development")
+    string? ck24LookupPath = null;   // CK24 -> WMO lookup CSV from correlation data
     bool useFullMesh = false;        // Use full WMO mesh instead of walkable surfaces
     bool useDebugWmo = false;        // Generate placeholder WMOs instead of matching
 
@@ -1412,6 +1417,7 @@ static int RunPatchPipeline(string[] args)
             case "--out": outputRoot = args[++i]; break;
             case "--wmo-filter": wmoFilter = args[++i]; break;
             case "--m2-filter": m2Filter = args[++i]; break;
+            case "--ck24-lookup": ck24LookupPath = args[++i]; break;
             case "--use-full-mesh": useFullMesh = true; break;
             case "--use-debug-wmo": useDebugWmo = true; break;
             case "--help":
@@ -1433,6 +1439,7 @@ static int RunPatchPipeline(string[] args)
                 Console.WriteLine("  --m2-filter <path>  Filter M2s by path prefix (e.g., 'development')");
                 Console.WriteLine("  --use-full-mesh     Use full WMO mesh for matching (not just walkable surfaces)");
                 Console.WriteLine("  --use-debug-wmo     SKIP matching and generate placeholder WMOs from PM4 geometry");
+                Console.WriteLine("  --ck24-lookup <csv> CK24 -> WMO lookup table from correlation data");
                 return 0;
         }
     }
@@ -1447,7 +1454,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath, useDebugWmo);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath, useDebugWmo, ck24LookupPath);
         return 0;
     }
     catch (Exception ex)
@@ -2667,4 +2674,284 @@ static string GetName(byte[] stringBlock, List<uint> offsets, uint nameId)
     while (end < stringBlock.Length && stringBlock[end] != 0) end++;
     
     return System.Text.Encoding.ASCII.GetString(stringBlock, (int)offset, end - (int)offset);
+}
+
+static List<ModfEntry> ReadModfFromAdt(byte[] data)
+{
+    var entries = new List<ModfEntry>();
+    int offset = FindChunk(data, "MODF");
+    if (offset == -1) offset = FindChunk(data, "FDOM"); // Reversed
+    
+    if (offset == -1) return entries;
+    
+    int size = BitConverter.ToInt32(data, offset + 4);
+    int entryCount = size / 64;
+    offset += 8;
+    
+    for (int i = 0; i < entryCount; i++)
+    {
+        int nameId = BitConverter.ToInt32(data, offset);
+        // Position is XZY in ADT
+        float x = BitConverter.ToSingle(data, offset + 8);
+        float z = BitConverter.ToSingle(data, offset + 12);
+        float y = BitConverter.ToSingle(data, offset + 16);
+        
+        // Rotation is XYZ
+        float rotX = BitConverter.ToSingle(data, offset + 20);
+        float rotY = BitConverter.ToSingle(data, offset + 24);
+        float rotZ = BitConverter.ToSingle(data, offset + 28);
+        
+        entries.Add(new ModfEntry(nameId, new Vector3(x, y, z), new Vector3(rotX, rotY, rotZ)));
+        offset += 64;
+    }
+    
+    return entries;
+}
+
+static List<string> ReadMwmoFromAdt(byte[] data)
+{
+    var names = new List<string>();
+    var stringBlock = ReadStringBlock(data, "MWMO");
+    if (stringBlock.Length == 0) return names;
+    
+    var offsets = ReadOffsets(data, "MWID");
+    foreach (var off in offsets)
+    {
+        names.Add(ReadNullTerminatedString(stringBlock, (int)off));
+    }
+    
+    return names;
+}
+
+static string ReadNullTerminatedString(byte[] data, int offset)
+{
+    if (offset < 0 || offset >= data.Length) return "<OutOfBounds>";
+    int end = offset;
+    while (end < data.Length && data[end] != 0) end++;
+    return System.Text.Encoding.ASCII.GetString(data, offset, end - offset);
+}
+
+// correlate-pm4-adt command - match PM4 objects to ADT WMO placements
+static int RunCorrelatePm4Adt(string[] args)
+{
+    string? adtPath = null;
+    string? pm4Dir = null;
+    string? outputCsv = null;
+    string? tileFilter = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--adt") adtPath = args[++i];
+        else if (args[i] == "--pm4") pm4Dir = args[++i];
+        else if (args[i] == "--out") outputCsv = args[++i];
+        else if (args[i] == "--tile") tileFilter = args[++i];
+    }
+    
+    if (string.IsNullOrEmpty(adtPath) || string.IsNullOrEmpty(pm4Dir))
+    {
+        Console.WriteLine("Usage: correlate-pm4-adt --adt <adt_file_or_dir> --pm4 <pm4_directory> [--out <output.csv>] [--tile X_Y]");
+        Console.WriteLine("  --adt can be a single file or directory of ADT files");
+        return 1;
+    }
+    
+    outputCsv ??= "pm4_adt_correlation.csv";
+    
+    try
+    {
+        Console.WriteLine("\n=== PM4-ADT Correlation Tool ===\n");
+        
+        // Determine if --adt is a file or directory
+        List<string> adtFiles = new();
+        if (File.Exists(adtPath))
+        {
+            adtFiles.Add(adtPath);
+        }
+        else if (Directory.Exists(adtPath))
+        {
+            // Find all ADT files (exclude _obj0, _tex0, etc.)
+            adtFiles = Directory.GetFiles(adtPath, "*.adt")
+                .Where(f => !Path.GetFileName(f).Contains("_obj") && !Path.GetFileName(f).Contains("_tex"))
+                .ToList();
+            Console.WriteLine($"[ADT] Found {adtFiles.Count} root ADT files in directory");
+        }
+        else
+        {
+            Console.WriteLine($"Error: ADT path not found: {adtPath}");
+            return 1;
+        }
+        
+        // 1. Load ALL PM4 objects upfront for efficient matching
+        Console.WriteLine($"[PM4] Loading objects from {pm4Dir}...");
+        var pm4Objects = new List<(string CK24, int Instance, Vector3 Min, Vector3 Max, Vector3 Centroid, string Tile, byte TypeFlags)>();
+        
+        var pm4Files = Directory.GetFiles(pm4Dir, "*.pm4");
+        int pm4Count = 0;
+        foreach (var pm4File in pm4Files)
+        {
+            var tileName = Path.GetFileNameWithoutExtension(pm4File).Replace("development_", "");
+            if (tileFilter != null && tileName != tileFilter) continue;
+            
+            var pm4 = Pm4Decoder.Decode(File.ReadAllBytes(pm4File));
+            var parts = tileName.Split('_');
+            if (parts.Length != 2) continue;
+            int tileX = int.Parse(parts[0]);
+            int tileY = int.Parse(parts[1]);
+            
+            var candidates = Pm4ObjectBuilder.BuildCandidates(pm4, tileX, tileY);
+            
+            foreach (var cand in candidates)
+            {
+                var centroid = (cand.BoundsMin + cand.BoundsMax) / 2f;
+                pm4Objects.Add((
+                    $"0x{cand.CK24:X6}",
+                    cand.InstanceId,
+                    cand.BoundsMin,
+                    cand.BoundsMax,
+                    centroid,
+                    tileName,
+                    cand.TypeFlags
+                ));
+            }
+            pm4Count++;
+            if (pm4Count % 50 == 0) Console.Write(".");
+        }
+        Console.WriteLine($"\n[PM4] Loaded {pm4Objects.Count} objects from {pm4Count} PM4 files");
+        
+        // 2. Process each ADT and correlate
+        var allCorrelations = new List<(string AdtFile, string Tile, int ModfIndex, string WmoName, Vector3 AdtPos, Vector3 AdtRot, string CK24, int Instance, Vector3 Pm4Centroid, float Distance, byte TypeFlags)>();
+        int adtProcessed = 0;
+        int totalModf = 0;
+        int totalMatched = 0;
+        
+        Console.WriteLine($"\n[Processing] Correlating {adtFiles.Count} ADT files...");
+        
+        foreach (var adtFile in adtFiles)
+        {
+            var adtFileName = Path.GetFileNameWithoutExtension(adtFile);
+            
+            // Extract tile coordinates from ADT filename (e.g., "development_56_61")
+            var adtParts = adtFileName.Split('_');
+            string adtTile = "";
+            if (adtParts.Length >= 3)
+            {
+                adtTile = $"{adtParts[adtParts.Length - 2]}_{adtParts[adtParts.Length - 1]}";
+            }
+            
+            // Apply tile filter if specified
+            if (tileFilter != null && adtTile != tileFilter) continue;
+            
+            try
+            {
+                var adtData = File.ReadAllBytes(adtFile);
+                var modfEntries = ReadModfFromAdt(adtData);
+                var mwmoNames = ReadMwmoFromAdt(adtData);
+                
+                totalModf += modfEntries.Count;
+                
+                for (int i = 0; i < modfEntries.Count; i++)
+                {
+                    var modf = modfEntries[i];
+                    var wmoName = modf.NameId < mwmoNames.Count ? mwmoNames[modf.NameId] : "UNKNOWN";
+                    
+                    // Find closest PM4 object
+                    var closest = pm4Objects
+                        .Select(pm4 => new {
+                            PM4 = pm4,
+                            Distance = Vector3.Distance(modf.Position, pm4.Centroid)
+                        })
+                        .OrderBy(x => x.Distance)
+                        .FirstOrDefault();
+                    
+                    if (closest != null && closest.Distance < 200) // Within 200 yards
+                    {
+                        allCorrelations.Add((
+                            adtFileName, adtTile, i, wmoName, 
+                            modf.Position, modf.Rotation,
+                            closest.PM4.CK24, closest.PM4.Instance, 
+                            closest.PM4.Centroid, closest.Distance,
+                            closest.PM4.TypeFlags
+                        ));
+                        totalMatched++;
+                    }
+                }
+                
+                adtProcessed++;
+                if (adtProcessed % 100 == 0) Console.Write(".");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n  Warning: Failed to process {adtFileName}: {ex.Message}");
+            }
+        }
+        
+        Console.WriteLine($"\n\n[SUMMARY]");
+        Console.WriteLine($"  ADTs processed: {adtProcessed}");
+        Console.WriteLine($"  Total MODF entries: {totalModf}");
+        Console.WriteLine($"  Matched correlations: {totalMatched} ({(totalModf > 0 ? 100.0 * totalMatched / totalModf : 0):F1}%)");
+        
+        // 3. Write comprehensive CSV
+        using (var writer = new StreamWriter(outputCsv))
+        {
+            writer.WriteLine("ADT_File,Tile,MODF_Index,WMO_Name,ADT_X,ADT_Y,ADT_Z,ADT_RotX,ADT_RotY,ADT_RotZ,CK24,TypeFlags,Instance,PM4_X,PM4_Y,PM4_Z,Distance");
+            foreach (var corr in allCorrelations)
+            {
+                writer.WriteLine($"{corr.AdtFile},{corr.Tile},{corr.ModfIndex},{corr.WmoName},{corr.AdtPos.X:F2},{corr.AdtPos.Y:F2},{corr.AdtPos.Z:F2},{corr.AdtRot.X:F2},{corr.AdtRot.Y:F2},{corr.AdtRot.Z:F2},{corr.CK24},0x{corr.TypeFlags:X2},{corr.Instance},{corr.Pm4Centroid.X:F2},{corr.Pm4Centroid.Y:F2},{corr.Pm4Centroid.Z:F2},{corr.Distance:F2}");
+            }
+        }
+        
+        // 4. Generate summary by CK24 TypeFlags (WMO vs M2 analysis)
+        var byTypeFlags = allCorrelations
+            .GroupBy(c => c.TypeFlags)
+            .OrderByDescending(g => g.Count())
+            .Take(10);
+        
+        Console.WriteLine($"\n[TYPE FLAGS DISTRIBUTION] (Top 10)");
+        foreach (var group in byTypeFlags)
+        {
+            string typeDesc = group.Key switch
+            {
+                0x00 => "Nav Mesh",
+                0x40 or 0x41 => "M2 Interior",
+                0x42 or 0x43 => "WMO",
+                0xC0 or 0xC1 or 0xC2 or 0xC3 => "M2 Exterior",
+                _ => "Other"
+            };
+            Console.WriteLine($"  0x{group.Key:X2} ({typeDesc}): {group.Count()} correlations");
+        }
+        
+        // 5. Generate unique WMO summary
+        var uniqueWmos = allCorrelations
+            .GroupBy(c => c.WmoName)
+            .OrderByDescending(g => g.Count())
+            .Take(20);
+        
+        Console.WriteLine($"\n[TOP 20 WMOs BY MATCH COUNT]");
+        foreach (var wmo in uniqueWmos)
+        {
+            var ck24s = wmo.Select(c => c.CK24).Distinct().ToList();
+            Console.WriteLine($"  {wmo.Count(),4}x {Path.GetFileName(wmo.Key)} -> CK24: {string.Join(", ", ck24s.Take(3))}{(ck24s.Count > 3 ? "..." : "")}");
+        }
+        
+        Console.WriteLine($"\n[OUTPUT] Wrote {allCorrelations.Count} correlations to: {outputCsv}");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error: {ex.Message}\n{ex.StackTrace}");
+        return 1;
+    }
+}
+
+class ModfEntry
+{
+    public int NameId { get; set; }
+    public Vector3 Position { get; set; }
+    public Vector3 Rotation { get; set; }
+    
+    public ModfEntry(int nameId, Vector3 position, Vector3 rotation)
+    {
+        NameId = nameId;
+        Position = position;
+        Rotation = rotation;
+    }
 }

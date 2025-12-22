@@ -18,6 +18,7 @@ namespace WoWRollback.Core.Services.PM4;
 public sealed class Pm4ModfReconstructor
 {
     private readonly Pm4WmoGeometryMatcher _matcher = new();
+    private Dictionary<uint, string> _ck24WmoLookup = new();  // CK24 -> WMO path lookup from correlation data
 
     /// <summary>
     /// Represents a WMO in the reference library with pre-computed geometry stats.
@@ -262,6 +263,76 @@ public sealed class Pm4ModfReconstructor
         var json = File.ReadAllText(path);
         var options = new JsonSerializerOptions { IncludeFields = true };
         return JsonSerializer.Deserialize<List<WmoReference>>(json, options);
+    }
+
+    /// <summary>
+    /// Load CK24 -> WMO path lookup table from CSV.
+    /// CSV format: CK24,WMO_Name,TypeFlags,MatchCount,Confidence
+    /// </summary>
+    public void LoadCk24Lookup(string csvPath)
+    {
+        if (!File.Exists(csvPath))
+        {
+            Console.WriteLine($"[WARN] CK24 lookup file not found: {csvPath}");
+            return;
+        }
+
+        try
+        {
+            _ck24WmoLookup.Clear();
+            var lines = File.ReadAllLines(csvPath);
+            int loaded = 0;
+
+            foreach (var line in lines.Skip(1)) // Skip header
+            {
+                var parts = line.Split(',');
+                if (parts.Length >= 2)
+                {
+                    // Strip quotes from CSV values
+                    var ck24Str = parts[0].Trim().Trim('"');
+                    var wmoPath = parts[1].Trim().Trim('"');
+                    
+                    if (ck24Str.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (uint.TryParse(ck24Str.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out uint ck24))
+                        {
+                            if (!_ck24WmoLookup.ContainsKey(ck24))
+                            {
+                                _ck24WmoLookup[ck24] = wmoPath;
+                                loaded++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine($"[INFO] Loaded {loaded} CK24 -> WMO mappings from {Path.GetFileName(csvPath)}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Failed to load CK24 lookup: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get the number of CK24 lookup entries loaded.
+    /// </summary>
+    public int Ck24LookupCount => _ck24WmoLookup.Count;
+
+    /// <summary>
+    /// Try to get a WMO path from the CK24 lookup table.
+    /// </summary>
+    public bool TryGetCk24Match(string ck24Hex, out string? wmoPath)
+    {
+        wmoPath = null;
+        if (ck24Hex.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            if (uint.TryParse(ck24Hex.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out uint ck24))
+            {
+                return _ck24WmoLookup.TryGetValue(ck24, out wmoPath);
+            }
+        }
+        return false;
     }
 
     public List<M2Reference> LoadM2Library(string cachePath)
@@ -659,15 +730,59 @@ public sealed class Pm4ModfReconstructor
 
         uint nextUniqueId = startingUniqueId;
 
-        Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {wmoLibrary.Count} WMOs...\n");
+        Console.WriteLine($"\n[INFO] Matching {pm4Objects.Count} PM4 objects against {wmoLibrary.Count} WMOs...");
+        if (_ck24WmoLookup.Count > 0)
+            Console.WriteLine($"[INFO] Using CK24 lookup table with {_ck24WmoLookup.Count} pre-mapped entries");
+        Console.WriteLine();
 
         int matched = 0;
+        int matchedFromLookup = 0;
+        int matchedFromGeometric = 0;
         int unmatched = 0;
 
         var allCandidates = new List<MatchCandidate>();
 
         foreach (var pm4Obj in pm4Objects)
         {
+            // CRITICAL: Skip CK24=0x000000 - this is nav mesh/terrain data, not WMO objects!
+            // Matching these produces garbage WMO placements that can crash Noggit
+            if (pm4Obj.Ck24 == "0x000000" || pm4Obj.Ck24 == "0x00000000")
+            {
+                unmatched++;
+                continue;
+            }
+            
+            WmoReference? bestMatch = null;
+            float matchConfidence = 0f;
+            bool fromLookup = false;
+
+            // FIRST: Check CK24 lookup table for pre-seeded match
+            if (TryGetCk24Match(pm4Obj.Ck24, out var lookupWmoPath) && lookupWmoPath != null)
+            {
+                // Find the WMO in our library by path
+                bestMatch = wmoLibrary.FirstOrDefault(w => 
+                    w.WmoPath.Equals(lookupWmoPath, StringComparison.OrdinalIgnoreCase) ||
+                    w.WmoPath.EndsWith(Path.GetFileName(lookupWmoPath), StringComparison.OrdinalIgnoreCase));
+                
+                if (bestMatch != null)
+                {
+                    matchConfidence = 0.98f;  // High confidence for lookup-based match
+                    fromLookup = true;
+                    
+                    allCandidates.Add(new MatchCandidate(
+                        pm4Obj.Ck24,
+                        bestMatch.WmoPath,
+                        matchConfidence,
+                        pm4Obj.MprlPosition ?? pm4Obj.Stats.Centroid,
+                        pm4Obj.MprlRotationDegrees.HasValue ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0) : Vector3.Zero,
+                        1.0f
+                    ));
+                }
+            }
+
+            // SECOND: Fall back to geometric matching if no lookup match
+            if (bestMatch == null)
+            {
             // Quick pre-filter using extent ratios
             var potentialMatches = wmoLibrary
                 .Select(w => (wmo: w, score: QuickMatchScore(pm4Obj.Stats, w.Stats)))
@@ -685,12 +800,24 @@ public sealed class Pm4ModfReconstructor
             }
 
             // Find all candidates
-            var (bestMatch, transform, candidates) = MatchPm4ToWmo(pm4Obj, potentialMatches, minConfidence);
+            var (geometricMatch, transform, candidates) = MatchPm4ToWmo(pm4Obj, potentialMatches, minConfidence);
             
             // Add all valid candidates to the global list
             allCandidates.AddRange(candidates);
 
-            if (bestMatch == null || transform == null)
+            if (geometricMatch == null || transform == null)
+            {
+                unmatchedObjects.Add(pm4Obj.Ck24);
+                unmatched++;
+                continue;
+            }
+            
+            bestMatch = geometricMatch;
+            matchConfidence = transform.MatchConfidence;
+            } // End of geometric matching block
+
+            // Now we have bestMatch (either from lookup or geometric)
+            if (bestMatch == null)
             {
                 unmatchedObjects.Add(pm4Obj.Ck24);
                 unmatched++;
@@ -698,6 +825,8 @@ public sealed class Pm4ModfReconstructor
             }
 
             matched++;
+            if (fromLookup) matchedFromLookup++;
+            else matchedFromGeometric++;
 
             // Get or create WMO name ID
             if (!wmoNameToId.TryGetValue(bestMatch.WmoPath, out var nameId))
@@ -719,12 +848,10 @@ public sealed class Pm4ModfReconstructor
 
             // Use MPRL data from PM4 when available (this is the ACTUAL placement data!)
             // Fall back to computed values only when MPRL is not found
-            var position = pm4Obj.MprlPosition ?? transform.Position;
+            var position = pm4Obj.MprlPosition ?? pm4Obj.Stats.Centroid;
             var rotation = pm4Obj.MprlRotationDegrees.HasValue 
                 ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0)
                 : Vector3.Zero;  // No rotation if no MPRL data
-            
-            bool usedMprl = pm4Obj.MprlPosition.HasValue;
             
             var modf = new ModfEntry(
                 NameId: nameId,
@@ -736,23 +863,23 @@ public sealed class Pm4ModfReconstructor
                 Flags: 0,
                 DoodadSet: 0,
                 NameSet: 0,
-                Scale: (ushort)(transform.Scale * 1024),
+                Scale: 1024,  // WMOs are always 1:1 scale
                 WmoPath: bestMatch.WmoPath,
                 Ck24: pm4Obj.Ck24,
-                MatchConfidence: transform.MatchConfidence,
+                MatchConfidence: matchConfidence,
                 TileX: pm4Obj.TileX,
                 TileY: pm4Obj.TileY);
 
             modfEntries.Add(modf);
 
-            // Log best match
-            Console.WriteLine($"  {pm4Obj.Ck24} -> {Path.GetFileName(bestMatch.WmoPath)} ({transform.MatchConfidence:P0})");
-            // Log other candidates count
-            if (candidates.Count > 1)
-                Console.WriteLine($"    + {candidates.Count - 1} other candidates");
+            // Log match (less verbose)
+            if (fromLookup)
+                Console.WriteLine($"  {pm4Obj.Ck24} -> {Path.GetFileName(bestMatch.WmoPath)} (LOOKUP {matchConfidence:P0})");
+            else
+                Console.WriteLine($"  {pm4Obj.Ck24} -> {Path.GetFileName(bestMatch.WmoPath)} ({matchConfidence:P0})");
         }
 
-        Console.WriteLine($"\n[RESULT] Matched: {matched}, Unmatched: {unmatched}, Total Candidates: {allCandidates.Count}");
+        Console.WriteLine($"\n[RESULT] Matched: {matched} (Lookup: {matchedFromLookup}, Geometric: {matchedFromGeometric}), Unmatched: {unmatched}");
 
         return new ReconstructionResult(modfEntries, wmoNames, unmatchedObjects, matchCounts, allCandidates);
     }
