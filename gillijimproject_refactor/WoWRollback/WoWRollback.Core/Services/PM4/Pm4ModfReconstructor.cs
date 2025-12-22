@@ -756,39 +756,14 @@ public sealed class Pm4ModfReconstructor
             float matchConfidence = 0f;
             bool fromLookup = false;
 
-            // FIRST: Check CK24 lookup table for pre-seeded match
-            if (TryGetCk24Match(pm4Obj.Ck24, out var lookupWmoPath) && lookupWmoPath != null)
-            {
-                // Find the WMO in our library by path
-                bestMatch = wmoLibrary.FirstOrDefault(w => 
-                    w.WmoPath.Equals(lookupWmoPath, StringComparison.OrdinalIgnoreCase) ||
-                    w.WmoPath.EndsWith(Path.GetFileName(lookupWmoPath), StringComparison.OrdinalIgnoreCase));
-                
-                if (bestMatch != null)
-                {
-                    matchConfidence = 0.98f;  // High confidence for lookup-based match
-                    fromLookup = true;
-                    
-                    allCandidates.Add(new MatchCandidate(
-                        pm4Obj.Ck24,
-                        bestMatch.WmoPath,
-                        matchConfidence,
-                        pm4Obj.MprlPosition ?? pm4Obj.Stats.Centroid,
-                        pm4Obj.MprlRotationDegrees.HasValue ? new Vector3(0, pm4Obj.MprlRotationDegrees.Value, 0) : Vector3.Zero,
-                        1.0f
-                    ));
-                }
-            }
-
-            // SECOND: Fall back to geometric matching if no lookup match
-            if (bestMatch == null)
-            {
-            // Quick pre-filter using extent ratios
+            // GEOMETRY MATCHING ONLY - no lookup table shortcuts
+            // The goal is to DISCOVER which WMO each PM4 object represents
+            // Quick pre-filter using extent ratios - lowered threshold to catch more candidates
             var potentialMatches = wmoLibrary
                 .Select(w => (wmo: w, score: QuickMatchScore(pm4Obj.Stats, w.Stats)))
-                .Where(x => x.score > 0.92f)
+                .Where(x => x.score > 0.92f)  // Restored to 0.92
                 .OrderByDescending(x => x.score)
-                .Take(10) // Increased to Top 10 for broader search
+                .Take(20) // Check top 20 candidates
                 .Select(x => x.wmo)
                 .ToList();
 
@@ -799,7 +774,7 @@ public sealed class Pm4ModfReconstructor
                 continue;
             }
 
-            // Find all candidates
+            // Find all candidates through geometry matching
             var (geometricMatch, transform, candidates) = MatchPm4ToWmo(pm4Obj, potentialMatches, minConfidence);
             
             // Add all valid candidates to the global list
@@ -814,7 +789,6 @@ public sealed class Pm4ModfReconstructor
             
             bestMatch = geometricMatch;
             matchConfidence = transform.MatchConfidence;
-            } // End of geometric matching block
 
             // Now we have bestMatch (either from lookup or geometric)
             if (bestMatch == null)

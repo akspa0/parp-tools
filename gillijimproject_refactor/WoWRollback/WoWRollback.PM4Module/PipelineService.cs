@@ -256,6 +256,7 @@ namespace WoWRollback.PM4Module
             List<string> wmoNames = new();
             List<Pm4ModfReconstructor.MddfEntry> mddfEntries = new();
             List<string> m2Names = new();
+            List<Pm4ModfReconstructor.WmoReference> wmoLibrary = new();
             
             // Global UniqueID counter to prevent duplicates across WMOs and M2s
             uint globalNextUniqueId = 75_000_000; // Start at 75M to avoid conflicts with existing IDs
@@ -291,107 +292,128 @@ namespace WoWRollback.PM4Module
                 }
                 else
                 {
-                    // Step 1: Load PM4 objects directly from .pm4 files
-                    var pm4Objects = LoadPm4ObjectsFromFiles(pm4Path);
+                    // OLD CK24-BASED MATCHING DISABLED
+                    // Now using MSCN discovery (Stage 2c) as primary matching method
+                    Console.WriteLine("[INFO] Stage 2: CK24-based matching DISABLED - using MSCN discovery instead");
                     
-                    // Step 1b: Export PM4 candidates as OBJ for decoder verification
-                    var pm4ObjDebugDir = Path.Combine(outputRoot, "pm4_obj_debug");
-                    Console.WriteLine($"[INFO] Exporting PM4 candidates to OBJ: {pm4ObjDebugDir}");
-                    ExportPm4CandidatesToObj(pm4Path, pm4ObjDebugDir);
-                    
-                    if (pm4Objects.Count == 0)
+                    // Build WMO library (needed for MSCN matching in Stage 2c)
+                    bool actualUseFullMesh = true;
+                    Console.WriteLine("[INFO] Building WMO reference library (FULL MESH mode)...");
+                    if (!string.IsNullOrEmpty(wmoFilter))
+                        Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
+                    wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, actualUseFullMesh);
+                    Console.WriteLine($"[INFO] WMO library: {wmoLibrary.Count} WMOs loaded");
+                }
+            }
+            
+            // M2 matching DISABLED - now using MSCN discovery
+
+            // Stage 2c: MSCN Object Discovery - find MISSING objects not in museum ADTs
+            Console.WriteLine("\n[Stage 2c] MSCN Object Discovery - finding missing objects...");
+            if (!string.IsNullOrEmpty(pm4Path) && !string.IsNullOrEmpty(museumAdtPath))
+            {
+                try
+                {
+                    // Load WMO library from cache
+                    var wmoLibraryPath = Path.Combine(outputRoot, "wmo_library_cache_all_full.json");
+                    var wmoList = new List<Pm4ModfReconstructor.WmoReference>();
+                    if (File.Exists(wmoLibraryPath))
                     {
-                        Console.WriteLine("[WARN] No PM4 objects found. Ensure pm4 path contains .pm4 files.");
-                        Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
+                        var json = File.ReadAllText(wmoLibraryPath);
+                        wmoList = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.WmoReference>>(json) ?? new();
+                    }
+                    
+                    // Load M2 library from cache
+                    var m2LibraryPath = Path.Combine(outputRoot, "m2_library_cache.json");
+                    var m2List = new List<Pm4ModfReconstructor.M2Reference>();
+                    if (File.Exists(m2LibraryPath))
+                    {
+                        var json = File.ReadAllText(m2LibraryPath);
+                        m2List = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json) ?? new();
+                    }
+                    
+                    if (wmoList.Count == 0 && m2List.Count == 0)
+                    {
+                        Console.WriteLine("[MSCN] No WMO/M2 library available, skipping discovery");
                     }
                     else
                     {
-                        // Step 2: Build WMO reference library for matching
-                        // FULL MESH is required to match PM4's full collision geometry (MSVT + MSCN)
-                        bool actualUseFullMesh = true; // Always use full mesh now
-                        Console.WriteLine("[INFO] Building WMO reference library (FULL MESH mode)...");
-                        if (!string.IsNullOrEmpty(wmoFilter))
-                            Console.WriteLine($"[INFO] Filtering WMOs by path containing: {wmoFilter}");
-                        var wmoLibrary = _reconstructor.BuildWmoLibrary(gamePath, listfilePath, outputRoot, wmoFilter, actualUseFullMesh);
+                        Console.WriteLine($"[MSCN] Using {wmoList.Count} WMOs, {m2List.Count} M2s for matching");
                         
-                        if (wmoLibrary.Count == 0)
+                        // Use MSCN collision data to discover objects not in existing ADTs
+                        var mscnObjects = LoadMscnMissingObjects(
+                            pm4Path, 
+                            museumAdtPath,
+                            wmoList,
+                            m2List,
+                            0.70f);
+                    
+                    if (mscnObjects.Count > 0)
+                    {
+                        Console.WriteLine($"[MSCN] Found {mscnObjects.Count} missing objects to add");
+                        
+                        // Convert MSCN objects to MODF entries
+                        var mscnWmoNames = new HashSet<string>();
+                        foreach (var obj in mscnObjects.Where(o => !string.IsNullOrEmpty(o.ObjPath)))
                         {
-                            Console.WriteLine("[WARN] WMO library is empty. Check game path and listfile.");
-                            Console.WriteLine("[WARN] Continuing without PM4 MODF data...");
-                        }
-                        else
-                        {
-                            // Load CK24 lookup table if provided
-                            if (!string.IsNullOrEmpty(ck24LookupPath))
+                            if (obj.ObjPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
                             {
-                                _reconstructor.LoadCk24Lookup(ck24LookupPath);
+                                mscnWmoNames.Add(obj.ObjPath);
+                                
+                                // Create MODF entry with world coordinates (already transformed in LoadMscnMissingObjects)
+                                var wmoIdx = wmoNames.IndexOf(obj.ObjPath);
+                                if (wmoIdx < 0)
+                                {
+                                    wmoIdx = wmoNames.Count;
+                                    wmoNames.Add(obj.ObjPath);
+                                }
+                                
+                                transformedEntries.Add(new Pm4ModfReconstructor.ModfEntry(
+                                    NameId: (uint)wmoIdx,
+                                    UniqueId: globalNextUniqueId++,
+                                    Position: obj.MprlPosition ?? new Vector3(0, 0, 0),
+                                    Rotation: new Vector3(0, 0, 0),  // Default rotation
+                                    BoundsMin: Vector3.Zero,
+                                    BoundsMax: Vector3.Zero,
+                                    Flags: 0,
+                                    DoodadSet: 0,
+                                    NameSet: 0,
+                                    Scale: 1024,  // Default scale
+                                    WmoPath: obj.ObjPath,
+                                    Ck24: obj.Ck24,
+                                    MatchConfidence: 0.80f,
+                                    TileX: obj.TileX,
+                                    TileY: obj.TileY
+                                ));
+                                
+                                Console.WriteLine($"  [MODF] {Path.GetFileName(obj.ObjPath)} @ tile {obj.TileX}_{obj.TileY}");
                             }
-                            
-                            // Step 3: Match PM4 objects to WMOs and reconstruct MODF
-                            Console.WriteLine("[INFO] Matching PM4 objects to WMOs...");
-                            var result = _reconstructor.ReconstructModf(pm4Objects, wmoLibrary, 0.70f, globalNextUniqueId); // Lowered threshold for more matches
-                            globalNextUniqueId += (uint)result.ModfEntries.Count; // Reserve IDs for next batch
-                            
-                            // PM4 data is already transformed to ADT coords in LoadPm4ObjectsFromFiles
-                            // so the result positions are already in correct coordinate space
-                            transformedEntries = result.ModfEntries;
-                            wmoNames = result.WmoNames;
-                            
-                            // Export CSVs for future cache
-                            _reconstructor.ExportToCsv(result with { ModfEntries = transformedEntries }, modfCsvPath);
-                            _reconstructor.ExportMwmoNames(result, mwmoPath);
-                            
-                            var candidatesPath = Path.Combine(dirs.ModfCsv, "match_candidates.csv");
-                            _reconstructor.ExportCandidatesCsv(result, candidatesPath);
-                            
-                            Console.WriteLine($"[INFO] Matched {transformedEntries.Count} MODF entries, {wmoNames.Count} WMOs");
-                            Console.WriteLine($"[INFO] Unmatched PM4 objects: {result.UnmatchedPm4Objects.Count}");
-                            
-                            // Export MPRL rotation investigation CSV
-                            ExportMprlRotationData(pm4Path, dirs.ModfCsv);
                         }
                         
-                        // Step 4: M2 Matching (Stage 2b)
-                        // DISABLED: Scale calculation produces invalid values (1100x+ normal)
-                        bool enableM2Matching = false;
+                        Console.WriteLine($"[MSCN] Added {mscnWmoNames.Count} WMO entries to MODF");
                         
-                        // Load M2 library from cache if we didn't build it in Stage 1b
-                        if (enableM2Matching && m2Library.Count == 0 && File.Exists(m2LibraryCachePath))
+                        // Export MODF CSV
+                        if (transformedEntries.Count > 0)
                         {
-                            try
-                            {
-                                var json = File.ReadAllText(m2LibraryCachePath);
-                                var list = System.Text.Json.JsonSerializer.Deserialize<List<Pm4ModfReconstructor.M2Reference>>(json);
-                                if (list != null)
-                                    m2Library = list.ToDictionary(x => x.M2Path, x => x, StringComparer.OrdinalIgnoreCase);
-                            }
-                            catch { }
-                        }
-                        
-                        if (enableM2Matching && m2Library.Count > 0)
-                        {
-                            var m2Candidates = pm4Objects.ToList();
-                            Console.WriteLine($"[INFO] Matching {m2Candidates.Count} M2 candidates against {m2Library.Count} reference M2s...");
-                            var mddfResult = _reconstructor.ReconstructMddf(m2Candidates, m2Library.Values.ToList(), 0.97f, globalNextUniqueId);
-                            globalNextUniqueId += (uint)mddfResult.MddfEntries.Count; // Reserve IDs for M2s
-                            mddfEntries = mddfResult.MddfEntries;
-                            m2Names = mddfResult.M2Names;
-                            
-                            // Export MDDF CSV
-                            _reconstructor.ExportMddfToCsv(mddfResult, mddfCsvPath);
-                            
-                            Console.WriteLine($"[INFO] Matched {mddfEntries.Count} MDDF entries, {m2Names.Count} unique M2s");
-                        }
-                        else if (!enableM2Matching)
-                        {
-                            Console.WriteLine("[WARN] M2 matching is DISABLED - produces invalid scale values");
-                        }
-                        else
-                        {
-                            Console.WriteLine("[WARN] M2 library empty, skipping M2 matching");
+                            var result = new Pm4ModfReconstructor.ReconstructionResult(transformedEntries, wmoNames, new List<string>(), new Dictionary<string, int>(), new List<Pm4ModfReconstructor.MatchCandidate>());
+                            _reconstructor.ExportToCsv(result, modfCsvPath);
+                            Console.WriteLine($"[MSCN] Exported {transformedEntries.Count} MODF entries to {modfCsvPath}");
                         }
                     }
+                    else
+                    {
+                        Console.WriteLine("[MSCN] No additional missing objects discovered");
+                    }
+                    } // end of wmoList/m2List check
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] MSCN discovery failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("[INFO] Skipping MSCN discovery - requires pm4 and museum-adt paths");
             }
 
 
@@ -1469,12 +1491,15 @@ namespace WoWRollback.PM4Module
                         
                         var stats = matcher.ComputeStats(allVertices);
                         
+                        // Pass MPRL position directly - DO NOT transform here
+                        // The matching code handles coordinate conversion where needed
+                        
                         // Include MSCN points for verification, MPRL rotation and position
                         objects.Add(new Pm4ModfReconstructor.Pm4Object(
                             ck24Hex, pm4Path, tileX, tileY, stats, 
                             candidate.DebugMscnVertices,
                             candidate.MprlRotationDegrees,
-                            candidate.MprlPosition));  // Pass MPRL position
+                            candidate.MprlPosition));  // Pass RAW MPRL position
                     }
                     
                     // No separate M2 extraction - all objects matched uniformly against both libraries
@@ -1487,6 +1512,226 @@ namespace WoWRollback.PM4Module
             
             Console.WriteLine($"[INFO] Loaded {objects.Count} PM4 objects from {pm4Files.Length} files");
             return objects;
+        }
+        
+        /// <summary>
+        /// Load MISSING objects from MSCN data by comparing against existing ADT placements.
+        /// Uses MSCN collision geometry (not CK24 floor data) for matching.
+        /// </summary>
+        public List<Pm4ModfReconstructor.Pm4Object> LoadMscnMissingObjects(
+            string pm4Directory,
+            string museumAdtDirectory,
+            List<Pm4ModfReconstructor.WmoReference> wmoLibrary,
+            List<Pm4ModfReconstructor.M2Reference> m2Library,
+            float minConfidence = 0.70f)
+        {
+            var foundObjects = new List<Pm4ModfReconstructor.Pm4Object>();
+            var matcher = new Pm4WmoGeometryMatcher();
+            
+            if (!Directory.Exists(pm4Directory))
+            {
+                Console.WriteLine($"[WARN] PM4 directory not found: {pm4Directory}");
+                return foundObjects;
+            }
+            
+            // Debug: Show sample M2 dimensions from library
+            Console.WriteLine("[DEBUG] Sample M2 dimensions from library:");
+            foreach (var m2 in m2Library.Take(5))
+            {
+                Console.WriteLine($"  {Path.GetFileName(m2.M2Path)}: {m2.Stats.Dimensions.X:F1} x {m2.Stats.Dimensions.Y:F1} x {m2.Stats.Dimensions.Z:F1}");
+            }
+            
+            // Step 1: Load existing placements from museum ADTs
+            Console.WriteLine("[MSCN Discovery] Loading existing ADT placements...");
+            var existingPlacements = LoadExistingAdtPlacements(museumAdtDirectory);
+            Console.WriteLine($"[MSCN Discovery] Found {existingPlacements.Count} existing placements in museum ADTs");
+            
+            // Step 2: Process each PM4 file
+            var pm4Files = Directory.GetFiles(pm4Directory, "*.pm4", SearchOption.AllDirectories);
+            Console.WriteLine($"[MSCN Discovery] Processing {pm4Files.Length} PM4 files...");
+            
+            int totalClusters = 0;
+            int samplesPrinted = 0;
+            int matchedClusters = 0;
+            int filesProcessed = 0;
+            
+            foreach (var pm4Path in pm4Files)
+            {
+                filesProcessed++;
+                if (filesProcessed % 10 == 0 || filesProcessed == pm4Files.Length)
+                {
+                    Console.Write($"\r[MSCN] Processing {filesProcessed}/{pm4Files.Length} PM4 files, {totalClusters} clusters found, {matchedClusters} matched...");
+                }
+                try
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+                    var match = System.Text.RegularExpressions.Regex.Match(baseName, @"(\d+)_(\d+)$");
+                    if (!match.Success) continue;
+                    
+                    int tileX = int.Parse(match.Groups[1].Value);
+                    int tileY = int.Parse(match.Groups[2].Value);
+                    
+                    var pm4Data = File.ReadAllBytes(pm4Path);
+                    var decoded = Decoding.Pm4Decoder.Decode(pm4Data);
+                    
+                    if (decoded.SceneNodes == null || decoded.SceneNodes.Count < 4)
+                        continue;
+                    
+                    // Get placements for this tile area
+                    var tilePlacements = existingPlacements
+                        .Where(p => IsNearTile(p.Position, tileX, tileY))
+                        .ToList();
+                    
+                    // Extract MSCN clusters that don't overlap existing placements
+                    var missingClusters = Decoding.MscnObjectDiscovery.ExtractMissingObjects(
+                        decoded, tileX, tileY, tilePlacements);
+                    
+                    totalClusters += missingClusters.Count;
+                    
+                    // Match each missing cluster to WMO/M2 library
+                    foreach (var cluster in missingClusters)
+                    {
+                        // Debug: Print first 5 MSCN cluster dimensions
+                        if (samplesPrinted < 5)
+                        {
+                            Console.WriteLine($"[DEBUG] MSCN cluster CK24=0x{cluster.CK24:X6}: {cluster.Dimensions.X:F1} x {cluster.Dimensions.Y:F1} x {cluster.Dimensions.Z:F1} ({cluster.MscnVertices.Count} verts)");
+                            samplesPrinted++;
+                        }
+                        
+                        var (assetPath, confidence, isWmo) = Decoding.MscnObjectDiscovery.MatchClusterToAsset(
+                            cluster, wmoLibrary, m2Library, minConfidence);
+                        
+                        if (assetPath != null && confidence >= minConfidence)
+                        {
+                            matchedClusters++;
+                            
+                            // Create Pm4Object for the match
+                            var stats = matcher.ComputeStats(cluster.MscnVertices);
+                            
+                            foundObjects.Add(new Pm4ModfReconstructor.Pm4Object(
+                                $"0x{cluster.CK24:X6}",
+                                assetPath,
+                                tileX,
+                                tileY,
+                                stats,
+                                cluster.MscnVertices,
+                                null, // No rotation from MSCN
+                                cluster.Centroid
+                            ));
+                            
+                            Console.WriteLine($"  [MATCH] CK24=0x{cluster.CK24:X6} -> {Path.GetFileName(assetPath)} @ ({cluster.Centroid.X:F1}, {cluster.Centroid.Y:F1}) conf={confidence:P0}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] Failed to process {pm4Path}: {ex.Message}");
+                }
+            }
+            
+            Console.WriteLine($"[MSCN Discovery] Found {totalClusters} MSCN clusters, matched {matchedClusters} to assets");
+            return foundObjects;
+        }
+        
+        private List<Decoding.MscnObjectDiscovery.ExistingPlacement> LoadExistingAdtPlacements(string adtDirectory)
+        {
+            var placements = new List<Decoding.MscnObjectDiscovery.ExistingPlacement>();
+            
+            if (!Directory.Exists(adtDirectory))
+                return placements;
+            
+            foreach (var adtPath in Directory.GetFiles(adtDirectory, "*.adt", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var bytes = File.ReadAllBytes(adtPath);
+                    
+                    // Parse MODF entries (WMOs)
+                    var modfEntries = ParseModfFromAdt(bytes);
+                    foreach (var entry in modfEntries)
+                    {
+                        placements.Add(new Decoding.MscnObjectDiscovery.ExistingPlacement(
+                            entry.WmoPath,
+                            entry.Position,
+                            entry.BoundsMin,
+                            entry.BoundsMax,
+                            IsWmo: true
+                        ));
+                    }
+                    
+                    // TODO: Also parse MDDF entries (M2s) when needed
+                }
+                catch { }
+            }
+            
+            return placements;
+        }
+        
+        private List<(string WmoPath, Vector3 Position, Vector3 BoundsMin, Vector3 BoundsMax)> ParseModfFromAdt(byte[] bytes)
+        {
+            var entries = new List<(string, Vector3, Vector3, Vector3)>();
+            
+            // Simple MODF parsing - find "FDOM" chunk (reversed "MODF")
+            var str = System.Text.Encoding.ASCII.GetString(bytes);
+            int modfIdx = str.IndexOf("FDOM");
+            if (modfIdx < 0) return entries;
+            
+            // Get chunk size
+            int sizeOffset = modfIdx + 4;
+            if (sizeOffset + 4 > bytes.Length) return entries;
+            uint chunkSize = BitConverter.ToUInt32(bytes, sizeOffset);
+            
+            int dataStart = sizeOffset + 4;
+            int entrySize = 64; // MODF entry size
+            int entryCount = (int)(chunkSize / entrySize);
+            
+            for (int i = 0; i < entryCount; i++)
+            {
+                int offset = dataStart + i * entrySize;
+                if (offset + entrySize > bytes.Length) break;
+                
+                // nameId at offset 0
+                // uniqueId at offset 4
+                // position at offset 8 (3 floats)
+                // rotation at offset 20 (3 floats)
+                // boundsMin at offset 32 (3 floats)
+                // boundsMax at offset 44 (3 floats)
+                
+                var pos = new Vector3(
+                    BitConverter.ToSingle(bytes, offset + 8),
+                    BitConverter.ToSingle(bytes, offset + 12),
+                    BitConverter.ToSingle(bytes, offset + 16)
+                );
+                
+                var bMin = new Vector3(
+                    BitConverter.ToSingle(bytes, offset + 32),
+                    BitConverter.ToSingle(bytes, offset + 36),
+                    BitConverter.ToSingle(bytes, offset + 40)
+                );
+                
+                var bMax = new Vector3(
+                    BitConverter.ToSingle(bytes, offset + 44),
+                    BitConverter.ToSingle(bytes, offset + 48),
+                    BitConverter.ToSingle(bytes, offset + 52)
+                );
+                
+                entries.Add(("WMO", pos, bMin, bMax));
+            }
+            
+            return entries;
+        }
+        
+        private bool IsNearTile(Vector3 position, int tileX, int tileY)
+        {
+            // Check if position is within ~1 tile of the given tile coordinates
+            const float TileSize = 533.33333f;
+            const float HalfMap = 17066.6666f;
+            
+            float expectedX = HalfMap - (tileX * TileSize + TileSize / 2);
+            float expectedY = HalfMap - (tileY * TileSize + TileSize / 2);
+            
+            return Math.Abs(position.X - expectedX) < TileSize * 1.5f &&
+                   Math.Abs(position.Z - expectedY) < TileSize * 1.5f;
         }
 
         /// <summary>

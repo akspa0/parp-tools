@@ -8,65 +8,65 @@ namespace WoWRollback.PM4Module
         private const float HalfMapExtent = 32f * TileSize; // 17066.66656 (center of map)
 
         /// <summary>
-        /// Converts PM4 local/tile coordinates to ADT Placement coordinates.
-        /// PM4 vertices are relative to the tile's coordinate space.
-        /// We rebase them to global ADT placement coords using the tile indices.
+        /// Converts PM4 local/tile coordinates to ADT MODF/MDDF Placement coordinates.
+        /// 
+        /// PM4 vertices are in tile-local space (0-533 within each tile).
+        /// MODF/MDDF positions use ADT placement coords where:
+        ///   ADT_X = 17066 - WorldY (west-east axis)
+        ///   ADT_Y = Height (up)
+        ///   ADT_Z = 17066 - WorldX (north-south axis)
+        /// 
+        /// This means tile (0,0) which is at world pos (17066, 17066) becomes
+        /// placement (0, height, 0) after the transform.
         /// </summary>
-        /// <param name="pm4LocalPos">The PM4 vertex in local/tile coordinates (may need axis swap)</param>
-        /// <param name="tileX">The tile X index from the PM4 filename</param>
-        /// <param name="tileY">The tile Y index from the PM4 filename</param>
         public static Vector3 Pm4ToAdtPosition(Vector3 pm4LocalPos, int tileX, int tileY)
         {
-            // PM4/Recast uses Y-up coordinate system, WoW uses Z-up
-            // Swap: Input.Y is height, Input.Z is horizontal
-            float localX = pm4LocalPos.X;
-            float localY = pm4LocalPos.Z;  // Horizontal axis (swapped from Y-up Z)
-            float height = pm4LocalPos.Y;  // Height axis (swapped from Y-up Y)
+            // PM4/Recast uses Y-up: X=forward, Y=up, Z=right
+            // WoW uses Z-up: X=north, Y=west, Z=up
+            float localX = pm4LocalPos.X;  // Forward in PM4 = North in WoW
+            float height = pm4LocalPos.Y;  // Up in both systems
+            float localZ = pm4LocalPos.Z;  // Right in PM4 = West in WoW
             
-            // Calculate tile origin in ADT placement coords
-            // ADT placement: tile (0,0) starts at placement coord (0,0)
-            // Each tile spans TileSize (533.33) units
-            float tileOriginX = tileX * TileSize;
-            float tileOriginY = tileY * TileSize;
+            // Convert tile-local to world coordinates
+            // Tile (0,0) is at top-left = world (17066, 17066)
+            // Each tile is 533.33 units, moving south-east as tile indices increase
+            float worldX = HalfMapExtent - (tileX * TileSize + localX);
+            float worldY = HalfMapExtent - (tileY * TileSize + localZ);
             
-            // PM4 local coords are typically in range 0..533 within the tile
-            // Add tile origin to get global placement coords
-            float placementX = tileOriginX + localX;
-            float placementY = height;
-            float placementZ = tileOriginY + localY;
-
-            // Handle coordinate wrapping for values exceeding map boundaries
-            // Full map extent is 64 * 533.33 = 34133.33
-            const float FullMapExtent = 64f * TileSize;
-            
-            // If coordinates exceed map bounds, they may be encoded as wrapping values
-            // Subtract full map extent to bring them back into valid range
-            if (placementX > FullMapExtent)
-                placementX -= FullMapExtent;
-            if (placementZ > FullMapExtent)
-                placementZ -= FullMapExtent;
-            
-            // Also handle potential negative overflow (values that wrapped the other way)
-            if (placementX < 0)
-                placementX += FullMapExtent;
-            if (placementZ < 0)
-                placementZ += FullMapExtent;
+            // Convert to ADT MODF/MDDF placement coordinates
+            // According to wowdev.wiki: placement_X = 17066 - worldY, placement_Z = 17066 - worldX
+            float placementX = HalfMapExtent - worldY;  // = tileY * TileSize + localZ
+            float placementY = height;                   // Height stays the same
+            float placementZ = HalfMapExtent - worldX;   // = tileX * TileSize + localX
 
             return new Vector3(placementX, placementY, placementZ);
         }
 
         /// <summary>
         /// Legacy method - converts Server/World coordinates to ADT Placement coordinates.
-        /// Use Pm4ToAdtPosition for PM4 data instead.
+        /// Server coords: X=north(+), Y=west(+), Z=up
+        /// Placement coords: X=17066-Y, Y=Z, Z=17066-X
         /// </summary>
         public static Vector3 ServerToAdtPosition(Vector3 serverPos)
         {
-            // This is for world coords centered at (0,0), not PM4 tile-local coords
+            // Server world coords are centered at (0,0) with:
+            // +X = north, +Y = west, +Z = up
+            // Placement coords: X = 17066 - serverY, Y = serverZ, Z = 17066 - serverX
             float placementX = HalfMapExtent - serverPos.Y;
             float placementY = serverPos.Z;  // Height
             float placementZ = HalfMapExtent - serverPos.X;
 
             return new Vector3(placementX, placementY, placementZ);
+        }
+        
+        /// <summary>
+        /// Get tile indices from world position.
+        /// </summary>
+        public static (int TileX, int TileY) WorldPosToTile(float worldX, float worldY)
+        {
+            int tileX = (int)((HalfMapExtent - worldX) / TileSize);
+            int tileY = (int)((HalfMapExtent - worldY) / TileSize);
+            return (tileX, tileY);
         }
     }
 }

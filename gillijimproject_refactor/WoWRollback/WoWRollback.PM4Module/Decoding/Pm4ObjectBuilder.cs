@@ -7,68 +7,63 @@ public class Pm4ObjectBuilder
 {
     /// <summary>
     /// Reconstructs WMO candidates from PM4 data.
-    /// Groups surfaces by CK24, then splits by MSVI gaps to separate instances.
-    /// All CK24 groups matched against both WMO and M2 libraries.
+    /// Groups surfaces by CK24 into WHOLE objects (no MSVI splitting).
+    /// One CK24 = one candidate, using closest MPRL for position.
     /// </summary>
     public static List<Pm4WmoCandidate> BuildCandidates(Pm4FileStructure pm4, int tileX, int tileY)
     {
+        const float MaxTileSize = 533.33333f; // ADT tile size in world units
         var candidates = new List<Pm4WmoCandidate>();
         
-        // Group surfaces by CK24, EXCLUDING CK24=0 which is nav mesh terrain
-        // CK24=0x000000 spans ALL tiles and is NOT a WMO - matching it causes garbage placements
-        var surfacesByCk24 = pm4.Surfaces
-            .Where(s => s.CK24 != 0)  // CRITICAL: Skip nav mesh
-            .GroupBy(s => s.CK24);
+        // Group surfaces by CK24 - each CK24 = ONE complete object type
+        var surfacesByCk24 = pm4.Surfaces.GroupBy(s => s.CK24);
 
         foreach (var group in surfacesByCk24)
         {
             uint ck24 = group.Key;
             var surfaces = group.ToList();
             
-            // Split by MSVI gaps to separate individual object instances
-            var instances = MsViGapSplitter.SplitByMsviGaps(surfaces, gapThreshold: 50);
+            // Extract geometry for the ENTIRE CK24 group (no splitting)
+            var geometry = ExtractGeometry(surfaces, pm4);
             
-            // Create one candidate per instance
-            for (int instanceId = 0; instanceId < instances.Count; instanceId++)
+            if (geometry.Vertices.Count < 3)
+                continue;
+            
+            // SIZE VALIDATION: Skip objects that exceed tile bounds
+            var boundsSize = geometry.BoundsMax - geometry.BoundsMin;
+            if (boundsSize.X > MaxTileSize || boundsSize.Y > MaxTileSize || boundsSize.Z > MaxTileSize)
             {
-                var instanceSurfaces = instances[instanceId];
-                
-                // Extract geometry for this instance
-                var geometry = ExtractGeometry(instanceSurfaces, pm4);
-                
-                if (geometry.Vertices.Count < 3)
-                    continue;
-                
-                // Calculate Dominant Angle
-                float domAngle = CalculateDominantAngle(instanceSurfaces);
-
-                // Type Flags (Byte 2 of CK24)
-                byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
-                
-                // Find CLOSEST MPRL entry to use for position/rotation
-                var centroid = (geometry.BoundsMin + geometry.BoundsMax) / 2f;
-                var (mprlRot, mprlPos) = FindClosestMprl(centroid, pm4.PositionRefs);
-                
-                // Create candidate for this instance
-                var candidate = new Pm4WmoCandidate(
-                    CK24: ck24,
-                    InstanceId: instanceId,
-                    TileX: tileX,
-                    TileY: tileY,
-                    BoundsMin: geometry.BoundsMin,
-                    BoundsMax: geometry.BoundsMax,
-                    DominantAngle: domAngle,
-                    SurfaceCount: instanceSurfaces.Count,
-                    VertexCount: geometry.Vertices.Count,
-                    TypeFlags: typeFlags,
-                    MprlRotationDegrees: mprlRot,
-                    MprlPosition: mprlPos ?? centroid, // Use centroid if no MPRL
-                    DebugGeometry: geometry.Vertices,
-                    DebugFaces: geometry.Faces,
-                    DebugMscnVertices: geometry.MscnVertices
-                );
-                candidates.Add(candidate);
+                // Skip: Object too large, likely nav mesh terrain
+                continue;
             }
+            
+            // Calculate Dominant Angle and Type Flags
+            float domAngle = CalculateDominantAngle(surfaces);
+            byte typeFlags = (byte)((ck24 >> 16) & 0xFF);
+            
+            // Find CLOSEST MPRL entry for position/rotation
+            var centroid = (geometry.BoundsMin + geometry.BoundsMax) / 2f;
+            var (mprlRot, mprlPos) = FindClosestMprl(centroid, pm4.PositionRefs);
+            
+            // Create ONE candidate per CK24 object
+            var candidate = new Pm4WmoCandidate(
+                CK24: ck24,
+                InstanceId: 0,
+                TileX: tileX,
+                TileY: tileY,
+                BoundsMin: geometry.BoundsMin,
+                BoundsMax: geometry.BoundsMax,
+                DominantAngle: domAngle,
+                SurfaceCount: surfaces.Count,
+                VertexCount: geometry.Vertices.Count,
+                TypeFlags: typeFlags,
+                MprlRotationDegrees: mprlRot,
+                MprlPosition: mprlPos ?? centroid,
+                DebugGeometry: geometry.Vertices,
+                DebugFaces: geometry.Faces,
+                DebugMscnVertices: geometry.MscnVertices
+            );
+            candidates.Add(candidate);
         }
 
         return candidates;
