@@ -358,6 +358,11 @@ namespace WoWRollback.PM4Module
                         {
                             if (obj.ObjPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
                             {
+                                // DEBUG: Show coordinate sources to verify transform
+                                Console.WriteLine($"[DEBUG COORD] {Path.GetFileName(obj.ObjPath)} CK24={obj.Ck24}");
+                                Console.WriteLine($"  MprlPosition: ({obj.MprlPosition?.X:F2}, {obj.MprlPosition?.Y:F2}, {obj.MprlPosition?.Z:F2})");
+                                Console.WriteLine($"  Stats.Centroid: ({obj.Stats.Centroid.X:F2}, {obj.Stats.Centroid.Y:F2}, {obj.Stats.Centroid.Z:F2})");
+                                
                                 mscnWmoNames.Add(obj.ObjPath);
                                 
                                 // Create MODF entry with world coordinates (already transformed in LoadMscnMissingObjects)

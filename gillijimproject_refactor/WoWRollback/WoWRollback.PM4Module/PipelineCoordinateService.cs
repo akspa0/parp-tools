@@ -43,6 +43,28 @@ namespace WoWRollback.PM4Module
         }
 
         /// <summary>
+        /// Converts MSCN coordinates to ADT MODF/MDDF Placement coordinates.
+        /// 
+        /// MSCN data is ALREADY in world coordinates (not tile-local), but with
+        /// X and Y axes swapped compared to WoW client convention:
+        ///   MSCN_X = WoW_Y (West/East)
+        ///   MSCN_Y = WoW_X (North/South)  
+        ///   MSCN_Z = Height
+        /// 
+        /// No placement offset needed - data is already in client world space.
+        /// </summary>
+        public static Vector3 MscnToAdtPosition(Vector3 mscnPos)
+        {
+            // MSCN axes are swapped: X<->Y compared to WoW client coords
+            // No 17066 subtraction needed - MSCN is already in client world space
+            float worldX = mscnPos.Y;    // MSCN Y -> WoW X (North)
+            float worldY = mscnPos.X;    // MSCN X -> WoW Y (West)
+            float height = mscnPos.Z;    // Height stays
+
+            return new Vector3(worldX, worldY, height);
+        }
+
+        /// <summary>
         /// Legacy method - converts Server/World coordinates to ADT Placement coordinates.
         /// Server coords: X=north(+), Y=west(+), Z=up
         /// Placement coords: X=17066-Y, Y=Z, Z=17066-X

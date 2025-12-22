@@ -80,17 +80,44 @@ public static class MscnObjectDiscovery
             var (min, max) = CalculateBounds(mscnVertices);
             var dims = max - min;
             
+            // DEBUG: Show raw MSCN values vs expected ADT tile bounds
+            // Only print for first few clusters per tile to avoid spam
+            bool shouldDebug = (ck24 != 0) && (mscnVertices.Count > 10);
+            if (shouldDebug)
+            {
+                // Expected ADT tile bounds (world coords)
+                const float TileSize = 533.33333f;
+                const float MapCenter = 17066.66656f;
+                float tileWorldMinX = MapCenter - (tileX + 1) * TileSize;
+                float tileWorldMaxX = MapCenter - tileX * TileSize;
+                float tileWorldMinY = MapCenter - (tileY + 1) * TileSize;
+                float tileWorldMaxY = MapCenter - tileY * TileSize;
+                
+                Console.WriteLine($"[DEBUG MSCN] Tile {tileX}_{tileY} CK24=0x{ck24:X6} ({mscnVertices.Count} verts)");
+                Console.WriteLine($"[DEBUG MSCN]   Expected ADT X range: {tileWorldMinX:F0} to {tileWorldMaxX:F0}");
+                Console.WriteLine($"[DEBUG MSCN]   Expected ADT Y range: {tileWorldMinY:F0} to {tileWorldMaxY:F0}");
+                Console.WriteLine($"[DEBUG MSCN]   RAW MSCN X: {min.X:F1} to {max.X:F1} (range: {dims.X:F1})");
+                Console.WriteLine($"[DEBUG MSCN]   RAW MSCN Y: {min.Y:F1} to {max.Y:F1} (range: {dims.Y:F1})");
+                Console.WriteLine($"[DEBUG MSCN]   RAW MSCN Z: {min.Z:F1} to {max.Z:F1} (range: {dims.Z:F1})");
+            }
+            
             // Skip tiny noise or huge terrain
             if (dims.X < 0.5f && dims.Y < 0.5f && dims.Z < 0.5f) continue;
             if (dims.X > 300f || dims.Y > 300f) continue; // Object-scale, not terrain
             
             var centroid = (min + max) / 2f;
             
-            // CRITICAL: Transform centroid from PM4 local coords to ADT world coords
-            // PM4 vertices are in tile-local space; ADT placements use world coordinates
-            var worldCentroid = PipelineCoordinateService.Pm4ToAdtPosition(centroid, tileX, tileY);
-            var worldMin = PipelineCoordinateService.Pm4ToAdtPosition(min, tileX, tileY);
-            var worldMax = PipelineCoordinateService.Pm4ToAdtPosition(max, tileX, tileY);
+            // MSCN data is ALREADY in world coordinates (not tile-local)
+            // Just need axis swap: MSCN_X=WoW_Y, MSCN_Y=WoW_X
+            var worldCentroid = PipelineCoordinateService.MscnToAdtPosition(centroid);
+            var worldMin = PipelineCoordinateService.MscnToAdtPosition(min);
+            var worldMax = PipelineCoordinateService.MscnToAdtPosition(max);
+            
+            if (shouldDebug)
+            {
+                Console.WriteLine($"[DEBUG MSCN]   RAW centroid: ({centroid.X:F1}, {centroid.Y:F1}, {centroid.Z:F1})");
+                Console.WriteLine($"[DEBUG MSCN]   TRANSFORMED: ({worldCentroid.X:F1}, {worldCentroid.Y:F1}, {worldCentroid.Z:F1})");
+            }
             
             // Fix min/max after transform (coords may flip due to axis conversion)
             var actualWorldMin = Vector3.Min(worldMin, worldMax);
