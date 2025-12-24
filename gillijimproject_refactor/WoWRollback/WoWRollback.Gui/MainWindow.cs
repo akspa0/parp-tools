@@ -21,7 +21,9 @@ using WoWRollback.DbcModule;
 using WoWRollback.Core.Services;
 using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.Minimap;
+using WoWRollback.Core.Services.Viewer;
 using WoWRollback.MinimapModule;
+using WoWRollback.MinimapModule.Services;
 
 namespace WoWRollback.Gui;
 
@@ -802,56 +804,139 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    // Build MPQ paths for WotLK 3.3.5
-                    var mpqPaths = new List<string>();
-                    var dataDir = Path.Combine(payload.Root!, "Data");
-                    if (Directory.Exists(dataDir))
+                    // Find minimaps in versioned cache subdirectories (Prepare Layers extracts to {cache}/{version}/minimaps/)
+                    string? minimapCacheDir = null;
+                    
+                    // Search for minimaps directory in cache subdirectories
+                    if (Directory.Exists(_cacheRoot))
                     {
-                        mpqPaths.AddRange(Directory.GetFiles(dataDir, "*.mpq", SearchOption.AllDirectories)
-                            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
+                        foreach (var versionDir in Directory.GetDirectories(_cacheRoot))
+                        {
+                            var minimapsDir = Path.Combine(versionDir, "minimaps");
+                            if (Directory.Exists(minimapsDir))
+                            {
+                                // Check if this minimaps dir has files for our map
+                                var mapFiles = Directory.GetFiles(minimapsDir, $"{map}_*.png");
+                                if (mapFiles.Length > 0)
+                                {
+                                    minimapCacheDir = minimapsDir;
+                                    await Dispatcher.UIThread.InvokeAsync(() =>
+                                        AppendBuildLog($"[VLM] Found {mapFiles.Length} minimap files in: {minimapCacheDir}"));
+                                    break;
+                                }
+                            }
+                        }
                     }
-
-                    if (mpqPaths.Count == 0)
+                    
+                    // Also check the legacy path structure ({cache}/{map}/minimap/)
+                    if (minimapCacheDir == null)
+                    {
+                        var legacyPath = Path.Combine(_cacheRoot, map, "minimap");
+                        if (Directory.Exists(legacyPath))
+                        {
+                            minimapCacheDir = legacyPath;
+                            await Dispatcher.UIThread.InvokeAsync(() =>
+                                AppendBuildLog($"[VLM] Found legacy minimap cache at: {minimapCacheDir}"));
+                        }
+                    }
+                    
+                    if (string.IsNullOrEmpty(minimapCacheDir) || !Directory.Exists(minimapCacheDir))
                     {
                         await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog("[VLM] No MPQ files found. Make sure Data Sources Root points to a WoW installation."));
+                            AppendBuildLog($"[VLM] ERROR: No minimap cache found for map: {map}"));
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                            AppendBuildLog("[VLM] Please run 'Prepare Layers' first to extract minimaps from MPQs."));
                         return;
                     }
-
+                    
+                    // Scan for available minimap tiles in cache
+                    var minimapFiles = Directory.GetFiles(minimapCacheDir, "*.png", SearchOption.AllDirectories)
+                        .Concat(Directory.GetFiles(minimapCacheDir, "*.jpg", SearchOption.AllDirectories))
+                        .ToList();
+                    
                     await Dispatcher.UIThread.InvokeAsync(() =>
-                        AppendBuildLog($"[VLM] Found {mpqPaths.Count} MPQ archives"));
-
-                    using var archiveSource = new MpqArchiveSource(mpqPaths);
-
-                    // Parse md5translate if available
-                    Md5TranslateIndex? md5Index = null;
-                    if (Md5TranslateResolver.TryLoad(archiveSource, out var loadedIndex, out var md5SourcePath))
+                        AppendBuildLog($"[VLM] Found {minimapFiles.Count} cached minimap files"));
+                    
+                    if (minimapFiles.Count == 0)
                     {
-                        md5Index = loadedIndex;
                         await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog($"[VLM] Loaded md5translate from: {md5SourcePath} ({md5Index?.PlainToHash.Count ?? 0} entries)"));
+                            AppendBuildLog("[VLM] No minimap files found in cache. Export cancelled."));
+                        return;
                     }
-
-                    var resolver = new MinimapFileResolver(archiveSource, md5Index);
-                    var exporter = new VlmDatasetExporter();
-
-                    var progress = new Progress<string>(msg =>
-                        Dispatcher.UIThread.InvokeAsync(() => AppendBuildLog($"[VLM] {msg}")));
-
-                    var result = await exporter.ExportMapAsync(
-                        archiveSource,
-                        resolver,
-                        map,
-                        vlmOutputDir,
-                        progress);
-
+                    
+                    // Create output directories
+                    var imagesDir = Path.Combine(vlmOutputDir, "images");
+                    var metadataDir = Path.Combine(vlmOutputDir, "metadata");
+                    Directory.CreateDirectory(imagesDir);
+                    Directory.CreateDirectory(metadataDir);
+                    
+                    int tilesExported = 0;
+                    int tilesSkipped = 0;
+                    
+                    // Copy each minimap file and generate metadata
+                    foreach (var srcPath in minimapFiles)
+                    {
+                        var fileName = Path.GetFileName(srcPath);
+                        
+                        // Try to parse tile coordinates from filename (e.g., "Azeroth_32_48.png")
+                        int tileX = -1, tileY = -1;
+                        var baseName = Path.GetFileNameWithoutExtension(fileName);
+                        var parts = baseName.Split('_');
+                        if (parts.Length >= 3 && 
+                            int.TryParse(parts[^2], out tileX) && 
+                            int.TryParse(parts[^1], out tileY))
+                        {
+                            // Valid tile coordinates found
+                        }
+                        else
+                        {
+                            tilesSkipped++;
+                            continue;
+                        }
+                        
+                        try
+                        {
+                            // Copy the minimap image
+                            var destPath = Path.Combine(imagesDir, $"{map}_{tileX}_{tileY}.png");
+                            File.Copy(srcPath, destPath, overwrite: true);
+                            
+                            // Generate metadata JSON
+                            var metadataPath = Path.Combine(metadataDir, $"{map}_{tileX}_{tileY}.json");
+                            var metadata = new { tile_id = $"{map}_{tileX}_{tileY}", x = tileX, y = tileY };
+                            await File.WriteAllTextAsync(metadataPath, 
+                                System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                            
+                            tilesExported++;
+                            
+                            if (tilesExported == 1)
+                            {
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                    AppendBuildLog($"[VLM] First tile: {fileName}"));
+                            }
+                            
+                            if (tilesExported % 100 == 0)
+                            {
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                    AppendBuildLog($"[VLM] Exported {tilesExported} tiles..."));
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            tilesSkipped++;
+                            if (tilesSkipped <= 3)
+                            {
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                    AppendBuildLog($"[VLM] Failed: {fileName} - {ex.Message}"));
+                            }
+                        }
+                    }
+                    
                     await Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         AppendBuildLog($"[VLM] Export complete!");
-                        AppendBuildLog($"[VLM]   Tiles exported: {result.TilesExported}");
-                        AppendBuildLog($"[VLM]   Tiles skipped: {result.TilesSkipped}");
-                        AppendBuildLog($"[VLM]   Unique textures: {result.UniqueTextures}");
-                        AppendBuildLog($"[VLM]   Output: {result.OutputDirectory}");
+                        AppendBuildLog($"[VLM]   Tiles exported: {tilesExported}");
+                        AppendBuildLog($"[VLM]   Tiles skipped: {tilesSkipped}");
+                        AppendBuildLog($"[VLM]   Output: {vlmOutputDir}");
                     });
                 }
                 catch (Exception ex)

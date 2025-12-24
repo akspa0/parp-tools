@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
 using WoWRollback.AnalysisModule;
 using WoWRollback.Core.Models;
 using WoWRollback.Core.Services;
@@ -2473,13 +2474,13 @@ internal static class Program
                             blpStream.CopyTo(ms);
                             var blpData = ms.ToArray();
                             
-                            // Convert BLP to JPG using Warcraft.NET
+                            // Convert BLP to PNG using Warcraft.NET (lossless for VLM training)
                             var blp = new Warcraft.NET.Files.BLP.BLP(blpData);
                             var image = blp.GetMipMap(0); // Get highest resolution mipmap
                             
-                            var outputPath = Path.Combine(minimapOutDir, $"{mapName}_{x}_{y}.jpg");
+                            var outputPath = Path.Combine(minimapOutDir, $"{mapName}_{x}_{y}.png");
                             using var outStream = File.Create(outputPath);
-                            image.Save(outStream, new JpegEncoder { Quality = 85 });
+                            image.Save(outStream, new PngEncoder());
                             extracted++;
                             
                             if (extracted == 1)
@@ -2501,7 +2502,7 @@ internal static class Program
 
             if (extracted > 0)
             {
-                Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→JPG)");
+                Console.WriteLine($"[info] Extracted and converted {extracted} minimap tiles (BLP→PNG)");
                 if (failed > 0)
                 {
                     Console.WriteLine($"[info] Failed to extract {failed} tiles (missing or corrupt)");
@@ -3641,21 +3642,21 @@ internal static class Program
 
         Console.WriteLine($"  [ok] Extracted {extractResult.M2Count} M2 + {extractResult.WmoCount} WMO placements");
 
-        // Step 2: Extract minimaps (disabled by default)
-        if (opts.ContainsKey("export-minimaps"))
+        // Step 2: Extract minimaps (enabled by default, use --skip-minimaps to disable)
+        if (!opts.ContainsKey("skip-minimaps"))
         {
             Console.WriteLine("  Step 2: Extracting minimaps...");
             minimapDir = ExtractMinimapsFromMpq(src, mapName, outDir);
             if (!string.IsNullOrEmpty(minimapDir))
             {
-                var count = Directory.GetFiles(minimapDir, "*.jpg").Length;
+                var count = Directory.GetFiles(minimapDir, "*.png").Length;
                 Console.WriteLine($"  [ok] Extracted {count} minimap tiles");
             }
         }
         else
         {
             minimapDir = null;
-            Console.WriteLine("  Step 2: Skipped minimaps (enable with --export-minimaps)");
+            Console.WriteLine("  Step 2: Skipped minimaps (--skip-minimaps)");
         }
 
         // Step 3: Analyze UniqueIDs

@@ -54,6 +54,8 @@ public sealed class VlmDatasetExporter
 
         int tilesExported = 0;
         int tilesSkipped = 0;
+        int tilesChecked = 0;
+        int tilesResolved = 0;
         var allTextures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Scan all possible tiles (0-63, 0-63)
@@ -61,12 +63,19 @@ public sealed class VlmDatasetExporter
         {
             for (int y = 0; y < 64; y++)
             {
+                tilesChecked++;
                 try
                 {
                     // Try to resolve minimap tile
                     if (!resolver.TryResolveTile(mapName, x, y, out var blpPath) || string.IsNullOrEmpty(blpPath))
                     {
                         continue;
+                    }
+                    
+                    tilesResolved++;
+                    if (tilesResolved <= 3)
+                    {
+                        progress?.Report($"Found minimap: {blpPath}");
                     }
 
                     // Try to load the minimap BLP
@@ -135,8 +144,8 @@ public sealed class VlmDatasetExporter
         var textureDb = new { count = allTextures.Count, textures = allTextures.ToList() };
         await File.WriteAllTextAsync(textureDbPath, JsonSerializer.Serialize(textureDb, JsonOptions));
 
-        progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
-        _logger?.LogInformation("VLM export complete: {Exported} tiles, {Skipped} skipped, {Textures} unique textures",
+        progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped (checked {tilesChecked}, resolved {tilesResolved})");
+        _logger?.LogInformation("VLM export complete: {Exported} tiles, {Skipped} skipped, {Textures} unique textures, {Resolved} resolved from {Checked} checked",
             tilesExported, tilesSkipped, allTextures.Count);
 
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
