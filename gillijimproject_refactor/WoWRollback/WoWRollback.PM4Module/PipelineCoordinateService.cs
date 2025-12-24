@@ -65,20 +65,27 @@ namespace WoWRollback.PM4Module
         }
 
         /// <summary>
-        /// Legacy method - converts Server/World coordinates to ADT Placement coordinates.
-        /// Server coords: X=north(+), Y=west(+), Z=up
-        /// Placement coords: X=17066-Y, Y=Z, Z=17066-X
+        /// Converts Server/World coordinates to ADT Placement coordinates for ModfEntry.
+        /// 
+        /// Server coords: X=north(+), Y=west(+), Z=up (height)
+        /// 
+        /// IMPORTANT: BuildModfData writes position as (X, Z, Y) because WMO MODF format
+        /// stores height in the middle. So we output (placementX, placementZ, height)
+        /// which BuildModfData will write as (placementX, height, placementZ) = correct!
         /// </summary>
         public static Vector3 ServerToAdtPosition(Vector3 serverPos)
         {
-            // Server world coords are centered at (0,0) with:
-            // +X = north, +Y = west, +Z = up
-            // Placement coords: X = 17066 - serverY, Y = serverZ, Z = 17066 - serverX
+            // Server world coords: +X = north, +Y = west, +Z = up
+            // Placement coords need X = 17066 - serverY, Z = 17066 - serverX
             float placementX = HalfMapExtent - serverPos.Y;
-            float placementY = serverPos.Z;  // Height
             float placementZ = HalfMapExtent - serverPos.X;
+            float height = serverPos.Z;
 
-            return new Vector3(placementX, placementY, placementZ);
+            // CRITICAL: Return as (X, Z_position, Height) because BuildModfData swaps Y↔Z
+            // BuildModfData writes: [Position.X, Position.Z, Position.Y]
+            // So we return: (placementX, placementZ, height)
+            // Which gets written as: (placementX, height, placementZ) = CORRECT MODF format
+            return new Vector3(placementX, placementZ, height);
         }
         
         /// <summary>

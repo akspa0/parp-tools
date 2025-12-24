@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,7 +22,7 @@ namespace WoWRollback.PM4Module
             _adtPatcher = new MuseumAdtPatcher();
         }
 
-        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null, bool useDebugWmo = false, string? ck24LookupPath = null)
+        public void Execute(string gamePath, string listfilePath, string pm4Path, string splitAdtPath, string museumAdtPath, string outputRoot, string? wdlPath = null, string? wmoFilter = null, string? m2Filter = null, bool useFullMesh = false, string? originalSplitPath = null, bool useDebugWmo = false, string? ck24LookupPath = null, bool useDebugM2 = false)
         {
             Console.WriteLine("=== Parsing Patch Pipeline ===\n");
 
@@ -275,10 +275,10 @@ namespace WoWRollback.PM4Module
             }
             else
             {
-                // Full PM4 matching pipeline: parse PM4 → match WMO geometry → generate MODF
-                Console.WriteLine("[INFO] Running PM4 → WMO matching pipeline...");
+                // Full PM4 matching pipeline: parse PM4 â†’ match WMO geometry â†’ generate MODF
+                Console.WriteLine("[INFO] Running PM4 â†’ WMO matching pipeline...");
                 
-                if (useDebugWmo)
+                if (useDebugWmo && !useDebugM2)
                 {
                     Console.WriteLine("\n[INFO] DEBUG WMO MODE: Generating placeholder WMOs from PM4 geometry...");
                     Console.WriteLine("[INFO] Skipping WMO library matching.");
@@ -289,6 +289,11 @@ namespace WoWRollback.PM4Module
                     var result = new Pm4ModfReconstructor.ReconstructionResult(transformedEntries, wmoNames, new List<string>(), new Dictionary<string, int>(), new List<Pm4ModfReconstructor.MatchCandidate>());
                     _reconstructor.ExportToCsv(result, modfCsvPath);
                     _reconstructor.ExportMwmoNames(result, mwmoPath);
+                }
+                else if (useDebugM2)
+                {
+                    Console.WriteLine("\n[INFO] DEBUG M2 MODE: Skipping WMO generation - will generate M2s instead in Stage 2b...");
+                    // Leave transformedEntries and wmoNames empty - M2s will be generated in Stage 2b
                 }
                 else
                 {
@@ -309,8 +314,13 @@ namespace WoWRollback.PM4Module
             // M2 matching DISABLED - now using MSCN discovery
 
             // Stage 2c: MSCN Object Discovery - find MISSING objects not in museum ADTs
+            // SKIP in debug mode - we only want debug WMO placements
             Console.WriteLine("\n[Stage 2c] MSCN Object Discovery - finding missing objects...");
-            if (!string.IsNullOrEmpty(pm4Path) && !string.IsNullOrEmpty(museumAdtPath))
+            if (useDebugWmo)
+            {
+                Console.WriteLine("[MSCN] Skipping discovery in debug WMO mode");
+            }
+            else if (!string.IsNullOrEmpty(pm4Path) && !string.IsNullOrEmpty(museumAdtPath))
             {
                 try
                 {
@@ -423,13 +433,13 @@ namespace WoWRollback.PM4Module
 
 
             // Stage 2b: Generate Debug M2s from CK24 Objects (for visual verification)
-            // TEMPORARILY DISABLED: M2 format may be incorrect, causing Noggit crashes
-            bool enableDebugM2s = false;
+            // Enable via --use-debug-m2 flag
+            bool enableDebugM2s = useDebugM2;
             Console.WriteLine("\n[Stage 2b] Generating debug M2s from CK24 objects...");
             var debugM2Entries = new List<(string path, Vector3 position, int tileX, int tileY)>();
             if (!enableDebugM2s)
             {
-                Console.WriteLine("[WARN] Debug M2 generation is DISABLED - M2 format needs fixing");
+                Console.WriteLine("[INFO] Debug M2 generation skipped (use --use-debug-m2 to enable)");
             }
             else
             {
@@ -446,7 +456,7 @@ namespace WoWRollback.PM4Module
                     var pm4 = PM4File.FromFile(pm4File);
                     if (pm4.Surfaces == null || pm4.Surfaces.Count == 0) continue;
                     
-                    // Extract tile coordinates from PM4 filename (e.g., development_31_32.pm4 → 31,32)
+                    // Extract tile coordinates from PM4 filename (e.g., development_31_32.pm4 â†’ 31,32)
                     var pm4FileName = Path.GetFileNameWithoutExtension(pm4File);
                     var tileMatch = System.Text.RegularExpressions.Regex.Match(pm4FileName, @"_(\d+)_(\d+)$");
                     int fileTileX = tileMatch.Success ? int.Parse(tileMatch.Groups[1].Value) : 0;
@@ -621,8 +631,41 @@ namespace WoWRollback.PM4Module
                 Console.WriteLine($"[INFO] Found WDL: {Path.GetFileName(actualWdlFile)}");
                 string mapName = Path.GetFileNameWithoutExtension(actualWdlFile);
                 
+                // === MPRL TERRAIN REFINEMENT: Pre-load PM4 MPRL data by tile ===
+                Console.WriteLine("[INFO] Pre-loading MPRL terrain intersection data from PM4 files...");
+                var mprlByTile = new Dictionary<(int x, int y), List<WdlToAdtGenerator.MprlPoint>>();
+                if (!string.IsNullOrEmpty(pm4Path) && Directory.Exists(pm4Path))
+                {
+                    foreach (var pm4File in Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories))
+                    {
+                        try
+                        {
+                            var pm4FileName = Path.GetFileNameWithoutExtension(pm4File);
+                            var tileMatch = System.Text.RegularExpressions.Regex.Match(pm4FileName, @"_(\d+)_(\d+)$");
+                            if (!tileMatch.Success) continue;
+                            
+                            int tx = int.Parse(tileMatch.Groups[1].Value);
+                            int ty = int.Parse(tileMatch.Groups[2].Value);
+                            
+                            var pm4 = PM4File.FromFile(pm4File);
+                            var mprlPoints = WdlToAdtGenerator.ExtractMprlPoints(pm4);
+                            
+                            if (mprlPoints.Count > 0)
+                            {
+                                mprlByTile[(tx, ty)] = mprlPoints;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[WARN] Failed to load MPRL from {Path.GetFileName(pm4File)}: {ex.Message}");
+                        }
+                    }
+                    Console.WriteLine($"[INFO] Loaded MPRL data for {mprlByTile.Count} tiles ({mprlByTile.Values.Sum(p => p.Count)} total points)");
+                }
+                
                 int generated = 0;
                 int textured = 0;
+                int mprlRefined = 0;
                 for (int y = 0; y < 64; y++)
                 {
                     for (int x = 0; x < 64; x++)
@@ -645,6 +688,38 @@ namespace WoWRollback.PM4Module
                                 // Copy museum ADT directly for painted version
                                 File.Copy(museumAdtFile, Path.Combine(dirs.WdlPainted, adtName), true);
                                 textured++;
+                                
+                                // === MPRL TERRAIN REFINEMENT: Apply if we have MPRL data for this tile ===
+                                if (mprlByTile.TryGetValue((x, y), out var mprlPoints) && mprlPoints.Count > 0)
+                                {
+                                    try
+                                    {
+                                        // Calculate tile bounds in MSVT space
+                                        float tileMinX = mprlPoints.Min(p => p.X);
+                                        float tileMinY = mprlPoints.Min(p => p.Y);
+                                        
+                                        // Use MuseumTextureExtractor to get modifiable terrain data
+                                        var museumData = MuseumTextureExtractor.Extract(museumAdtFile);
+                                        
+                                        if (museumData != null && museumData.McvtPerChunk != null)
+                                        {
+                                            int modified = WdlToAdtGenerator.ApplyMprlHeights(museumData, mprlPoints, tileMinX, tileMinY);
+                                            
+                                            if (modified > 0)
+                                            {
+                                                // Re-generate ADT with refined terrain
+                                                var refinedAdt = WdlToAdtGenerator.GenerateAdt(tileData, x, y, null, museumData);
+                                                string refinedName = $"{mapName}_{x}_{y}_mprl_refined.adt";
+                                                File.WriteAllBytes(Path.Combine(dirs.WdlPainted, refinedName), refinedAdt);
+                                                mprlRefined++;
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[WARN] MPRL refinement failed for tile {x}_{y}: {ex.Message}");
+                                    }
+                                }
                             }
                             else
                             {
@@ -656,7 +731,7 @@ namespace WoWRollback.PM4Module
                         }
                     }
                 }
-                Console.WriteLine($"[INFO] Generated {generated} ADTs from WDL ({textured} copied from museum).");
+                Console.WriteLine($"[INFO] Generated {generated} ADTs from WDL ({textured} from museum, {mprlRefined} with MPRL terrain refinement).");
                 
                 // Copy WDL ADTs to Patched folders as base (to be overwritten/merged later)
                 // If we want WDL-based ADTs to be the primary output for unvisited areas.
@@ -949,7 +1024,7 @@ namespace WoWRollback.PM4Module
                         .Select(id => wmoNames[id])
                         .ToList();
                     
-                    // Build old NameId → new NameId mapping
+                    // Build old NameId â†’ new NameId mapping
                     var nameIdMap = new Dictionary<uint, uint>();
                     for (int i = 0; i < usedNameIds.Count && i < tileWmoNames.Count; i++)
                     {
@@ -1154,7 +1229,7 @@ namespace WoWRollback.PM4Module
             Console.WriteLine($"[INFO] Patched {mddfPatchedCount} ADTs with MDDF data ({mddfEntries.Count} total M2 placements)");
 
 
-            // Stage 4c: WL* → MH2O Liquid Conversion
+            // Stage 4c: WL* â†’ MH2O Liquid Conversion
             // TEMPORARILY DISABLED: MH2O serialization has format issues causing Noggit crashes
             // TODO: Fix SMLiquidInstance structure to match wiki spec
             bool enableMh2oInjection = false;
@@ -1840,16 +1915,16 @@ namespace WoWRollback.PM4Module
                         totalMprl++;
                         
                         // Track distributions
-                        if (!unk14Distribution.ContainsKey(mprl.Unknown0x14))
-                            unk14Distribution[mprl.Unknown0x14] = 0;
-                        unk14Distribution[mprl.Unknown0x14]++;
+                        if (!unk14Distribution.ContainsKey(mprl.Unk14))
+                            unk14Distribution[mprl.Unk14] = 0;
+                        unk14Distribution[mprl.Unk14]++;
                         
-                        if (!unk16Distribution.ContainsKey(mprl.Unknown0x16))
-                            unk16Distribution[mprl.Unknown0x16] = 0;
-                        unk16Distribution[mprl.Unknown0x16]++;
+                        if (!unk16Distribution.ContainsKey(mprl.Unk16))
+                            unk16Distribution[mprl.Unk16] = 0;
+                        unk16Distribution[mprl.Unk16]++;
                         
                         // Track command/flag entries
-                        if (mprl.Unknown0x16 == 0x3FFF || mprl.Unknown0x14 == -1)
+                        if (mprl.Unk16 == 0x3FFF || mprl.Unk14 == -1)
                             commandEntries.Add((tileX, tileY, mprl));
                     }
                 }
@@ -1865,8 +1940,8 @@ namespace WoWRollback.PM4Module
                     sw.WriteLine(string.Join(",",
                         tileX, tileY, mprl.Index,
                         mprl.PositionX.ToString("F3"), mprl.PositionY.ToString("F3"), mprl.PositionZ.ToString("F3"),
-                        mprl.Unknown0x04, mprl.HeadingDegrees.ToString("F2"), mprl.Unknown0x14,
-                        $"0x{mprl.Unknown0x06:X4}", $"0x{mprl.Unknown0x16:X4}", mprl.IsCommandEntry));
+                        mprl.Unk04, mprl.Unk04AsDegrees.ToString("F2"), mprl.Unk14,
+                        $"0x{mprl.Unk06:X4}", $"0x{mprl.Unk16:X4}", mprl.IsNegativeUnk14));
                 }
             }
             
@@ -1878,12 +1953,12 @@ namespace WoWRollback.PM4Module
                 sw.WriteLine($"Command/Flag entries (unk16=0x3FFF or unk14=-1): {commandEntries.Count}");
                 sw.WriteLine();
                 
-                sw.WriteLine("=== Unknown0x14 Distribution ===");
+                sw.WriteLine("=== Unk14 Distribution ===");
                 foreach (var kvp in unk14Distribution.OrderBy(x => x.Key))
                     sw.WriteLine($"  unk14={kvp.Key,4}: {kvp.Value,6} entries");
                 
                 sw.WriteLine();
-                sw.WriteLine("=== Unknown0x16 Distribution ===");
+                sw.WriteLine("=== Unk16 Distribution ===");
                 foreach (var kvp in unk16Distribution.OrderBy(x => x.Key))
                     sw.WriteLine($"  unk16=0x{kvp.Key:X4}: {kvp.Value,6} entries");
                 
@@ -1891,7 +1966,7 @@ namespace WoWRollback.PM4Module
                 sw.WriteLine("=== Sample Command Entries (unk16=0x3FFF) ===");
                 foreach (var (tx, ty, mprl) in commandEntries.Take(50))
                 {
-                    sw.WriteLine($"  Tile({tx},{ty}) Idx={mprl.Index}: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04} unk14={mprl.Unknown0x14} unk16=0x{mprl.Unknown0x16:X4}");
+                    sw.WriteLine($"  Tile({tx},{ty}) Idx={mprl.Index}: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unk04} unk14={mprl.Unk14} unk16=0x{mprl.Unk16:X4}");
                 }
             }
             
@@ -1966,26 +2041,10 @@ namespace WoWRollback.PM4Module
                         }
                         
                         // Determine placement
-                        // Use MPRL position if available for accurate placement
-                        // Otherwise use geometric centroid (less accurate)
-                        Vector3 position = Vector3.Zero;
+                        // MPRL is not reliable - use geometry centroid instead
                         Vector3 rotation = Vector3.Zero;
                         
-                        if (candidate.MprlPosition.HasValue)
-                        {
-                            // MPRL position is raw (X, Y, Z) - verify if this needs swapping
-                            // Based on recent fixes, we assume raw coordinates are correct
-                            position = candidate.MprlPosition.Value;
-                            
-                            if (candidate.MprlRotationDegrees.HasValue)
-                            {
-                                // MPRL rotation is typically Yaw only (Y-axis)
-                                // Standard rotation in MODF is (Pitch, Yaw, Roll)
-                                rotation = new Vector3(0, candidate.MprlRotationDegrees.Value, 0);
-                            }
-                        }
-
-                        // Calculate Bounds for ModfEntry
+                        // Calculate position from geometry centroid (ignore MPRL)
                         var min = new Vector3(float.MaxValue);
                         var max = new Vector3(float.MinValue);
                         foreach (var v in candidate.DebugGeometry)
@@ -1993,13 +2052,33 @@ namespace WoWRollback.PM4Module
                             min = Vector3.Min(min, v);
                             max = Vector3.Max(max, v);
                         }
-                        var bounds = new Generation.Pm4DebugWmoWriter.BoundingBox(min, max);
-
-                        // Fallback to centroid if no MPRL
-                        if (!candidate.MprlPosition.HasValue)
+                        
+                        // Geometry centroid - MSVT vertices are in WORLD space, not tile-local!
+                        // Debug showed values like (9866, 12000) which are world coords, not (0-533) tile-local
+                        Vector3 worldCentroid = (min + max) / 2f;
+                        
+                        // WMO local bounds (centered around origin in the WMO file)
+                        Vector3 localMin = min - worldCentroid;
+                        Vector3 localMax = max - worldCentroid;
+                        
+                        // Convert world coordinates to ADT placement coordinates
+                        Vector3 position = PipelineCoordinateService.ServerToAdtPosition(worldCentroid);
+                        
+                        // MODF bounds = local WMO bounds offset by placement position
+                        // This gives the world-space bounding box after the WMO is placed
+                        var modfBoundsMin = position + localMin;
+                        var modfBoundsMax = position + localMax;
+                        
+                        // DEBUG: Log first entry from certain tiles to verify transform
+                        if (tileX == 22 && tileY == 18 && modfEntries.Count(e => e.TileX == 22 && e.TileY == 18) < 2)
                         {
-                            position = (min + max) / 2f;
+                            Console.WriteLine($"[DEBUG] Tile {tileX}_{tileY} CK24={candidate.CK24:X6}:");
+                            Console.WriteLine($"  World centroid: ({worldCentroid.X:F2}, {worldCentroid.Y:F2}, {worldCentroid.Z:F2})");
+                            Console.WriteLine($"  ADT position: ({position.X:F2}, {position.Y:F2}, {position.Z:F2})");
                         }
+                        
+                        // For WMO writer, use local-space bounds (centered)
+                        var localBounds = new Generation.Pm4DebugWmoWriter.BoundingBox(localMin, localMax);
                         
                         // Create MODF Entry using Pm4ModfReconstructor type
                         var entry = new Pm4ModfReconstructor.ModfEntry(
@@ -2007,8 +2086,8 @@ namespace WoWRollback.PM4Module
                             nextUniqueId++,
                             position,
                             rotation,
-                            bounds.Min,
-                            bounds.Max,
+                            modfBoundsMin,
+                            modfBoundsMax,
                             0, // Flags
                             0, // DoodadSet
                             0, // NameSet
@@ -2033,7 +2112,7 @@ namespace WoWRollback.PM4Module
         }
 
         /// <summary>
-        /// Deep analysis of MSLK ↔ CK24 relationships to find sub-object segmentation patterns.
+        /// Deep analysis of MSLK â†” CK24 relationships to find sub-object segmentation patterns.
         /// Explores how MSLK TypeFlags, Subtype, GroupObjectId correlate with CK24 groups.
         /// </summary>
         public void ExportMslkCk24Analysis(string pm4Directory, string outputDir)
@@ -2140,7 +2219,7 @@ namespace WoWRollback.PM4Module
             // Write analysis report
             using (var sw = new StreamWriter(mslkAnalysisPath))
             {
-                sw.WriteLine("=== MSLK ↔ CK24 Deep Analysis ===");
+                sw.WriteLine("=== MSLK â†” CK24 Deep Analysis ===");
                 sw.WriteLine($"Total MSLK entries: {totalMslk}");
                 sw.WriteLine($"Total MSUR surfaces: {totalSurfaces}");
                 sw.WriteLine($"PM4 files analyzed: {pm4Files.Length}");
@@ -2161,7 +2240,7 @@ namespace WoWRollback.PM4Module
                     sw.WriteLine($"  Type={kvp.Key.type,2} Subtype={kvp.Key.subtype,3}: {kvp.Value,6} entries");
                 
                 sw.WriteLine();
-                sw.WriteLine("=== GroupObjectId → CK24 Correlation ===");
+                sw.WriteLine("=== GroupObjectId â†’ CK24 Correlation ===");
                 var multiCk24Groups = groupIdToCk24s.Where(g => g.Value.Count > 1).ToList();
                 var singleCk24Groups = groupIdToCk24s.Where(g => g.Value.Count == 1).ToList();
                 var noCk24Groups = groupIdToCk24s.Where(g => g.Value.Count == 0).ToList();
@@ -2282,7 +2361,7 @@ namespace WoWRollback.PM4Module
                 sw.WriteLine($"  Without geometry (MspiFirstIndex = -1): {mslkWithoutGeometry:N0}");
                 sw.WriteLine();
                 
-                sw.WriteLine("=== MSLK.RefIndex → MPRL Correlation ===");
+                sw.WriteLine("=== MSLK.RefIndex â†’ MPRL Correlation ===");
                 foreach (var (key, count) in refIndexToMprlMatch)
                 {
                     sw.WriteLine($"  {key}: {count:N0} ({100.0 * count / totalMslk:F1}%)");
@@ -2307,14 +2386,14 @@ namespace WoWRollback.PM4Module
                 }
                 sw.WriteLine();
                 
-                sw.WriteLine("=== Sample MSLK → MPRL Links (RefIndex as index) ===");
+                sw.WriteLine("=== Sample MSLK â†’ MPRL Links (RefIndex as index) ===");
                 foreach (var (file, idx, mslk, mprl) in sampleMatches)
                 {
                     if (mprl != null)
                     {
                         sw.WriteLine($"  {file} MSLK[{idx}]:");
                         sw.WriteLine($"    MSLK: Type={mslk.TypeFlags} Subtype={mslk.Subtype} GroupId=0x{mslk.GroupObjectId:X8} RefIdx={mslk.RefIndex}");
-                        sw.WriteLine($"    MPRL[{mslk.RefIndex}]: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04} unk14={mprl.Unknown0x14}");
+                        sw.WriteLine($"    MPRL[{mslk.RefIndex}]: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unk04} unk14={mprl.Unk14}");
                         sw.WriteLine();
                     }
                 }
@@ -2459,9 +2538,9 @@ namespace WoWRollback.PM4Module
                 }
                 
                 sw.WriteLine("=== Key Findings ===");
-                sw.WriteLine("If 'could_be_global' is high → RefIndex might be a global/cumulative index");
-                sw.WriteLine("If LinkId has cross-tile patterns (0xFFFFYYXX) → Object spans multiple tiles");
-                sw.WriteLine("If 'is_sentinel' is high → 0xFFFF means 'no reference'");
+                sw.WriteLine("If 'could_be_global' is high â†’ RefIndex might be a global/cumulative index");
+                sw.WriteLine("If LinkId has cross-tile patterns (0xFFFFYYXX) â†’ Object spans multiple tiles");
+                sw.WriteLine("If 'is_sentinel' is high â†’ 0xFFFF means 'no reference'");
             }
             
             Console.WriteLine($"[INFO] Invalid RefIndex Analysis: {analysisPath}");
@@ -2586,9 +2665,9 @@ namespace WoWRollback.PM4Module
                 sw.WriteLine("=== Sample Resolved Entries ===");
                 foreach (var (src, idx, mslk, tgt, mprl) in sampleResolved)
                 {
-                    sw.WriteLine($"  {src} MSLK[{idx}] → target tile {tgt}:");
+                    sw.WriteLine($"  {src} MSLK[{idx}] â†’ target tile {tgt}:");
                     sw.WriteLine($"    MSLK: GroupId=0x{mslk.GroupObjectId:X8} RefIdx={mslk.RefIndex} LinkId=0x{mslk.LinkId:X8}");
-                    sw.WriteLine($"    MPRL: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unknown0x04}");
+                    sw.WriteLine($"    MPRL: pos=({mprl.PositionX:F1},{mprl.PositionY:F1},{mprl.PositionZ:F1}) unk04={mprl.Unk04}");
                     sw.WriteLine();
                 }
                 
@@ -2597,7 +2676,7 @@ namespace WoWRollback.PM4Module
                     sw.WriteLine("=== Sample Unresolved Entries ===");
                     foreach (var (src, idx, mslk, tgt, reason) in sampleUnresolved)
                     {
-                        sw.WriteLine($"  {src} MSLK[{idx}] → {tgt}: {reason}");
+                        sw.WriteLine($"  {src} MSLK[{idx}] â†’ {tgt}: {reason}");
                     }
                 }
             }
@@ -2783,57 +2862,57 @@ namespace WoWRollback.PM4Module
             
             using (var sw = new StreamWriter(analysisPath))
             {
-                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-                sw.WriteLine("║        PM4 COMPREHENSIVE RELATIONSHIP ANALYSIS                 ║");
-                sw.WriteLine("║  Treating PM4 as a database with chunks as tables              ║");
-                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+                sw.WriteLine("â•‘        PM4 COMPREHENSIVE RELATIONSHIP ANALYSIS                 â•‘");
+                sw.WriteLine("â•‘  Treating PM4 as a database with chunks as tables              â•‘");
+                sw.WriteLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine();
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CHUNK RELATIONSHIP MAP (Database Schema)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
-    ┌──────────────────────────────────────────────────────────────┐
-    │                      PM4 SCENE GRAPH                         │
-    └──────────────────────────────────────────────────────────────┘
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+    â”‚                      PM4 SCENE GRAPH                         â”‚
+    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
     
     MSHD (Header)
-      │
-      ├─► MSLK[n] ──┬──► MSPI[first:count] ──► MSPV (Path vertices)
-      │   │         │     (navigation paths)
-      │   │         │
-      │   │         └──► RefIndex ──► MPRL? (position reference?)
-      │   │
-      │   ├── TypeFlags (object type: 1=walkable, 2=wall, etc.)
-      │   ├── Subtype (floor level 0-18)
-      │   ├── GroupObjectId (local grouping)
-      │   └── LinkId (cross-tile reference: 0x00FFXXYY)
-      │
-      ├─► MSUR[n] ──┬──► MSVI[first:count] ──► MSVT (Mesh vertices)
-      │   │         │     (renderable surfaces)
-      │   │         │
-      │   │         └──► CK24 (object grouping key from PackedParams)
-      │   │
-      │   ├── Normal (surface orientation)
-      │   ├── Height (Z level)
-      │   └── AttributeMask (bit7 = liquid?)
-      │
-      ├─► MPRL[n] (Position references)
-      │   ├── Position (X, Y, Z)
-      │   ├── Unk14 (floor level, -1 = command)
-      │   ├── Unk16 (0x3FFF = terminator)
-      │   └── Unk04 (NOT rotation - varies at same position)
-      │
-      ├─► MPRR[n] (Object boundaries)  
-      │   ├── Value1 (0xFFFF = SENTINEL)
-      │   └── Value2 (component type)
-      │
-      └─► MSCN[n] (Exterior vertices for collision hull)
+      â”‚
+      â”œâ”€â–º MSLK[n] â”€â”€â”¬â”€â”€â–º MSPI[first:count] â”€â”€â–º MSPV (Path vertices)
+      â”‚   â”‚         â”‚     (navigation paths)
+      â”‚   â”‚         â”‚
+      â”‚   â”‚         â””â”€â”€â–º RefIndex â”€â”€â–º MPRL? (position reference?)
+      â”‚   â”‚
+      â”‚   â”œâ”€â”€ TypeFlags (object type: 1=walkable, 2=wall, etc.)
+      â”‚   â”œâ”€â”€ Subtype (floor level 0-18)
+      â”‚   â”œâ”€â”€ GroupObjectId (local grouping)
+      â”‚   â””â”€â”€ LinkId (cross-tile reference: 0x00FFXXYY)
+      â”‚
+      â”œâ”€â–º MSUR[n] â”€â”€â”¬â”€â”€â–º MSVI[first:count] â”€â”€â–º MSVT (Mesh vertices)
+      â”‚   â”‚         â”‚     (renderable surfaces)
+      â”‚   â”‚         â”‚
+      â”‚   â”‚         â””â”€â”€â–º CK24 (object grouping key from PackedParams)
+      â”‚   â”‚
+      â”‚   â”œâ”€â”€ Normal (surface orientation)
+      â”‚   â”œâ”€â”€ Height (Z level)
+      â”‚   â””â”€â”€ AttributeMask (bit7 = liquid?)
+      â”‚
+      â”œâ”€â–º MPRL[n] (Position references)
+      â”‚   â”œâ”€â”€ Position (X, Y, Z)
+      â”‚   â”œâ”€â”€ Unk14 (floor level, -1 = command)
+      â”‚   â”œâ”€â”€ Unk16 (0x3FFF = terminator)
+      â”‚   â””â”€â”€ Unk04 (NOT rotation - varies at same position)
+      â”‚
+      â”œâ”€â–º MPRR[n] (Object boundaries)  
+      â”‚   â”œâ”€â”€ Value1 (0xFFFF = SENTINEL)
+      â”‚   â””â”€â”€ Value2 (component type)
+      â”‚
+      â””â”€â–º MSCN[n] (Exterior vertices for collision hull)
 ");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CK24 BYTE DECOMPOSITION (Testing Z-layer hypothesis)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CK24 = ((PackedParams >> 8) & 0xFFFFFF)");
                 sw.WriteLine("Decomposed: [Byte2][Byte1][Byte0]");
                 sw.WriteLine();
@@ -2853,54 +2932,54 @@ namespace WoWRollback.PM4Module
                     sw.WriteLine($"  0x{val:X2}: {count,6}");
                 sw.WriteLine($"  Unique values: {ck24Byte2.Count}");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("INDEX FIELD ANALYSIS");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine($"MSLK.MspiFirstIndex max: {maxMspiFirst}");
                 sw.WriteLine($"MSLK.MspiIndexCount distribution: min={allMspiCounts.DefaultIfEmpty((byte)0).Min()}, max={allMspiCounts.DefaultIfEmpty((byte)0).Max()}, avg={allMspiCounts.Select(x => (double)x).DefaultIfEmpty(0).Average():F1}");
                 sw.WriteLine($"MSLK.RefIndex max (excl 0xFFFF): {maxRefIndex}");
                 sw.WriteLine($"MSUR.MsviFirstIndex max: {maxMsviFirst}");
                 sw.WriteLine($"MSUR.IndexCount distribution: min={allIndexCounts.DefaultIfEmpty((byte)0).Min()}, max={allIndexCounts.DefaultIfEmpty((byte)0).Max()}, avg={allIndexCounts.Select(x => (double)x).DefaultIfEmpty(0).Average():F1}");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("SAMPLE RELATIONSHIP CHAINS");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 foreach (var chain in sampleChains)
                     sw.WriteLine($"  {chain}");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("UNKNOWN/UNMAPPED RELATIONSHIPS");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
-  ❓ MSLK.RefIndex → What does it reference when > local MPRL count?
+  â“ MSLK.RefIndex â†’ What does it reference when > local MPRL count?
      - NOT cross-tile via LinkId (0% resolution rate)
      - NOT global cumulative index
      - Could be: object definition ID? WMO file hash? External reference?
   
-  ❓ MSLK.GroupObjectId → Relationship to CK24?
+  â“ MSLK.GroupObjectId â†’ Relationship to CK24?
      - No direct correlation found
      - Could be: local scene graph node ID
   
-  ❓ MPRR Value1/Value2 → What geometry do they reference?
+  â“ MPRR Value1/Value2 â†’ What geometry do they reference?
      - Value1=0xFFFF marks boundaries
      - Value2 meaning unknown (component type?)
   
-  ❓ MPRL.Unk04 → Multiple values at same position
+  â“ MPRL.Unk04 â†’ Multiple values at same position
      - NOT rotation angle
      - Could be: LOD level? Animation state? Event trigger?
   
-  ❓ CK24 byte components → Z-layer separation?
+  â“ CK24 byte components â†’ Z-layer separation?
      - User hypothesis: different bytes = different Z levels
      - Need to test: group surfaces by CK24 byte, check Z ranges
   
-  ❓ MSHD fields → Index offsets into global data?
+  â“ MSHD fields â†’ Index offsets into global data?
      - Unk00, Unk04, Unk08 have non-zero values
      - Could be: cumulative offsets, tile metadata, grid dimensions
 ");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("NEXT INVESTIGATION TARGETS");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
   1. CK24 Z-Layer Test: Group surfaces by CK24 byte, compute Z ranges
   2. MPRR-MSUR Correlation: Do MPRR entries count match MSUR surfaces?
@@ -2977,17 +3056,17 @@ namespace WoWRollback.PM4Module
             
             using (var sw = new StreamWriter(analysisPath))
             {
-                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-                sw.WriteLine("║         CK24 Z-LAYER CORRELATION ANALYSIS                      ║");
-                sw.WriteLine("║  Testing: Does Byte2 (type flag) correlate with Z height?     ║");
-                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+                sw.WriteLine("â•‘         CK24 Z-LAYER CORRELATION ANALYSIS                      â•‘");
+                sw.WriteLine("â•‘  Testing: Does Byte2 (type flag) correlate with Z height?     â•‘");
+                sw.WriteLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine();
                 sw.WriteLine($"Total surfaces analyzed: {totalSurfaces:N0}");
                 sw.WriteLine();
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("Z RANGES BY BYTE2 (Type Flag)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("Byte2  |  Count   |   Min Z   |   Max Z   |  Z Range  | LowByte Combos");
                 sw.WriteLine("-------|----------|-----------|-----------|-----------|---------------");
                 
@@ -3003,21 +3082,21 @@ namespace WoWRollback.PM4Module
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("INTERPRETATION");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
 If Z ranges for different Byte2 values are NON-OVERLAPPING:
-  → Byte2 encodes FLOOR/LAYER index (Z-layer hypothesis CONFIRMED)
+  â†’ Byte2 encodes FLOOR/LAYER index (Z-layer hypothesis CONFIRMED)
   
 If Z ranges for different Byte2 values OVERLAP significantly:
-  → Byte2 encodes OBJECT TYPE (geometry classification flag)
-  → Byte0+Byte1 = object instance identifier
+  â†’ Byte2 encodes OBJECT TYPE (geometry classification flag)
+  â†’ Byte0+Byte1 = object instance identifier
 ");
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("TOP CK24 VALUES BY SURFACE COUNT");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CK24       | Count | Min Z   | Max Z   | Z Span | Byte2 | Byte1 | Byte0");
                 sw.WriteLine("-----------|-------|---------|---------|--------|-------|-------|------");
                 
@@ -3031,9 +3110,9 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                     sw.WriteLine($"0x{ck24:X6} | {stats.Count,5} | {stats.MinZ,7:F1} | {stats.MaxZ,7:F1} | {span,6:F1} | 0x{b2:X2}  | 0x{b1:X2}  | 0x{b0:X2}");
                 }
                 
-                sw.WriteLine("\n════════════════════════════════════════════════════════════════");
+                sw.WriteLine("\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("KEY QUESTIONS ANSWERED");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
                 // Calculate overlap
                 var byte2Ranges = zByByte2.Where(x => x.Value.Count > 100)
@@ -3056,7 +3135,7 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                             if (overlap > 10) // Significant overlap (> 10 units)
                             {
                                 hasSignificantOverlap = true;
-                                overlaps.Add($"0x{a.Key:X2} ↔ 0x{b.Key:X2}: {overlap:F1} units overlap");
+                                overlaps.Add($"0x{a.Key:X2} â†” 0x{b.Key:X2}: {overlap:F1} units overlap");
                             }
                         }
                     }
@@ -3064,7 +3143,7 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 
                 if (hasSignificantOverlap)
                 {
-                    sw.WriteLine("❌ Z-Layer Hypothesis: REJECTED (significant overlaps found)");
+                    sw.WriteLine("âŒ Z-Layer Hypothesis: REJECTED (significant overlaps found)");
                     sw.WriteLine("   Byte2 appears to encode OBJECT TYPE, not floor level.");
                     sw.WriteLine("\n   Overlapping types:");
                     foreach (var o in overlaps.Take(10))
@@ -3072,7 +3151,7 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 }
                 else
                 {
-                    sw.WriteLine("✓ Z-Layer Hypothesis: POSSIBLE (no significant overlaps)");
+                    sw.WriteLine("âœ“ Z-Layer Hypothesis: POSSIBLE (no significant overlaps)");
                     sw.WriteLine("   Byte2 may encode floor/layer index!");
                 }
             }
@@ -3134,10 +3213,10 @@ If Z ranges for different Byte2 values OVERLAP significantly:
             
             using (var sw = new StreamWriter(analysisPath))
             {
-                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-                sw.WriteLine("║       CK24 OBJECTID GROUPING ANALYSIS                          ║");
-                sw.WriteLine("║  Testing: Does Byte0+Byte1 identify distinct objects?          ║");
-                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+                sw.WriteLine("â•‘       CK24 OBJECTID GROUPING ANALYSIS                          â•‘");
+                sw.WriteLine("â•‘  Testing: Does Byte0+Byte1 identify distinct objects?          â•‘");
+                sw.WriteLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine();
                 sw.WriteLine($"Total object groups (Type+ObjectID): {objectGroups.Count:N0}");
                 sw.WriteLine();
@@ -3146,9 +3225,9 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 var byType = objectGroups.GroupBy(x => x.Key.Type)
                     .OrderByDescending(g => g.Sum(x => x.Value.SurfaceCount));
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("SUMMARY BY TYPE (Byte2)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("Type   | Objects | Total Surfs | Avg Surfs/Obj | Multi-File Objs");
                 sw.WriteLine("-------|---------|-------------|---------------|----------------");
                 
@@ -3163,9 +3242,9 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("OBJECT SIZE DISTRIBUTION");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
                 var sizeGroups = objectGroups.Values
                     .GroupBy(o => o.SurfaceCount switch { < 10 => "1-9", < 50 => "10-49", < 100 => "50-99", < 500 => "100-499", _ => "500+" })
@@ -3177,9 +3256,9 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("TOP 30 LARGEST OBJECTS (by surface count)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("Type+ObjID  | Surfaces | Indices | Z Span   | Files | Could be");
                 sw.WriteLine("------------|----------|---------|----------|-------|----------");
                 
@@ -3191,9 +3270,9 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CROSS-TILE OBJECTS (span multiple files)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
                 var crossTile = objectGroups.Where(x => x.Value.Files.Count > 1)
                     .OrderByDescending(x => x.Value.Files.Count).Take(15);
@@ -3205,15 +3284,15 @@ If Z ranges for different Byte2 values OVERLAP significantly:
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("INTERPRETATION");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
 CK24 Structure (CONFIRMED):
-  ┌────────────────────────────────────────┐
-  │ Byte2  │  Byte1  │  Byte0             │
-  │ (Type) │  (ObjectID high)  (low)      │
-  └────────────────────────────────────────┘
+  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚ Byte2  â”‚  Byte1  â”‚  Byte0             â”‚
+  â”‚ (Type) â”‚  (ObjectID high)  (low)      â”‚
+  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 Type flags (Byte2):
   - 0x40 bit = has pathfinding mesh
@@ -3327,27 +3406,27 @@ ObjectID (Byte0+Byte1):
             
             using (var sw = new StreamWriter(analysisPath))
             {
-                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-                sw.WriteLine("║       REFINDEX ALTERNATIVE HYPOTHESIS ANALYSIS                 ║");
-                sw.WriteLine("║  What does RefIndex reference when > local MPRL count?         ║");
-                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+                sw.WriteLine("â•‘       REFINDEX ALTERNATIVE HYPOTHESIS ANALYSIS                 â•‘");
+                sw.WriteLine("â•‘  What does RefIndex reference when > local MPRL count?         â•‘");
+                sw.WriteLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine();
                 sw.WriteLine($"Valid (< MPRL count): {totalValid:N0}");
                 sw.WriteLine($"Invalid (>= MPRL count): {totalInvalid:N0}");
                 sw.WriteLine();
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("ALTERNATIVE TARGET TESTS");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine($"  RefIndex < MSUR count: {refMatchesMsur:N0} ({100.0 * refMatchesMsur / Math.Max(1, totalInvalid):F1}%)");
                 sw.WriteLine($"  RefIndex < MSVT count: {refMatchesMsvt:N0} ({100.0 * refMatchesMsvt / Math.Max(1, totalInvalid):F1}%)");
                 sw.WriteLine($"  RefIndex < MSVI count: {refMatchesMsvi:N0} ({100.0 * refMatchesMsvi / Math.Max(1, totalInvalid):F1}%)");
                 sw.WriteLine($"  RefIndex == GroupObjectId low word: {refMatchesGroupId:N0} ({100.0 * refMatchesGroupId / Math.Max(1, totalInvalid):F1}%)");
                 sw.WriteLine();
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("REFINDEX HIGH BYTE DISTRIBUTION (for invalid refs)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("High Byte | Count    | Could mean");
                 sw.WriteLine("----------|----------|-------------------------------------------");
                 
@@ -3367,9 +3446,9 @@ ObjectID (Byte0+Byte1):
                 }
                 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("SAMPLE INVALID REFINDEX WITH CONTEXT");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
                 foreach (var (file, idx, mslk, mprl, msur, msvt) in samplePatterns)
                 {
@@ -3380,9 +3459,9 @@ ObjectID (Byte0+Byte1):
                     sw.WriteLine();
                 }
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("HYPOTHESES");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine(@"
 1. RefIndex is a GLOBAL index:
    - Into a master MPRL table combining all tiles
@@ -3606,7 +3685,7 @@ ObjectID (Byte0+Byte1):
                 sw.WriteLine("=== Value1 Frequency (top 20) ===");
                 foreach (var (val, count) in value1Distribution.OrderByDescending(x => x.Value).Take(20))
                 {
-                    var marker = val == 0xFFFF ? " ← SENTINEL" : "";
+                    var marker = val == 0xFFFF ? " â† SENTINEL" : "";
                     sw.WriteLine($"  {val,5} (0x{val:X4}): {count,8} entries{marker}");
                 }
                 
@@ -3788,19 +3867,19 @@ ObjectID (Byte0+Byte1):
             
             using (var sw = new StreamWriter(analysisPath))
             {
-                sw.WriteLine("╔════════════════════════════════════════════════════════════════╗");
-                sw.WriteLine("║        GEOMETRIC TYPE CORRELATION ANALYSIS                     ║");
-                sw.WriteLine("║  Validating 'Type' meaning via Physical Properties             ║");
-                sw.WriteLine("╚════════════════════════════════════════════════════════════════╝");
+                sw.WriteLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+                sw.WriteLine("â•‘        GEOMETRIC TYPE CORRELATION ANALYSIS                     â•‘");
+                sw.WriteLine("â•‘  Validating 'Type' meaning via Physical Properties             â•‘");
+                sw.WriteLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine();
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("MSLK TYPE (Pathfinding Mesh)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("MSLK TYPE (Pathfinding Mesh)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 
                 // Debug info
                 sw.WriteLine($"[DEBUG] Total MSLK analyzed: {filesAnalyzed}");
@@ -3836,9 +3915,9 @@ ObjectID (Byte0+Byte1):
 
 
                 sw.WriteLine();
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("CK24 TYPE (Surface Grouping)");
-                sw.WriteLine("════════════════════════════════════════════════════════════════");
+                sw.WriteLine("â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
                 sw.WriteLine("Type | Surfaces | Avg Normal Z (Up) | Prediction");
                 sw.WriteLine("-----|----------|-------------------|-----------");
                 

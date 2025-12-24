@@ -77,6 +77,29 @@ public class Pm4DebugWmoWriter
         var localVertices = vertices.Select(v => v - centroid).ToList();
         var localBox = new BoundingBox(min - centroid, max - centroid);
 
+        // Safety: If no geometry or indices, create a minimal cube placeholder
+        if (localVertices.Count == 0 || indices.Count < 3)
+        {
+            // Create a 1x1x1 unit cube centered at origin
+            localVertices.Clear();
+            indices.Clear();
+            
+            localVertices.Add(new Vector3(-0.5f, -0.5f, -0.5f)); // 0
+            localVertices.Add(new Vector3(0.5f, -0.5f, -0.5f));  // 1
+            localVertices.Add(new Vector3(0.5f, 0.5f, -0.5f));   // 2
+            localVertices.Add(new Vector3(-0.5f, 0.5f, -0.5f));  // 3
+            localVertices.Add(new Vector3(-0.5f, -0.5f, 0.5f));  // 4
+            localVertices.Add(new Vector3(0.5f, -0.5f, 0.5f));   // 5
+            localVertices.Add(new Vector3(0.5f, 0.5f, 0.5f));    // 6
+            localVertices.Add(new Vector3(-0.5f, 0.5f, 0.5f));   // 7
+            
+            // 12 triangles (2 per face, 6 faces)
+            int[] cubeIndices = { 0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 2,3,7, 2,7,6, 0,4,7, 0,7,3, 1,2,6, 1,6,5 };
+            indices.AddRange(cubeIndices);
+            
+            localBox = new BoundingBox(new Vector3(-0.5f), new Vector3(0.5f));
+        }
+
         // 3. Write Files
         WriteGroupFile(Path.Combine(outputDir, groupFileName), localVertices, indices, localBox);
         WriteRootFile(Path.Combine(outputDir, rootFileName), localBox);
@@ -219,21 +242,23 @@ public class Pm4DebugWmoWriter
         bw.Write(0);
         long startPos = fs.Position;
 
-        bw.Write(0); // group_name
-        bw.Write(0); // desc_name
+        bw.Write(0); // group_name offset
+        bw.Write(0); // desc_name offset
         bw.Write(0); // flags
         WriteBounds(bw, bounds);
         bw.Write((ushort)0); // portal_start
         bw.Write((ushort)0); // portal_count
-        bw.Write((ushort)0); // trans_batches
-        bw.Write((ushort)0); // interior
-        bw.Write((ushort)1); // exterior
-        bw.Write((ushort)0); // padding
-        bw.Write(0); // fogs
-        bw.Write(0); // liquid
-        bw.Write(0); // id
-        bw.Write(0); // unk
-        bw.Write(0); // unk
+        bw.Write((ushort)0); // transBatchCount
+        bw.Write((ushort)0); // intBatchCount
+        bw.Write((ushort)1); // extBatchCount
+        bw.Write((ushort)0); // padding/fogIndices
+        bw.Write(0); // group_liquid (deprecated)
+        bw.Write(0); // uniqueID
+        bw.Write(0); // flags2 (unused padding for us)
+        bw.Write(0); // unk1 (parent_or_first_child_split_group)
+        bw.Write(0); // unk2 (next_split_child_group)
+        // MOGP header must be exactly 68 bytes - we have 64, need 4 more
+        bw.Write(0); // unk3 (padding to reach 68 bytes)
 
         // MOPY (Materials)
         bw.Write(ToFourCC("YPOM"));
@@ -249,14 +274,15 @@ public class Pm4DebugWmoWriter
         bw.Write(indices.Count * 2);
         foreach (var idx in indices) bw.Write((ushort)idx);
 
-        // MOVT (Vertices)
+        // MOVT (Vertices) - WMO uses Y-Up, our data is Z-Up
+        // Transform: v.X -> X, v.Z -> Y(height), v.Y -> Z(depth)
         bw.Write(ToFourCC("TVOM"));
         bw.Write(vertices.Count * 12);
         foreach (var v in vertices)
         {
             bw.Write(v.X);
-            bw.Write(v.Y);
-            bw.Write(v.Z);
+            bw.Write(v.Z);  // Height (was Y in Y-Up) from our Z
+            bw.Write(v.Y);  // Depth (was Z in Y-Up) from our Y
         }
 
         // MONR (Normals)

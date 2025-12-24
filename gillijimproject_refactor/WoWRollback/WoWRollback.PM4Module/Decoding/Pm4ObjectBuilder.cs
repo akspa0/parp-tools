@@ -81,7 +81,7 @@ public class Pm4ObjectBuilder
             return (null, null);
 
         var closest = mprlList
-            .Where(p => p.EntryType == 0) // Skip terminators
+            .Where(p => p.Unk16 == 0) // Skip entries with non-zero Unk16
             .Select(p => new {
                 Entry = p,
                 // Use raw coordinates to match Pm4Reader
@@ -92,7 +92,7 @@ public class Pm4ObjectBuilder
 
         if (closest != null && Vector3.Distance(closest.Pos, centroid) < 100) // Within 100 yards
         {
-            float rot = 360f * closest.Entry.Rotation / 65536f;
+            float rot = 360f * closest.Entry.Unk04 / 65536f;
             return (rot, closest.Pos);
         }
 
@@ -109,7 +109,7 @@ public class Pm4ObjectBuilder
 
         foreach (var p in mprlList)
         {
-            if (p.EntryType != 0) continue; // Skip terminators
+            if (p.Unk16 != 0) continue; // Skip entries with non-zero Unk16
             
             // Use raw coordinates to match Pm4Reader
             var pos = p.Position;
@@ -118,7 +118,7 @@ public class Pm4ObjectBuilder
             if (pos.X >= min.X - 50 && pos.X <= max.X + 50 &&
                 pos.Y >= min.Y - 50 && pos.Y <= max.Y + 50)
             {
-                float rot = 360f * p.Rotation / 65536f;
+                float rot = 360f * p.Unk04 / 65536f;
                 placements.Add((rot, pos));
             }
         }
@@ -136,7 +136,7 @@ public class Pm4ObjectBuilder
         // MPRL stored as Y, Z, X -> Need to swap to X, Y, Z to match our World Space
         
         var nearby = mprlList
-            .Where(p => p.EntryType == 0) // Non-terminator
+            .Where(p => p.Unk16 == 0) // Skip entries with non-zero Unk16
             .Select(p => new {
                 Entry = p,
                 // Use raw coordinates to match Pm4Reader
@@ -150,7 +150,7 @@ public class Pm4ObjectBuilder
 
         if (nearby != null)
         {
-            float rot = 360f * nearby.Entry.Rotation / 65536f;
+            float rot = 360f * nearby.Entry.Unk04 / 65536f;
             return (rot, nearby.Pos);
         }
 

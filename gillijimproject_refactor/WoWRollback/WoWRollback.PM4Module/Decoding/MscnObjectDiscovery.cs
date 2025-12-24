@@ -215,10 +215,21 @@ public static class MscnObjectDiscovery
         if (assetDims.Length < 3 || clusterDims.Length < 3) return 0f;
         if (assetDims[0] < 0.1f || clusterDims[0] < 0.1f) return 0f;
         
-        // Normalize to largest dimension (compare SHAPE, not absolute size)
         float clusterScale = clusterDims[0];
         float assetScale = assetDims[0];
         
+        // CRITICAL: Reject if absolute sizes are too different
+        // Allow maximum 2x scale difference for WMOs (they can't be scaled)
+        float sizeRatio = clusterScale / assetScale;
+        if (sizeRatio < 0.5f || sizeRatio > 2.0f)
+            return 0f;  // Size mismatch - small building can't match dungeon!
+        
+        // Also reject objects that are too large (dungeons/raids are typically 200+ units)
+        // MSCN building clusters should be under 150 units in their largest dimension
+        if (assetScale > 200f && clusterScale < 100f)
+            return 0f;  // Asset is way too big for this cluster
+        
+        // Now compare shape ratios
         float[] clusterNorm = { 1f, clusterDims[1] / clusterScale, clusterDims[2] / clusterScale };
         float[] assetNorm = { 1f, assetDims[1] / assetScale, assetDims[2] / assetScale };
         
@@ -228,7 +239,14 @@ public static class MscnObjectDiscovery
         float diff3 = Math.Abs(clusterNorm[2] - assetNorm[2]);
         
         float avgDiff = (diff1 + diff2 + diff3) / 3f;
-        return Math.Max(0f, 1f - avgDiff * 2f);
+        float shapeScore = Math.Max(0f, 1f - avgDiff * 2f);
+        
+        // Bonus for close absolute size match
+        float sizeDiff = Math.Abs(1f - sizeRatio);
+        float sizeScore = Math.Max(0f, 1f - sizeDiff);
+        
+        // Combined score: 70% shape, 30% size match
+        return shapeScore * 0.7f + sizeScore * 0.3f;
     }
     
     private static float CompareDimensions(float[] clusterDims, Vector3 assetDimVec)

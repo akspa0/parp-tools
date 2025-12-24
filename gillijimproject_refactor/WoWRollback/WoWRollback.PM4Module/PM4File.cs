@@ -211,15 +211,15 @@ public class PM4File
             PositionRefs.Add(new MprlEntry
             {
                 Index = i,
-                Unknown0x00 = br.ReadUInt16(),
-                Unknown0x02 = br.ReadInt16(),
-                Unknown0x04 = br.ReadUInt16(),  // ROTATION CANDIDATE
-                Unknown0x06 = br.ReadUInt16(),
+                Unk00 = br.ReadUInt16(),
+                Unk02 = br.ReadInt16(),
+                Unk04 = br.ReadUInt16(),
+                Unk06 = br.ReadUInt16(),
                 PositionX = br.ReadSingle(),
                 PositionY = br.ReadSingle(),
                 PositionZ = br.ReadSingle(),
-                Unknown0x14 = br.ReadInt16(),   // ROTATION CANDIDATE ("floor_offset")
-                Unknown0x16 = br.ReadUInt16()
+                Unk14 = br.ReadInt16(),
+                Unk16 = br.ReadUInt16()
             });
         }
     }
@@ -274,33 +274,34 @@ public class MsurEntry
 }
 
 /// <summary>
-/// MPRL entry (24 bytes) - Position references with potential rotation data.
-/// Unknown0x04 and Unknown0x14 are rotation candidates under investigation.
+/// MPRL entry (24 bytes) - Position reference with metadata.
+/// Fields at 0x04 and 0x14 are under investigation - may relate to orientation.
+/// Compare with ADT MODF rotation (C3Vector in degrees: yaw, pitch, roll).
 /// </summary>
 public class MprlEntry
 {
     public int Index { get; set; }
-    public ushort Unknown0x00 { get; set; }    // Always 0
-    public short Unknown0x02 { get; set; }     // -1 for "command" entries
-    public ushort Unknown0x04 { get; set; }    // ROTATION CANDIDATE - heading?
-    public ushort Unknown0x06 { get; set; }    // Always 0x8000
+    public ushort Unk00 { get; set; }           // Always 0
+    public short Unk02 { get; set; }            // -1 for all entries in some tiles
+    public ushort Unk04 { get; set; }           // Varies 0-~65535, may be pitch or index
+    public ushort Unk06 { get; set; }           // Often 0x8000
     public float PositionX { get; set; }
     public float PositionY { get; set; }
     public float PositionZ { get; set; }
-    public short Unknown0x14 { get; set; }     // ROTATION CANDIDATE - "floor_offset"?
-    public ushort Unknown0x16 { get; set; }    // Attribute flags
+    public short Unk14 { get; set; }            // Signed, -1 to ~7 observed, may be yaw or level-index
+    public ushort Unk16 { get; set; }           // Varies, may be flags or type
 
     public Vector3 Position => new(PositionX, PositionY, PositionZ);
     
     /// <summary>
-    /// Experimental: Interpret Unknown0x04 as heading angle (0-65535 -> 0-360°)
+    /// Test interpretation: Unk04 as scaled angle (0-65535 -> 0-360°)
     /// </summary>
-    public float HeadingDegrees => (Unknown0x04 / 65536.0f) * 360.0f;
+    public float Unk04AsDegrees => (Unk04 / 65536.0f) * 360.0f;
     
     /// <summary>
-    /// Is this a "command" entry (Unknown0x02 == -1)?
+    /// Test interpretation: Unk14 as signed level/floor index
     /// </summary>
-    public bool IsCommandEntry => Unknown0x02 == -1;
+    public bool IsNegativeUnk14 => Unk14 < 0;
 }
 
 /// <summary>

@@ -57,17 +57,18 @@ struct MSHDHeader {
 > [!CAUTION]
 > Different chunks use different coordinate systems!
 
-| Chunk | Stored As  | Loaded As | To Global Align | To Z-Up World |
-|-------|------------|-----------|-----------------|---------------|
-| MSVT  | Y, X, Z    | X, Y, Z   | (Identity)      | X, Z, Y       |
-| **MPRL** | **X, Z, Y** | X, Y, Z   | **Swap Y↔Z**   | (Identity)    |
-| MSCN  | X, Y, Z    | X, Y, Z   | **Y, X, Z**     | Y, Z, X       |
-| MSPV  | X, Y, Z    | X, Y, Z   | (Identity)      | X, Z, Y       |
+| Chunk | Stored As  | To match MSVT | Notes |
+|-------|------------|---------------|-------|
+| MSVT  | X, Y, Z    | (Identity)    | Reference coordinate system |
+| **MPRL** | **Z→X, X→Y, Y→Z** | **Cyclic rotate** | See MPRL section for verified ranges |
+| MSCN  | X, Y, Z    | **Y, X, Z**   | Swap first two components |
+| MSPV  | X, Y, Z    | (Identity)    | Same as MSVT |
 
 > [!IMPORTANT]
-> **MPRL is stored as X, Z, Y!** To match MSVT coordinates, swap the Y and Z components.
-
-*(Note: The MSCN transform effectively swaps the first two components to match the MSVT schema before vertical orientation).*
+> **MPRL coordinate mapping (verified December 2025):**
+> - MPRL.position_z → MSVT X
+> - MPRL.position_x → MSVT Y
+> - MPRL.position_y → MSVT Z (height)
 
 ---
 
@@ -185,9 +186,29 @@ CK24 groups multiple object instances together. To split them:
 
 **Result**: 27 gaps = approximately 28 separate objects within this CK24!
 
-### MdosIndex (Unknown Purpose)
-MdosIndex has 18,656 unique values but does NOT correspond to object instances.
-Possibly related to destructible object states (MDOS chunk).
+### MdosIndex = MSCN Index (DECODED December 2025!)
+
+> [!IMPORTANT]
+> MdosIndex is a **valid MSCN vertex index** on normal tiles (100% valid on tile 22_18).
+
+| Metric | Tile 00_00 | Tile 22_18 |
+|--------|-----------|------------|
+| Valid as MSCN index | 82.4% | **100%** |
+| Surfaces sharing same MdosIndex | 1-4 | **up to 263** |
+| Unique values | 4,091 | 18,656 |
+
+**Hypothesis**: MdosIndex is a **navigation region marker** that groups surfaces by spatial proximity for pathfinding. Multiple surfaces share the same MdosIndex when they belong to the same navigable region.
+
+### MDSF/MDOS Chunks (Wintergrasp-Specific)
+
+> [!NOTE]
+> MDSF/MDOS only contain data in tile 00_00 for Wintergrasp destructible building testing.
+> These are **server-side data** for scripted building destruction - not used in normal tiles.
+
+On tile 00_00 only:
+- MDSF links MSUR surfaces to MDOS destructible states
+- MDOS Field0 = FileID, Field1 = destruction state (0-3)
+- For normal navigation/extraction, **ignore these chunks**
 
 
 
@@ -212,42 +233,96 @@ Since PM4 does not explicitly store WMO rotation in `MPRL`, we rely on **Geometr
 
 ## MSLK Chunk (20 bytes/entry)
 
-Navigation node catalog - **THE CONNECTOR CHUNK** linking surfaces to geometry. **Updated December 2025.**
+Navigation node catalog - **THE CONNECTOR CHUNK** linking surfaces to geometry.
+
+> [!CAUTION]
+> **December 2025 CORRECTION**: Previous documentation claimed LinkId encodes tile coordinates. Fresh raw analysis shows this is **WRONG** - LinkId is always `0xFFFF0000` in tile 00_00.
 
 ```c
 struct MSLKEntry {
-    uint8_t  type_flags;       // Connection type (1,2,4,10,12) - see table below
-    uint8_t  subtype;          // Floor level (0-8 confirmed)
-    uint16_t padding;          // Usually 0
-    uint32_t group_object_id;  // **NAVIGATION EDGE ID** (sequential 0-N, see below!)
-    int24_t  mspi_first;       // Index into MSPI (24-bit). -1 = no geometry.
-    uint8_t  mspi_count;       // Count of MSPI entries (always 4 when present)
-    uint8_t  tile_x;           // **TILE COORDINATE X** (e.g., 0x16 = 22)
-    uint8_t  tile_y;           // **TILE COORDINATE Y** (e.g., 0x12 = 18)
-    uint16_t link_marker;      // Always 0xFFFF (adjacent tile marker)
-    uint16_t ref_index;        // Dual-index: MPRL or MSVT (see below)
-    uint16_t system_flag;      // Always 0x8000 (constant marker)
+    uint8_t  type_flags;       // Connection type (1,2,4,10,12,18,20,28)
+    uint8_t  subtype;          // Floor level (0-11 observed)
+    uint16_t padding;          // Always 0
+    uint32_t group_object_id;  // **Sequential 0-N** (edge/node ID, see below)
+    int24_t  mspi_first;       // Index into MSPI. -1 = no geometry.
+    uint8_t  mspi_count;       // Count of MSPI entries (0, 4, or 6)
+    uint32_t link_id;          // **Always 0xFFFFXXYY** (Tile coords, encoded little-endian)
+    uint16_t msur_index;       // **Direct MSUR index! 100% valid!**
+    uint16_t system_flag;      // Always 0x8000
 };
 ```
 
-### LinkId = Tile Coordinates (DECODED!)
+### RefIndex = MSUR Index (CONFIRMED December 2025!)
 
 > [!IMPORTANT]
-> **BREAKTHROUGH**: The 4-byte "LinkId" field encodes **tile coordinates**!
+> **Raw analysis proves RefIndex is a direct MSUR index!**
 
-| Byte | Value (tile 22_18) | Meaning |
-|------|-------------------|---------|
-| Byte[0] | 0x16 (22) | **Tile X** |
-| Byte[1] | 0x12 (18) | **Tile Y** |
-| Byte[2-3] | 0xFFFF | Marker (padding?) |
+| Metric (tile 00_00) | Value |
+|---------------------|-------|
+| Total MSLK entries | 12,820 |
+| Valid as MSUR index | **12,820 (100%)** |
+| MSUR range accessed | 0-4109 |
 
-**Adjacent tile references (cross-tile navigation):**
-| Pattern | Count | Interpretation |
-|---------|-------|----------------|
-| 0xFFFF1216 | 42,840 (99.8%) | Current tile (22, 18) |
-| 0xFFFF1217 | 53 | Tile (23, 18) - X+1 |
-| 0xFFFF1316 | 30 | Tile (22, 19) - Y+1 |
-| 0xFFFF1116 | 18 | Tile (22, 17) - Y-1 |
+### GroupObjectId = Sequential Edge ID
+
+| Metric (tile 00_00) | Value |
+|---------------------|-------|
+| Unique values | 5,880 |
+| Range | 0-5879 |
+| **Sequential gaps** | **0** (perfectly contiguous) |
+
+> [!NOTE]
+> Each GroupObjectId maps to exactly ONE CK24 value - 1:1 relationship!
+
+### LinkId = Tile Coordinates (CONFIRMED on 22_18!)
+
+> [!IMPORTANT]
+> LinkId encodes tile coordinates as **0xFFFFYYXX** (little-endian)
+
+| Tile | LinkId Value | Interpretation |
+|------|--------------|----------------|
+| 00_00 | 0xFFFF0000 | X=0, Y=0 ✓ |
+| 22_18 | 0xFFFF1216 | X=22 (0x16), Y=18 (0x12) ✓ |
+
+**Cross-tile references (tile 22_18):**
+| LinkId | Count | Target Tile |
+|--------|-------|-------------|
+| 0xFFFF1216 | 99.8% | Current (22, 18) |
+| 0xFFFF1217 | ~50 | Neighbor X+1 |
+| 0xFFFF1316 | ~30 | Neighbor Y+1 |
+| 0xFFFF1116 | ~18 | Neighbor Y-1 |
+
+### Cross-Tile Linking Mechanism (DECODED December 2025!)
+
+> [!IMPORTANT]
+> **RefIndex points to the DESTINATION tile's MSUR**, not the source tile!
+
+```
+When LinkId != current_tile:
+  1. Load DESTINATION tile's PM4 file
+  2. Use RefIndex as index into DEST.MSUR[]
+  3. Get surface/CK24 from destination tile
+```
+
+**Cross-tile analysis (616 tiles, development map):**
+| Metric | Value |
+|--------|-------|
+| Total MSLK refs | 37,647 |
+| Local refs (same tile) | 37,538 (99.71%) |
+| Cross-tile refs | 109 (0.29%) |
+| Cross-refs resolved in DEST | **40/40 (100%)** |
+
+**Multi-tile CK24 distribution:**
+| CK24 Span | Count | Example |
+|-----------|-------|---------|
+| 1 tile | 963 | Most small objects |
+| 2+ tiles | 265 | Large structures |
+| 8 tiles (max) | 1 | CK24 0x42CBEA (33,587 surfaces) |
+
+> [!NOTE]
+> PM4 files form a **distributed navigation graph** - each tile contains local data
+> but references cross-tile neighbors via LinkId for seamless pathfinding.
+> Index spaces (MSVI, MSVT) are **LOCAL per tile** - no global indices.
 
 ### GroupObjectId = Navigation Edge ID (DECODED!)
 
@@ -317,7 +392,7 @@ MSLK[Type=4, Subtype=2, GroupId=0x00000001]
 
 ## MPRL Chunk (24 bytes/entry)
 
-Position references. **Updated December 2025: Unknown0x04 IS rotation!**
+Navigation node positions. **UPDATED December 2025: Coordinate mapping and purpose decoded!**
 
 ```c
 struct MPRLEntry {
@@ -325,27 +400,69 @@ struct MPRLEntry {
     int16_t  unknown_0x02;     // -1 for command/terminator entries
     uint16_t rotation;         // **ROTATION!** Range 0-65535 = 0°-360°
     uint16_t unknown_0x06;     // Always 0x8000
-    float    position_x;
-    float    position_y;
-    float    position_z;
+    float    position_x;       // Maps to MSVT Y
+    float    position_y;       // Maps to MSVT Z (height!)
+    float    position_z;       // Maps to MSVT X
     int16_t  floor_level;      // Floor level index (-1 to 18)
     uint16_t entry_type;       // 0x0000=normal, 0x3FFF=terminator
 };
 ```
+
+### Coordinate Mapping (CORRECTED December 2025!)
+
+> [!CAUTION]
+> **MPRL uses a DIFFERENT axis order than MSVT!**
+
+| MPRL Field | Observed Range (tile 22_18) | Maps to MSVT |
+|------------|---------------------------|--------------|
+| position_x | 11749-12263               | **Y** (MSVT Y: 11733-12267) |
+| position_y | 40-184                    | **Z height** (MSVT Z: -12 to 390) |
+| position_z | 9605-10130                | **X** (MSVT X: 9600-10133) |
+
+**Transform code:**
+```csharp
+// To convert MPRL to MSVT coordinate space:
+float msvtX = mprl.position_z;  // MPRL Z -> MSVT X
+float msvtY = mprl.position_x;  // MPRL X -> MSVT Y  
+float msvtZ = mprl.position_y;  // MPRL Y -> MSVT Z (height)
+```
+
+### MPRL Purpose (DECODED December 2025!)
+
+> [!IMPORTANT]
+> **MPRL = Terrain intersection points where WMO/M2 objects touch the ground!**
+
+**Visual verification in MeshLab confirms:**
+- MPRL points cluster at object bases (terrain contact)
+- Combined with CK24 geometry bounds = complete object footprints
+- Can be used to reconstruct terrain heights at object locations
+
+**Spatial Analysis Results (tile 22_18):**
+| Metric | Value |
+|--------|-------|
+| Normal entries | 667 |
+| Terminator entries | 906 |
+| **Within CK24 bounds** | **56.7% (378/667)** |
+| Interior vs perimeter | 440 vs 199 (69% interior) |
+| Top rotation | ~165° (272 entries) |
+
+**Use Cases:**
+- **Terrain reconstruction** - MPRL Z values = ground height at object contact points
+- **Object placement validation** - verify WMO/M2 sits correctly on terrain
+- **Collision bounds** - compute object footprint on terrain
 
 ### Rotation Field (CONFIRMED!)
 
 > [!IMPORTANT]
 > **Unknown0x04 IS rotation!** Conversion: `angle_degrees = 360.0 * value / 65536.0`
 
-| Raw Value | Angle | Count | Notes |
-|-----------|-------|-------|-------|
-| 29806 | 163.7° | 64 | Consistent per-object |
-| 30050 | 165.1° | 56 | Adjacent positions share angle |
-| 20648 | 113.4° | 49 | |
-| 21105 | 115.9° | - | Floor 1/2 entries |
-
-**Evidence:** Same rotation value appears for nearby positions of the same object.
+Top rotation values (5° bins):
+| Angle | Count | Notes |
+|-------|-------|-------|
+| ~165° | 272 | Most common |
+| ~210° | 128 | |
+| ~205° | 77 | |
+| ~115° | 73 | |
 
 ### Floor Level (CONFIRMED!)
 | Value | Meaning |

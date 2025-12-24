@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
@@ -50,6 +50,61 @@ class Program
         if (args[0] == "--export-mscn" && args.Length > 1)
         {
             return ExportMscnPoints(args[1], args.Length > 2 ? args[2] : null);
+        }
+        
+        if (args[0] == "--mslk-trace" && args.Length > 1)
+        {
+            return RunMslkTrace(args[1]);
+        }
+        
+        if (args[0] == "--mscn-analysis" && args.Length > 1)
+        {
+            return RunMscnAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--raw-dump" && args.Length > 1)
+        {
+            return RunRawDump(args[1]);
+        }
+        
+        if (args[0] == "--cross-tile" && args.Length > 1)
+        {
+            return RunCrossTileAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--mdsf-analysis" && args.Length > 1)
+        {
+            return RunMdsfAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--object-complete" && args.Length > 1)
+        {
+            return RunObjectCompleteAnalysis(args[1], args.Length > 2 ? args[2] : null);
+        }
+        
+        if (args[0] == "--node-graph" && args.Length > 1)
+        {
+            return RunNodeGraphAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--mprl-graph" && args.Length > 1)
+        {
+            return RunMprlGraphAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--full-map" && args.Length > 1)
+        {
+            return RunFullStructureMap(args[1]);
+        }
+        
+        if (args[0] == "--mprl-footprint" && args.Length > 1)
+        {
+            return RunMprlFootprintAnalysis(args[1]);
+        }
+        
+        if (args[0] == "--mprl-to-adt" && args.Length > 1)
+        {
+            return RunMprlToAdtTerrainExtraction(args[1]);
         }
 
         string path = args[0];
@@ -780,6 +835,2744 @@ class Program
         Console.WriteLine($"Exported: {msvtPath}");
         
         Console.WriteLine($"\nOutput directory: {outputDir}");
+        return 0;
+    }
+    
+    /// <summary>
+    /// Trace MSLK → MSUR linkage to understand how navigation nodes connect to surfaces.
+    /// Key question: Does MSLK.RefIndex (msur_index) point to MSUR entries?
+    /// </summary>
+    static int RunMslkTrace(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MSLK → MSUR Trace: {baseName} ===\n");
+        Console.WriteLine($"MSLK entries: {pm4.LinkEntries.Count}");
+        Console.WriteLine($"MSUR entries: {pm4.Surfaces.Count}");
+        Console.WriteLine($"MPRL entries: {pm4.PositionRefs.Count}");
+        Console.WriteLine($"MSVT entries: {pm4.MeshVertices.Count}");
+        Console.WriteLine($"MSCN entries: {pm4.SceneNodes.Count}");
+        
+        // Analyze RefIndex distribution
+        var validMsurRefs = pm4.LinkEntries.Count(e => e.RefIndex < pm4.Surfaces.Count);
+        var outOfRangeMsurRefs = pm4.LinkEntries.Count(e => e.RefIndex >= pm4.Surfaces.Count);
+        
+        Console.WriteLine($"\n=== RefIndex Analysis ===");
+        Console.WriteLine($"  RefIndex < MSUR.Count ({pm4.Surfaces.Count}): {validMsurRefs}");
+        Console.WriteLine($"  RefIndex >= MSUR.Count: {outOfRangeMsurRefs}");
+        
+        // Test hypothesis: RefIndex directly indexes into MSUR
+        Console.WriteLine($"\n=== Testing: RefIndex is MSUR index ===");
+        int validLinks = 0;
+        var linkedCk24s = new Dictionary<uint, int>();
+        
+        foreach (var mslk in pm4.LinkEntries.Take(100)) // Sample first 100
+        {
+            if (mslk.RefIndex < pm4.Surfaces.Count)
+            {
+                var msur = pm4.Surfaces[mslk.RefIndex];
+                validLinks++;
+                if (!linkedCk24s.ContainsKey(msur.CK24))
+                    linkedCk24s[msur.CK24] = 0;
+                linkedCk24s[msur.CK24]++;
+            }
+        }
+        Console.WriteLine($"  Valid MSLK→MSUR links (first 100): {validLinks}/100");
+        Console.WriteLine($"  Unique CK24s through these links: {linkedCk24s.Count}");
+        
+        // Show CK24 distribution via MSLK
+        Console.WriteLine($"\n=== CK24 values reached via MSLK.RefIndex (sample) ===");
+        foreach (var (ck24, count) in linkedCk24s.OrderByDescending(kv => kv.Value).Take(10))
+        {
+            Console.WriteLine($"    CK24 0x{ck24:X6}: {count} MSLK entries");
+        }
+        
+        // Alternative hypothesis: RefIndex >= MPRL.Count means MSVT index
+        Console.WriteLine($"\n=== Testing: Dual-index pattern (like MPRR) ===");
+        Console.WriteLine($"  If RefIndex < MPRL.Count ({pm4.PositionRefs.Count}) → MPRL");
+        Console.WriteLine($"  If RefIndex >= MPRL.Count → MSVT");
+        
+        int toMprl = pm4.LinkEntries.Count(e => e.RefIndex < pm4.PositionRefs.Count);
+        int toMsvt = pm4.LinkEntries.Count(e => e.RefIndex >= pm4.PositionRefs.Count && 
+                                                  e.RefIndex < pm4.PositionRefs.Count + pm4.MeshVertices.Count);
+        int outOfAll = pm4.LinkEntries.Count(e => e.RefIndex >= pm4.PositionRefs.Count + pm4.MeshVertices.Count);
+        
+        Console.WriteLine($"  RefIndex → MPRL: {toMprl} ({100.0 * toMprl / pm4.LinkEntries.Count:F1}%)");
+        Console.WriteLine($"  RefIndex → MSVT: {toMsvt} ({100.0 * toMsvt / pm4.LinkEntries.Count:F1}%)");
+        Console.WriteLine($"  Out of range: {outOfAll}");
+        
+        // MSLK GroupObjectId analysis - is this the object grouping key?
+        Console.WriteLine($"\n=== MSLK.GroupObjectId → Object Grouping? ===");
+        var uniqueGroupIds = pm4.LinkEntries.Select(e => e.GroupObjectId).Distinct().Count();
+        Console.WriteLine($"  Unique GroupObjectId values: {uniqueGroupIds}");
+        
+        // Check if GroupObjectId correlates with CK24
+        var groupToCk24 = new Dictionary<uint, HashSet<uint>>();
+        foreach (var mslk in pm4.LinkEntries)
+        {
+            if (mslk.RefIndex < pm4.Surfaces.Count)
+            {
+                var ck24 = pm4.Surfaces[mslk.RefIndex].CK24;
+                if (!groupToCk24.ContainsKey(mslk.GroupObjectId))
+                    groupToCk24[mslk.GroupObjectId] = new HashSet<uint>();
+                groupToCk24[mslk.GroupObjectId].Add(ck24);
+            }
+        }
+        
+        var singleCk24Groups = groupToCk24.Count(kv => kv.Value.Count == 1);
+        var multiCk24Groups = groupToCk24.Count(kv => kv.Value.Count > 1);
+        Console.WriteLine($"  GroupObjectIds mapping to 1 CK24: {singleCk24Groups}");
+        Console.WriteLine($"  GroupObjectIds mapping to multiple CK24s: {multiCk24Groups}");
+        
+        // Show sample linkages
+        Console.WriteLine($"\n=== Sample MSLK → MSUR → CK24 Chains ===");
+        foreach (var mslk in pm4.LinkEntries.Where(e => e.RefIndex < pm4.Surfaces.Count).Take(5))
+        {
+            var msur = pm4.Surfaces[mslk.RefIndex];
+            Console.WriteLine($"  MSLK[Type={mslk.TypeFlags}, Subtype={mslk.Subtype}, GroupId=0x{mslk.GroupObjectId:X8}]");
+            Console.WriteLine($"    → RefIndex={mslk.RefIndex} → MSUR[CK24=0x{msur.CK24:X6}, GroupKey={msur.GroupKey}]");
+            Console.WriteLine($"    → MspiFirst={mslk.MspiFirstIndex}, Count={mslk.MspiIndexCount}");
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze MSCN data to understand how it relates to objects.
+    /// Key question: How do we group MSCN vertices by object?
+    /// </summary>
+    static int RunMscnAnalysis(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MSCN Object Grouping Analysis: {baseName} ===\n");
+        Console.WriteLine($"MSCN entries: {pm4.SceneNodes.Count}");
+        Console.WriteLine($"MSUR entries: {pm4.Surfaces.Count}");
+        Console.WriteLine($"Unique MdosIndex values in MSUR: {pm4.Surfaces.Select(s => s.MdosIndex).Distinct().Count()}");
+        
+        // Key hypothesis: MdosIndex indexes into MSCN
+        Console.WriteLine($"\n=== Testing: MSUR.MdosIndex → MSCN index? ===");
+        var mdosRange = pm4.Surfaces.Where(s => s.MdosIndex != 0)
+            .Select(s => s.MdosIndex)
+            .DefaultIfEmpty()
+            .ToList();
+        
+        if (mdosRange.Any())
+        {
+            var minMdos = mdosRange.Min();
+            var maxMdos = mdosRange.Max();
+            Console.WriteLine($"  MdosIndex range: {minMdos} to {maxMdos}");
+            Console.WriteLine($"  MSCN count: {pm4.SceneNodes.Count}");
+            Console.WriteLine($"  Max MdosIndex < MSCN.Count? {maxMdos < pm4.SceneNodes.Count}");
+            
+            // If MdosIndex < MSCN.Count, test the linkage
+            if (maxMdos < pm4.SceneNodes.Count)
+            {
+                Console.WriteLine($"\n  ✓ MdosIndex could be MSCN index!");
+                
+                // Group MSCN by CK24 via MdosIndex linkage
+                var ck24ToMscn = new Dictionary<uint, List<Vector3>>();
+                foreach (var surf in pm4.Surfaces.Where(s => s.MdosIndex < pm4.SceneNodes.Count))
+                {
+                    var mscnVert = pm4.SceneNodes[(int)surf.MdosIndex];
+                    if (!ck24ToMscn.ContainsKey(surf.CK24))
+                        ck24ToMscn[surf.CK24] = new List<Vector3>();
+                    ck24ToMscn[surf.CK24].Add(mscnVert);
+                }
+                
+                Console.WriteLine($"\n=== MSCN grouped by CK24 via MdosIndex ===");
+                foreach (var (ck24, verts) in ck24ToMscn.OrderByDescending(kv => kv.Value.Count).Take(10))
+                {
+                    var bounds = ComputeBounds(verts);
+                    var size = bounds.max - bounds.min;
+                    Console.WriteLine($"  CK24 0x{ck24:X6}: {verts.Count} MSCN verts, Size: {size.X:F0}x{size.Y:F0}x{size.Z:F0}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"\n  ✗ MdosIndex exceeds MSCN count - different interpretation needed");
+            }
+        }
+        
+        // Look for MDSF chunk in unparsed chunks (links MSUR to MDOS)
+        Console.WriteLine($"\n=== MDSF Chunk (MSUR→MDOS linkage) ===");
+        // MDSF is not currently parsed - let's check if it exists in the file
+        Console.WriteLine($"  (MDSF parsing not yet implemented - would link msur_index → mdos_index)");
+        
+        // Alternative: Check if MSCN vertices spatially correlate with CK24 objects
+        Console.WriteLine($"\n=== MSCN Spatial Correlation with CK24 Objects ===");
+        
+        // Get bounds of each CK24 object from MSVT
+        var ck24Bounds = new Dictionary<uint, (Vector3 min, Vector3 max)>();
+        foreach (var group in pm4.Surfaces.GroupBy(s => s.CK24))
+        {
+            var allVerts = new List<Vector3>();
+            foreach (var surf in group)
+            {
+                var verts = GetSurfaceVertices(pm4, surf);
+                allVerts.AddRange(verts);
+            }
+            if (allVerts.Count > 0)
+            {
+                ck24Bounds[group.Key] = ComputeBounds(allVerts);
+            }
+        }
+        
+        // For each MSCN vertex, find which CK24 bounding box it falls into
+        var mscnToCk24 = new Dictionary<uint, int>();
+        int mscnWithoutCk24 = 0;
+        
+        foreach (var mscnVert in pm4.SceneNodes)
+        {
+            uint matchedCk24 = 0;
+            foreach (var (ck24, bounds) in ck24Bounds)
+            {
+                if (ck24 == 0) continue; // Skip nav mesh
+                if (mscnVert.X >= bounds.min.X && mscnVert.X <= bounds.max.X &&
+                    mscnVert.Y >= bounds.min.Y && mscnVert.Y <= bounds.max.Y &&
+                    mscnVert.Z >= bounds.min.Z - 5 && mscnVert.Z <= bounds.max.Z + 5) // Z tolerance
+                {
+                    matchedCk24 = ck24;
+                    break;
+                }
+            }
+            
+            if (matchedCk24 != 0)
+            {
+                if (!mscnToCk24.ContainsKey(matchedCk24))
+                    mscnToCk24[matchedCk24] = 0;
+                mscnToCk24[matchedCk24]++;
+            }
+            else
+            {
+                mscnWithoutCk24++;
+            }
+        }
+        
+        Console.WriteLine($"  MSCN verts inside CK24 bounds: {pm4.SceneNodes.Count - mscnWithoutCk24}");
+        Console.WriteLine($"  MSCN verts outside all CK24 bounds: {mscnWithoutCk24}");
+        Console.WriteLine($"\n  Top CK24s by MSCN containment:");
+        foreach (var (ck24, count) in mscnToCk24.OrderByDescending(kv => kv.Value).Take(10))
+        {
+            Console.WriteLine($"    CK24 0x{ck24:X6}: {count} MSCN verts");
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Fresh raw dump of PM4 file - examining structure without old assumptions.
+    /// Shows raw chunk data, entry counts at different sizes, cross-references.
+    /// </summary>
+    static int RunRawDump(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var data = File.ReadAllBytes(pm4Path);
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== FRESH PM4 RAW ANALYSIS: {baseName} ===");
+        Console.WriteLine($"File size: {data.Length:N0} bytes\n");
+        
+        // Parse chunks raw
+        var chunks = new List<(string sig, uint size, long offset, byte[] data)>();
+        using (var ms = new MemoryStream(data))
+        using (var br = new BinaryReader(ms))
+        {
+            while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                long chunkStart = br.BaseStream.Position;
+                var sigBytes = br.ReadBytes(4);
+                Array.Reverse(sigBytes); // Reversed on disk
+                string sig = Encoding.ASCII.GetString(sigBytes);
+                uint size = br.ReadUInt32();
+                byte[] chunkData = br.ReadBytes((int)size);
+                chunks.Add((sig, size, chunkStart, chunkData));
+            }
+        }
+        
+        Console.WriteLine("=== CHUNK INVENTORY ===");
+        Console.WriteLine($"Total chunks: {chunks.Count}\n");
+        
+        foreach (var (sig, size, offset, chunkData) in chunks)
+        {
+            Console.WriteLine($"  {sig}: {size:N0} bytes @ offset 0x{offset:X8}");
+            
+            // Try common entry sizes
+            if (size >= 4)
+            {
+                var possibleSizes = new[] { 4, 8, 12, 16, 20, 24, 32 };
+                var validSizes = possibleSizes.Where(s => size % s == 0).ToList();
+                if (validSizes.Count > 0)
+                {
+                    Console.Write($"        Possible entries: ");
+                    Console.WriteLine(string.Join(", ", validSizes.Select(s => $"{size/s} @ {s}B")));
+                }
+                
+                // Show first few bytes as hex
+                int previewLen = Math.Min(32, chunkData.Length);
+                Console.WriteLine($"        First {previewLen} bytes: {BitConverter.ToString(chunkData, 0, previewLen).Replace("-", " ")}");
+            }
+        }
+        
+        // Deep analysis of key chunks with fresh eyes
+        Console.WriteLine("\n=== MSLK DEEP ANALYSIS (20 bytes/entry - per wowdev wiki) ===");
+        var mslkChunk = chunks.FirstOrDefault(c => c.sig == "MSLK");
+        if (mslkChunk.data != null && mslkChunk.data.Length >= 20)
+        {
+            int entryCount = mslkChunk.data.Length / 20;
+            Console.WriteLine($"Entry count: {entryCount}");
+            
+            // Analyze each field position
+            using var br = new BinaryReader(new MemoryStream(mslkChunk.data));
+            
+            // Collect stats on each field
+            var field0x00 = new List<byte>();   // uint8
+            var field0x01 = new List<byte>();   // uint8  
+            var field0x02 = new List<ushort>(); // uint16 (padding per wiki)
+            var field0x04 = new List<uint>();   // uint32 (index somewhere)
+            var field0x08 = new List<int>();    // int24 (MSPI first)
+            var field0x0b = new List<byte>();   // uint8 (MSPI count)
+            var field0x0c = new List<uint>();   // uint32 (0xFFFFFFFF per wiki)
+            var field0x10 = new List<ushort>(); // uint16 (msur_index per wiki!)
+            var field0x12 = new List<ushort>(); // uint16 (0x8000 per wiki)
+            
+            for (int i = 0; i < entryCount; i++)
+            {
+                field0x00.Add(br.ReadByte());
+                field0x01.Add(br.ReadByte());
+                field0x02.Add(br.ReadUInt16());
+                field0x04.Add(br.ReadUInt32());
+                
+                // Read int24
+                byte[] b = br.ReadBytes(3);
+                int val = b[0] | (b[1] << 8) | (b[2] << 16);
+                if ((val & 0x800000) != 0) val |= unchecked((int)0xFF000000);
+                field0x08.Add(val);
+                
+                field0x0b.Add(br.ReadByte());
+                field0x0c.Add(br.ReadUInt32());
+                field0x10.Add(br.ReadUInt16());
+                field0x12.Add(br.ReadUInt16());
+            }
+            
+            Console.WriteLine("\nField statistics:");
+            Console.WriteLine($"  [0x00] byte:   unique={field0x00.Distinct().Count()}, range={field0x00.Min()}-{field0x00.Max()}");
+            Console.WriteLine($"  [0x01] byte:   unique={field0x01.Distinct().Count()}, range={field0x01.Min()}-{field0x01.Max()}");
+            Console.WriteLine($"  [0x02] ushort: unique={field0x02.Distinct().Count()}, range={field0x02.Min()}-{field0x02.Max()}");
+            Console.WriteLine($"  [0x04] uint:   unique={field0x04.Distinct().Count()}, range={field0x04.Min()}-{field0x04.Max()}");
+            Console.WriteLine($"  [0x08] int24:  unique={field0x08.Distinct().Count()}, range={field0x08.Min()}-{field0x08.Max()}");
+            Console.WriteLine($"  [0x0B] byte:   unique={field0x0b.Distinct().Count()}, range={field0x0b.Min()}-{field0x0b.Max()}");
+            Console.WriteLine($"  [0x0C] uint:   unique={field0x0c.Distinct().Count()}, values: {string.Join(",", field0x0c.Distinct().Take(5).Select(v => $"0x{v:X8}"))}");
+            Console.WriteLine($"  [0x10] ushort: unique={field0x10.Distinct().Count()}, range={field0x10.Min()}-{field0x10.Max()}");
+            Console.WriteLine($"  [0x12] ushort: unique={field0x12.Distinct().Count()}, values: {string.Join(",", field0x12.Distinct().Take(5).Select(v => $"0x{v:X4}"))}");
+            
+            // Cross-reference analysis
+            var msurChunk = chunks.FirstOrDefault(c => c.sig == "MSUR");
+            var mscnChunk = chunks.FirstOrDefault(c => c.sig == "MSCN");
+            var mprlChunk = chunks.FirstOrDefault(c => c.sig == "MPRL");
+            var mspiChunk = chunks.FirstOrDefault(c => c.sig == "MSPI");
+            
+            int msurCount = msurChunk.data?.Length / 32 ?? 0;
+            int mscnCount = mscnChunk.data?.Length / 12 ?? 0;
+            int mprlCount = mprlChunk.data?.Length / 24 ?? 0;
+            int mspiCount = mspiChunk.data?.Length / 4 ?? 0;
+            
+            Console.WriteLine("\nCross-reference validation:");
+            Console.WriteLine($"  MSUR count: {msurCount}");
+            Console.WriteLine($"  MSCN count: {mscnCount}");
+            Console.WriteLine($"  MPRL count: {mprlCount}");
+            Console.WriteLine($"  MSPI count: {mspiCount}");
+            
+            int refInMsur = field0x10.Count(v => v < msurCount);
+            int refInMscn = field0x10.Count(v => v < mscnCount);
+            int refInMprl = field0x10.Count(v => v < mprlCount);
+            
+            Console.WriteLine($"\n  [0x10] as MSUR index: {refInMsur}/{entryCount} valid ({100.0*refInMsur/entryCount:F1}%)");
+            Console.WriteLine($"  [0x10] as MSCN index: {refInMscn}/{entryCount} valid ({100.0*refInMscn/entryCount:F1}%)");
+            Console.WriteLine($"  [0x10] as MPRL index: {refInMprl}/{entryCount} valid ({100.0*refInMprl/entryCount:F1}%)");
+            
+            // MSPI validation
+            int mspiValid = field0x08.Count(v => v >= 0 && v < mspiCount);
+            Console.WriteLine($"\n  [0x08] as MSPI index: {mspiValid}/{entryCount} valid ({100.0*mspiValid/entryCount:F1}%)");
+            
+            // Show first 5 entries raw
+            Console.WriteLine("\nFirst 5 entries (raw hex per field):");
+            br.BaseStream.Position = 0;
+            for (int i = 0; i < Math.Min(5, entryCount); i++)
+            {
+                var bytes = br.ReadBytes(20);
+                Console.WriteLine($"  [{i}] {BitConverter.ToString(bytes).Replace("-", " ")}");
+            }
+        }
+        
+        // MSUR analysis
+        Console.WriteLine("\n=== MSUR DEEP ANALYSIS (32 bytes/entry) ===");
+        var msurData = chunks.FirstOrDefault(c => c.sig == "MSUR");
+        if (msurData.data != null && msurData.data.Length >= 32)
+        {
+            int entryCount = msurData.data.Length / 32;
+            Console.WriteLine($"Entry count: {entryCount}");
+            
+            using var br = new BinaryReader(new MemoryStream(msurData.data));
+            
+            // Fields per current understanding
+            var groupKeys = new List<byte>();
+            var indexCounts = new List<byte>();
+            var attrMasks = new List<byte>();
+            var msviFirsts = new List<uint>();
+            var mdosIndices = new List<uint>();
+            var packedParams = new List<uint>();
+            
+            for (int i = 0; i < entryCount; i++)
+            {
+                groupKeys.Add(br.ReadByte());      // 0x00
+                indexCounts.Add(br.ReadByte());    // 0x01
+                attrMasks.Add(br.ReadByte());      // 0x02
+                br.ReadByte();                      // 0x03 padding
+                br.ReadSingle(); br.ReadSingle(); br.ReadSingle(); // normals 0x04-0x0F
+                br.ReadSingle();                    // height 0x10
+                msviFirsts.Add(br.ReadUInt32());   // 0x14
+                mdosIndices.Add(br.ReadUInt32());  // 0x18
+                packedParams.Add(br.ReadUInt32()); // 0x1C
+            }
+            
+            Console.WriteLine("\nField statistics:");
+            Console.WriteLine($"  [0x00] GroupKey:   unique={groupKeys.Distinct().Count()}, values: {string.Join(",", groupKeys.Distinct().OrderBy(x=>x).Take(10))}");
+            Console.WriteLine($"  [0x01] IndexCount: unique={indexCounts.Distinct().Count()}, range={indexCounts.Min()}-{indexCounts.Max()}");
+            Console.WriteLine($"  [0x14] MsviFirst:  unique={msviFirsts.Distinct().Count()}, range={msviFirsts.Min()}-{msviFirsts.Max()}");
+            Console.WriteLine($"  [0x18] MdosIndex:  unique={mdosIndices.Distinct().Count()}, range={mdosIndices.Min()}-{mdosIndices.Max()}");
+            
+            var ck24s = packedParams.Select(p => (p & 0xFFFFFF00) >> 8).Distinct().ToList();
+            Console.WriteLine($"  [0x1C] CK24:       unique={ck24s.Count}");
+            Console.WriteLine($"         Top CK24s: {string.Join(", ", ck24s.OrderByDescending(x => packedParams.Count(p => ((p & 0xFFFFFF00) >> 8) == x)).Take(5).Select(x => $"0x{x:X6}"))}");
+            
+            // MSCN cross-ref
+            var mscnCount = chunks.FirstOrDefault(c => c.sig == "MSCN").data?.Length / 12 ?? 0;
+            int mdosInMscn = mdosIndices.Count(v => v < mscnCount);
+            Console.WriteLine($"\n  MdosIndex < MSCN.Count ({mscnCount}): {mdosInMscn}/{entryCount} ({100.0*mdosInMscn/entryCount:F1}%)");
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze cross-tile linking in PM4 files.
+    /// Goal: Understand how data is distributed across tiles and how tiles reference each other.
+    /// </summary>
+    static int RunCrossTileAnalysis(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            Console.WriteLine($"Directory not found: {directory}");
+            return 1;
+        }
+        
+        var pm4Files = Directory.GetFiles(directory, "*.pm4");
+        Console.WriteLine($"=== CROSS-TILE PM4 ANALYSIS ===");
+        Console.WriteLine($"Found {pm4Files.Length} PM4 files in {Path.GetFileName(directory)}\n");
+        
+        // Parse tile coords from filename and load each file
+        var tiles = new Dictionary<(int x, int y), Pm4File>();
+        var tileStats = new List<(int x, int y, Pm4File pm4)>();
+        
+        foreach (var path in pm4Files)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                Path.GetFileName(path), @"(\d+)_(\d+)\.pm4$");
+            if (!match.Success) continue;
+            
+            int x = int.Parse(match.Groups[1].Value);
+            int y = int.Parse(match.Groups[2].Value);
+            
+            try
+            {
+                var pm4 = Pm4File.Parse(File.ReadAllBytes(path));
+                tiles[(x, y)] = pm4;
+                tileStats.Add((x, y, pm4));
+            }
+            catch { /* skip unreadable files */ }
+        }
+        
+        Console.WriteLine($"Successfully loaded {tiles.Count} tiles\n");
+        
+        // Analyze cross-tile references via LinkId
+        Console.WriteLine("=== MSLK CROSS-TILE REFERENCES ===");
+        var allCrossRefs = new List<(int srcX, int srcY, int destX, int destY, int count)>();
+        int totalLocal = 0, totalCross = 0;
+        
+        foreach (var (x, y, pm4) in tileStats.Take(20)) // Sample first 20 tiles
+        {
+            if (pm4.LinkEntries.Count == 0) continue;
+            
+            // Parse LinkId to extract tile coordinates
+            var localRefs = 0;
+            var crossRefs = new Dictionary<(int, int), int>();
+            
+            foreach (var lnk in pm4.LinkEntries)
+            {
+                // LinkId format: 0xFFFFYYXX (little endian)
+                uint linkId = lnk.LinkId;
+                int linkX = (int)(linkId & 0xFF);
+                int linkY = (int)((linkId >> 8) & 0xFF);
+                
+                if (linkX == x && linkY == y)
+                    localRefs++;
+                else
+                {
+                    var key = (linkX, linkY);
+                    crossRefs[key] = crossRefs.GetValueOrDefault(key) + 1;
+                }
+            }
+            
+            totalLocal += localRefs;
+            totalCross += crossRefs.Values.Sum();
+            
+            if (crossRefs.Count > 0)
+            {
+                Console.WriteLine($"  Tile {x}_{y}: {localRefs} local, {crossRefs.Values.Sum()} cross-tile");
+                foreach (var (dest, cnt) in crossRefs.OrderByDescending(kv => kv.Value))
+                {
+                    Console.WriteLine($"    → Tile {dest.Item1}_{dest.Item2}: {cnt} refs");
+                    allCrossRefs.Add((x, y, dest.Item1, dest.Item2, cnt));
+                }
+            }
+        }
+        
+        Console.WriteLine($"\nTotal: {totalLocal} local refs, {totalCross} cross-tile refs");
+        Console.WriteLine($"Cross-tile percentage: {100.0 * totalCross / (totalLocal + totalCross):F2}%");
+        
+        // Analyze CK24 distribution across tiles
+        Console.WriteLine("\n=== CK24 DISTRIBUTION ACROSS TILES ===");
+        var ck24ToTiles = new Dictionary<uint, HashSet<(int, int)>>();
+        var ck24ToSurfaces = new Dictionary<uint, int>();
+        
+        foreach (var (x, y, pm4) in tileStats)
+        {
+            foreach (var surf in pm4.Surfaces)
+            {
+                if (surf.CK24 == 0) continue; // Skip nav mesh
+                
+                if (!ck24ToTiles.ContainsKey(surf.CK24))
+                {
+                    ck24ToTiles[surf.CK24] = new HashSet<(int, int)>();
+                    ck24ToSurfaces[surf.CK24] = 0;
+                }
+                ck24ToTiles[surf.CK24].Add((x, y));
+                ck24ToSurfaces[surf.CK24]++;
+            }
+        }
+        
+        var multiTileCk24s = ck24ToTiles.Where(kv => kv.Value.Count > 1)
+            .OrderByDescending(kv => kv.Value.Count)
+            .ToList();
+        
+        Console.WriteLine($"Total unique CK24s: {ck24ToTiles.Count}");
+        Console.WriteLine($"CK24s spanning 1 tile: {ck24ToTiles.Count(kv => kv.Value.Count == 1)}");
+        Console.WriteLine($"CK24s spanning 2+ tiles: {multiTileCk24s.Count}");
+        
+        Console.WriteLine("\nLargest multi-tile objects:");
+        foreach (var (ck24, tileset) in multiTileCk24s.Take(10))
+        {
+            Console.WriteLine($"  CK24 0x{ck24:X6}: {tileset.Count} tiles, {ck24ToSurfaces[ck24]} total surfaces");
+            Console.WriteLine($"    Tiles: {string.Join(", ", tileset.OrderBy(t => t.Item1).ThenBy(t => t.Item2).Select(t => $"{t.Item1}_{t.Item2}"))}");
+        }
+        
+        // Analyze index spaces - do they overlap or segment?
+        Console.WriteLine("\n=== INDEX SPACE ANALYSIS ===");
+        Console.WriteLine("Checking if MSVI/MSVT indices are local or global...\n");
+        
+        foreach (var (x, y, pm4) in tileStats.Take(5))
+        {
+            if (pm4.Surfaces.Count == 0) continue;
+            
+            var msviMin = pm4.Surfaces.Min(s => s.MsviFirstIndex);
+            var msviMax = pm4.Surfaces.Max(s => s.MsviFirstIndex + (uint)s.IndexCount);
+            var msvtCount = pm4.MeshVertices.Count;
+            
+            Console.WriteLine($"Tile {x}_{y}:");
+            Console.WriteLine($"  MSVI range used: {msviMin} - {msviMax}");
+            Console.WriteLine($"  MSVT count: {msvtCount}");
+            Console.WriteLine($"  Max MSVI index < MSVI.Count: {msviMax <= pm4.MeshIndices.Count} (local={pm4.MeshIndices.Count})");
+            
+            // Check if any surfaces reference beyond local MSVI
+            var outOfRange = pm4.Surfaces.Count(s => s.MsviFirstIndex + s.IndexCount > pm4.MeshIndices.Count);
+            if (outOfRange > 0)
+                Console.WriteLine($"  ⚠️ {outOfRange} surfaces reference MSVI beyond local count!");
+            else
+                Console.WriteLine($"  ✓ All surfaces reference local MSVI");
+        }
+        
+        // Hypothesis test: Do MSLK cross-tile refs point to indices in the other tile?
+        Console.WriteLine("\n=== CROSS-TILE INDEX RESOLUTION ===");
+        Console.WriteLine("Testing if cross-tile MSLK entries reference data in the target tile...\n");
+        
+        int resolved = 0, unresolved = 0;
+        
+        foreach (var (srcX, srcY, destX, destY, count) in allCrossRefs.Take(10))
+        {
+            if (!tiles.ContainsKey((srcX, srcY)) || !tiles.ContainsKey((destX, destY))) continue;
+            
+            var srcPm4 = tiles[(srcX, srcY)];
+            var destPm4 = tiles[(destX, destY)];
+            
+            // Find MSLK entries that reference the dest tile
+            var crossEntries = srcPm4.LinkEntries
+                .Where(lnk => (lnk.LinkId & 0xFF) == destX && ((lnk.LinkId >> 8) & 0xFF) == destY)
+                .Take(5);
+            
+            foreach (var lnk in crossEntries)
+            {
+                // Does RefIndex make sense in DEST tile?
+                bool validInDest = lnk.RefIndex < destPm4.Surfaces.Count;
+                bool validInSrc = lnk.RefIndex < srcPm4.Surfaces.Count;
+                
+                if (validInDest)
+                {
+                    resolved++;
+                    var destSurf = destPm4.Surfaces[lnk.RefIndex];
+                    Console.WriteLine($"  Cross-ref {srcX}_{srcY}→{destX}_{destY}: RefIndex={lnk.RefIndex} → DEST.CK24=0x{destSurf.CK24:X6}");
+                }
+                else if (validInSrc)
+                {
+                    unresolved++;
+                    var srcSurf = srcPm4.Surfaces[lnk.RefIndex];
+                    Console.WriteLine($"  Cross-ref {srcX}_{srcY}→{destX}_{destY}: RefIndex={lnk.RefIndex} → SRC.CK24=0x{srcSurf.CK24:X6} (local!)");
+                }
+                else
+                {
+                    Console.WriteLine($"  Cross-ref {srcX}_{srcY}→{destX}_{destY}: RefIndex={lnk.RefIndex} INVALID in both!");
+                }
+            }
+        }
+        
+        Console.WriteLine($"\nResolved in DEST tile: {resolved}");
+        Console.WriteLine($"Resolved in SRC (local): {unresolved}");
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze MDSF chunk to understand MSUR→MDOS linkage and investigate MdosIndex.
+    /// MDSF per wowdev wiki: struct { uint32_t msur_index; uint32_t mdos_index; }
+    /// </summary>
+    static int RunMdsfAnalysis(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var data = File.ReadAllBytes(pm4Path);
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MDSF/MDOS ANALYSIS: {baseName} ===\n");
+        
+        // Parse chunks raw to get MDSF, MDOS, MDBH, MDBI, MDBF
+        var chunks = new Dictionary<string, List<byte[]>>();
+        using (var ms = new MemoryStream(data))
+        using (var br = new BinaryReader(ms))
+        {
+            while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                var sigBytes = br.ReadBytes(4);
+                Array.Reverse(sigBytes);
+                string sig = Encoding.ASCII.GetString(sigBytes);
+                uint size = br.ReadUInt32();
+                byte[] chunkData = br.ReadBytes((int)size);
+                
+                if (!chunks.ContainsKey(sig))
+                    chunks[sig] = new List<byte[]>();
+                chunks[sig].Add(chunkData);
+            }
+        }
+        
+        // Parse standard PM4 for cross-reference
+        var pm4 = Pm4File.Parse(data);
+        
+        Console.WriteLine("=== DESTRUCTIBLE BUILDING CHUNKS ===");
+        
+        // MDBH: count of destructible buildings
+        if (chunks.TryGetValue("MDBH", out var mdbhList) && mdbhList.Count > 0)
+        {
+            uint buildingCount = BitConverter.ToUInt32(mdbhList[0], 0);
+            Console.WriteLine($"MDBH: {buildingCount} destructible buildings");
+        }
+        
+        // MDBI: building indices (file IDs)
+        if (chunks.TryGetValue("MDBI", out var mdbiList))
+        {
+            Console.WriteLine($"MDBI: {mdbiList.Count} entries (building file IDs)");
+            foreach (var mdbi in mdbiList.Take(5))
+            {
+                uint fileId = BitConverter.ToUInt32(mdbi, 0);
+                Console.WriteLine($"  FileID: 0x{fileId:X8} ({fileId})");
+            }
+        }
+        
+        // MDBF: building filenames (null-terminated strings)
+        if (chunks.TryGetValue("MDBF", out var mdbfList))
+        {
+            var nonEmpty = mdbfList.Where(b => b.Length > 0).ToList();
+            Console.WriteLine($"MDBF: {mdbfList.Count} entries ({nonEmpty.Count} with data)");
+            foreach (var mdbf in nonEmpty.Take(3))
+            {
+                string path = Encoding.UTF8.GetString(mdbf).TrimEnd('\0');
+                Console.WriteLine($"  Path: {path}");
+            }
+        }
+        
+        // MDOS: destructible object states
+        if (chunks.TryGetValue("MDOS", out var mdosList) && mdosList.Count > 0)
+        {
+            var mdosData = mdosList[0];
+            int mdosCount = mdosData.Length / 8; // 8 bytes per entry
+            Console.WriteLine($"\nMDOS: {mdosCount} entries (8 bytes each)");
+            
+            using var br = new BinaryReader(new MemoryStream(mdosData));
+            for (int i = 0; i < Math.Min(10, mdosCount); i++)
+            {
+                uint field0 = br.ReadUInt32(); // building_index?
+                uint field1 = br.ReadUInt32(); // destruction_state?
+                Console.WriteLine($"  [{i}] Field0: 0x{field0:X8} ({field0}), Field1: 0x{field1:X8} ({field1})");
+            }
+        }
+        
+        // MDSF: THE KEY CHUNK - links MSUR to MDOS!
+        Console.WriteLine("\n=== MDSF CHUNK (MSUR → MDOS LINKAGE) ===");
+        if (chunks.TryGetValue("MDSF", out var mdsfList) && mdsfList.Count > 0)
+        {
+            var mdsfData = mdsfList[0];
+            int mdsfCount = mdsfData.Length / 8; // struct { uint32 msur_index; uint32 mdos_index; }
+            Console.WriteLine($"MDSF: {mdsfCount} entries");
+            
+            var msurToMdos = new Dictionary<uint, uint>();
+            using var br = new BinaryReader(new MemoryStream(mdsfData));
+            
+            for (int i = 0; i < mdsfCount; i++)
+            {
+                uint msurIdx = br.ReadUInt32();
+                uint mdosIdx = br.ReadUInt32();
+                msurToMdos[msurIdx] = mdosIdx;
+            }
+            
+            // Show first entries
+            Console.WriteLine("\nFirst 10 mappings:");
+            br.BaseStream.Position = 0;
+            for (int i = 0; i < Math.Min(10, mdsfCount); i++)
+            {
+                uint msurIdx = br.ReadUInt32();
+                uint mdosIdx = br.ReadUInt32();
+                
+                // Cross-reference with MSUR
+                string ck24Info = "";
+                if (msurIdx < pm4.Surfaces.Count)
+                {
+                    var surf = pm4.Surfaces[(int)msurIdx];
+                    ck24Info = $", CK24=0x{surf.CK24:X6}, MdosIndex={surf.MdosIndex}";
+                }
+                Console.WriteLine($"  MSUR[{msurIdx}] → MDOS[{mdosIdx}]{ck24Info}");
+            }
+            
+            // Analyze MDSF→MdosIndex correlation
+            Console.WriteLine("\n=== MDSF vs MSUR.MdosIndex Correlation ===");
+            int matches = 0, mismatches = 0;
+            
+            foreach (var (msurIdx, mdosIdx) in msurToMdos.Take(100))
+            {
+                if (msurIdx < pm4.Surfaces.Count)
+                {
+                    var surf = pm4.Surfaces[(int)msurIdx];
+                    if (surf.MdosIndex == mdosIdx)
+                        matches++;
+                    else
+                        mismatches++;
+                }
+            }
+            Console.WriteLine($"MDSF.mdos_index == MSUR.MdosIndex: {matches}/{matches+mismatches} ({100.0*matches/(matches+mismatches):F1}%)");
+            
+            // Check if MDSF covers all surfaces with non-zero MdosIndex
+            var surfacesWithMdos = pm4.Surfaces.Where(s => s.MdosIndex > 0).Count();
+            Console.WriteLine($"\nSurfaces with MdosIndex > 0: {surfacesWithMdos}");
+            Console.WriteLine($"MDSF entries: {mdsfCount}");
+            Console.WriteLine($"Coverage: {100.0*mdsfCount/Math.Max(1,surfacesWithMdos):F1}%");
+        }
+        else
+        {
+            Console.WriteLine("MDSF chunk not found in this file!");
+        }
+        
+        // Investigate MdosIndex → MSCN relationship
+        Console.WriteLine("\n=== MSUR.MdosIndex → MSCN ANALYSIS ===");
+        
+        var mdosValues = pm4.Surfaces.Select(s => s.MdosIndex).ToList();
+        var uniqueMdos = mdosValues.Distinct().Count();
+        var mdosMax = mdosValues.Max();
+        var mdosMin = mdosValues.Min();
+        var mscnCount = pm4.SceneNodes.Count;
+        
+        Console.WriteLine($"MdosIndex range: {mdosMin} - {mdosMax}");
+        Console.WriteLine($"Unique MdosIndex values: {uniqueMdos}");
+        Console.WriteLine($"MSCN count: {mscnCount}");
+        
+        int validAsMscn = mdosValues.Count(v => v < mscnCount);
+        Console.WriteLine($"MdosIndex < MSCN.Count: {validAsMscn}/{pm4.Surfaces.Count} ({100.0*validAsMscn/pm4.Surfaces.Count:F1}%)");
+        
+        // Group surfaces by MdosIndex and see if they cluster spatially
+        Console.WriteLine("\n=== MdosIndex Clustering Check ===");
+        var byMdos = pm4.Surfaces
+            .Where(s => s.MdosIndex < mscnCount && s.MdosIndex > 0)
+            .GroupBy(s => s.MdosIndex)
+            .OrderByDescending(g => g.Count())
+            .Take(5);
+        
+        foreach (var group in byMdos)
+        {
+            var mscnVert = pm4.SceneNodes[(int)group.Key];
+            var surfCk24s = group.Select(s => s.CK24).Distinct().ToList();
+            Console.WriteLine($"  MdosIndex={group.Key}: {group.Count()} surfaces, CK24s: {string.Join(",", surfCk24s.Take(3).Select(c => $"0x{c:X6}"))}");
+            Console.WriteLine($"    → MSCN vertex: ({mscnVert.X:F1}, {mscnVert.Y:F1}, {mscnVert.Z:F1})");
+        }
+        
+        // NEW: Investigate MdosIndex as range start into MSCN
+        Console.WriteLine("\n=== MdosIndex STRIDE PATTERN ANALYSIS ===");
+        
+        // Sort by MdosIndex and look for stride pattern
+        var sortedByMdos = pm4.Surfaces
+            .Where(s => s.MdosIndex < mscnCount)
+            .OrderBy(s => s.MdosIndex)
+            .ToList();
+        
+        if (sortedByMdos.Count > 10)
+        {
+            Console.WriteLine("First 10 MdosIndex values (sorted):");
+            var strides = new List<int>();
+            for (int i = 0; i < 10; i++)
+            {
+                var surf = sortedByMdos[i];
+                int stride = i > 0 ? (int)(surf.MdosIndex - sortedByMdos[i-1].MdosIndex) : 0;
+                strides.Add(stride);
+                Console.WriteLine($"  [{i}] MdosIndex={surf.MdosIndex}, CK24=0x{surf.CK24:X6}, Stride={stride}");
+            }
+            
+            // Compute common stride
+            var nonZeroStrides = strides.Where(s => s > 0).ToList();
+            if (nonZeroStrides.Count > 0)
+            {
+                var avgStride = nonZeroStrides.Average();
+                var commonStride = nonZeroStrides.GroupBy(s => s).OrderByDescending(g => g.Count()).First().Key;
+                Console.WriteLine($"\nAverage stride: {avgStride:F1}");
+                Console.WriteLine($"Most common stride: {commonStride}");
+            }
+        }
+        
+        // Check if MdosIndex is a boundary marker - does it mark where MSCN vertices for an object START?
+        Console.WriteLine("\n=== MdosIndex as MSCN RANGE START ===");
+        var surfacesByMdos = pm4.Surfaces
+            .Where(s => s.MdosIndex < mscnCount)
+            .GroupBy(s => s.MdosIndex)
+            .OrderBy(g => g.Key)
+            .ToList();
+        
+        if (surfacesByMdos.Count > 3)
+        {
+            Console.WriteLine("Testing if MdosIndex marks start of MSCN range for each surface:");
+            for (int i = 0; i < Math.Min(5, surfacesByMdos.Count - 1); i++)
+            {
+                var current = surfacesByMdos[i];
+                var next = surfacesByMdos[i + 1];
+                
+                int rangeStart = (int)current.Key;
+                int rangeEnd = (int)next.Key;
+                int rangeSize = rangeEnd - rangeStart;
+                
+                // Get MSCN vertices in this range
+                var mscnInRange = new List<Vector3>();
+                for (int m = rangeStart; m < rangeEnd && m < mscnCount; m++)
+                    mscnInRange.Add(pm4.SceneNodes[m]);
+                
+                // Get surface geometry bounds
+                var surfVerts = new List<Vector3>();
+                foreach (var surf in current)
+                    surfVerts.AddRange(GetSurfaceVertices(pm4, surf));
+                
+                if (surfVerts.Count > 0 && mscnInRange.Count > 0)
+                {
+                    var surfBounds = ComputeBounds(surfVerts);
+                    var mscnBounds = ComputeBounds(mscnInRange);
+                    
+                    // Check overlap
+                    bool overlaps = 
+                        surfBounds.min.X <= mscnBounds.max.X && surfBounds.max.X >= mscnBounds.min.X &&
+                        surfBounds.min.Y <= mscnBounds.max.Y && surfBounds.max.Y >= mscnBounds.min.Y;
+                    
+                    Console.WriteLine($"  MdosIndex {rangeStart}-{rangeEnd} ({rangeSize} MSCN verts):");
+                    Console.WriteLine($"    MSCN bounds: ({mscnBounds.min.X:F0},{mscnBounds.min.Y:F0}) to ({mscnBounds.max.X:F0},{mscnBounds.max.Y:F0})");
+                    Console.WriteLine($"    Surf bounds: ({surfBounds.min.X:F0},{surfBounds.min.Y:F0}) to ({surfBounds.max.X:F0},{surfBounds.max.Y:F0})");
+                    Console.WriteLine($"    Overlaps: {overlaps}");
+                }
+            }
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze whether we can isolate MSCN per object and pair with MSVT geometry.
+    /// Goal: Create "complete" objects with both mesh vertices AND scene nodes.
+    /// </summary>
+    static int RunObjectCompleteAnalysis(string pm4Path, string? outputDir)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        outputDir ??= Path.Combine(Path.GetTempPath(), "pm4_complete_objects");
+        Directory.CreateDirectory(outputDir);
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== COMPLETE OBJECT ANALYSIS: {baseName} ===\n");
+        Console.WriteLine($"MSUR surfaces: {pm4.Surfaces.Count}");
+        Console.WriteLine($"MSVT vertices: {pm4.MeshVertices.Count}");
+        Console.WriteLine($"MSCN vertices: {pm4.SceneNodes.Count}");
+        
+        // Group surfaces by CK24
+        var surfacesByCk24 = pm4.Surfaces
+            .Where(s => s.CK24 != 0) // Skip nav mesh
+            .GroupBy(s => s.CK24)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        
+        Console.WriteLine($"Unique CK24s (non-zero): {surfacesByCk24.Count}\n");
+        
+        // For each CK24, gather:
+        // 1. MSVT vertices (via MSUR→MSVI→MSVT)
+        // 2. MSCN vertices (via MSUR.MdosIndex→MSCN)
+        Console.WriteLine("=== MSCN ISOLATION PER CK24 ===");
+        Console.WriteLine("Testing if MdosIndex groups MSCN by object...\n");
+        
+        int exported = 0;
+        var results = new List<(uint ck24, int msvtCount, int mscnCount, bool overlaps)>();
+        
+        foreach (var (ck24, surfaces) in surfacesByCk24.OrderByDescending(kv => kv.Value.Count).Take(10))
+        {
+            // Get all MSVT vertices for this CK24
+            var msvtVerts = new HashSet<Vector3>();
+            foreach (var surf in surfaces)
+            {
+                var verts = GetSurfaceVertices(pm4, surf);
+                foreach (var v in verts) msvtVerts.Add(v);
+            }
+            
+            // Get all unique MdosIndex values for this CK24
+            var mdosIndices = surfaces
+                .Select(s => s.MdosIndex)
+                .Where(m => m < pm4.SceneNodes.Count)
+                .Distinct()
+                .ToList();
+            
+            // Get MSCN vertices referenced by these surfaces
+            var mscnVerts = new HashSet<Vector3>();
+            foreach (var idx in mdosIndices)
+            {
+                mscnVerts.Add(pm4.SceneNodes[(int)idx]);
+            }
+            
+            // Check spatial overlap
+            bool overlaps = false;
+            if (msvtVerts.Count > 0 && mscnVerts.Count > 0)
+            {
+                var msvtBounds = ComputeBounds(msvtVerts.ToList());
+                var mscnBounds = ComputeBounds(mscnVerts.ToList());
+                
+                overlaps = 
+                    msvtBounds.min.X <= mscnBounds.max.X + 10 && msvtBounds.max.X >= mscnBounds.min.X - 10 &&
+                    msvtBounds.min.Y <= mscnBounds.max.Y + 10 && msvtBounds.max.Y >= mscnBounds.min.Y - 10;
+                
+                Console.WriteLine($"CK24 0x{ck24:X6}:");
+                Console.WriteLine($"  Surfaces: {surfaces.Count}");
+                Console.WriteLine($"  MSVT vertices: {msvtVerts.Count}");
+                Console.WriteLine($"  MSCN vertices (via MdosIndex): {mscnVerts.Count}");
+                Console.WriteLine($"  MdosIndex range: {mdosIndices.Min()}-{mdosIndices.Max()}");
+                Console.WriteLine($"  MSVT bounds: ({msvtBounds.min.X:F0},{msvtBounds.min.Y:F0}) to ({msvtBounds.max.X:F0},{msvtBounds.max.Y:F0})");
+                Console.WriteLine($"  MSCN bounds: ({mscnBounds.min.X:F0},{mscnBounds.min.Y:F0}) to ({mscnBounds.max.X:F0},{mscnBounds.max.Y:F0})");
+                Console.WriteLine($"  Spatial overlap: {(overlaps ? "✓ YES" : "✗ NO")}\n");
+            }
+            
+            results.Add((ck24, msvtVerts.Count, mscnVerts.Count, overlaps));
+            
+            // Export complete object (MSVT + MSCN)
+            if (msvtVerts.Count > 0 && mscnVerts.Count > 0 && exported < 5)
+            {
+                var objPath = Path.Combine(outputDir, $"{baseName}_CK24_{ck24:X6}_complete.obj");
+                using (var sw = new StreamWriter(objPath))
+                {
+                    sw.WriteLine($"# Complete object: CK24 0x{ck24:X6}");
+                    sw.WriteLine($"# MSVT vertices: {msvtVerts.Count}");
+                    sw.WriteLine($"# MSCN vertices: {mscnVerts.Count}");
+                    sw.WriteLine();
+                    
+                    // Write MSVT vertices
+                    sw.WriteLine("# === MSVT MESH VERTICES ===");
+                    foreach (var v in msvtVerts)
+                        sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+                    
+                    int msvtEnd = msvtVerts.Count;
+                    
+                    // Write MSCN vertices (as different color/group)
+                    sw.WriteLine();
+                    sw.WriteLine("# === MSCN SCENE NODES ===");
+                    sw.WriteLine("g mscn_points");
+                    foreach (var v in mscnVerts)
+                        sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+                    
+                    // Create point cloud for MSCN
+                    for (int i = msvtEnd + 1; i <= msvtEnd + mscnVerts.Count; i++)
+                        sw.WriteLine($"p {i}");
+                }
+                Console.WriteLine($"  Exported: {objPath}");
+                exported++;
+            }
+        }
+        
+        // Summary
+        Console.WriteLine("\n=== SUMMARY ===");
+        int overlapping = results.Count(r => r.overlaps);
+        Console.WriteLine($"Objects with spatial MSVT/MSCN overlap: {overlapping}/{results.Count}");
+        Console.WriteLine($"Total MSCN isolated via MdosIndex: {results.Sum(r => r.mscnCount)}");
+        
+        // Now try alternative: Use spatial proximity to assign MSCN to CK24
+        Console.WriteLine("\n=== ALTERNATIVE: SPATIAL ASSIGNMENT ===");
+        Console.WriteLine("Assigning each MSCN vertex to nearest CK24 bounding box...\n");
+        
+        // Build CK24 bounding boxes
+        var ck24Bounds = new Dictionary<uint, (Vector3 min, Vector3 max)>();
+        foreach (var (ck24, surfaces) in surfacesByCk24)
+        {
+            var allVerts = new List<Vector3>();
+            foreach (var surf in surfaces)
+                allVerts.AddRange(GetSurfaceVertices(pm4, surf));
+            if (allVerts.Count > 0)
+                ck24Bounds[ck24] = ComputeBounds(allVerts);
+        }
+        
+        // Assign each MSCN to a CK24 based on containment
+        var mscnToCk24 = new Dictionary<uint, List<int>>(); // CK24 → list of MSCN indices
+        int unassigned = 0;
+        
+        for (int i = 0; i < pm4.SceneNodes.Count; i++)
+        {
+            var mscn = pm4.SceneNodes[i];
+            uint matched = 0;
+            
+            foreach (var (ck24, bounds) in ck24Bounds)
+            {
+                // Expand bounds slightly for tolerance
+                if (mscn.X >= bounds.min.X - 5 && mscn.X <= bounds.max.X + 5 &&
+                    mscn.Y >= bounds.min.Y - 5 && mscn.Y <= bounds.max.Y + 5 &&
+                    mscn.Z >= bounds.min.Z - 10 && mscn.Z <= bounds.max.Z + 10)
+                {
+                    matched = ck24;
+                    break;
+                }
+            }
+            
+            if (matched != 0)
+            {
+                if (!mscnToCk24.ContainsKey(matched))
+                    mscnToCk24[matched] = new List<int>();
+                mscnToCk24[matched].Add(i);
+            }
+            else
+            {
+                unassigned++;
+            }
+        }
+        
+        Console.WriteLine($"MSCN assigned to CK24 objects: {pm4.SceneNodes.Count - unassigned}");
+        Console.WriteLine($"MSCN unassigned (terrain/nav?): {unassigned}");
+        Console.WriteLine($"CK24s with MSCN data: {mscnToCk24.Count}");
+        
+        Console.WriteLine("\nTop CK24s by MSCN count:");
+        foreach (var (ck24, indices) in mscnToCk24.OrderByDescending(kv => kv.Value.Count).Take(5))
+        {
+            Console.WriteLine($"  CK24 0x{ck24:X6}: {indices.Count} MSCN vertices");
+        }
+        
+        Console.WriteLine($"\nOutput directory: {outputDir}");
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze PM4 as a node graph structure.
+    /// Hypothesis: MSLK entries are edges connecting navigation nodes.
+    /// GroupObjectId = edge ID, TypeFlags = edge type, surfaces linked via RefIndex.
+    /// </summary>
+    static int RunNodeGraphAnalysis(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== PM4 NODE GRAPH ANALYSIS: {baseName} ===\n");
+        Console.WriteLine($"MSLK entries (graph edges): {pm4.LinkEntries.Count}");
+        Console.WriteLine($"MSUR surfaces (face data): {pm4.Surfaces.Count}");
+        Console.WriteLine($"MSPV path vertices: {pm4.PathVertices.Count}");
+        Console.WriteLine($"MSCN scene nodes: {pm4.SceneNodes.Count}");
+        
+        // === MSLK as edges analysis ===
+        Console.WriteLine("\n=== GRAPH STRUCTURE ANALYSIS ===");
+        
+        // Group MSLK by GroupObjectId (these are the "edges")
+        var edgeGroups = pm4.LinkEntries
+            .GroupBy(e => e.GroupObjectId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        
+        Console.WriteLine($"Unique edge IDs (GroupObjectId): {edgeGroups.Count}");
+        
+        // Analyze edge cardinality (how many MSLK entries per edge?)
+        var edgeSizes = edgeGroups.Values.Select(v => v.Count).ToList();
+        Console.WriteLine($"Edge cardinality distribution:");
+        foreach (var group in edgeSizes.GroupBy(s => s).OrderBy(g => g.Key))
+        {
+            Console.WriteLine($"  {group.Key} entries/edge: {group.Count()} edges ({100.0*group.Count()/edgeGroups.Count:F1}%)");
+        }
+        
+        // === TypeFlags as edge types ===
+        Console.WriteLine("\n=== EDGE TYPES (TypeFlags) ===");
+        var typeDistribution = pm4.LinkEntries
+            .GroupBy(e => e.TypeFlags)
+            .OrderByDescending(g => g.Count());
+        
+        foreach (var group in typeDistribution)
+        {
+            int withGeom = group.Count(e => e.MspiIndexCount > 0);
+            int withoutGeom = group.Count(e => e.MspiIndexCount == 0);
+            Console.WriteLine($"  Type {group.Key,2}: {group.Count(),6} entries ({100.0*group.Count()/pm4.LinkEntries.Count:F1}%) - Geometry: {withGeom} yes, {withoutGeom} no");
+        }
+        
+        // === Subtype as floor levels ===
+        Console.WriteLine("\n=== SUBTYPE (FLOOR LEVELS) ===");
+        var subtypeDistribution = pm4.LinkEntries
+            .GroupBy(e => e.Subtype)
+            .OrderBy(g => g.Key);
+        
+        foreach (var group in subtypeDistribution)
+        {
+            Console.WriteLine($"  Subtype {group.Key,2}: {group.Count(),6} entries");
+        }
+        
+        // === Try to build actual graph connectivity ===
+        Console.WriteLine("\n=== GRAPH CONNECTIVITY ===");
+        Console.WriteLine("Analyzing how edges connect via shared surfaces (RefIndex → MSUR)...\n");
+        
+        // Build: MSUR index → list of edge IDs that reference it
+        var surfaceToEdges = new Dictionary<int, List<uint>>();
+        foreach (var (edgeId, entries) in edgeGroups)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.RefIndex < pm4.Surfaces.Count)
+                {
+                    int idx = entry.RefIndex;
+                    if (!surfaceToEdges.ContainsKey(idx))
+                        surfaceToEdges[idx] = new List<uint>();
+                    if (!surfaceToEdges[idx].Contains(edgeId))
+                        surfaceToEdges[idx].Add(edgeId);
+                }
+            }
+        }
+        
+        // Count how many surfaces are shared by multiple edges
+        var sharedSurfaces = surfaceToEdges.Where(kv => kv.Value.Count > 1).ToList();
+        Console.WriteLine($"Total surfaces referenced: {surfaceToEdges.Count}");
+        Console.WriteLine($"Surfaces shared by 2+ edges: {sharedSurfaces.Count}");
+        
+        // Build edge adjacency graph
+        var edgeAdjacency = new Dictionary<uint, HashSet<uint>>();
+        foreach (var (surfIdx, edgeIds) in sharedSurfaces)
+        {
+            // All edges sharing this surface are connected
+            foreach (var e1 in edgeIds)
+            {
+                if (!edgeAdjacency.ContainsKey(e1))
+                    edgeAdjacency[e1] = new HashSet<uint>();
+                foreach (var e2 in edgeIds)
+                {
+                    if (e1 != e2)
+                        edgeAdjacency[e1].Add(e2);
+                }
+            }
+        }
+        
+        Console.WriteLine($"Edges with connections: {edgeAdjacency.Count}");
+        
+        // Find connected components (subgraphs = isolated objects?)
+        Console.WriteLine("\n=== CONNECTED COMPONENTS (SUBGRAPHS) ===");
+        var visited = new HashSet<uint>();
+        var components = new List<HashSet<uint>>();
+        
+        foreach (var edgeId in edgeGroups.Keys)
+        {
+            if (!visited.Contains(edgeId))
+            {
+                var component = new HashSet<uint>();
+                var queue = new Queue<uint>();
+                queue.Enqueue(edgeId);
+                
+                while (queue.Count > 0)
+                {
+                    var current = queue.Dequeue();
+                    if (visited.Contains(current)) continue;
+                    visited.Add(current);
+                    component.Add(current);
+                    
+                    if (edgeAdjacency.TryGetValue(current, out var neighbors))
+                    {
+                        foreach (var n in neighbors)
+                            if (!visited.Contains(n))
+                                queue.Enqueue(n);
+                    }
+                }
+                
+                if (component.Count > 0)
+                    components.Add(component);
+            }
+        }
+        
+        Console.WriteLine($"Total connected components: {components.Count}");
+        var sortedComponents = components.OrderByDescending(c => c.Count).ToList();
+        
+        Console.WriteLine("\nLargest components:");
+        for (int i = 0; i < Math.Min(10, sortedComponents.Count); i++)
+        {
+            var comp = sortedComponents[i];
+            
+            // Get CK24s in this component
+            var ck24s = new HashSet<uint>();
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                        ck24s.Add(pm4.Surfaces[entry.RefIndex].CK24);
+                }
+            }
+            
+            Console.WriteLine($"  Component {i+1}: {comp.Count} edges, CK24s: {string.Join(",", ck24s.Take(3).Select(c => $"0x{c:X6}"))}");
+        }
+        
+        // === Analyze MSLK MSPI geometry as actual path connections ===
+        Console.WriteLine("\n=== MSPI PATH GEOMETRY ===");
+        Console.WriteLine("Analyzing edges with geometry (MspiIndexCount > 0)...\n");
+        
+        var edgesWithGeom = pm4.LinkEntries.Where(e => e.MspiIndexCount > 0).ToList();
+        Console.WriteLine($"Edges with path geometry: {edgesWithGeom.Count}/{pm4.LinkEntries.Count}");
+        
+        // Look at MSPV (path vertices) referenced by MSPI
+        var mspiMax = edgesWithGeom.Max(e => e.MspiFirstIndex + e.MspiIndexCount);
+        Console.WriteLine($"MSPI index range used: 0 to {mspiMax}");
+        Console.WriteLine($"MSPI total count: {pm4.PathIndices.Count}");
+        Console.WriteLine($"MSPV total count: {pm4.PathVertices.Count}");
+        
+        // Sample a few path geometries
+        Console.WriteLine("\nSample path geometries:");
+        foreach (var entry in edgesWithGeom.Take(5))
+        {
+            Console.WriteLine($"  Edge GroupId={entry.GroupObjectId}, Type={entry.TypeFlags}, Subtype={entry.Subtype}:");
+            Console.WriteLine($"    MSPI[{entry.MspiFirstIndex}..{entry.MspiFirstIndex + entry.MspiIndexCount - 1}] ({entry.MspiIndexCount} indices)");
+            
+            // Get actual vertices
+            if (entry.MspiFirstIndex >= 0 && entry.MspiFirstIndex + entry.MspiIndexCount <= pm4.PathIndices.Count)
+            {
+                var pathVerts = new List<Vector3>();
+                for (int i = 0; i < entry.MspiIndexCount; i++)
+                {
+                    int mspiIdx = entry.MspiFirstIndex + i;
+                    if (mspiIdx < pm4.PathIndices.Count)
+                    {
+                        int mspvIdx = (int)pm4.PathIndices[mspiIdx];
+                        if (mspvIdx < pm4.PathVertices.Count)
+                            pathVerts.Add(pm4.PathVertices[mspvIdx]);
+                    }
+                }
+                
+                if (pathVerts.Count > 0)
+                {
+                    var bounds = ComputeBounds(pathVerts);
+                    Console.WriteLine($"    Path vertices: {pathVerts.Count}");
+                    Console.WriteLine($"    Bounds: ({bounds.min.X:F0},{bounds.min.Y:F0},{bounds.min.Z:F0}) to ({bounds.max.X:F0},{bounds.max.Y:F0},{bounds.max.Z:F0})");
+                }
+            }
+        }
+        
+        // === Isolate polygons via MSPI ===
+        Console.WriteLine("\n=== POLYGON ISOLATION VIA MSPI ===");
+        Console.WriteLine("Each MSLK entry with geometry defines a polygon via MSPI→MSPV...\n");
+        
+        int polygonCount = edgesWithGeom.Count;
+        var polygonSizes = edgesWithGeom.Select(e => e.MspiIndexCount).GroupBy(s => s);
+        Console.WriteLine($"Total polygons: {polygonCount}");
+        Console.WriteLine("Polygon sizes (vertex count):");
+        foreach (var group in polygonSizes.OrderBy(g => g.Key))
+        {
+            Console.WriteLine($"  {group.Key} vertices: {group.Count()} polygons");
+        }
+        
+        // === Component to CK24 correlation ===
+        Console.WriteLine("\n=== COMPONENT ↔ CK24 CORRELATION ===");
+        Console.WriteLine("Testing if connected components match individual CK24 objects...\n");
+        
+        // For each component, count how many CK24s it contains
+        var singleCk24Components = 0;
+        var multiCk24Components = 0;
+        var componentCk24Map = new List<(int componentIdx, HashSet<uint> ck24s, int edgeCount)>();
+        
+        for (int i = 0; i < sortedComponents.Count; i++)
+        {
+            var comp = sortedComponents[i];
+            var ck24s = new HashSet<uint>();
+            
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                        ck24s.Add(pm4.Surfaces[entry.RefIndex].CK24);
+                }
+            }
+            
+            componentCk24Map.Add((i + 1, ck24s, comp.Count));
+            
+            if (ck24s.Count == 1)
+                singleCk24Components++;
+            else
+                multiCk24Components++;
+        }
+        
+        Console.WriteLine($"Components with SINGLE CK24: {singleCk24Components} ({100.0*singleCk24Components/components.Count:F1}%)");
+        Console.WriteLine($"Components with MULTIPLE CK24s: {multiCk24Components} ({100.0*multiCk24Components/components.Count:F1}%)");
+        
+        // Show some multi-CK24 components
+        Console.WriteLine("\nComponents spanning multiple CK24s:");
+        foreach (var (idx, ck24s, edgeCount) in componentCk24Map.Where(c => c.ck24s.Count > 1).Take(5))
+        {
+            Console.WriteLine($"  Component {idx}: {edgeCount} edges, {ck24s.Count} CK24s: {string.Join(",", ck24s.Take(5).Select(c => $"0x{c:X6}"))}");
+        }
+        
+        // === Analyze Type 1 vs other types in components ===
+        Console.WriteLine("\n=== TYPE DISTRIBUTION IN COMPONENTS ===");
+        Console.WriteLine("Type 1 = anchor nodes (no geometry), Types 2/4/10/12 = connection nodes...\n");
+        
+        for (int i = 0; i < Math.Min(5, sortedComponents.Count); i++)
+        {
+            var comp = sortedComponents[i];
+            int type1Count = 0, otherTypeCount = 0;
+            
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.TypeFlags == 1)
+                        type1Count++;
+                    else
+                        otherTypeCount++;
+                }
+            }
+            
+            Console.WriteLine($"  Component {i+1}: Type1={type1Count}, Other={otherTypeCount} (ratio: {(otherTypeCount > 0 ? 100.0*type1Count/otherTypeCount : 0):F0}%)");
+        }
+        
+        // === Export navigation mesh for one component ===
+        Console.WriteLine("\n=== EXPORTING COMPONENT NAV MESH ===");
+        var exportComp = sortedComponents.FirstOrDefault(c => c.Count > 50 && c.Count < 200);
+        if (exportComp != null && exportComp.Count > 0)
+        {
+            var outputDir = Path.Combine(Path.GetTempPath(), "pm4_nav_components");
+            Directory.CreateDirectory(outputDir);
+            
+            // Collect all path geometry from this component
+            var navVerts = new List<Vector3>();
+            var navQuads = new List<(int a, int b, int c, int d)>();
+            var vertexMap = new Dictionary<Vector3, int>();
+            
+            foreach (var edgeId in exportComp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.MspiIndexCount == 4 && entry.MspiFirstIndex >= 0)
+                    {
+                        var quadVerts = new List<int>();
+                        for (int j = 0; j < 4; j++)
+                        {
+                            int mspiIdx = entry.MspiFirstIndex + j;
+                            if (mspiIdx < pm4.PathIndices.Count)
+                            {
+                                int mspvIdx = (int)pm4.PathIndices[mspiIdx];
+                                if (mspvIdx < pm4.PathVertices.Count)
+                                {
+                                    var v = pm4.PathVertices[mspvIdx];
+                                    if (!vertexMap.ContainsKey(v))
+                                    {
+                                        vertexMap[v] = navVerts.Count + 1; // OBJ is 1-indexed
+                                        navVerts.Add(v);
+                                    }
+                                    quadVerts.Add(vertexMap[v]);
+                                }
+                            }
+                        }
+                        if (quadVerts.Count == 4)
+                            navQuads.Add((quadVerts[0], quadVerts[1], quadVerts[2], quadVerts[3]));
+                    }
+                }
+            }
+            
+            // Get CK24s for this component
+            var compCk24s = new HashSet<uint>();
+            foreach (var edgeId in exportComp)
+                foreach (var entry in edgeGroups[edgeId])
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                        compCk24s.Add(pm4.Surfaces[entry.RefIndex].CK24);
+            
+            var ck24Str = string.Join("_", compCk24s.Take(2).Select(c => $"{c:X6}"));
+            var objPath = Path.Combine(outputDir, $"{baseName}_component_{exportComp.Count}edges_{ck24Str}.obj");
+            
+            using (var sw = new StreamWriter(objPath))
+            {
+                sw.WriteLine($"# Navigation mesh component");
+                sw.WriteLine($"# Edges: {exportComp.Count}");
+                sw.WriteLine($"# Vertices: {navVerts.Count}");
+                sw.WriteLine($"# Quads: {navQuads.Count}");
+                sw.WriteLine($"# CK24s: {string.Join(",", compCk24s.Select(c => $"0x{c:X6}"))}");
+                sw.WriteLine();
+                
+                foreach (var v in navVerts)
+                    sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+                
+                sw.WriteLine();
+                foreach (var (a, b, c, d) in navQuads)
+                    sw.WriteLine($"f {a} {b} {c} {d}");
+            }
+            
+            Console.WriteLine($"Exported {navQuads.Count} quads from component with {exportComp.Count} edges");
+            Console.WriteLine($"Output: {objPath}");
+        }
+        
+        // === MSCN relationship to components ===
+        Console.WriteLine("\n=== MSCN ↔ COMPONENT RELATIONSHIP ===");
+        Console.WriteLine("Testing how MSCN vertices relate to navigation graph components...\n");
+        
+        // For each component, gather MSCN via MdosIndex from the surfaces
+        var componentMscn = new Dictionary<int, HashSet<int>>(); // componentIdx → MSCN indices
+        
+        for (int i = 0; i < sortedComponents.Count; i++)
+        {
+            var comp = sortedComponents[i];
+            var mscnIndices = new HashSet<int>();
+            
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                    {
+                        var surf = pm4.Surfaces[entry.RefIndex];
+                        if (surf.MdosIndex < pm4.SceneNodes.Count)
+                            mscnIndices.Add((int)surf.MdosIndex);
+                    }
+                }
+            }
+            
+            if (mscnIndices.Count > 0)
+                componentMscn[i] = mscnIndices;
+        }
+        
+        int componentsWithMscn = componentMscn.Count;
+        int totalMscnInComponents = componentMscn.Values.Sum(s => s.Count);
+        
+        Console.WriteLine($"Components with MSCN data: {componentsWithMscn}/{components.Count} ({100.0*componentsWithMscn/components.Count:F1}%)");
+        Console.WriteLine($"Total MSCN referenced by components: {totalMscnInComponents}");
+        Console.WriteLine($"MSCN coverage: {100.0*totalMscnInComponents/pm4.SceneNodes.Count:F1}% of {pm4.SceneNodes.Count}");
+        
+        // Check if nav mesh quads spatially overlap with their component's MSCN
+        Console.WriteLine("\n=== NAV MESH ↔ MSCN SPATIAL CORRELATION ===");
+        Console.WriteLine("Testing if component's nav quads overlap spatially with component's MSCN...\n");
+        
+        int overlappingComponents = 0;
+        int nonOverlappingComponents = 0;
+        
+        for (int i = 0; i < Math.Min(20, sortedComponents.Count); i++)
+        {
+            var comp = sortedComponents[i];
+            if (!componentMscn.ContainsKey(i)) continue;
+            
+            // Get nav mesh bounds for this component
+            var navVerts = new List<Vector3>();
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.MspiIndexCount > 0 && entry.MspiFirstIndex >= 0)
+                    {
+                        for (int j = 0; j < entry.MspiIndexCount; j++)
+                        {
+                            int mspiIdx = entry.MspiFirstIndex + j;
+                            if (mspiIdx < pm4.PathIndices.Count)
+                            {
+                                int mspvIdx = (int)pm4.PathIndices[mspiIdx];
+                                if (mspvIdx < pm4.PathVertices.Count)
+                                    navVerts.Add(pm4.PathVertices[mspvIdx]);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Get MSCN bounds for this component
+            var mscnVerts = componentMscn[i].Select(idx => pm4.SceneNodes[idx]).ToList();
+            
+            if (navVerts.Count > 0 && mscnVerts.Count > 0)
+            {
+                var navBounds = ComputeBounds(navVerts);
+                var mscnBounds = ComputeBounds(mscnVerts);
+                
+                bool overlaps = 
+                    navBounds.min.X <= mscnBounds.max.X + 20 && navBounds.max.X >= mscnBounds.min.X - 20 &&
+                    navBounds.min.Y <= mscnBounds.max.Y + 20 && navBounds.max.Y >= mscnBounds.min.Y - 20;
+                
+                if (overlaps) overlappingComponents++;
+                else nonOverlappingComponents++;
+                
+                if (i < 5)
+                {
+                    Console.WriteLine($"  Component {i+1}: {comp.Count} edges, {mscnVerts.Count} MSCN, {navVerts.Count} nav verts");
+                    Console.WriteLine($"    Nav bounds: ({navBounds.min.X:F0},{navBounds.min.Y:F0}) to ({navBounds.max.X:F0},{navBounds.max.Y:F0})");
+                    Console.WriteLine($"    MSCN bounds: ({mscnBounds.min.X:F0},{mscnBounds.min.Y:F0}) to ({mscnBounds.max.X:F0},{mscnBounds.max.Y:F0})");
+                    Console.WriteLine($"    Overlaps: {(overlaps ? "✓" : "✗")}");
+                }
+            }
+        }
+        
+        Console.WriteLine($"\nSpatial overlap (first 20 components): {overlappingComponents} overlapping, {nonOverlappingComponents} non-overlapping");
+        
+        // === Export complete navigable object with Nav + MSCN + MSVT ===
+        Console.WriteLine("\n=== EXPORTING COMPLETE NAVIGABLE OBJECT ===");
+        var exportIdx = sortedComponents.FindIndex(c => c.Count > 80 && c.Count < 150);
+        if (exportIdx >= 0 && componentMscn.ContainsKey(exportIdx))
+        {
+            var outputDir = Path.Combine(Path.GetTempPath(), "pm4_complete_nav_objects");
+            Directory.CreateDirectory(outputDir);
+            
+            var comp = sortedComponents[exportIdx];
+            var compMscnIndices = componentMscn[exportIdx];
+            
+            // Collect all data for this component
+            var allVerts = new List<Vector3>();
+            var navQuads = new List<(int, int, int, int)>();
+            var msvtVerts = new List<Vector3>();
+            var mscnPoints = new List<Vector3>();
+            var vertexMap = new Dictionary<Vector3, int>();
+            
+            // Nav mesh vertices (from MSPV via MSPI)
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.MspiIndexCount == 4 && entry.MspiFirstIndex >= 0)
+                    {
+                        var quadVerts = new List<int>();
+                        for (int j = 0; j < 4; j++)
+                        {
+                            int mspiIdx = entry.MspiFirstIndex + j;
+                            if (mspiIdx < pm4.PathIndices.Count)
+                            {
+                                int mspvIdx = (int)pm4.PathIndices[mspiIdx];
+                                if (mspvIdx < pm4.PathVertices.Count)
+                                {
+                                    var v = pm4.PathVertices[mspvIdx];
+                                    if (!vertexMap.ContainsKey(v))
+                                    {
+                                        vertexMap[v] = allVerts.Count + 1;
+                                        allVerts.Add(v);
+                                    }
+                                    quadVerts.Add(vertexMap[v]);
+                                }
+                            }
+                        }
+                        if (quadVerts.Count == 4)
+                            navQuads.Add((quadVerts[0], quadVerts[1], quadVerts[2], quadVerts[3]));
+                    }
+                }
+            }
+            int navVertEnd = allVerts.Count;
+            
+            // MSVT vertices (object geometry via MSUR→MSVI→MSVT)
+            var compSurfaces = new HashSet<int>();
+            foreach (var edgeId in comp)
+                foreach (var entry in edgeGroups[edgeId])
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                        compSurfaces.Add(entry.RefIndex);
+            
+            foreach (var surfIdx in compSurfaces)
+            {
+                var surf = pm4.Surfaces[surfIdx];
+                var verts = GetSurfaceVertices(pm4, surf);
+                foreach (var v in verts)
+                {
+                    if (!vertexMap.ContainsKey(v))
+                    {
+                        vertexMap[v] = allVerts.Count + 1;
+                        allVerts.Add(v);
+                        msvtVerts.Add(v);
+                    }
+                }
+            }
+            int msvtVertEnd = allVerts.Count;
+            
+            // MSCN points
+            foreach (var mscnIdx in compMscnIndices)
+            {
+                var v = pm4.SceneNodes[mscnIdx];
+                if (!vertexMap.ContainsKey(v))
+                {
+                    vertexMap[v] = allVerts.Count + 1;
+                    allVerts.Add(v);
+                }
+                mscnPoints.Add(v);
+            }
+            
+            // Get CK24s
+            var compCk24s = compSurfaces.Select(i => pm4.Surfaces[i].CK24).Distinct().ToList();
+            var ck24Str = string.Join("_", compCk24s.Take(2).Select(c => $"{c:X6}"));
+            var objPath = Path.Combine(outputDir, $"{baseName}_complete_{comp.Count}edges_{ck24Str}.obj");
+            
+            using (var sw = new StreamWriter(objPath))
+            {
+                sw.WriteLine($"# Complete Navigable Object");
+                sw.WriteLine($"# Component: {comp.Count} edges");
+                sw.WriteLine($"# Nav vertices: {navVertEnd}");
+                sw.WriteLine($"# Nav quads: {navQuads.Count}");
+                sw.WriteLine($"# MSVT vertices: {msvtVerts.Count}");
+                sw.WriteLine($"# MSCN points: {mscnPoints.Count}");
+                sw.WriteLine($"# CK24s: {string.Join(",", compCk24s.Select(c => $"0x{c:X6}"))}");
+                sw.WriteLine();
+                
+                // Write all vertices
+                sw.WriteLine("# All vertices (nav + msvt + mscn)");
+                foreach (var v in allVerts)
+                    sw.WriteLine($"v {v.X:F4} {v.Y:F4} {v.Z:F4}");
+                
+                // Nav mesh faces
+                sw.WriteLine();
+                sw.WriteLine("g navigation_mesh");
+                foreach (var (a, b, c, d) in navQuads)
+                    sw.WriteLine($"f {a} {b} {c} {d}");
+                
+                // MSCN as point cloud
+                sw.WriteLine();
+                sw.WriteLine("g mscn_collision_points");
+                foreach (var v in mscnPoints)
+                {
+                    if (vertexMap.TryGetValue(v, out var idx))
+                        sw.WriteLine($"p {idx}");
+                }
+            }
+            
+            Console.WriteLine($"Exported complete navigable object:");
+            Console.WriteLine($"  Nav mesh: {navQuads.Count} quads ({navVertEnd} vertices)");
+            Console.WriteLine($"  MSVT geometry: {msvtVerts.Count} vertices");
+            Console.WriteLine($"  MSCN collision: {mscnPoints.Count} points");
+            Console.WriteLine($"  Output: {objPath}");
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Analyze how MPRL (object placements) relate to the navigation graph.
+    /// MPRL contains position/rotation for placed objects, MPRR may link back.
+    /// </summary>
+    static int RunMprlGraphAnalysis(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var pm4 = Pm4File.Parse(File.ReadAllBytes(pm4Path));
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MPRL ↔ GRAPH CORRELATION: {baseName} ===\n");
+        Console.WriteLine($"MPRL entries (placements): {pm4.PositionRefs.Count}");
+        Console.WriteLine($"MPRR entries (references): {pm4.MprrEntries.Count}");
+        Console.WriteLine($"MSLK entries (edges): {pm4.LinkEntries.Count}");
+        Console.WriteLine($"MSUR surfaces: {pm4.Surfaces.Count}");
+        
+        // === MSLK RefIndex → MPRL analysis ===
+        Console.WriteLine("\n=== MSLK RefIndex → MPRL/MSVT ===");
+        
+        int mprlRefs = pm4.LinkEntries.Count(e => e.RefIndex < pm4.PositionRefs.Count);
+        int msvtRefs = pm4.LinkEntries.Count(e => e.RefIndex >= pm4.PositionRefs.Count);
+        
+        Console.WriteLine($"RefIndex < MPRL.Count ({pm4.PositionRefs.Count}): {mprlRefs} ({100.0*mprlRefs/pm4.LinkEntries.Count:F1}%)");
+        Console.WriteLine($"RefIndex >= MPRL.Count (→MSVT?): {msvtRefs} ({100.0*msvtRefs/pm4.LinkEntries.Count:F1}%)");
+        
+        // Wait - we confirmed RefIndex → MSUR, not MPRL! Let me check...
+        Console.WriteLine("\nClarification: We CONFIRMED RefIndex → MSUR (100% valid)");
+        Console.WriteLine("So RefIndex IS an MSUR index, not MPRL index.\n");
+        
+        // === How does MPRL relate to graph components? ===
+        Console.WriteLine("=== MPRL SPATIAL CORRELATION WITH GRAPH ===");
+        
+        // For each MPRL, find which graph component(s) are spatially nearby
+        // First build graph components (reusing logic from node-graph)
+        var edgeGroups = pm4.LinkEntries
+            .GroupBy(e => e.GroupObjectId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        
+        // Build surface-to-edge adjacency for component finding
+        var surfaceToEdges = new Dictionary<int, List<uint>>();
+        foreach (var (edgeId, entries) in edgeGroups)
+        {
+            foreach (var entry in entries)
+            {
+                if (entry.RefIndex < pm4.Surfaces.Count)
+                {
+                    int idx = entry.RefIndex;
+                    if (!surfaceToEdges.ContainsKey(idx))
+                        surfaceToEdges[idx] = new List<uint>();
+                    if (!surfaceToEdges[idx].Contains(edgeId))
+                        surfaceToEdges[idx].Add(edgeId);
+                }
+            }
+        }
+        
+        // Build edge adjacency
+        var edgeAdjacency = new Dictionary<uint, HashSet<uint>>();
+        foreach (var (surfIdx, edgeIds) in surfaceToEdges.Where(kv => kv.Value.Count > 1))
+        {
+            foreach (var e1 in edgeIds)
+            {
+                if (!edgeAdjacency.ContainsKey(e1))
+                    edgeAdjacency[e1] = new HashSet<uint>();
+                foreach (var e2 in edgeIds)
+                    if (e1 != e2)
+                        edgeAdjacency[e1].Add(e2);
+            }
+        }
+        
+        // Find connected components
+        var visited = new HashSet<uint>();
+        var components = new List<HashSet<uint>>();
+        
+        foreach (var edgeId in edgeGroups.Keys)
+        {
+            if (!visited.Contains(edgeId))
+            {
+                var component = new HashSet<uint>();
+                var queue = new Queue<uint>();
+                queue.Enqueue(edgeId);
+                
+                while (queue.Count > 0)
+                {
+                    var current = queue.Dequeue();
+                    if (visited.Contains(current)) continue;
+                    visited.Add(current);
+                    component.Add(current);
+                    
+                    if (edgeAdjacency.TryGetValue(current, out var neighbors))
+                        foreach (var n in neighbors)
+                            if (!visited.Contains(n))
+                                queue.Enqueue(n);
+                }
+                if (component.Count > 0)
+                    components.Add(component);
+            }
+        }
+        
+        Console.WriteLine($"Graph has {components.Count} components");
+        
+        // Build bounding boxes for each component
+        var componentBounds = new Dictionary<int, (Vector3 min, Vector3 max)>();
+        for (int i = 0; i < components.Count; i++)
+        {
+            var comp = components[i];
+            var allVerts = new List<Vector3>();
+            foreach (var edgeId in comp)
+            {
+                foreach (var entry in edgeGroups[edgeId])
+                {
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                    {
+                        var verts = GetSurfaceVertices(pm4, pm4.Surfaces[entry.RefIndex]);
+                        allVerts.AddRange(verts);
+                    }
+                }
+            }
+            if (allVerts.Count > 0)
+                componentBounds[i] = ComputeBounds(allVerts);
+        }
+        
+        // For each MPRL, find which component it's inside
+        Console.WriteLine("\nAssigning MPRL entries to graph components...\n");
+        var mprlToComponent = new Dictionary<int, int>(); // MPRL index → component index
+        int unassigned = 0;
+        
+        for (int m = 0; m < pm4.PositionRefs.Count; m++)
+        {
+            var mprl = pm4.PositionRefs[m];
+            // MPRL position stored as Y, Z, X (needs swap)
+            float px = mprl.PositionZ;
+            float py = mprl.PositionX;
+            float pz = mprl.PositionY;
+            
+            int matchedComponent = -1;
+            foreach (var (idx, bounds) in componentBounds)
+            {
+                if (px >= bounds.min.X - 10 && px <= bounds.max.X + 10 &&
+                    py >= bounds.min.Y - 10 && py <= bounds.max.Y + 10 &&
+                    pz >= bounds.min.Z - 20 && pz <= bounds.max.Z + 20)
+                {
+                    matchedComponent = idx;
+                    break;
+                }
+            }
+            
+            if (matchedComponent >= 0)
+                mprlToComponent[m] = matchedComponent;
+            else
+                unassigned++;
+        }
+        
+        Console.WriteLine($"MPRL assigned to components: {mprlToComponent.Count}");
+        Console.WriteLine($"MPRL unassigned: {unassigned}");
+        
+        // Show components with most MPRL placements
+        var componentMprlCount = mprlToComponent.GroupBy(kv => kv.Value)
+            .OrderByDescending(g => g.Count())
+            .Take(10);
+        
+        Console.WriteLine("\nComponents with most MPRL placements:");
+        foreach (var grp in componentMprlCount)
+        {
+            var comp = components[grp.Key];
+            // Get CK24s for this component
+            var ck24s = new HashSet<uint>();
+            foreach (var edgeId in comp)
+                foreach (var entry in edgeGroups[edgeId])
+                    if (entry.RefIndex < pm4.Surfaces.Count)
+                        ck24s.Add(pm4.Surfaces[entry.RefIndex].CK24);
+            
+            Console.WriteLine($"  Component {grp.Key}: {grp.Count()} MPRL, {comp.Count} edges, CK24s: {string.Join(",", ck24s.Take(3).Select(c => $"0x{c:X6}"))}");
+        }
+        
+        // === MPRR Analysis ===
+        Console.WriteLine("\n=== MPRR STRUCTURE ANALYSIS ===");
+        Console.WriteLine($"Total MPRR entries: {pm4.MprrEntries.Count}");
+        
+        // Non-sentinel MPRR
+        var nonSentinel = pm4.MprrEntries.Where(e => e.Value1 != 0xFFFF).ToList();
+        Console.WriteLine($"Non-sentinel MPRR: {nonSentinel.Count}");
+        
+        if (nonSentinel.Count > 0)
+        {
+            var v1Min = nonSentinel.Min(e => e.Value1);
+            var v1Max = nonSentinel.Max(e => e.Value1);
+            Console.WriteLine($"Value1 range: {v1Min} - {v1Max}");
+            Console.WriteLine($"Value1 < MPRL.Count: {nonSentinel.Count(e => e.Value1 < pm4.PositionRefs.Count)}");
+            Console.WriteLine($"Value1 < MSVT.Count: {nonSentinel.Count(e => e.Value1 < pm4.MeshVertices.Count)}");
+            
+            // Value2 patterns
+            var v2Patterns = nonSentinel.GroupBy(e => e.Value2 >> 8) // High byte
+                .OrderByDescending(g => g.Count())
+                .Take(5);
+            
+            Console.WriteLine("\nValue2 high-byte patterns:");
+            foreach (var p in v2Patterns)
+            {
+                Console.WriteLine($"  0x{p.Key:X2}xx: {p.Count()} entries");
+            }
+        }
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Complete PM4 structure mapping - analyze ALL chunks comprehensively.
+    /// </summary>
+    static int RunFullStructureMap(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var data = File.ReadAllBytes(pm4Path);
+        var pm4 = Pm4File.Parse(data);
+        var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== COMPLETE PM4 STRUCTURE MAP: {baseName} ===");
+        Console.WriteLine($"File size: {data.Length:N0} bytes\n");
+        
+        // === Parse all chunks raw ===
+        var chunks = new List<(string sig, uint size, long offset, byte[] data)>();
+        using (var ms = new MemoryStream(data))
+        using (var br = new BinaryReader(ms))
+        {
+            while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                long startPos = br.BaseStream.Position;
+                var sigBytes = br.ReadBytes(4);
+                Array.Reverse(sigBytes);
+                string sig = Encoding.ASCII.GetString(sigBytes);
+                uint size = br.ReadUInt32();
+                byte[] chunkData = br.ReadBytes((int)size);
+                chunks.Add((sig, size, startPos, chunkData));
+            }
+        }
+        
+        Console.WriteLine("=== CHUNK INVENTORY ===");
+        Console.WriteLine($"Total chunks: {chunks.Count}\n");
+        
+        foreach (var c in chunks.GroupBy(x => x.sig))
+        {
+            var totalSize = c.Sum(x => (long)x.size);
+            int entrySize4 = (int)(totalSize / Math.Max(1, c.Sum(x => x.size / 4)));
+            Console.WriteLine($"  {c.Key}: {c.Count()} chunk(s), {totalSize:N0} bytes total");
+        }
+        
+        // === MSHD Header Analysis ===
+        Console.WriteLine("\n=== MSHD HEADER ANALYSIS ===");
+        if (pm4.Header != null)
+        {
+            var h = pm4.Header;
+            Console.WriteLine($"  Field00 (MSUR-related?): {h.Field00}");
+            Console.WriteLine($"  Field04 (count?): {h.Field04}");
+            Console.WriteLine($"  Field08 (count?): {h.Field08}");
+            Console.WriteLine($"  Field0C-1C: {h.Field0C}, {h.Field10}, {h.Field14}, {h.Field18}, {h.Field1C}");
+            
+            // Correlate with chunk counts
+            Console.WriteLine("\n  Correlation check:");
+            Console.WriteLine($"    Field00={h.Field00} vs MSUR.Count={pm4.Surfaces.Count} (match: {h.Field00 == pm4.Surfaces.Count})");
+            Console.WriteLine($"    Field04={h.Field04} vs MPRL.Count={pm4.PositionRefs.Count} (match: {h.Field04 == pm4.PositionRefs.Count})");
+            Console.WriteLine($"    Field08={h.Field08} vs MSLK.Count={pm4.LinkEntries.Count} (match: {h.Field08 == pm4.LinkEntries.Count})");
+        }
+        else
+        {
+            Console.WriteLine("  No MSHD header found!");
+        }
+        
+        // === MPRR Deep Analysis ===
+        Console.WriteLine("\n=== MPRR DEEP ANALYSIS ===");
+        Console.WriteLine($"Total entries: {pm4.MprrEntries.Count}");
+        
+        var nonSentinel = pm4.MprrEntries.Where(e => e.Value1 != 0xFFFF).ToList();
+        var sentinel = pm4.MprrEntries.Where(e => e.Value1 == 0xFFFF).ToList();
+        Console.WriteLine($"Non-sentinel: {nonSentinel.Count}");
+        Console.WriteLine($"Sentinel (0xFFFF): {sentinel.Count}");
+        
+        if (nonSentinel.Count > 0)
+        {
+            // Value1 analysis
+            Console.WriteLine("\n  Value1 (reference index):");
+            Console.WriteLine($"    Range: 0 - {nonSentinel.Max(e => e.Value1)}");
+            Console.WriteLine($"    < MPRL.Count ({pm4.PositionRefs.Count}): {nonSentinel.Count(e => e.Value1 < pm4.PositionRefs.Count)}");
+            Console.WriteLine($"    >= MPRL.Count (MSVT?): {nonSentinel.Count(e => e.Value1 >= pm4.PositionRefs.Count)}");
+            
+            // Value2 analysis - decode the pattern
+            Console.WriteLine("\n  Value2 (flags/type):");
+            var v2Groups = nonSentinel.GroupBy(e => e.Value2).OrderByDescending(g => g.Count()).Take(10);
+            foreach (var g in v2Groups)
+            {
+                byte hiByte = (byte)(g.Key >> 8);
+                byte loByte = (byte)(g.Key & 0xFF);
+                Console.WriteLine($"    0x{g.Key:X4} (hi=0x{hiByte:X2}, lo=0x{loByte:X2}): {g.Count()} entries");
+            }
+            
+            // Hypothesis: High byte = floor/level, Low byte = edge flags?
+            Console.WriteLine("\n  Value2 interpretation hypothesis:");
+            var byHiByte = nonSentinel.GroupBy(e => e.Value2 >> 8).OrderBy(g => g.Key);
+            Console.WriteLine("    High byte (floor level?):");
+            foreach (var g in byHiByte.Take(5))
+            {
+                Console.WriteLine($"      0x{g.Key:X2}: {g.Count()} entries");
+            }
+        }
+        
+        // === MSVI → MSVT Triangle Assembly ===
+        Console.WriteLine("\n=== MSVI → MSVT TRIANGLE ASSEMBLY ===");
+        Console.WriteLine($"MSVI indices: {pm4.MeshIndices.Count}");
+        Console.WriteLine($"MSVT vertices: {pm4.MeshVertices.Count}");
+        
+        // Check if MSVI values are valid MSVT indices
+        if (pm4.MeshIndices.Count > 0)
+        {
+            var maxMsvi = pm4.MeshIndices.Max();
+            var minMsvi = pm4.MeshIndices.Min();
+            Console.WriteLine($"  MSVI value range: {minMsvi} - {maxMsvi}");
+            Console.WriteLine($"  All valid MSVT indices: {maxMsvi < pm4.MeshVertices.Count}");
+            
+            // How does MSUR use MSVI?
+            if (pm4.Surfaces.Count > 0)
+            {
+                var surf = pm4.Surfaces[0];
+                Console.WriteLine($"\n  Sample surface (MSUR[0]):");
+                Console.WriteLine($"    MsviFirstIndex: {surf.MsviFirstIndex}");
+                Console.WriteLine($"    IndexCount: {surf.IndexCount}");
+                Console.WriteLine($"    Triangle count: {surf.IndexCount / 3}");
+                
+                // Get the actual indices and vertices
+                Console.WriteLine($"    First 6 MSVI values:");
+                for (int i = 0; i < Math.Min(6, (int)surf.IndexCount); i++)
+                {
+                    int msviIdx = (int)surf.MsviFirstIndex + i;
+                    if (msviIdx < pm4.MeshIndices.Count)
+                    {
+                        uint msvtIdx = pm4.MeshIndices[msviIdx];
+                        if (msvtIdx < pm4.MeshVertices.Count)
+                        {
+                            var v = pm4.MeshVertices[(int)msvtIdx];
+                            Console.WriteLine($"      MSVI[{msviIdx}]={msvtIdx} → MSVT: ({v.X:F1}, {v.Y:F1}, {v.Z:F1})");
+                        }
+                    }
+                }
+            }
+        }
+        
+        // === MSPV → MSPI Path Geometry ===
+        Console.WriteLine("\n=== MSPV/MSPI PATH GEOMETRY ===");
+        Console.WriteLine($"MSPI indices: {pm4.PathIndices.Count}");
+        Console.WriteLine($"MSPV vertices: {pm4.PathVertices.Count}");
+        
+        if (pm4.PathIndices.Count > 0)
+        {
+            var maxMspi = pm4.PathIndices.Max();
+            Console.WriteLine($"MSPI value range: 0 - {maxMspi}");
+            Console.WriteLine($"All valid MSPV indices: {maxMspi < pm4.PathVertices.Count}");
+        }
+        
+        // === Complete Structure Summary ===
+        Console.WriteLine("\n=== COMPLETE PM4 STRUCTURE ===");
+        Console.WriteLine(@"
+PM4 = Phased Model 4 (Server-side Navigation/Collision)
+
+HIERARCHY:
+┌──────────────────────────────────────────────────────────────┐
+│ MSHD: File Header                                             │
+│   ├── Field00 = MSUR count                                   │
+│   ├── Field04 = MPRL count                                   │
+│   └── Field08 = ? (to investigate)                           │
+├──────────────────────────────────────────────────────────────┤
+│ NAVIGATION GRAPH (walkable surfaces)                          │
+│   MSLK → Edges (27,087 unique GroupObjectId)                 │
+│     ├── TypeFlags: 1=anchor, 2/4/10/12=walkable              │
+│     ├── Subtype: Floor level (0-8)                           │
+│     ├── RefIndex → MSUR (surface)                            │
+│     ├── MSPI → MSPV (4-vertex nav quads)                     │
+│     └── LinkId: Tile coords for cross-tile refs              │
+├──────────────────────────────────────────────────────────────┤
+│ COLLISION GEOMETRY                                            │
+│   MSUR → Surface definitions                                  │
+│     ├── GroupKey: 3=terrain, 18/19=WMO                       │
+│     ├── CK24: Object ID (WMO/M2 unique key)                  │
+│     ├── MdosIndex → MSCN (scene node reference)              │
+│     └── MSVI → MSVT (triangle mesh vertices)                 │
+├──────────────────────────────────────────────────────────────┤
+│ OBJECT PLACEMENT                                              │
+│   MPRL → Position + Rotation for placed objects               │
+│   MPRR → Reference records (links to MPRL or MSVT)           │
+│     ├── Value1: Index (MPRL if < MPRL.Count, else MSVT)      │
+│     └── Value2: Flags (hi-byte=floor?, lo-byte=edge type?)   │
+├──────────────────────────────────────────────────────────────┤
+│ SCENE DATA                                                    │
+│   MSCN → Scene/collision nodes (point cloud)                  │
+│          (Referenced by MSUR.MdosIndex)                       │
+├──────────────────────────────────────────────────────────────┤
+│ DESTRUCTIBLE (Wintergrasp only)                               │
+│   MDBH/MDBI/MDBF/MDOS/MDSF → Server-side building states     │
+└──────────────────────────────────────────────────────────────┘
+
+DATA FLOW:
+  Object Instance → CK24 → MSUR surfaces → MSVT geometry
+                                        → MSCN collision points
+  Navigation      → MSLK edges → Components → Nav mesh quads
+  Placement       → MPRL position/rotation → MPRR links
+");
+        
+        // === Cross-reference verification ===
+        Console.WriteLine("=== CROSS-REFERENCE VERIFICATION ===");
+        
+        // MSLK → MSUR
+        int validMslkToMsur = pm4.LinkEntries.Count(e => e.RefIndex < pm4.Surfaces.Count);
+        Console.WriteLine($"MSLK.RefIndex → MSUR: {validMslkToMsur}/{pm4.LinkEntries.Count} ({100.0*validMslkToMsur/pm4.LinkEntries.Count:F1}%)");
+        
+        // MSUR.MdosIndex → MSCN
+        int validMsurToMscn = pm4.Surfaces.Count(s => s.MdosIndex < pm4.SceneNodes.Count);
+        Console.WriteLine($"MSUR.MdosIndex → MSCN: {validMsurToMscn}/{pm4.Surfaces.Count} ({100.0*validMsurToMscn/pm4.Surfaces.Count:F1}%)");
+        
+        // MSUR → MSVI → MSVT
+        int validMsurToMsvt = pm4.Surfaces.Count(s => 
+            s.MsviFirstIndex + s.IndexCount <= pm4.MeshIndices.Count);
+        Console.WriteLine($"MSUR → MSVI (in range): {validMsurToMsvt}/{pm4.Surfaces.Count} ({100.0*validMsurToMsvt/pm4.Surfaces.Count:F1}%)");
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Deep MPRL footprint analysis - investigate if MPRL is building footprints/terrain barriers.
+    /// User hypothesis: MPRL contains many vertices around building bases, not single placement points.
+    /// </summary>
+    static int RunMprlFootprintAnalysis(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var data = File.ReadAllBytes(pm4Path);
+        var pm4 = Pm4File.Parse(data);
+        string tileName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        Console.WriteLine($"=== MPRL FOOTPRINT ANALYSIS: {tileName} ===");
+        Console.WriteLine($"Testing hypothesis: MPRL = building footprints/terrain barriers\n");
+        
+        // Basic MPRL stats
+        int totalMprl = pm4.PositionRefs.Count;
+        int normalEntries = pm4.PositionRefs.Count(p => p.Unknown0x16 == 0);  // Type 0 = normal
+        int terminatorEntries = pm4.PositionRefs.Count(p => p.Unknown0x16 != 0);  // Type 0x3FFF = terminator
+        
+        Console.WriteLine($"=== MPRL ENTRY DISTRIBUTION ===");
+        Console.WriteLine($"Total MPRL entries: {totalMprl}");
+        Console.WriteLine($"  Normal entries (type=0): {normalEntries}");
+        Console.WriteLine($"  Terminator entries: {terminatorEntries}");
+        
+        // Get normal entries only for spatial analysis
+        var normalMprl = pm4.PositionRefs
+            .Select((p, i) => new {
+                Index = i,
+                Entry = p,
+                // MPRL to MSVT coordinate mapping (based on observed ranges):
+                // MPRL field | Observed range | Maps to MSVT axis
+                // PositionX  | 11749-12263    | Y (MSVT Y: 11733-12267)
+                // PositionY  | 40-184         | Z height (MSVT Z: -12 to 390)
+                // PositionZ  | 9605-10130     | X (MSVT X: 9600-10133)
+                X = p.PositionZ,   // MPRL Z -> MSVT X
+                Y = p.PositionX,   // MPRL X -> MSVT Y
+                Z = p.PositionY,   // MPRL Y -> MSVT Z (height)
+                Floor = p.Unknown0x14,
+                Rotation = 360.0f * p.Unknown0x04 / 65536.0f
+            })
+            .Where(p => p.Entry.Unknown0x16 == 0)
+            .ToList();
+        
+        if (normalMprl.Count == 0)
+        {
+            Console.WriteLine("No normal MPRL entries found!");
+            return 0;
+        }
+        
+        // Compute MPRL bounding box
+        float minX = normalMprl.Min(p => p.X);
+        float maxX = normalMprl.Max(p => p.X);
+        float minY = normalMprl.Min(p => p.Y);
+        float maxY = normalMprl.Max(p => p.Y);
+        float minZ = normalMprl.Min(p => p.Z);
+        float maxZ = normalMprl.Max(p => p.Z);
+        
+        Console.WriteLine($"\n=== MPRL SPATIAL BOUNDS ===");
+        Console.WriteLine($"X range: {minX:F1} to {maxX:F1} (span: {maxX-minX:F1})");
+        Console.WriteLine($"Y range: {minY:F1} to {maxY:F1} (span: {maxY-minY:F1})");
+        Console.WriteLine($"Z range: {minZ:F1} to {maxZ:F1} (span: {maxZ-minZ:F1})");
+        
+        // Compare with MSVT geometry bounds
+        if (pm4.MeshVertices.Count > 0)
+        {
+            float msvtMinX = pm4.MeshVertices.Min(v => v.X);
+            float msvtMaxX = pm4.MeshVertices.Max(v => v.X);
+            float msvtMinY = pm4.MeshVertices.Min(v => v.Y);
+            float msvtMaxY = pm4.MeshVertices.Max(v => v.Y);
+            float msvtMinZ = pm4.MeshVertices.Min(v => v.Z);
+            float msvtMaxZ = pm4.MeshVertices.Max(v => v.Z);
+            
+            Console.WriteLine($"\n=== MSVT (Geometry) BOUNDS for comparison ===");
+            Console.WriteLine($"MSVT X: {msvtMinX:F1} to {msvtMaxX:F1} (span: {msvtMaxX-msvtMinX:F1})");
+            Console.WriteLine($"MSVT Y: {msvtMinY:F1} to {msvtMaxY:F1} (span: {msvtMaxY-msvtMinY:F1})");
+            Console.WriteLine($"MSVT Z: {msvtMinZ:F1} to {msvtMaxZ:F1} (span: {msvtMaxZ-msvtMinZ:F1})");
+            
+            Console.WriteLine($"\nOverlap analysis:");
+            Console.WriteLine($"  MPRL within MSVT X: {(minX >= msvtMinX && maxX <= msvtMaxX)}");
+            Console.WriteLine($"  MPRL within MSVT Y: {(minY >= msvtMinY && maxY <= msvtMaxY)}");
+        }
+        
+        // === FLOOR LEVEL ANALYSIS ===
+        Console.WriteLine($"\n=== MPRL FLOOR LEVEL DISTRIBUTION ===");
+        var floorGroups = normalMprl.GroupBy(p => p.Floor).OrderBy(g => g.Key);
+        foreach (var fg in floorGroups.Take(10))
+        {
+            float fMinZ = fg.Min(p => p.Z);
+            float fMaxZ = fg.Max(p => p.Z);
+            Console.WriteLine($"  Floor {fg.Key}: {fg.Count()} entries, Z range: {fMinZ:F1} - {fMaxZ:F1}");
+        }
+        
+        // === ROTATION ANALYSIS ===
+        Console.WriteLine($"\n=== MPRL ROTATION ANALYSIS ===");
+        var rotationGroups = normalMprl.GroupBy(p => Math.Round(p.Rotation / 5.0) * 5)  // Group by 5-degree bins
+            .OrderByDescending(g => g.Count())
+            .Take(10);
+        Console.WriteLine("Top 10 rotation values (5° bins):");
+        foreach (var rg in rotationGroups)
+        {
+            Console.WriteLine($"  ~{rg.Key:F0}°: {rg.Count()} entries");
+        }
+        
+        // === SPATIAL CLUSTERING (are MPRL points clustered around objects?) ===
+        Console.WriteLine($"\n=== SPATIAL CLUSTERING ANALYSIS ===");
+        
+        // Group by CK24 and check if MPRL points cluster near those objects
+        var surfacesByCk24 = pm4.Surfaces.GroupBy(s => s.CK24).Where(g => g.Key != 0).ToList();
+        Console.WriteLine($"Unique CK24 objects (excluding 0): {surfacesByCk24.Count}");
+        
+        // For each CK24, compute its bounding box from MSVT vertices
+        var ck24Bounds = new Dictionary<uint, (Vector3 min, Vector3 max, int surfCount)>();
+        foreach (var ck24Grp in surfacesByCk24)
+        {
+            var vertices = new List<Vector3>();
+            foreach (var surf in ck24Grp)
+            {
+                for (int i = 0; i < (int)surf.IndexCount && surf.MsviFirstIndex + i < pm4.MeshIndices.Count; i++)
+                {
+                    uint vsIdx = pm4.MeshIndices[(int)surf.MsviFirstIndex + i];
+                    if (vsIdx < pm4.MeshVertices.Count)
+                    {
+                        var v = pm4.MeshVertices[(int)vsIdx];
+                        vertices.Add(new Vector3(v.X, v.Y, v.Z));
+                    }
+                }
+            }
+            
+            if (vertices.Count > 0)
+            {
+                var min = new Vector3(vertices.Min(v => v.X), vertices.Min(v => v.Y), vertices.Min(v => v.Z));
+                var max = new Vector3(vertices.Max(v => v.X), vertices.Max(v => v.Y), vertices.Max(v => v.Z));
+                ck24Bounds[ck24Grp.Key] = (min, max, ck24Grp.Count());
+            }
+        }
+        
+        // Count MPRL points within each CK24's bounding box (foot-print test)
+        Console.WriteLine($"\nMPRL points near CK24 object bounds (within 5 units):");
+        var mprlNearCk24 = new Dictionary<uint, int>();
+        float margin = 5.0f;  // Search margin around bounding box
+        
+        foreach (var (ck24, bounds) in ck24Bounds.OrderByDescending(kv => kv.Value.surfCount).Take(20))
+        {
+            int nearbyCount = normalMprl.Count(p => 
+                p.X >= bounds.min.X - margin && p.X <= bounds.max.X + margin &&
+                p.Y >= bounds.min.Y - margin && p.Y <= bounds.max.Y + margin);
+            
+            if (nearbyCount > 0)
+            {
+                mprlNearCk24[ck24] = nearbyCount;
+                float sizeX = bounds.max.X - bounds.min.X;
+                float sizeY = bounds.max.Y - bounds.min.Y;
+                Console.WriteLine($"  CK24 0x{ck24:X6}: {nearbyCount} MPRL, box {sizeX:F0}x{sizeY:F0}, {bounds.surfCount} surfaces");
+            }
+        }
+        
+        int totalNearObjects = mprlNearCk24.Values.Sum();
+        Console.WriteLine($"\nTotal MPRL within object bounds: {totalNearObjects}/{normalMprl.Count} ({100.0*totalNearObjects/normalMprl.Count:F1}%)");
+        
+        // === FOOTPRINT PERIMETER TEST ===
+        // If MPRL is a footprint, points should be at the EDGES of bounding boxes (perimeter)
+        Console.WriteLine($"\n=== FOOTPRINT PERIMETER TEST ===");
+        Console.WriteLine("Testing if MPRL points cluster at object EDGES (footprint perimeter)");
+        
+        int perimeterPoints = 0;
+        int interiorPoints = 0;
+        float edgeMargin = 3.0f;  // Consider points within 3 units of edge as "on edge"
+        
+        foreach (var (ck24, bounds) in ck24Bounds)
+        {
+            foreach (var mprl in normalMprl)
+            {
+                // Check if within bounding box (with margin)
+                if (mprl.X >= bounds.min.X - margin && mprl.X <= bounds.max.X + margin &&
+                    mprl.Y >= bounds.min.Y - margin && mprl.Y <= bounds.max.Y + margin)
+                {
+                    // Check if on edge (near boundary) or in interior
+                    bool nearXMin = Math.Abs(mprl.X - bounds.min.X) < edgeMargin;
+                    bool nearXMax = Math.Abs(mprl.X - bounds.max.X) < edgeMargin;
+                    bool nearYMin = Math.Abs(mprl.Y - bounds.min.Y) < edgeMargin;
+                    bool nearYMax = Math.Abs(mprl.Y - bounds.max.Y) < edgeMargin;
+                    
+                    if (nearXMin || nearXMax || nearYMin || nearYMax)
+                        perimeterPoints++;
+                    else
+                        interiorPoints++;
+                }
+            }
+        }
+        
+        Console.WriteLine($"  Perimeter points (near edges): {perimeterPoints}");
+        Console.WriteLine($"  Interior points: {interiorPoints}");
+        if (perimeterPoints + interiorPoints > 0)
+        {
+            Console.WriteLine($"  Perimeter ratio: {100.0*perimeterPoints/(perimeterPoints+interiorPoints):F1}%");
+            if (perimeterPoints > interiorPoints)
+                Console.WriteLine($"  RESULT: MPRL favors EDGES → supports FOOTPRINT hypothesis!");
+            else
+                Console.WriteLine($"  RESULT: MPRL in interiors → does NOT support footprint hypothesis");
+        }
+        
+        // === DENSITY ANALYSIS (many points per object = footprint, few = placement) ===
+        Console.WriteLine($"\n=== MPRL DENSITY PER OBJECT ===");
+        var mprlPerCk24 = mprlNearCk24.OrderByDescending(kv => kv.Value).Take(10);
+        Console.WriteLine("Objects with most MPRL points:");
+        foreach (var (ck24, count) in mprlPerCk24)
+        {
+            var bounds = ck24Bounds[ck24];
+            float area = (bounds.max.X - bounds.min.X) * (bounds.max.Y - bounds.min.Y);
+            float density = area > 0 ? count / area : 0;
+            Console.WriteLine($"  CK24 0x{ck24:X6}: {count} MPRL, area: {area:F0} sq, density: {density:F3}/sq");
+        }
+        
+        // === EXPORT OBJs FOR VISUAL VERIFICATION ===
+        // Output to test_output folder (not temp - user clears that)
+        string baseDir = Path.GetDirectoryName(pm4Path) ?? ".";
+        string outputDir = Path.Combine(baseDir, "..", "..", "..", "..", "test_output", "mprl_terrain_points");
+        Directory.CreateDirectory(outputDir);
+        
+        // Export 1: MPRL points only
+        string mprlObjPath = Path.Combine(outputDir, $"{tileName}_mprl_points.obj");
+        using (var sw = new StreamWriter(mprlObjPath))
+        {
+            sw.WriteLine($"# MPRL Points from {tileName}");
+            sw.WriteLine($"# Total points: {normalMprl.Count}");
+            sw.WriteLine($"# Showing MPRL distribution - load alongside geometry to verify footprint hypothesis");
+            sw.WriteLine();
+            
+            foreach (var p in normalMprl)
+            {
+                sw.WriteLine($"v {p.X:F3} {p.Y:F3} {p.Z:F3}");
+            }
+        }
+        Console.WriteLine($"\n=== EXPORTED OBJs FOR VISUAL VERIFICATION ===");
+        Console.WriteLine($"MPRL points: {mprlObjPath}");
+        
+        // Export 2: For each CK24 with MPRL points, export geometry + MPRL together
+        var topCk24s = mprlNearCk24.OrderByDescending(kv => kv.Value).Take(5);
+        foreach (var (ck24, mprlCount) in topCk24s)
+        {
+            string ck24ObjPath = Path.Combine(outputDir, $"{tileName}_ck24_{ck24:X6}_with_mprl.obj");
+            
+            using (var sw = new StreamWriter(ck24ObjPath))
+            {
+                sw.WriteLine($"# CK24 0x{ck24:X6} geometry + MPRL points");
+                sw.WriteLine($"# This shows MPRL distribution relative to object geometry");
+                sw.WriteLine();
+                
+                // Collect geometry for this CK24
+                var ck24Surfaces = pm4.Surfaces.Where(s => s.CK24 == ck24).ToList();
+                var vertices = new List<Vector3>();
+                var faces = new List<(int, int, int)>();
+                
+                foreach (var surf in ck24Surfaces)
+                {
+                    if (surf.IndexCount < 3) continue;
+                    
+                    // Get triangle indices
+                    for (int t = 0; t < (int)surf.IndexCount - 2; t += 3)
+                    {
+                        int idx0 = (int)surf.MsviFirstIndex + t;
+                        int idx1 = (int)surf.MsviFirstIndex + t + 1;
+                        int idx2 = (int)surf.MsviFirstIndex + t + 2;
+                        
+                        if (idx2 >= pm4.MeshIndices.Count) continue;
+                        
+                        uint vi0 = pm4.MeshIndices[idx0];
+                        uint vi1 = pm4.MeshIndices[idx1];
+                        uint vi2 = pm4.MeshIndices[idx2];
+                        
+                        if (vi0 >= pm4.MeshVertices.Count || vi1 >= pm4.MeshVertices.Count || vi2 >= pm4.MeshVertices.Count) continue;
+                        
+                        var v0 = pm4.MeshVertices[(int)vi0];
+                        var v1 = pm4.MeshVertices[(int)vi1];
+                        var v2 = pm4.MeshVertices[(int)vi2];
+                        
+                        int baseIdx = vertices.Count;
+                        vertices.Add(new Vector3(v0.X, v0.Y, v0.Z));
+                        vertices.Add(new Vector3(v1.X, v1.Y, v1.Z));
+                        vertices.Add(new Vector3(v2.X, v2.Y, v2.Z));
+                        faces.Add((baseIdx + 1, baseIdx + 2, baseIdx + 3));  // OBJ is 1-indexed
+                    }
+                }
+                
+                // Write geometry vertices
+                sw.WriteLine($"# CK24 geometry: {vertices.Count} vertices, {faces.Count} triangles");
+                foreach (var v in vertices)
+                {
+                    sw.WriteLine($"v {v.X:F3} {v.Y:F3} {v.Z:F3}");
+                }
+                
+                // Write faces
+                foreach (var (a, b, c) in faces)
+                {
+                    sw.WriteLine($"f {a} {b} {c}");
+                }
+                
+                // Now add MPRL points as additional vertices (for visual overlay)
+                var bounds = ck24Bounds[ck24];
+                // margin already defined in outer scope
+                var nearbyMprlPts = normalMprl.Where(p => 
+                    p.X >= bounds.min.X - margin && p.X <= bounds.max.X + margin &&
+                    p.Y >= bounds.min.Y - margin && p.Y <= bounds.max.Y + margin).ToList();
+                
+                sw.WriteLine();
+                sw.WriteLine($"# MPRL points near this object: {nearbyMprlPts.Count}");
+                sw.WriteLine("# (These are additional vertices - not connected, just point markers)");
+                foreach (var mp in nearbyMprlPts)
+                {
+                    // Output MPRL at same Z as geometry floor for visibility
+                    sw.WriteLine($"v {mp.X:F3} {mp.Y:F3} {mp.Z:F3}");
+                }
+            }
+            
+            Console.WriteLine($"CK24 0x{ck24:X6} + MPRL: {ck24ObjPath}");
+        }
+        
+        // Export 3: All geometry bounding boxes as wireframe + MPRL
+        string combinedPath = Path.Combine(outputDir, $"{tileName}_all_bounds_with_mprl.obj");
+        using (var sw = new StreamWriter(combinedPath))
+        {
+            sw.WriteLine($"# All CK24 bounding boxes (wireframe) + MPRL points");
+            sw.WriteLine($"# This shows spatial relationship between MPRL and object footprints");
+            sw.WriteLine();
+            
+            int vertIdx = 1;
+            
+            // Draw bounding boxes as wireframe cubes
+            foreach (var (ck24, bounds) in ck24Bounds)
+            {
+                // 8 corners of bounding box
+                var corners = new[] {
+                    new Vector3(bounds.min.X, bounds.min.Y, bounds.min.Z),  // 0: min corner
+                    new Vector3(bounds.max.X, bounds.min.Y, bounds.min.Z),  // 1
+                    new Vector3(bounds.max.X, bounds.max.Y, bounds.min.Z),  // 2
+                    new Vector3(bounds.min.X, bounds.max.Y, bounds.min.Z),  // 3
+                    new Vector3(bounds.min.X, bounds.min.Y, bounds.max.Z),  // 4: max Z level
+                    new Vector3(bounds.max.X, bounds.min.Y, bounds.max.Z),  // 5
+                    new Vector3(bounds.max.X, bounds.max.Y, bounds.max.Z),  // 6: max corner
+                    new Vector3(bounds.min.X, bounds.max.Y, bounds.max.Z),  // 7
+                };
+                
+                sw.WriteLine($"# CK24 0x{ck24:X6} bounding box");
+                foreach (var c in corners)
+                {
+                    sw.WriteLine($"v {c.X:F3} {c.Y:F3} {c.Z:F3}");
+                }
+                
+                // Bottom face, top face, vertical edges (as lines - using 'l')
+                sw.WriteLine($"l {vertIdx} {vertIdx+1}");
+                sw.WriteLine($"l {vertIdx+1} {vertIdx+2}");
+                sw.WriteLine($"l {vertIdx+2} {vertIdx+3}");
+                sw.WriteLine($"l {vertIdx+3} {vertIdx}");
+                sw.WriteLine($"l {vertIdx+4} {vertIdx+5}");
+                sw.WriteLine($"l {vertIdx+5} {vertIdx+6}");
+                sw.WriteLine($"l {vertIdx+6} {vertIdx+7}");
+                sw.WriteLine($"l {vertIdx+7} {vertIdx+4}");
+                sw.WriteLine($"l {vertIdx} {vertIdx+4}");
+                sw.WriteLine($"l {vertIdx+1} {vertIdx+5}");
+                sw.WriteLine($"l {vertIdx+2} {vertIdx+6}");
+                sw.WriteLine($"l {vertIdx+3} {vertIdx+7}");
+                
+                vertIdx += 8;
+            }
+            
+            // Add all MPRL points 
+            sw.WriteLine();
+            sw.WriteLine($"# MPRL points: {normalMprl.Count}");
+            foreach (var p in normalMprl)
+            {
+                sw.WriteLine($"v {p.X:F3} {p.Y:F3} {p.Z:F3}");
+            }
+        }
+        Console.WriteLine($"All bounds + MPRL: {combinedPath}");
+        Console.WriteLine($"\nOpen these OBJs in a 3D viewer to verify MPRL distribution!");
+        
+        // === HYPOTHESIS CONCLUSION ===
+        Console.WriteLine($"\n=== HYPOTHESIS EVALUATION ===");
+        Console.WriteLine("Testing: MPRL = building footprints/terrain barriers (many perimeter vertices)");
+        
+        // Evidence summary
+        int evidence = 0;
+        if (normalMprl.Count > 100)
+        {
+            Console.WriteLine("✓ High vertex count suggests footprints (not simple placement points)");
+            evidence++;
+        }
+        if (perimeterPoints > interiorPoints)
+        {
+            Console.WriteLine("✓ More perimeter points than interior → supports footprint");
+            evidence++;
+        }
+        else
+        {
+            Console.WriteLine("✗ Interior points dominate → may NOT be footprints");
+        }
+        if (mprlNearCk24.Count > surfacesByCk24.Count / 2)
+        {
+            Console.WriteLine("✓ Most CK24 objects have associated MPRL → supports per-object footprints");
+            evidence++;
+        }
+        
+        Console.WriteLine($"\nEvidence score: {evidence}/3");
+        if (evidence >= 2)
+            Console.WriteLine("CONCLUSION: MPRL likely IS building footprints/terrain barriers!");
+        else
+            Console.WriteLine("CONCLUSION: MPRL may have different purpose (needs more investigation)");
+        
+        return 0;
+    }
+    
+    /// <summary>
+    /// Extract terrain height data from MPRL terrain intersection points.
+    /// Maps MPRL Z values to ADT MCNK chunk positions for terrain reconstruction.
+    /// </summary>
+    static int RunMprlToAdtTerrainExtraction(string pm4Path)
+    {
+        if (!File.Exists(pm4Path))
+        {
+            Console.WriteLine($"File not found: {pm4Path}");
+            return 1;
+        }
+        
+        var data = File.ReadAllBytes(pm4Path);
+        var pm4 = Pm4File.Parse(data);
+        string tileName = Path.GetFileNameWithoutExtension(pm4Path);
+        
+        // Extract tile coordinates from filename (development_XX_YY.pm4)
+        int tileX = 0, tileY = 0;
+        var match = System.Text.RegularExpressions.Regex.Match(tileName, @"_(\d+)_(\d+)$");
+        if (match.Success)
+        {
+            tileX = int.Parse(match.Groups[1].Value);
+            tileY = int.Parse(match.Groups[2].Value);
+        }
+        
+        Console.WriteLine($"=== MPRL TO ADT TERRAIN EXTRACTION: {tileName} ===");
+        Console.WriteLine($"Tile coordinates: ({tileX}, {tileY})");
+        Console.WriteLine($"Extracting terrain heights from MPRL intersection points\n");
+        
+        // ADT constants
+        const float ADT_SIZE = 533.333f;  // ADT tile size in yards
+        const int CHUNKS_PER_SIDE = 16;   // 16x16 MCNK chunks per ADT
+        const float MCNK_SIZE = ADT_SIZE / CHUNKS_PER_SIDE;  // ~33.33 yards per chunk
+        const int VERTS_PER_CHUNK = 9;    // 9x9 heightmap vertices per chunk (edges shared)
+        const float VERT_SPACING = MCNK_SIZE / 8;  // spacing between vertices
+        
+        // Get normal MPRL entries (type=0)
+        var normalMprl = pm4.PositionRefs
+            .Where(p => p.Unknown0x16 == 0)
+            .Select(p => new {
+                // MPRL to MSVT coordinate mapping
+                X = p.PositionZ,   // MPRL Z -> MSVT X
+                Y = p.PositionX,   // MPRL X -> MSVT Y
+                Z = p.PositionY,   // MPRL Y -> MSVT Z (height)
+                Floor = p.Unknown0x14
+            })
+            .ToList();
+        
+        Console.WriteLine($"MPRL entries: {pm4.PositionRefs.Count} total, {normalMprl.Count} normal entries");
+        
+        if (normalMprl.Count == 0)
+        {
+            Console.WriteLine("No MPRL data to extract!");
+            return 0;
+        }
+        
+        // Compute MPRL bounds
+        float minX = normalMprl.Min(p => p.X);
+        float maxX = normalMprl.Max(p => p.X);
+        float minY = normalMprl.Min(p => p.Y);
+        float maxY = normalMprl.Max(p => p.Y);
+        float minZ = normalMprl.Min(p => p.Z);
+        float maxZ = normalMprl.Max(p => p.Z);
+        
+        Console.WriteLine($"\nMPRL terrain intersection bounds:");
+        Console.WriteLine($"  X: {minX:F1} to {maxX:F1} (span: {maxX-minX:F1})");
+        Console.WriteLine($"  Y: {minY:F1} to {maxY:F1} (span: {maxY-minY:F1})");
+        Console.WriteLine($"  Z (height): {minZ:F1} to {maxZ:F1} (span: {maxZ-minZ:F1})");
+        
+        // Create 16x16 grid of MCNK chunks
+        var chunkHeights = new List<float>[16, 16];
+        for (int cx = 0; cx < 16; cx++)
+            for (int cy = 0; cy < 16; cy++)
+                chunkHeights[cx, cy] = new List<float>();
+        
+        // Map MPRL points to chunks
+        // Assume tile starts at minX, minY and covers ADT_SIZE
+        float tileMinX = minX;
+        float tileMinY = minY;
+        
+        int mappedPoints = 0;
+        foreach (var pt in normalMprl)
+        {
+            // Calculate chunk indices
+            int cx = (int)((pt.X - tileMinX) / MCNK_SIZE);
+            int cy = (int)((pt.Y - tileMinY) / MCNK_SIZE);
+            
+            // Clamp to valid range
+            cx = Math.Clamp(cx, 0, 15);
+            cy = Math.Clamp(cy, 0, 15);
+            
+            // Add height to chunk's height collection
+            chunkHeights[cx, cy].Add(pt.Z);
+            mappedPoints++;
+        }
+        
+        Console.WriteLine($"\nMapped {mappedPoints} MPRL points to MCNK chunks");
+        
+        // Analyze chunk coverage
+        int chunksWithData = 0;
+        int totalHeightPoints = 0;
+        float[,] avgChunkHeights = new float[16, 16];
+        
+        Console.WriteLine("\n=== MCNK CHUNK HEIGHT DATA ===");
+        for (int cy = 0; cy < 16; cy++)
+        {
+            var row = new List<string>();
+            for (int cx = 0; cx < 16; cx++)
+            {
+                var heights = chunkHeights[cx, cy];
+                if (heights.Count > 0)
+                {
+                    chunksWithData++;
+                    totalHeightPoints += heights.Count;
+                    avgChunkHeights[cx, cy] = heights.Average();
+                    row.Add($"{heights.Count,3}");
+                }
+                else
+                {
+                    avgChunkHeights[cx, cy] = float.NaN;
+                    row.Add("  -");
+                }
+            }
+            Console.WriteLine($"Row {cy,2}: {string.Join(" ", row)}");
+        }
+        
+        Console.WriteLine($"\nChunks with MPRL data: {chunksWithData}/256 ({100.0*chunksWithData/256:F1}%)");
+        Console.WriteLine($"Total height points: {totalHeightPoints}");
+        
+        // === Export terrain heightmap as OBJ ===
+        string baseDir = Path.GetDirectoryName(pm4Path) ?? ".";
+        string outputDir = Path.Combine(baseDir, "..", "..", "..", "..", "test_output", "mprl_terrain");
+        Directory.CreateDirectory(outputDir);
+        
+        // Export 1: Raw MPRL points as terrain mesh
+        string terrainObjPath = Path.Combine(outputDir, $"{tileName}_terrain_points.obj");
+        using (var sw = new StreamWriter(terrainObjPath))
+        {
+            sw.WriteLine($"# MPRL Terrain Intersection Points - {tileName}");
+            sw.WriteLine($"# {normalMprl.Count} points representing terrain heights where objects touch ground");
+            sw.WriteLine($"# Z range: {minZ:F1} to {maxZ:F1}");
+            sw.WriteLine();
+            
+            foreach (var pt in normalMprl)
+            {
+                sw.WriteLine($"v {pt.X:F3} {pt.Y:F3} {pt.Z:F3}");
+            }
+        }
+        Console.WriteLine($"\n=== EXPORTED ===");
+        Console.WriteLine($"Terrain points: {terrainObjPath}");
+        
+        // Export 2: Chunk average heights as grid
+        string gridObjPath = Path.Combine(outputDir, $"{tileName}_terrain_grid.obj");
+        using (var sw = new StreamWriter(gridObjPath))
+        {
+            sw.WriteLine($"# MPRL Chunk Average Heights - {tileName}");
+            sw.WriteLine($"# 16x16 grid of average terrain heights from MPRL data");
+            sw.WriteLine();
+            
+            int vertIdx = 1;
+            
+            // Create grid vertices
+            for (int cy = 0; cy < 16; cy++)
+            {
+                for (int cx = 0; cx < 16; cx++)
+                {
+                    float x = tileMinX + cx * MCNK_SIZE + MCNK_SIZE / 2;
+                    float y = tileMinY + cy * MCNK_SIZE + MCNK_SIZE / 2;
+                    float z = float.IsNaN(avgChunkHeights[cx, cy]) ? minZ : avgChunkHeights[cx, cy];
+                    sw.WriteLine($"v {x:F3} {y:F3} {z:F3}");
+                }
+            }
+            
+            // Create quad faces for the grid
+            for (int cy = 0; cy < 15; cy++)
+            {
+                for (int cx = 0; cx < 15; cx++)
+                {
+                    int v0 = cy * 16 + cx + 1;        // bottom-left
+                    int v1 = cy * 16 + cx + 2;        // bottom-right
+                    int v2 = (cy + 1) * 16 + cx + 2;  // top-right
+                    int v3 = (cy + 1) * 16 + cx + 1;  // top-left
+                    sw.WriteLine($"f {v0} {v1} {v2} {v3}");
+                }
+            }
+        }
+        Console.WriteLine($"Terrain grid: {gridObjPath}");
+        
+        // Export 3: CSV with chunk height data for ADT injection
+        string csvPath = Path.Combine(outputDir, $"{tileName}_terrain_heights.csv");
+        using (var sw = new StreamWriter(csvPath))
+        {
+            sw.WriteLine("ChunkX,ChunkY,AvgHeight,MinHeight,MaxHeight,PointCount");
+            for (int cy = 0; cy < 16; cy++)
+            {
+                for (int cx = 0; cx < 16; cx++)
+                {
+                    var heights = chunkHeights[cx, cy];
+                    if (heights.Count > 0)
+                    {
+                        sw.WriteLine($"{cx},{cy},{heights.Average():F3},{heights.Min():F3},{heights.Max():F3},{heights.Count}");
+                    }
+                }
+            }
+        }
+        Console.WriteLine($"Height CSV: {csvPath}");
+        
+        Console.WriteLine($"\nReady for ADT terrain injection!");
+        Console.WriteLine($"Use CSV data to update MCNK heightmap (MCVT) in ADT files.");
+        
         return 0;
     }
     

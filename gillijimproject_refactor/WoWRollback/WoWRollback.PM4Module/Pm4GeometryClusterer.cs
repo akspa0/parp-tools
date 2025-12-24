@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -203,10 +203,10 @@ namespace WoWRollback.PM4Module
 
             // Convert MPRL positions from YZX to XYZ and cache
             var mprlConverted = positionRefs
-                .Where(p => p.Unknown0x16 == 0)  // Non-terminator entries only
+                .Where(p => p.Unk16 == 0)  // Non-terminator entries only
                 .Select(p => new {
                     Entry = p,
-                    // YZX → XYZ conversion
+                    // YZX â†’ XYZ conversion
                     X = p.PositionZ,  // stored Z is real X
                     Y = p.PositionX,  // stored X is real Y
                     Z = p.PositionY   // stored Y is real Z
@@ -227,14 +227,14 @@ namespace WoWRollback.PM4Module
                 {
                     var closest = nearby.First();
                     
-                    // Extract rotation (0-65535 → 0-360°)
-                    cluster.MprlRotationDegrees = 360.0f * closest.Entry.Unknown0x04 / 65536.0f;
+                    // Extract rotation (0-65535 â†’ 0-360Â°)
+                    cluster.MprlRotationDegrees = 360.0f * closest.Entry.Unk04 / 65536.0f;
                     
                     // Use converted XYZ position
                     cluster.MprlPlacementPosition = new Vector3(closest.X, closest.Y, closest.Z);
                     
                     // Floor level
-                    cluster.MprlFloorLevel = closest.Entry.Unknown0x14;
+                    cluster.MprlFloorLevel = closest.Entry.Unk14;
                 }
             }
         }

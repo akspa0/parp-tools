@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
@@ -23,6 +24,409 @@ public static class WdlToAdtGenerator
         public short[,] Height17 { get; } = new short[17, 17];
         public short[,] Height16 { get; } = new short[16, 16];
         public ushort[] HoleMask16 { get; } = new ushort[16];
+    }
+
+    /// <summary>
+    /// MPRL terrain intersection point (transformed to MSVT coordinate space).
+    /// </summary>
+    public class MprlPoint
+    {
+        public float X { get; set; }  // MSVT X coordinate
+        public float Y { get; set; }  // MSVT Y coordinate  
+        public float Z { get; set; }  // Height value
+        public int Floor { get; set; } // Floor level (optional)
+    }
+
+    /// <summary>
+    /// Apply MPRL terrain intersection heights to refine museum texture heightmap data.
+    /// MPRL contains precise Z heights where WMO/M2 objects touch the terrain.
+    /// </summary>
+    /// <param name="museumTexture">Museum texture data with McvtPerChunk to be modified.</param>
+    /// <param name="mprlPoints">List of MPRL points in MSVT coordinate space.</param>
+    /// <param name="tileMinX">Minimum X coordinate of the tile.</param>
+    /// <param name="tileMinY">Minimum Y coordinate of the tile.</param>
+    /// <returns>Number of vertices modified.</returns>
+    public static int ApplyMprlHeights(MuseumTextureExtractor.MuseumTextureData museumTexture, 
+        List<MprlPoint> mprlPoints, float tileMinX, float tileMinY)
+    {
+        if (museumTexture?.McvtPerChunk == null) return 0;
+        
+        int modifiedCount = 0;
+        const float blendFactor = 0.5f;  // Weight for MPRL vs existing height
+        const float spikeThreshold = 50.0f;  // Ignore changes larger than this
+        
+        foreach (var pt in mprlPoints)
+        {
+            // Calculate which chunk this point belongs to
+            float relX = pt.X - tileMinX;
+            float relY = pt.Y - tileMinY;
+            
+            // Skip points outside tile bounds
+            if (relX < 0 || relX >= TileSize || relY < 0 || relY >= TileSize)
+                continue;
+            
+            int chunkX = (int)(relX / ChunkSize);
+            int chunkY = (int)(relY / ChunkSize);
+            chunkX = Math.Clamp(chunkX, 0, 15);
+            chunkY = Math.Clamp(chunkY, 0, 15);
+            
+            int chunkIdx = chunkY * 16 + chunkX;
+            var mcvtData = museumTexture.McvtPerChunk[chunkIdx];
+            
+            if (mcvtData == null || mcvtData.Length != 145 * 4)
+                continue;
+            
+            // Calculate vertex position within chunk
+            float chunkMinX = tileMinX + chunkX * ChunkSize;
+            float chunkMinY = tileMinY + chunkY * ChunkSize;
+            
+            float vertRelX = (pt.X - chunkMinX) / ChunkSize * 8;
+            float vertRelY = (pt.Y - chunkMinY) / ChunkSize * 8;
+            
+            int vertCol = (int)Math.Round(vertRelX);
+            int vertRow = (int)Math.Round(vertRelY * 2);  // *2 because alternating rows
+            vertCol = Math.Clamp(vertCol, 0, 8);
+            vertRow = Math.Clamp(vertRow, 0, 16);
+            
+            // Calculate vertex index in 145-vertex array
+            // Layout: alternating rows of 9 outer vertices and 8 inner vertices
+            int vertIdx;
+            bool isInnerRow = (vertRow % 2) == 1;
+            int actualRow = vertRow / 2;
+            
+            if (isInnerRow)
+            {
+                // Inner rows have 8 vertices (indices 0-7)
+                int innerIdx = Math.Min(vertCol, 7);
+                // Count vertices: each full pair of rows = 9 + 8 = 17 vertices
+                vertIdx = actualRow * 17 + 9 + innerIdx;
+            }
+            else
+            {
+                // Outer rows have 9 vertices (indices 0-8)
+                vertIdx = actualRow * 17 + vertCol;
+            }
+            
+            if (vertIdx < 0 || vertIdx >= 145)
+                continue;
+            
+            // Read current height from MCVT
+            int byteOffset = vertIdx * 4;
+            float currentHeight = BitConverter.ToSingle(mcvtData, byteOffset);
+            
+            // Apply blended height (MPRL Z is absolute, MCVT stores relative)
+            // Need to estimate base Z from first vertex
+            float baseZ = BitConverter.ToSingle(mcvtData, 0);
+            float mprlRelativeHeight = pt.Z - baseZ;
+            float heightDiff = mprlRelativeHeight - currentHeight;
+            
+            // Skip if change would cause a spike
+            if (Math.Abs(heightDiff) > spikeThreshold)
+                continue;
+            
+            // Blend toward MPRL height
+            float newHeight = currentHeight + heightDiff * blendFactor;
+            byte[] newHeightBytes = BitConverter.GetBytes(newHeight);
+            Array.Copy(newHeightBytes, 0, mcvtData, byteOffset, 4);
+            
+            modifiedCount++;
+        }
+        
+        return modifiedCount;
+    }
+
+    /// <summary>
+    /// Extract terrain intersection points from PM4 MPRL data.
+    /// Transforms MPRL coordinates to MSVT space for terrain analysis.
+    /// </summary>
+    /// <param name="pm4">PM4 file with MPRL data</param>
+    /// <returns>List of MprlPoints in MSVT coordinate space</returns>
+    public static List<MprlPoint> ExtractMprlPoints(PM4File pm4)
+    {
+        var points = new List<MprlPoint>();
+        
+        if (pm4.PositionRefs == null || pm4.PositionRefs.Count == 0)
+            return points;
+        
+        // Extract non-terminator entries (Unk16 == 0 indicates normal entry)
+        foreach (var entry in pm4.PositionRefs)
+        {
+            if (entry.Unk16 != 0)  // Skip terminators
+                continue;
+            
+            // MPRL to MSVT coordinate mapping (discovered December 2025):
+            // MPRL.PositionZ -> MSVT X
+            // MPRL.PositionX -> MSVT Y
+            // MPRL.PositionY -> MSVT Z (height)
+            points.Add(new MprlPoint
+            {
+                X = entry.PositionZ,   // MPRL Z -> MSVT X
+                Y = entry.PositionX,   // MPRL X -> MSVT Y
+                Z = entry.PositionY,   // MPRL Y -> MSVT Z (terrain height)
+                Floor = entry.Unk14    // Floor level
+            });
+        }
+        
+        return points;
+    }
+
+    /// <summary>
+    /// Extract MPRL points and transform to WoW World coordinates.
+    /// MPRL appears to be in a coordinate system related to placement space.
+    /// </summary>
+    public static List<MprlPoint> ExtractMprlPointsAsWorld(PM4File pm4, int tileX, int tileY)
+    {
+        var points = new List<MprlPoint>();
+        
+        if (pm4.PositionRefs == null || pm4.PositionRefs.Count == 0)
+            return points;
+        
+        const float HalfMap = 17066.66656f;
+        
+        // Based on debug output:
+        // MPRL after axis swap: X=11749-12263, Y=9604-10129
+        // Expected tile world: X=4800-5333, Y=6933-7466
+        // 
+        // If MPRL is in placement space (like MODF writes), then:
+        // worldX = 17066 - placementZ, worldY = 17066 - placementX
+        //
+        // Let's try: After mapping PositionZ->X, PositionX->Y,
+        // they may already be in placement order
+        
+        foreach (var entry in pm4.PositionRefs)
+        {
+            if (entry.Unk16 != 0)  // Skip terminators
+                continue;
+            
+            // Raw MPRL mapping (from spec):
+            // PositionZ -> Our X
+            // PositionX -> Our Y
+            // PositionY -> Height
+            float mprlX = entry.PositionZ;
+            float mprlY = entry.PositionX;
+            float height = entry.PositionY;
+            
+            // Try: MPRL might be using placement coordinates
+            // Placement: x = 17066 - worldY, z = 17066 - worldX
+            // Reverse: worldX = 17066 - placementZ, worldY = 17066 - placementX
+            float worldX = HalfMap - mprlY;  // Try reversing the Y component
+            float worldY = HalfMap - mprlX;  // Try reversing the X component
+            
+            points.Add(new MprlPoint
+            {
+                X = worldX,
+                Y = worldY,
+                Z = height,
+                Floor = entry.Unk14
+            });
+        }
+        
+        return points;
+    }
+
+    /// <summary>
+    /// Records a single height modification made during terrain patching.
+    /// </summary>
+    public record HeightDiff(int ChunkX, int ChunkY, int VertexIdx, float OriginalHeight, float NewHeight, float MprlHeight);
+
+    /// <summary>
+    /// Patch MCVT heights directly in existing ADT bytes (in-place modification).
+    /// This preserves chunk continuity and all original positioning.
+    /// </summary>
+    public static int PatchAdtMcvtInPlace(byte[] adtBytes, List<MprlPoint> mprlPoints, int tileX, int tileY)
+    {
+        return PatchAdtMcvtInPlace(adtBytes, mprlPoints, tileX, tileY, out _);
+    }
+
+    /// <summary>
+    /// Patch MCVT heights with diff output for verification.
+    /// </summary>
+    public static int PatchAdtMcvtInPlace(byte[] adtBytes, List<MprlPoint> mprlPoints, int tileX, int tileY, out List<HeightDiff> diffs)
+    {
+        diffs = new List<HeightDiff>();
+        
+        if (mprlPoints == null || mprlPoints.Count == 0)
+            return 0;
+        
+        int modifiedCount = 0;
+        const float blendFactor = 1.0f;  // 100% trust MPRL - closest to real terrain data
+        const float spikeThreshold = 500.0f;  // Increased from 50 for large terrain differences
+        bool debugHeightPrinted = false;
+        
+        // Calculate tile world bounds (WoW world coordinate space)
+        // ADT tiles are 533.33 yards each, with tile 32,32 at world origin
+        float tileWorldX = (32 - tileX) * TileSize;
+        float tileWorldY = (32 - tileY) * TileSize;
+        
+        // Parse ADT to find MCNK chunks and their MCVT subchunks
+        int pos = 0;
+        int mcnkIndex = 0;
+        int mcvtFoundCount = 0;
+        
+        while (pos + 8 <= adtBytes.Length)
+        {
+            // Read chunk signature (reversed)
+            string sig = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
+            string readable = new string(sig.Reverse().ToArray());
+            uint size = BitConverter.ToUInt32(adtBytes, pos + 4);
+            
+            if (pos + 8 + size > adtBytes.Length)
+                break;
+            
+            if (readable == "MCNK")
+            {
+                // Parse MCNK header to get MCVT offset
+                int mcnkDataStart = pos + 8;
+                
+                if (mcnkDataStart + 128 > adtBytes.Length)
+                    break;
+                
+                // MCNK header: flags @ 0, IndexX @ 4, IndexY @ 8, ofsHeight @ 0x14
+                uint chunkX = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 4);
+                uint chunkY = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 8);
+                uint ofsHeight = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 0x14);
+                
+                // baseZ is at position offset 0x70 (position.z in C3Vector at 0x68)
+                // C3Vector: x @ 0x68, y @ 0x6C, z @ 0x70
+                float baseZ = BitConverter.ToSingle(adtBytes, mcnkDataStart + 0x70);
+                
+                if (ofsHeight > 0)
+                {
+                    // MCVT offset is relative to MCNK chunk start (including 8-byte header)
+                    int mcvtPos = pos + (int)ofsHeight;
+                    
+                    if (mcvtPos + 8 <= adtBytes.Length)
+                    {
+                        // Verify it's MCVT
+                        string mcvtSig = System.Text.Encoding.ASCII.GetString(adtBytes, mcvtPos, 4);
+                        string mcvtReadable = new string(mcvtSig.Reverse().ToArray());
+                        
+
+                        
+                        if (mcvtReadable == "MCVT")
+                        {
+                            mcvtFoundCount++;
+                            uint mcvtSize = BitConverter.ToUInt32(adtBytes, mcvtPos + 4);
+                            int mcvtDataStart = mcvtPos + 8;
+                            
+                            if (mcvtSize >= 145 * 4 && mcvtDataStart + 145 * 4 <= adtBytes.Length)
+                            {
+                                // Calculate chunk world position
+                                // Tile corner is at (tileWorldX, tileWorldY), tile spans DOWNWARD
+                                // Chunk (0,0) is at tile corner, Chunk (15,15) is at tile_corner - 15*ChunkSize
+                                // Each chunk covers ChunkSize (33.33 units) from its position going DOWN
+                                float chunkMinX = tileWorldX - (chunkX + 1) * ChunkSize;  // Lower bound
+                                float chunkMaxX = tileWorldX - chunkX * ChunkSize;        // Upper bound
+                                float chunkMinY = tileWorldY - (chunkY + 1) * ChunkSize;
+                                float chunkMaxY = tileWorldY - chunkY * ChunkSize;
+                                
+                                // ========================================
+                                // LOW-RES TERRAIN DETECTION
+                                // ========================================
+                                // Calculate height variance in this chunk to detect WDL-generated flat terrain
+                                // Real terrain has high variance, WDL flat terrain has very low variance
+                                float minHeight = float.MaxValue;
+                                float maxHeight = float.MinValue;
+                                for (int v = 0; v < 145; v++)
+                                {
+                                    float h = BitConverter.ToSingle(adtBytes, mcvtDataStart + v * 4);
+                                    if (h < minHeight) minHeight = h;
+                                    if (h > maxHeight) maxHeight = h;
+                                }
+                                float chunkVariance = maxHeight - minHeight;
+                                
+                                // If chunk has high variance (>2 units), it likely has real terrain data
+                                // Only patch if variance is low (flat/WDL-generated)
+                                const float lowResThreshold = 2.0f;
+                                bool isLowResChunk = chunkVariance < lowResThreshold;
+                                
+
+                                
+
+                                
+                                // SMART PATCHING: Skip chunks with existing detailed terrain
+                                // Only patch if the chunk appears to be low-resolution (WDL-generated flat terrain)
+                                if (!isLowResChunk)
+                                    continue;  // Preserve existing detailed terrain
+                                
+                                // Apply each MPRL point that falls within or near this chunk
+                                foreach (var pt in mprlPoints)
+                                {
+                                    // Check if point is within this chunk (with margin)
+                                    float margin = ChunkSize * 0.1f;
+                                    if (pt.X < chunkMinX - margin || pt.X > chunkMaxX + margin)
+                                        continue;
+                                    if (pt.Y < chunkMinY - margin || pt.Y > chunkMaxY + margin)
+                                        continue;
+                                    
+                                    // Calculate vertex position within chunk
+                                    // Chunk spans from chunkMinX to chunkMaxX
+                                    // relX = 0 at chunkMaxX, 8 at chunkMinX (8 outer vertices per row)
+                                    float relX = (chunkMaxX - pt.X) / ChunkSize * 8;
+                                    float relY = (chunkMaxY - pt.Y) / ChunkSize * 8;
+                                    
+                                    int vertCol = (int)Math.Round(relX);
+                                    int vertRow = (int)Math.Round(relY * 2);
+                                    
+                                    if (vertCol < 0 || vertCol > 8 || vertRow < 0 || vertRow > 16)
+                                        continue;
+                                    
+                                    // Calculate vertex index in 145-vertex array
+                                    bool isInnerRow = (vertRow % 2) == 1;
+                                    int actualRow = vertRow / 2;
+                                    
+                                    int vertIdx;
+                                    if (isInnerRow)
+                                    {
+                                        int innerIdx = Math.Min(vertCol, 7);
+                                        vertIdx = actualRow * 17 + 9 + innerIdx;
+                                    }
+                                    else
+                                    {
+                                        vertIdx = actualRow * 17 + vertCol;
+                                    }
+                                    
+                                    if (vertIdx < 0 || vertIdx >= 145)
+                                        continue;
+                                    
+                                    // Read current height (relative to baseZ)
+                                    int byteOffset = mcvtDataStart + vertIdx * 4;
+                                    float currentRelHeight = BitConverter.ToSingle(adtBytes, byteOffset);
+                                    float currentAbsHeight = baseZ + currentRelHeight;
+                                    
+                                    // Calculate height difference
+                                    float heightDiff = pt.Z - currentAbsHeight;
+                                    
+
+                                    
+                                    // Skip if change would cause a spike
+                                    if (Math.Abs(heightDiff) > spikeThreshold)
+                                        continue;
+                                    
+                                    // Blend toward MPRL height (modify relative height)
+                                    float newRelHeight = currentRelHeight + heightDiff * blendFactor;
+                                    byte[] newHeightBytes = BitConverter.GetBytes(newRelHeight);
+                                    Array.Copy(newHeightBytes, 0, adtBytes, byteOffset, 4);
+                                    
+                                    // Record the diff for verification
+                                    diffs.Add(new HeightDiff(
+                                        (int)chunkX, (int)chunkY, vertIdx,
+                                        currentAbsHeight, baseZ + newRelHeight, pt.Z));
+                                    
+                                    modifiedCount++;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                mcnkIndex++;
+            }
+            
+            pos += 8 + (int)size;
+        }
+        
+        return modifiedCount;
     }
 
     /// <summary>

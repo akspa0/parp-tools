@@ -532,7 +532,7 @@ public class Pm4MapReader
     private (float? Rotation, Vector3? Position) FindClosestMprl(Vector3 centroid, int tileX, int tileY)
     {
         var tilePosRefs = GlobalPositionRefs
-            .Where(p => p.TileX == tileX && p.TileY == tileY && p.Entry.EntryType == 0)
+            .Where(p => p.TileX == tileX && p.TileY == tileY && p.Entry.Unk16 == 0)
             .ToList();
         
         if (tilePosRefs.Count == 0)
@@ -545,7 +545,7 @@ public class Pm4MapReader
         
         if (closest != null && closest.Dist < 100)
         {
-            float rot = 360f * closest.Entry.Rotation / 65536f;
+            float rot = 360f * closest.Entry.Unk04 / 65536f;
             return (rot, closest.Entry.Position);
         }
         

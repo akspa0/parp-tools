@@ -32,15 +32,15 @@ public record MsurChunk(
     public ushort CK24ObjectId => (ushort)(CK24 & 0xFFFF);
 }
 
-/// <summary>MPRL entry - Position reference with rotation.</summary>
+/// <summary>MPRL entry - Position reference with metadata (purpose of non-position fields under investigation).</summary>
 public record MprlChunk(
-    ushort Unknown0x00,
-    short Unknown0x02,    // -1 for terminators
-    ushort Rotation,      // 0-65535 map to 0-360 degrees
-    ushort Unknown0x06,
+    ushort Unk00,         // Always 0 observed
+    short Unk02,          // -1 in all entries for some tiles
+    ushort Unk04,         // Varies, may be pitch/tilt or index
+    ushort Unk06,         // Often 0x8000
     Vector3 Position,
-    short FloorLevel,     // Unknown0x14
-    ushort EntryType      // 0x0000=normal, 0x3FFF=command (terminator)
+    short Unk14,          // Signed, -1 to ~7 observed - may be yaw or level index
+    ushort Unk16          // Varies, may be flags
 );
 
 /// <summary>MPRR entry - Reference graph edge.</summary>

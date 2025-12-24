@@ -1,4 +1,4 @@
-// ADT Merger - Merges split 3.3.5 ADTs into monolithic format
+﻿// ADT Merger - Merges split 3.3.5 ADTs into monolithic format
 // Creates "clean" LK ADTs preserving all existing object data + WDT
 // Also supports WDL to ADT generation for filling gaps
 
@@ -93,10 +93,16 @@ if (args.Length > 0)
         
         case "fix-uniqueids":
             return RunFixUniqueIds(args.Skip(1).ToArray());
+        
+        case "raw-dump-pm4":
+            return RunRawDumpPm4(args.Skip(1).ToArray());
+        
+        case "mprl-terrain-patch":
+            return RunMprlTerrainPatch(args.Skip(1).ToArray());
     }
 }
 
-// merge-split command - uses Warcraft.NET for proper split→monolithic conversion
+// merge-split command - uses Warcraft.NET for proper splitâ†’monolithic conversion
 static int RunMergeSplit(string[] args)
 {
     Console.WriteLine("=== Split ADT Merger (Warcraft.NET) ===\n");
@@ -1408,6 +1414,7 @@ static int RunPatchPipeline(string[] args)
     string? ck24LookupPath = null;   // CK24 -> WMO lookup CSV from correlation data
     bool useFullMesh = false;        // Use full WMO mesh instead of walkable surfaces
     bool useDebugWmo = false;        // Generate placeholder WMOs instead of matching
+    bool useDebugM2 = false;         // Generate debug M2s instead of WMOs
 
     for (int i = 0; i < args.Length; i++)
     {
@@ -1426,6 +1433,7 @@ static int RunPatchPipeline(string[] args)
             case "--ck24-lookup": ck24LookupPath = args[++i]; break;
             case "--use-full-mesh": useFullMesh = true; break;
             case "--use-debug-wmo": useDebugWmo = true; break;
+            case "--use-debug-m2": useDebugM2 = true; break;
             case "--help":
             case "-h":
                 Console.WriteLine("Usage: patch-pipeline --game <path> --listfile <path> --pm4 <dir> --split-adt <dir> --museum-adt <dir> [options]");
@@ -1445,6 +1453,7 @@ static int RunPatchPipeline(string[] args)
                 Console.WriteLine("  --m2-filter <path>  Filter M2s by path prefix (e.g., 'development')");
                 Console.WriteLine("  --use-full-mesh     Use full WMO mesh for matching (not just walkable surfaces)");
                 Console.WriteLine("  --use-debug-wmo     SKIP matching and generate placeholder WMOs from PM4 geometry");
+                Console.WriteLine("  --use-debug-m2      SKIP matching and generate debug M2s from PM4 geometry");
                 Console.WriteLine("  --ck24-lookup <csv> CK24 -> WMO lookup table from correlation data");
                 return 0;
         }
@@ -1460,7 +1469,7 @@ static int RunPatchPipeline(string[] args)
     try
     {
         var pipeline = new PipelineService();
-        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath, useDebugWmo, ck24LookupPath);
+        pipeline.Execute(gamePath, listfilePath, pm4Path, splitAdtPath, museumAdtPath, outputRoot, wdlPath, wmoFilter, m2Filter, useFullMesh, originalSplitPath, useDebugWmo, ck24LookupPath, useDebugM2);
         return 0;
     }
     catch (Exception ex)
@@ -1496,10 +1505,10 @@ static int RunExportMscn(string[] args)
                 Console.WriteLine("  --out <dir>    Output directory for OBJ files");
                 Console.WriteLine("  --raw          Export raw coordinates without transform (default: apply MSCN transform)");
                 Console.WriteLine();
-                Console.WriteLine("MSCN Transform: 180° X-axis rotation + Y-negate");
+                Console.WriteLine("MSCN Transform: 180Â° X-axis rotation + Y-negate");
                 Console.WriteLine("  correctedY = -Y");
-                Console.WriteLine("  newY = correctedY * cos(π) - Z * sin(π)");
-                Console.WriteLine("  newZ = correctedY * sin(π) + Z * cos(π)");
+                Console.WriteLine("  newY = correctedY * cos(Ï€) - Z * sin(Ï€)");
+                Console.WriteLine("  newZ = correctedY * sin(Ï€) + Z * cos(Ï€)");
                 return 0;
         }
     }
@@ -1529,7 +1538,7 @@ static int RunExportMscn(string[] args)
     }
     
     Console.WriteLine($"Found {pm4Files.Count} PM4 files");
-    Console.WriteLine($"Transform mode: {(applyTransform ? "MSCN transform (180° X rotation + Y-negate)" : "RAW coordinates")}\n");
+    Console.WriteLine($"Transform mode: {(applyTransform ? "MSCN transform (180Â° X rotation + Y-negate)" : "RAW coordinates")}\n");
     
     int totalMscnVerts = 0;
     int filesWithMscn = 0;
@@ -1556,7 +1565,7 @@ static int RunExportMscn(string[] args)
             
             writer.WriteLine($"# MSCN data from {baseName}");
             writer.WriteLine($"# Vertices: {pm4.ExteriorVertices.Count}");
-            writer.WriteLine($"# Transform: {(applyTransform ? "MSCN (180° X rot + Y-negate)" : "RAW")}");
+            writer.WriteLine($"# Transform: {(applyTransform ? "MSCN (180Â° X rot + Y-negate)" : "RAW")}");
             writer.WriteLine();
             
             foreach (var v in pm4.ExteriorVertices)
@@ -3056,6 +3065,432 @@ static int RunFixUniqueIds(string[] args)
     
     Console.WriteLine($"\n[DONE] Fixed {count} entries.");
     return 0;
+}
+
+/// <summary>
+/// Raw dump of ALL PM4 chunk fields for pattern analysis without assumptions.
+/// Exports MSLK, MPRL, MPRR, MSUR with complete cross-references.
+/// </summary>
+static int RunRawDumpPm4(string[] args)
+{
+    Console.WriteLine("=== RAW PM4 CHUNK DUMP (No Assumptions) ===\n");
+    
+    string? pm4Path = null;
+    string? outputDir = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Path = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: raw-dump-pm4 --pm4 <path.pm4> --out <output_dir>");
+                Console.WriteLine("\nDumps ALL chunk fields to CSV files for fresh pattern analysis.");
+                Console.WriteLine("Output files:");
+                Console.WriteLine("  mslk_raw.csv   - All MSLK fields");
+                Console.WriteLine("  mprl_raw.csv   - All MPRL fields");
+                Console.WriteLine("  mprr_raw.csv   - All MPRR fields");
+                Console.WriteLine("  msur_raw.csv   - All MSUR fields (with CK24)");
+                Console.WriteLine("  relationships.txt - Cross-references analysis");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Path) || !File.Exists(pm4Path))
+    {
+        Console.Error.WriteLine("Error: --pm4 <path.pm4> is required and file must exist");
+        return 1;
+    }
+    
+    outputDir ??= Path.GetDirectoryName(pm4Path) ?? ".";
+    Directory.CreateDirectory(outputDir);
+    
+    Console.WriteLine($"Loading: {pm4Path}");
+    var pm4 = PM4File.FromFile(pm4Path);
+    var baseName = Path.GetFileNameWithoutExtension(pm4Path);
+    
+    Console.WriteLine($"  MSLK: {pm4.LinkEntries.Count}");
+    Console.WriteLine($"  MPRL: {pm4.PositionRefs.Count}");
+    Console.WriteLine($"  MPRR: {pm4.MprrEntries.Count}");
+    Console.WriteLine($"  MSUR: {pm4.Surfaces.Count}");
+    Console.WriteLine($"  MSVT: {pm4.MeshVertices.Count}");
+    Console.WriteLine($"  MSCN: {pm4.ExteriorVertices.Count}");
+    Console.WriteLine();
+    
+    // Export MSLK - ALL fields
+    var mslkPath = Path.Combine(outputDir, $"{baseName}_mslk_raw.csv");
+    using (var sw = new StreamWriter(mslkPath))
+    {
+        sw.WriteLine("idx,TypeFlags,Subtype,Padding,GroupObjectId,MspiFirst,MspiCount,LinkId_hex,TileX,TileY,RefIndex,SystemFlag,HasGeometry,RefIndex_MPRL_valid");
+        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        {
+            var m = pm4.LinkEntries[i];
+            byte tileX = m.LinkIdBytes.Length > 0 ? m.LinkIdBytes[0] : (byte)0;
+            byte tileY = m.LinkIdBytes.Length > 1 ? m.LinkIdBytes[1] : (byte)0;
+            bool refValid = m.RefIndex < pm4.PositionRefs.Count;
+            
+            sw.WriteLine($"{i},{m.TypeFlags},{m.Subtype},{m.Padding},0x{m.GroupObjectId:X8},{m.MspiFirstIndex},{m.MspiIndexCount},0x{m.LinkId:X8},{tileX},{tileY},{m.RefIndex},0x{m.SystemFlag:X4},{m.HasGeometry},{refValid}");
+        }
+    }
+    Console.WriteLine($"Wrote: {mslkPath}");
+    
+    // Export MPRL - ALL fields with no filtering
+    var mprlPath = Path.Combine(outputDir, $"{baseName}_mprl_raw.csv");
+    using (var sw = new StreamWriter(mprlPath))
+    {
+        sw.WriteLine("idx,Unk00,Unk02,Unk04_rot,Unk06,PosX,PosY,PosZ,Unk14_floor,Unk16_type,HeadingDeg,IsCommand,MSLK_refs");
+        
+        // Build reverse lookup: which MSLK entries reference each MPRL
+        var mprlToMslk = new Dictionary<int, List<int>>();
+        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        {
+            int refIdx = pm4.LinkEntries[i].RefIndex;
+            if (refIdx < pm4.PositionRefs.Count)
+            {
+                if (!mprlToMslk.ContainsKey(refIdx)) mprlToMslk[refIdx] = new List<int>();
+                mprlToMslk[refIdx].Add(i);
+            }
+        }
+        
+        for (int i = 0; i < pm4.PositionRefs.Count; i++)
+        {
+            var p = pm4.PositionRefs[i];
+            string mslkRefs = mprlToMslk.ContainsKey(i) ? string.Join(";", mprlToMslk[i]) : "";
+            
+            sw.WriteLine($"{i},{p.Unk00},{p.Unk02},0x{p.Unk04:X4},0x{p.Unk06:X4},{p.PositionX:F3},{p.PositionY:F3},{p.PositionZ:F3},{p.Unk14},0x{p.Unk16:X4},{p.Unk04AsDegrees:F2},{p.IsNegativeUnk14},{mslkRefs}");
+        }
+    }
+    Console.WriteLine($"Wrote: {mprlPath}");
+    
+    // Export MPRR - ALL entries with sentinel analysis
+    var mprrPath = Path.Combine(outputDir, $"{baseName}_mprr_raw.csv");
+    using (var sw = new StreamWriter(mprrPath))
+    {
+        sw.WriteLine("idx,Value1,Value2,IsSentinel,Value1_hex,Value2_hex,Interpretation");
+        for (int i = 0; i < pm4.MprrEntries.Count; i++)
+        {
+            var r = pm4.MprrEntries[i];
+            string interp;
+            if (r.IsSentinel)
+                interp = "SENTINEL/BOUNDARY";
+            else if (r.Value1 < pm4.PositionRefs.Count)
+                interp = $"MPRL[{r.Value1}]";
+            else if (r.Value1 < pm4.MeshVertices.Count)
+                interp = $"MSVT[{r.Value1}]";
+            else
+                interp = "OUT_OF_RANGE";
+            
+            sw.WriteLine($"{i},{r.Value1},{r.Value2},{r.IsSentinel},0x{r.Value1:X4},0x{r.Value2:X4},{interp}");
+        }
+    }
+    Console.WriteLine($"Wrote: {mprrPath}");
+    
+    // Export MSUR - ALL fields with CK24 breakdown
+    var msurPath = Path.Combine(outputDir, $"{baseName}_msur_raw.csv");
+    using (var sw = new StreamWriter(msurPath))
+    {
+        sw.WriteLine("idx,GroupKey,IndexCount,AttrMask,Padding,NormX,NormY,NormZ,Height,MsviFirst,MdosIndex,PackedParams,CK24_hex,CK24_type,CK24_objID");
+        for (int i = 0; i < pm4.Surfaces.Count; i++)
+        {
+            var s = pm4.Surfaces[i];
+            byte ck24Type = (byte)((s.CK24 >> 16) & 0xFF);
+            ushort ck24ObjId = (ushort)(s.CK24 & 0xFFFF);
+            
+            sw.WriteLine($"{i},{s.GroupKey},{s.IndexCount},{s.AttributeMask},{s.Padding},{s.NormalX:F4},{s.NormalY:F4},{s.NormalZ:F4},{s.Height:F3},{s.MsviFirstIndex},{s.MdosIndex},0x{s.PackedParams:X8},0x{s.CK24:X6},{ck24Type},0x{ck24ObjId:X4}");
+        }
+    }
+    Console.WriteLine($"Wrote: {msurPath}");
+    
+    // Relationship analysis
+    var relPath = Path.Combine(outputDir, $"{baseName}_relationships.txt");
+    using (var sw = new StreamWriter(relPath))
+    {
+        sw.WriteLine($"=== RAW PM4 ANALYSIS: {baseName} ===\n");
+        sw.WriteLine($"Chunks: MSLK={pm4.LinkEntries.Count}, MPRL={pm4.PositionRefs.Count}, MPRR={pm4.MprrEntries.Count}, MSUR={pm4.Surfaces.Count}");
+        sw.WriteLine();
+        
+        // MSLK RefIndex analysis
+        int refToMprl = 0, refToMsvt = 0;
+        foreach (var m in pm4.LinkEntries)
+        {
+            if (m.RefIndex < pm4.PositionRefs.Count) refToMprl++;
+            else refToMsvt++;
+        }
+        sw.WriteLine("=== MSLK.RefIndex Analysis ===");
+        sw.WriteLine($"  RefIndex -> MPRL: {refToMprl} ({100.0*refToMprl/pm4.LinkEntries.Count:F1}%)");
+        sw.WriteLine($"  RefIndex -> MSVT: {refToMsvt} ({100.0*refToMsvt/pm4.LinkEntries.Count:F1}%)");
+        sw.WriteLine();
+        
+        // MPRL Unk04 distribution (rotation candidate)
+        var unk04Dist = pm4.PositionRefs.GroupBy(p => p.Unk04).OrderByDescending(g => g.Count()).Take(20);
+        sw.WriteLine("=== MPRL.Unk04 (Rotation?) Top Values ===");
+        foreach (var g in unk04Dist)
+        {
+            float degrees = (g.Key / 65536.0f) * 360.0f;
+            sw.WriteLine($"  0x{g.Key:X4} ({degrees:F1}Â°): {g.Count()} entries");
+        }
+        sw.WriteLine();
+        
+        // MPRL Unk02 distribution
+        var unk02Dist = pm4.PositionRefs.GroupBy(p => p.Unk02).OrderByDescending(g => g.Count()).Take(10);
+        sw.WriteLine("=== MPRL.Unk02 Distribution ===");
+        foreach (var g in unk02Dist)
+            sw.WriteLine($"  {g.Key,6}: {g.Count()} entries");
+        sw.WriteLine();
+        
+        // MPRL Unk14 distribution (floor?)
+        var unk14Dist = pm4.PositionRefs.GroupBy(p => p.Unk14).OrderByDescending(g => g.Count()).Take(10);
+        sw.WriteLine("=== MPRL.Unk14 (Floor?) Distribution ===");
+        foreach (var g in unk14Dist)
+            sw.WriteLine($"  {g.Key,6}: {g.Count()} entries");
+        sw.WriteLine();
+        
+        // MPRR sentinel distribution - object boundaries?
+        int sentinels = pm4.MprrEntries.Count(r => r.IsSentinel);
+        sw.WriteLine("=== MPRR Sentinel Analysis ===");
+        sw.WriteLine($"  Sentinels (0xFFFF): {sentinels}");
+        sw.WriteLine($"  Non-sentinel: {pm4.MprrEntries.Count - sentinels}");
+        sw.WriteLine($"  Potential objects: {sentinels} (if sentinels mark boundaries)");
+        sw.WriteLine();
+        
+        // CK24 distribution
+        var ck24Dist = pm4.Surfaces.GroupBy(s => s.CK24).OrderByDescending(g => g.Count()).Take(20);
+        sw.WriteLine("=== CK24 Distribution (Top 20) ===");
+        foreach (var g in ck24Dist)
+            sw.WriteLine($"  0x{g.Key:X6}: {g.Count()} surfaces");
+        sw.WriteLine();
+        
+        // MSLK TypeFlags distribution
+        var typeDist = pm4.LinkEntries.GroupBy(m => m.TypeFlags).OrderBy(g => g.Key);
+        sw.WriteLine("=== MSLK.TypeFlags Distribution ===");
+        foreach (var g in typeDist)
+            sw.WriteLine($"  Type {g.Key,2}: {g.Count()} ({100.0*g.Count()/pm4.LinkEntries.Count:F1}%)");
+        sw.WriteLine();
+        
+        // GroupObjectId analysis
+        var gidDist = pm4.LinkEntries.GroupBy(m => m.GroupObjectId);
+        int gidMin = pm4.LinkEntries.Count > 0 ? (int)pm4.LinkEntries.Min(m => m.GroupObjectId) : -1;
+        int gidMax = pm4.LinkEntries.Count > 0 ? (int)pm4.LinkEntries.Max(m => m.GroupObjectId) : -1;
+        sw.WriteLine("=== MSLK.GroupObjectId Analysis ===");
+        sw.WriteLine($"  Unique values: {gidDist.Count()}");
+        sw.WriteLine($"  Min: 0x{gidMin:X8}, Max: 0x{gidMax:X8}");
+        sw.WriteLine($"  Range: {gidMax - gidMin + 1} (is it sequential?)");
+        sw.WriteLine();
+        
+        sw.WriteLine("=== KEY QUESTIONS ===");
+        sw.WriteLine("1. Why are only 1-2% of MSLK entries pointing to MPRL?");
+        sw.WriteLine("2. What is the real purpose of MPRL entries not referenced by MSLK?");
+        sw.WriteLine("3. How do MPRR sentinels relate to object boundaries?");
+        sw.WriteLine("4. Is MSUR.MdosIndex really linking to MSCN or is it object instance ID?");
+        sw.WriteLine("5. What pattern in MSLK separates individual buildings?");
+    }
+    Console.WriteLine($"Wrote: {relPath}");
+    
+    Console.WriteLine("\n[DONE] Use CSV files for pattern analysis without assuming anything!");
+    return 0;
+}
+
+// mprl-terrain-patch command - ONLY patches terrain heights from MPRL, no MODF/MDDF
+static int RunMprlTerrainPatch(string[] args)
+{
+    Console.WriteLine("=== MPRL Terrain Patch (Terrain Only - No MODF/MDDF) ===\n");
+    
+    string? pm4Path = null;
+    string? museumAdtPath = null;
+    string? outputDir = null;
+    string? singleTile = null;
+    
+    for (int i = 0; i < args.Length; i++)
+    {
+        switch (args[i])
+        {
+            case "--pm4": pm4Path = args[++i]; break;
+            case "--museum-adt": museumAdtPath = args[++i]; break;
+            case "--out": outputDir = args[++i]; break;
+            case "--tile": singleTile = args[++i]; break;
+            case "--help":
+            case "-h":
+                Console.WriteLine("Usage: mprl-terrain-patch --pm4 <dir> --museum-adt <dir> --out <dir> [--tile X_Y]");
+                Console.WriteLine();
+                Console.WriteLine("  --pm4         Directory containing PM4 files (e.g., development_22_18.pm4)");
+                Console.WriteLine("  --museum-adt  Directory containing museum ADT files to patch");
+                Console.WriteLine("  --out         Output directory for refined ADTs");
+                Console.WriteLine("  --tile        Optional: process only a single tile (e.g., '22_18')");
+                Console.WriteLine();
+                Console.WriteLine("This command ONLY patches terrain heights from MPRL data.");
+                Console.WriteLine("No MODF/MDDF manipulation - just terrain refinement.");
+                return 0;
+        }
+    }
+    
+    if (string.IsNullOrEmpty(pm4Path) || string.IsNullOrEmpty(museumAdtPath) || string.IsNullOrEmpty(outputDir))
+    {
+        Console.Error.WriteLine("Error: --pm4, --museum-adt and --out are required. Use --help for usage.");
+        return 1;
+    }
+    
+    if (!Directory.Exists(pm4Path))
+    {
+        Console.Error.WriteLine($"Error: PM4 directory not found: {pm4Path}");
+        return 1;
+    }
+    
+    if (!Directory.Exists(museumAdtPath))
+    {
+        Console.Error.WriteLine($"Error: Museum ADT directory not found: {museumAdtPath}");
+        return 1;
+    }
+    
+    Directory.CreateDirectory(outputDir);
+    
+    // Step 1: Load MPRL data from PM4 files
+    Console.WriteLine("[Step 1] Loading MPRL terrain intersection data from PM4 files...");
+    var mprlByTile = new Dictionary<(int x, int y), List<WoWRollback.PM4Module.Services.WdlToAdtGenerator.MprlPoint>>();
+    
+    var pm4Files = Directory.GetFiles(pm4Path, "*.pm4", SearchOption.AllDirectories);
+    foreach (var pm4File in pm4Files)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(pm4File);
+        var match = System.Text.RegularExpressions.Regex.Match(fileName, @"_(\d+)_(\d+)$");
+        if (!match.Success) continue;
+        
+        // Filter by single tile if specified
+        int tx = int.Parse(match.Groups[1].Value);
+        int ty = int.Parse(match.Groups[2].Value);
+        
+        if (!string.IsNullOrEmpty(singleTile))
+        {
+            var parts = singleTile.Split('_');
+            if (parts.Length == 2 && int.TryParse(parts[0], out int filterX) && int.TryParse(parts[1], out int filterY))
+            {
+                if (tx != filterX || ty != filterY)
+                    continue;
+            }
+        }
+        
+        try
+        {
+            var pm4 = PM4File.FromFile(pm4File);
+            var mprlPoints = WoWRollback.PM4Module.Services.WdlToAdtGenerator.ExtractMprlPointsAsWorld(pm4, tx, ty);
+            
+            if (mprlPoints.Count > 0)
+            {
+                mprlByTile[(tx, ty)] = mprlPoints;
+                Console.WriteLine($"  Tile {tx}_{ty}: {mprlPoints.Count} MPRL points");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [WARN] Failed to load {fileName}: {ex.Message}");
+        }
+    }
+    
+    Console.WriteLine($"\n[INFO] Loaded MPRL for {mprlByTile.Count} tiles ({mprlByTile.Values.Sum(p => p.Count)} total points)");
+    
+    if (mprlByTile.Count == 0)
+    {
+        Console.WriteLine("[INFO] No MPRL data found. Nothing to patch.");
+        return 0;
+    }
+    
+    // Step 2: Process museum ADTs
+    Console.WriteLine("\n[Step 2] Patching museum ADTs with MPRL terrain heights...");
+    
+    int patchedCount = 0;
+    int skippedCount = 0;
+    int errorCount = 0;
+    
+    // DEBUG: Show coordinate ranges for first few tiles
+    int debugCount = 0;
+    foreach (var ((dtx, dty), dpts) in mprlByTile.Take(3))
+    {
+        float mprlMinX = dpts.Min(p => p.X);
+        float mprlMaxX = dpts.Max(p => p.X);
+        float mprlMinY = dpts.Min(p => p.Y);
+        float mprlMaxY = dpts.Max(p => p.Y);
+        
+        float tileWorldX = (32 - dtx) * 533.33333f;
+        float tileWorldY = (32 - dty) * 533.33333f;
+        
+        Console.WriteLine($"  [DEBUG] Tile {dtx}_{dty}:");
+        Console.WriteLine($"    MPRL X: {mprlMinX:F1} to {mprlMaxX:F1}");
+        Console.WriteLine($"    MPRL Y: {mprlMinY:F1} to {mprlMaxY:F1}");
+        Console.WriteLine($"    Tile World: X={tileWorldX:F1}, Y={tileWorldY:F1}");
+        Console.WriteLine($"    Expected chunk range: X={tileWorldX - 533.33f:F1} to {tileWorldX:F1}, Y={tileWorldY - 533.33f:F1} to {tileWorldY:F1}");
+        debugCount++;
+    }
+    Console.WriteLine();
+    
+    foreach (var ((tx, ty), mprlPoints) in mprlByTile)
+    {
+        // Find the matching museum ADT
+        var adtPattern = $"*_{tx}_{ty}.adt";
+        var adtFiles = Directory.GetFiles(museumAdtPath, adtPattern, SearchOption.TopDirectoryOnly)
+            .Where(f => !f.Contains("_obj") && !f.Contains("_tex"))
+            .ToList();
+        
+        if (adtFiles.Count == 0)
+        {
+            Console.WriteLine($"  [SKIP] No museum ADT found for tile {tx}_{ty}");
+            skippedCount++;
+            continue;
+        }
+        
+        var adtPath = adtFiles[0];
+        var adtName = Path.GetFileName(adtPath);
+        
+        try
+        {
+            // IN-PLACE PATCHING: Read ADT bytes, patch MCVT directly, write back
+            // This preserves all original chunk positioning and terrain continuity
+            var adtBytes = File.ReadAllBytes(adtPath);
+            
+            // Apply MPRL heights directly to MCVT in the byte array
+            int modified = WoWRollback.PM4Module.Services.WdlToAdtGenerator.PatchAdtMcvtInPlace(
+                adtBytes, mprlPoints, tx, ty, out var heightDiffs);
+            
+            if (modified > 0)
+            {
+                // Save patched ADT (original structure preserved)
+                var outputPath = Path.Combine(outputDir, adtName);
+                File.WriteAllBytes(outputPath, adtBytes);
+                
+                // Save diff CSV for verification
+                var diffPath = Path.Combine(outputDir, $"{Path.GetFileNameWithoutExtension(adtName)}_diffs.csv");
+                using (var w = new StreamWriter(diffPath))
+                {
+                    w.WriteLine("ChunkX,ChunkY,VertexIdx,OriginalHeight,NewHeight,MprlHeight,Diff");
+                    foreach (var d in heightDiffs.Take(1000)) // Limit to first 1000 for large tiles
+                    {
+                        w.WriteLine($"{d.ChunkX},{d.ChunkY},{d.VertexIdx},{d.OriginalHeight:F2},{d.NewHeight:F2},{d.MprlHeight:F2},{d.NewHeight - d.OriginalHeight:F3}");
+                    }
+                }
+                
+                Console.WriteLine($"  [OK] {adtName}: {modified} vertices refined -> {outputPath}");
+                patchedCount++;
+            }
+            else
+            {
+                Console.WriteLine($"  [SKIP] {adtName}: No vertices in range");
+                skippedCount++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  [ERROR] {adtName}: {ex.Message}");
+            errorCount++;
+        }
+    }
+    
+    Console.WriteLine("\n=== Summary ===");
+    Console.WriteLine($"  Patched: {patchedCount}");
+    Console.WriteLine($"  Skipped: {skippedCount}");
+    Console.WriteLine($"  Errors:  {errorCount}");
+    Console.WriteLine($"\nOutput: {outputDir}");
+    
+    return errorCount > 0 ? 1 : 0;
 }
 
 class ModfEntry

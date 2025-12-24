@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,7 +10,7 @@ namespace WoWRollback.Core.Services.PM4;
 
 /// <summary>
 /// Correlates PM4 pathfinding objects with ADT MODF placements.
-/// Uses development_29_39 as the Rosetta Stone for understanding PM4↔WMO relationships.
+/// Uses development_29_39 as the Rosetta Stone for understanding PM4â†”WMO relationships.
 /// </summary>
 public sealed class Pm4AdtCorrelator
 {
@@ -34,13 +34,13 @@ public sealed class Pm4AdtCorrelator
     /// </summary>
     public record MprlEntry(
         int Index,
-        ushort Unknown0x00,
-        short Unknown0x02,
-        ushort Unknown0x04,
-        ushort Unknown0x06,
+        ushort Unk00,
+        short Unk02,
+        ushort Unk04,
+        ushort Unk06,
         Vector3 Position,
-        short Unknown0x14,
-        ushort Unknown0x16);
+        short Unk14,
+        ushort Unk16);
 
     /// <summary>
     /// MSLK entry from PM4 file - scene graph/hierarchy node.
@@ -567,7 +567,7 @@ public sealed class Pm4AdtCorrelator
         // Cross-reference with MODF UniqueIds
         if (modfPlacements != null && modfPlacements.Count > 0)
         {
-            Console.WriteLine($"\n[MSLK ↔ MODF Cross-Reference Analysis]");
+            Console.WriteLine($"\n[MSLK â†” MODF Cross-Reference Analysis]");
             
             var modfUniqueIds = modfPlacements.Select(m => (uint)m.UniqueId).ToHashSet();
             Console.WriteLine($"  MODF UniqueIds: {string.Join(", ", modfUniqueIds.OrderBy(x => x).Take(10))}{(modfUniqueIds.Count > 10 ? "..." : "")}");
@@ -576,7 +576,7 @@ public sealed class Pm4AdtCorrelator
             // Check if any ParentIndex values match MODF UniqueIds directly
             var parentIds = entries.Select(e => e.ParentIndex).Distinct().ToHashSet();
             var directMatches = parentIds.Intersect(modfUniqueIds).ToList();
-            Console.WriteLine($"  Direct ParentIndex ↔ UniqueId matches: {directMatches.Count}");
+            Console.WriteLine($"  Direct ParentIndex â†” UniqueId matches: {directMatches.Count}");
             if (directMatches.Count > 0)
             {
                 Console.WriteLine($"    Matching IDs: {string.Join(", ", directMatches.OrderBy(x => x).Take(20))}");
@@ -585,11 +585,11 @@ public sealed class Pm4AdtCorrelator
             // Check ReferenceIndex matches
             var refIndices = entries.Select(e => (uint)e.ReferenceIndex).Distinct().ToHashSet();
             var refMatches = refIndices.Intersect(modfUniqueIds).ToList();
-            Console.WriteLine($"  ReferenceIndex ↔ UniqueId matches: {refMatches.Count}");
+            Console.WriteLine($"  ReferenceIndex â†” UniqueId matches: {refMatches.Count}");
 
             // Check LinkId for UniqueId encoding (unlikely but check)
             var linkIdMatches = entries.Where(e => modfUniqueIds.Contains(e.LinkId)).ToList();
-            Console.WriteLine($"  LinkId ↔ UniqueId matches: {linkIdMatches.Count}");
+            Console.WriteLine($"  LinkId â†” UniqueId matches: {linkIdMatches.Count}");
 
             // Composite key analysis - try different field combinations
             Console.WriteLine($"\n[Composite Key Analysis]");
@@ -630,7 +630,7 @@ public sealed class Pm4AdtCorrelator
             
             // Check if CK24 matches MODF UniqueIds
             var ck24Matches = ck24Values.Where(ck => modfUniqueIds.Contains(ck)).ToList();
-            Console.WriteLine($"  CK24 ↔ UniqueId matches: {ck24Matches.Count}");
+            Console.WriteLine($"  CK24 â†” UniqueId matches: {ck24Matches.Count}");
         }
     }
 
@@ -687,12 +687,12 @@ public sealed class Pm4AdtCorrelator
                     e.Position.X.ToString("F3"),
                     e.Position.Y.ToString("F3"),
                     e.Position.Z.ToString("F3"),
-                    e.Unknown0x00,
-                    e.Unknown0x02,
-                    e.Unknown0x04,
-                    e.Unknown0x06,
-                    e.Unknown0x14,
-                    e.Unknown0x16));
+                    e.Unk00,
+                    e.Unk02,
+                    e.Unk04,
+                    e.Unk06,
+                    e.Unk14,
+                    e.Unk16));
             }
             Console.WriteLine($"  MPRL CSV: {mprlCsv}");
         }
