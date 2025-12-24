@@ -249,7 +249,7 @@ public static class WdlToAdtGenerator
             return 0;
         
         int modifiedCount = 0;
-        const float blendFactor = 1.0f;  // 100% trust MPRL - closest to real terrain data
+        const float blendFactor = 0.5f;  // Interpolate 50% with old terrain to prevent "holes"/tearing
         const float spikeThreshold = 500.0f;  // Increased from 50 for large terrain differences
         bool debugHeightPrinted = false;
         

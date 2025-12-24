@@ -5,10 +5,11 @@
 - **Tiles Skipped:** 4
 - **Success Rate:** 100%
 - **All patch logs silent & fast** (debug removed)
+- **Mode:** **Interpolation (50%)** - Blends MPRL data with old terrain to prevent holes/tearing.
 
 ## Recommended Tiles for Noggit Verification
 
-**Note:** MPRL heights are now trusted 100% (blendFactor=1.0). In the `_diffs.csv`, `NewHeight` should exactly equal `MprlHeight` (plus potential flating point epsilon).
+**Note:** MPRL heights are blended (Old * 0.5 + New * 0.5). In the `_diffs.csv`, `NewHeight` will be halfway between `OriginalHeight` and `MprlHeight`.
 
 | Tile | Vertices Modified | Notes |
 |------|-------------------|-------|
