@@ -3402,26 +3402,7 @@ static int RunMprlTerrainPatch(string[] args)
     int skippedCount = 0;
     int errorCount = 0;
     
-    // DEBUG: Show coordinate ranges for first few tiles
-    int debugCount = 0;
-    foreach (var ((dtx, dty), dpts) in mprlByTile.Take(3))
-    {
-        float mprlMinX = dpts.Min(p => p.X);
-        float mprlMaxX = dpts.Max(p => p.X);
-        float mprlMinY = dpts.Min(p => p.Y);
-        float mprlMaxY = dpts.Max(p => p.Y);
-        
-        float tileWorldX = (32 - dtx) * 533.33333f;
-        float tileWorldY = (32 - dty) * 533.33333f;
-        
-        Console.WriteLine($"  [DEBUG] Tile {dtx}_{dty}:");
-        Console.WriteLine($"    MPRL X: {mprlMinX:F1} to {mprlMaxX:F1}");
-        Console.WriteLine($"    MPRL Y: {mprlMinY:F1} to {mprlMaxY:F1}");
-        Console.WriteLine($"    Tile World: X={tileWorldX:F1}, Y={tileWorldY:F1}");
-        Console.WriteLine($"    Expected chunk range: X={tileWorldX - 533.33f:F1} to {tileWorldX:F1}, Y={tileWorldY - 533.33f:F1} to {tileWorldY:F1}");
-        debugCount++;
-    }
-    Console.WriteLine();
+
     
     foreach (var ((tx, ty), mprlPoints) in mprlByTile)
     {
@@ -3462,7 +3443,7 @@ static int RunMprlTerrainPatch(string[] args)
                 using (var w = new StreamWriter(diffPath))
                 {
                     w.WriteLine("ChunkX,ChunkY,VertexIdx,OriginalHeight,NewHeight,MprlHeight,Diff");
-                    foreach (var d in heightDiffs.Take(1000)) // Limit to first 1000 for large tiles
+                    foreach (var d in heightDiffs) // No limit - full dump
                     {
                         w.WriteLine($"{d.ChunkX},{d.ChunkY},{d.VertexIdx},{d.OriginalHeight:F2},{d.NewHeight:F2},{d.MprlHeight:F2},{d.NewHeight - d.OriginalHeight:F3}");
                     }

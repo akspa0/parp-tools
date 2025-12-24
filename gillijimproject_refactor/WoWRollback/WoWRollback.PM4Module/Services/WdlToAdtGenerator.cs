@@ -320,34 +320,13 @@ public static class WdlToAdtGenerator
                                 float chunkMinY = tileWorldY - (chunkY + 1) * ChunkSize;
                                 float chunkMaxY = tileWorldY - chunkY * ChunkSize;
                                 
-                                // ========================================
-                                // LOW-RES TERRAIN DETECTION
-                                // ========================================
-                                // Calculate height variance in this chunk to detect WDL-generated flat terrain
-                                // Real terrain has high variance, WDL flat terrain has very low variance
-                                float minHeight = float.MaxValue;
-                                float maxHeight = float.MinValue;
-                                for (int v = 0; v < 145; v++)
-                                {
-                                    float h = BitConverter.ToSingle(adtBytes, mcvtDataStart + v * 4);
-                                    if (h < minHeight) minHeight = h;
-                                    if (h > maxHeight) maxHeight = h;
-                                }
-                                float chunkVariance = maxHeight - minHeight;
-                                
-                                // If chunk has high variance (>2 units), it likely has real terrain data
-                                // Only patch if variance is low (flat/WDL-generated)
-                                const float lowResThreshold = 2.0f;
-                                bool isLowResChunk = chunkVariance < lowResThreshold;
+
                                 
 
                                 
 
                                 
-                                // SMART PATCHING: Skip chunks with existing detailed terrain
-                                // Only patch if the chunk appears to be low-resolution (WDL-generated flat terrain)
-                                if (!isLowResChunk)
-                                    continue;  // Preserve existing detailed terrain
+
                                 
                                 // Apply each MPRL point that falls within or near this chunk
                                 foreach (var pt in mprlPoints)
@@ -405,6 +384,13 @@ public static class WdlToAdtGenerator
                                     
                                     // Blend toward MPRL height (modify relative height)
                                     float newRelHeight = currentRelHeight + heightDiff * blendFactor;
+                                    
+                                    // CRITICAL: Ensure we don't write invalid floats (NaN/Infinity) which crash Noggit
+                                    if (float.IsNaN(newRelHeight) || float.IsInfinity(newRelHeight))
+                                    {
+                                        continue; 
+                                    }
+                                    
                                     byte[] newHeightBytes = BitConverter.GetBytes(newRelHeight);
                                     Array.Copy(newHeightBytes, 0, adtBytes, byteOffset, 4);
                                     

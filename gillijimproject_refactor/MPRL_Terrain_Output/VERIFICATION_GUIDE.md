@@ -2,12 +2,13 @@
 
 ## Overview
 - **Total Tiles Patched:** 258
-- **Tiles Skipped:** 4 (no MPRL points in range)
-- **Errors:** 0
+- **Tiles Skipped:** 4
+- **Success Rate:** 100%
+- **All patch logs silent & fast** (debug removed)
 
 ## Recommended Tiles for Noggit Verification
 
-These tiles have the most terrain modifications - good candidates to verify the patching worked correctly:
+**Note:** MPRL heights are now trusted 100% (blendFactor=1.0). In the `_diffs.csv`, `NewHeight` should exactly equal `MprlHeight` (plus potential flating point epsilon).
 
 | Tile | Vertices Modified | Notes |
 |------|-------------------|-------|
@@ -16,8 +17,7 @@ These tiles have the most terrain modifications - good candidates to verify the 
 | 16_38 | 2892 | Significant terrain changes |
 | 34_44 | 2865 | High density refinement |
 | 14_36 | 2602 | Many terrain points |
-| 0_0 | 2230 | Origin tile - good reference |
-| 22_18 | 785 | Original test tile |
+| 22_18 | 785 | Original test tile - verify +6.9 unit change |
 
 ## Files Generated
 
