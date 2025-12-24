@@ -5,11 +5,13 @@
 - **Tiles Skipped:** 4
 - **Success Rate:** 100%
 - **All patch logs silent & fast** (debug removed)
-- **Mode:** **Interpolation (50%)** - Blends MPRL data with old terrain to prevent holes/tearing.
+- **Mode:** **Interpolation (50%) + Seam Stitching**
+  - **Interpolation:** Blends MPRL data with old terrain to prevent sharp jaggedness.
+  - **Seam Stitching:** Automatically patches shared edges on neighbor chunks to prevent holes/tearing.
 
 ## Recommended Tiles for Noggit Verification
 
-**Note:** MPRL heights are blended (Old * 0.5 + New * 0.5). In the `_diffs.csv`, `NewHeight` will be halfway between `OriginalHeight` and `MprlHeight`.
+**Note:** Check chunk boundaries carefully. There should be NO gaps or tears between chunks, even in steep areas.
 
 | Tile | Vertices Modified | Notes |
 |------|-------------------|-------|

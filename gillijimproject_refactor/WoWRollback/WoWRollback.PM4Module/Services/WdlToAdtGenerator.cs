@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Linq;
 
 namespace WoWRollback.PM4Module.Services;
 
@@ -186,13 +187,6 @@ public static class WdlToAdtGenerator
         // Based on debug output:
         // MPRL after axis swap: X=11749-12263, Y=9604-10129
         // Expected tile world: X=4800-5333, Y=6933-7466
-        // 
-        // If MPRL is in placement space (like MODF writes), then:
-        // worldX = 17066 - placementZ, worldY = 17066 - placementX
-        //
-        // Let's try: After mapping PositionZ->X, PositionX->Y,
-        // they may already be in placement order
-        
         foreach (var entry in pm4.PositionRefs)
         {
             if (entry.Unk16 != 0)  // Skip terminators
@@ -206,7 +200,6 @@ public static class WdlToAdtGenerator
             float mprlY = entry.PositionX;
             float height = entry.PositionY;
             
-            // Try: MPRL might be using placement coordinates
             // Placement: x = 17066 - worldY, z = 17066 - worldX
             // Reverse: worldX = 17066 - placementZ, worldY = 17066 - placementX
             float worldX = HalfMap - mprlY;  // Try reversing the Y component
@@ -240,178 +233,240 @@ public static class WdlToAdtGenerator
 
     /// <summary>
     /// Patch MCVT heights with diff output for verification.
+    /// Implements Seam Stitching to prevent holes between chunks.
     /// </summary>
     public static int PatchAdtMcvtInPlace(byte[] adtBytes, List<MprlPoint> mprlPoints, int tileX, int tileY, out List<HeightDiff> diffs)
     {
-        diffs = new List<HeightDiff>();
+        var diffsList = new List<HeightDiff>();
         
         if (mprlPoints == null || mprlPoints.Count == 0)
+        {
+            diffs = diffsList;
             return 0;
+        }
         
         int modifiedCount = 0;
         const float blendFactor = 0.5f;  // Interpolate 50% with old terrain to prevent "holes"/tearing
         const float spikeThreshold = 500.0f;  // Increased from 50 for large terrain differences
-        bool debugHeightPrinted = false;
         
-        // Calculate tile world bounds (WoW world coordinate space)
-        // ADT tiles are 533.33 yards each, with tile 32,32 at world origin
-        float tileWorldX = (32 - tileX) * TileSize;
-        float tileWorldY = (32 - tileY) * TileSize;
+        // =========================================================================================
+        // PASS 1: Index all chunks (MCVT offsets and BaseZ) to allow random access for seam stitching
+        // =========================================================================================
+        int[,] mcvtOffsets = new int[16, 16];
+        float[,] chunkBaseZs = new float[16, 16];
         
-        // Parse ADT to find MCNK chunks and their MCVT subchunks
-        int pos = 0;
-        int mcnkIndex = 0;
-        int mcvtFoundCount = 0;
+        // Initialize with -1
+        for (int x = 0; x < 16; x++)
+            for (int y = 0; y < 16; y++)
+                mcvtOffsets[x, y] = -1;
+
+        long pos = 0;
         
+        // Iterate through all MCNK chunks
         while (pos + 8 <= adtBytes.Length)
         {
-            // Read chunk signature (reversed)
-            string sig = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
-            string readable = new string(sig.Reverse().ToArray());
-            uint size = BitConverter.ToUInt32(adtBytes, pos + 4);
+            // Read chunk signature
+            string sig = System.Text.Encoding.ASCII.GetString(adtBytes, (int)pos, 4);
+            string readable = new string(sig.Reverse().ToArray()); 
+            uint size = BitConverter.ToUInt32(adtBytes, (int)pos + 4);
             
-            if (pos + 8 + size > adtBytes.Length)
-                break;
+            if (pos + 8 + size > adtBytes.Length) break;
             
             if (readable == "MCNK")
             {
-                // Parse MCNK header to get MCVT offset
-                int mcnkDataStart = pos + 8;
+                int mcnkDataStart = (int)pos + 8;
                 
-                if (mcnkDataStart + 128 > adtBytes.Length)
-                    break;
-                
-                // MCNK header: flags @ 0, IndexX @ 4, IndexY @ 8, ofsHeight @ 0x14
-                uint chunkX = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 4);
-                uint chunkY = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 8);
-                uint ofsHeight = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 0x14);
-                
-                // baseZ is at position offset 0x70 (position.z in C3Vector at 0x68)
-                // C3Vector: x @ 0x68, y @ 0x6C, z @ 0x70
-                float baseZ = BitConverter.ToSingle(adtBytes, mcnkDataStart + 0x70);
-                
-                if (ofsHeight > 0)
+                // Read Indices and Offsets
+                if (mcnkDataStart + 128 <= adtBytes.Length)
                 {
-                    // MCVT offset is relative to MCNK chunk start (including 8-byte header)
-                    int mcvtPos = pos + (int)ofsHeight;
+                    uint cx = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 4);
+                    uint cy = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 8);
+                    uint ofsHeight = BitConverter.ToUInt32(adtBytes, mcnkDataStart + 0x14);
+                    float baseZ = BitConverter.ToSingle(adtBytes, mcnkDataStart + 0x70);
                     
-                    if (mcvtPos + 8 <= adtBytes.Length)
+                    if (cx < 16 && cy < 16 && ofsHeight > 0)
                     {
-                        // Verify it's MCVT
-                        string mcvtSig = System.Text.Encoding.ASCII.GetString(adtBytes, mcvtPos, 4);
-                        string mcvtReadable = new string(mcvtSig.Reverse().ToArray());
-                        
-
-                        
-                        if (mcvtReadable == "MCVT")
+                        int mcvtPos = (int)pos + (int)ofsHeight;
+                        if (mcvtPos + 8 <= adtBytes.Length)
                         {
-                            mcvtFoundCount++;
-                            uint mcvtSize = BitConverter.ToUInt32(adtBytes, mcvtPos + 4);
-                            int mcvtDataStart = mcvtPos + 8;
+                            string mcvtSig = System.Text.Encoding.ASCII.GetString(adtBytes, mcvtPos, 4);
+                            string mcvtReadable = new string(mcvtSig.Reverse().ToArray());
                             
-                            if (mcvtSize >= 145 * 4 && mcvtDataStart + 145 * 4 <= adtBytes.Length)
+                            if (mcvtReadable == "MCVT")
                             {
-                                // Calculate chunk world position
-                                // Tile corner is at (tileWorldX, tileWorldY), tile spans DOWNWARD
-                                // Chunk (0,0) is at tile corner, Chunk (15,15) is at tile_corner - 15*ChunkSize
-                                // Each chunk covers ChunkSize (33.33 units) from its position going DOWN
-                                float chunkMinX = tileWorldX - (chunkX + 1) * ChunkSize;  // Lower bound
-                                float chunkMaxX = tileWorldX - chunkX * ChunkSize;        // Upper bound
-                                float chunkMinY = tileWorldY - (chunkY + 1) * ChunkSize;
-                                float chunkMaxY = tileWorldY - chunkY * ChunkSize;
-                                
-
-                                
-
-                                
-
-                                
-
-                                
-                                // Apply each MPRL point that falls within or near this chunk
-                                foreach (var pt in mprlPoints)
-                                {
-                                    // Check if point is within this chunk (with margin)
-                                    float margin = ChunkSize * 0.1f;
-                                    if (pt.X < chunkMinX - margin || pt.X > chunkMaxX + margin)
-                                        continue;
-                                    if (pt.Y < chunkMinY - margin || pt.Y > chunkMaxY + margin)
-                                        continue;
-                                    
-                                    // Calculate vertex position within chunk
-                                    // Chunk spans from chunkMinX to chunkMaxX
-                                    // relX = 0 at chunkMaxX, 8 at chunkMinX (8 outer vertices per row)
-                                    float relX = (chunkMaxX - pt.X) / ChunkSize * 8;
-                                    float relY = (chunkMaxY - pt.Y) / ChunkSize * 8;
-                                    
-                                    int vertCol = (int)Math.Round(relX);
-                                    int vertRow = (int)Math.Round(relY * 2);
-                                    
-                                    if (vertCol < 0 || vertCol > 8 || vertRow < 0 || vertRow > 16)
-                                        continue;
-                                    
-                                    // Calculate vertex index in 145-vertex array
-                                    bool isInnerRow = (vertRow % 2) == 1;
-                                    int actualRow = vertRow / 2;
-                                    
-                                    int vertIdx;
-                                    if (isInnerRow)
-                                    {
-                                        int innerIdx = Math.Min(vertCol, 7);
-                                        vertIdx = actualRow * 17 + 9 + innerIdx;
-                                    }
-                                    else
-                                    {
-                                        vertIdx = actualRow * 17 + vertCol;
-                                    }
-                                    
-                                    if (vertIdx < 0 || vertIdx >= 145)
-                                        continue;
-                                    
-                                    // Read current height (relative to baseZ)
-                                    int byteOffset = mcvtDataStart + vertIdx * 4;
-                                    float currentRelHeight = BitConverter.ToSingle(adtBytes, byteOffset);
-                                    float currentAbsHeight = baseZ + currentRelHeight;
-                                    
-                                    // Calculate height difference
-                                    float heightDiff = pt.Z - currentAbsHeight;
-                                    
-
-                                    
-                                    // Skip if change would cause a spike
-                                    if (Math.Abs(heightDiff) > spikeThreshold)
-                                        continue;
-                                    
-                                    // Blend toward MPRL height (modify relative height)
-                                    float newRelHeight = currentRelHeight + heightDiff * blendFactor;
-                                    
-                                    // CRITICAL: Ensure we don't write invalid floats (NaN/Infinity) which crash Noggit
-                                    if (float.IsNaN(newRelHeight) || float.IsInfinity(newRelHeight))
-                                    {
-                                        continue; 
-                                    }
-                                    
-                                    byte[] newHeightBytes = BitConverter.GetBytes(newRelHeight);
-                                    Array.Copy(newHeightBytes, 0, adtBytes, byteOffset, 4);
-                                    
-                                    // Record the diff for verification
-                                    diffs.Add(new HeightDiff(
-                                        (int)chunkX, (int)chunkY, vertIdx,
-                                        currentAbsHeight, baseZ + newRelHeight, pt.Z));
-                                    
-                                    modifiedCount++;
-                                }
+                                mcvtOffsets[cx, cy] = mcvtPos + 8;
+                                chunkBaseZs[cx, cy] = baseZ;
                             }
                         }
                     }
                 }
-                
-                mcnkIndex++;
             }
-            
             pos += 8 + (int)size;
         }
+
+        // =========================================================================================
+        // PASS 2: Patch Heights with Seam Stitching (Neighbor Propagation)
+        // =========================================================================================
+
+        // Helper to modify a specific vertex
+        void ApplyHeight(int cx, int cy, int row, int col, float targetZ)
+        {
+            if (cx < 0 || cx >= 16 || cy < 0 || cy >= 16) return;
+            
+            int mcvtStart = mcvtOffsets[cx, cy];
+            if (mcvtStart == -1) return;
+
+            float baseZ = chunkBaseZs[cx, cy];
+            
+            // Calculate vertex index (0-144)
+            int vertIdx = -1;
+            bool isInnerRow = (row % 2) == 1;
+            int actualRow = row / 2;
+            
+            if (isInnerRow)
+            {
+                // Inner rows (odd rows) have only 8 columns (0..7)
+                int innerIdx = Math.Min(col, 7);
+                if (col >= 0 && col <= 7)
+                    vertIdx = actualRow * 17 + 9 + innerIdx;
+            }
+            else
+            {
+                // Outer row (even rows) have 9 columns (0..8)
+                if (col >= 0 && col <= 8)
+                    vertIdx = actualRow * 17 + col;
+            }
+
+            if (vertIdx < 0 || vertIdx >= 145) return;
+
+            int byteOffset = mcvtStart + vertIdx * 4;
+            float currentRelHeight = BitConverter.ToSingle(adtBytes, byteOffset);
+            float currentAbsHeight = baseZ + currentRelHeight;
+            float heightDiff = targetZ - currentAbsHeight;
+
+            if (Math.Abs(heightDiff) > spikeThreshold) return;
+
+            float newRelHeight = currentRelHeight + heightDiff * blendFactor;
+
+            // Safety check
+            if (float.IsNaN(newRelHeight) || float.IsInfinity(newRelHeight)) return;
+
+            byte[] newHeightBytes = BitConverter.GetBytes(newRelHeight);
+            Array.Copy(newHeightBytes, 0, adtBytes, byteOffset, 4);
+
+            diffsList.Add(new HeightDiff(cx, cy, vertIdx, currentAbsHeight, baseZ + newRelHeight, targetZ));
+            modifiedCount++;
+        }
+
+        float tileWorldX = (32 - tileX) * TileSize;
+        float tileWorldY = (32 - tileY) * TileSize;
+
+        foreach (var pt in mprlPoints)
+        {
+            // Map Point -> Chunk
+            float relPtX = tileWorldX - pt.X; 
+            float relPtY = tileWorldY - pt.Y; 
+            
+            int cx = (int)(relPtX / ChunkSize);
+            int cy = (int)(relPtY / ChunkSize);
+            
+            if (cx < 0 || cx >= 16 || cy < 0 || cy >= 16) continue;
+
+            // Map Point -> Vertex
+            float chunkMaxX = tileWorldX - cx * ChunkSize;
+            float chunkMaxY = tileWorldY - cy * ChunkSize;
+            
+            float inChunkX = (chunkMaxX - pt.X) / ChunkSize * 8;
+            float inChunkY = (chunkMaxY - pt.Y) / ChunkSize * 8;
+            
+            int col = (int)Math.Round(inChunkX);
+            int row = (int)Math.Round(inChunkY * 2);
+
+            if (col < 0 || col > 8 || row < 0 || row > 16) continue;
+
+            // Apply to Primary Vertex
+            ApplyHeight(cx, cy, row, col, pt.Z);
+
+            // Propagate to Neighbors (Stitching)
+            // Only outer rows (even rows) touch horizontal boundaries (Left/Right)
+            bool isOuterRow = (row % 2) == 0;
+            if (isOuterRow)
+            {
+                // Note: Logic assumes standard ADT neighbor layout
+                // Orientation Check:
+                // inChunkX: 0=North(MaxX), 8=South(MinX)
+                // inChunkY: 0=West(MaxY), 8=East(MinY) -> Wait, Y axis in WoW is East-West?
+                // WoW: +X=North, +Y=West, +Z=Up.
+                // Tile (0,0) is Top-Left (North-West).
+                // Chunk (0,0) is North-West corner.
+                // Chunk grid increments: +cx -> South (-X direction), +cy -> East (-Y direction).
+                // Chunk local grid: 
+                // X axis (rows): 0=North, 8=South.
+                // Y axis (cols): 0=West, 8=East.
+                //
+                // Let's re-verify my earlier mapping:
+                // float chunkMinX = tileWorldX - (chunkX + 1) * ChunkSize; (South edge)
+                // float chunkMaxX = tileWorldX - chunkX * ChunkSize; (North edge)
+                // float inChunkX = (chunkMaxX - pt.X) / ChunkSize * 8;
+                // If pt.X == chunkMaxX (North edge), inChunkX = 0.
+                // If pt.X == chunkMinX (South edge), inChunkX = 8.
+                // So Col 0 = North side. Col 8 = South side.
+                // Neighbor North = cx-1. Neighbor South = cx+1.
+                // Correct.
+                
+                // float chunkMinY = tileWorldY - (chunkY + 1) * ChunkSize; (East edge)
+                // float chunkMaxY = tileWorldY - chunkY * ChunkSize; (West edge)
+                // float inChunkY = (chunkMaxY - pt.Y) / ChunkSize * 8;
+                // If pt.Y == chunkMaxY (West edge), inChunkY = 0.
+                // If pt.Y == chunkMinY (East edge), inChunkY = 8.
+                // So Row 0 = West side. Row 16 = East side.
+                // Neighbor West = cy-1? Wait.
+                // Tile (0,0) is North-West. 
+                // +cy moves East? 
+                // tileWorldY = (32 - tileY) * TileSize.
+                // If tileY increases, tileWorldY decreases.
+                // WoW Y is +West??
+                // Standard WoW: +X North, +Y West, +Z Up.
+                // So (32,32) origin.
+                // (0,0) is far North (+X) and far West (+Y).
+                // As we go East, Y decreases.
+                // So +cy (moving East) means lower Y.
+                // My mapping: `chunkMaxY - cy*ChunkSize`.
+                // cy=0 is West-most chunk. cy=15 is East-most.
+                // So cy+1 is Neighbor East. cy-1 is Neighbor West.
+                // Row 0 (West edge) should touch Neighbor West (cy-1).
+                // Row 16 (East edge) should touch Neighbor East (cy+1).
+                // Correct.
+                
+                // Col 0 -> North Edge. Neighbor (cx-1) South Edge (Col 8).
+                if (col == 0) ApplyHeight(cx - 1, cy, row, 8, pt.Z);
+
+                // Col 8 -> South Edge. Neighbor (cx+1) North Edge (Col 0).
+                if (col == 8) ApplyHeight(cx + 1, cy, row, 0, pt.Z);
+
+                // Row 0 -> West Edge. Neighbor (cy-1) East Edge (Row 16).
+                if (row == 0) ApplyHeight(cx, cy - 1, 16, col, pt.Z);
+
+                // Row 16 -> East Edge. Neighbor (cy+1) West Edge (Row 0).
+                if (row == 16) ApplyHeight(cx, cy + 1, 0, col, pt.Z);
+
+                // Corners (Diagonal Stitching)
+                // Top-Left (North-West): Col 0, Row 0 -> Neighbor Diag (cx-1, cy-1) Bottom-Right (Col 8, Row 16)
+                if (col == 0 && row == 0)   ApplyHeight(cx - 1, cy - 1, 16, 8, pt.Z);
+                
+                // Top-Right (North-East? No, North-East is Col 0, Row 16).
+                // Col 0 (North), Row 16 (East) -> Neighbor (cx-1, cy+1) South-West (Col 8, Row 0)
+                if (col == 0 && row == 16)  ApplyHeight(cx - 1, cy + 1, 0, 8, pt.Z);
+                
+                // Bottom-Left (South-West): Col 8 (South), Row 0 (West) -> Neighbor (cx+1, cy-1) North-East (Col 0, Row 16)
+                if (col == 8 && row == 0)   ApplyHeight(cx + 1, cy - 1, 16, 0, pt.Z);
+                
+                // Bottom-Right (South-East): Col 8 (South), Row 16 (East) -> Neighbor (cx+1, cy+1) North-West (Col 0, Row 0)
+                if (col == 8 && row == 16)  ApplyHeight(cx + 1, cy + 1, 0, 0, pt.Z);
+            }
+        }
         
+        diffs = diffsList;
         return modifiedCount;
     }
 
