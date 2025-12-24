@@ -266,6 +266,7 @@
             <Button x:Name="PrepareBtn" Content="Prepare Layers"/>
             <Button x:Name="BuildBtn" Content="Build Selected" IsEnabled="False"/>
             <Button x:Name="OpenOutBtn" Content="Open Output"/>
+            <Button x:Name="ExportVlmBtn" Content="Export VLM Dataset" Background="#059669" Foreground="White" FontWeight="Bold"/>
           </StackPanel>
 
           <!-- Log -->

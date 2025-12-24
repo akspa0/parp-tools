@@ -19,6 +19,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using WoWRollback.DbcModule;
 using WoWRollback.Core.Services;
+using WoWRollback.Core.Services.Archive;
+using WoWRollback.Core.Services.Minimap;
+using WoWRollback.MinimapModule;
 
 namespace WoWRollback.Gui;
 
@@ -496,6 +499,7 @@ public partial class MainWindow : Window
         var saveSel = this.FindControl<Button>("SaveSelectionPresetBtn"); if (saveSel != null) saveSel.Click += SaveSelectionPresetBtn_Click;
         var prep = this.FindControl<Button>("PrepareBtn"); if (prep != null) prep.Click += PrepareBtn_Click;
         var openOut = this.FindControl<Button>("OpenOutBtn"); if (openOut != null) openOut.Click += OpenOutBtn_Click;
+        var exportVlm = this.FindControl<Button>("ExportVlmBtn"); if (exportVlm != null) exportVlm.Click += ExportVlmBtn_Click;
         var genBaseline = this.FindControl<Button>("GenBaselineBtn"); if (genBaseline != null) genBaseline.Click += GenBaselineBtn_Click;
 
         // Data Sources tab hookups
@@ -765,6 +769,106 @@ public partial class MainWindow : Window
             }
         }
         catch { }
+    }
+
+    private async void ExportVlmBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var map = _currentMap;
+            if (string.IsNullOrWhiteSpace(map))
+            {
+                AppendBuildLog("[VLM] No map selected. Please load data and select a map first.");
+                return;
+            }
+
+            var payload = BuildDataSourcePayload();
+            if (string.IsNullOrWhiteSpace(payload.Root) || !Directory.Exists(payload.Root))
+            {
+                AppendBuildLog("[VLM] No valid data root. Please configure Data Sources first.");
+                return;
+            }
+
+            // Determine output directory
+            var buildOutBox = this.FindControl<TextBox>("BuildOutBox");
+            var outputBase = buildOutBox?.Text?.Trim() ?? Path.Combine(_cacheRoot, "..", "output");
+            var vlmOutputDir = Path.Combine(outputBase, "vlm_dataset", map);
+
+            AppendBuildLog($"[VLM] Starting VLM dataset export for map: {map}");
+            AppendBuildLog($"[VLM] Output: {vlmOutputDir}");
+            ShowLoading($"Exporting VLM dataset for {map}...");
+
+            await Task.Run(async () =>
+            {
+                try
+                {
+                    // Build MPQ paths for WotLK 3.3.5
+                    var mpqPaths = new List<string>();
+                    var dataDir = Path.Combine(payload.Root!, "Data");
+                    if (Directory.Exists(dataDir))
+                    {
+                        mpqPaths.AddRange(Directory.GetFiles(dataDir, "*.mpq", SearchOption.AllDirectories)
+                            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
+                    }
+
+                    if (mpqPaths.Count == 0)
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                            AppendBuildLog("[VLM] No MPQ files found. Make sure Data Sources Root points to a WoW installation."));
+                        return;
+                    }
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                        AppendBuildLog($"[VLM] Found {mpqPaths.Count} MPQ archives"));
+
+                    using var archiveSource = new MpqArchiveSource(mpqPaths);
+
+                    // Parse md5translate if available
+                    Md5TranslateIndex? md5Index = null;
+                    if (Md5TranslateResolver.TryLoad(archiveSource, out var loadedIndex, out var md5SourcePath))
+                    {
+                        md5Index = loadedIndex;
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                            AppendBuildLog($"[VLM] Loaded md5translate from: {md5SourcePath} ({md5Index?.PlainToHash.Count ?? 0} entries)"));
+                    }
+
+                    var resolver = new MinimapFileResolver(archiveSource, md5Index);
+                    var exporter = new VlmDatasetExporter();
+
+                    var progress = new Progress<string>(msg =>
+                        Dispatcher.UIThread.InvokeAsync(() => AppendBuildLog($"[VLM] {msg}")));
+
+                    var result = await exporter.ExportMapAsync(
+                        archiveSource,
+                        resolver,
+                        map,
+                        vlmOutputDir,
+                        progress);
+
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        AppendBuildLog($"[VLM] Export complete!");
+                        AppendBuildLog($"[VLM]   Tiles exported: {result.TilesExported}");
+                        AppendBuildLog($"[VLM]   Tiles skipped: {result.TilesSkipped}");
+                        AppendBuildLog($"[VLM]   Unique textures: {result.UniqueTextures}");
+                        AppendBuildLog($"[VLM]   Output: {result.OutputDirectory}");
+                    });
+                }
+                catch (Exception ex)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                        AppendBuildLog($"[VLM] ERROR: {ex.Message}"));
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendBuildLog($"[VLM] ERROR: {ex.Message}");
+        }
+        finally
+        {
+            HideLoading();
+        }
     }
 
     // ===== Data Sources logic =====

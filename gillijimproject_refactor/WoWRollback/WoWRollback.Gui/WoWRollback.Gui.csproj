@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.DbcModule\WoWRollback.DbcModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.MinimapModule\WoWRollback.MinimapModule.csproj" />
   </ItemGroup>
 
 </Project>
