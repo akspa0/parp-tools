@@ -1,45 +1,41 @@
 # WoWRollback Active Context
 
-## Current Focus: PM4 → ADT Pipeline (Dec 2025)
+## Current Focus: VLM Terrain Data Export (Dec 2025)
 
-### Session Summary (2025-12-21)
+### Session Summary (2025-12-25)
 
-**Goal**: Match PM4 pathfinding geometry to WMOs and reconstruct ADT placements.
+**Goal**: Export VLM dataset with terrain ground truth (heightmaps, textures, alpha maps) for AI training.
 
-**Fixes Applied**:
-1. ✅ CK24 Lookup CSV parsing - strip quotes from values
-2. ✅ WMO Full Mesh mode - enabled by default
-3. ✅ PM4 MSVT+MSCN combined geometry for matching
-4. ✅ Coordinate swap reverted in `Pm4Decoder` (X,Y,Z direct)
-5. ✅ **Skip CK24=0x000000** - nav mesh excluded from WMO matching
+**Status**: BLOCKED - GUI changes not taking effect
 
-**Root Cause of Noggit Crash**: CK24=0x000000 (nav mesh terrain) was matched to random WMOs and placed, creating garbage that crashed Noggit.
+**What Works**:
+- VLM Export button exports minimap PNGs
+- Placements from CSV cache files work
+- JSON metadata files created
 
----
+**What's Broken**:
+- Terrain data is always `null` in JSON
+- Debug logging added to `MainWindow.cs` never appears
+- Builds succeed but changes don't seem to take effect
 
-## Critical Insight: PM4 Scene Graph Architecture
+**Code Locations**:
+- `WoWRollback.Gui/MainWindow.cs` - `ExportVlmBtn_Click` (~line 776) - inline terrain extraction NOT WORKING
+- `WoWRollback.AnalysisModule/AdtMpqTerrainExtractor.cs` - Full implementation (works in CLI)
+- CLI "Prepare Layers" uses `--placements-only`, skips terrain extraction
 
-The PM4 format is a **hierarchical scene graph**:
+**Root Cause Theories**:
+1. GUI not actually rebuilding (DLL caching issue)
+2. Need to use CLI's AdtMpqTerrainExtractor instead of inline GUI code
+3. "Prepare Layers" should run terrain extraction first, GUI reads from cache
 
-```
-PM4 Map Object (Global)
-├── Global Pools (MSVT, MSVI, MSCN, MPRL, MPRR)
-├── CK24 Object Groups (can span multiple tiles)
-└── Tile Manifests (which CK24s belong to which tile)
-```
-
-### Current Problem
-Reading tiles independently is **wrong**. Objects span tiles; vertex data is shared globally.
-
-### Next Step: Implement Global PM4 Reader
-1. Load ALL tiles into one unified `Pm4MapObject` 
-2. Build global vertex/index/MSCN pools with tile provenance
-3. Extract per-tile CK24 objects by referencing global pools
-4. Use MSCN as verification layer (compare matched WMO point cloud)
-
-**Implementation Plan**: See `implementation_plan.md` in artifacts.
+**Next Steps**:
+1. Verify MainWindow.cs changes are in compiled DLL
+2. Option A: Remove `--placements-only` from GUI's CLI call, let cache populate terrain JSON
+3. Option B: GUI VLM export reads cached terrain JSON (already implemented, but cache empty)
 
 ---
+
+## Previous Focus: PM4 → ADT Pipeline (Dec 2025)
 
 ## Key Files
 

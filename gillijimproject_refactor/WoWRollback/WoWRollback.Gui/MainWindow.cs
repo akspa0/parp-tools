@@ -798,30 +798,33 @@ public partial class MainWindow : Window
 
             AppendBuildLog($"[VLM] Starting VLM dataset export for map: {map}");
             AppendBuildLog($"[VLM] Output: {vlmOutputDir}");
+            var dataRoot = payload.Root; // Capture for closure
             ShowLoading($"Exporting VLM dataset for {map}...");
 
             await Task.Run(async () =>
             {
                 try
                 {
-                    // Find minimaps in versioned cache subdirectories (Prepare Layers extracts to {cache}/{version}/minimaps/)
+                    // Find minimaps in versioned cache subdirectories (Prepare Layers extracts to {cache}/{version}/{map}/minimap/)
                     string? minimapCacheDir = null;
                     
                     // Search for minimaps directory in cache subdirectories
+                    string? foundVersionDir = null;
                     if (Directory.Exists(_cacheRoot))
                     {
                         foreach (var versionDir in Directory.GetDirectories(_cacheRoot))
                         {
-                            var minimapsDir = Path.Combine(versionDir, "minimaps");
+                            // Check {version}/{map}/minimaps/ path (note: plural)
+                            var minimapsDir = Path.Combine(versionDir, map, "minimaps");
                             if (Directory.Exists(minimapsDir))
                             {
-                                // Check if this minimaps dir has files for our map
-                                var mapFiles = Directory.GetFiles(minimapsDir, $"{map}_*.png");
-                                if (mapFiles.Length > 0)
+                                var pngFiles = Directory.GetFiles(minimapsDir, "*.png");
+                                if (pngFiles.Length > 0)
                                 {
                                     minimapCacheDir = minimapsDir;
+                                    foundVersionDir = versionDir;
                                     await Dispatcher.UIThread.InvokeAsync(() =>
-                                        AppendBuildLog($"[VLM] Found {mapFiles.Length} minimap files in: {minimapCacheDir}"));
+                                        AppendBuildLog($"[VLM] Found {pngFiles.Length} minimap files in: {minimapCacheDir}"));
                                     break;
                                 }
                             }
@@ -873,6 +876,31 @@ public partial class MainWindow : Window
                     int tilesExported = 0;
                     int tilesSkipped = 0;
                     
+                    // Create archive source ONCE before processing all tiles
+                    MpqArchiveSource? archiveSource = null;
+                    if (!string.IsNullOrEmpty(dataRoot) && Directory.Exists(dataRoot))
+                    {
+                        var mpqPaths = ArchiveLocator.LocateMpqs(dataRoot);
+                        Console.WriteLine($"[VLM] DEBUG: Found {mpqPaths.Count} MPQs in {dataRoot}");
+                        if (mpqPaths.Count > 0)
+                        {
+                            foreach (var mpq in mpqPaths.Take(10))
+                                Console.WriteLine($"[VLM]   - {Path.GetFileName(mpq)}");
+                            if (mpqPaths.Count > 10)
+                                Console.WriteLine($"[VLM]   ... and {mpqPaths.Count - 10} more");
+                            
+                            archiveSource = new MpqArchiveSource(mpqPaths);
+                            
+                            // Test: Check if a known ADT exists
+                            var testPath = $"world/maps/{map}/{map}_32_32.adt";
+                            Console.WriteLine($"[VLM] DEBUG: Testing ADT path: {testPath} exists={archiveSource.FileExists(testPath)}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[VLM] WARNING: dataRoot invalid or doesn't exist: '{dataRoot}'");
+                    }
+                    
                     // Copy each minimap file and generate metadata
                     foreach (var srcPath in minimapFiles)
                     {
@@ -900,9 +928,96 @@ public partial class MainWindow : Window
                             var destPath = Path.Combine(imagesDir, $"{map}_{tileX}_{tileY}.png");
                             File.Copy(srcPath, destPath, overwrite: true);
                             
-                            // Generate metadata JSON
+                            // Build comprehensive metadata with terrain + placements
                             var metadataPath = Path.Combine(metadataDir, $"{map}_{tileX}_{tileY}.json");
-                            var metadata = new { tile_id = $"{map}_{tileX}_{tileY}", x = tileX, y = tileY };
+                            
+                            // DEBUG: Write to file since Console.WriteLine might not be visible
+                            var debugLogPath = Path.Combine(vlmOutputDir, "vlm_debug.txt");
+                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] Processing tile {tileX},{tileY} - dataRoot='{dataRoot}'\n");
+                            Console.WriteLine($"[VLM] Processing tile {tileX},{tileY} - tilesExported={tilesExported}, dataRoot='{dataRoot}'");
+                            
+                            // Try to load terrain data from cache first
+                            object? terrainData = null;
+                            var terrainJsonPath = Path.Combine(foundVersionDir ?? "", map, "terrain", $"{map}_{tileX}_{tileY}_terrain.json");
+                            if (File.Exists(terrainJsonPath))
+                            {
+                                try
+                                {
+                                    var terrainJson = File.ReadAllText(terrainJsonPath);
+                                    terrainData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(terrainJson);
+                                }
+                                catch { /* ignore terrain parse errors */ }
+                            }
+                            
+                            // If no cached terrain, try inline extraction from shared MPQ archive
+                            if (terrainData == null && archiveSource != null)
+                            {
+                                try
+                                {
+                                    var adtPath = $"world/maps/{map}/{map}_{tileX}_{tileY}.adt";
+                                    if (archiveSource.FileExists(adtPath))
+                                    {
+                                        using var stream = archiveSource.OpenFile(adtPath);
+                                        using var ms = new MemoryStream();
+                                        stream.CopyTo(ms);
+                                        var adtBytes = ms.ToArray();
+                                        terrainData = ExtractTerrainFromAdt(adtBytes, map, tileX, tileY);
+                                        if (terrainData == null && tilesExported < 3)
+                                        {
+                                            Console.WriteLine($"[VLM] ADT {tileX},{tileY}: {adtBytes.Length} bytes, terrain extraction returned null");
+                                        }
+                                    }
+                                    else if (tilesExported < 3)
+                                    {
+                                        Console.WriteLine($"[VLM] ADT not found for tile {tileX},{tileY}: {adtPath}");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (tilesExported < 3)
+                                    {
+                                        Console.WriteLine($"[VLM] Terrain extraction error for {tileX},{tileY}: {ex.Message}");
+                                    }
+                                }
+                            }
+                            
+                            // Try to load placements for this tile from CSV
+                            var tilePlacements = new List<object>();
+                            var placementsCsvPath = Path.Combine(foundVersionDir ?? "", map, $"{map}_placements.csv");
+                            if (File.Exists(placementsCsvPath))
+                            {
+                                try
+                                {
+                                    foreach (var line in File.ReadLines(placementsCsvPath).Skip(1))
+                                    {
+                                        var csvParts = line.Split(',');
+                                        if (csvParts.Length >= 8 && 
+                                            int.TryParse(csvParts[1], out var px) && px == tileX &&
+                                            int.TryParse(csvParts[2], out var py) && py == tileY)
+                                        {
+                                            tilePlacements.Add(new 
+                                            { 
+                                                type = csvParts[3],
+                                                path = csvParts[4],
+                                                uniqueId = csvParts.Length > 5 ? csvParts[5] : "",
+                                                worldX = csvParts.Length > 6 ? csvParts[6] : "",
+                                                worldY = csvParts.Length > 7 ? csvParts[7] : ""
+                                            });
+                                        }
+                                    }
+                                }
+                                catch { /* ignore placement parse errors */ }
+                            }
+                            
+                            // Build final metadata
+                            var metadata = new 
+                            { 
+                                tile_id = $"{map}_{tileX}_{tileY}", 
+                                x = tileX, 
+                                y = tileY,
+                                terrain = terrainData,
+                                placements = tilePlacements.Count > 0 ? tilePlacements : null
+                            };
                             await File.WriteAllTextAsync(metadataPath, 
                                 System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                             
@@ -953,6 +1068,129 @@ public partial class MainWindow : Window
         finally
         {
             HideLoading();
+        }
+    }
+
+    // Helper method to extract terrain data from ADT bytes inline
+    private static object? ExtractTerrainFromAdt(byte[] adtBytes, string mapName, int tileX, int tileY)
+    {
+        try
+        {
+            Console.WriteLine($"[VLM] ExtractTerrainFromAdt: {mapName}_{tileX}_{tileY}, bytes={adtBytes.Length}");
+            
+            var textures = new List<string>();
+            var chunks = new List<object>();
+            
+            // Check first 4 bytes to see file signature
+            if (adtBytes.Length >= 4)
+            {
+                var sig = System.Text.Encoding.ASCII.GetString(adtBytes, 0, 4);
+                Console.WriteLine($"[VLM]   First 4 bytes signature: '{sig}' (reversed: '{new string(sig.Reverse().ToArray())}')");
+            }
+            
+            // Parse top-level chunks for MTEX
+            int pos = 0;
+            while (pos < adtBytes.Length - 8)
+            {
+                string sig = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
+                int size = BitConverter.ToInt32(adtBytes, pos + 4);
+                if (size < 0 || pos + 8 + size > adtBytes.Length) break;
+                string readable = new string(sig.Reverse().ToArray());
+                
+                // Parse MTEX (texture filenames)
+                if (readable == "MTEX" && size > 0)
+                {
+                    int start = pos + 8;
+                    int strStart = start;
+                    for (int i = start; i < start + size; i++)
+                    {
+                        if (adtBytes[i] == 0)
+                        {
+                            if (i > strStart)
+                            {
+                                var name = System.Text.Encoding.ASCII.GetString(adtBytes, strStart, i - strStart);
+                                if (!string.IsNullOrWhiteSpace(name)) textures.Add(name);
+                            }
+                            strStart = i + 1;
+                        }
+                    }
+                }
+                
+                // Parse MCNK chunks for terrain data
+                if (readable == "MCNK" && size >= 128)
+                {
+                    var chunkData = new byte[size];
+                    Buffer.BlockCopy(adtBytes, pos + 8, chunkData, 0, size);
+                    
+                    // Parse subchunks (starting after 128-byte header)
+                    var heights = new List<float>();
+                    var layers = new List<object>();
+                    string? alpha = null;
+                    
+                    int subPos = 128;
+                    while (subPos < chunkData.Length - 8)
+                    {
+                        string subSig = System.Text.Encoding.ASCII.GetString(chunkData, subPos, 4);
+                        int subSize = BitConverter.ToInt32(chunkData, subPos + 4);
+                        if (subSize < 0 || subPos + 8 + subSize > chunkData.Length) break;
+                        string subReadable = new string(subSig.Reverse().ToArray());
+                        
+                        // MCVT - heights (145 floats)
+                        if (subReadable == "MCVT" && subSize >= 145 * 4)
+                        {
+                            for (int i = 0; i < 145; i++)
+                                heights.Add(BitConverter.ToSingle(chunkData, subPos + 8 + i * 4));
+                        }
+                        
+                        // MCLY - texture layers (16 bytes each)
+                        if (subReadable == "MCLY" && subSize >= 16)
+                        {
+                            int layerCount = subSize / 16;
+                            for (int i = 0; i < layerCount; i++)
+                            {
+                                int off = subPos + 8 + i * 16;
+                                layers.Add(new { 
+                                    textureId = BitConverter.ToUInt32(chunkData, off),
+                                    flags = BitConverter.ToUInt32(chunkData, off + 4)
+                                });
+                            }
+                        }
+                        
+                        // MCAL - alpha map (base64 encoded)
+                        if (subReadable == "MCAL" && subSize > 0)
+                        {
+                            var alphaData = new byte[subSize];
+                            Buffer.BlockCopy(chunkData, subPos + 8, alphaData, 0, subSize);
+                            alpha = Convert.ToBase64String(alphaData);
+                        }
+                        
+                        subPos += 8 + subSize;
+                    }
+                    
+                    chunks.Add(new {
+                        idx = chunks.Count,
+                        heights = heights.Count > 0 ? heights : null,
+                        layers = layers.Count > 0 ? layers : null,
+                        alpha = alpha
+                    });
+                }
+                
+                pos += 8 + size;
+            }
+            
+            if (textures.Count == 0 && chunks.Count == 0) return null;
+            
+            return new {
+                map = mapName,
+                tile_x = tileX,
+                tile_y = tileY,
+                textures = textures.Count > 0 ? textures : null,
+                chunks = chunks.Count > 0 ? chunks : null
+            };
+        }
+        catch
+        {
+            return null;
         }
     }
 
