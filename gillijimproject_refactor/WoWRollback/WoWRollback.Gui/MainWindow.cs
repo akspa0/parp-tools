@@ -24,6 +24,8 @@ using WoWRollback.Core.Services.Minimap;
 using WoWRollback.Core.Services.Viewer;
 using WoWRollback.MinimapModule;
 using WoWRollback.MinimapModule.Services;
+using WoWRollback.AnalysisModule;
+using WoWRollback.PM4Module;
 
 namespace WoWRollback.Gui;
 
@@ -875,30 +877,61 @@ public partial class MainWindow : Window
                     
                     int tilesExported = 0;
                     int tilesSkipped = 0;
+                    // Debug log path - declare early so we can use it in MPQ setup logging
+                    var debugLogPath = Path.Combine(vlmOutputDir, "vlm_debug.txt");
                     
-                    // Create archive source ONCE before processing all tiles
-                    MpqArchiveSource? archiveSource = null;
+                    // Create PrioritizedArchiveSource for terrain extraction (same approach as CLI analyze-map-adts-mpq)
+                    // This works reliably without needing listfile enumeration - we read files directly by path
+                    PrioritizedArchiveSource? archiveSource = null;
+                    AdtMpqTerrainExtractor? terrainExtractor = null;
                     if (!string.IsNullOrEmpty(dataRoot) && Directory.Exists(dataRoot))
                     {
                         var mpqPaths = ArchiveLocator.LocateMpqs(dataRoot);
-                        Console.WriteLine($"[VLM] DEBUG: Found {mpqPaths.Count} MPQs in {dataRoot}");
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                            AppendBuildLog($"[VLM] Found {mpqPaths.Count} MPQs in data root"));
+                        
+                        // Debug: Log which MPQs are found
+                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] === VLM MPQ Debug (PrioritizedArchiveSource) ===\n");
+                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] dataRoot: {dataRoot}\n");
+                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] mapName: {map}\n");
+                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] MPQ count: {mpqPaths.Count}\n");
+                        foreach (var mpq in mpqPaths.Take(5))
+                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}]   MPQ: {Path.GetFileName(mpq)}\n");
+                        if (mpqPaths.Count > 5)
+                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}]   ... and {mpqPaths.Count - 5} more\n");
+                        
                         if (mpqPaths.Count > 0)
                         {
-                            foreach (var mpq in mpqPaths.Take(10))
-                                Console.WriteLine($"[VLM]   - {Path.GetFileName(mpq)}");
-                            if (mpqPaths.Count > 10)
-                                Console.WriteLine($"[VLM]   ... and {mpqPaths.Count - 10} more");
+                            // Use PrioritizedArchiveSource like CLI does - handles patch priority automatically
+                            archiveSource = new PrioritizedArchiveSource(dataRoot, mpqPaths);
+                            terrainExtractor = new AdtMpqTerrainExtractor();
                             
-                            archiveSource = new MpqArchiveSource(mpqPaths);
+                            // Test if WDT exists (like CLI does at line 3600)
+                            var wdtPath = $"world/maps/{map}/{map}.wdt";
+                            var wdtExists = archiveSource.FileExists(wdtPath);
+                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] WDT test: FileExists('{wdtPath}') = {wdtExists}\n");
                             
-                            // Test: Check if a known ADT exists
-                            var testPath = $"world/maps/{map}/{map}_32_32.adt";
-                            Console.WriteLine($"[VLM] DEBUG: Testing ADT path: {testPath} exists={archiveSource.FileExists(testPath)}");
+                            if (wdtExists)
+                            {
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                    AppendBuildLog($"[VLM] Archive source ready - WDT found for '{map}'"));
+                            }
+                            else
+                            {
+                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] WARNING: WDT not found - ADTs may not be accessible\n");
+                            }
+                        }
+                        else
+                        {
+                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] No MPQs found\n");
+                            await Dispatcher.UIThread.InvokeAsync(() =>
+                                AppendBuildLog($"[VLM] WARNING: No MPQ archives found in '{dataRoot}'"));
                         }
                     }
                     else
                     {
-                        Console.WriteLine($"[VLM] WARNING: dataRoot invalid or doesn't exist: '{dataRoot}'");
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                            AppendBuildLog($"[VLM] WARNING: dataRoot invalid or doesn't exist: '{dataRoot}'"));
                     }
                     
                     // Copy each minimap file and generate metadata
@@ -932,7 +965,6 @@ public partial class MainWindow : Window
                             var metadataPath = Path.Combine(metadataDir, $"{map}_{tileX}_{tileY}.json");
                             
                             // DEBUG: Write to file since Console.WriteLine might not be visible
-                            var debugLogPath = Path.Combine(vlmOutputDir, "vlm_debug.txt");
                             File.AppendAllText(debugLogPath, $"[{DateTime.Now}] Processing tile {tileX},{tileY} - dataRoot='{dataRoot}'\n");
                             Console.WriteLine($"[VLM] Processing tile {tileX},{tileY} - tilesExported={tilesExported}, dataRoot='{dataRoot}'");
                             
@@ -949,36 +981,61 @@ public partial class MainWindow : Window
                                 catch { /* ignore terrain parse errors */ }
                             }
                             
-                            // If no cached terrain, try inline extraction from shared MPQ archive
-                            if (terrainData == null && archiveSource != null)
+                            // Extract terrain directly from archive using PrioritizedArchiveSource
+                            if (terrainData == null && archiveSource != null && terrainExtractor != null)
                             {
                                 try
                                 {
-                                    var adtPath = $"world/maps/{map}/{map}_{tileX}_{tileY}.adt";
+                                    // Use lowercase paths like CLI does (archiveSource normalizes internally)
+                                    var mapLower = map.ToLowerInvariant();
+                                    var adtPath = $"world/maps/{mapLower}/{mapLower}_{tileX}_{tileY}.adt";
+                                    
                                     if (archiveSource.FileExists(adtPath))
                                     {
                                         using var stream = archiveSource.OpenFile(adtPath);
                                         using var ms = new MemoryStream();
                                         stream.CopyTo(ms);
                                         var adtBytes = ms.ToArray();
-                                        terrainData = ExtractTerrainFromAdt(adtBytes, map, tileX, tileY);
-                                        if (terrainData == null && tilesExported < 3)
+                                        
+                                        if (adtBytes.Length > 0)
                                         {
-                                            Console.WriteLine($"[VLM] ADT {tileX},{tileY}: {adtBytes.Length} bytes, terrain extraction returned null");
+                                            // Use the terrain extractor from AnalysisModule
+                                            var tileTerrainData = terrainExtractor.ExtractTileData(adtBytes, map, tileX, tileY);
+                                            if (tileTerrainData != null && tileTerrainData.Chunks.Count > 0)
+                                            {
+                                                terrainData = tileTerrainData;
+                                                if (tilesExported < 3)
+                                                {
+                                                    File.AppendAllText(debugLogPath, $"[{DateTime.Now}] SUCCESS: Terrain extracted for {tileX},{tileY} - {tileTerrainData.Chunks.Count} chunks, {adtBytes.Length} bytes\n");
+                                                }
+                                            }
+                                            else if (tilesExported < 3)
+                                            {
+                                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] ExtractTileData null/empty for {tileX},{tileY} (bytes={adtBytes.Length})\n");
+                                            }
                                         }
                                     }
                                     else if (tilesExported < 3)
                                     {
-                                        Console.WriteLine($"[VLM] ADT not found for tile {tileX},{tileY}: {adtPath}");
+                                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] ADT not found: {adtPath}\n");
                                     }
                                 }
                                 catch (Exception ex)
                                 {
                                     if (tilesExported < 3)
                                     {
-                                        Console.WriteLine($"[VLM] Terrain extraction error for {tileX},{tileY}: {ex.Message}");
+                                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] EXCEPTION for {tileX},{tileY}: {ex.Message}\n");
+                                        await Dispatcher.UIThread.InvokeAsync(() =>
+                                            AppendBuildLog($"[VLM] Terrain extraction error for {tileX},{tileY}: {ex.Message}"));
                                     }
                                 }
+                            }
+                            else if (terrainData == null && tilesExported < 3)
+                            {
+                                // Log why we skipped terrain extraction
+                                var reason = archiveSource == null ? "archiveSource is null" : 
+                                             terrainExtractor == null ? "terrainExtractor is null" : "unknown";
+                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] SKIPPED terrain for {tileX},{tileY}: {reason}\n");
                             }
                             
                             // Try to load placements for this tile from CSV
@@ -1046,6 +1103,9 @@ public partial class MainWindow : Window
                         }
                     }
                     
+                    // Cleanup MPQ extractor
+                    archiveSource?.Dispose();
+                    
                     await Dispatcher.UIThread.InvokeAsync(() =>
                     {
                         AppendBuildLog($"[VLM] Export complete!");
@@ -1071,128 +1131,6 @@ public partial class MainWindow : Window
         }
     }
 
-    // Helper method to extract terrain data from ADT bytes inline
-    private static object? ExtractTerrainFromAdt(byte[] adtBytes, string mapName, int tileX, int tileY)
-    {
-        try
-        {
-            Console.WriteLine($"[VLM] ExtractTerrainFromAdt: {mapName}_{tileX}_{tileY}, bytes={adtBytes.Length}");
-            
-            var textures = new List<string>();
-            var chunks = new List<object>();
-            
-            // Check first 4 bytes to see file signature
-            if (adtBytes.Length >= 4)
-            {
-                var sig = System.Text.Encoding.ASCII.GetString(adtBytes, 0, 4);
-                Console.WriteLine($"[VLM]   First 4 bytes signature: '{sig}' (reversed: '{new string(sig.Reverse().ToArray())}')");
-            }
-            
-            // Parse top-level chunks for MTEX
-            int pos = 0;
-            while (pos < adtBytes.Length - 8)
-            {
-                string sig = System.Text.Encoding.ASCII.GetString(adtBytes, pos, 4);
-                int size = BitConverter.ToInt32(adtBytes, pos + 4);
-                if (size < 0 || pos + 8 + size > adtBytes.Length) break;
-                string readable = new string(sig.Reverse().ToArray());
-                
-                // Parse MTEX (texture filenames)
-                if (readable == "MTEX" && size > 0)
-                {
-                    int start = pos + 8;
-                    int strStart = start;
-                    for (int i = start; i < start + size; i++)
-                    {
-                        if (adtBytes[i] == 0)
-                        {
-                            if (i > strStart)
-                            {
-                                var name = System.Text.Encoding.ASCII.GetString(adtBytes, strStart, i - strStart);
-                                if (!string.IsNullOrWhiteSpace(name)) textures.Add(name);
-                            }
-                            strStart = i + 1;
-                        }
-                    }
-                }
-                
-                // Parse MCNK chunks for terrain data
-                if (readable == "MCNK" && size >= 128)
-                {
-                    var chunkData = new byte[size];
-                    Buffer.BlockCopy(adtBytes, pos + 8, chunkData, 0, size);
-                    
-                    // Parse subchunks (starting after 128-byte header)
-                    var heights = new List<float>();
-                    var layers = new List<object>();
-                    string? alpha = null;
-                    
-                    int subPos = 128;
-                    while (subPos < chunkData.Length - 8)
-                    {
-                        string subSig = System.Text.Encoding.ASCII.GetString(chunkData, subPos, 4);
-                        int subSize = BitConverter.ToInt32(chunkData, subPos + 4);
-                        if (subSize < 0 || subPos + 8 + subSize > chunkData.Length) break;
-                        string subReadable = new string(subSig.Reverse().ToArray());
-                        
-                        // MCVT - heights (145 floats)
-                        if (subReadable == "MCVT" && subSize >= 145 * 4)
-                        {
-                            for (int i = 0; i < 145; i++)
-                                heights.Add(BitConverter.ToSingle(chunkData, subPos + 8 + i * 4));
-                        }
-                        
-                        // MCLY - texture layers (16 bytes each)
-                        if (subReadable == "MCLY" && subSize >= 16)
-                        {
-                            int layerCount = subSize / 16;
-                            for (int i = 0; i < layerCount; i++)
-                            {
-                                int off = subPos + 8 + i * 16;
-                                layers.Add(new { 
-                                    textureId = BitConverter.ToUInt32(chunkData, off),
-                                    flags = BitConverter.ToUInt32(chunkData, off + 4)
-                                });
-                            }
-                        }
-                        
-                        // MCAL - alpha map (base64 encoded)
-                        if (subReadable == "MCAL" && subSize > 0)
-                        {
-                            var alphaData = new byte[subSize];
-                            Buffer.BlockCopy(chunkData, subPos + 8, alphaData, 0, subSize);
-                            alpha = Convert.ToBase64String(alphaData);
-                        }
-                        
-                        subPos += 8 + subSize;
-                    }
-                    
-                    chunks.Add(new {
-                        idx = chunks.Count,
-                        heights = heights.Count > 0 ? heights : null,
-                        layers = layers.Count > 0 ? layers : null,
-                        alpha = alpha
-                    });
-                }
-                
-                pos += 8 + size;
-            }
-            
-            if (textures.Count == 0 && chunks.Count == 0) return null;
-            
-            return new {
-                map = mapName,
-                tile_x = tileX,
-                tile_y = tileY,
-                textures = textures.Count > 0 ? textures : null,
-                chunks = chunks.Count > 0 ? chunks : null
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     // ===== Data Sources logic =====
     private void PopulateDataVersions()

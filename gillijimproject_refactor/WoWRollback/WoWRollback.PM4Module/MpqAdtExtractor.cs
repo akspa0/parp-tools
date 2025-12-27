@@ -89,11 +89,13 @@ public sealed class MpqAdtExtractor : IDisposable
     /// <summary>
     /// List all files in the archive matching a pattern.
     /// </summary>
-    public List<string> ListFiles(string pattern = "*")
+    /// <param name="pattern">File pattern (e.g., "*.adt")</param>
+    /// <param name="listFile">Optional path to external listfile for file enumeration</param>
+    public List<string> ListFiles(string pattern = "*", string? listFile = null)
     {
         var results = new List<string>();
         
-        var hFind = SFileFindFirstFile(_hArchive, pattern, out var findData, null);
+        var hFind = SFileFindFirstFile(_hArchive, pattern, out var findData, listFile);
         if (hFind == IntPtr.Zero)
             return results;
 
@@ -117,10 +119,12 @@ public sealed class MpqAdtExtractor : IDisposable
     /// <summary>
     /// List ADT files for a specific map.
     /// </summary>
-    public List<string> ListMapAdts(string mapName)
+    /// <param name="mapName">Map name (e.g., "Azeroth")</param>
+    /// <param name="listFile">Optional path to external listfile for file enumeration</param>
+    public List<string> ListMapAdts(string mapName, string? listFile = null)
     {
         var pattern = $"World\\Maps\\{mapName}\\*.adt";
-        var all = ListFiles(pattern);
+        var all = ListFiles(pattern, listFile);
         
         // Filter to root ADTs only (not _obj0, _tex0 which shouldn't exist in 2.x anyway)
         var results = new List<string>();

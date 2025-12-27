@@ -83,7 +83,7 @@ public sealed class AdtMpqTerrainExtractor
             CsvPath: terrainDir);
     }
     
-    private TileTerrainData? ExtractTileData(byte[] adtBytes, string mapName, int tileX, int tileY)
+    public TileTerrainData? ExtractTileData(byte[] adtBytes, string mapName, int tileX, int tileY)
     {
         var result = new TileTerrainData
         {
