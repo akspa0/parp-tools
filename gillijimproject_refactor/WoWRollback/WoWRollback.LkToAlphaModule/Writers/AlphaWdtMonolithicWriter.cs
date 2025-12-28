@@ -52,10 +52,12 @@ public sealed class AlphaWdtMonolithicWriter
 
 
         // Collect WMO and M2 names from WDT and all tile ADTs
+        // OPTIMIZATION: Use parallel processing and file cache for faster name collection
         var wdtReader = new LkWdtReader();
         var adtReader = new LkAdtReader();
-        var allWmoNames = new HashSet<string>();
-        var allM2Names = new HashSet<string>();
+        var allWmoNames = new ConcurrentBag<string>();
+        var allM2Names = new ConcurrentBag<string>();
+        var fileCache = new ConcurrentDictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         
         // Read from top-level WDT first
         var wdtWmos = wdtReader.ReadWmoNames(lkWdtPath);
@@ -64,11 +66,15 @@ public sealed class AlphaWdtMonolithicWriter
             allWmoNames.Add(name);
         }
         
-        foreach (var rootAdt in rootAdts)
+        // OPTIMIZATION: Parallel name collection from ADTs
+        var nameScanSw = Stopwatch.StartNew();
+        Console.WriteLine($"[pack] Scanning {rootAdts.Count} tiles for M2/WMO names (parallel)...");
+        Parallel.ForEach(rootAdts, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, rootAdt =>
         {
             try
             {
                 var bytesScan = File.ReadAllBytes(rootAdt);
+                fileCache[rootAdt] = bytesScan; // Cache for later use
                 foreach (var n in BuildMmdxOrdered(bytesScan)) allM2Names.Add(n);
                 foreach (var n in BuildMwmoOrdered(bytesScan)) allWmoNames.Add(n);
                 var baseNameScan = Path.GetFileNameWithoutExtension(rootAdt);
@@ -79,26 +85,28 @@ public sealed class AlphaWdtMonolithicWriter
                 if (File.Exists(objScan))
                 {
                     var objBytesScan = File.ReadAllBytes(objScan);
+                    fileCache[objScan] = objBytesScan;
                     foreach (var n in BuildMmdxOrdered(objBytesScan)) allM2Names.Add(n);
                     foreach (var n in BuildMwmoOrdered(objBytesScan)) allWmoNames.Add(n);
                 }
-            // Clear diagnostics hook for safety before moving to next tile
-            AlphaMcnkBuilder.OnChunkBuilt = null;
                 if (File.Exists(obj0Scan))
                 {
                     var obj0BytesScan = File.ReadAllBytes(obj0Scan);
+                    fileCache[obj0Scan] = obj0BytesScan;
                     foreach (var n in BuildMmdxOrdered(obj0BytesScan)) allM2Names.Add(n);
                     foreach (var n in BuildMwmoOrdered(obj0BytesScan)) allWmoNames.Add(n);
                 }
                 if (File.Exists(obj1Scan))
                 {
                     var obj1BytesScan = File.ReadAllBytes(obj1Scan);
+                    fileCache[obj1Scan] = obj1BytesScan;
                     foreach (var n in BuildMmdxOrdered(obj1BytesScan)) allM2Names.Add(n);
                     foreach (var n in BuildMwmoOrdered(obj1BytesScan)) allWmoNames.Add(n);
                 }
             }
             catch { /* best-effort name harvest */ }
-        }
+        });
+        Console.WriteLine($"[pack] Name scan complete in {nameScanSw.ElapsedMilliseconds}ms (M2: {allM2Names.Distinct().Count()}, WMO: {allWmoNames.Distinct().Count()})");
         
         int mccvExported = 0;
         int mccvHeaders = 0;
@@ -192,6 +200,8 @@ public sealed class AlphaWdtMonolithicWriter
         // RAW EMBED MODE disabled in monolithic packer (use conversion path below)
 
         // Read from each tile ADT (root and obj variants)
+        var tileSw = Stopwatch.StartNew();
+        int tilesProcessed = 0;
         foreach (var rootAdt in rootAdts)
         {
             int tileIndex = -1;
@@ -216,7 +226,8 @@ public sealed class AlphaWdtMonolithicWriter
 
                 tileStart = outMs.Position;
 
-                var bytes = File.ReadAllBytes(rootAdt);
+                // OPTIMIZATION: Use cached file if available, otherwise read fresh
+                var bytes = fileCache.TryGetValue(rootAdt, out var cached) ? cached : File.ReadAllBytes(rootAdt);
             // Locate LK MHDR → MCIN to get MCNK offsets to know which exist
             int mhdrOffset = FindFourCC(bytes, "MHDR");
             if (mhdrOffset < 0) continue;
@@ -237,7 +248,8 @@ public sealed class AlphaWdtMonolithicWriter
                 var texAdtLocal = Path.Combine(rootDirLocal, baseNameLocal + "_tex.adt");
                 if (File.Exists(texAdtLocal))
                 {
-                    texBytesForChunks = File.ReadAllBytes(texAdtLocal);
+                    // OPTIMIZATION: Use cached file if available
+                    texBytesForChunks = fileCache.TryGetValue(texAdtLocal, out var texCached) ? texCached : File.ReadAllBytes(texAdtLocal);
                     int tMhOff = FindFourCC(texBytesForChunks, "MHDR");
                     if (tMhOff >= 0)
                     {
@@ -358,9 +370,10 @@ public sealed class AlphaWdtMonolithicWriter
             var obj0Adt = Path.Combine(rootDir, baseName + "_obj0.adt");
             var obj1Adt = Path.Combine(rootDir, baseName + "_obj1.adt");
 
-            byte[] objBytesFs = File.Exists(objAdt) ? File.ReadAllBytes(objAdt) : Array.Empty<byte>();
-            byte[] obj0BytesFs = File.Exists(obj0Adt) ? File.ReadAllBytes(obj0Adt) : Array.Empty<byte>();
-            byte[] obj1BytesFs = File.Exists(obj1Adt) ? File.ReadAllBytes(obj1Adt) : Array.Empty<byte>();
+            // OPTIMIZATION: Use cached files if available
+            byte[] objBytesFs = fileCache.TryGetValue(objAdt, out var objCached) ? objCached : (File.Exists(objAdt) ? File.ReadAllBytes(objAdt) : Array.Empty<byte>());
+            byte[] obj0BytesFs = fileCache.TryGetValue(obj0Adt, out var obj0Cached) ? obj0Cached : (File.Exists(obj0Adt) ? File.ReadAllBytes(obj0Adt) : Array.Empty<byte>());
+            byte[] obj1BytesFs = fileCache.TryGetValue(obj1Adt, out var obj1Cached) ? obj1Cached : (File.Exists(obj1Adt) ? File.ReadAllBytes(obj1Adt) : Array.Empty<byte>());
 
             // Local name tables per source
             var mmdxRoot = BuildMmdxOrdered(bytes);
@@ -505,54 +518,56 @@ public sealed class AlphaWdtMonolithicWriter
             catch { }
             objectsCsvLines.Add($"{yy},{xx},{mddfCountFs},{modfCountFs},{firstMddfName},{firstModfName}");
 
-            // Emit per-tile MCRF debug CSV for quick inspection
-            try
+            // OPTIMIZATION: Only emit per-tile MCRF debug CSV in verbose mode (slow I/O)
+            if (verbose)
             {
-                var outDirLocal = Path.GetDirectoryName(outWdtPath) ?? ".";
-                Directory.CreateDirectory(Path.Combine(outDirLocal, "mcrf_debug"));
-                var dbgPath = Path.Combine(outDirLocal, "mcrf_debug", $"{yy:D2}_{xx:D2}_mcrf_debug.csv");
-                using var swDbg = new StreamWriter(dbgPath, false, Encoding.UTF8);
-                swDbg.WriteLine("chunk_idx,nDoodadRefs,nMapObjRefs,d_min,d_max,w_min,w_max,d_samples,w_samples,violations");
-                for (int ci = 0; ci < 256; ci++)
+                try
                 {
-                    var drefs = doodadRefsByChunkFs[ci];
-                    var wrefs = wmoRefsByChunkFs[ci];
-                    int dn = drefs?.Count ?? 0;
-                    int wn = wrefs?.Count ?? 0;
-                    int dmin = int.MaxValue, dmax = int.MinValue, wmin = int.MaxValue, wmax = int.MinValue;
-                    bool viol = false;
-                    if (dn > 0)
+                    var outDirLocal = Path.GetDirectoryName(outWdtPath) ?? ".";
+                    Directory.CreateDirectory(Path.Combine(outDirLocal, "mcrf_debug"));
+                    var dbgPath = Path.Combine(outDirLocal, "mcrf_debug", $"{yy:D2}_{xx:D2}_mcrf_debug.csv");
+                    using var swDbg = new StreamWriter(dbgPath, false, Encoding.UTF8);
+                    swDbg.WriteLine("chunk_idx,nDoodadRefs,nMapObjRefs,d_min,d_max,w_min,w_max,d_samples,w_samples,violations");
+                    for (int ci = 0; ci < 256; ci++)
                     {
-                        for (int k = 0; k < dn; k++) { int v = drefs[k]; if (v < dmin) dmin = v; if (v > dmax) dmax = v; if (v < 0 || v >= m2Names.Count) viol = true; }
-                    }
-                    else { dmin = dmax = -1; }
-                    if (wn > 0)
-                    {
-                        for (int k = 0; k < wn; k++) { int v = wrefs[k]; if (v < wmin) wmin = v; if (v > wmax) wmax = v; if (v < 0 || v >= wmoNames.Count) viol = true; }
-                    }
-                    else { wmin = wmax = -1; }
+                        var drefs = doodadRefsByChunkFs[ci];
+                        var wrefs = wmoRefsByChunkFs[ci];
+                        int dn = drefs?.Count ?? 0;
+                        int wn = wrefs?.Count ?? 0;
+                        int dmin = int.MaxValue, dmax = int.MinValue, wmin = int.MaxValue, wmax = int.MinValue;
+                        bool viol = false;
+                        if (dn > 0)
+                        {
+                            for (int k = 0; k < dn; k++) { int v = drefs[k]; if (v < dmin) dmin = v; if (v > dmax) dmax = v; if (v < 0 || v >= m2Names.Count) viol = true; }
+                        }
+                        else { dmin = dmax = -1; }
+                        if (wn > 0)
+                        {
+                            for (int k = 0; k < wn; k++) { int v = wrefs[k]; if (v < wmin) wmin = v; if (v > wmax) wmax = v; if (v < 0 || v >= wmoNames.Count) viol = true; }
+                        }
+                        else { wmin = wmax = -1; }
 
-                    // Sample up to 4 refs of each type
-                    string ds = string.Empty;
-                    if (dn > 0)
-                    {
-                        int take = Math.Min(4, dn);
-                        var arr = new string[take];
-                        for (int t = 0; t < take; t++) arr[t] = drefs[t].ToString(CultureInfo.InvariantCulture);
-                        ds = string.Join('|', arr);
+                        string ds = string.Empty;
+                        if (dn > 0)
+                        {
+                            int take = Math.Min(4, dn);
+                            var arr = new string[take];
+                            for (int t = 0; t < take; t++) arr[t] = drefs[t].ToString(CultureInfo.InvariantCulture);
+                            ds = string.Join('|', arr);
+                        }
+                        string ws = string.Empty;
+                        if (wn > 0)
+                        {
+                            int take = Math.Min(4, wn);
+                            var arr = new string[take];
+                            for (int t = 0; t < take; t++) arr[t] = wrefs[t].ToString(CultureInfo.InvariantCulture);
+                            ws = string.Join('|', arr);
+                        }
+                        swDbg.WriteLine($"{ci},{dn},{wn},{dmin},{dmax},{wmin},{wmax},{ds},{ws},{(viol ? "viol" : "")}");
                     }
-                    string ws = string.Empty;
-                    if (wn > 0)
-                    {
-                        int take = Math.Min(4, wn);
-                        var arr = new string[take];
-                        for (int t = 0; t < take; t++) arr[t] = wrefs[t].ToString(CultureInfo.InvariantCulture);
-                        ws = string.Join('|', arr);
-                    }
-                    swDbg.WriteLine($"{ci},{dn},{wn},{dmin},{dmax},{wmin},{wmax},{ds},{ws},{(viol ? "viol" : "")}");
                 }
+                catch { }
             }
-            catch { }
 
             // Rebuild MCNKs with MCRF refs
             // Hook diagnostics to collect per-chunk sizes for this tile
@@ -662,6 +677,15 @@ public sealed class AlphaWdtMonolithicWriter
             // Commit MAIN entries after successful tile write
             mhdrAbs[tileIndex] = checked((int)mhdrAbsolute);
             mhdrToFirstMcnkSizes[tileIndex] = mhdrToFirstVal;
+            tilesProcessed++;
+            // OPTIMIZATION: Progress reporting every 10 tiles or at end
+            if (tilesProcessed % 10 == 0 || tilesProcessed == rootAdts.Count)
+            {
+                var elapsed = tileSw.Elapsed;
+                var rate = tilesProcessed / Math.Max(0.001, elapsed.TotalSeconds);
+                var remaining = (rootAdts.Count - tilesProcessed) / Math.Max(0.1, rate);
+                Console.WriteLine($"[pack] Progress: {tilesProcessed}/{rootAdts.Count} tiles ({tilesProcessed * 100 / rootAdts.Count}%) - {rate:F1} tiles/sec - ETA: {remaining:F0}s");
+            }
             try
             {
                 swTile.Stop();
@@ -691,6 +715,10 @@ public sealed class AlphaWdtMonolithicWriter
             continue;
         }
         }
+
+        // OPTIMIZATION: Clear file cache to free memory
+        fileCache.Clear();
+        Console.WriteLine($"[pack] Tile processing complete: {tilesProcessed} tiles in {tileSw.Elapsed.TotalSeconds:F1}s ({tilesProcessed / Math.Max(0.001, tileSw.Elapsed.TotalSeconds):F1} tiles/sec)");
 
         // Patch MAIN data
         outMs.Position = mainStart + 8;
