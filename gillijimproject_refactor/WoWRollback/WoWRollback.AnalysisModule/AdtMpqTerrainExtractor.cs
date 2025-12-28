@@ -4,12 +4,13 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using WoWRollback.Core.Services.Archive;
+using WoWRollback.PM4Module;
 
 namespace WoWRollback.AnalysisModule;
 
 /// <summary>
-/// Extracts terrain data (MCVT heights, MTEX textures, MCLY layers, MCAL alphas) from ADT files
-/// and writes per-tile JSON for VLM training ground truth.
+/// Extracts terrain data from ADT files using PM4Module's proven parser.
+/// Writes per-tile JSON with heights, textures, layers, and alpha data.
 /// </summary>
 public sealed class AdtMpqTerrainExtractor
 {
@@ -26,7 +27,7 @@ public sealed class AdtMpqTerrainExtractor
         {
             for (int y = 0; y < 64; y++)
             {
-                // Try both monolithic and split ADT paths
+                // Try standard path naming
                 var adtPath = $"world/maps/{mapName}/{mapName}_{x}_{y}.adt";
                 
                 if (!source.FileExists(adtPath))
@@ -39,13 +40,16 @@ public sealed class AdtMpqTerrainExtractor
                     stream.CopyTo(ms);
                     var adtBytes = ms.ToArray();
                     
-                    var tileData = ExtractTileData(adtBytes, mapName, x, y);
+                    // Use PM4Module's static terrain parser
+                    var tileData = AdtTerrainParser.Parse(adtBytes, mapName, x, y);
                     
                     if (tileData != null && tileData.Chunks.Count > 0)
                     {
-                        // Write terrain JSON
+                        // Convert to JSON-serializable format
+                        var jsonData = ConvertToJsonFormat(tileData);
+                        
                         var jsonPath = Path.Combine(terrainDir, $"{mapName}_{x}_{y}_terrain.json");
-                        var json = JsonSerializer.Serialize(tileData, new JsonSerializerOptions 
+                        var json = JsonSerializer.Serialize(jsonData, new JsonSerializerOptions 
                         { 
                             WriteIndented = true,
                             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -57,7 +61,9 @@ public sealed class AdtMpqTerrainExtractor
                         
                         if (tilesProcessed == 1)
                         {
-                            Console.WriteLine($"  [TerrainExtractor] First tile: {mapName}_{x}_{y} ({tileData.Chunks.Count} chunks, {tileData.Textures.Count} textures)");
+                            var layerCount = tileData.Chunks.Sum(c => c.Layers?.Count ?? 0);
+                            var alphaCount = tileData.Chunks.Count(c => c.AlphaRaw != null && c.AlphaRaw.Length > 0);
+                            Console.WriteLine($"  [TerrainExtractor] First tile: {mapName}_{x}_{y} ({tileData.Chunks.Count} chunks, {tileData.Textures.Count} textures, {layerCount} total layers, {alphaCount} chunks with alpha)");
                         }
                         
                         if (tilesProcessed % 100 == 0)
@@ -83,110 +89,52 @@ public sealed class AdtMpqTerrainExtractor
             CsvPath: terrainDir);
     }
     
-    public TileTerrainData? ExtractTileData(byte[] adtBytes, string mapName, int tileX, int tileY)
+    /// <summary>
+    /// Convert PM4Module's TileTerrainData to a JSON-friendly format with proper serialization.
+    /// </summary>
+    private object ConvertToJsonFormat(TileTerrainData tileData)
     {
-        var result = new TileTerrainData
-        {
-            Map = mapName,
-            TileX = tileX,
-            TileY = tileY,
-            Textures = new List<string>(),
-            Chunks = new List<ChunkTerrainData>()
-        };
+        var chunks = new List<object>();
         
-        // Parse top-level chunks
-        var topChunks = ParseChunks(adtBytes, 0);
-        
-        // Extract MTEX (texture filenames)
-        if (topChunks.TryGetValue("MTEX", out var mtexData))
+        foreach (var chunk in tileData.Chunks)
         {
-            result.Textures = ParseMtexFilenames(mtexData);
-        }
-        
-        // Find and parse all MCNKs
-        int pos = 0;
-        int chunkIdx = 0;
-        while (pos < adtBytes.Length - 8)
-        {
-            string sig = Encoding.ASCII.GetString(adtBytes, pos, 4);
-            int size = BitConverter.ToInt32(adtBytes, pos + 4);
-            
-            if (size < 0 || pos + 8 + size > adtBytes.Length) break;
-            
-            string readable = new string(sig.Reverse().ToArray());
-            
-            if (readable == "MCNK" && size >= 128)
+            var layers = new List<object>();
+            if (chunk.Layers != null)
             {
-                var mcnkData = new byte[size];
-                Buffer.BlockCopy(adtBytes, pos + 8, mcnkData, 0, size);
-                
-                var chunkData = ExtractChunkData(mcnkData, chunkIdx);
-                if (chunkData != null)
+                foreach (var layer in chunk.Layers)
                 {
-                    result.Chunks.Add(chunkData);
+                    layers.Add(new
+                    {
+                        textureId = layer.TextureId,
+                        flags = layer.Flags,
+                        alphaOffset = layer.AlphaOffset
+                    });
                 }
-                chunkIdx++;
             }
             
-            pos += 8 + size;
+            chunks.Add(new
+            {
+                idx = chunk.Idx,
+                heights = chunk.Heights,
+                layers = layers,
+                alphaEncoding = DetermineAlphaEncoding(chunk.AlphaRaw?.Length ?? 0, chunk.Layers?.Count ?? 0),
+                alpha = chunk.AlphaRaw != null ? Convert.ToBase64String(chunk.AlphaRaw) : null
+            });
         }
         
-        return result.Chunks.Count > 0 ? result : null;
-    }
-    
-    private ChunkTerrainData? ExtractChunkData(byte[] mcnkData, int chunkIdx)
-    {
-        if (mcnkData.Length < 128) return null;
-        
-        var result = new ChunkTerrainData
+        return new
         {
-            Idx = chunkIdx,
-            Heights = new List<float>(),
-            Layers = new List<TextureLayerInfo>()
+            map = tileData.Map,
+            tileX = tileData.TileX,
+            tileY = tileData.TileY,
+            textures = tileData.Textures,
+            chunks = chunks
         };
-        
-        // Parse subchunks within MCNK (starting after 128-byte header)
-        var subchunks = ParseChunks(mcnkData, 128);
-        
-        // MCVT - 145 floats (9*9 + 8*8 = 81+64 = 145)
-        if (subchunks.TryGetValue("MCVT", out var mcvtData) && mcvtData.Length >= 145 * 4)
-        {
-            for (int i = 0; i < 145; i++)
-            {
-                result.Heights.Add(BitConverter.ToSingle(mcvtData, i * 4));
-            }
-        }
-        
-        // MCLY - texture layer info (16 bytes per entry)
-        if (subchunks.TryGetValue("MCLY", out var mclyData) && mclyData.Length >= 16)
-        {
-            int layerCount = mclyData.Length / 16;
-            for (int i = 0; i < layerCount; i++)
-            {
-                int offset = i * 16;
-                result.Layers.Add(new TextureLayerInfo
-                {
-                    TextureId = BitConverter.ToUInt32(mclyData, offset),
-                    Flags = BitConverter.ToUInt32(mclyData, offset + 4),
-                    OffsetInMcal = BitConverter.ToUInt32(mclyData, offset + 8),
-                    EffectId = BitConverter.ToInt32(mclyData, offset + 12)
-                });
-            }
-        }
-        
-        // MCAL - alpha map data (variable size based on flags)
-        if (subchunks.TryGetValue("MCAL", out var mcalData) && mcalData.Length > 0)
-        {
-            result.Alpha = Convert.ToBase64String(mcalData);
-            // Determine encoding type based on flags/size
-            result.AlphaEncoding = DetermineAlphaEncoding(mcalData.Length, result.Layers.Count);
-        }
-        
-        return result;
     }
     
-    private string DetermineAlphaEncoding(int mcalSize, int layerCount)
+    private string? DetermineAlphaEncoding(int mcalSize, int layerCount)
     {
+        if (mcalSize == 0) return null;
         if (layerCount <= 1) return "noAlpha";
         
         int expectedUncompressed = 2048 * (layerCount - 1); // 64x32 per layer (4-bit packed)
@@ -199,81 +147,4 @@ public sealed class AdtMpqTerrainExtractor
         
         return "compressed"; // RLE or other format
     }
-    
-    private Dictionary<string, byte[]> ParseChunks(byte[] data, int startOffset)
-    {
-        var result = new Dictionary<string, byte[]>();
-        int pos = startOffset;
-        
-        while (pos < data.Length - 8)
-        {
-            string sig = Encoding.ASCII.GetString(data, pos, 4);
-            int size = BitConverter.ToInt32(data, pos + 4);
-            
-            if (size < 0 || size > 10_000_000 || pos + 8 + size > data.Length) break;
-            
-            string readable = new string(sig.Reverse().ToArray());
-            
-            // Store first occurrence of each non-MCNK chunk
-            if (!result.ContainsKey(readable) && readable != "MCNK")
-            {
-                var chunkData = new byte[size];
-                Buffer.BlockCopy(data, pos + 8, chunkData, 0, size);
-                result[readable] = chunkData;
-            }
-            
-            pos += 8 + size;
-        }
-        
-        return result;
-    }
-    
-    private List<string> ParseMtexFilenames(byte[] mtexData)
-    {
-        var result = new List<string>();
-        int start = 0;
-        
-        for (int i = 0; i < mtexData.Length; i++)
-        {
-            if (mtexData[i] == 0)
-            {
-                if (i > start)
-                {
-                    var filename = Encoding.ASCII.GetString(mtexData, start, i - start);
-                    if (!string.IsNullOrWhiteSpace(filename))
-                        result.Add(filename);
-                }
-                start = i + 1;
-            }
-        }
-        
-        return result;
-    }
-}
-
-// Data models for terrain JSON output
-public class TileTerrainData
-{
-    public string Map { get; set; } = "";
-    public int TileX { get; set; }
-    public int TileY { get; set; }
-    public List<string> Textures { get; set; } = new();
-    public List<ChunkTerrainData> Chunks { get; set; } = new();
-}
-
-public class ChunkTerrainData
-{
-    public int Idx { get; set; }
-    public List<float> Heights { get; set; } = new();
-    public List<TextureLayerInfo> Layers { get; set; } = new();
-    public string? AlphaEncoding { get; set; }
-    public string? Alpha { get; set; } // Base64 encoded MCAL data
-}
-
-public class TextureLayerInfo
-{
-    public uint TextureId { get; set; }
-    public uint Flags { get; set; }
-    public uint OffsetInMcal { get; set; }
-    public int EffectId { get; set; }
 }

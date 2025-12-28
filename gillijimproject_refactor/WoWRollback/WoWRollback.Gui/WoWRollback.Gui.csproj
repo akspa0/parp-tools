@@ -20,6 +20,7 @@
     <ProjectReference Include="..\WoWRollback.MinimapModule\WoWRollback.MinimapModule.csproj" />
     <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
     <ProjectReference Include="..\..\WoWRollback\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
+    <ProjectReference Include="..\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
   </ItemGroup>
 
 </Project>

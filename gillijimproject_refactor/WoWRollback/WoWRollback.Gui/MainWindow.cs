@@ -684,18 +684,28 @@ public partial class MainWindow : Window
             if (string.Equals(p.Type, "casc", StringComparison.OrdinalIgnoreCase))
             {
                 var sb = new StringBuilder();
-                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-casc --client-path \"{root}\" --all-maps --out \"{outRoot}\" --placements-only");
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-casc --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
                 if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
                 if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
                 if (!string.IsNullOrWhiteSpace(p.Listfile)) sb.Append($" --listfile \"{p.Listfile}\"");
+                // CLI option checkboxes
+                if (this.FindControl<CheckBox>("CliForceCheck")?.IsChecked == true) sb.Append(" --force");
+                if (this.FindControl<CheckBox>("CliSkipMinimapsCheck")?.IsChecked == true) sb.Append(" --skip-minimaps");
+                if (this.FindControl<CheckBox>("CliExportMeshCheck")?.IsChecked == true) sb.Append(" --export-mesh");
+                if (this.FindControl<CheckBox>("CliPlacementsOnlyCheck")?.IsChecked == true) sb.Append(" --placements-only");
                 args = sb.ToString();
             }
             else if (string.Equals(p.Type, "install", StringComparison.OrdinalIgnoreCase))
             {
                 var sb = new StringBuilder();
-                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-mpq --client-path \"{root}\" --all-maps --out \"{outRoot}\" --placements-only");
+                sb.Append($"run --project \"{cliProj}\" -- analyze-map-adts-mpq --client-path \"{root}\" --all-maps --out \"{outRoot}\"");
                 if (!string.IsNullOrWhiteSpace(p.DbdDir)) sb.Append($" --dbd-dir \"{p.DbdDir}\"");
                 if (!string.IsNullOrWhiteSpace(resolvedVer)) sb.Append($" --version \"{resolvedVer}\"");
+                // CLI option checkboxes
+                if (this.FindControl<CheckBox>("CliForceCheck")?.IsChecked == true) sb.Append(" --force");
+                if (this.FindControl<CheckBox>("CliSkipMinimapsCheck")?.IsChecked == true) sb.Append(" --skip-minimaps");
+                if (this.FindControl<CheckBox>("CliExportMeshCheck")?.IsChecked == true) sb.Append(" --export-mesh");
+                if (this.FindControl<CheckBox>("CliPlacementsOnlyCheck")?.IsChecked == true) sb.Append(" --placements-only");
                 args = sb.ToString();
             }
             else
@@ -800,324 +810,24 @@ public partial class MainWindow : Window
 
             AppendBuildLog($"[VLM] Starting VLM dataset export for map: {map}");
             AppendBuildLog($"[VLM] Output: {vlmOutputDir}");
-            var dataRoot = payload.Root; // Capture for closure
+            
             ShowLoading($"Exporting VLM dataset for {map}...");
 
             await Task.Run(async () =>
             {
                 try
                 {
-                    // Find minimaps in versioned cache subdirectories (Prepare Layers extracts to {cache}/{version}/{map}/minimap/)
-                    string? minimapCacheDir = null;
-                    
-                    // Search for minimaps directory in cache subdirectories
-                    string? foundVersionDir = null;
-                    if (Directory.Exists(_cacheRoot))
+                    // Use new unified VlmExporter service (supports both LK and Alpha via temp WDT)
+                    using var exporter = new WoWRollback.Gui.Services.VlmExporter(_cacheRoot);
+                    await exporter.ExportMap(payload.Root!, map, vlmOutputDir, msg => 
                     {
-                        foreach (var versionDir in Directory.GetDirectories(_cacheRoot))
-                        {
-                            // Check {version}/{map}/minimaps/ path (note: plural)
-                            var minimapsDir = Path.Combine(versionDir, map, "minimaps");
-                            if (Directory.Exists(minimapsDir))
-                            {
-                                var pngFiles = Directory.GetFiles(minimapsDir, "*.png");
-                                if (pngFiles.Length > 0)
-                                {
-                                    minimapCacheDir = minimapsDir;
-                                    foundVersionDir = versionDir;
-                                    await Dispatcher.UIThread.InvokeAsync(() =>
-                                        AppendBuildLog($"[VLM] Found {pngFiles.Length} minimap files in: {minimapCacheDir}"));
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Also check the legacy path structure ({cache}/{map}/minimap/)
-                    if (minimapCacheDir == null)
-                    {
-                        var legacyPath = Path.Combine(_cacheRoot, map, "minimap");
-                        if (Directory.Exists(legacyPath))
-                        {
-                            minimapCacheDir = legacyPath;
-                            await Dispatcher.UIThread.InvokeAsync(() =>
-                                AppendBuildLog($"[VLM] Found legacy minimap cache at: {minimapCacheDir}"));
-                        }
-                    }
-                    
-                    if (string.IsNullOrEmpty(minimapCacheDir) || !Directory.Exists(minimapCacheDir))
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog($"[VLM] ERROR: No minimap cache found for map: {map}"));
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog("[VLM] Please run 'Prepare Layers' first to extract minimaps from MPQs."));
-                        return;
-                    }
-                    
-                    // Scan for available minimap tiles in cache
-                    var minimapFiles = Directory.GetFiles(minimapCacheDir, "*.png", SearchOption.AllDirectories)
-                        .Concat(Directory.GetFiles(minimapCacheDir, "*.jpg", SearchOption.AllDirectories))
-                        .ToList();
-                    
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                        AppendBuildLog($"[VLM] Found {minimapFiles.Count} cached minimap files"));
-                    
-                    if (minimapFiles.Count == 0)
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog("[VLM] No minimap files found in cache. Export cancelled."));
-                        return;
-                    }
-                    
-                    // Create output directories
-                    var imagesDir = Path.Combine(vlmOutputDir, "images");
-                    var metadataDir = Path.Combine(vlmOutputDir, "metadata");
-                    Directory.CreateDirectory(imagesDir);
-                    Directory.CreateDirectory(metadataDir);
-                    
-                    int tilesExported = 0;
-                    int tilesSkipped = 0;
-                    // Debug log path - declare early so we can use it in MPQ setup logging
-                    var debugLogPath = Path.Combine(vlmOutputDir, "vlm_debug.txt");
-                    
-                    // Create PrioritizedArchiveSource for terrain extraction (same approach as CLI analyze-map-adts-mpq)
-                    // This works reliably without needing listfile enumeration - we read files directly by path
-                    PrioritizedArchiveSource? archiveSource = null;
-                    AdtMpqTerrainExtractor? terrainExtractor = null;
-                    if (!string.IsNullOrEmpty(dataRoot) && Directory.Exists(dataRoot))
-                    {
-                        var mpqPaths = ArchiveLocator.LocateMpqs(dataRoot);
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog($"[VLM] Found {mpqPaths.Count} MPQs in data root"));
-                        
-                        // Debug: Log which MPQs are found
-                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] === VLM MPQ Debug (PrioritizedArchiveSource) ===\n");
-                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] dataRoot: {dataRoot}\n");
-                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] mapName: {map}\n");
-                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] MPQ count: {mpqPaths.Count}\n");
-                        foreach (var mpq in mpqPaths.Take(5))
-                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}]   MPQ: {Path.GetFileName(mpq)}\n");
-                        if (mpqPaths.Count > 5)
-                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}]   ... and {mpqPaths.Count - 5} more\n");
-                        
-                        if (mpqPaths.Count > 0)
-                        {
-                            // Use PrioritizedArchiveSource like CLI does - handles patch priority automatically
-                            archiveSource = new PrioritizedArchiveSource(dataRoot, mpqPaths);
-                            terrainExtractor = new AdtMpqTerrainExtractor();
-                            
-                            // Test if WDT exists (like CLI does at line 3600)
-                            var wdtPath = $"world/maps/{map}/{map}.wdt";
-                            var wdtExists = archiveSource.FileExists(wdtPath);
-                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] WDT test: FileExists('{wdtPath}') = {wdtExists}\n");
-                            
-                            if (wdtExists)
-                            {
-                                await Dispatcher.UIThread.InvokeAsync(() =>
-                                    AppendBuildLog($"[VLM] Archive source ready - WDT found for '{map}'"));
-                            }
-                            else
-                            {
-                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] WARNING: WDT not found - ADTs may not be accessible\n");
-                            }
-                        }
-                        else
-                        {
-                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] No MPQs found\n");
-                            await Dispatcher.UIThread.InvokeAsync(() =>
-                                AppendBuildLog($"[VLM] WARNING: No MPQ archives found in '{dataRoot}'"));
-                        }
-                    }
-                    else
-                    {
-                        await Dispatcher.UIThread.InvokeAsync(() =>
-                            AppendBuildLog($"[VLM] WARNING: dataRoot invalid or doesn't exist: '{dataRoot}'"));
-                    }
-                    
-                    // Copy each minimap file and generate metadata
-                    foreach (var srcPath in minimapFiles)
-                    {
-                        var fileName = Path.GetFileName(srcPath);
-                        
-                        // Try to parse tile coordinates from filename (e.g., "Azeroth_32_48.png")
-                        int tileX = -1, tileY = -1;
-                        var baseName = Path.GetFileNameWithoutExtension(fileName);
-                        var parts = baseName.Split('_');
-                        if (parts.Length >= 3 && 
-                            int.TryParse(parts[^2], out tileX) && 
-                            int.TryParse(parts[^1], out tileY))
-                        {
-                            // Valid tile coordinates found
-                        }
-                        else
-                        {
-                            tilesSkipped++;
-                            continue;
-                        }
-                        
-                        try
-                        {
-                            // Copy the minimap image
-                            var destPath = Path.Combine(imagesDir, $"{map}_{tileX}_{tileY}.png");
-                            File.Copy(srcPath, destPath, overwrite: true);
-                            
-                            // Build comprehensive metadata with terrain + placements
-                            var metadataPath = Path.Combine(metadataDir, $"{map}_{tileX}_{tileY}.json");
-                            
-                            // DEBUG: Write to file since Console.WriteLine might not be visible
-                            File.AppendAllText(debugLogPath, $"[{DateTime.Now}] Processing tile {tileX},{tileY} - dataRoot='{dataRoot}'\n");
-                            Console.WriteLine($"[VLM] Processing tile {tileX},{tileY} - tilesExported={tilesExported}, dataRoot='{dataRoot}'");
-                            
-                            // Try to load terrain data from cache first
-                            object? terrainData = null;
-                            var terrainJsonPath = Path.Combine(foundVersionDir ?? "", map, "terrain", $"{map}_{tileX}_{tileY}_terrain.json");
-                            if (File.Exists(terrainJsonPath))
-                            {
-                                try
-                                {
-                                    var terrainJson = File.ReadAllText(terrainJsonPath);
-                                    terrainData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(terrainJson);
-                                }
-                                catch { /* ignore terrain parse errors */ }
-                            }
-                            
-                            // Extract terrain directly from archive using PrioritizedArchiveSource
-                            if (terrainData == null && archiveSource != null && terrainExtractor != null)
-                            {
-                                try
-                                {
-                                    // Use lowercase paths like CLI does (archiveSource normalizes internally)
-                                    var mapLower = map.ToLowerInvariant();
-                                    var adtPath = $"world/maps/{mapLower}/{mapLower}_{tileX}_{tileY}.adt";
-                                    
-                                    if (archiveSource.FileExists(adtPath))
-                                    {
-                                        using var stream = archiveSource.OpenFile(adtPath);
-                                        using var ms = new MemoryStream();
-                                        stream.CopyTo(ms);
-                                        var adtBytes = ms.ToArray();
-                                        
-                                        if (adtBytes.Length > 0)
-                                        {
-                                            // Use the terrain extractor from AnalysisModule
-                                            var tileTerrainData = terrainExtractor.ExtractTileData(adtBytes, map, tileX, tileY);
-                                            if (tileTerrainData != null && tileTerrainData.Chunks.Count > 0)
-                                            {
-                                                terrainData = tileTerrainData;
-                                                if (tilesExported < 3)
-                                                {
-                                                    File.AppendAllText(debugLogPath, $"[{DateTime.Now}] SUCCESS: Terrain extracted for {tileX},{tileY} - {tileTerrainData.Chunks.Count} chunks, {adtBytes.Length} bytes\n");
-                                                }
-                                            }
-                                            else if (tilesExported < 3)
-                                            {
-                                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] ExtractTileData null/empty for {tileX},{tileY} (bytes={adtBytes.Length})\n");
-                                            }
-                                        }
-                                    }
-                                    else if (tilesExported < 3)
-                                    {
-                                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] ADT not found: {adtPath}\n");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    if (tilesExported < 3)
-                                    {
-                                        File.AppendAllText(debugLogPath, $"[{DateTime.Now}] EXCEPTION for {tileX},{tileY}: {ex.Message}\n");
-                                        await Dispatcher.UIThread.InvokeAsync(() =>
-                                            AppendBuildLog($"[VLM] Terrain extraction error for {tileX},{tileY}: {ex.Message}"));
-                                    }
-                                }
-                            }
-                            else if (terrainData == null && tilesExported < 3)
-                            {
-                                // Log why we skipped terrain extraction
-                                var reason = archiveSource == null ? "archiveSource is null" : 
-                                             terrainExtractor == null ? "terrainExtractor is null" : "unknown";
-                                File.AppendAllText(debugLogPath, $"[{DateTime.Now}] SKIPPED terrain for {tileX},{tileY}: {reason}\n");
-                            }
-                            
-                            // Try to load placements for this tile from CSV
-                            var tilePlacements = new List<object>();
-                            var placementsCsvPath = Path.Combine(foundVersionDir ?? "", map, $"{map}_placements.csv");
-                            if (File.Exists(placementsCsvPath))
-                            {
-                                try
-                                {
-                                    foreach (var line in File.ReadLines(placementsCsvPath).Skip(1))
-                                    {
-                                        var csvParts = line.Split(',');
-                                        if (csvParts.Length >= 8 && 
-                                            int.TryParse(csvParts[1], out var px) && px == tileX &&
-                                            int.TryParse(csvParts[2], out var py) && py == tileY)
-                                        {
-                                            tilePlacements.Add(new 
-                                            { 
-                                                type = csvParts[3],
-                                                path = csvParts[4],
-                                                uniqueId = csvParts.Length > 5 ? csvParts[5] : "",
-                                                worldX = csvParts.Length > 6 ? csvParts[6] : "",
-                                                worldY = csvParts.Length > 7 ? csvParts[7] : ""
-                                            });
-                                        }
-                                    }
-                                }
-                                catch { /* ignore placement parse errors */ }
-                            }
-                            
-                            // Build final metadata
-                            var metadata = new 
-                            { 
-                                tile_id = $"{map}_{tileX}_{tileY}", 
-                                x = tileX, 
-                                y = tileY,
-                                terrain = terrainData,
-                                placements = tilePlacements.Count > 0 ? tilePlacements : null
-                            };
-                            await File.WriteAllTextAsync(metadataPath, 
-                                System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                            
-                            tilesExported++;
-                            
-                            if (tilesExported == 1)
-                            {
-                                await Dispatcher.UIThread.InvokeAsync(() =>
-                                    AppendBuildLog($"[VLM] First tile: {fileName}"));
-                            }
-                            
-                            if (tilesExported % 100 == 0)
-                            {
-                                await Dispatcher.UIThread.InvokeAsync(() =>
-                                    AppendBuildLog($"[VLM] Exported {tilesExported} tiles..."));
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            tilesSkipped++;
-                            if (tilesSkipped <= 3)
-                            {
-                                await Dispatcher.UIThread.InvokeAsync(() =>
-                                    AppendBuildLog($"[VLM] Failed: {fileName} - {ex.Message}"));
-                            }
-                        }
-                    }
-                    
-                    // Cleanup MPQ extractor
-                    archiveSource?.Dispose();
-                    
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        AppendBuildLog($"[VLM] Export complete!");
-                        AppendBuildLog($"[VLM]   Tiles exported: {tilesExported}");
-                        AppendBuildLog($"[VLM]   Tiles skipped: {tilesSkipped}");
-                        AppendBuildLog($"[VLM]   Output: {vlmOutputDir}");
+                        Dispatcher.UIThread.Post(() => AppendBuildLog(msg));
                     });
                 }
                 catch (Exception ex)
                 {
                     await Dispatcher.UIThread.InvokeAsync(() =>
-                        AppendBuildLog($"[VLM] ERROR: {ex.Message}"));
+                        AppendBuildLog($"[VLM] FATAL ERROR: {ex.Message}"));
                 }
             });
         }

@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
     <ProjectReference Include="..\WoWRollback.DbcModule\WoWRollback.DbcModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
     <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
     <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
     <ProjectReference Include="..\..\lib\wow.tools.local\WoWFormatLib\WoWFormatLib\WoWFormatLib.csproj" />

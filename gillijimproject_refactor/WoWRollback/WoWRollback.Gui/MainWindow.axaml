@@ -107,6 +107,15 @@
               <Button x:Name="LoadDataDefaultsBtn" Content="Load Defaults" MinWidth="120"/>
               <CheckBox x:Name="AutoPrepareAfterLoadCheck" Content="Auto‑Prepare after Load" VerticalAlignment="Center" IsChecked="True"/>
             </StackPanel>
+            <!-- CLI Options -->
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
+              <TextBlock Text="CLI Options:" VerticalAlignment="Center" FontWeight="Bold"/>
+              <CheckBox x:Name="CliForceCheck" Content="Force Re‑extract" VerticalAlignment="Center" ToolTip.Tip="--force: Re-extract even if cached"/>
+              <CheckBox x:Name="CliSkipMinimapsCheck" Content="Skip Minimaps" VerticalAlignment="Center" ToolTip.Tip="--skip-minimaps: Don't extract minimap tiles"/>
+              <CheckBox x:Name="CliExportMeshCheck" Content="Export Mesh (GLB)" VerticalAlignment="Center" ToolTip.Tip="--export-mesh: Export terrain as GLB/OBJ"/>
+              <CheckBox x:Name="CliPlacementsOnlyCheck" Content="Placements Only" VerticalAlignment="Center" ToolTip.Tip="--placements-only: Skip terrain, clusters, mesh"/>
+            </StackPanel>
+
           </StackPanel>
           <Grid Grid.Row="1" ColumnDefinitions="*,*">
             <Border BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,0,8,0" Grid.Column="0">

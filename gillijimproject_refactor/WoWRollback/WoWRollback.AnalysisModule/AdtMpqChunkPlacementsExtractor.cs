@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using WoWRollback.Core.Services.Archive;
+using WoWRollback.PM4Module;
 using WoWFormatLib.FileReaders;
 using WoWFormatLib.Structs.ADT;
 using WoWFormatLib.Structs.WDT;
@@ -33,20 +34,29 @@ public sealed class AdtMpqChunkPlacementsExtractor
             int mdxCount = 0;
             int wmoCount = 0;
             int tilesProcessed = 0;
+            int terrainTilesExtracted = 0;
+            
+            // Setup terrain extraction output directory
+            var outputDir = Path.GetDirectoryName(outputCsvPath)!;
+            var terrainDir = Path.Combine(outputDir, "terrain");
+            Directory.CreateDirectory(terrainDir);
+            
+            // Terrain extraction is done via static AdtTerrainParser.Parse()
 
             Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Processing {tiles.Count} tiles from archive...");
 
             int tileIndex = 0;
-            foreach (var (tileX, tileY, _, virtualPath) in tiles)
+            foreach (var (tileX, tileY, isCataSplit, virtualPath) in tiles)
             {
                 tileIndex++;
                 if (tileIndex % 10 == 0 || tileIndex == 1)
                 {
-                    Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Progress: {tileIndex}/{tiles.Count} tiles ({m2Count} M2, {mdxCount} MDX, {wmoCount} WMO so far)");
+                    Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Progress: {tileIndex}/{tiles.Count} tiles ({m2Count} M2, {mdxCount} MDX, {wmoCount} WMO, {terrainTilesExtracted} terrain)");
                 }
                 
                 try
                 {
+                    // Extract placements (using WoWFormatLib reader)
                     var rows = ExtractPlacementsFromAdt(source, virtualPath, mapName, tileX, tileY);
                     foreach (var p in rows)
                     {
@@ -62,6 +72,43 @@ public sealed class AdtMpqChunkPlacementsExtractor
                         else wmoCount++;
                     }
                     tilesProcessed++;
+                    
+                    // ALSO extract terrain data from the same ADT (in same pass)
+                    // For pre-Cata monolithic ADTs, use the root file; for Cata+ we need the root not _obj0
+                    var terrainPath = isCataSplit 
+                        ? virtualPath.Replace("_obj0.adt", ".adt", StringComparison.OrdinalIgnoreCase)
+                        : virtualPath;
+                    
+                    try
+                    {
+                        if (source.FileExists(terrainPath))
+                        {
+                            using var stream = source.OpenFile(terrainPath);
+                            using var ms = new MemoryStream();
+                            stream.CopyTo(ms);
+                            var adtBytes = ms.ToArray();
+                            
+                            var terrainData = AdtTerrainParser.Parse(adtBytes, mapName, tileX, tileY);
+                            if (terrainData != null && terrainData.Chunks.Count > 0)
+                            {
+                                var terrainJsonPath = Path.Combine(terrainDir, $"{mapName}_{tileX}_{tileY}_terrain.json");
+                                var json = System.Text.Json.JsonSerializer.Serialize(terrainData, new System.Text.Json.JsonSerializerOptions
+                                {
+                                    WriteIndented = true,
+                                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+                                });
+                                File.WriteAllText(terrainJsonPath, json);
+                                terrainTilesExtracted++;
+                            }
+                        }
+                    }
+                    catch (Exception tex)
+                    {
+                        if (terrainTilesExtracted < 3)
+                        {
+                            Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Terrain warning ({tileX},{tileY}): {tex.Message}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -74,8 +121,9 @@ public sealed class AdtMpqChunkPlacementsExtractor
 
             var totalModels = m2Count + mdxCount;
             var modelSummary = mdxCount > 0 ? $"{mdxCount} MDX" : (m2Count > 0 ? $"{m2Count} M2" : "0 models");
+            Console.WriteLine($"[AdtMpqChunkPlacementsExtractor] Terrain extracted for {terrainTilesExtracted} tiles to: {terrainDir}");
             return new PlacementsExtractionResult(true, tilesProcessed, totalModels, wmoCount, 
-                $"Extracted {modelSummary} and {wmoCount} WMO placements from {tilesProcessed} tiles");
+                $"Extracted {modelSummary} and {wmoCount} WMO placements from {tilesProcessed} tiles, {terrainTilesExtracted} terrain tiles");
         }
         catch (Exception ex)
         {
