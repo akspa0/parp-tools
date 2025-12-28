@@ -9,6 +9,11 @@ public class AreaIdCrosswalk
     private readonly Dictionary<string, Dictionary<int, int>> _mapCrosswalks = new();
     private readonly Dictionary<int, string> _areaNames = new();
 
+    public AreaIdCrosswalk()
+    {
+        LoadEmbeddedDefaults();
+    }
+
     /// <summary>
     /// Load crosswalk data from DBCTool.V2 compare/v2/ directory.
     /// Each CSV file represents a map's Alpha→LK AreaID mappings.
@@ -104,5 +109,114 @@ public class AreaIdCrosswalk
     {
         var key = mapName.ToLowerInvariant();
         return _mapCrosswalks.TryGetValue(key, out var mappings) ? mappings.Count : 0;
+    }
+
+    private void LoadEmbeddedDefaults()
+    {
+        try
+        {
+            var assembly = typeof(AreaIdCrosswalk).Assembly;
+            var resourceName = "WoWMapConverter.Core.Resources.area_crosswalk.csv";
+            
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null) 
+            {
+                Console.WriteLine($"[WARN] AreaIdCrosswalk: Embedded resource '{resourceName}' not found.");
+                return;
+            }
+
+            using var reader = new StreamReader(stream);
+            var headerLine = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(headerLine)) return;
+
+            var headers = headerLine.Split(',');
+            int GetCol(string name) => Array.FindIndex(headers, h => h.Trim().Equals(name, StringComparison.InvariantCultureIgnoreCase));
+
+            // Support new "Matching Report" format
+            int colMapId = GetCol("src_mapId");
+            int colSrcId = GetCol("src_areaNumber"); 
+            if (colSrcId < 0) colSrcId = GetCol("src_areaId");
+
+            int colMatches = GetCol("matches");
+
+            // Fallback to old format
+            int colMapName = GetCol("src_mapName");
+            int colTgtIdOld = GetCol("tgt_id_335");
+
+            if (colSrcId < 0) 
+            {
+                Console.WriteLine("[WARN] AreaIdCrosswalk: Could not find src_areaId column.");
+                return;
+            }
+
+            // Fallback for old format Target Name check
+            int colTgtName = GetCol("tgt_name");
+
+            while (!reader.EndOfStream)
+            {
+                var line = reader.ReadLine();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                var parts = line.Split(',');
+                
+                if (parts.Length <= colSrcId || !int.TryParse(parts[colSrcId], out var srcId)) continue;
+
+                string mapNameKeys = "";
+                int tgtId = 0;
+                string tgtName = "";
+
+                // STRATEGY 1: New Format (src_mapId + matches)
+                if (colMapId >= 0 && colMatches >= 0 && parts.Length > colMatches)
+                {
+                    if (int.TryParse(parts[colMapId], out var mapId))
+                    {
+                        mapNameKeys = mapId switch {
+                            0 => "azeroth",
+                            1 => "kalimdor",
+                            _ => "" 
+                        };
+                    }
+
+                    var matchStr = parts[colMatches]; 
+                    // Expected matchStr: "type:id:score:name"
+                    if (!string.IsNullOrWhiteSpace(matchStr))
+                    {
+                        var matchParts = matchStr.Split(':');
+                        if (matchParts.Length >= 2 && int.TryParse(matchParts[1], out var parsedTgt))
+                        {
+                            tgtId = parsedTgt;
+                        }
+                    }
+                }
+                // STRATEGY 2: Old Format
+                else if (colMapName >= 0 && colTgtIdOld >= 0 && parts.Length > colTgtIdOld)
+                {
+                    mapNameKeys = parts[colMapName].Trim().ToLowerInvariant();
+                    if (int.TryParse(parts[colTgtIdOld], out var parsedTgt))
+                    {
+                        tgtId = parsedTgt;
+                    }
+                    if (colTgtName >= 0 && parts.Length > colTgtName)
+                    {
+                        tgtName = parts[colTgtName].Trim().Trim('"');
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(mapNameKeys) && tgtId > 0)
+                {
+                    if (!_mapCrosswalks.ContainsKey(mapNameKeys))
+                        _mapCrosswalks[mapNameKeys] = new Dictionary<int, int>();
+
+                    _mapCrosswalks[mapNameKeys][srcId] = tgtId;
+                    
+                    if (!string.IsNullOrEmpty(tgtName))
+                        _areaNames[tgtId] = tgtName;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Failed to load embedded crosswalk: {ex.Message}");
+        }
     }
 }

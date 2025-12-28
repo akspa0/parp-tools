@@ -10,6 +10,12 @@ public class AreaIdMapper
     private readonly Dictionary<int, AreaEntry> _lkAreas = new();
     private readonly Dictionary<int, int> _mapCrosswalk = new();
 
+    public AreaIdMapper()
+    {
+        // Auto-load embedded defaults
+        LoadEmbeddedDefaults();
+    }
+
     // Lookup indices
     private readonly Dictionary<string, int> _lkByName = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(int map, string name), int> _lkByMapAndName = new();
@@ -276,6 +282,47 @@ public class AreaIdMapper
     public int AlphaAreaCount => _alphaAreas.Count;
     public int LkAreaCount => _lkAreas.Count;
     public int CrosswalkCount => _mapCrosswalk.Count;
+
+    private void LoadEmbeddedDefaults()
+    {
+        try
+        {
+            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            var resourceName = "WoWMapConverter.Core.Resources.area_crosswalk.csv";
+            
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null) return;
+
+            using var reader = new StreamReader(stream);
+            var headerLine = reader.ReadLine();
+            if (string.IsNullOrEmpty(headerLine)) return;
+
+            var headers = headerLine.Split(',');
+            int colSrc = Array.IndexOf(headers, "src_areaNumber");
+            int colTgt = Array.IndexOf(headers, "tgt_id_335");
+
+            if (colSrc < 0 || colTgt < 0) return;
+
+            while (!reader.EndOfStream)
+            {
+                var line = reader.ReadLine();
+                if (string.IsNullOrEmpty(line)) continue;
+
+                var parts = line.Split(',');
+                if (parts.Length > Math.Max(colSrc, colTgt) &&
+                    int.TryParse(parts[colSrc], out var srcId) &&
+                    int.TryParse(parts[colTgt], out var tgtId) &&
+                    srcId > 0 && tgtId > 0)
+                {
+                    _mapCrosswalk[srcId] = tgtId;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Failed to load embedded crosswalk: {ex.Message}");
+        }
+    }
 }
 
 public struct AreaEntry

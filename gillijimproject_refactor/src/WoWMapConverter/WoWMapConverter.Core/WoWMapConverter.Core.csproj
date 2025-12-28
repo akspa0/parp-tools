@@ -18,4 +18,8 @@
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\area_crosswalk.csv" />
+  </ItemGroup>
+
 </Project>

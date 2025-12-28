@@ -6,7 +6,7 @@
 
 | Version | ADT | WMO | Models | Status |
 |---------|-----|-----|--------|--------|
-| **Alpha 0.5.3** | Monolithic WDT | v14 (mono) | MDX | ✅ Full support |
+| **Alpha 0.5.3** | Monolithic WDT | v14 (mono) | MDX | ✅ Verified (Ghidra) |
 | **Classic 1.x** | v18 | v17 | M2 | ✅ Full support |
 | **TBC 2.x** | v18 | v17 | M2 | ✅ Full support |
 | **WotLK 3.x** | v18 + MH2O | v17 | M2 | ✅ Full support |
@@ -57,7 +57,7 @@ WoWMapConverter/
 ## Features
 
 ### Map Conversion (Bidirectional)
-- **Alpha ↔ LK**: Monolithic WDT ↔ Split ADT files
+- **Alpha ↔ LK**: Monolithic WDT ↔ Split ADT files with **strict Ghidra-verified compliance** (Fixed offsets, 15KB chunk limits)
 - **LK ↔ Cata+**: Handle split file format changes
 - **AreaID Crosswalk**: Integrated mapping across all versions
 - **Coordinate Transform**: Y-up (Alpha) ↔ Z-up (LK+)
@@ -85,9 +85,8 @@ WoWMapConverter/
 # Single map conversion
 dotnet run --project WoWMapConverter.Cli -- convert World/Maps/Azeroth/Azeroth.wdt -o ./output
 
-# With AreaID crosswalk
+# With Listfile (AreaID crosswalk is automated)
 dotnet run --project WoWMapConverter.Cli -- convert map.wdt \
-  --crosswalk ./DBCTool.V2/compare/v2 \
   --listfile community-listfile.csv
 
 # Batch conversion

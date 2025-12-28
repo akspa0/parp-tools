@@ -92,16 +92,13 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         var cMwid = new Mwid(cMwmo.GetIndicesForMwid());
 
         // Copy and remap MDDF/MODF indices for LK
-        // [FIX] Alpha uses (X,Z,Y) coordinates (Y-up, offset 12=Height) while LK uses (X,Y,Z) (Z-up, offset 16=Height).
-        // We must swap the Y/Z floats (offsets 12 and 16) to calculate correct positions.
-        var mddfData = (byte[])_mddf.Data.Clone();
-        SwapYAndZ(mddfData, 36);
-        var cMddf = new Mddf("MDDF", mddfData.Length, mddfData);
+        // Copy and remap MDDF/MODF indices for LK
+        // [PORT] Reference C++ implementation does NOT swap Y/Z. 
+        // Assuming Alpha coordinates are already compatible (Z-up) or consistent with what's expected.
+        var cMddf = new Mddf("MDDF", _mddf.Data.Length, (byte[])_mddf.Data.Clone());
         cMddf.UpdateIndicesForLk(alphaM2Indices);
 
-        var modfData = (byte[])_modf.Data.Clone();
-        SwapYAndZ(modfData, 64);
-        var cModf = new Modf("MODF", modfData.Length, modfData);
+        var cModf = new Modf("MODF", _modf.Data.Length, (byte[])_modf.Data.Clone());
         cModf.UpdateIndicesForLk(alphaWmoIndices);
 
         // Convert all present Alpha MCNKs into LK MCNKs using MCIN offsets
@@ -224,29 +221,4 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         return $"{baseName}_{x}_{y}.adt";
     }
 
-    private static void SwapYAndZ(byte[] data, int entrySize)
-    {
-        for (int i = 0; i + entrySize <= data.Length; i += entrySize)
-        {
-            // Position is at offset 8 (X), 12 (Y/Z), 16 (Z/Y)
-            // Swap float at 12 and 16
-            int offsetA = i + 12;
-            int offsetB = i + 16;
-            
-            byte temp0 = data[offsetA + 0];
-            byte temp1 = data[offsetA + 1];
-            byte temp2 = data[offsetA + 2];
-            byte temp3 = data[offsetA + 3];
-
-            data[offsetA + 0] = data[offsetB + 0];
-            data[offsetA + 1] = data[offsetB + 1];
-            data[offsetA + 2] = data[offsetB + 2];
-            data[offsetA + 3] = data[offsetB + 3];
-
-            data[offsetB + 0] = temp0;
-            data[offsetB + 1] = temp1;
-            data[offsetB + 2] = temp2;
-            data[offsetB + 3] = temp3;
-        }
-    }
 }

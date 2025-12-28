@@ -76,5 +76,23 @@ public class Wdt : WowChunkedFormat
         File.WriteAllBytes(outPath, whole.ToArray());
     }
 
+    /// <summary>
+    /// Write to an exact file path.
+    /// </summary>
+    public void ToExactFile(string absolutePath)
+    {
+        var dir = Path.GetDirectoryName(absolutePath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        var whole = new List<byte>();
+        whole.AddRange(_mver.GetWholeChunk());
+        whole.AddRange(_mphd.GetWholeChunk());
+        whole.AddRange(_main.GetWholeChunk());
+        if (!_mwmo.IsEmpty()) whole.AddRange(_mwmo.GetWholeChunk());
+        if (!_modf.IsEmpty()) whole.AddRange(_modf.GetWholeChunk());
+
+        File.WriteAllBytes(absolutePath, whole.ToArray());
+    }
+
     public override string ToString() => $"Wdt({_wdtName})";
 }
