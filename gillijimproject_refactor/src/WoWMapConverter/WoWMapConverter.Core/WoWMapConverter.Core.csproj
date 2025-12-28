@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>WoWMapConverter.Core</RootNamespace>
+    <Description>WoW Alpha WDT/ADT to LK 3.3.5 converter library with AreaID crosswalk support</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\gillijimproject-csharp\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\..\..\lib\WoWTools.Minimaps\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCnEncoder.Net" Version="2.1.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>
