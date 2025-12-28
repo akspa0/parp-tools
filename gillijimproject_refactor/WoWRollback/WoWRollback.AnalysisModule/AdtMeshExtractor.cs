@@ -59,7 +59,11 @@ public sealed class AdtMeshExtractor
         if (Directory.Exists(minimapSourceDir))
         {
             int copied = 0;
-            foreach (var minimapFile in Directory.GetFiles(minimapSourceDir, $"{mapName}_*.jpg"))
+            // Support both PNG (from MinimapHandler) and JPG formats
+            var minimapFiles = Directory.GetFiles(minimapSourceDir, $"{mapName}_*.png")
+                .Concat(Directory.GetFiles(minimapSourceDir, $"{mapName}_*.jpg"))
+                .ToArray();
+            foreach (var minimapFile in minimapFiles)
             {
                 var fileName = Path.GetFileName(minimapFile);
                 var destPath = Path.Combine(meshDir, fileName);
@@ -307,8 +311,12 @@ public sealed class AdtMeshExtractor
             glbFile = $"{mapName}_{tileX}_{tileY}.glb";
             var glbPath = Path.Combine(meshDir, glbFile);
             
-            // Texture path (JPG minimap - must exist or GLB will use fallback color)
-            var texturePath = Path.Combine(meshDir, $"{mapName}_{tileX}_{tileY}.jpg");
+            // Texture path (PNG preferred, JPG fallback - must exist or GLB will use fallback color)
+            var texturePath = Path.Combine(meshDir, $"{mapName}_{tileX}_{tileY}.png");
+            if (!File.Exists(texturePath))
+            {
+                texturePath = Path.Combine(meshDir, $"{mapName}_{tileX}_{tileY}.jpg");
+            }
             
             ExportGLB(positions, uvs, chunkStartIndices, adt, glbPath, texturePath);
         }
@@ -479,7 +487,11 @@ public sealed class AdtMeshExtractor
         mtl.AppendLine("# Terrain material");
         mtl.AppendLine("newmtl Minimap");
         mtl.AppendLine("Kd 1.000 1.000 1.000");
-        mtl.AppendLine($"map_Kd {Path.GetFileNameWithoutExtension(baseName)}.jpg");
+        // Use PNG if available, else JPG
+        var mtlTextureName = File.Exists(Path.Combine(Path.GetDirectoryName(mtlPath)!, $"{Path.GetFileNameWithoutExtension(baseName)}.png"))
+            ? $"{Path.GetFileNameWithoutExtension(baseName)}.png"
+            : $"{Path.GetFileNameWithoutExtension(baseName)}.jpg";
+        mtl.AppendLine($"map_Kd {mtlTextureName}");
         File.WriteAllText(mtlPath, mtl.ToString());
 
         // Write OBJ file (matching working implementation)

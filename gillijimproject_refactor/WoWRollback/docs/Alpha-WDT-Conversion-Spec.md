@@ -348,6 +348,29 @@ For each tile in MAIN:
 
 **Fix**: Extract MWMO data from source LK WDT
 
+### 7. ❌ MDNM/MONM with Zero Bytes When Empty
+
+**Symptom**: `iffChunk.token=='MONM'` assertion failure in `CMap::LoadMapObjNames`
+
+**Cause**: When no M2/WMO names exist, MDNM/MONM chunks written with 0 bytes of data
+
+**Fix**: Always write at least a single null byte (0x00) as the string list terminator, even when no names exist:
+```csharp
+if (names.Count == 0)
+    return new byte[] { 0 };  // Trailing null terminator
+```
+
+### 8. ❌ Missing Top-Level MODF Chunk
+
+**Symptom**: Client may fail to parse WDT correctly
+
+**Cause**: Top-level MODF chunk not written after MONM
+
+**Fix**: Always write MODF chunk (can be empty) after MONM:
+```
+MVER -> MPHD -> MAIN -> MDNM -> MONM -> MODF -> [Tile Data]
+```
+
 ---
 
 ## Verification Checklist
@@ -356,6 +379,8 @@ For each tile in MAIN:
 ✅ MPHD offsets point to correct chunks  
 ✅ MPHD.nMapObjNames uses split-by-null counting  
 ✅ MONM contains actual WMO names from source  
+✅ MDNM/MONM have at least 1 byte (trailing null) even when empty  
+✅ Top-level MODF chunk exists (can be empty)  
 ✅ MAIN entries have correct offsets and sizes  
 ✅ MHDR.offsInfo points to MCIN  
 ✅ MHDR offsets are relative to MHDR.data  

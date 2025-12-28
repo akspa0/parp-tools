@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,6 +7,7 @@ using System.Text;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Globalization;
+using System.Threading.Tasks;
 using WoWRollback.LkToAlphaModule;
 using WoWRollback.Core.Services.Assets;
 using WoWRollback.LkToAlphaModule.Readers;
@@ -162,8 +164,10 @@ public sealed class AlphaWdtMonolithicWriter
         var monmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < wmoNames.Count; i++) monmIndexFs[NormalizeAssetName(wmoNames[i])] = i;
         // MDNM/MONM chunks
-        long mdnmStart = ms.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2Names).Length, BuildMdnmData(m2Names)); ms.Write(mdnm.GetWholeChunk());
-        long monmStart = ms.Position; var monm = new Chunk("MONM", BuildMonmData(wmoNames).Length, BuildMonmData(wmoNames)); ms.Write(monm.GetWholeChunk());
+        long mdnmStart = ms.Position; var mdnmData = BuildMdnmData(m2Names); var mdnm = new Chunk("MDNM", mdnmData.Length, mdnmData); ms.Write(mdnm.GetWholeChunk());
+        long monmStart = ms.Position; var monmData = BuildMonmData(wmoNames); var monm = new Chunk("MONM", monmData.Length, monmData); ms.Write(monm.GetWholeChunk());
+        // MODF chunk (top-level WMO definitions) - must exist even if empty per Alpha spec
+        ms.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
         // Patch MPHD with absolute offsets and counts
         long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = new byte[128]; mphdData.Clear();
         // MPHD layout: [0..3]=nTextures (M2), [4..7]=MDNM abs, [8..11]=nMapObjNames (WMO, +1 when any), [12..15]=MONM abs
@@ -923,8 +927,10 @@ public sealed class AlphaWdtMonolithicWriter
         outMs.Write(new Chunk("MVER", 4, BitConverter.GetBytes(18)).GetWholeChunk());
         long mphdStart = outMs.Position; var mphd = new Chunk("MPHD", 128, new byte[128]); outMs.Write(mphd.GetWholeChunk()); long mphdDataStart = mphdStart + 8;
         var mainData = new byte[GridTiles * 16]; var main = new Chunk("MAIN", mainData.Length, mainData); long mainStart = outMs.Position; outMs.Write(main.GetWholeChunk());
-        long mdnmStart = outMs.Position; var mdnm = new Chunk("MDNM", BuildMdnmData(m2List).Length, BuildMdnmData(m2List)); outMs.Write(mdnm.GetWholeChunk());
-        long monmStart = outMs.Position; var monm = new Chunk("MONM", BuildMonmData(wmoList).Length, BuildMonmData(wmoList)); outMs.Write(monm.GetWholeChunk());
+        long mdnmStart = outMs.Position; var mdnmData2 = BuildMdnmData(m2List); var mdnm = new Chunk("MDNM", mdnmData2.Length, mdnmData2); outMs.Write(mdnm.GetWholeChunk());
+        long monmStart = outMs.Position; var monmData2 = BuildMonmData(wmoList); var monm = new Chunk("MONM", monmData2.Length, monmData2); outMs.Write(monm.GetWholeChunk());
+        // MODF chunk (top-level WMO definitions) - must exist even if empty per Alpha spec
+        outMs.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
         long savePos = outMs.Position; outMs.Position = mphdDataStart; Span<byte> mphdData = new byte[128]; mphdData.Clear();
         BitConverter.GetBytes(m2List.Count > 0 ? m2List.Count + 1 : 0).CopyTo(mphdData);
         BitConverter.GetBytes(checked((int)mdnmStart)).CopyTo(mphdData.Slice(4));
@@ -1605,8 +1611,10 @@ public sealed class AlphaWdtMonolithicWriter
 
     private static byte[] BuildMdnmData(List<string> m2Names)
     {
+        // CRITICAL: Alpha client reads MDNM chunk at the offset in MPHD.
+        // Even if no M2 names exist, we must write a valid chunk with at least a trailing null.
         if (m2Names == null || m2Names.Count == 0)
-            return Array.Empty<byte>();
+            return new byte[] { 0 }; // Single null byte = empty string list terminator
 
         using var ms = new MemoryStream();
         foreach (var name in m2Names)
@@ -1644,8 +1652,10 @@ public sealed class AlphaWdtMonolithicWriter
 
     private static byte[] BuildMonmData(List<string> wmoNames)
     {
+        // CRITICAL: Alpha client ALWAYS reads MONM chunk at the offset in MPHD.
+        // Even if no WMO names exist, we must write a valid chunk with at least a trailing null.
         if (wmoNames == null || wmoNames.Count == 0)
-            return Array.Empty<byte>();
+            return new byte[] { 0 }; // Single null byte = empty string list terminator
 
         using var ms = new MemoryStream();
         foreach (var name in wmoNames)

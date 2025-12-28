@@ -521,6 +521,15 @@ public partial class MainWindow : Window
         var saveDefaults = this.FindControl<Button>("SaveDataDefaultsBtn"); if (saveDefaults != null) saveDefaults.Click += SaveDataDefaultsBtn_Click;
         var loadDefaults = this.FindControl<Button>("LoadDataDefaultsBtn"); if (loadDefaults != null) loadDefaults.Click += LoadDataDefaultsBtn_Click;
 
+        // Alpha Import tab hookups
+        var pickAlphaWdt = this.FindControl<Button>("PickAlphaWdtBtn"); if (pickAlphaWdt != null) pickAlphaWdt.Click += PickAlphaWdtBtn_Click;
+        var pickAlphaListfile = this.FindControl<Button>("PickAlphaListfileBtn"); if (pickAlphaListfile != null) pickAlphaListfile.Click += PickAlphaListfileBtn_Click;
+        var pickAlphaOutput = this.FindControl<Button>("PickAlphaOutputBtn"); if (pickAlphaOutput != null) pickAlphaOutput.Click += PickAlphaOutputBtn_Click;
+        var pickAlphaDbcPatch = this.FindControl<Button>("PickAlphaDbcPatchBtn"); if (pickAlphaDbcPatch != null) pickAlphaDbcPatch.Click += PickAlphaDbcPatchBtn_Click;
+        var alphaConvert = this.FindControl<Button>("AlphaConvertBtn"); if (alphaConvert != null) alphaConvert.Click += AlphaConvertBtn_Click;
+        var alphaOpenOut = this.FindControl<Button>("AlphaOpenOutputBtn"); if (alphaOpenOut != null) alphaOpenOut.Click += AlphaOpenOutputBtn_Click;
+        var alphaLoadLayers = this.FindControl<Button>("AlphaLoadInLayersBtn"); if (alphaLoadLayers != null) alphaLoadLayers.Click += AlphaLoadInLayersBtn_Click;
+
         // Filters tab hookups
         var analyzeBtn = this.FindControl<Button>("AnalyzeFiltersBtn"); if (analyzeBtn != null) analyzeBtn.Click += AnalyzeFiltersBtn_Click;
         var whitelistBtn = this.FindControl<Button>("WhitelistBtn"); if (whitelistBtn != null) whitelistBtn.Click += (s,e)=>MarkFilters(true);
@@ -595,6 +604,251 @@ public partial class MainWindow : Window
         {
             var box = this.FindControl<TextBox>("LkDbcBox"); if (box != null) box.Text = res[0].Path.LocalPath;
         }
+    }
+
+    // ========== Alpha Import Tab Handlers ==========
+
+    private string? _lastAlphaOutputDir;
+
+    private async void PickAlphaWdtBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select Alpha 0.5.3 WDT",
+            AllowMultiple = false,
+            FileTypeFilter = new List<FilePickerFileType> { new FilePickerFileType("WDT Files") { Patterns = new List<string> { "*.wdt" } } }
+        });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("AlphaWdtPathBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickAlphaListfileBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select Community Listfile CSV",
+            AllowMultiple = false,
+            FileTypeFilter = new List<FilePickerFileType> { new FilePickerFileType("CSV Files") { Patterns = new List<string> { "*.csv" } } }
+        });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("AlphaListfileBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickAlphaOutputBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select Output Folder", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("AlphaOutputBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private async void PickAlphaDbcPatchBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var res = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select DBCTool compare/v2 Folder", AllowMultiple = false });
+        if (res != null && res.Count > 0)
+        {
+            var box = this.FindControl<TextBox>("AlphaDbcPatchBox"); if (box != null) box.Text = res[0].Path.LocalPath;
+        }
+    }
+
+    private void AppendAlphaLog(string line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var log = this.FindControl<TextBox>("AlphaImportLogBox"); if (log == null) return;
+            log.Text += (string.IsNullOrEmpty(log.Text) ? string.Empty : Environment.NewLine) + line;
+            try { log.CaretIndex = log.Text?.Length ?? 0; } catch { }
+        });
+    }
+
+    private async void AlphaConvertBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var wdtPath = this.FindControl<TextBox>("AlphaWdtPathBox")?.Text?.Trim();
+        var listfile = this.FindControl<TextBox>("AlphaListfileBox")?.Text?.Trim();
+        var outputRoot = this.FindControl<TextBox>("AlphaOutputBox")?.Text?.Trim();
+        var dbcPatchDir = this.FindControl<TextBox>("AlphaDbcPatchBox")?.Text?.Trim();
+        var exportMesh = this.FindControl<CheckBox>("AlphaExportMeshCheck")?.IsChecked == true;
+        var noFixups = this.FindControl<CheckBox>("AlphaNoFixupsCheck")?.IsChecked == true;
+
+        if (string.IsNullOrWhiteSpace(wdtPath) || !File.Exists(wdtPath))
+        {
+            await ShowMessage("Error", "Please select a valid Alpha WDT file.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(listfile) || !File.Exists(listfile))
+        {
+            await ShowMessage("Error", "Please select a valid community listfile CSV.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(outputRoot))
+        {
+            outputRoot = Path.Combine(Path.GetDirectoryName(wdtPath) ?? ".", "alpha_to_lk_output");
+        }
+
+        var mapName = Path.GetFileNameWithoutExtension(wdtPath);
+        var sessionDir = Path.Combine(outputRoot, $"session_{DateTime.Now:yyyyMMdd_HHmmss}");
+        Directory.CreateDirectory(sessionDir);
+        _lastAlphaOutputDir = sessionDir;
+
+        this.FindControl<TextBox>("AlphaImportLogBox")!.Text = "";
+        AppendAlphaLog($"[Alpha Import] Starting conversion for: {mapName}");
+        AppendAlphaLog($"[Alpha Import] Output: {sessionDir}");
+
+        var convertBtn = this.FindControl<Button>("AlphaConvertBtn");
+        if (convertBtn != null) convertBtn.IsEnabled = false;
+        ShowLoading("Converting Alpha WDT to LK format...");
+
+        try
+        {
+            // Build CLI arguments for AlphaWdtAnalyzer
+            var args = new List<string>
+            {
+                "--input", wdtPath,
+                "--listfile", listfile,
+                "--out", sessionDir,
+                "--export-adt",
+                "--export-dir", sessionDir
+            };
+            if (!string.IsNullOrWhiteSpace(dbcPatchDir) && Directory.Exists(dbcPatchDir))
+            {
+                args.Add("--dbctool-patch-dir");
+                args.Add(dbcPatchDir);
+            }
+            if (noFixups)
+            {
+                args.Add("--no-fixups");
+            }
+
+            // Find AlphaWdtAnalyzer.Cli project
+            var solutionRoot = FindSolutionRoot();
+            var cliProject = Path.Combine(solutionRoot, "AlphaWDTAnalysisTool", "AlphaWdtAnalyzer.Cli", "AlphaWdtAnalyzer.Cli.csproj");
+            
+            if (!File.Exists(cliProject))
+            {
+                AppendAlphaLog($"[error] Cannot find AlphaWdtAnalyzer.Cli project at: {cliProject}");
+                await ShowMessage("Error", "AlphaWdtAnalyzer.Cli project not found. Ensure the solution is built.");
+                return;
+            }
+
+            AppendAlphaLog($"[Alpha Import] Running: dotnet run --project {Path.GetFileName(cliProject)} -- {string.Join(" ", args.Take(6))}...");
+
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"run --project \"{cliProject}\" -- {string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))}",
+                WorkingDirectory = solutionRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            await Task.Run(() =>
+            {
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc == null) { AppendAlphaLog("[error] Failed to start process"); return; }
+
+                proc.OutputDataReceived += (s, ev) => { if (ev.Data != null) AppendAlphaLog(ev.Data); };
+                proc.ErrorDataReceived += (s, ev) => { if (ev.Data != null) AppendAlphaLog($"[stderr] {ev.Data}"); };
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
+                proc.WaitForExit();
+
+                if (proc.ExitCode == 0)
+                {
+                    AppendAlphaLog("[Alpha Import] Conversion completed successfully!");
+                }
+                else
+                {
+                    AppendAlphaLog($"[Alpha Import] Conversion finished with exit code: {proc.ExitCode}");
+                }
+            });
+
+            // Check for output and enable Load in Layers button
+            var lkWdtPath = Path.Combine(sessionDir, "World", "Maps", mapName, $"{mapName}.wdt");
+            if (File.Exists(lkWdtPath))
+            {
+                AppendAlphaLog($"[Alpha Import] LK WDT created: {lkWdtPath}");
+                var loadBtn = this.FindControl<Button>("AlphaLoadInLayersBtn");
+                if (loadBtn != null) loadBtn.IsEnabled = true;
+            }
+            else
+            {
+                AppendAlphaLog($"[Alpha Import] Warning: Expected LK WDT not found at {lkWdtPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendAlphaLog($"[error] {ex.Message}");
+            await ShowMessage("Error", ex.Message);
+        }
+        finally
+        {
+            HideLoading();
+            if (convertBtn != null) convertBtn.IsEnabled = true;
+        }
+    }
+
+    private void AlphaOpenOutputBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        var dir = _lastAlphaOutputDir ?? this.FindControl<TextBox>("AlphaOutputBox")?.Text?.Trim();
+        if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true }); }
+            catch { }
+        }
+    }
+
+    private async void AlphaLoadInLayersBtn_Click(object? sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastAlphaOutputDir))
+        {
+            await ShowMessage("Info", "No conversion output available. Run a conversion first.");
+            return;
+        }
+
+        // Find the LK map directory and load it into the Data Sources / Layers workflow
+        var wdtPath = this.FindControl<TextBox>("AlphaWdtPathBox")?.Text?.Trim();
+        var mapName = Path.GetFileNameWithoutExtension(wdtPath ?? "");
+        var lkMapDir = Path.Combine(_lastAlphaOutputDir, "World", "Maps", mapName);
+
+        if (!Directory.Exists(lkMapDir))
+        {
+            await ShowMessage("Error", $"LK map directory not found: {lkMapDir}");
+            return;
+        }
+
+        // Set the Data Sources root to the session output and switch to Layers tab
+        var dataRoot = this.FindControl<TextBox>("DataRootBox");
+        if (dataRoot != null) dataRoot.Text = _lastAlphaOutputDir;
+
+        var tabs = this.FindControl<TabControl>("MainTabs");
+        if (tabs != null) tabs.SelectedIndex = 2; // Layers tab (0=DataSources, 1=AlphaImport, 2=Layers)
+
+        AppendAlphaLog($"[Alpha Import] Switched to Layers tab. Data root set to: {_lastAlphaOutputDir}");
+        AppendAlphaLog($"[Alpha Import] Click 'Load' in Data Sources or 'Prepare Layers' to continue.");
+    }
+
+    private string FindSolutionRoot()
+    {
+        // Walk up from assembly location to find gillijimproject_refactor
+        var dir = Path.GetDirectoryName(typeof(MainWindow).Assembly.Location);
+        for (int i = 0; i < 10 && dir != null; i++)
+        {
+            if (File.Exists(Path.Combine(dir, "WoWRollback", "WoWRollback.sln")) ||
+                Directory.Exists(Path.Combine(dir, "AlphaWDTAnalysisTool")))
+            {
+                return dir;
+            }
+            dir = Path.GetDirectoryName(dir);
+        }
+        // Fallback to current directory
+        return Environment.CurrentDirectory;
     }
 
     private void AppendBuildLog(string line)
