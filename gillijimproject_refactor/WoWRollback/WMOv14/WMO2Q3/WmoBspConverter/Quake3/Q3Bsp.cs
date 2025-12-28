@@ -26,6 +26,10 @@ namespace WmoBspConverter.Quake3
         public List<Q3Face> Faces { get; set; } = new();
         public List<byte[]> Lightmaps { get; set; } = new();
         public List<Q3LightVol> LightVols { get; set; } = new();
+        
+        // VisData with proper header
+        public int NumClusters { get; set; }
+        public int BytesPerCluster { get; set; }
         public byte[]? VisData { get; set; }
     }
 

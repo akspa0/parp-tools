@@ -20,7 +20,7 @@ namespace WmoBspConverter
             }
 
             bool emitCube = false;
-            string inputFile = args[0];
+            string inputFile = args[0].StartsWith("-") ? "" : args[0];
             string? outputFile = null;
             bool extractTextures = true;
             string? outputDir = null;
@@ -34,9 +34,12 @@ namespace WmoBspConverter
             string mopyPair = "a"; // a or b
             string mapping = "auto"; // auto|mopy|moba
             bool convertToV17 = false;
+            bool useQ3V2 = false;
+            bool outputMap = false;
 
-            // Parse simple command line arguments
-            for (int i = 1; i < args.Length; i++)
+            // Parse simple command line arguments (start from 0 if first arg is a flag)
+            int startIdx = args[0].StartsWith("-") ? 0 : 1;
+            for (int i = startIdx; i < args.Length; i++)
             {
                 switch (args[i].ToLowerInvariant())
                 {
@@ -120,6 +123,13 @@ namespace WmoBspConverter
                     case "--to-v17":
                         convertToV17 = true;
                         break;
+                    case "--q3v2":
+                    case "--q3-v2":
+                        useQ3V2 = true;
+                        break;
+                    case "--map":
+                        outputMap = true;
+                        break;
                     case "--help":
                     case "-h":
                         ShowUsage();
@@ -148,6 +158,14 @@ namespace WmoBspConverter
                 else if (!string.IsNullOrEmpty(objPath))
                 {
                     await ExportObjAsync(inputFile, objPath!, allowFallback, includeNonRender, extractTextures, verbose, matOnly, groupIndex, mopyPair, mapping);
+                }
+                else if (outputMap)
+                {
+                    await ConvertToMapAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
+                }
+                else if (useQ3V2)
+                {
+                    await ConvertQ3V2Async(inputFile, outputFile, outputDir, verbose);
                 }
                 else
                 {
@@ -186,6 +204,8 @@ namespace WmoBspConverter
             Console.WriteLine("  --mopy-pair <a|b>        For MOPYx2, prefer 'a' or 'b' entry when both are renderable (default: a)");
             Console.WriteLine("  --mapping <auto|mopy|moba>  Force mapping source (default: auto)");
             Console.WriteLine("  --to-v17                  Convert WMO v14 to v17 format (for use with wow.tools exporters)");
+            Console.WriteLine("  --q3v2                    Use V2 BSP converter with proper BSP tree/visibility");
+            Console.WriteLine("  --map                     Output .map file for GtkRadiant (instead of .bsp)");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
             Console.WriteLine("Examples:");
@@ -382,6 +402,149 @@ namespace WmoBspConverter
 
             await Task.CompletedTask;
         }
+
+        static async Task ConvertQ3V2Async(string inputFile, string? outputFile, string? outputDir, bool verbose)
+        {
+            if (!File.Exists(inputFile))
+                throw new FileNotFoundException($"Input file not found: {inputFile}");
+
+            var outputDirectory = outputDir ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
+            Directory.CreateDirectory(outputDirectory);
+
+            if (string.IsNullOrEmpty(outputFile))
+            {
+                outputFile = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFile) + ".bsp");
+            }
+
+            Console.WriteLine("WMO v14 → Quake 3 BSP V2 Converter");
+            Console.WriteLine("===================================");
+            Console.WriteLine($"Input:  {Path.GetFullPath(inputFile)}");
+            Console.WriteLine($"Output: {Path.GetFullPath(outputFile)}");
+            Console.WriteLine();
+
+            // Parse WMO v14
+            var parser = new WmoV14Parser();
+            var wmoData = parser.ParseWmoV14(inputFile);
+
+            Console.WriteLine($"[INFO] Parsed WMO v{wmoData.Version}: {wmoData.Groups.Count} groups, {wmoData.Materials.Count} materials");
+
+            // Convert using V2 converter with proper BSP tree
+            var converter = new Quake3.WmoToQ3ConverterV2();
+            var q3bsp = converter.Convert(wmoData);
+
+            // Write BSP file
+            var writer = new Quake3.Q3BspWriter(q3bsp);
+            writer.Write(outputFile);
+
+            Console.WriteLine();
+            Console.WriteLine("✓ Conversion completed!");
+            Console.WriteLine($"  Vertices: {q3bsp.Vertices.Count:N0}");
+            Console.WriteLine($"  Faces: {q3bsp.Faces.Count:N0}");
+            Console.WriteLine($"  Textures: {q3bsp.Textures.Count:N0}");
+            Console.WriteLine($"  Nodes: {q3bsp.Nodes.Count:N0}");
+            Console.WriteLine($"  Leaves: {q3bsp.Leaves.Count:N0}");
+            Console.WriteLine($"  Brushes: {q3bsp.Brushes.Count:N0}");
+            Console.WriteLine($"  File size: {new FileInfo(outputFile).Length:N0} bytes");
+            Console.WriteLine();
+            Console.WriteLine("💡 To test in Quake 3:");
+            Console.WriteLine($"   1. Copy {Path.GetFileName(outputFile)} to baseq3/maps/");
+            Console.WriteLine("   2. Run: /devmap " + Path.GetFileNameWithoutExtension(outputFile));
+
+            await Task.CompletedTask;
+        }
+
+        static async Task ConvertToMapAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
+        {
+            if (!File.Exists(inputFile))
+                throw new FileNotFoundException($"Input file not found: {inputFile}");
+
+            var outputDirectory = outputDir ?? Path.Combine(Directory.GetCurrentDirectory(), "output");
+            Directory.CreateDirectory(outputDirectory);
+
+            if (string.IsNullOrEmpty(outputFile))
+            {
+                outputFile = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(inputFile) + ".map");
+            }
+
+            Console.WriteLine("WMO v14 → Quake 3 .MAP Converter");
+            Console.WriteLine("================================");
+            Console.WriteLine($"Input:  {Path.GetFullPath(inputFile)}");
+            Console.WriteLine($"Output: {Path.GetFullPath(outputFile)}");
+            Console.WriteLine();
+
+            // Parse WMO v14
+            var parser = new WmoV14Parser();
+            var wmoData = parser.ParseWmoV14(inputFile);
+
+            Console.WriteLine($"[INFO] Parsed WMO v{wmoData.Version}: {wmoData.Groups.Count} groups, {wmoData.Materials.Count} materials");
+
+            // Create BspFile with actual geometry for the map generator
+            var bspFile = new BspFile();
+            
+            // Add textures
+            foreach (var tex in wmoData.Textures)
+            {
+                var cleanName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
+                bspFile.Textures.Add(new BspTexture { Name = $"textures/wmo/{cleanName}" });
+            }
+            if (bspFile.Textures.Count == 0)
+            {
+                bspFile.Textures.Add(new BspTexture { Name = "textures/common/caulk" });
+            }
+            
+            // Add geometry from all groups
+            foreach (var group in wmoData.Groups)
+            {
+                int vertexBase = bspFile.Vertices.Count;
+                
+                // Add vertices
+                foreach (var v in group.Vertices)
+                {
+                    bspFile.Vertices.Add(new BspVertex { Position = v });
+                }
+                
+                // Add faces (triangles)
+                for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+                {
+                    var i0 = group.Indices[i];
+                    var i1 = group.Indices[i + 1];
+                    var i2 = group.Indices[i + 2];
+                    int triIndex = i / 3;
+                    int matId = triIndex < group.FaceMaterials.Count ? group.FaceMaterials[triIndex] : 0;
+                    
+                    bspFile.Faces.Add(new BspFace
+                    {
+                        FirstVertex = vertexBase + i0,
+                        NumVertices = 3,
+                        Texture = matId
+                    });
+                }
+            }
+            
+            Console.WriteLine($"[INFO] Prepared {bspFile.Vertices.Count} vertices, {bspFile.Faces.Count} faces for .map generation");
+
+            // Generate .map file
+            var mapGen = new WmoMapGenerator();
+            if (splitGroups)
+            {
+                mapGen.GenerateMapFilePerGroup(outputFile, wmoData, bspFile);
+            }
+            else
+            {
+                mapGen.GenerateMapFile(outputFile, wmoData, bspFile);
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("✓ Conversion completed!");
+            Console.WriteLine($"  File: {Path.GetFullPath(outputFile)}");
+            Console.WriteLine();
+            Console.WriteLine("💡 To use in GtkRadiant:");
+            Console.WriteLine("   1. Open GtkRadiant");
+            Console.WriteLine($"   2. File → Open → {Path.GetFileName(outputFile)}");
+            Console.WriteLine("   3. Build → BSP to compile");
+
+            await Task.CompletedTask;
+        }
     }
 
     internal static class CubeEmitter
@@ -460,15 +623,44 @@ namespace WmoBspConverter
                 min = new Vector3(Math.Min(min.X, p.X), Math.Min(min.Y, p.Y), Math.Min(min.Z, p.Z));
                 max = new Vector3(Math.Max(max.X, p.X), Math.Max(max.Y, p.Y), Math.Max(max.Z, p.Z));
             }
+            
+            // Expand bounds slightly
+            min -= new Vector3(64, 64, 64);
+            max += new Vector3(64, 64, 64);
+            
+            // Create world model
             bsp.Models.Add(new BspModel { Min = min, Max = max, FirstFace = 0, NumFaces = bsp.Faces.Count });
-            bsp.Nodes.Add(new BspNode { Plane = 0, Children = new[]{-1,-1}, Min = min, Max = max });
-            bsp.Leaves.Add(new BspLeaf { Min = min, Max = max, Cluster = 0, Area = 0, FirstFace = 0, NumFaces = bsp.Faces.Count });
-            for (int i=0;i<bsp.Faces.Count;i++) bsp.LeafFaces.Add(i);
+            
+            // Create BSP tree: root node with 2 leaf children
+            // In Q3, negative child = -(leafIndex + 1), so -1 = leaf 0, -2 = leaf 1
+            bsp.Nodes.Add(new BspNode { Plane = 0, Children = new[]{-1, -2}, Min = min, Max = max });
+            
+            // Leaf 0: contains all faces (inside)
+            for (int i = 0; i < bsp.Faces.Count; i++) bsp.LeafFaces.Add(i);
+            bsp.Leaves.Add(new BspLeaf { 
+                Min = min, Max = max, 
+                Cluster = 0, Area = 0, 
+                FirstFace = 0, NumFaces = bsp.Faces.Count,
+                FirstBrush = 0, NumBrushes = 0
+            });
+            
+            // Leaf 1: empty (outside)
+            bsp.Leaves.Add(new BspLeaf { 
+                Min = min, Max = max, 
+                Cluster = -1, Area = 0, 
+                FirstFace = 0, NumFaces = 0,
+                FirstBrush = 0, NumBrushes = 0
+            });
+            
+            // Setup visibility: 1 cluster, all visible
+            bsp.NumClusters = 1;
+            bsp.BytesPerCluster = 1;
+            bsp.VisData = new byte[] { 0x01 }; // Cluster 0 can see cluster 0
 
             // Entities (worldspawn + spawn)
-            bsp.Entities.Add("{\n  \"classname\" \"worldspawn\"\n}");
+            bsp.Entities.Add("{\n\"classname\" \"worldspawn\"\n}");
             var center = (min + max) * 0.5f;
-            bsp.Entities.Add($"{{\n  \"classname\" \"info_player_deathmatch\"\n  \"origin\" \"{center.X:F1} {center.Y:F1} {max.Z + 32:F1}\"\n  \"angle\" \"0\"\n}}");
+            bsp.Entities.Add($"{{\n\"classname\" \"info_player_deathmatch\"\n\"origin\" \"{center.X:F0} {center.Y:F0} {max.Z + 32:F0}\"\n\"angle\" \"0\"\n}}");
 
             // Save and verify
             bsp.Save(outPath);

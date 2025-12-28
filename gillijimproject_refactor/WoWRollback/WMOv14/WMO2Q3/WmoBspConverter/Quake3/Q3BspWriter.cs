@@ -75,6 +75,10 @@ namespace WmoBspConverter.Quake3
         
         private (int offset, int length) WriteLump(BinaryWriter writer, Action<BinaryWriter> writeLumpData)
         {
+            // Align to 4-byte boundary before writing lump
+            while (writer.BaseStream.Position % 4 != 0)
+                writer.Write((byte)0);
+            
             var start = (int)writer.BaseStream.Position;
             writeLumpData(writer);
             var end = (int)writer.BaseStream.Position;
@@ -304,10 +308,18 @@ namespace WmoBspConverter.Quake3
         
         private void WriteLump_VisData(BinaryWriter writer)
         {
-            if (_bsp.VisData != null && _bsp.VisData.Length > 0)
+            // Q3 VisData format: header (2 ints) + bitset data
+            // struct tBSPVisData { int numOfClusters; int bytesPerCluster; byte* pBitsets; }
+            if (_bsp.NumClusters > 0 && _bsp.BytesPerCluster > 0)
             {
-                writer.Write(_bsp.VisData);
+                writer.Write(_bsp.NumClusters);
+                writer.Write(_bsp.BytesPerCluster);
+                if (_bsp.VisData != null && _bsp.VisData.Length > 0)
+                {
+                    writer.Write(_bsp.VisData);
+                }
             }
+            // If no clusters, write empty lump (valid for simple maps)
         }
     }
 }

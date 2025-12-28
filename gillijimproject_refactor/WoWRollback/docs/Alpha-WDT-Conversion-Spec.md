@@ -22,6 +22,32 @@ This document specifies the requirements for converting WoW 3.3.5 (LK) WDT/ADT f
 
 ---
 
+## Critical: Sequential Chunk Reading (Ghidra Verified)
+
+**Reverse engineered from WoWClient.exe (0.5.3.3368) with PDB symbols:**
+
+The Alpha client reads WDT chunks **SEQUENTIALLY** - it does NOT seek to MPHD offsets!
+
+```c
+// From CMap::LoadWdt decompilation:
+SFile::Read(wdtFile, &iffChunk, 8, ...);  // MVER header
+SFile::Read(wdtFile, &version, 4, ...);    // MVER data
+SFile::Read(wdtFile, &iffChunk, 8, ...);  // MPHD header
+SFile::Read(wdtFile, &header, 0x80, ...); // MPHD data (128 bytes)
+SFile::Read(wdtFile, &iffChunk, 8, ...);  // MAIN header
+SFile::Read(wdtFile, &areaInfo, 0x10000, ...); // MAIN data (65536 bytes)
+LoadDoodadNames();  // Reads MDNM sequentially
+LoadMapObjNames();  // Reads MONM sequentially
+SFile::Read(wdtFile, &iffChunk, 8, ...);  // Check for MODF
+```
+
+**Implications:**
+- MPHD offsets (`offsDoodadNames`, `offsMapObjNames`) are metadata for indexing names, NOT used for seeking
+- **ANY padding bytes between chunks will cause assertion failures**
+- Chunks must be written in exact order with NO gaps
+
+---
+
 ## Top-Level WDT Structure
 
 ### Required Chunks (in order)
@@ -47,12 +73,11 @@ MDNM (variable)
 MONM (variable)
   - WMO names (null-terminated strings)
   - CRITICAL: Must contain actual WMO names from source
-  
-MODF (0 bytes, optional)
-  - Top-level WMO definitions
-  - Usually empty but chunk must exist
+  - CRITICAL: NO padding byte after MONM even if size is odd
   
 [Tile Data]
+  - Embedded MHDR + tile data immediately after MONM
+  - NOTE: Original Alpha format has NO MODF chunk here
   - Embedded MHDR + tile data for each non-zero tile
 ```
 
@@ -360,15 +385,15 @@ if (names.Count == 0)
     return new byte[] { 0 };  // Trailing null terminator
 ```
 
-### 8. ❌ Missing Top-Level MODF Chunk
+### 8. ❌ Extra MODF Chunk or Padding After MONM
 
-**Symptom**: Client may fail to parse WDT correctly
+**Symptom**: `iffChunk.token=='MONM'` assertion failure
 
-**Cause**: Top-level MODF chunk not written after MONM
+**Cause**: Writing MODF chunk or padding bytes after MONM - original Alpha format has neither
 
-**Fix**: Always write MODF chunk (can be empty) after MONM:
+**Fix**: Tile data (MHDR) starts immediately after MONM with NO intervening chunks or padding:
 ```
-MVER -> MPHD -> MAIN -> MDNM -> MONM -> MODF -> [Tile Data]
+MVER -> MPHD -> MAIN -> MDNM -> MONM -> [Tile Data (MHDR...)]
 ```
 
 ---
@@ -380,7 +405,8 @@ MVER -> MPHD -> MAIN -> MDNM -> MONM -> MODF -> [Tile Data]
 ✅ MPHD.nMapObjNames uses split-by-null counting  
 ✅ MONM contains actual WMO names from source  
 ✅ MDNM/MONM have at least 1 byte (trailing null) even when empty  
-✅ Top-level MODF chunk exists (can be empty)  
+✅ NO padding bytes between MDNM and MONM chunks  
+✅ NO MODF chunk after MONM - tile data starts immediately  
 ✅ MAIN entries have correct offsets and sizes  
 ✅ MHDR.offsInfo points to MCIN  
 ✅ MHDR offsets are relative to MHDR.data  

@@ -10,7 +10,8 @@ namespace WmoBspConverter.Wmo
 {
     /// <summary>
     /// WMO v14 parser that handles the special MOMO container structure.
-    /// Based on the proven V14ChunkReader approach from old_sources.
+    /// GHIDRA-VERIFIED: All sizes and chunk names verified against WoWClient.exe (0.5.3.3368)
+    /// Key findings: MOPY=4 bytes, indices use MOIN (not MOVI), MOGI=40 bytes, MODD=40 bytes
     /// </summary>
     public class WmoV14Parser
     {
@@ -373,14 +374,18 @@ namespace WmoBspConverter.Wmo
             var mogiChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOGI");
             if (mogiChunk?.Data != null)
             {
-                const int REC = 32;
+                // GHIDRA-VERIFIED: MOGI is 40 bytes per entry (size / 0x28), NOT 32!
+                // Structure: flags(4), boundingBox(24), nameOffset(4), unknown(8)
+                const int REC = 40;  // GHIDRA: groupCount = size / 0x28
                 int count = mogiChunk.Data.Length / REC;
                 for (int i = 0; i < count; i++)
                 {
                     int ofs = i * REC;
+                    // Name offset is at +28 (after flags + bounding box)
                     int nameIdx = BitConverter.ToInt32(mogiChunk.Data, ofs + 28);
                     wmoData.GroupNameIndices.Add(nameIdx);
                 }
+                Console.WriteLine($"[DEBUG] Parsed {count} MOGI entries (40 bytes each, Ghidra-verified)");
             }
 
             // Build groups: use each MOGP chunk's data buffer directly (headerless slice already captured by ReadChunk)
@@ -461,9 +466,9 @@ namespace WmoBspConverter.Wmo
 
         private void ProcessGroups(byte[] groupInfoData, List<string> groupNames, WmoV14Data wmoData)
         {
-            // WMO v14 group info structure: 32 bytes per group
-            // uint32_t flags, CAaBox bounding_box, int32_t nameoffset
-            const int GROUP_INFO_SIZE = 32;
+            // GHIDRA-VERIFIED: MOGI is 40 bytes per group (size / 0x28)
+            // Structure: flags(4), boundingBox(24), nameOffset(4), unknown(8)
+            const int GROUP_INFO_SIZE = 40;  // GHIDRA: size / 0x28
 
             var groupCount = groupInfoData.Length / GROUP_INFO_SIZE;
 
@@ -631,7 +636,9 @@ namespace WmoBspConverter.Wmo
             groupData.Batches.Clear();
 
             // Find first plausible sub-chunk header after the variable-size MOGP header.
-            var valid = new HashSet<string>{"MOVT","MOVI","MOIN","MONR","MOTV","MOPY","MOBA","MOBN","MOBR"};
+            // GHIDRA-VERIFIED: Chunk order is MOPY, MOVT, MONR, MOTV, MOLV, MOIN, MOBA
+            // NOTE: Client uses MOIN (not MOVI) for indices, and MOLV for lightmap UVs
+            var valid = new HashSet<string>{"MOPY","MOVT","MONR","MOTV","MOLV","MOIN","MOBA","MOBN","MOBR","MOLR","MODR","MOCV","MLIQ"};
             long foundPos = -1;
             long searchStart = MOGP_HEADER_SIZE;
             long searchLimit = Math.Min(ms.Length, searchStart + 1024); // scan up to 1KB past header
@@ -672,19 +679,21 @@ namespace WmoBspConverter.Wmo
                         seenMOVT = true;
                         movtVerts = data.Length / 12;
                         break;
-                    case "MOVI":
-                        ProcessMoviChunk(data, groupData);
-                        seenMOVI = true;
+                    case "MOIN":  // GHIDRA-VERIFIED: Client uses MOIN, not MOVI!
+                        ProcessMoinChunk(data, groupData);
+                        seenMOVI = true;  // Use same flag for compatibility
                         moviIdx = data.Length / 2;
                         break;
-                    case "MOIN":
+                    case "MOVI":  // Fallback for any files that might use old name
                         if (!seenMOVI)
                         {
-                            // Append all MOIN segments when MOVI is absent
-                            ProcessMoinChunk(data, groupData);
-                            indicesFromMoin = true;
-                            moviIdx = groupData.Indices.Count;
+                            ProcessMoviChunk(data, groupData);
+                            seenMOVI = true;
+                            moviIdx = data.Length / 2;
                         }
+                        break;
+                    case "MOLV":  // GHIDRA-VERIFIED: Lightmap UVs (8 bytes each)
+                        ProcessMolvChunk(data, groupData);
                         break;
                     case "MOTV":
                         ProcessMotvChunk(data, groupData);
@@ -692,7 +701,7 @@ namespace WmoBspConverter.Wmo
                     case "MOPY":
                         ProcessMopyChunk(data, groupData);
                         seenMOPY = true;
-                        mopyFaces = data.Length / 2;
+                        mopyFaces = data.Length / 4;  // GHIDRA-VERIFIED: MOPY is 4 bytes per face
                         break;
                     case "MOBA":
                         ProcessMobaChunk(data, groupData);
@@ -742,25 +751,31 @@ namespace WmoBspConverter.Wmo
 
         private void ProcessMopyChunk(byte[] mopyData, WmoGroupData groupData)
         {
-            // MOPY: 2 bytes per face: flags, materialId
-            int faceCount = mopyData.Length / 2;
+            // GHIDRA-VERIFIED: MOPY is 4 bytes per face (size >> 2), NOT 2 bytes!
+            // Structure: flags(1), materialId(1), unknown(2) - possibly face normal index or padding
+            const int ENTRY_SIZE = 4;  // GHIDRA: polyCount = size >> 2
+            int faceCount = mopyData.Length / ENTRY_SIZE;
             groupData.FaceFlags.Clear();
             groupData.FaceMaterials.Clear();
             for (int i = 0; i < faceCount; i++)
             {
-                byte flags = mopyData[i * 2 + 0];
-                byte matId = mopyData[i * 2 + 1];
+                int offset = i * ENTRY_SIZE;
+                byte flags = mopyData[offset + 0];
+                byte matId = mopyData[offset + 1];
+                // bytes 2-3 are unknown/padding per Ghidra
                 groupData.FaceFlags.Add(flags);
                 groupData.FaceMaterials.Add(matId);
             }
-            Console.WriteLine($"[DEBUG] Extracted {faceCount} faces from MOPY");
+            Console.WriteLine($"[DEBUG] Extracted {faceCount} faces from MOPY (4 bytes each, Ghidra-verified)");
             
             // Log first few MOPY entries for debugging
             for (int i = 0; i < Math.Min(faceCount, 5); i++)
             {
-                Console.WriteLine($"[DEBUG]   MOPY {i}: flags=0x{mopyData[i*2]:X2}, mat={mopyData[i*2+1]}");
+                int o = i * ENTRY_SIZE;
+                Console.WriteLine($"[DEBUG]   MOPY {i}: flags=0x{mopyData[o]:X2}, mat={mopyData[o+1]}, unk=0x{mopyData[o+2]:X2}{mopyData[o+3]:X2}");
             }
         }
+
         private void ProcessMobrChunk(byte[] mobrData, WmoGroupData groupData)
         {
             // MOBR: face order mapping (uint16 entries)
@@ -772,10 +787,12 @@ namespace WmoBspConverter.Wmo
             }
             Console.WriteLine($"[DEBUG] Extracted {count} entries from MOBR");
         }
+
         private void ProcessMoinChunk(byte[] moinData, WmoGroupData groupData)
         {
-            // Treat MOIN as an index buffer like MOVI (2 bytes per index). Some v14 files use MOIN instead of MOVI.
-            const int INDEX_SIZE = 2;
+            // GHIDRA-VERIFIED: Client uses MOIN (0x4D4F494E) for indices, NOT MOVI!
+            // This is the PRIMARY index chunk in WMO v14.
+            const int INDEX_SIZE = 2;  // GHIDRA: indexCount = size >> 1
             if (moinData.Length % INDEX_SIZE != 0)
             {
                 Console.WriteLine("[WARN] MOIN size not divisible by 2; skipping.");
@@ -789,6 +806,17 @@ namespace WmoBspConverter.Wmo
             }
             Console.WriteLine($"[DEBUG] Extracted {indexCount} indices from MOIN");
         }
+
+        private void ProcessMolvChunk(byte[] molvData, WmoGroupData groupData)
+        {
+            // GHIDRA-VERIFIED: MOLV is lightmap UVs, 8 bytes per vertex (2 floats)
+            // This chunk was MISSING from old documentation!
+            const int UV_SIZE = 8;
+            int count = molvData.Length / UV_SIZE;
+            // Store in a separate list if needed - for now just log
+            Console.WriteLine($"[DEBUG] Found MOLV chunk with {count} lightmap UVs (Ghidra-verified)");
+        }
+
         private void ProcessTopLevelMovtChunk(byte[] movtData, WmoGroupData? groupData)
         {
             if (groupData == null) return;

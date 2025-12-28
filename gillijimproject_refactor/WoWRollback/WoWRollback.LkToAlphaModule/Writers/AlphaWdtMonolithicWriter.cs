@@ -171,11 +171,15 @@ public sealed class AlphaWdtMonolithicWriter
         for (int i = 0; i < m2Names.Count; i++) mdnmIndexFs[NormalizeAssetName(m2Names[i])] = i;
         var monmIndexFs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < wmoNames.Count; i++) monmIndexFs[NormalizeAssetName(wmoNames[i])] = i;
-        // MDNM/MONM chunks
-        long mdnmStart = ms.Position; var mdnmData = BuildMdnmData(m2Names); var mdnm = new Chunk("MDNM", mdnmData.Length, mdnmData); ms.Write(mdnm.GetWholeChunk());
-        long monmStart = ms.Position; var monmData = BuildMonmData(wmoNames); var monm = new Chunk("MONM", monmData.Length, monmData); ms.Write(monm.GetWholeChunk());
-        // MODF chunk (top-level WMO definitions) - must exist even if empty per Alpha spec
-        ms.Write(new Chunk("MODF", 0, Array.Empty<byte>()).GetWholeChunk());
+        // MDNM/MONM chunks - Alpha format does NOT use padding between these chunks
+        long mdnmStart = ms.Position;
+        var mdnmData = BuildMdnmData(m2Names);
+        WriteChunkNoPadding(ms, "MDNM", mdnmData);
+        
+        long monmStart = ms.Position;
+        var monmData = BuildMonmData(wmoNames);
+        WriteChunkNoPadding(ms, "MONM", monmData);
+        // NOTE: Original Alpha WDT has NO MODF chunk after MONM - tile data starts immediately
         // Patch MPHD with absolute offsets and counts
         long savePos = ms.Position; ms.Position = mphdDataStart; Span<byte> mphdData = new byte[128]; mphdData.Clear();
         // MPHD layout: [0..3]=nTextures (M2), [4..7]=MDNM abs, [8..11]=nMapObjNames (WMO, +1 when any), [12..15]=MONM abs
@@ -2392,5 +2396,20 @@ public sealed class AlphaWdtMonolithicWriter
         // xppm/yppm and palette fields left zero
         fs.Write(header);
         fs.Write(bgrTopDown, 0, bgrTopDown.Length);
+    }
+
+    /// <summary>
+    /// Write a chunk WITHOUT padding - Alpha WDT format does not use padding between MDNM/MONM chunks.
+    /// </summary>
+    private static void WriteChunkNoPadding(MemoryStream ms, string fourCC, byte[] data)
+    {
+        // Reverse FourCC for on-disk representation (e.g., "MDNM" -> "MNDM")
+        var reversed = new string(new[] { fourCC[3], fourCC[2], fourCC[1], fourCC[0] });
+        var header = new byte[8];
+        Encoding.ASCII.GetBytes(reversed, 0, 4, header, 0);
+        BitConverter.GetBytes(data.Length).CopyTo(header, 4);
+        ms.Write(header, 0, 8);
+        ms.Write(data, 0, data.Length);
+        // NO padding byte - Alpha format doesn't use it
     }
 }

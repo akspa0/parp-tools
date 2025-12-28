@@ -24,7 +24,9 @@ namespace WmoBspConverter.Bsp
         public List<BspBrush> Brushes { get; set; } = new List<BspBrush>();
         public List<BspBrushSide> BrushSides { get; set; } = new List<BspBrushSide>();
         public List<BspPlane> Planes { get; set; } = new List<BspPlane>();
-        public List<int> VisData { get; set; } = new List<int>();
+        public int NumClusters { get; set; }
+        public int BytesPerCluster { get; set; }
+        public byte[] VisData { get; set; } = Array.Empty<byte>();
         public List<string> Entities { get; set; } = new List<string>();
         public List<int> MeshVertices { get; set; } = new List<int>();
 
@@ -58,7 +60,19 @@ namespace WmoBspConverter.Bsp
             lumpData[BspLumpType.FaceIndex] = Faces.SelectMany(f => f.ToByteArray()).ToArray();
             lumpData[BspLumpType.Lightmaps] = Lightmaps.SelectMany(l => l).ToArray();
             lumpData[BspLumpType.LightGrid] = Array.Empty<byte>();
-            lumpData[BspLumpType.VisData] = VisData.Select(BitConverter.GetBytes).SelectMany(x => x).ToArray();
+            // VisData needs proper header: numClusters + bytesPerCluster + bitset data
+            if (NumClusters > 0 && BytesPerCluster > 0)
+            {
+                var visBytes = new List<byte>();
+                visBytes.AddRange(BitConverter.GetBytes(NumClusters));
+                visBytes.AddRange(BitConverter.GetBytes(BytesPerCluster));
+                visBytes.AddRange(VisData);
+                lumpData[BspLumpType.VisData] = visBytes.ToArray();
+            }
+            else
+            {
+                lumpData[BspLumpType.VisData] = Array.Empty<byte>();
+            }
 
             // Reserve header space first
             long offset = BspHeader.Size;
