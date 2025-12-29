@@ -143,6 +143,25 @@ public class AlphaToLkConverter
                     Console.WriteLine($"  Patched {chunksPatched} chunks in {filesPatched} files");
             }
 
+            // Convert WMO v14 files if enabled
+            if (_options.ConvertWmos && !string.IsNullOrEmpty(_options.AlphaWmoDirectory))
+            {
+                if (_options.Verbose)
+                    Console.WriteLine($"Converting WMO files from: {_options.AlphaWmoDirectory}");
+
+                var wmoPathMapping = ConvertWmoFiles(monmNames, outputDir);
+                
+                if (_options.Verbose)
+                    Console.WriteLine($"  Converted {wmoPathMapping.Count} WMO files");
+                
+                // TODO: Patch ADT MWMO chunks with remapped paths
+                // For now, log the mappings for manual verification
+                foreach (var kvp in wmoPathMapping)
+                {
+                    result.Warnings.Add($"WMO: {kvp.Key} → {kvp.Value}");
+                }
+            }
+
             result.Success = true;
 
             if (_options.Verbose)
@@ -529,6 +548,82 @@ public class AlphaToLkConverter
     {
         return _listfileService?.FixAssetPath(path, _options.FuzzyAssetMatching) ?? path;
     }
+
+    /// <summary>
+    /// Convert WMO v14 files to v17 format.
+    /// Returns a dictionary mapping original paths to new _alpha suffixed paths.
+    /// </summary>
+    private Dictionary<string, string> ConvertWmoFiles(List<string> monmNames, string outputDir)
+    {
+        var pathMapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var converter = new WmoV14ToV17Converter();
+        
+        // Collect unique WMO paths from MONM
+        var uniqueWmos = monmNames
+            .Where(p => !string.IsNullOrEmpty(p) && p.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (_options.Verbose)
+            Console.WriteLine($"  Found {uniqueWmos.Count} unique WMO references in MONM");
+
+        foreach (var wmoPath in uniqueWmos)
+        {
+            try
+            {
+                // Normalize path separators
+                var normalizedPath = wmoPath.Replace('/', '\\').TrimStart('\\');
+                
+                // Build source path
+                var sourcePath = Path.Combine(_options.AlphaWmoDirectory!, normalizedPath);
+                
+                if (!File.Exists(sourcePath))
+                {
+                    // Try without "World\" prefix
+                    if (normalizedPath.StartsWith("World\\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var withoutWorld = normalizedPath.Substring(6);
+                        sourcePath = Path.Combine(_options.AlphaWmoDirectory!, withoutWorld);
+                    }
+                }
+
+                if (!File.Exists(sourcePath))
+                {
+                    if (_options.Verbose)
+                        Console.WriteLine($"    [SKIP] Source not found: {wmoPath}");
+                    continue;
+                }
+
+                // Build output path with _alpha suffix
+                var wmoBaseName = Path.GetFileNameWithoutExtension(normalizedPath);
+                var wmoDir = Path.GetDirectoryName(normalizedPath) ?? "";
+                var newWmoName = $"{wmoBaseName}_alpha.wmo";
+                var newWmoPath = Path.Combine(wmoDir, newWmoName).Replace('\\', '/');
+                
+                // Create output directory structure
+                var fullOutputDir = Path.Combine(outputDir, wmoDir);
+                Directory.CreateDirectory(fullOutputDir);
+                
+                var fullOutputPath = Path.Combine(outputDir, wmoDir, newWmoName);
+                
+                if (_options.Verbose)
+                    Console.WriteLine($"    Converting: {wmoPath} → {newWmoPath}");
+
+                // Convert the WMO
+                converter.Convert(sourcePath, fullOutputPath);
+                
+                // Record mapping
+                pathMapping[wmoPath] = newWmoPath;
+            }
+            catch (Exception ex)
+            {
+                if (_options.Verbose)
+                    Console.WriteLine($"    [ERROR] {wmoPath}: {ex.Message}");
+            }
+        }
+
+        return pathMapping;
+    }
 }
 
 /// <summary>
@@ -570,6 +665,18 @@ public class ConversionOptions
     /// Path to WoWDBDefs definitions directory.
     /// </summary>
     public string? DbdDefinitionsPath { get; set; }
+
+    /// <summary>
+    /// Path to Alpha WMO root directory containing v14 WMO files.
+    /// When set, references WMOs will be converted to v17 format.
+    /// </summary>
+    public string? AlphaWmoDirectory { get; set; }
+
+    /// <summary>
+    /// Enable automatic WMO v14→v17 conversion during ADT conversion.
+    /// Converted WMOs will be renamed with _alpha suffix to avoid 3.3.5 collisions.
+    /// </summary>
+    public bool ConvertWmos { get; set; } = false;
 }
 
 /// <summary>

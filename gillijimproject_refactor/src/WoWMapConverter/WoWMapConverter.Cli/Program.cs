@@ -42,8 +42,10 @@ public static class Program
         string? crosswalkDir = null;
         string? communityListfile = null;
         string? lkListfile = null;
+        string? wmoDir = null;
         bool fuzzy = false;
         bool verbose = false;
+        bool convertWmos = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -73,6 +75,12 @@ public static class Program
                 case "-v":
                     verbose = true;
                     break;
+                case "--convert-wmos":
+                    convertWmos = true;
+                    break;
+                case "--wmo-dir":
+                    if (i + 1 < args.Length) wmoDir = args[++i];
+                    break;
                 default:
                     if (!args[i].StartsWith("-") && inputPath == null)
                         inputPath = args[i];
@@ -94,7 +102,9 @@ public static class Program
             CommunityListfile = communityListfile,
             LkListfile = lkListfile,
             FuzzyAssetMatching = fuzzy,
-            Verbose = verbose
+            Verbose = verbose,
+            ConvertWmos = convertWmos,
+            AlphaWmoDirectory = wmoDir
         };
 
         var converter = new AlphaToLkConverter(options);
@@ -161,13 +171,98 @@ public static class Program
         try
         {
             var converter = new WmoV14ToV17Converter();
-            converter.Convert(inputPath, outputPath);
+            var textures = converter.Convert(inputPath, outputPath);
+            
+            // Auto-copy textures
+            CopyTextures(inputPath, outputPath, textures);
+            
             return 0;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
+        }
+    }
+
+    private static void CopyTextures(string inputWmoPath, string outputWmoPath, List<string> textures)
+    {
+        if (textures == null || textures.Count == 0) return;
+
+        string inputDir = Path.GetDirectoryName(Path.GetFullPath(inputWmoPath))!;
+        string outputDir = Path.GetDirectoryName(Path.GetFullPath(outputWmoPath))!;
+
+        // Attempt to find the "Root" data directory by looking for the first part of the texture path
+        // e.g. if tex is "World/wmos/...", we look for a "World" folder in inputDir or its parents.
+        
+        Console.WriteLine($"[INFO] wmo references {textures.Count} textures. Copying...");
+        foreach (var t in textures) Console.WriteLine($"  - {t}");
+
+        // Simple heuristic: Try to find the file relative to inputDir, then check parents
+        foreach (var tex in textures)
+        {
+            var cleanTex = tex.Replace('/', '\\');
+            string srcPath = null;
+            
+            // 1. Try relative to wmo file itself (unlikely but possible)
+            var p1 = Path.Combine(inputDir, cleanTex);
+            if (File.Exists(p1)) srcPath = p1;
+            else
+            {
+                // 2. Walk up 5 levels to find the root
+                var curr = new DirectoryInfo(inputDir);
+                DirectoryInfo rootDir = null;
+                for (int i = 0; i < 5 && curr != null; i++)
+                {
+                   var p2 = Path.Combine(curr.FullName, cleanTex);
+                   if (File.Exists(p2))
+                   {
+                       srcPath = p2;
+                       break;
+                   }
+                   if (Directory.Exists(Path.Combine(curr.FullName, "DUNGEONS")) || 
+                       Directory.Exists(Path.Combine(curr.FullName, "World")) ||
+                       Directory.Exists(Path.Combine(curr.FullName, "Textures")))
+                   {
+                       rootDir = curr;
+                   }
+                   curr = curr.Parent;
+                }
+
+                // 3. Fallback: Recursive search in Root if identified, or InputDir parents
+                if (srcPath == null)
+                {
+                     var searchRoot = rootDir ?? new DirectoryInfo(inputDir).Parent?.Parent;
+                     if (searchRoot != null && searchRoot.Exists)
+                     {
+                         var filename = Path.GetFileName(cleanTex);
+                         var found = Directory.EnumerateFiles(searchRoot.FullName, filename, SearchOption.AllDirectories).FirstOrDefault();
+                         if (found != null)
+                         {
+                             srcPath = found;
+                             Console.WriteLine($"    Found via search: {srcPath}");
+                         }
+                     }
+                }
+            } // End else
+
+            if (srcPath != null)
+            {
+                // Copy to output
+                // Preserve directory structure matches WMO path
+                string targetRelPath = cleanTex;
+                var destPath = Path.Combine(outputDir, targetRelPath);
+                
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                if (!File.Exists(destPath)) 
+                {
+                    File.Copy(srcPath, destPath, true);
+                }
+            }
+            else
+            {
+                Console.WriteLine($"  [WARN] Missing texture: {cleanTex}");
+            }
         }
     }
 
@@ -525,6 +620,8 @@ public static class Program
         Console.WriteLine("  --output, -o <dir>      Output directory (default: ./output)");
         Console.WriteLine("  --crosswalk <dir>       AreaID crosswalk CSV directory");
         Console.WriteLine("  --listfile <csv>        Community listfile CSV for asset fixups");
+        Console.WriteLine("  --convert-wmos          Convert WMO v14 files to v17 with _alpha suffix");
+        Console.WriteLine("  --wmo-dir <dir>         Alpha WMO source directory (e.g., test_data/0.5.3/tree)");
         Console.WriteLine("  --verbose, -v           Verbose output");
         Console.WriteLine();
         Console.WriteLine("LK → Alpha Conversion Options:");
