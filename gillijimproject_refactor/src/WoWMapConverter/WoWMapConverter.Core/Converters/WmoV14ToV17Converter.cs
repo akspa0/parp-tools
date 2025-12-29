@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text;
+using WoWMapConverter.Core.Services;
 
 namespace WoWMapConverter.Core.Converters;
 
@@ -11,13 +12,27 @@ public class WmoV14ToV17Converter
 {
     /// <summary>
     /// Convert a v14 WMO file to v17 format.
+    /// Automatically handles per-asset MPQ archives (.wmo.MPQ).
     /// </summary>
     public List<string> Convert(string inputPath, string outputPath)
     {
         Console.WriteLine($"[INFO] Converting {Path.GetFileName(inputPath)} to v17...");
         
-        using var fs = new FileStream(inputPath, FileMode.Open, FileAccess.Read);
-        using var reader = new BinaryReader(fs);
+        // Try reading from file directly or from MPQ archive
+        var data = AlphaMpqReader.ReadWithMpqFallback(inputPath);
+        if (data == null)
+            throw new FileNotFoundException($"WMO not found (checked direct and MPQ): {inputPath}");
+        
+        return ConvertFromBytes(data, outputPath);
+    }
+    
+    /// <summary>
+    /// Convert WMO v14 data from bytes to v17 format.
+    /// </summary>
+    public List<string> ConvertFromBytes(byte[] wmoData, string outputPath)
+    {
+        using var ms = new MemoryStream(wmoData);
+        using var reader = new BinaryReader(ms);
 
         var data = ParseWmoV14(reader);
         
@@ -289,6 +304,16 @@ public class WmoV14ToV17Converter
                 Texture3Offset = reader.ReadUInt32(),
                 Color2 = reader.ReadUInt32()
             };
+            
+            // Debug: Print parsed DiffuseColor
+            byte b = (byte)(mat.DiffuseColor & 0xFF);
+            byte g = (byte)((mat.DiffuseColor >> 8) & 0xFF);
+            byte r = (byte)((mat.DiffuseColor >> 16) & 0xFF);
+            byte a = (byte)((mat.DiffuseColor >> 24) & 0xFF);
+            Console.WriteLine($"[DEBUG] Material {i} DiffuseColor: R={r} G={g} B={b} A={a} (Raw: 0x{mat.DiffuseColor:X8})");
+            
+            // DiffuseColor preserved from v14 (black = 0xFF000000)
+            
             data.Materials.Add(mat);
         }
     }
@@ -597,6 +622,23 @@ public class WmoV14ToV17Converter
                             LastVertex = unknown2,  // May be vertex end
                             Flags = flags
                         });
+                    }
+                    break;
+                
+                case "MOCV":
+                    // v14 MOCV: 4 bytes per vertex (BGRA)
+                    int colorCount = (int)(chunkSize / 4);
+                    Console.WriteLine($"[DEBUG] MOCV: {chunkSize} bytes, {colorCount} vertex colors (v14 format)");
+                    group.VertexColors = new List<uint>(colorCount);
+                    for (int i = 0; i < colorCount; i++)
+                    {
+                        group.VertexColors.Add(reader.ReadUInt32());
+                    }
+                    // Debug: Print first few colors
+                    for (int i = 0; i < Math.Min(3, colorCount); i++)
+                    {
+                        uint c = group.VertexColors[i];
+                        Console.WriteLine($"  Parsed Color[{i}]: B={c & 0xFF} G={(c >> 8) & 0xFF} R={(c >> 16) & 0xFF} A={(c >> 24) & 0xFF}");
                     }
                     break;
             }
@@ -924,11 +966,37 @@ public class WmoV14ToV17Converter
             }
         });
 
-        // MODN (doodad names - raw string table)
+        // MODN (doodad names - raw string table with MDX→M2 remapping)
         WriteChunk(writer, "MODN", w =>
         {
             if (data.DoodadNamesRaw.Length > 0)
-                w.Write(data.DoodadNamesRaw);
+            {
+                // Parse string table and remap .mdx → .m2
+                var names = ParseStringTable(data.DoodadNamesRaw);
+                var remappedBuilder = new MemoryStream();
+                var remappedWriter = new BinaryWriter(remappedBuilder, Encoding.UTF8);
+                
+                int mdxCount = 0;
+                foreach (var name in names)
+                {
+                    var remapped = name;
+                    if (name.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Remap .mdx to .m2 for LK compatibility
+                        remapped = name.Substring(0, name.Length - 4) + ".m2";
+                        mdxCount++;
+                    }
+                    
+                    // Write null-terminated string
+                    remappedWriter.Write(Encoding.UTF8.GetBytes(remapped));
+                    remappedWriter.Write((byte)0);
+                }
+                
+                if (mdxCount > 0)
+                    Console.WriteLine($"[DEBUG] Remapped {mdxCount} MDX doodad paths to M2");
+                
+                w.Write(remappedBuilder.ToArray());
+            }
         });
 
         // MODD (doodad defs - 40 bytes each)
@@ -1007,12 +1075,33 @@ public class WmoV14ToV17Converter
         // 0x1000 = has_liquid (MLIQ) - We preserve if present
 
         var fixedFlags = group.Flags;
-        fixedFlags |= 0x1u; // MOBN
-        fixedFlags |= 0x4u; // MOCV
+        fixedFlags |= 0x1u; // MOBN - we always write BSP
+        
+        // INTERIOR heuristic: If NOT Exterior (0x8), then set Interior (0x2000)
+        // This matches real 3.3.5 behavior where Group 0 is Interior and Group 1 is Exterior
+        bool isExterior = (fixedFlags & 0x8) != 0;
+        bool isInterior = !isExterior;
+        if (isInterior)
+        {
+            fixedFlags |= 0x2000u; // Set Interior flag
+        }
+        
+        // MOCV - Only for interior groups with vertex colors (matching real 3.3.5)
+        // Real 3.3.5: Group 0 (Interior) has MOCV, Group 1 (Exterior) does NOT
+        if (isInterior && group.VertexColors != null && group.VertexColors.Count > 0)
+        {
+            fixedFlags |= 0x4u;
+            Console.WriteLine($"[DEBUG] Setting MOCV flag for Interior group ({group.VertexColors.Count} colors)");
+        }
+        else
+        {
+            fixedFlags &= ~0x4u; // Clear if no colors or exterior
+        }
+        
         fixedFlags &= ~0x200u; // No MOLR
         fixedFlags &= ~0x400u; // No MPBV
         
-        // MODR
+        // MODR (doodads) - set if we have doodad refs
         if (group.DoodadRefs != null && group.DoodadRefs.Count > 0)
             fixedFlags |= 0x800u;
         else
@@ -1023,6 +1112,8 @@ public class WmoV14ToV17Converter
             fixedFlags |= 0x1000u;
         else
             fixedFlags &= ~0x1000u;
+            
+        Console.WriteLine($"[DEBUG] Group flags: 0x{fixedFlags:X8} (Interior={isInterior}, Exterior={isExterior}, MOCV={(fixedFlags & 0x4) != 0})");
 
         
         writer.Write(group.NameOffset);                      // +0x00 (4)
@@ -1152,20 +1243,19 @@ public class WmoV14ToV17Converter
         // 11. MPBV (Portals) - Skipped (Flag 0x400 cleared)
 
         // 12. MOCV (Vertex Colors) - Flag 0x4
-        WriteSubChunk(writer, "MOCV", w =>
+        if ((fixedFlags & 0x4) != 0)
         {
-            if (group.VertexColors != null && group.VertexColors.Count > 0)
+            WriteSubChunk(writer, "MOCV", w =>
             {
-                 foreach (var c in group.VertexColors)
-                     w.Write(c);
-            }
-            else
-            {
-                // Write white for every vertex if missing
-                for (int v = 0; v < group.Vertices.Count; v++)
-                    w.Write(0xFFFFFFFF); // BGRA White
-            }
-        });
+                Console.WriteLine($"[DEBUG] MOCV: Writing {group.VertexColors.Count} parsed vertex colors");
+                foreach (var c in group.VertexColors)
+                    w.Write(c);
+            });
+        }
+        else
+        {
+            Console.WriteLine("[DEBUG] MOCV: SKIPPED (no vertex colors parsed)");
+        }
 
         // 13. MLIQ (Liquid) - Flag 0x1000
         if ((fixedFlags & 0x1000) != 0)

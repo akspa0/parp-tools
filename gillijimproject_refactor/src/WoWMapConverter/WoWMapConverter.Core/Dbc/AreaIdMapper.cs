@@ -50,6 +50,56 @@ public class AreaIdMapper
     }
 
     /// <summary>
+    /// Try to auto-discover and load AreaTable.dbc files from test_data directories.
+    /// Searches for test_data/0.5.3/tree/DBFilesClient and test_data/3.3.5/tree/DBFilesClient
+    /// starting from current directory and walking up to 5 parent levels.
+    /// </summary>
+    /// <returns>True if DBCs were found and loaded, false otherwise.</returns>
+    public bool TryAutoLoadFromTestData()
+    {
+        // Standard paths relative to test_data
+        const string alphaDbcPath = "test_data/0.5.3/tree/DBFilesClient/AreaTable.dbc";
+        const string lkDbcPath = "test_data/3.3.5/tree/DBFilesClient/AreaTable.dbc";
+        const string alphaMapPath = "test_data/0.5.3/tree/DBFilesClient/Map.dbc";
+        const string lkMapPath = "test_data/3.3.5/tree/DBFilesClient/Map.dbc";
+
+        // Try to find test_data directory by walking up from current dir
+        var searchDirs = new List<string> { Directory.GetCurrentDirectory() };
+        
+        // Also try assembly location
+        var assemblyDir = Path.GetDirectoryName(typeof(AreaIdMapper).Assembly.Location);
+        if (!string.IsNullOrEmpty(assemblyDir))
+            searchDirs.Add(assemblyDir);
+
+        foreach (var startDir in searchDirs)
+        {
+            var current = new DirectoryInfo(startDir);
+            for (int i = 0; i < 6 && current != null; i++)
+            {
+                var alphaPath = Path.Combine(current.FullName, alphaDbcPath);
+                var lkPath = Path.Combine(current.FullName, lkDbcPath);
+
+                if (File.Exists(alphaPath) && File.Exists(lkPath))
+                {
+                    var alphaMap = Path.Combine(current.FullName, alphaMapPath);
+                    var lkMap = Path.Combine(current.FullName, lkMapPath);
+
+                    LoadDbcs(alphaPath, lkPath,
+                        File.Exists(alphaMap) ? alphaMap : null,
+                        File.Exists(lkMap) ? lkMap : null);
+
+                    Console.WriteLine($"[INFO] Auto-loaded AreaTable from test_data: {AlphaAreaCount} Alpha, {LkAreaCount} LK areas");
+                    return true;
+                }
+
+                current = current.Parent;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Load from pre-generated crosswalk CSV files.
     /// </summary>
     public void LoadCrosswalkCsv(string csvDir)

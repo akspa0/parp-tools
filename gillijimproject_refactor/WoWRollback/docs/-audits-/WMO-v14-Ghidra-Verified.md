@@ -230,6 +230,46 @@ void __thiscall CMapObjGroup::CreateDataPointers(CMapObjGroup *this, uchar *para
 }
 ```
 
+### SMOBatch_v14 Structure (24 bytes) - CRITICAL
+
+**Ghidra-verified from RenderGroupTex @ 0x0069d8c0:**
+
+```c
+struct SMOBatch_v14 {
+    /*0x00*/ uint8  lightMap;        // Lightmap index
+    /*0x01*/ uint8  materialId;      // ← MATERIAL INDEX! Not at 0x17!
+    /*0x02*/ uint8  reserved[12];    // Bounding box (unused in v14)
+    /*0x0E*/ uint16 startIndex;      // ← START INDEX (ushort, NOT uint32!)
+    /*0x10*/ uint16 indexCount;      // Index count (faces * 3)
+    /*0x12*/ uint16 minVertex;       // Min vertex index for batch
+    /*0x14*/ uint16 maxVertex;       // Max vertex index for batch
+    /*0x16*/ uint8  flags;           // Batch flags
+    /*0x17*/ uint8  padding;         // Alignment padding
+};
+// Total: 24 bytes (0x18)
+```
+
+**Key Differences from v17:**
+- `materialId` at offset 0x01 (v17 uses different layout)
+- `startIndex` is `uint16` at 0x0E (NOT `uint32`!)
+
+**From RenderGroupTex disassembly:**
+```c
+// @ 0x0069d8c0
+for (batch = 0; batch < batchCount; batch++) {
+    SMOBatch *b = &batchList[batch];
+    
+    // Material setup - uses byte at offset 1
+    materialId = b->texture;           // offset 0x01
+    SetMaterial(materialList[materialId]);
+    
+    // Draw call - uses ushort at offset 0x0E
+    startIdx = *(ushort*)(&b->bytes[0x0E]);
+    count = *(ushort*)(&b->bytes[0x10]);
+    DrawTriangles(startIdx, count);
+}
+```
+
 ---
 
 ## 4. Optional Group Chunks (CreateOptionalDataPointers @ 0x006af4d0)
@@ -364,4 +404,69 @@ if (chunkId == "MOIN") ...  // Different chunk name!
 
 ---
 
-*This document contains ONLY Ghidra-verified information from decompilation of WoWClient.exe (0.5.3.3368). No old community documentation was used.*
+## 8. v14 → v17 Conversion Lessons (2025-12-29)
+
+### MOBA Batch Parsing - Critical Fix
+
+The v14 SMOBatch structure places the material ID at a different offset than expected:
+
+```c
+// WRONG - Old assumption
+uint32 startIndex = ReadUInt32(batch + 12);  // Offset 0x0C as uint32
+uint8  materialId = ReadByte(batch + 23);    // Offset 0x17
+
+// CORRECT - Ghidra-verified
+uint8  materialId = ReadByte(batch + 1);     // Offset 0x01
+uint16 startIndex = ReadUInt16(batch + 14);  // Offset 0x0E as uint16!
+uint16 indexCount = ReadUInt16(batch + 16);  // Offset 0x10
+```
+
+### MOCV Vertex Colors
+
+**Interior groups** (flag 0x2000) typically have MOCV vertex colors that provide ambient interior shading (blue-purple tint). Exterior groups (flag 0x8) typically do NOT have MOCV in v17.
+
+**Parsing**: 4 bytes per vertex (BGRA format)
+```csharp
+for (int i = 0; i < chunkSize / 4; i++) {
+    group.VertexColors.Add(reader.ReadUInt32());
+}
+```
+
+### Interior Flag Heuristic
+
+V14 groups may not have the Interior flag (0x2000) set, but real 3.3.5 WMOs do. Apply this heuristic:
+
+```csharp
+bool isExterior = (flags & 0x8) != 0;
+bool isInterior = !isExterior;
+
+if (isInterior) {
+    fixedFlags |= 0x2000u;  // Set Interior flag
+    
+    // Only interior groups get MOCV
+    if (hasVertexColors) {
+        fixedFlags |= 0x4u;
+    }
+}
+```
+
+### Batch Counts (Trans/Int/Ext)
+
+The MOGP header contains batch counts that control lighting:
+- **TransBatchCount**: Transparent batches
+- **IntBatchCount**: Interior-lit batches (receive ambient color)
+- **ExtBatchCount**: Exterior-lit batches
+
+These values should be preserved from v14 source, not recalculated.
+
+### Test Results (2025-12-29)
+
+| WMO | Groups | Status |
+|-----|--------|--------|
+| castle01.wmo | 2 | ✓ Near-perfect match |
+| Ironforge.wmo | 146 | ✓ Loads in Noggit |
+| Karazhan.wmo | 101 | ✓ Loads in Noggit |
+
+---
+
+*Document updated 2025-12-29 with v14→v17 conversion lessons from WmoV14ToV17Converter.cs development.*

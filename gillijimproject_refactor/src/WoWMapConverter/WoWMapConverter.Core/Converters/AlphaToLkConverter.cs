@@ -1,4 +1,5 @@
 using WoWMapConverter.Core.Services;
+using WoWMapConverter.Core.Dbc;
 using GillijimProject.WowFiles.Alpha;
 using static WoWMapConverter.Core.Services.AdtAreaIdPatcher;
 
@@ -10,7 +11,7 @@ namespace WoWMapConverter.Core.Converters;
 /// </summary>
 public class AlphaToLkConverter
 {
-    private readonly AreaIdCrosswalk? _areaCrosswalk;
+    private readonly AreaIdMapper? _areaMapper;
     private readonly ListfileService? _listfileService;
     private readonly ConversionOptions _options;
 
@@ -18,13 +19,21 @@ public class AlphaToLkConverter
     {
         _options = options ?? new ConversionOptions();
         
-        // Always instantiate crosswalk to load embedded defaults
-        _areaCrosswalk = new AreaIdCrosswalk();
-
-        if (!string.IsNullOrEmpty(_options.CrosswalkDirectory))
+        // Initialize AreaIdMapper
+        _areaMapper = new AreaIdMapper();
+        
+        // Try auto-discovery from test_data directories first
+        if (!_areaMapper.TryAutoLoadFromTestData())
         {
-            _areaCrosswalk.LoadFromDirectory(_options.CrosswalkDirectory);
+            // Fall back to CSV crosswalk directory if provided
+            if (!string.IsNullOrEmpty(_options.CrosswalkDirectory))
+            {
+                _areaMapper.LoadCrosswalkCsv(_options.CrosswalkDirectory);
+            }
         }
+        
+        if (_options.Verbose && _areaMapper.CrosswalkCount > 0)
+            Console.WriteLine($"[INFO] AreaIdMapper ready: {_areaMapper.AlphaAreaCount} Alpha, {_areaMapper.LkAreaCount} LK, {_areaMapper.CrosswalkCount} mapped");
 
         if (!string.IsNullOrEmpty(_options.CommunityListfile))
         {
@@ -128,10 +137,10 @@ public class AlphaToLkConverter
             result.TilesConverted = converted;
 
             // Apply AreaID crosswalk if available
-            if (_areaCrosswalk != null && _areaCrosswalk.HasMapData(mapName))
+            if (_areaMapper != null && _areaMapper.CrosswalkCount > 0)
             {
                 if (_options.Verbose)
-                    Console.WriteLine($"Applying AreaID crosswalk for {mapName}...");
+                    Console.WriteLine($"Applying AreaID crosswalk for {mapName} ({_areaMapper.CrosswalkCount} mappings)...");
 
                 var (filesPatched, chunksPatched) = AdtAreaIdPatcher.PatchDirectory(
                     outputDir, 
@@ -535,10 +544,19 @@ public class AlphaToLkConverter
 
     /// <summary>
     /// Map an Alpha AreaID to LK AreaID.
+    /// Uses AreaIdMapper with fuzzy name matching.
     /// </summary>
     public int MapAreaId(string mapName, int alphaAreaId)
     {
-        return _areaCrosswalk?.MapAreaId(mapName, alphaAreaId) ?? 0;
+        // Get continent hint from map name
+        int? continentHint = mapName.ToLowerInvariant() switch
+        {
+            "azeroth" => 0,
+            "kalimdor" => 1,
+            _ => null
+        };
+        
+        return _areaMapper?.MapAreaId(alphaAreaId, continentHint) ?? 0;
     }
 
     /// <summary>
@@ -567,33 +585,33 @@ public class AlphaToLkConverter
         if (_options.Verbose)
             Console.WriteLine($"  Found {uniqueWmos.Count} unique WMO references in MONM");
 
+        // Build index of available WMO files (recursive search for .wmo and .wmo.MPQ)
+        var wmoIndex = BuildWmoIndex(_options.AlphaWmoDirectory!);
+        if (_options.Verbose)
+            Console.WriteLine($"  Indexed {wmoIndex.Count} WMO files/MPQs in source directory");
+
         foreach (var wmoPath in uniqueWmos)
         {
             try
             {
-                // Normalize path separators
-                var normalizedPath = wmoPath.Replace('/', '\\').TrimStart('\\');
+                // Get just the filename (e.g., guardtower.wmo)
+                var wmoFileName = Path.GetFileName(wmoPath).ToLowerInvariant();
                 
-                // Build source path
-                var sourcePath = Path.Combine(_options.AlphaWmoDirectory!, normalizedPath);
-                
-                if (!File.Exists(sourcePath))
+                // Look up in our index
+                if (!wmoIndex.TryGetValue(wmoFileName, out var sourcePath))
                 {
-                    // Try without "World\" prefix
-                    if (normalizedPath.StartsWith("World\\", StringComparison.OrdinalIgnoreCase))
+                    // Also try with .MPQ extension
+                    if (!wmoIndex.TryGetValue(wmoFileName + ".mpq", out sourcePath))
                     {
-                        var withoutWorld = normalizedPath.Substring(6);
-                        sourcePath = Path.Combine(_options.AlphaWmoDirectory!, withoutWorld);
+                        if (_options.Verbose)
+                            Console.WriteLine($"    [SKIP] Source not found: {wmoPath}");
+                        continue;
                     }
                 }
 
-                if (!File.Exists(sourcePath))
-                {
-                    if (_options.Verbose)
-                        Console.WriteLine($"    [SKIP] Source not found: {wmoPath}");
-                    continue;
-                }
-
+                // Normalize path separators for output
+                var normalizedPath = wmoPath.Replace('/', '\\').TrimStart('\\');
+                
                 // Build output path with _alpha suffix
                 var wmoBaseName = Path.GetFileNameWithoutExtension(normalizedPath);
                 var wmoDir = Path.GetDirectoryName(normalizedPath) ?? "";
@@ -609,7 +627,7 @@ public class AlphaToLkConverter
                 if (_options.Verbose)
                     Console.WriteLine($"    Converting: {wmoPath} → {newWmoPath}");
 
-                // Convert the WMO
+                // Convert the WMO (converter handles both direct files and MPQs)
                 converter.Convert(sourcePath, fullOutputPath);
                 
                 // Record mapping
@@ -623,6 +641,41 @@ public class AlphaToLkConverter
         }
 
         return pathMapping;
+    }
+
+    /// <summary>
+    /// Build an index of WMO files (both direct .wmo and .wmo.MPQ) by filename.
+    /// </summary>
+    private Dictionary<string, string> BuildWmoIndex(string rootDir)
+    {
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        
+        try
+        {
+            // Search for .wmo files
+            foreach (var file in Directory.EnumerateFiles(rootDir, "*.wmo", SearchOption.AllDirectories))
+            {
+                var fileName = Path.GetFileName(file).ToLowerInvariant();
+                if (!index.ContainsKey(fileName))
+                    index[fileName] = file;
+            }
+            
+            // Search for .wmo.MPQ files (per-asset archives)
+            foreach (var file in Directory.EnumerateFiles(rootDir, "*.wmo.mpq", SearchOption.AllDirectories))
+            {
+                // Key is "filename.wmo" (without .MPQ), value is full path to .wmo.MPQ
+                var fileName = Path.GetFileName(file).ToLowerInvariant();
+                var wmoName = fileName.Replace(".mpq", ""); // Remove .mpq to get "filename.wmo"
+                if (!index.ContainsKey(wmoName))
+                    index[wmoName] = file;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Error indexing WMO directory: {ex.Message}");
+        }
+        
+        return index;
     }
 }
 
@@ -657,9 +710,24 @@ public class ConversionOptions
     public bool Verbose { get; set; } = false;
 
     /// <summary>
-    /// Path to alpha AreaTable.dbc for area name resolution.
+    /// Path to Alpha AreaTable.dbc for crosswalk generation.
     /// </summary>
     public string? AlphaAreaTablePath { get; set; }
+
+    /// <summary>
+    /// Path to LK 3.3.5 AreaTable.dbc for crosswalk generation.
+    /// </summary>
+    public string? LkAreaTablePath { get; set; }
+
+    /// <summary>
+    /// Path to Alpha Map.dbc for crosswalk (optional).
+    /// </summary>
+    public string? AlphaMapDbcPath { get; set; }
+
+    /// <summary>
+    /// Path to LK Map.dbc for crosswalk (optional).
+    /// </summary>
+    public string? LkMapDbcPath { get; set; }
 
     /// <summary>
     /// Path to WoWDBDefs definitions directory.

@@ -1,0 +1,374 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Text;
+
+namespace WoWMapConverter.Core.Services;
+
+/// <summary>
+/// Pure C# implementation for reading Alpha 0.5.3 per-asset MPQ archives.
+/// These are simple MPQ v1 archives with 2 files: data and MD5 checksum.
+/// StormLib has issues with these archives, so we implement our own reader.
+/// </summary>
+public static class AlphaMpqReader
+{
+    // MPQ hash type constants
+    private const uint HASH_TABLE_INDEX = 0;
+    private const uint HASH_NAME_A = 1;
+    private const uint HASH_NAME_B = 2;
+    private const uint HASH_FILE_KEY = 3;
+    
+    // Encryption table for MPQ hash/decrypt
+    private static readonly uint[] CryptTable = BuildCryptTable();
+    
+    /// <summary>
+    /// Read the main data file from an Alpha per-asset MPQ archive.
+    /// Returns null if the archive can't be read.
+    /// </summary>
+    public static byte[]? ReadFromMpq(string mpqPath)
+    {
+        if (!File.Exists(mpqPath))
+        {
+            Console.WriteLine($"[WARN] MPQ file not found: {mpqPath}");
+            return null;
+        }
+        
+        try
+        {
+            using var fs = new FileStream(mpqPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(fs);
+            
+            // Find MPQ header (can be at offset 0 or at 512-byte boundary)
+            long headerOffset = FindMpqHeader(reader);
+            if (headerOffset < 0)
+            {
+                Console.WriteLine($"[WARN] No MPQ header found in: {mpqPath}");
+                return null;
+            }
+            
+            fs.Position = headerOffset;
+            
+            // Read MPQ header (v1 = 32 bytes)
+            var header = ReadMpqHeader(reader);
+            if (header == null)
+            {
+                Console.WriteLine($"[WARN] Invalid MPQ header in: {mpqPath}");
+                return null;
+            }
+            
+            // Read and decrypt block table
+            fs.Position = headerOffset + header.BlockTableOffset;
+            var blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+            
+            // Find the largest block (the actual data, not the MD5)
+            BlockEntry? largestBlock = null;
+            foreach (var block in blockTable)
+            {
+                if (block.FileSize > 0 && (largestBlock == null || block.FileSize > largestBlock.FileSize))
+                    largestBlock = block;
+            }
+            
+            if (largestBlock == null)
+            {
+                Console.WriteLine($"[WARN] No valid blocks in MPQ: {mpqPath}");
+                return null;
+            }
+            
+            // Read and decompress the file data
+            fs.Position = headerOffset + largestBlock.BlockOffset;
+            return ReadFileData(reader, largestBlock, header.SectorSize);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WARN] Error reading MPQ {mpqPath}: {ex.Message}");
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Try to read a file, falling back to MPQ version if not found.
+    /// </summary>
+    public static byte[]? ReadWithMpqFallback(string filePath)
+    {
+        // If path is already an MPQ archive, extract from it
+        if (filePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+            return ReadFromMpq(filePath);
+        
+        // Try direct file first (non-MPQ)
+        if (File.Exists(filePath))
+            return File.ReadAllBytes(filePath);
+        
+        // Try MPQ version (e.g., castle01.wmo -> castle01.wmo.MPQ)
+        var mpqPath = filePath + ".MPQ";
+        if (File.Exists(mpqPath))
+            return ReadFromMpq(mpqPath);
+        
+        // Try lowercase mpq extension
+        mpqPath = filePath + ".mpq";
+        if (File.Exists(mpqPath))
+            return ReadFromMpq(mpqPath);
+        
+        return null;
+    }
+    
+    private static long FindMpqHeader(BinaryReader reader)
+    {
+        // Check offset 0
+        if (reader.BaseStream.Length >= 4)
+        {
+            reader.BaseStream.Position = 0;
+            uint magic = reader.ReadUInt32();
+            if (magic == 0x1A51504D) // "MPQ\x1A" little-endian
+                return 0;
+        }
+        
+        // Search at 512-byte boundaries
+        for (long offset = 0x200; offset < reader.BaseStream.Length && offset < 0x100000; offset += 0x200)
+        {
+            reader.BaseStream.Position = offset;
+            if (reader.BaseStream.Length - offset < 4)
+                break;
+            
+            uint magic = reader.ReadUInt32();
+            if (magic == 0x1A51504D)
+                return offset;
+        }
+        
+        return -1;
+    }
+    
+    private static MpqHeader? ReadMpqHeader(BinaryReader reader)
+    {
+        uint magic = reader.ReadUInt32();
+        if (magic != 0x1A51504D)
+            return null;
+        
+        var header = new MpqHeader
+        {
+            HeaderSize = reader.ReadUInt32(),
+            ArchiveSize = reader.ReadUInt32(),
+            FormatVersion = reader.ReadUInt16(),
+            SectorSizeShift = reader.ReadUInt16(),
+            HashTableOffset = reader.ReadUInt32(),
+            BlockTableOffset = reader.ReadUInt32(),
+            HashTableEntries = reader.ReadUInt32(),
+            BlockTableEntries = reader.ReadUInt32()
+        };
+        
+        header.SectorSize = 512u << header.SectorSizeShift;
+        
+        return header;
+    }
+    
+    private static BlockEntry[] ReadBlockTable(BinaryReader reader, uint entryCount)
+    {
+        // Read encrypted block table
+        var encryptedData = new uint[entryCount * 4];
+        for (int i = 0; i < encryptedData.Length; i++)
+            encryptedData[i] = reader.ReadUInt32();
+        
+        // Decrypt block table using key = Hash("(block table)", HASH_FILE_KEY)
+        uint key = HashString("(block table)", HASH_FILE_KEY);
+        DecryptBlock(encryptedData, key);
+        
+        // Parse entries
+        var entries = new BlockEntry[entryCount];
+        for (uint i = 0; i < entryCount; i++)
+        {
+            entries[i] = new BlockEntry
+            {
+                BlockOffset = encryptedData[i * 4 + 0],
+                BlockSize = encryptedData[i * 4 + 1],
+                FileSize = encryptedData[i * 4 + 2],
+                Flags = encryptedData[i * 4 + 3]
+            };
+        }
+        
+        return entries;
+    }
+    
+    private static byte[]? ReadFileData(BinaryReader reader, BlockEntry block, uint sectorSize)
+    {
+        const uint FLAG_COMPRESSED = 0x00000200;
+        const uint FLAG_IMPLODED = 0x00000100;
+        const uint FLAG_SINGLE_UNIT = 0x01000000;
+        
+        // Single unit (no sectors) - common for small files
+        if ((block.Flags & FLAG_SINGLE_UNIT) != 0 || block.FileSize <= sectorSize)
+        {
+            var data = reader.ReadBytes((int)block.BlockSize);
+            
+            if ((block.Flags & FLAG_COMPRESSED) != 0 && block.BlockSize < block.FileSize)
+            {
+                return DecompressData(data, block.FileSize);
+            }
+            
+            return data;
+        }
+        
+        // Multi-sector file - read sector offset table and decompress each sector
+        uint sectorCount = (block.FileSize + sectorSize - 1) / sectorSize;
+        var sectorOffsets = new uint[sectorCount + 1];
+        
+        for (uint i = 0; i <= sectorCount; i++)
+            sectorOffsets[i] = reader.ReadUInt32();
+        
+        using var output = new MemoryStream();
+        
+        for (uint i = 0; i < sectorCount; i++)
+        {
+            uint sectorStart = sectorOffsets[i];
+            uint sectorEnd = sectorOffsets[i + 1];
+            uint compressedSize = sectorEnd - sectorStart;
+            uint uncompressedSize = Math.Min(sectorSize, block.FileSize - (i * sectorSize));
+            
+            var sectorData = reader.ReadBytes((int)compressedSize);
+            
+            if ((block.Flags & FLAG_COMPRESSED) != 0 && compressedSize < uncompressedSize)
+            {
+                var decompressed = DecompressData(sectorData, uncompressedSize);
+                if (decompressed != null)
+                    output.Write(decompressed, 0, decompressed.Length);
+            }
+            else
+            {
+                output.Write(sectorData, 0, sectorData.Length);
+            }
+        }
+        
+        return output.ToArray();
+    }
+    
+    private static byte[]? DecompressData(byte[] data, uint expectedSize)
+    {
+        if (data.Length == 0)
+            return null;
+        
+        // First byte indicates compression type
+        byte compressionType = data[0];
+        var compressedData = new byte[data.Length - 1];
+        Array.Copy(data, 1, compressedData, 0, compressedData.Length);
+        
+        switch (compressionType)
+        {
+            case 0x02: // ZLIB
+                return DecompressZlib(compressedData, expectedSize);
+            
+            case 0x08: // PKWARE DCL (implode)
+                // For simplicity, return raw if we can't decompress
+                Console.WriteLine("[WARN] PKWARE DCL compression not implemented, returning raw data");
+                return data;
+            
+            default:
+                // Unknown compression, return raw
+                return data;
+        }
+    }
+    
+    private static byte[]? DecompressZlib(byte[] data, uint expectedSize)
+    {
+        try
+        {
+            using var input = new MemoryStream(data);
+            // Skip zlib header (2 bytes)
+            input.ReadByte();
+            input.ReadByte();
+            
+            using var deflate = new DeflateStream(input, CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            deflate.CopyTo(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            // Try without skipping header
+            try
+            {
+                using var input = new MemoryStream(data);
+                using var deflate = new DeflateStream(input, CompressionMode.Decompress);
+                using var output = new MemoryStream();
+                deflate.CopyTo(output);
+                return output.ToArray();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+    
+    private static uint HashString(string str, uint hashType)
+    {
+        uint seed1 = 0x7FED7FED;
+        uint seed2 = 0xEEEEEEEE;
+        
+        foreach (char c in str.ToUpperInvariant())
+        {
+            uint ch = (byte)c;
+            seed1 = CryptTable[hashType * 0x100 + ch] ^ (seed1 + seed2);
+            seed2 = ch + seed1 + seed2 + (seed2 << 5) + 3;
+        }
+        
+        return seed1;
+    }
+    
+    private static void DecryptBlock(uint[] data, uint key)
+    {
+        uint seed = 0xEEEEEEEE;
+        
+        for (int i = 0; i < data.Length; i++)
+        {
+            seed += CryptTable[0x400 + (key & 0xFF)];
+            uint temp = data[i] ^ (key + seed);
+            
+            key = ((~key << 0x15) + 0x11111111) | (key >> 0x0B);
+            seed = temp + seed + (seed << 5) + 3;
+            
+            data[i] = temp;
+        }
+    }
+    
+    private static uint[] BuildCryptTable()
+    {
+        var table = new uint[0x500];
+        uint seed = 0x00100001;
+        
+        for (uint i = 0; i < 0x100; i++)
+        {
+            uint index = i;
+            for (int j = 0; j < 5; j++, index += 0x100)
+            {
+                seed = (seed * 125 + 3) % 0x2AAAAB;
+                uint temp1 = (seed & 0xFFFF) << 0x10;
+                
+                seed = (seed * 125 + 3) % 0x2AAAAB;
+                uint temp2 = seed & 0xFFFF;
+                
+                table[index] = temp1 | temp2;
+            }
+        }
+        
+        return table;
+    }
+    
+    private class MpqHeader
+    {
+        public uint HeaderSize;
+        public uint ArchiveSize;
+        public ushort FormatVersion;
+        public ushort SectorSizeShift;
+        public uint HashTableOffset;
+        public uint BlockTableOffset;
+        public uint HashTableEntries;
+        public uint BlockTableEntries;
+        public uint SectorSize;
+    }
+    
+    private class BlockEntry
+    {
+        public uint BlockOffset;
+        public uint BlockSize;
+        public uint FileSize;
+        public uint Flags;
+    }
+}

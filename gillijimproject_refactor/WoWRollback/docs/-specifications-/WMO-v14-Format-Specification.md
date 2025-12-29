@@ -356,22 +356,26 @@ enum SMOPoly_Flags {
 
 ### MOBA - Render Batches (24 bytes each in v14)
 
+**Ghidra-verified structure (2025-12-29):**
+
 ```c
 struct SMOBatch_v14 {
     /*0x00*/ uint8  lightMap;        // Lightmap index
-    /*0x01*/ uint8  texture;         // Material index!
-    /*0x02*/ uint8  boundingBox[12]; // Unused in v14
-    /*0x0E*/ uint16 startIndex;      // First index in MOVI
-    /*0x10*/ uint16 numIndices;      // Index count (NOT triangle count!)
-    /*0x12*/ uint16 minIndex;        // Min vertex index
-    /*0x14*/ uint16 maxIndex;        // Max vertex index
+    /*0x01*/ uint8  materialId;      // Material index (CRITICAL: at 0x01, not 0x17!)
+    /*0x02*/ uint8  reserved[12];    // Bounding box (unused in v14)
+    /*0x0E*/ uint16 startIndex;      // First index in MOVI (CRITICAL: uint16, not uint32!)
+    /*0x10*/ uint16 indexCount;      // Index count (faces * 3)
+    /*0x12*/ uint16 minVertex;       // Min vertex index for batch
+    /*0x14*/ uint16 maxVertex;       // Max vertex index for batch
     /*0x16*/ uint8  flags;           // Batch flags
-    /*0x17*/ uint8  padding;
+    /*0x17*/ uint8  padding;         // Alignment
 };
 // Total: 24 bytes
 ```
 
-**Critical**: In v14, `texture` field (offset 0x01) is the material index, NOT the `materialId` field found in v17!
+> [!IMPORTANT]
+> In v14, `materialId` is at offset **0x01** (not 0x17) and `startIndex` is at offset **0x0E** as **uint16** (not uint32).
+> This was verified by Ghidra analysis of RenderGroupTex @ 0x0069d8c0.
 
 ### MOBN - BSP Nodes
 
