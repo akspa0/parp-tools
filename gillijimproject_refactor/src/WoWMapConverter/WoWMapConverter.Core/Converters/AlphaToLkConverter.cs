@@ -1,5 +1,6 @@
 using WoWMapConverter.Core.Services;
 using WoWMapConverter.Core.Dbc;
+
 using GillijimProject.WowFiles.Alpha;
 using static WoWMapConverter.Core.Services.AdtAreaIdPatcher;
 
@@ -14,6 +15,7 @@ public class AlphaToLkConverter
     private readonly AreaIdMapper? _areaMapper;
     private readonly ListfileService? _listfileService;
     private readonly ConversionOptions _options;
+
 
     public AlphaToLkConverter(ConversionOptions? options = null)
     {

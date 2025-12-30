@@ -135,6 +135,7 @@ public static class Program
     {
         string? inputPath = null;
         string? outputPath = null;
+        bool extended = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -147,6 +148,9 @@ public static class Program
                 case "--output":
                 case "-o":
                     if (i + 1 < args.Length) outputPath = args[++i];
+                    break;
+                case "--extended":
+                    extended = true;
                     break;
                 default:
                     if (!args[i].StartsWith("-") && inputPath == null)
@@ -170,8 +174,17 @@ public static class Program
 
         try
         {
-            var converter = new WmoV14ToV17Converter();
-            var textures = converter.Convert(inputPath, outputPath);
+            List<string> textures;
+            if (extended)
+            {
+                var converter = new WmoV14ToV17ExtendedConverter();
+                textures = converter.Convert(inputPath, outputPath);
+            }
+            else
+            {
+                var converter = new WmoV14ToV17Converter();
+                textures = converter.Convert(inputPath, outputPath);
+            }
             
             // Auto-copy textures
             CopyTextures(inputPath, outputPath, textures);
@@ -636,6 +649,7 @@ public static class Program
         Console.WriteLine("WMO Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input WMO v14 file");
         Console.WriteLine("  --output, -o <path>     Output WMO v17 path (creates root + _XXX.wmo groups)");
+        Console.WriteLine("  --extended              Use extended converter (for v15/hybrid variants)");
         Console.WriteLine();
         Console.WriteLine("MDX Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input MDX file");
