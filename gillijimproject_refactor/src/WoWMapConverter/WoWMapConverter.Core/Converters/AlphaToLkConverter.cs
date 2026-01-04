@@ -630,7 +630,13 @@ public class AlphaToLkConverter
                     Console.WriteLine($"    Converting: {wmoPath} → {newWmoPath}");
 
                 // Convert the WMO (converter handles both direct files and MPQs)
-                converter.Convert(sourcePath, fullOutputPath);
+                var texturePaths = converter.Convert(sourcePath, fullOutputPath);
+                
+                // Extract textures from source WMO MPQ if available
+                if (texturePaths != null && texturePaths.Count > 0)
+                {
+                    ExtractWmoTextures(sourcePath, texturePaths, outputDir);
+                }
                 
                 // Record mapping
                 pathMapping[wmoPath] = newWmoPath;
@@ -678,6 +684,85 @@ public class AlphaToLkConverter
         }
         
         return index;
+    }
+    
+    /// <summary>
+    /// Extract texture files from a WMO's MPQ archive and save to output directory.
+    /// </summary>
+    private void ExtractWmoTextures(string sourcePath, List<string> texturePaths, string outputDir)
+    {
+        // Build source texture search paths
+        var sourceDir = Path.GetDirectoryName(sourcePath) ?? "";
+        var mpqPath = sourcePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) 
+            ? sourcePath 
+            : sourcePath + ".mpq";
+        
+        var extractedCount = 0;
+        var skippedCount = 0;
+        
+        foreach (var texPath in texturePaths.Distinct())
+        {
+            if (string.IsNullOrEmpty(texPath)) continue;
+            
+            try
+            {
+                // Normalize path (remove leading slashes, normalize separators)
+                var normalizedPath = texPath.Replace('/', '\\').TrimStart('\\');
+                var texFileName = Path.GetFileName(normalizedPath);
+                
+                // Build output path preserving directory structure
+                var fullOutputPath = Path.Combine(outputDir, normalizedPath);
+                var fullOutputDir = Path.GetDirectoryName(fullOutputPath);
+                
+                if (File.Exists(fullOutputPath))
+                {
+                    skippedCount++;
+                    continue; // Already extracted
+                }
+                
+                // Search for texture file in source directory tree
+                byte[]? textureData = null;
+                var possiblePaths = new[]
+                {
+                    Path.Combine(_options.AlphaWmoDirectory!, normalizedPath),
+                    Path.Combine(_options.AlphaWmoDirectory!, texFileName),
+                    Path.Combine(sourceDir, texFileName),
+                    Path.Combine(sourceDir, normalizedPath)
+                };
+                
+                foreach (var path in possiblePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        textureData = File.ReadAllBytes(path);
+                        break;
+                    }
+                }
+                
+                if (textureData != null)
+                {
+                    Directory.CreateDirectory(fullOutputDir!);
+                    File.WriteAllBytes(fullOutputPath, textureData);
+                    extractedCount++;
+                    
+                    if (_options.Verbose)
+                        Console.WriteLine($"      Extracted: {normalizedPath}");
+                }
+                else
+                {
+                    if (_options.Verbose)
+                        Console.WriteLine($"      [MISSING] {normalizedPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (_options.Verbose)
+                    Console.WriteLine($"      [ERROR] {texPath}: {ex.Message}");
+            }
+        }
+        
+        if (extractedCount > 0 || _options.Verbose)
+            Console.WriteLine($"      Textures: {extractedCount} extracted, {skippedCount} already exist");
     }
 }
 

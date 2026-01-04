@@ -641,6 +641,44 @@ public class WmoV14ToV17Converter
                         Console.WriteLine($"  Parsed Color[{i}]: B={c & 0xFF} G={(c >> 8) & 0xFF} R={(c >> 16) & 0xFF} A={(c >> 24) & 0xFF}");
                     }
                     break;
+                    
+                case "MOLV":
+                    // v14 MOLV: Lightmap UVs per face-vertex (C2Vector = 8 bytes)
+                    int uvLmCount = (int)(chunkSize / 8);
+                    Console.WriteLine($"[DEBUG] MOLV: {chunkSize} bytes, {uvLmCount} lightmap UVs");
+                    group.LightmapUVs = new List<Vector2>(uvLmCount);
+                    for (int i = 0; i < uvLmCount; i++)
+                    {
+                        group.LightmapUVs.Add(new Vector2(
+                            reader.ReadSingle(),
+                            reader.ReadSingle()));
+                    }
+                    break;
+                    
+                case "MOLM":
+                    // v14 MOLM: Lightmap Info - structure unclear, logging raw
+                    Console.WriteLine($"[WARNING] Found MOLM (Lightmap Info) chunk ({chunkSize} bytes) - Parsing...");
+                    // According to wiki, MOLM is per-batch lightmap metadata
+                    // Try to parse common structures: could be (uint32 offset, uint16 width, uint16 height) = 8 bytes
+                    int lmInfoCount = (int)(chunkSize / 8);
+                    group.LightmapInfos = new List<LightmapInfo>(lmInfoCount);
+                    for (int i = 0; i < lmInfoCount; i++)
+                    {
+                        group.LightmapInfos.Add(new LightmapInfo
+                        {
+                            DataOffset = reader.ReadUInt32(),
+                            Width = reader.ReadUInt16(),
+                            Height = reader.ReadUInt16()
+                        });
+                    }
+                    Console.WriteLine($"[DEBUG] Parsed {lmInfoCount} lightmap info entries");
+                    break;
+                    
+                case "MOLD":
+                    // v14 MOLD: Raw lightmap pixel data
+                    Console.WriteLine($"[DEBUG] MOLD: {chunkSize} bytes of lightmap pixel data");
+                    group.LightmapData = reader.ReadBytes((int)chunkSize);
+                    break;
             }
 
             reader.BaseStream.Position = chunkEnd;
@@ -655,6 +693,21 @@ public class WmoV14ToV17Converter
         else
         {
             Console.WriteLine($"[DEBUG] Using {group.Batches.Count} native MOBA batches");
+        }
+        
+        // v14 FIX: Validate and regenerate indices if needed
+        // v14 MOVT contains nFaces*3 vertices (sequential per face, not indexed)
+        // If MOIN is empty/invalid, generate sequential indices (0,1,2, 3,4,5...)
+        int expectedIndices = group.FaceMaterials.Count * 3;
+        if (group.Indices.Count != expectedIndices)
+        {
+            Console.WriteLine($"[FIX] v14 Index Mismatch: MOIN has {group.Indices.Count} indices but expected {expectedIndices} (nFaces={group.FaceMaterials.Count} * 3)");
+            Console.WriteLine($"      Regenerating sequential indices 0,1,2, 3,4,5, ... {expectedIndices-1}");
+            group.Indices = new List<ushort>(expectedIndices);
+            for (int i = 0; i < expectedIndices; i++)
+            {
+                group.Indices.Add((ushort)i);
+            }
         }
 
         data.Groups.Add(group);
@@ -754,6 +807,136 @@ public class WmoV14ToV17Converter
             currentFaceStart += numFaces;
             
             Console.WriteLine($"[DEBUG] Rebuilt Batch Mat={matId}: Faces={numFaces}, Verts=[{minV}-{maxV}]");
+        }
+    }
+
+    /// <summary>
+    /// Convert v14 lightmap data (MOLM/MOLD/MOLV) to v17 vertex colors (MOCV).
+    /// If no lightmap data exists, generates neutral gray vertex colors.
+    /// </summary>
+    private void GenerateMocvFromLightmaps(WmoGroupData group)
+    {
+        int vertexCount = group.Vertices.Count;
+        
+        // If we already have valid MOCV from parsing, check if it's usable
+        if (group.VertexColors.Count == vertexCount && group.VertexColors.Count > 0)
+        {
+            // Calculate average luminosity to detect placeholder/dark colors
+            double avgLum = 0;
+            foreach (var c in group.VertexColors)
+            {
+                byte b = (byte)(c & 0xFF);
+                byte g = (byte)((c >> 8) & 0xFF);
+                byte r = (byte)((c >> 16) & 0xFF);
+                avgLum += (r + g + b) / 3.0;
+            }
+            avgLum /= group.VertexColors.Count;
+            
+            Console.WriteLine($"[DEBUG] MOCV Stats: Avg Luminosity = {avgLum:F2}");
+            
+            if (avgLum >= 10) // Valid colors, keep them
+            {
+                Console.WriteLine("[FIX] MOCV: Valid colors detected. Forced all vertex alphas to 0xFF (Opaque).");
+                for (int i = 0; i < group.VertexColors.Count; i++)
+                {
+                    group.VertexColors[i] = (group.VertexColors[i] & 0x00FFFFFF) | 0xFF000000;
+                }
+                return;
+            }
+            else
+            {
+                Console.WriteLine("[FIX] MOCV Detected as Dark/Placeholder (AvgLum < 10). Regenerating...");
+            }
+        }
+        
+        // Check if we have lightmap data to sample
+        if (group.LightmapData.Length > 0 && group.LightmapUVs.Count > 0 && group.LightmapInfos.Count > 0)
+        {
+            Console.WriteLine($"[DEBUG] Converting lightmap to MOCV: {group.LightmapInfos.Count} lightmaps, {group.LightmapUVs.Count} UVs, {group.LightmapData.Length} bytes pixel data");
+            
+            // Generate MOCV by sampling lightmap textures
+            group.VertexColors = new List<uint>(vertexCount);
+            
+            // Simple approach: For each vertex, find corresponding UV and sample lightmap
+            // MOLV is per-face-vertex (3 per triangle), we need to map to unique vertices
+            var vertexColorAccum = new Dictionary<int, List<uint>>();
+            
+            // MOLD format assumption: BGRA 32-bit per pixel packed in each lightmap
+            for (int faceIdx = 0; faceIdx < group.FaceMaterials.Count && faceIdx * 3 + 2 < group.Indices.Count; faceIdx++)
+            {
+                // Get lightmap info for this face (use first if only one)
+                int lmIdx = Math.Min(faceIdx, group.LightmapInfos.Count - 1);
+                var lmInfo = group.LightmapInfos[lmIdx];
+                
+                if (lmInfo.Width == 0 || lmInfo.Height == 0) continue;
+                
+                for (int c = 0; c < 3; c++) // 3 vertices per face
+                {
+                    int uvIdx = faceIdx * 3 + c;
+                    int vertIdx = group.Indices[faceIdx * 3 + c];
+                    
+                    if (uvIdx >= group.LightmapUVs.Count) continue;
+                    
+                    var uv = group.LightmapUVs[uvIdx];
+                    
+                    // Clamp UV to [0,1]
+                    float u = Math.Clamp(uv.X, 0f, 1f);
+                    float v = Math.Clamp(uv.Y, 0f, 1f);
+                    
+                    // Calculate pixel coordinates
+                    int px = (int)(u * (lmInfo.Width - 1));
+                    int py = (int)(v * (lmInfo.Height - 1));
+                    
+                    // Calculate offset in MOLD data (4 bytes per pixel)
+                    int pixelOffset = (int)(lmInfo.DataOffset + (py * lmInfo.Width + px) * 4);
+                    
+                    if (pixelOffset + 4 <= group.LightmapData.Length)
+                    {
+                        uint color = BitConverter.ToUInt32(group.LightmapData, pixelOffset);
+                        
+                        if (!vertexColorAccum.ContainsKey(vertIdx))
+                            vertexColorAccum[vertIdx] = new List<uint>();
+                        vertexColorAccum[vertIdx].Add(color);
+                    }
+                }
+            }
+            
+            // Average sampled colors per vertex
+            for (int i = 0; i < vertexCount; i++)
+            {
+                if (vertexColorAccum.TryGetValue(i, out var colors) && colors.Count > 0)
+                {
+                    int avgB = 0, avgG = 0, avgR = 0;
+                    foreach (var c in colors)
+                    {
+                        avgB += (int)(c & 0xFF);
+                        avgG += (int)((c >> 8) & 0xFF);
+                        avgR += (int)((c >> 16) & 0xFF);
+                    }
+                    avgB /= colors.Count;
+                    avgG /= colors.Count;
+                    avgR /= colors.Count;
+                    
+                    group.VertexColors.Add((uint)(avgB | (avgG << 8) | (avgR << 16) | 0xFF000000));
+                }
+                else
+                {
+                    // No lightmap sample, use neutral gray
+                    group.VertexColors.Add(0xFF808080);
+                }
+            }
+            
+            Console.WriteLine($"[DEBUG] Generated {group.VertexColors.Count} vertex colors from lightmap sampling");
+            return;
+        }
+        
+        // Fallback: Generate neutral gray MOCV
+        Console.WriteLine($"[FIX] No lightmap data available. Generating neutral gray MOCV ({vertexCount} vertices)");
+        group.VertexColors = new List<uint>(vertexCount);
+        for (int i = 0; i < vertexCount; i++)
+        {
+            // Neutral gray (RGB=128) with full alpha
+            group.VertexColors.Add(0xFF808080);
         }
     }
 
@@ -1049,6 +1232,10 @@ public class WmoV14ToV17Converter
         for (int i = 0; i < data.Groups.Count; i++)
         {
             var group = data.Groups[i];
+            
+            // Convert v14 lightmap data to MOCV vertex colors before writing
+            GenerateMocvFromLightmaps(group);
+            
             var groupPath = Path.Combine(outputDir, $"{baseName}_{i:D3}.wmo");
             WriteGroupFile(group, groupPath, i);
         }
@@ -1426,6 +1613,19 @@ public class WmoV14ToV17Converter
         public List<ushort> DoodadRefs = new(); // MODR
         public List<uint> VertexColors = new(); // MOCV (BGRA)
         public byte[] LiquidData = Array.Empty<byte>(); // MLIQ
+        
+        // v14 Lightmap data (to be converted to MOCV)
+        public List<Vector2> LightmapUVs = new(); // MOLV - per-face-vertex UVs
+        public byte[] LightmapData = Array.Empty<byte>(); // MOLD - raw lightmap pixels
+        public List<LightmapInfo> LightmapInfos = new(); // MOLM - lightmap metadata
+    }
+    
+    // v14 Lightmap info structure
+    public struct LightmapInfo
+    {
+        public uint DataOffset;  // Offset into MOLD data
+        public ushort Width;     // Lightmap texture width
+        public ushort Height;    // Lightmap texture height
     }
 
     public struct WmoBatch
