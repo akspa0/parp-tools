@@ -830,7 +830,12 @@ public class WmoV14ToV17Converter
                 uint off2 = !string.IsNullOrEmpty(mat.Texture2Name) && newOffsets.ContainsKey(mat.Texture2Name) ? newOffsets[mat.Texture2Name] : 0;
                 uint off3 = !string.IsNullOrEmpty(mat.Texture3Name) && newOffsets.ContainsKey(mat.Texture3Name) ? newOffsets[mat.Texture3Name] : 0;
                 
-                w.Write(mat.Flags);
+                // FIX: Set F_UNLIT flag (0x1) to disable lighting calculations
+                // v14 WMOs use lightmaps (MOLM/MOLD) which don't exist in v17/3.3.5
+                // Without MOCV vertex colors, groups render black unless F_UNLIT is set
+                uint fixedFlags = mat.Flags | 0x1u; // F_UNLIT = disable lighting
+                
+                w.Write(fixedFlags);
                 w.Write(mat.Shader);
                 w.Write(mat.BlendMode);
                 w.Write(off1); // Texture1Offset
@@ -1100,6 +1105,15 @@ public class WmoV14ToV17Converter
         
         fixedFlags &= ~0x200u; // No MOLR
         fixedFlags &= ~0x400u; // No MPBV
+        
+        // 0x40 = exterior_lit - Use outdoor lighting for this group
+        // Set this for ALL groups that don't have proper vertex colors
+        // This prevents groups from rendering black
+        if (isExterior || (group.VertexColors == null || group.VertexColors.Count == 0))
+        {
+            fixedFlags |= 0x40u; // exterior_lit - use outdoor lighting
+            Console.WriteLine($"[DEBUG] Setting exterior_lit flag (0x40) for group (Exterior={isExterior}, NoVertexColors={(group.VertexColors == null || group.VertexColors.Count == 0)})");
+        }
         
         // MODR (doodads) - set if we have doodad refs
         if (group.DoodadRefs != null && group.DoodadRefs.Count > 0)
