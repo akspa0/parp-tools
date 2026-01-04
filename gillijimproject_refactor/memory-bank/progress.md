@@ -44,6 +44,50 @@
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
 
+## Session Jan 3-4, 2026 - WMO v14→v17 Conversion Fixes
+
+### WMO Lighting Fix ✅
+Resolved dark/black WMO rendering in Noggit:
+
+| Component | Status |
+|-----------|--------|
+| MOLV parsing | ✅ Lightmap UVs per face-vertex |
+| MOLM parsing | ✅ Lightmap metadata (offset, width, height) |
+| MOLD parsing | ✅ Raw lightmap pixel data |
+| `GenerateMocvFromLightmaps()` | ✅ Samples lightmaps → MOCV |
+| Neutral gray fallback | ✅ RGB=128 if no lightmap data |
+| DiffuseColor fix | ✅ Replace black (L<32) with gray |
+| MOCV for all groups | ✅ Exterior groups now get vertex colors |
+
+### MOBA Batch Bounding Box ✅
+Fixed WMO placement failures by calculating `unknown_box`:
+- `CalculateBatchBoundingBoxes()` computes min/max from vertex positions
+- Applied to both rebuilt and native batches
+- Batches now write proper bx,by,bz,tx,ty,tz values
+
+### v14 Index Handling ✅
+- Regenerates sequential indices when MOIN mismatches expected count
+- Handles case where v14 MOVT contains `nFaces * 3` sequential vertices
+
+### Texture Extraction ✅
+- `ExtractWmoTextures()` copies BLP files from `--wmo-dir` to output
+
+### ⚠️ Unresolved: Geometry Drop-outs
+Complex WMOs (Ironforge) show random geometry drop-outs:
+- Sections of geometry missing or not rendering
+- Drop-outs appear in different places on each conversion run
+- **Attempted fixes that made things worse:**
+  - UV V-flip (1-Y) - broke texture alignment further
+  - Forced batch rebuilding - caused more drop-outs
+  - ValidateAndRepairGroupData - disabled (made both issues worse)
+
+### Root Cause Analysis Needed
+The v14 WMO parsing appears to have fundamental issues:
+- Batch/face/vertex relationship handling may be incorrect
+- Portal geometry not being processed correctly
+- Need to study Ghidra v14 client code or MirrorMachine exporter
+
+
 ## Next Steps (WoWMapConverter v3)
 1. **Test LK→Alpha conversion** - Validate with real LK ADT data
 2. **Port WMO v17+ loader** - from wow.export

@@ -693,6 +693,8 @@ public class WmoV14ToV17Converter
         else
         {
             Console.WriteLine($"[DEBUG] Using {group.Batches.Count} native MOBA batches");
+            // Calculate bounding boxes for native batches (v14 doesn't have unknown_box)
+            CalculateBatchBoundingBoxes(group);
         }
         
         // v14 FIX: Validate and regenerate indices if needed
@@ -709,8 +711,186 @@ public class WmoV14ToV17Converter
                 group.Indices.Add((ushort)i);
             }
         }
+        
+        // DISABLED: Mesh repair breaks batch data (minIndex/maxIndex become invalid)
+        // TODO: Need to recalculate batch bounds and unknown_box after vertex welding
+        // RepairMesh(group);
 
         data.Groups.Add(group);
+    }
+    
+    /// <summary>
+    /// Repair mesh geometry by welding nearby vertices and removing degenerate triangles.
+    /// </summary>
+    private void RepairMesh(WmoGroupData group)
+    {
+        const float WELD_EPSILON = 0.0001f; // Distance threshold for welding
+        const float AREA_EPSILON = 0.00001f; // Minimum triangle area
+        
+        int originalVertexCount = group.Vertices.Count;
+        int originalFaceCount = group.FaceMaterials.Count;
+        
+        // ===== Phase 1: Vertex Welding =====
+        // Build spatial hash for fast vertex lookup
+        var vertexMap = new Dictionary<int, int>(); // old index -> new index
+        var newVertices = new List<Vector3>();
+        var newUVs = new List<Vector2>();
+        var newColors = new List<uint>();
+        var newLightmapUVs = new List<Vector2>();
+        
+        for (int i = 0; i < group.Vertices.Count; i++)
+        {
+            var v = group.Vertices[i];
+            int foundIndex = -1;
+            
+            // Search for existing vertex within epsilon (requires BOTH position AND UV match)
+            // This preserves intentional seams between facade/shell geometry
+            var currentUV = i < group.UVs.Count ? group.UVs[i] : new Vector2(0, 0);
+            
+            for (int j = 0; j < newVertices.Count; j++)
+            {
+                var existing = newVertices[j];
+                float dx = Math.Abs(v.X - existing.X);
+                float dy = Math.Abs(v.Y - existing.Y);
+                float dz = Math.Abs(v.Z - existing.Z);
+                
+                // Check position match
+                if (dx < WELD_EPSILON && dy < WELD_EPSILON && dz < WELD_EPSILON)
+                {
+                    // Also check UV match to preserve texture seams
+                    var existingUV = j < newUVs.Count ? newUVs[j] : new Vector2(0, 0);
+                    float du = Math.Abs(currentUV.X - existingUV.X);
+                    float dv = Math.Abs(currentUV.Y - existingUV.Y);
+                    
+                    if (du < WELD_EPSILON && dv < WELD_EPSILON)
+                    {
+                        foundIndex = j;
+                        break;
+                    }
+                }
+            }
+            
+            if (foundIndex >= 0)
+            {
+                // Map to existing vertex
+                vertexMap[i] = foundIndex;
+            }
+            else
+            {
+                // Add new vertex
+                vertexMap[i] = newVertices.Count;
+                newVertices.Add(v);
+                
+                // Also copy associated data
+                if (i < group.UVs.Count)
+                    newUVs.Add(group.UVs[i]);
+                if (i < group.VertexColors.Count)
+                    newColors.Add(group.VertexColors[i]);
+                if (i < group.LightmapUVs.Count)
+                    newLightmapUVs.Add(group.LightmapUVs[i]);
+            }
+        }
+        
+        // Remap indices
+        for (int i = 0; i < group.Indices.Count; i++)
+        {
+            int oldIdx = group.Indices[i];
+            if (vertexMap.TryGetValue(oldIdx, out int newIdx))
+            {
+                group.Indices[i] = (ushort)newIdx;
+            }
+        }
+        
+        // Replace vertex data
+        group.Vertices = newVertices;
+        if (newUVs.Count > 0) group.UVs = newUVs;
+        if (newColors.Count > 0) group.VertexColors = newColors;
+        if (newLightmapUVs.Count > 0) group.LightmapUVs = newLightmapUVs;
+        
+        int weldedCount = originalVertexCount - newVertices.Count;
+        
+        // ===== Phase 2: Degenerate Triangle Removal =====
+        var validFaces = new List<int>(); // indices of valid face triplets
+        int degenerateCount = 0;
+        
+        for (int faceIdx = 0; faceIdx < group.FaceMaterials.Count; faceIdx++)
+        {
+            int baseIdx = faceIdx * 3;
+            if (baseIdx + 2 >= group.Indices.Count)
+            {
+                degenerateCount++;
+                continue;
+            }
+            
+            int i0 = group.Indices[baseIdx];
+            int i1 = group.Indices[baseIdx + 1];
+            int i2 = group.Indices[baseIdx + 2];
+            
+            // Check for duplicate indices
+            if (i0 == i1 || i1 == i2 || i0 == i2)
+            {
+                degenerateCount++;
+                continue;
+            }
+            
+            // Check for valid vertex indices
+            if (i0 >= group.Vertices.Count || i1 >= group.Vertices.Count || i2 >= group.Vertices.Count)
+            {
+                degenerateCount++;
+                continue;
+            }
+            
+            // Calculate triangle area using cross product
+            var v0 = group.Vertices[i0];
+            var v1 = group.Vertices[i1];
+            var v2 = group.Vertices[i2];
+            
+            var e1 = new Vector3(v1.X - v0.X, v1.Y - v0.Y, v1.Z - v0.Z);
+            var e2 = new Vector3(v2.X - v0.X, v2.Y - v0.Y, v2.Z - v0.Z);
+            
+            // Cross product
+            var cross = new Vector3(
+                e1.Y * e2.Z - e1.Z * e2.Y,
+                e1.Z * e2.X - e1.X * e2.Z,
+                e1.X * e2.Y - e1.Y * e2.X
+            );
+            
+            float areaSq = cross.X * cross.X + cross.Y * cross.Y + cross.Z * cross.Z;
+            
+            if (areaSq < AREA_EPSILON)
+            {
+                degenerateCount++;
+                continue;
+            }
+            
+            validFaces.Add(faceIdx);
+        }
+        
+        // Rebuild indices and materials with only valid faces
+        if (degenerateCount > 0)
+        {
+            var newIndices = new List<ushort>();
+            var newMaterials = new List<byte>();
+            
+            foreach (int faceIdx in validFaces)
+            {
+                int baseIdx = faceIdx * 3;
+                newIndices.Add(group.Indices[baseIdx]);
+                newIndices.Add(group.Indices[baseIdx + 1]);
+                newIndices.Add(group.Indices[baseIdx + 2]);
+                newMaterials.Add(group.FaceMaterials[faceIdx]);
+            }
+            
+            group.Indices = newIndices;
+            group.FaceMaterials = newMaterials;
+        }
+        
+        // Report results
+        if (weldedCount > 0 || degenerateCount > 0)
+        {
+            Console.WriteLine($"[MESH REPAIR] Welded {weldedCount} vertices ({originalVertexCount} → {newVertices.Count})");
+            Console.WriteLine($"[MESH REPAIR] Removed {degenerateCount} degenerate faces ({originalFaceCount} → {validFaces.Count})");
+        }
     }
     
     private void RebuildBatches(WmoGroupData group)
@@ -791,22 +971,102 @@ public class WmoV14ToV17Converter
             batch.FirstVertex = minV;
             batch.LastVertex = maxV;
             
-            // Create "Infinite" Bounding Box (-30000 to +30000) to safely prevent culling
-            // Using logic: minX, minY, minZ, maxX, maxY, maxZ (shorts)
+            // Calculate actual bounding box from vertices in this batch
+            // unknown_box: bx,by,bz (min) and tx,ty,tz (max) as int16
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int vIdx = indices[i];
+                if (vIdx < group.Vertices.Count)
+                {
+                    var v = group.Vertices[vIdx];
+                    if (v.X < minX) minX = v.X;
+                    if (v.Y < minY) minY = v.Y;
+                    if (v.Z < minZ) minZ = v.Z;
+                    if (v.X > maxX) maxX = v.X;
+                    if (v.Y > maxY) maxY = v.Y;
+                    if (v.Z > maxZ) maxZ = v.Z;
+                }
+            }
+            
+            // Convert to int16, rounding away from zero
+            short bx = (short)Math.Floor(minX);
+            short by = (short)Math.Floor(minY);
+            short bz = (short)Math.Floor(minZ);
+            short tx = (short)Math.Ceiling(maxX);
+            short ty = (short)Math.Ceiling(maxY);
+            short tz = (short)Math.Ceiling(maxZ);
+            
             batch.BoundingBoxRaw = new byte[12];
             using (var ms = new MemoryStream(batch.BoundingBoxRaw))
             using (var bw = new BinaryWriter(ms))
             {
-                short safeMin = -30000;
-                short safeMax = 30000;
-                bw.Write(safeMin); bw.Write(safeMin); bw.Write(safeMin);
-                bw.Write(safeMax); bw.Write(safeMax); bw.Write(safeMax);
+                bw.Write(bx); bw.Write(by); bw.Write(bz);
+                bw.Write(tx); bw.Write(ty); bw.Write(tz);
             }
             
             group.Batches.Add(batch);
             currentFaceStart += numFaces;
             
-            Console.WriteLine($"[DEBUG] Rebuilt Batch Mat={matId}: Faces={numFaces}, Verts=[{minV}-{maxV}]");
+            Console.WriteLine($"[DEBUG] Rebuilt Batch Mat={matId}: Faces={numFaces}, Verts=[{minV}-{maxV}], Box=[{bx},{by},{bz}]-[{tx},{ty},{tz}]");
+        }
+    }
+    
+    /// <summary>
+    /// Calculate bounding boxes (unknown_box) for batches parsed from v14.
+    /// v14 doesn't have the bx,by,bz,tx,ty,tz fields that v17 requires.
+    /// </summary>
+    private void CalculateBatchBoundingBoxes(WmoGroupData group)
+    {
+        for (int batchIdx = 0; batchIdx < group.Batches.Count; batchIdx++)
+        {
+            var batch = group.Batches[batchIdx];
+            
+            // Skip if already has bounding box
+            if (batch.BoundingBoxRaw != null && batch.BoundingBoxRaw.Length == 12)
+                continue;
+            
+            // Find min/max from vertices in this batch
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            
+            // Use FirstVertex to LastVertex range
+            int startVert = batch.FirstVertex;
+            int endVert = batch.LastVertex;
+            
+            for (int v = startVert; v <= endVert && v < group.Vertices.Count; v++)
+            {
+                var vert = group.Vertices[v];
+                if (vert.X < minX) minX = vert.X;
+                if (vert.Y < minY) minY = vert.Y;
+                if (vert.Z < minZ) minZ = vert.Z;
+                if (vert.X > maxX) maxX = vert.X;
+                if (vert.Y > maxY) maxY = vert.Y;
+                if (vert.Z > maxZ) maxZ = vert.Z;
+            }
+            
+            // Convert to int16, rounding away from zero
+            short bx = (short)Math.Floor(minX);
+            short by = (short)Math.Floor(minY);
+            short bz = (short)Math.Floor(minZ);
+            short tx = (short)Math.Ceiling(maxX);
+            short ty = (short)Math.Ceiling(maxY);
+            short tz = (short)Math.Ceiling(maxZ);
+            
+            batch.BoundingBoxRaw = new byte[12];
+            using (var ms = new MemoryStream(batch.BoundingBoxRaw))
+            using (var bw = new BinaryWriter(ms))
+            {
+                bw.Write(bx); bw.Write(by); bw.Write(bz);
+                bw.Write(tx); bw.Write(ty); bw.Write(tz);
+            }
+            
+            // Update the batch in the list (struct copy)
+            group.Batches[batchIdx] = batch;
+            
+            Console.WriteLine($"[DEBUG] Calculated Batch {batchIdx} Box: [{bx},{by},{bz}]-[{tx},{ty},{tz}]");
         }
     }
 
@@ -1025,7 +1285,21 @@ public class WmoV14ToV17Converter
                 w.Write(mat.EmissiveColor);
                 w.Write(mat.FrameEmissiveColor);
                 w.Write(off2); // Texture2Offset
-                w.Write(mat.DiffuseColor);
+                
+                // FIX: v14 materials often have black DiffuseColor which causes black rendering
+                // Replace with neutral gray if the color is too dark
+                uint diffuseColor = mat.DiffuseColor;
+                byte b = (byte)(diffuseColor & 0xFF);
+                byte g = (byte)((diffuseColor >> 8) & 0xFF);
+                byte r = (byte)((diffuseColor >> 16) & 0xFF);
+                int luminance = (r + g + b) / 3;
+                if (luminance < 32) // Too dark
+                {
+                    diffuseColor = 0xFF808080; // Neutral gray
+                    Console.WriteLine($"[FIX] Material DiffuseColor was too dark (L={luminance}), set to neutral gray");
+                }
+                w.Write(diffuseColor);
+                
                 w.Write(mat.GroundType);
                 w.Write(off3); // Texture3Offset
                 w.Write(mat.Color2);
@@ -1233,12 +1507,90 @@ public class WmoV14ToV17Converter
         {
             var group = data.Groups[i];
             
+            // DISABLED: Made textures and geometry worse
+            // ValidateAndRepairGroupData(group, i);
+            
             // Convert v14 lightmap data to MOCV vertex colors before writing
             GenerateMocvFromLightmaps(group);
             
             var groupPath = Path.Combine(outputDir, $"{baseName}_{i:D3}.wmo");
             WriteGroupFile(group, groupPath, i);
         }
+    }
+    
+    /// <summary>
+    /// Validate and repair group data to prevent drop-outs and rendering issues.
+    /// Ensures UV count matches vertex count, indices are in range, etc.
+    /// </summary>
+    private void ValidateAndRepairGroupData(WmoGroupData group, int groupIndex)
+    {
+        int vertexCount = group.Vertices.Count;
+        int indexCount = group.Indices.Count;
+        int faceCount = group.FaceMaterials.Count;
+        
+        // 0. Flip UV V-coordinate (v14 uses different texture coordinate system than v17)
+        // This fixes inverted textures where top/bottom are swapped
+        for (int i = 0; i < group.UVs.Count; i++)
+        {
+            var uv = group.UVs[i];
+            group.UVs[i] = new Vector2(uv.X, 1.0f - uv.Y); // Flip V
+        }
+        
+        // 1. Ensure UV count matches vertex count
+        if (group.UVs.Count != vertexCount)
+        {
+            Console.WriteLine($"[REPAIR] Group {groupIndex}: UV count mismatch ({group.UVs.Count} UVs vs {vertexCount} vertices)");
+            
+            // Rebuild UVs from existing data or generate default
+            var newUVs = new List<Vector2>(vertexCount);
+            for (int i = 0; i < vertexCount; i++)
+            {
+                if (i < group.UVs.Count)
+                    newUVs.Add(group.UVs[i]);
+                else
+                    newUVs.Add(new Vector2(0, 0)); // Default UV
+            }
+            group.UVs = newUVs;
+            Console.WriteLine($"[REPAIR] Group {groupIndex}: Fixed UV count to {group.UVs.Count}");
+        }
+        
+        // 2. Validate indices are in range
+        int outOfRangeCount = 0;
+        for (int i = 0; i < indexCount; i++)
+        {
+            if (group.Indices[i] >= vertexCount)
+            {
+                outOfRangeCount++;
+                group.Indices[i] = 0; // Reset to 0 to prevent crash
+            }
+        }
+        if (outOfRangeCount > 0)
+        {
+            Console.WriteLine($"[REPAIR] Group {groupIndex}: Fixed {outOfRangeCount} out-of-range indices");
+        }
+        
+        // 3. Ensure face count matches index count / 3
+        int expectedFaces = indexCount / 3;
+        if (faceCount != expectedFaces)
+        {
+            Console.WriteLine($"[REPAIR] Group {groupIndex}: Face count mismatch ({faceCount} faces vs {expectedFaces} expected)");
+            
+            // Rebuild face materials
+            var newMaterials = new List<byte>(expectedFaces);
+            for (int i = 0; i < expectedFaces; i++)
+            {
+                if (i < group.FaceMaterials.Count)
+                    newMaterials.Add(group.FaceMaterials[i]);
+                else
+                    newMaterials.Add(0); // Default material
+            }
+            group.FaceMaterials = newMaterials;
+            Console.WriteLine($"[REPAIR] Group {groupIndex}: Fixed face count to {group.FaceMaterials.Count}");
+        }
+        
+        // 4. Always rebuild batches from face materials to ensure consistency
+        Console.WriteLine($"[REPAIR] Group {groupIndex}: Rebuilding batches for consistency");
+        RebuildBatches(group);
     }
 
     private void WriteGroupFile(WmoGroupData group, string outputPath, int groupIndex)
@@ -1278,28 +1630,26 @@ public class WmoV14ToV17Converter
             fixedFlags |= 0x2000u; // Set Interior flag
         }
         
-        // MOCV - Only for interior groups with vertex colors (matching real 3.3.5)
-        // Real 3.3.5: Group 0 (Interior) has MOCV, Group 1 (Exterior) does NOT
-        if (isInterior && group.VertexColors != null && group.VertexColors.Count > 0)
+        // MOCV - Set for ALL groups that have vertex colors (fixes black exterior rendering)
+        // v14 WMOs converted to v17 need MOCV because they don't have proper lighting
+        if (group.VertexColors != null && group.VertexColors.Count > 0)
         {
             fixedFlags |= 0x4u;
-            Console.WriteLine($"[DEBUG] Setting MOCV flag for Interior group ({group.VertexColors.Count} colors)");
+            Console.WriteLine($"[DEBUG] Setting MOCV flag for group ({group.VertexColors.Count} colors, Interior={isInterior})");
         }
         else
         {
-            fixedFlags &= ~0x4u; // Clear if no colors or exterior
+            fixedFlags &= ~0x4u; // Clear if no colors
         }
         
         fixedFlags &= ~0x200u; // No MOLR
         fixedFlags &= ~0x400u; // No MPBV
         
-        // 0x40 = exterior_lit - Use outdoor lighting for this group
-        // Set this for ALL groups that don't have proper vertex colors
-        // This prevents groups from rendering black
-        if (isExterior || (group.VertexColors == null || group.VertexColors.Count == 0))
+        // 0x40 = exterior_lit - Set for exterior groups (outdoor lighting)
+        if (isExterior)
         {
-            fixedFlags |= 0x40u; // exterior_lit - use outdoor lighting
-            Console.WriteLine($"[DEBUG] Setting exterior_lit flag (0x40) for group (Exterior={isExterior}, NoVertexColors={(group.VertexColors == null || group.VertexColors.Count == 0)})");
+            fixedFlags |= 0x40u;
+            Console.WriteLine($"[DEBUG] Setting exterior_lit flag (0x40) for exterior group");
         }
         
         // MODR (doodads) - set if we have doodad refs

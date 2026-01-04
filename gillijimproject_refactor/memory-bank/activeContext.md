@@ -1,9 +1,9 @@
 # Active Context
 
-## Current Focus: WoWMapConverter v3 - Complete Bidirectional Toolkit (Dec 28, 2025)
+## Current Focus: WMO v14→v17 Geometry Issues (Jan 4, 2026)
 
 ### Status Summary
-Building **WoWMapConverter v3** - a complete bidirectional WoW map/asset conversion toolkit supporting all versions from Alpha 0.5.3 through modern retail.
+WMO conversion has **lighting working** but **geometry drop-outs remain unresolved**. Complex WMOs like Ironforge show random missing sections. Quick fixes (UV flip, batch rebuilding) made things worse. Need deeper investigation into v14 WMO parsing.
 
 ### Session Dec 28, 2025 - Major Progress
 
@@ -106,12 +106,35 @@ const float TileSize = 533.33333f;
 const float WorldBase = 32f * TileSize;
 ```
 
+### Session Jan 3-4, 2026 - WMO v14→v17 Fixes
+
+#### Completed ✅
+1. **Lighting Fixed** - MOCV generation from lightmaps + neutral gray fallback
+2. **DiffuseColor Fix** - Replace black materials with neutral gray
+3. **MOBA Bounding Boxes** - `CalculateBatchBoundingBoxes()` for all batches  
+4. **MOCV for All Groups** - Exterior groups now get vertex colors
+5. **v14 Index Regeneration** - Sequential indices when MOIN mismatches
+6. **Texture Extraction** - BLP files copied to output
+
+#### ⚠️ Unresolved: Geometry Drop-outs
+Complex WMOs show random geometry drop-outs:
+- Sections missing/not rendering in Ironforge
+- Different parts drop out on each conversion run
+- **Attempted fixes that made things WORSE:**
+  - UV V-flip (broke textures further)
+  - Forced batch rebuild (more drop-outs)
+  - ValidateAndRepairGroupData (disabled)
+
+#### Root Cause Analysis Needed
+- v14 WMO parsing may have fundamental issues
+- Batch/face/vertex relationships not processed correctly
+- Need Ghidra analysis or MirrorMachine reference
+
 ### Next Steps (Priority Order)
-1. **Test LK→Alpha conversion** - Validate with real LK ADT data
-2. **Port WMO v17+ loader** - from wow.export
-3. **Port M2 MD21 loader** - from wow.export
-4. **Integrate PM4 pipeline** - from WoWRollback.PM4Module
-5. **Add GUI** - Avalonia-based with 3D viewer
+1. **Deep dive into v14 WMO format** - Compare parsing with client code
+2. **Study MirrorMachine exporter** - Reference implementation
+3. **Investigate portal/group relationships** - May be causing drop-outs
+4. Test with simpler WMOs to isolate the issue
 
 ### Additional Modules to Integrate
 
