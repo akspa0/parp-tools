@@ -212,6 +212,7 @@ namespace WmoBspConverter.Wmo
         {
             public string Name { get; set; } = string.Empty;
             public List<Vector3> Vertices { get; set; } = new();
+            public List<Vector3> Normals { get; set; } = new();
             public List<ushort> Indices { get; set; } = new();
             public List<byte> FaceFlags { get; set; } = new();
             public List<byte> FaceMaterials { get; set; } = new();
@@ -679,6 +680,9 @@ namespace WmoBspConverter.Wmo
                         seenMOVT = true;
                         movtVerts = data.Length / 12;
                         break;
+                    case "MONR":
+                        ProcessMonrChunk(data, groupData);
+                        break;
                     case "MOIN":  // GHIDRA-VERIFIED: Client uses MOIN, not MOVI!
                         ProcessMoinChunk(data, groupData);
                         seenMOVI = true;  // Use same flag for compatibility
@@ -733,6 +737,26 @@ namespace WmoBspConverter.Wmo
             }
             
             Console.WriteLine($"[DEBUG] Extracted {vertexCount} vertices from MOVT");
+        }
+
+        private void ProcessMonrChunk(byte[] monrData, WmoGroupData groupData)
+        {
+            // MONR: 3D Normals (12 bytes per normal: x, y, z floats)
+            const int NORMAL_SIZE = 12;
+            var normalCount = monrData.Length / NORMAL_SIZE;
+            
+            groupData.Normals.Clear();
+            
+            for (int i = 0; i < normalCount; i++)
+            {
+                var offset = i * NORMAL_SIZE;
+                var x = BitConverter.ToSingle(monrData, offset);
+                var y = BitConverter.ToSingle(monrData, offset + 4);
+                var z = BitConverter.ToSingle(monrData, offset + 8);
+                groupData.Normals.Add(new Vector3(x, y, z));
+            }
+            
+            Console.WriteLine($"[DEBUG] Extracted {normalCount} normals from MONR");
         }
 
         private void ProcessMoviChunk(byte[] moviData, WmoGroupData groupData)

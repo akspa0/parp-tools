@@ -147,16 +147,16 @@ public class WmoAseExporter
         
         writer.WriteLine("}");
         
-        // Add misc_model entities for each group with absolute paths
+        // Add misc_model entities for each group with relative paths
         for (int i = 0; i < groupCount; i++)
         {
-            // Use absolute path with forward slashes for cross-platform compatibility
-            var asePath = Path.Combine(modelsDir, $"{baseName}_group{i:D3}.ase");
-            var absolutePath = Path.GetFullPath(asePath).Replace('\\', '/');
-            
+            // Use valid relative path assuming the output directory is the game root (fs_basepath)
+            // GtkRadiant expects paths relative to baseq3/
+            var modelPath = $"models/wmo/{baseName}_group{i:D3}.ase";
+
             writer.WriteLine("{");
             writer.WriteLine("\"classname\" \"misc_model\"");
-            writer.WriteLine($"\"model\" \"{absolutePath}\"");
+            writer.WriteLine($"\"model\" \"{modelPath}\"");
             writer.WriteLine($"\"origin\" \"{offset.X} {offset.Y} {offset.Z}\"");
             writer.WriteLine("}");
         }

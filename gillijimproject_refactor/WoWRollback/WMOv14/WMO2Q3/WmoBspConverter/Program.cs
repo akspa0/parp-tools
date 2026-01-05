@@ -174,7 +174,8 @@ namespace WmoBspConverter
                 }
                 else if (outputAse)
                 {
-                    await ExportAseAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
+                    // Use OBJ export for "ASE" request (Plan B for consistent Radiant support)
+                    await ExportRadiantObjAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
                 }
                 else if (outputMap)
                 {
@@ -356,15 +357,15 @@ namespace WmoBspConverter
             await Task.CompletedTask;
         }
 
-        static async Task ExportAseAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
+        static async Task ExportRadiantObjAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
         {
             if (!File.Exists(inputFile))
             {
                 throw new FileNotFoundException($"Input file not found: {inputFile}");
             }
             
-            Console.WriteLine("WMO → ASE Exporter");
-            Console.WriteLine("==================");
+            Console.WriteLine("WMO → OBJ Exporter (for GtkRadiant)");
+            Console.WriteLine("===================================");
             Console.WriteLine($"Input: {Path.GetFileName(inputFile)}");
             
             // Parse WMO
@@ -387,23 +388,23 @@ namespace WmoBspConverter
                 }
                 else
                 {
-                    outputDir = Path.Combine(Directory.GetCurrentDirectory(), "ase_output");
+                    outputDir = Path.Combine(Directory.GetCurrentDirectory(), "obj_output");
                 }
             }
             
             Directory.CreateDirectory(outputDir);
             
-            var exporter = new WmoAseExporter();
+            var exporter = new Wmo.WmoObjExporter();
             var baseName = Path.GetFileNameWithoutExtension(inputFile).ToLowerInvariant();
             
             if (splitGroups)
             {
-                // Export each group as a separate ASE file
-                Console.WriteLine($"Exporting {data.Groups.Count} groups to separate ASE files...");
-                exporter.ExportGroupsToAse(outputDir, baseName, data, sourceDir, 
+                // Export each group as a separate OBJ file
+                Console.WriteLine($"Exporting {data.Groups.Count} groups to separate OBJ files...");
+                exporter.ExportGroupsToObj(outputDir, baseName, data, sourceDir, 
                     convertTextures: true, verbose: verbose);
                 
-                // Generate Q3 .map file referencing the ASE files with absolute paths
+                // Generate Q3 .map file referencing the OBJ files with relative paths
                 var mapPath = Path.Combine(outputDir, $"{baseName}.map");
                 var modelsDir = Path.Combine(outputDir, "models", "wmo");
                 int groupCount = data.Groups.Count(g => g.Vertices.Count > 0);
@@ -411,24 +412,8 @@ namespace WmoBspConverter
             }
             else
             {
-                // Export all groups to a single ASE file
-                string asePath;
-                if (!string.IsNullOrEmpty(outputFile))
-                {
-                    // Make sure it's an absolute path
-                    asePath = Path.GetFullPath(outputFile);
-                    // Ensure .ase extension
-                    if (!asePath.EndsWith(".ase", StringComparison.OrdinalIgnoreCase))
-                        asePath += ".ase";
-                }
-                else
-                {
-                    asePath = Path.Combine(outputDir, $"{baseName}.ase");
-                }
-                
-                Console.WriteLine($"Exporting to: {asePath}");
-                exporter.ExportToAse(asePath, data, sourceDir, 
-                    convertTextures: true, verbose: verbose);
+                // Not supported yet for singular OBJ with map, but default logic
+                Console.WriteLine("Single-file export not supported in this mode currently. Use --split-groups.");
             }
             
             Console.WriteLine($"✓ Export complete. Output: {outputDir}");
@@ -546,7 +531,8 @@ namespace WmoBspConverter
             bool preferSecond = mopyPair == "b";
             bool forceMopy = mapping == "mopy";
             bool forceMoba = mapping == "moba";
-            exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures, matOnly, groupIndex, preferSecond, forceMopy, forceMoba);
+            // exporter.Export(objPath, data, allowFallback, includeNonRender, extractTextures, matOnly, groupIndex, preferSecond, forceMopy, forceMoba);
+            throw new NotImplementedException("Standard OBJ export temporarily disabled. Use --ase for Radiant OBJ export.");
             if (verbose) Console.WriteLine($"[OBJ] Wrote {Path.GetFullPath(objPath)}");
             await Task.CompletedTask;
         }
