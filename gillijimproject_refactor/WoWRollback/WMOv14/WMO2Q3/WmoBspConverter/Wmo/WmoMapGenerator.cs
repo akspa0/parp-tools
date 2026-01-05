@@ -160,6 +160,10 @@ namespace WmoBspConverter.Wmo
             GenerateTextureInfo(mapContent, wmoData);
             Console.WriteLine($"[DEBUG] After GenerateTextureInfo, length: {mapContent.Length:N0}");
             
+            // Generate Portals (Hint brushes)
+            GeneratePortalBrushes(mapContent, wmoData, context);
+            Console.WriteLine($"[DEBUG] After GeneratePortalBrushes, length: {mapContent.Length:N0}");
+            
             // Write to file
             Console.WriteLine($"[DEBUG] StringBuilder length: {mapContent.Length:N0} characters");
             var finalContent = mapContent.ToString();
@@ -423,8 +427,6 @@ namespace WmoBspConverter.Wmo
 
         private string GenerateTriangleBrushFromGeometry(Vector3 v0, Vector3 v1, Vector3 v2, string textureName, Vector3 geometryOffset)
         {
-            var brush = new StringBuilder();
-
             var tex = string.IsNullOrWhiteSpace(textureName) ? CaulkTexture : textureName;
 
             // Transform to Q3 coordinates and translate into sealed room space
@@ -456,16 +458,47 @@ namespace WmoBspConverter.Wmo
             var interiorPoint = (top0 + top1 + top2 + bottom0 + bottom1 + bottom2) / 6f;
             var caulk = CaulkTexture;
 
+            // Pre-validate all 5 planes before writing anything
+            // If any plane is degenerate, skip the entire brush
+            var planes = new (Vector3 p0, Vector3 p1, Vector3 p2, string texture)[]
+            {
+                (top0, top1, top2, tex),                    // Top face (textured)
+                (bottom0, bottom2, bottom1, caulk),         // Bottom face
+                (top1, top0, bottom0, caulk),               // Edge 0-1
+                (top2, top1, bottom1, caulk),               // Edge 1-2
+                (top0, top2, bottom2, caulk),               // Edge 2-0
+            };
+
+            // Validate and compute corrected winding for each plane
+            var validatedPlanes = new List<(Vector3 p0, Vector3 p1, Vector3 p2, string texture)>();
+            foreach (var (p0, p1, p2, texture) in planes)
+            {
+                var planeNormal = Vector3.Cross(p1 - p0, p2 - p0);
+                if (planeNormal.LengthSquared() < 1e-6f)
+                {
+                    // Degenerate plane - skip entire brush
+                    return string.Empty;
+                }
+
+                // Correct winding so normal points away from interior
+                var finalP1 = p1;
+                var finalP2 = p2;
+                if (Vector3.Dot(planeNormal, interiorPoint - p0) > 0f)
+                {
+                    finalP1 = p2;
+                    finalP2 = p1;
+                }
+                validatedPlanes.Add((p0, finalP1, finalP2, texture));
+            }
+
+            // All planes valid - write the brush
+            var brush = new StringBuilder();
             brush.AppendLine("{");
 
-            // Triangle face (textured)
-            WriteBrushPlane(brush, top0, top1, top2, tex, interiorPoint);
-            // Back face
-            WriteBrushPlane(brush, bottom0, bottom2, bottom1, caulk, interiorPoint);
-            // Edge faces (caulk)
-            WriteBrushPlane(brush, top1, top0, bottom0, caulk, interiorPoint);
-            WriteBrushPlane(brush, top2, top1, bottom1, caulk, interiorPoint);
-            WriteBrushPlane(brush, top0, top2, bottom2, caulk, interiorPoint);
+            foreach (var (p0, p1, p2, texture) in validatedPlanes)
+            {
+                WritePlaneLine(brush, p0, p1, p2, texture);
+            }
 
             brush.AppendLine("}");
 
@@ -543,10 +576,10 @@ namespace WmoBspConverter.Wmo
             {
                 var tex = wmoData.Textures[textureIndex];
                 var baseName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
-                return $"textures/wmo/{baseName}";
+                return $"textures/wmo/{baseName}.tga";
             }
 
-            return "textures/wmo/wmo_default";
+            return "textures/wmo/wmo_default.tga";
         }
 
         private void GenerateTextureInfo(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData)
@@ -608,6 +641,95 @@ namespace WmoBspConverter.Wmo
             File.WriteAllText(outputPath, mapContent.ToString());
             
             Console.WriteLine($"[INFO] Generated simple test .map file: {outputPath}");
+        }
+
+        private void GeneratePortalBrushes(StringBuilder mapContent, WmoV14Parser.WmoV14Data wmoData, MapContext context)
+        {
+            if (wmoData.Portals.Count == 0 || wmoData.PortalVertices.Count == 0)
+                return;
+
+            mapContent.AppendLine("// Portal Hint Brushes");
+            mapContent.AppendLine($"// Generated {wmoData.Portals.Count} portals from {wmoData.PortalVertices.Count} vertices");
+
+            int pIdx = 0;
+            foreach (var portal in wmoData.Portals)
+            {
+                if (portal.VertexCount < 3) continue;
+
+                var poly = new List<Vector3>();
+                for (int i = 0; i < portal.VertexCount; i++)
+                {
+                    int vIdx = portal.FirstVertex + i;
+                    if (vIdx < wmoData.PortalVertices.Count)
+                    {
+                         poly.Add(wmoData.PortalVertices[vIdx]);
+                    }
+                }
+
+                if (poly.Count < 3) continue;
+
+                // Transform to Q3 and offset
+                for(int i=0; i<poly.Count; i++) 
+                {
+                    poly[i] = TransformToQ3(poly[i]) - context.GeometryOffset;
+                }
+
+                // Generate Brush
+                // Use common/hint for the portal face and common/skip for the rest
+                string brush = GenerateBrushFromPolygon(poly, "common/hint", "common/skip");
+                mapContent.Append(brush);
+                pIdx++;
+            }
+        }
+
+        private string GenerateBrushFromPolygon(List<Vector3> points, string frontTex, string otherTex)
+        {
+            // Compute normal from first 3 points (assuming planar)
+            var v0 = points[0];
+            var v1 = points[1];
+            var v2 = points[2];
+            var normal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+            
+            // Thickness
+            float thickness = 4.0f; // Thin brush
+            var offset = normal * (thickness * 0.5f);
+            
+            var brush = new StringBuilder();
+            brush.AppendLine("{");
+            brush.AppendLine($"// Hint Brush (Poly: {points.Count} verts)");
+            
+            // Front Face (Original polygon + offset)
+            // Winding: v0, v1, v2 is CCW looking from front.
+            // Pushed forward by offset -> Still v0, v1, v2
+            var f0 = v0 + offset;
+            var f1 = v1 + offset;
+            var f2 = v2 + offset;
+            WritePlaneLine(brush, f0, f1, f2, frontTex);
+
+            // Back Face (Original polygon - offset)
+            // Pushed back. To face away, we reverse winding: v0, v2, v1
+            var b0 = v0 - offset;
+            var b1 = v1 - offset;
+            var b2 = v2 - offset;
+            WritePlaneLine(brush, b0, b2, b1, otherTex);
+
+            // Side Faces
+            for (int i = 0; i < points.Count; i++)
+            {
+                var pA = points[i];
+                var pB = points[(i + 1) % points.Count];
+                
+                var topA = pA + offset;
+                var topB = pB + offset;
+                var botA = pA - offset;
+                var botB = pB - offset;
+                
+                // Side plane: topB, topA, botA (CCW looking from outside)
+                WritePlaneLine(brush, topB, topA, botA, otherTex);
+            }
+
+            brush.AppendLine("}");
+            return brush.ToString();
         }
     }
 }

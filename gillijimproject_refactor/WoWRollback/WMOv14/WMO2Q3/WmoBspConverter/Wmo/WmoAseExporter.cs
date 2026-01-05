@@ -207,14 +207,17 @@ public class WmoAseExporter
             for (int i = 0; i < textures.Count; i++)
             {
                 var origPath = textures[i];
+                var baseName = Path.GetFileNameWithoutExtension(origPath).ToLowerInvariant();
                 var q3Path = textureMap.TryGetValue(origPath, out var mapped) 
                     ? mapped 
-                    : $"textures/wmo/{Path.GetFileNameWithoutExtension(origPath).ToLowerInvariant()}.tga";
+                    : $"textures/wmo/{baseName}.tga";
                 
-                var matName = Path.GetFileNameWithoutExtension(origPath);
+                // Use the Q3 shader path (without extension) as the material name
+                // This is what PicoModel uses to look up shaders
+                var shaderName = $"textures/wmo/{baseName}";
                 
                 w.WriteLine($"\t\t*SUBMATERIAL {i} {{");
-                w.WriteLine($"\t\t\t*MATERIAL_NAME \"{matName}\"");
+                w.WriteLine($"\t\t\t*MATERIAL_NAME \"{shaderName}\"");
                 w.WriteLine($"\t\t\t*MATERIAL_CLASS \"Standard\"");
                 w.WriteLine($"\t\t\t*MAP_DIFFUSE {{");
                 w.WriteLine($"\t\t\t\t*MAP_NAME \"Map #1\"");

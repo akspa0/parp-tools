@@ -174,12 +174,12 @@ namespace WmoBspConverter
                 }
                 else if (outputAse)
                 {
-                    // Use OBJ export for "ASE" request (Plan B for consistent Radiant support)
-                    await ExportRadiantObjAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
+                    // Export ASE files for misc_model in GtkRadiant
+                    await ExportRadiantAseAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
                 }
                 else if (outputMap)
                 {
-                    await ConvertToMapAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
+                    await ConvertToMapAsync(inputFile, outputFile, outputDir, verbose, splitGroups, extractTextures);
                 }
                 else if (useQ3V2)
                 {
@@ -420,6 +420,78 @@ namespace WmoBspConverter
             await Task.CompletedTask;
         }
 
+        static async Task ExportRadiantAseAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
+        {
+            if (!File.Exists(inputFile))
+            {
+                throw new FileNotFoundException($"Input file not found: {inputFile}");
+            }
+            
+            Console.WriteLine("WMO → ASE Exporter (for GtkRadiant misc_model)");
+            Console.WriteLine("=============================================");
+            Console.WriteLine($"Input: {Path.GetFileName(inputFile)}");
+            
+            // Parse WMO
+            var parser = new WmoV14Parser();
+            var data = parser.ParseWmoV14(inputFile);
+            
+            Console.WriteLine($"Groups: {data.Groups.Count}");
+            Console.WriteLine($"Textures: {data.Textures.Count}");
+            
+            var sourceDir = Path.GetDirectoryName(Path.GetFullPath(inputFile)) ?? ".";
+            
+            // Determine output directory
+            if (string.IsNullOrEmpty(outputDir))
+            {
+                if (!string.IsNullOrEmpty(outputFile))
+                {
+                    var outDir = Path.GetDirectoryName(Path.GetFullPath(outputFile));
+                    outputDir = string.IsNullOrEmpty(outDir) ? Directory.GetCurrentDirectory() : outDir;
+                }
+                else
+                {
+                    outputDir = Path.Combine(Directory.GetCurrentDirectory(), "ase_output");
+                }
+            }
+            
+            Directory.CreateDirectory(outputDir);
+            
+            var exporter = new Wmo.WmoAseExporter();
+            var baseName = Path.GetFileNameWithoutExtension(inputFile).ToLowerInvariant();
+            
+            if (splitGroups)
+            {
+                // Export each group as a separate ASE file
+                Console.WriteLine($"Exporting {data.Groups.Count} groups to separate ASE files...");
+                exporter.ExportGroupsToAse(outputDir, baseName, data, sourceDir, 
+                    convertTextures: true, verbose: verbose);
+                
+                // Generate Q3 .map file referencing the ASE files
+                var mapPath = Path.Combine(outputDir, $"{baseName}.map");
+                var modelsDir = Path.Combine(outputDir, "models", "wmo");
+                int groupCount = data.Groups.Count(g => g.Vertices.Count > 0);
+                exporter.GenerateQ3MapFile(mapPath, baseName, groupCount, modelsDir);
+                
+                Console.WriteLine($"✓ Generated .map file: {mapPath}");
+            }
+            else
+            {
+                // Export all groups to a single ASE file
+                var asePath = Path.Combine(outputDir, $"{baseName}.ase");
+                exporter.ExportToAse(asePath, data, sourceDir, convertTextures: true, verbose: verbose);
+                Console.WriteLine($"✓ Exported single ASE: {asePath}");
+            }
+            
+            Console.WriteLine($"✓ ASE export complete. Output: {outputDir}");
+            Console.WriteLine();
+            Console.WriteLine("💡 Next steps:");
+            Console.WriteLine("   1. Open the .map file in GtkRadiant");
+            Console.WriteLine("   2. The misc_model entities will reference the .ase files");
+            Console.WriteLine("   3. Compile with Q3Map2 (Bsp → Compile)");
+            
+            await Task.CompletedTask;
+        }
+
         static async Task ConvertAsync(string inputFile, string? outputFile, bool extractTextures, string? outputDir, bool verbose, bool splitGroups = false)
         {
             // Validate input file
@@ -644,7 +716,7 @@ namespace WmoBspConverter
             await Task.CompletedTask;
         }
 
-        static async Task ConvertToMapAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
+        static async Task ConvertToMapAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups, bool extractTextures)
         {
             if (!File.Exists(inputFile))
                 throw new FileNotFoundException($"Input file not found: {inputFile}");
@@ -668,6 +740,15 @@ namespace WmoBspConverter
             var wmoData = parser.ParseWmoV14(inputFile);
 
             Console.WriteLine($"[INFO] Parsed WMO v{wmoData.Version}: {wmoData.Groups.Count} groups, {wmoData.Materials.Count} materials");
+            
+            // Extract textures if requested
+            if (extractTextures)
+            {
+                var inputDir = Path.GetDirectoryName(inputFile) ?? ".";
+                Console.WriteLine($"[INFO] Extracting textures from {inputDir} to {outputDirectory}...");
+                var texConverter = new WmoTextureConverter();
+                texConverter.ConvertTextures(wmoData.Textures, inputDir, outputDirectory, verbose);
+            }
 
             // Create BspFile with actual geometry for the map generator
             var bspFile = new BspFile();
@@ -676,7 +757,7 @@ namespace WmoBspConverter
             foreach (var tex in wmoData.Textures)
             {
                 var cleanName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
-                bspFile.Textures.Add(new BspTexture { Name = $"textures/wmo/{cleanName}" });
+                bspFile.Textures.Add(new BspTexture { Name = $"textures/wmo/{cleanName}.tga" });
             }
             if (bspFile.Textures.Count == 0)
             {

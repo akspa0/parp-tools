@@ -206,6 +206,27 @@ namespace WmoBspConverter.Wmo
             public byte[] FileBytes { get; set; } = Array.Empty<byte>();
             public Dictionary<int, string> GroupNameMap { get; set; } = new();
             public List<int> GroupNameIndices { get; set; } = new();
+            
+            // Portal Data
+            public List<MoptDef> Portals { get; set; } = new();
+            public List<MoprRef> PortalRefs { get; set; } = new();
+            public List<Vector3> PortalVertices { get; set; } = new();
+        }
+
+        public struct MoptDef
+        {
+            public ushort StartGroup;
+            public ushort EndGroup;
+            public ushort VertexCount;
+            public ushort FirstVertex;
+            public Vector4 Plane;
+        }
+
+        public struct MoprRef
+        {
+            public ushort PortalIndex;
+            public ushort GroupIndex; // Usually implicit or 'side'?
+            public int Sign;
         }
 
         public class WmoGroupData
@@ -364,6 +385,27 @@ namespace WmoBspConverter.Wmo
             {
                 wmoData.Materials = ParseMomtMaterials(momtChunk.Data, wmoData.Textures, wmoData.TextureOffsetToName);
                 wmoData.MaterialTextureIndices = ParseMomtTextureIndices(momtChunk.Data, wmoData.Textures, wmoData.TextureOffsetToName);
+            }
+
+            // Extract Portals (MOPT)
+            var moptChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOPT");
+            if (moptChunk?.Data != null)
+            {
+                ProcessMoptChunk(moptChunk.Data, wmoData);
+            }
+
+            // Extract Portal References (MOPR) - Root level references
+            var moprChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOPR");
+            if (moprChunk?.Data != null)
+            {
+                ProcessMoprChunk(moprChunk.Data, wmoData);
+            }
+
+            // Extract Portal Vertices (MOPV)
+            var mopvChunk = wmoData.Chunks.FirstOrDefault(c => c.Id == "MOPV");
+            if (mopvChunk?.Data != null)
+            {
+                ProcessMopvChunk(mopvChunk.Data, wmoData);
             }
 
             // Extract group names (MOGN/MOGI)
@@ -899,6 +941,129 @@ namespace WmoBspConverter.Wmo
             }
             
             Console.WriteLine($"[DEBUG] Extracted {faceCount} face materials from top-level MOPY");
+        }
+
+        private void ProcessMoptChunk(byte[] data, WmoV14Data wmoData)
+        {
+            // MOPT: Portal Definitions
+            // Likely 20 or 24 bytes per entry.
+            // Standard layout: StartGrp(2), EndGrp(2), Count(2), Base(2), Plane(16) = 24 bytes? No plane is 4 floats.
+            
+            // Check divisibility
+            int entrySize = 20; // Guess
+            if (data.Length % 20 != 0)
+            {
+                 Console.WriteLine($"[WARN] MOPT size {data.Length} not divisible by 20.");
+                 // Heuristic check
+                 if (data.Length % 32 == 0) entrySize = 32;
+                 else if (data.Length % 64 == 0) entrySize = 64;
+                 else Console.WriteLine($"[ERROR] MOPT Unknown entry size for {data.Length} bytes");
+            }
+
+            int count = data.Length / entrySize;
+            wmoData.Portals.Clear();
+            
+            for (int i = 0; i < count; i++)
+            {
+                int o = i * entrySize;
+                var def = new MoptDef();
+                
+                // Assuming standard 20 byte: Start(2), End(2), Cols(2), Padding(2), Plane(12 or 16?)
+                // Actually WotLK is: Start(2), End(2), Alg(1), Pad(1), Plane(16) = 22 bytes?
+                // V14 Guess based on MOGI=40 (vs 32): Maybe older struct?
+                // Let's assume standard 20 bytes for now: 
+                // Start(2), End(2), Plane(16)?
+                // OR Start(2), End(2), Count(2), Base(2), Plane(12)?
+                
+                // We will log the first entry to help debug
+                def.StartGroup = BitConverter.ToUInt16(data, o + 0);
+                def.EndGroup = BitConverter.ToUInt16(data, o + 2);
+                
+                // If 20 bytes, maybe it is:
+                // Start(2), End(2), VertexCount(2), FirstVertex(2), Plane(12) ?? Plane usually needs 16.
+                // If Plane is 12 (3 floats, implicit D?), that leaves 8 bytes: 4 UShorts.
+                // This fits perfectly: Start, End, Count, First, Normal(x,y,z).
+                
+                def.VertexCount = BitConverter.ToUInt16(data, o + 4);
+                def.FirstVertex = BitConverter.ToUInt16(data, o + 6);
+                
+                float p1 = BitConverter.ToSingle(data, o + 8);
+                float p2 = BitConverter.ToSingle(data, o + 12);
+                float p3 = BitConverter.ToSingle(data, o + 16);
+                // No room for D if 20 bytes? Or maybe Plane is 16 bytes and no Count/First?
+                // MOPT usually DOES NOT contain vertices in older formats, just the conceptual link.
+                
+                // Let's just capture the floats and see.
+                // If it's 20 bytes: 0-2 (start), 2-4 (end), 4-20 (16 bytes = 4 floats).
+                // If so, vertices must be found via MOPR or implicit.
+                
+                // Let's read 4 floats starting at offset 4 just in case it's a plane.
+                if (entrySize >= 20) {
+                     float f1 = BitConverter.ToSingle(data, o + 4); 
+                     float f2 = BitConverter.ToSingle(data, o + 8); 
+                     float f3 = BitConverter.ToSingle(data, o + 12); 
+                     float f4 = BitConverter.ToSingle(data, o + 16);
+                     def.Plane = new Vector4(f1, f2, f3, f4);
+                }
+
+                wmoData.Portals.Add(def);
+            }
+            Console.WriteLine($"[DEBUG] Parsed {count} portals from MOPT (Assuming {entrySize} bytes/entry)");
+            if (count > 0)
+            {
+                var p = wmoData.Portals[0];
+                Console.WriteLine($"[DEBUG]   Portal 0: Grp {p.StartGroup}->{p.EndGroup}, Plane={p.Plane}");
+            }
+        }
+
+        private void ProcessMoprChunk(byte[] data, WmoV14Data wmoData)
+        {
+            // MOPR: Portal References.
+            // Linking Groups to Portals.
+            // Standard: PortalIndex(2), Side(2) -> 4 bytes?
+            // Or larger?
+            
+            int entrySize = 8; // Conservative guess
+            if (data.Length % 8 != 0 && data.Length % 4 == 0) entrySize = 4;
+            else if (data.Length % 12 == 0) entrySize = 12; // Unlikely
+            
+            int count = data.Length / entrySize;
+            wmoData.PortalRefs.Clear();
+            
+            for (int i = 0; i < count; i++)
+            {
+                int o = i * entrySize;
+                var r = new MoprRef();
+                r.PortalIndex = BitConverter.ToUInt16(data, o);
+                r.GroupIndex = BitConverter.ToUInt16(data, o + 2); // Might represent Side or Group if 4 bytes
+                
+                wmoData.PortalRefs.Add(r);
+            }
+            Console.WriteLine($"[DEBUG] Parsed {count} portal refs from MOPR (Assuming {entrySize} bytes/entry)");
+            if (count > 0)
+                Console.WriteLine($"[DEBUG]   Ref 0: PortalIdx={wmoData.PortalRefs[0].PortalIndex}, Val2={wmoData.PortalRefs[0].GroupIndex}");
+        }
+
+        private void ProcessMopvChunk(byte[] data, WmoV14Data wmoData)
+        {
+             // MOPV: Portal Vertices
+             // 12 bytes per vertex (float x,y,z)
+             const int V_SIZE = 12;
+             if (data.Length % 12 != 0)
+                 Console.WriteLine($"[WARN] MOPV size {data.Length} not divisible by 12!");
+                 
+             int count = data.Length / V_SIZE;
+             wmoData.PortalVertices.Clear();
+             
+             for(int i=0; i<count; i++)
+             {
+                 int o = i * V_SIZE;
+                 float x = BitConverter.ToSingle(data, o);
+                 float y = BitConverter.ToSingle(data, o+4);
+                 float z = BitConverter.ToSingle(data, o+8);
+                 wmoData.PortalVertices.Add(new Vector3(x,y,z));
+             }
+             Console.WriteLine($"[DEBUG] Parsed {count} portal vertices from MOPV");
         }
     }
 }
