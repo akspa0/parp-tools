@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../../lib/wow.tools.local/WoWFormatLib/WoWFormatLib/WoWFormatLib.csproj" />
+    <ProjectReference Include="../../../../lib/wow.tools.local/WoWFormatLib/SereniaBLPLib/SereniaBLPLib/SereniaBLPLib.csproj" />
   </ItemGroup>
     
   <ItemGroup>

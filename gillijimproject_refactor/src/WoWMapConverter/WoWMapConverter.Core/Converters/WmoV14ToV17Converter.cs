@@ -34,7 +34,7 @@ public class WmoV14ToV17Converter
         using var ms = new MemoryStream(wmoData);
         using var reader = new BinaryReader(ms);
 
-        var data = ParseWmoV14(reader);
+        var data = ParseWmoV14Internal(reader);
         
         // Ensure output directory exists (including group files)
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -49,7 +49,39 @@ public class WmoV14ToV17Converter
         return data.Textures;
     }
 
-    private WmoV14Data ParseWmoV14(BinaryReader reader)
+    /// <summary>
+    /// Parse WMO v14 file and return structured data for analysis.
+    /// </summary>
+    public WmoV14Data ParseWmoV14(string inputPath)
+    {
+        var data = AlphaMpqReader.ReadWithMpqFallback(inputPath);
+        if (data == null)
+            throw new FileNotFoundException($"WMO not found (checked direct and MPQ): {inputPath}");
+        
+        using var ms = new MemoryStream(data);
+        using var reader = new BinaryReader(ms);
+        var wmoData = ParseWmoV14Internal(reader);
+        
+        // Populate group names from MOGN/MOGI
+        for (int i = 0; i < wmoData.Groups.Count && i < wmoData.GroupInfos.Count; i++)
+        {
+            var nameOfs = wmoData.GroupInfos[i].NameOffset;
+            wmoData.Groups[i].Name = GetGroupName(wmoData.GroupNames, nameOfs) ?? $"group_{i}";
+        }
+        
+        return wmoData;
+    }
+    
+    private string? GetGroupName(List<string> groupNames, int nameOffset)
+    {
+        // MOGN is a string table; nameOffset is a byte offset into the packed strings
+        // For now, use index-based lookup (simplified)
+        if (nameOffset >= 0 && nameOffset < groupNames.Count)
+            return groupNames[nameOffset];
+        return null;
+    }
+
+    private WmoV14Data ParseWmoV14Internal(BinaryReader reader)
     {
         var data = new WmoV14Data();
 
@@ -1949,6 +1981,7 @@ public class WmoV14ToV17Converter
 
     public class WmoGroupData
     {
+        public string? Name; // Group name from MOGN
         public uint NameOffset, DescriptiveNameOffset, Flags;
         public Vector3 BoundsMin, BoundsMax;
         public ushort PortalStart, PortalCount;

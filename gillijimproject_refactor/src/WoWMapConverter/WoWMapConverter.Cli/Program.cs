@@ -29,6 +29,7 @@ public static class Program
             "convert-mdx" => RunConvertMdx(args.Skip(1).ToArray()),
             "convert-m2-to-mdx" => RunConvertM2ToMdx(args.Skip(1).ToArray()),
             "pm4-export" => RunPm4Export(args.Skip(1).ToArray()),
+            "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
             "batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
@@ -594,6 +595,152 @@ public static class Program
         }
     }
 
+    private static int RunWmoInfo(string[] args)
+    {
+        string? inputPath = null;
+        bool verbose = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--input":
+                case "-i":
+                    if (i + 1 < args.Length) inputPath = args[++i];
+                    break;
+                case "--verbose":
+                case "-v":
+                    verbose = true;
+                    break;
+                default:
+                    if (!args[i].StartsWith("-") && inputPath == null)
+                        inputPath = args[i];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(inputPath))
+        {
+            Console.Error.WriteLine("Error: Input WMO path required");
+            return 1;
+        }
+
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Error: File not found: {inputPath}");
+            return 1;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"WMO Analysis: {Path.GetFileName(inputPath)}");
+        Console.WriteLine(new string('=', 70));
+
+        try
+        {
+            // Use WmoV14ToV17Converter's ParseWmoV14 to get data
+            var converter = new WmoV14ToV17Converter();
+            var wmoData = converter.ParseWmoV14(inputPath);
+
+            Console.WriteLine($"Version: v{wmoData.Version}");
+            Console.WriteLine($"Groups:  {wmoData.Groups.Count}");
+            Console.WriteLine($"Materials: {wmoData.Materials.Count}");
+            Console.WriteLine($"Textures: {wmoData.Textures.Count}");
+            Console.WriteLine($"Doodad Sets: {wmoData.DoodadSets.Count}");
+            Console.WriteLine($"Portals: {wmoData.Portals.Count}");
+            Console.WriteLine();
+
+            // List groups
+            Console.WriteLine("Groups:");
+            Console.WriteLine(new string('-', 70));
+            Console.WriteLine($"{"#",-4} {"Name",-35} {"Verts",-8} {"Faces",-8} {"Flags",-14}");
+            Console.WriteLine(new string('-', 70));
+
+            int totalVerts = 0, totalFaces = 0, emptyGroups = 0;
+
+            for (int i = 0; i < wmoData.Groups.Count; i++)
+            {
+                var g = wmoData.Groups[i];
+                int faceCount = g.Indices?.Count / 3 ?? 0;
+                int vertCount = g.Vertices?.Count ?? 0;
+                string flagsHex = $"0x{g.Flags:X8}";
+
+                // Decode common flags
+                var flagNotes = new List<string>();
+                if ((g.Flags & 0x01) != 0) flagNotes.Add("BSP");
+                if ((g.Flags & 0x02) != 0) flagNotes.Add("Light");
+                if ((g.Flags & 0x04) != 0) flagNotes.Add("Doodads");
+                if ((g.Flags & 0x08) != 0) flagNotes.Add("Liquid");
+                if ((g.Flags & 0x40) != 0) flagNotes.Add("Exterior");
+                if ((g.Flags & 0x2000) != 0) flagNotes.Add("ExtLit");
+                if ((g.Flags & 0x80000) != 0) flagNotes.Add("Indoor");
+
+                string displayName = string.IsNullOrEmpty(g.Name) ? $"(group_{i})" : g.Name;
+                if (displayName.Length > 35) displayName = displayName.Substring(0, 32) + "...";
+
+                Console.WriteLine($"{i,-4} {displayName,-35} {vertCount,-8} {faceCount,-8} {flagsHex}");
+
+                if (verbose && flagNotes.Count > 0)
+                {
+                    Console.WriteLine($"     Flags: {string.Join(", ", flagNotes)}");
+                }
+
+                if (vertCount == 0)
+                {
+                    emptyGroups++;
+                    if (verbose)
+                        Console.WriteLine($"     ⚠️  EMPTY GROUP");
+                }
+
+                totalVerts += vertCount;
+                totalFaces += faceCount;
+            }
+
+            Console.WriteLine(new string('-', 70));
+            Console.WriteLine($"Totals: {totalVerts} vertices, {totalFaces} faces");
+
+            if (emptyGroups > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"⚠️  Warning: {emptyGroups} empty groups (no vertices)");
+            }
+
+            // Show group name details in verbose mode
+            if (verbose && wmoData.GroupInfos.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("MOGI Group Info (parsed from root file):");
+                Console.WriteLine(new string('-', 70));
+                for (int i = 0; i < wmoData.GroupInfos.Count; i++)
+                {
+                    var info = wmoData.GroupInfos[i];
+                    Console.WriteLine($"  [{i}] Flags: 0x{info.Flags:X8}, NameOfs: 0x{info.NameOffset:X4}");
+                }
+            }
+
+            // Texture list
+            if (verbose && wmoData.Textures.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Textures:");
+                Console.WriteLine(new string('-', 70));
+                for (int i = 0; i < wmoData.Textures.Count; i++)
+                {
+                    Console.WriteLine($"  [{i}] {wmoData.Textures[i]}");
+                }
+            }
+
+            Console.WriteLine();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error parsing WMO: {ex.Message}");
+            if (verbose)
+                Console.Error.WriteLine(ex.StackTrace);
+            return 1;
+        }
+    }
+
     private static async Task<int> RunAnalyzeAsync(string[] args)
     {
         Console.WriteLine("Analyze command - not yet implemented");
@@ -626,6 +773,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter convert-mdx <input.mdx> [options]       Convert MDX → M2");
         Console.WriteLine("  wowmapconverter convert-m2-to-mdx <m2> [options]        Convert M2 → MDX");
         Console.WriteLine("  wowmapconverter pm4-export <pm4> [options]              Export PM4 to OBJ");
+        Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter batch --input-dir <dir> [options]       Batch convert directory");
         Console.WriteLine();
         Console.WriteLine("Alpha → LK Conversion Options:");
@@ -659,6 +807,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter convert World/Maps/Azeroth/Azeroth.wdt -o ./out");
         Console.WriteLine("  wowmapconverter convert-lk-to-alpha development.wdt --map-dir ./maps -o alpha.wdt");
         Console.WriteLine("  wowmapconverter convert-wmo castle01.wmo -o castle01_v17.wmo");
+        Console.WriteLine("  wowmapconverter wmo-info ironforge.wmo -v");
         Console.WriteLine("  wowmapconverter convert-mdx Human/HumanMale.mdx -o HumanMale.m2");
     }
 }

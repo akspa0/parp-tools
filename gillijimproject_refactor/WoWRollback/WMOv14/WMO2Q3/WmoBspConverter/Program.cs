@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -36,6 +37,8 @@ namespace WmoBspConverter
             bool convertToV17 = false;
             bool useQ3V2 = false;
             bool outputMap = false;
+            bool listGroups = false;
+            bool outputAse = false;
 
             // Parse simple command line arguments (start from 0 if first arg is a flag)
             int startIdx = args[0].StartsWith("-") ? 0 : 1;
@@ -130,6 +133,12 @@ namespace WmoBspConverter
                     case "--map":
                         outputMap = true;
                         break;
+                    case "--list-groups":
+                        listGroups = true;
+                        break;
+                    case "--ase":
+                        outputAse = true;
+                        break;
                     case "--help":
                     case "-h":
                         ShowUsage();
@@ -139,7 +148,11 @@ namespace WmoBspConverter
 
             try
             {
-                if (args.Contains("--list-textures"))
+                if (listGroups)
+                {
+                    await ListGroupsAsync(inputFile, verbose);
+                }
+                else if (args.Contains("--list-textures"))
                 {
                     await ListTexturesAsync(inputFile);
                 }
@@ -158,6 +171,10 @@ namespace WmoBspConverter
                 else if (!string.IsNullOrEmpty(objPath))
                 {
                     await ExportObjAsync(inputFile, objPath!, allowFallback, includeNonRender, extractTextures, verbose, matOnly, groupIndex, mopyPair, mapping);
+                }
+                else if (outputAse)
+                {
+                    await ExportAseAsync(inputFile, outputFile, outputDir, verbose, splitGroups);
                 }
                 else if (outputMap)
                 {
@@ -206,6 +223,8 @@ namespace WmoBspConverter
             Console.WriteLine("  --to-v17                  Convert WMO v14 to v17 format (for use with wow.tools exporters)");
             Console.WriteLine("  --q3v2                    Use V2 BSP converter with proper BSP tree/visibility");
             Console.WriteLine("  --map                     Output .map file for GtkRadiant (instead of .bsp)");
+            Console.WriteLine("  --ase                     Export to ASE format (3DS Max ASCII, Q3 misc_model)");
+            Console.WriteLine("  --list-groups             List all group names and info in the WMO");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
             Console.WriteLine("Examples:");
@@ -215,6 +234,10 @@ namespace WmoBspConverter
             Console.WriteLine("  WmoBspConverter --emit-cube -d ./output -v");
             Console.WriteLine("  WmoBspConverter model.wmo --obj ./out/model.obj -v");
             Console.WriteLine("  WmoBspConverter test.wmo --obj ./out/test.obj --allow-fallback");
+            Console.WriteLine("  WmoBspConverter ironforge.wmo --list-groups");
+            Console.WriteLine("  WmoBspConverter ironforge.wmo --map --split-groups -d ./output");
+            Console.WriteLine("  WmoBspConverter ironforge.wmo --ase -d ./output -v");
+            Console.WriteLine("  WmoBspConverter ironforge.wmo --ase --split-groups -d ./ase_output");
         }
 
         static async Task ListTexturesAsync(string inputFile)
@@ -227,6 +250,188 @@ namespace WmoBspConverter
             {
                 Console.WriteLine($"  {t}");
             }
+            await Task.CompletedTask;
+        }
+
+        static async Task ListGroupsAsync(string inputFile, bool verbose)
+        {
+            if (!File.Exists(inputFile)) throw new FileNotFoundException("WMO not found", inputFile);
+            
+            var parser = new WmoV14Parser();
+            var data = parser.ParseWmoV14(inputFile);
+            
+            Console.WriteLine();
+            Console.WriteLine($"WMO Group Analysis: {Path.GetFileName(inputFile)}");
+            Console.WriteLine(new string('=', 60));
+            Console.WriteLine($"Version: v{data.Version}");
+            Console.WriteLine($"Total Groups: {data.Groups.Count}");
+            Console.WriteLine($"Total Materials: {data.Materials.Count}");
+            Console.WriteLine($"Total Textures: {data.Textures.Count}");
+            Console.WriteLine();
+            
+            // List all group names with details
+            Console.WriteLine("Groups:");
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine($"{"#",-4} {"Name",-30} {"Verts",-8} {"Faces",-8} {"Flags",-12}");
+            Console.WriteLine(new string('-', 60));
+            
+            int totalVerts = 0, totalFaces = 0;
+            int emptyGroups = 0;
+            
+            for (int i = 0; i < data.Groups.Count; i++)
+            {
+                var g = data.Groups[i];
+                int faceCount = g.Indices.Count / 3;
+                string flagsHex = $"0x{g.Flags:X8}";
+                
+                // Decode some common flags
+                var flagNotes = new List<string>();
+                if ((g.Flags & 0x01) != 0) flagNotes.Add("HasBSP");
+                if ((g.Flags & 0x02) != 0) flagNotes.Add("HasLight");
+                if ((g.Flags & 0x04) != 0) flagNotes.Add("HasDoodads");
+                if ((g.Flags & 0x08) != 0) flagNotes.Add("HasLiquid");
+                if ((g.Flags & 0x40) != 0) flagNotes.Add("Exterior");
+                if ((g.Flags & 0x2000) != 0) flagNotes.Add("ExteriorLit");
+                if ((g.Flags & 0x10000) != 0) flagNotes.Add("SMOGroupMIRROR");
+                if ((g.Flags & 0x80000) != 0) flagNotes.Add("Indoor");
+                
+                string displayName = string.IsNullOrEmpty(g.Name) || g.Name.StartsWith("group_") ? $"(unnamed group {i})" : g.Name;
+                
+                Console.WriteLine($"{i,-4} {displayName,-30} {g.Vertices.Count,-8} {faceCount,-8} {flagsHex}");
+                
+                if (verbose && flagNotes.Count > 0)
+                {
+                    Console.WriteLine($"     Flags: {string.Join(", ", flagNotes)}");
+                }
+                
+                if (g.Vertices.Count == 0)
+                {
+                    emptyGroups++;
+                    if (verbose)
+                        Console.WriteLine($"     ⚠️  EMPTY GROUP (no vertices!)");
+                }
+                
+                totalVerts += g.Vertices.Count;
+                totalFaces += faceCount;
+            }
+            
+            Console.WriteLine(new string('-', 60));
+            Console.WriteLine($"Total: {totalVerts} vertices, {totalFaces} faces");
+            
+            if (emptyGroups > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"⚠️  Warning: {emptyGroups} groups have no geometry (empty/hidden groups)");
+            }
+            
+            // Show MOGN string block names if verbose
+            if (verbose && data.GroupNameMap.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("MOGN String Block (all group names in file):");
+                Console.WriteLine(new string('-', 60));
+                foreach (var kvp in data.GroupNameMap.OrderBy(x => x.Key))
+                {
+                    Console.WriteLine($"  Offset 0x{kvp.Key:X4}: \"{kvp.Value}\"");
+                }
+            }
+            
+            // Show MOGI info if verbose
+            if (verbose && data.GroupNameIndices.Count > 0)
+            {
+                Console.WriteLine();
+                Console.WriteLine("MOGI Name Offset Indices:");
+                Console.WriteLine(new string('-', 60));
+                for (int i = 0; i < data.GroupNameIndices.Count; i++)
+                {
+                    int nameOfs = data.GroupNameIndices[i];
+                    string resolvedName = data.GroupNameMap.TryGetValue(nameOfs, out var nm) ? nm : "(not found)";
+                    Console.WriteLine($"  Group {i}: nameOffset=0x{nameOfs:X4} → \"{resolvedName}\"");
+                }
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine("💡 Tip: Use --map --split-groups to export each group as a separate .map file");
+            
+            await Task.CompletedTask;
+        }
+
+        static async Task ExportAseAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups)
+        {
+            if (!File.Exists(inputFile))
+            {
+                throw new FileNotFoundException($"Input file not found: {inputFile}");
+            }
+            
+            Console.WriteLine("WMO → ASE Exporter");
+            Console.WriteLine("==================");
+            Console.WriteLine($"Input: {Path.GetFileName(inputFile)}");
+            
+            // Parse WMO
+            var parser = new WmoV14Parser();
+            var data = parser.ParseWmoV14(inputFile);
+            
+            Console.WriteLine($"Groups: {data.Groups.Count}");
+            Console.WriteLine($"Textures: {data.Textures.Count}");
+            
+            var sourceDir = Path.GetDirectoryName(Path.GetFullPath(inputFile)) ?? ".";
+            
+            // Determine output directory - use -d if provided, else current directory
+            if (string.IsNullOrEmpty(outputDir))
+            {
+                // If outputFile is specified, use its directory; otherwise use current directory
+                if (!string.IsNullOrEmpty(outputFile))
+                {
+                    var outDir = Path.GetDirectoryName(Path.GetFullPath(outputFile));
+                    outputDir = string.IsNullOrEmpty(outDir) ? Directory.GetCurrentDirectory() : outDir;
+                }
+                else
+                {
+                    outputDir = Path.Combine(Directory.GetCurrentDirectory(), "ase_output");
+                }
+            }
+            
+            Directory.CreateDirectory(outputDir);
+            
+            var exporter = new WmoAseExporter();
+            var baseName = Path.GetFileNameWithoutExtension(inputFile).ToLowerInvariant();
+            
+            if (splitGroups)
+            {
+                // Export each group as a separate ASE file
+                Console.WriteLine($"Exporting {data.Groups.Count} groups to separate ASE files...");
+                exporter.ExportGroupsToAse(outputDir, baseName, data, sourceDir, 
+                    convertTextures: true, verbose: verbose);
+                
+                // Generate Q3 .map file referencing the ASE files with absolute paths
+                var mapPath = Path.Combine(outputDir, $"{baseName}.map");
+                var modelsDir = Path.Combine(outputDir, "models", "wmo");
+                int groupCount = data.Groups.Count(g => g.Vertices.Count > 0);
+                exporter.GenerateQ3MapFile(mapPath, baseName, groupCount, modelsDir);
+            }
+            else
+            {
+                // Export all groups to a single ASE file
+                string asePath;
+                if (!string.IsNullOrEmpty(outputFile))
+                {
+                    // Make sure it's an absolute path
+                    asePath = Path.GetFullPath(outputFile);
+                    // Ensure .ase extension
+                    if (!asePath.EndsWith(".ase", StringComparison.OrdinalIgnoreCase))
+                        asePath += ".ase";
+                }
+                else
+                {
+                    asePath = Path.Combine(outputDir, $"{baseName}.ase");
+                }
+                
+                Console.WriteLine($"Exporting to: {asePath}");
+                exporter.ExportToAse(asePath, data, sourceDir, 
+                    convertTextures: true, verbose: verbose);
+            }
+            
+            Console.WriteLine($"✓ Export complete. Output: {outputDir}");
             await Task.CompletedTask;
         }
 
