@@ -66,7 +66,7 @@ public class WmoObjExporter
             
             writer.WriteLine($"# WMO group {i} export");
             writer.WriteLine($"mtllib {mtlFileName}");
-            writer.WriteLine($"o {baseName}_group{i:D3}"); // Object name
+            writer.WriteLine($"g {baseName}_group{i:D3}"); // Group name (required by Radiant)
             
             WriteMesh(writer, group, wmoData.Textures);
             
