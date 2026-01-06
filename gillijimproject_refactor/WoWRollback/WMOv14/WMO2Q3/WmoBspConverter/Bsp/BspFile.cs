@@ -222,6 +222,13 @@ namespace WmoBspConverter.Bsp
         public int Type { get; set; } // 1=polygon, 2=patch, 3=mesh, 4=billboard
         public int FirstVertex { get; set; }
         public int NumVertices { get; set; }
+        
+        // Explicit triangle vertex indices (for .map generation)
+        // These store the actual indices into the vertex array for each corner of a triangle
+        public int Vertex0 { get; set; }
+        public int Vertex1 { get; set; }
+        public int Vertex2 { get; set; }
+        
         public int FirstMeshVertex { get; set; }
         public int NumMeshVertices { get; set; }
         public int Lightmap { get; set; }

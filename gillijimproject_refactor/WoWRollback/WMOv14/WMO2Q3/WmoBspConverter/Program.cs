@@ -13,6 +13,10 @@ namespace WmoBspConverter
     {
         static async Task<int> Main(string[] args)
         {
+            // Ensure dot decimal separator is used globally
+            System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+            System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
+
             // Simple command-line parsing since System.CommandLine version has compatibility issues
             if (args.Length == 0)
             {
@@ -431,9 +435,9 @@ namespace WmoBspConverter
             Console.WriteLine("=============================================");
             Console.WriteLine($"Input: {Path.GetFileName(inputFile)}");
             
-            // Parse WMO
-            var parser = new WmoV14Parser();
-            var data = parser.ParseWmoV14(inputFile);
+            // Parse WMO (auto-detects v14, v16, or v17)
+            var parser = new WmoParser(verbose);
+            var data = parser.Parse(inputFile);
             
             Console.WriteLine($"Groups: {data.Groups.Count}");
             Console.WriteLine($"Textures: {data.Textures.Count}");
@@ -466,13 +470,11 @@ namespace WmoBspConverter
                 exporter.ExportGroupsToAse(outputDir, baseName, data, sourceDir, 
                     convertTextures: true, verbose: verbose);
                 
-                // Generate Q3 .map file referencing the ASE files
-                var mapPath = Path.Combine(outputDir, $"{baseName}.map");
-                var modelsDir = Path.Combine(outputDir, "models", "wmo");
-                int groupCount = data.Groups.Count(g => g.Vertices.Count > 0);
-                exporter.GenerateQ3MapFile(mapPath, baseName, groupCount, modelsDir);
+                // Generate individual .map files for each group (needed for Q3Map2 compilation)
+                var mapsDir = Path.Combine(outputDir, "maps");
+                exporter.GeneratePerGroupMapFiles(mapsDir, baseName, data);
                 
-                Console.WriteLine($"✓ Generated .map file: {mapPath}");
+                Console.WriteLine($"✓ Generated individual .map files in: {mapsDir}");
             }
             else
             {
@@ -484,10 +486,8 @@ namespace WmoBspConverter
             
             Console.WriteLine($"✓ ASE export complete. Output: {outputDir}");
             Console.WriteLine();
-            Console.WriteLine("💡 Next steps:");
-            Console.WriteLine("   1. Open the .map file in GtkRadiant");
-            Console.WriteLine("   2. The misc_model entities will reference the .ase files");
-            Console.WriteLine("   3. Compile with Q3Map2 (Bsp → Compile)");
+            Console.WriteLine("💡 Usage: Set -d to your baseq3 folder (e.g. -d \"C:\\Games\\Quake3\\baseq3\")");
+            Console.WriteLine("   Then compile maps/{baseName}.map in GtkRadiant (Bsp → Compile)");
             
             await Task.CompletedTask;
         }
@@ -788,7 +788,11 @@ namespace WmoBspConverter
                     {
                         FirstVertex = vertexBase + i0,
                         NumVertices = 3,
-                        Texture = matId
+                        Texture = matId,
+                        // Store explicit vertex indices for the triangle
+                        Vertex0 = vertexBase + i0,
+                        Vertex1 = vertexBase + i1,
+                        Vertex2 = vertexBase + i2
                     });
                 }
             }
@@ -796,15 +800,25 @@ namespace WmoBspConverter
             Console.WriteLine($"[INFO] Prepared {bspFile.Vertices.Count} vertices, {bspFile.Faces.Count} faces for .map generation");
 
             // Generate .map file
-            var mapGen = new WmoMapGenerator();
-            if (splitGroups)
-            {
-                mapGen.GenerateMapFilePerGroup(outputFile, wmoData, bspFile);
-            }
-            else
-            {
-                mapGen.GenerateMapFile(outputFile, wmoData, bspFile);
-            }
+                // CRITICAL RESCUE: Use ASE Models + Reference Map
+                // Brush generation for complex WMOs (Ironforge) is failing due to non-convex geometry.
+                // Switching to ASE-Only workflow:
+                // 1. Export each Group as an .ase model
+                // 2. Generate a .map file that references these models as misc_model entities
+                // 3. NO brushes except the bounding box.
+                
+                Console.WriteLine("[INFO] Switching to ASE Model Export (Robust Mode)...");
+
+                // Generate clustered map files which reference the ASE models
+                // This method also handles exporting the ASE files
+                var mapGen = new WmoMapGenerator();
+                mapGen.GenerateClusteredMapWithASE(
+                    outputFile, 
+                    wmoData, 
+                    bspFile, 
+                    outputDirectory, 
+                    Path.GetFileNameWithoutExtension(inputFile));
+
 
             Console.WriteLine();
             Console.WriteLine("✓ Conversion completed!");
