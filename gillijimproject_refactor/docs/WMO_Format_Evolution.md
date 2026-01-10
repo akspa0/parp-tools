@@ -43,6 +43,32 @@ The Group file supports embedded lightmaps, a feature removed in later versions.
     *   Flag `0x0004` enables `MOCV` chunk.
     *   Standard RGBA format.
 
+### Critical v14 Structures (Detailed)
+
+#### MOBA (Batches)
+The v14 MOBA chunk is 24 bytes, but the layout differs subtly from v17, which caused significant parsing errors.
+*   **Size**: 24 bytes per batch.
+*   **StartupIndex (0x0E)**: **UInt32**. (Previously misidentified as UInt16).
+*   **IndexCount (0x12)**: **UInt16**.
+    *   *Note*: Reading StartupIndex as UInt16 causes the high-word (usually 0) to be read as the Count, resulting in **0-face batches (drop-outs)**.
+*   **MaterialID (0x01)**: Byte.
+*   **Flags (0x16)**: Byte.
+
+#### MOPY (Faces)
+*   **Size**: **4 bytes** per face (vs 2 bytes in some assumptions).
+*   **Structure**: `Flags (u8) | MaterialID (u8) | Padding (u16)`.
+*   Reading this as 2 bytes causes complete geometry scrambling.
+
+#### BSP Tree (MOBN)
+*   **Node Size**: **16 bytes**.
+*   **Structure**: `Flags (u16) | NegChild (s16) | PosChild (s16) | nFaces (u16) | FaceStart (u32) | PlaneDist (f32)`.
+*   **Issues**: Some converters incorrectly write 14-byte nodes (missing a child index), causing tools like Noggit to fail saving/loading collision.
+
+#### Flags & Sorting
+*   **Batch Sorting**: v17 engines require batches to be sorted by render pass: **Transparent** (BlendMode >= 2) -> **Opaque** (BlendMode < 2).
+*   **Header Counts**: `TransBatchCount`, `IntBatchCount`, `ExtBatchCount` in the MOGP header must match this sorted order.
+*   **Flag Sync**: `MOGI` (Root) flags must match `MOGP` (Group) flags (e.g., Interior/Exterior) or the client culling logic will hide the group.
+
 ---
 
 ## 2. Alpha 0.6.0 (Format v16 - "The Hybrid")

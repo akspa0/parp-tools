@@ -1,7 +1,5 @@
 # Gillijim Project Refactor - 0.5.3 Integrated Server Fork
 
-> **Note**: This is a specialized fork of the Gillijim Project / Alpha Core. The original documentation is available in [README_PARP_TOOLS.md](README_PARP_TOOLS.md).
-
 ## 🌍 The Mission: A True 0.5.3 Integrated Server
 
 This fork aims to create a **complete, standalone server implementation** for the World of Warcraft 0.5.3 Alpha client.
@@ -46,4 +44,4 @@ Follow the setup instructions in [lib/alpha-core/README.md](lib/alpha-core/READM
 | **.bind [target]** | 0x1D9 | Bind target to their current location |
 
 ---
-*For the original preservation/mapping tool documentation, please see [README_PARP_TOOLS.md](README_PARP_TOOLS.md).*
+
