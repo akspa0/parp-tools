@@ -65,12 +65,12 @@ The Group file supports embedded lightmaps, a feature removed in later versions.
 
 ### Group File Structure (Hybrid)
 
-| Chunk | Token | Notes |
-| :--- | :--- | :--- |
-| **MOPY** | `0x4D4F5059` | **Stays**. Polygon faces are still explicit (removed in v17). |
-| **MOVI** | `0x4D4F5649` | **New**. Replaces `MOIN`. Same data, different token. |
-| **MOLV** | `MOLV` | **Removed**. No lightmap UVs in main sequence. |
-| **MOBA** | `MOBA` | **Changed**. Size is now `0x20` or `0x24` depending on flags. |
+| Chunk | Token | Entry Size | Notes |
+| :--- | :--- | :--- | :--- |
+| **MOPY** | `0x4D4F5059` | **4 bytes** | Polygon Materials/Flags. |
+| **MOVI** | `0x4D4F5649` | **2 bytes** | **Vertex Indices** (uint16). Replaces `MOIN`. |
+| **MOLV** | `MOLV` | - | **Removed**. No lightmap UVs in main sequence. |
+| **MOBA** | `0x4D4F4241` | **32 bytes** | **Expanded**. Material ID is at **offset 0x17** (1 byte). |
 
 ### Lighting & Flags
 *   **Flag 0x2 (Embedded LMs)**: **No longer checked**. The code blocks for `MOLM`/`MOLD` are removed.

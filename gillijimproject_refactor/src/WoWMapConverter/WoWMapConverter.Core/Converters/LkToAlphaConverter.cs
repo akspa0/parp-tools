@@ -547,11 +547,11 @@ public class LkToAlphaConverter
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
             ms.Write(BitConverter.GetBytes(minX));
-            ms.Write(BitConverter.GetBytes(minY));
             ms.Write(BitConverter.GetBytes(minZ));
+            ms.Write(BitConverter.GetBytes(minY));
             ms.Write(BitConverter.GetBytes(maxX));
-            ms.Write(BitConverter.GetBytes(maxY));
             ms.Write(BitConverter.GetBytes(maxZ));
+            ms.Write(BitConverter.GetBytes(maxY));
             ms.Write(BitConverter.GetBytes(flags));
             ms.Write(BitConverter.GetBytes(doodadSet));
             ms.Write(BitConverter.GetBytes(nameSet));

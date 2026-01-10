@@ -241,6 +241,7 @@ namespace WmoBspConverter.Wmo
             public uint Flags { get; set; }
             public List<MobaBatch> Batches { get; set; } = new();
             public List<ushort> FaceOrder { get; set; } = new();
+            public List<WmoBspNode> BspNodes { get; set; } = new();
         }
 
         public struct MobaBatch
@@ -252,6 +253,23 @@ namespace WmoBspConverter.Wmo
             public byte Flags;
             public byte MaterialId;
             public ushort PossibleBox2Z;
+        }
+
+        /// <summary>
+        /// WMO BSP Node (MOBN chunk) - 16 bytes per node
+        /// Used for collision detection in WMO files
+        /// </summary>
+        public struct WmoBspNode
+        {
+            public ushort Flags;      // 0=YZ-plane, 1=XZ-plane, 2=XY-plane, 4=leaf
+            public short NegChild;    // -1 = none
+            public short PosChild;    // -1 = none
+            public ushort NumFaces;   // Face count (for leaf nodes)
+            public uint FirstFace;    // Index into MOBR (for leaf nodes)
+            public float PlaneDist;   // Split plane distance
+            
+            public bool IsLeaf => (Flags & 4) != 0;
+            public int PlaneAxis => Flags & 3; // 0=X, 1=Y, 2=Z
         }
 
         /// <summary>
@@ -755,6 +773,9 @@ namespace WmoBspConverter.Wmo
                     case "MOBR":
                         ProcessMobrChunk(data, groupData);
                         break;
+                    case "MOBN":
+                        ProcessMobnChunk(data, groupData);
+                        break;
                 }
                 ms.Position = subEnd;
             }
@@ -852,6 +873,41 @@ namespace WmoBspConverter.Wmo
                 groupData.FaceOrder.Add(BitConverter.ToUInt16(mobrData, i * 2));
             }
             Console.WriteLine($"[DEBUG] Extracted {count} entries from MOBR");
+        }
+
+        private void ProcessMobnChunk(byte[] mobnData, WmoGroupData groupData)
+        {
+            // MOBN: BSP nodes for collision (16 bytes each)
+            // Structure: flags(2), negChild(2), posChild(2), numFaces(2), firstFace(4), planeDist(4)
+            const int NODE_SIZE = 16;
+            int nodeCount = mobnData.Length / NODE_SIZE;
+            
+            groupData.BspNodes.Clear();
+            
+            for (int i = 0; i < nodeCount; i++)
+            {
+                int o = i * NODE_SIZE;
+                var node = new WmoBspNode
+                {
+                    Flags = BitConverter.ToUInt16(mobnData, o + 0),
+                    NegChild = BitConverter.ToInt16(mobnData, o + 2),
+                    PosChild = BitConverter.ToInt16(mobnData, o + 4),
+                    NumFaces = BitConverter.ToUInt16(mobnData, o + 6),
+                    FirstFace = BitConverter.ToUInt32(mobnData, o + 8),
+                    PlaneDist = BitConverter.ToSingle(mobnData, o + 12)
+                };
+                groupData.BspNodes.Add(node);
+            }
+            
+            Console.WriteLine($"[DEBUG] Extracted {nodeCount} BSP nodes from MOBN");
+            
+            // Log first few nodes for debugging
+            for (int i = 0; i < Math.Min(nodeCount, 3); i++)
+            {
+                var n = groupData.BspNodes[i];
+                string type = n.IsLeaf ? "LEAF" : $"SPLIT(axis={n.PlaneAxis})";
+                Console.WriteLine($"[DEBUG]   Node {i}: {type} neg={n.NegChild} pos={n.PosChild} faces={n.NumFaces} firstFace={n.FirstFace} dist={n.PlaneDist:F2}");
+            }
         }
 
         private void ProcessMoinChunk(byte[] moinData, WmoGroupData groupData)
