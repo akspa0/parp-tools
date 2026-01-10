@@ -742,19 +742,8 @@ public class WmoV14ToV17Converter
                         var u = reader.ReadSingle();
                         var v = reader.ReadSingle();
                         
-                        // FIX TENTATIVE: Users reported upside down textures.
-                        // Standard WoW is D3D-style (0,0 top-left). Noggit/GL is 0,0 bottom-left.
-                        // 1.0 - v is usually correct for conversion.
-                        // If it's STILL upside down, maybe v14 is ALREADY GL-style? (Unlikely)
-                        // Or maybe we shouldn't flip?
-                        // Let's KEEP the flip for now, as removing it would flip them back if they were correct.
-                        // If "Upside Down" means "Vertically Mirrored", then 1-v fixes it.
-                        // If they are mirrored NOW, then we should remove it.
-                        // Let's try removing it ONLY if requested.
-                        // User Request: "looks like textures are upside down" (implying CURRENT state is wrong).
-                        // Current state has `1.0 - v`. So `1.0 - v` makes it upside down?
-                        // Let's try REMOVING the flip.
-                        group.UVs.Add(new Vector2(u, v));
+                        // FIX: Flip V coordinate for correct mapping
+                        group.UVs.Add(new Vector2(u, 1.0f - v));
                     }
                     break;
 
@@ -786,30 +775,26 @@ public class WmoV14ToV17Converter
                         short tz = reader.ReadInt16();
                         
                         // Index data
-                        // FIX: v14 StartIndex is 32-bit (0x0E-0x11)
-                        // This was the cause of "drop-outs" (High word read as count = 0)
-                        uint startIndex = reader.ReadUInt32();   // 0x0E
-                        ushort indexCount = reader.ReadUInt16(); // 0x12
+                        ushort startIndex = reader.ReadUInt16(); // 0x0E - ushort, NOT uint!
+                        ushort indexCount = reader.ReadUInt16(); // 0x10
                         
-                        // Unknown (possibly vertex range or padding) -> Usually 0 in v14
-                        ushort unknown1 = reader.ReadUInt16();   // 0x14
+                        // Unknown (possibly vertex range)
+                        ushort unknown1 = reader.ReadUInt16(); // 0x12
+                        ushort unknown2 = reader.ReadUInt16(); // 0x14
                         
-                        byte flags = reader.ReadByte();          // 0x16
-                        byte unknown2 = reader.ReadByte();       // 0x17
+                        byte flags = reader.ReadByte();        // 0x16
+                        byte unknown3 = reader.ReadByte();     // 0x17
                         
-                        // Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
+                        Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
                         
                         // Store parsed batch
                         group.Batches.Add(new WmoBatch
                         {
                             MaterialId = matId,
-                            FirstFace = startIndex / 3, // StartIndex is an index into indices array (triplets?) No, usually direct index.
-                            // Convert to Face Index: v14 seems to use index offsets.
-                            // However, WmoBatch expects FirstFace (i.e. index / 3).
-                            // Let's assume startIndex is index offset.
+                            FirstFace = (uint)(startIndex / 3),
                             NumFaces = (ushort)(indexCount / 3),
-                            FirstVertex = 0, // Will be recalculated
-                            LastVertex = 0,  // Will be recalculated
+                            FirstVertex = unknown1, // May be vertex start
+                            LastVertex = unknown2,  // May be vertex end
                             Flags = flags
                         });
                     }
@@ -1963,21 +1948,11 @@ public class WmoV14ToV17Converter
         // Writing dummy leaf node
         WriteSubChunk(writer, "MOBN", w =>
         {
-            // Valid MOBN Node (16 bytes)
-            // Offset   Type    Name        Description
-            // 0x00     uint16  Flags       4 = Leaf, 0 = Branch/Node
-            // 0x02     int16   NegChild    Index of negative child node (or -1/0 if leaf)
-            // 0x04     int16   PosChild    Index of positive child node (or -1/0 if leaf)
-            // 0x06     uint16  nFaces      Number of faces in this node (0 if branch)
-            // 0x08     uint32  FaceStart   Index into MOBR array (first face index)
-            // 0x0C     float   PlaneDist   Distance to splitting plane
-            
-            w.Write((ushort)4); // Flags: 4 = Leaf
-            w.Write((short)-1); // NegChild: -1 (Leaf/NoChild) - Noggit defines Flag_NoChild = 0xFFFF
-            w.Write((short)-1); // PosChild: -1 (Leaf/NoChild)
-            w.Write((ushort)(group.Indices.Count / 3)); // nFaces: All faces in this single leaf
-            w.Write((uint)0);   // FaceStart: Start at 0 in MOBR
-            w.Write(0f);        // PlaneDist: 0 for leaf
+            w.Write((short)4); // 4 = Leaf
+            w.Write((short)0); // flags?
+            w.Write((short)group.Indices.Count / 3); // nFaces
+            w.Write((int)0); // faceStart
+            w.Write(0f); // planeDist
         });
         
         WriteSubChunk(writer, "MOBR", w =>
@@ -1986,10 +1961,6 @@ public class WmoV14ToV17Converter
             for (ushort f = 0; f < group.Indices.Count / 3; f++)
                 w.Write(f);
         });
-
-        // 10b. MPBP, MPBI, MPBG - Only required if flag 0x400 is set.
-        // Input has 0x2007 (No 0x400), so we must NOT write these.
-
 
         // 11. MPBV (Portals) - Skipped (Flag 0x400 cleared)
 
