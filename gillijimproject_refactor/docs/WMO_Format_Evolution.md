@@ -48,9 +48,9 @@ The Group file supports embedded lightmaps, a feature removed in later versions.
 #### MOBA (Batches)
 The v14 MOBA chunk is 24 bytes, but the layout differs subtly from v17, which caused significant parsing errors.
 *   **Size**: 24 bytes per batch.
-*   **StartupIndex (0x0E)**: **UInt32**. (Previously misidentified as UInt16).
+*   **StartIndex (0x0E)**: **UInt32**. (Previously misidentified as UInt16).
+    *   *Critical*: StartIndex is a 32-bit integer. Reading it as 16-bit reads lower bits, and the next field (Count) reads the upper bits (usually 0), causing **0-face batches (drop-outs)**.
 *   **IndexCount (0x12)**: **UInt16**.
-    *   *Note*: Reading StartupIndex as UInt16 causes the high-word (usually 0) to be read as the Count, resulting in **0-face batches (drop-outs)**.
 *   **MaterialID (0x01)**: Byte.
 *   **Flags (0x16)**: Byte.
 
@@ -62,10 +62,12 @@ The v14 MOBA chunk is 24 bytes, but the layout differs subtly from v17, which ca
 #### BSP Tree (MOBN)
 *   **Node Size**: **16 bytes**.
 *   **Structure**: `Flags (u16) | NegChild (s16) | PosChild (s16) | nFaces (u16) | FaceStart (u32) | PlaneDist (f32)`.
-*   **Issues**: Some converters incorrectly write 14-byte nodes (missing a child index), causing tools like Noggit to fail saving/loading collision.
+*   **Strict Compliance Rules**:
+    *   **Leaf Children**: Must be **-1 (0xFFFF)**. Using `0` for leaf children is invalid in stricter parsers (e.g. Noggit) and causes load failures.
+    *   **Conditional Chunks**: `MPBP`, `MPBI`, `MPBG` are **only** expected if `flag_0x400` is set in the Group header. Writing them for standard v14/v17 groups (which lack this flag) corrupts the file stream.
 
 #### Flags & Sorting
-*   **Batch Sorting**: v17 engines require batches to be sorted by render pass: **Transparent** (BlendMode >= 2) -> **Opaque** (BlendMode < 2).
+*   **Batch Sorting**: v17 engines/tools (Noggit) require batches to be sorted by render pass: **Transparent** (BlendMode >= 2) -> **Opaque** (BlendMode < 2).
 *   **Header Counts**: `TransBatchCount`, `IntBatchCount`, `ExtBatchCount` in the MOGP header must match this sorted order.
 *   **Flag Sync**: `MOGI` (Root) flags must match `MOGP` (Group) flags (e.g., Interior/Exterior) or the client culling logic will hide the group.
 

@@ -432,6 +432,208 @@ namespace WmoBspConverter.Wmo
             Console.WriteLine($"[INFO] Generated .map file: {outputPath}");
         }
 
+        /// <summary>
+        /// Generate .map files directly from WMO groups, using BSP reconstruction for interiors.
+        /// Outputs ONE .map file per group (WMO groups are map-sized).
+        /// </summary>
+        public void GenerateMapFileFromGroups(
+            string outputPath, 
+            WmoV14Parser.WmoV14Data wmoData, 
+            bool interiorsOnly = true)
+        {
+            var outputDir = Path.GetDirectoryName(outputPath) ?? ".";
+            var baseName = Path.GetFileNameWithoutExtension(outputPath);
+            
+            int processedGroups = 0;
+            int skippedExterior = 0;
+            int skippedNoBsp = 0;
+            
+            for (int groupIdx = 0; groupIdx < wmoData.Groups.Count; groupIdx++)
+            {
+                var group = wmoData.Groups[groupIdx];
+                bool isExterior = (group.Flags & (0x8 | 0x2000)) != 0;
+                
+                if (interiorsOnly && isExterior)
+                {
+                    skippedExterior++;
+                    continue;
+                }
+                
+                if (group.BspNodes.Count == 0)
+                {
+                    skippedNoBsp++;
+                    Console.WriteLine($"[SKIP] Group {groupIdx} '{group.Name}' has no BSP nodes");
+                    continue;
+                }
+                
+                if (group.Vertices.Count == 0)
+                {
+                    continue;
+                }
+                
+                // Compute bounds for THIS group only
+                var groupMin = new Vector3(float.MaxValue);
+                var groupMax = new Vector3(float.MinValue);
+                foreach (var v in group.Vertices)
+                {
+                    groupMin = Vector3.Min(groupMin, v);
+                    groupMax = Vector3.Max(groupMax, v);
+                }
+                
+                var padding = new Vector3(128f);
+                var paddedMin = groupMin - padding;
+                var paddedMax = groupMax + padding;
+                // Center offset for this group
+                var offset = new Vector3(
+                    (groupMin.X + groupMax.X) / 2, 
+                    (groupMin.Y + groupMax.Y) / 2, 
+                    groupMin.Z);
+                
+                var context = new MapContext 
+                { 
+                    Bounds = new GeometryBounds(groupMin, groupMax),
+                    GeometryOffset = offset
+                };
+                var paddedBounds = new GeometryBounds(paddedMin - offset, paddedMax - offset);
+                
+                // Build map content for this group
+                var mapContent = new StringBuilder();
+                mapContent.AppendLine($"// Auto-generated from WMO v14 (BSP Mode) - Group {groupIdx}");
+                mapContent.AppendLine($"// Group: {group.Name}");
+                mapContent.AppendLine($"// Flags: 0x{group.Flags:X8}");
+                mapContent.AppendLine($"// BSP Nodes: {group.BspNodes.Count}");
+                mapContent.AppendLine();
+                
+                // Create sealed worldspawn for this group
+                CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
+                
+                // Generate brushes from BSP tree
+                GenerateBrushesFromWmoGroup(mapContent, group, wmoData, context);
+                
+                // Close worldspawn
+                mapContent.AppendLine("}");
+                mapContent.AppendLine();
+                
+                // Add spawn point
+                AddSpawnEntity(mapContent, context, paddedBounds.Min.Z);
+                
+                // Write to per-group file
+                var groupPath = Path.Combine(outputDir, $"{baseName}_group{groupIdx:D3}.map");
+                File.WriteAllText(groupPath, mapContent.ToString());
+                
+                Console.WriteLine($"[OK] Group {groupIdx}: {groupPath} ({group.BspNodes.Count} BSP nodes)");
+                processedGroups++;
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine($"[SUMMARY] Generated {processedGroups} .map files");
+            Console.WriteLine($"          Skipped {skippedExterior} exterior, {skippedNoBsp} no-BSP groups");
+        }
+
+        /// <summary>
+        /// Generate .map files using BSP reconstruction with portal-based clustering.
+        /// Connected interior groups are combined into single maps.
+        /// </summary>
+        public void GenerateClusteredBspMaps(
+            string outputPath, 
+            WmoV14Parser.WmoV14Data wmoData)
+        {
+            var outputDir = Path.GetDirectoryName(outputPath) ?? ".";
+            var baseName = Path.GetFileNameWithoutExtension(outputPath);
+            
+            // Use portal-based clustering to find connected interior groups
+            var clusters = ComputeClusters(wmoData, maxFacesPerCluster: 50000);
+            
+            Console.WriteLine($"[INFO] Found {clusters.Count} clusters (Cluster 0 = Exterior)");
+            
+            int mapCount = 0;
+            
+            for (int clusterIdx = 0; clusterIdx < clusters.Count; clusterIdx++)
+            {
+                var cluster = clusters[clusterIdx];
+                if (cluster.Count == 0) continue;
+                
+                // Skip cluster 0 (Exterior)
+                if (clusterIdx == 0)
+                {
+                    Console.WriteLine($"[SKIP] Cluster 0 (Exterior): {cluster.Count} groups");
+                    continue;
+                }
+                
+                // Filter to groups with BSP data
+                var bspGroups = cluster.Where(idx => wmoData.Groups[idx].BspNodes.Count > 0).ToList();
+                if (bspGroups.Count == 0)
+                {
+                    Console.WriteLine($"[SKIP] Cluster {clusterIdx}: No BSP nodes in {cluster.Count} groups");
+                    continue;
+                }
+                
+                // Compute combined bounds for this cluster
+                var clusterMin = new Vector3(float.MaxValue);
+                var clusterMax = new Vector3(float.MinValue);
+                foreach (var groupIdx in bspGroups)
+                {
+                    var group = wmoData.Groups[groupIdx];
+                    foreach (var v in group.Vertices)
+                    {
+                        clusterMin = Vector3.Min(clusterMin, v);
+                        clusterMax = Vector3.Max(clusterMax, v);
+                    }
+                }
+                
+                var padding = new Vector3(128f);
+                var paddedMin = clusterMin - padding;
+                var paddedMax = clusterMax + padding;
+                var offset = new Vector3(
+                    (clusterMin.X + clusterMax.X) / 2, 
+                    (clusterMin.Y + clusterMax.Y) / 2, 
+                    clusterMin.Z);
+                
+                var context = new MapContext 
+                { 
+                    Bounds = new GeometryBounds(clusterMin, clusterMax),
+                    GeometryOffset = offset
+                };
+                var paddedBounds = new GeometryBounds(paddedMin - offset, paddedMax - offset);
+                
+                // Build map content
+                var mapContent = new StringBuilder();
+                mapContent.AppendLine($"// Auto-generated from WMO v14 (BSP Mode) - Cluster {clusterIdx}");
+                mapContent.AppendLine($"// Groups: {string.Join(", ", bspGroups)}");
+                mapContent.AppendLine($"// Total BSP Groups: {bspGroups.Count}");
+                mapContent.AppendLine();
+                
+                // Create sealed worldspawn
+                CreateSealedWorldspawn(mapContent, wmoData, paddedBounds);
+                
+                // Generate brushes for each group in cluster
+                int totalBrushes = 0;
+                foreach (var groupIdx in bspGroups)
+                {
+                    var group = wmoData.Groups[groupIdx];
+                    GenerateBrushesFromWmoGroup(mapContent, group, wmoData, context);
+                }
+                
+                // Close worldspawn
+                mapContent.AppendLine("}");
+                mapContent.AppendLine();
+                
+                // Add spawn point
+                AddSpawnEntity(mapContent, context, paddedBounds.Min.Z);
+                
+                // Write file
+                var clusterPath = Path.Combine(outputDir, $"{baseName}_cluster{clusterIdx:D2}.map");
+                File.WriteAllText(clusterPath, mapContent.ToString());
+                
+                Console.WriteLine($"[OK] Cluster {clusterIdx}: {clusterPath} ({bspGroups.Count} groups)");
+                mapCount++;
+            }
+            
+            Console.WriteLine();
+            Console.WriteLine($"[SUMMARY] Generated {mapCount} clustered .map files");
+        }
+
+
         public void GenerateMapFileWithModels(
             string outputPath,
             string outputRootDir,
@@ -620,20 +822,51 @@ namespace WmoBspConverter.Wmo
             mapContent.AppendLine();
         }
 
+        private void GenerateBrushesFromData(StringBuilder mapContent, WmoV14Parser.WmoGroupData group, BspFile bspFile, string defaultTexture, MapContext context, WmoV14Parser.WmoV14Data fullWmoData)
+        {
+            // Determine generation strategy
+            // 0x8 = Exterior, 0x2000 = Outdoor (e.g. city streets). 
+            // Interior is usually lack of these, or 0x40 (Indoor).
+            bool isExterior = (group.Flags & (0x8 | 0x2000)) != 0;
+            bool hasBsp = group.BspNodes.Count > 0;
+            
+            bool useBsp = !isExterior && hasBsp;
+            
+            Console.WriteLine($"[DEBUG] Group '{group.Name}' Flags=0x{group.Flags:X} Ext={isExterior} BspNodes={group.BspNodes.Count} -> Strategy: {(useBsp ? "BSP RECONSTRUCTION" : "TRIANGLE MESH")}");
+
+            if (useBsp)
+            {
+                try 
+                {
+                    var walker = new BspTreeWalker();
+                    // Need full material list for texture lookup? 
+                    // Current walker creates "caulk" but we can improve.
+                    // Passing simplified texture list for now.
+                    var brushes = walker.GenerateBrushes(group, context.GeometryOffset, fullWmoData.Materials, fullWmoData.Textures);
+                    
+                    mapContent.AppendLine($"// BSP Brushes: {brushes.Count}");
+                    foreach (var b in brushes)
+                    {
+                        mapContent.Append(b);
+                    }
+                    Console.WriteLine($"[INFO] Generated {brushes.Count} brushes from BSP tree for {group.Name}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] BSP Walker failed for {group.Name}: {ex.Message}. Falling back to mesh.");
+                }
+            }
+
+            // Fallback / Exterior Logic: Triangle Mesh
+            mapContent.AppendLine("// Meshed geometry (Exterior or Fallback)");
+            GenerateBrushesFromGeometry(mapContent, bspFile, defaultTexture, context);
+        }
+
         private void GenerateBrushesFromGeometry(StringBuilder mapContent, BspFile bspFile, string defaultTexture, MapContext context)
         {
-            mapContent.AppendLine("// Complete geometry brushes generated from WMO data");
             mapContent.AppendLine($"// Total faces: {bspFile.Faces.Count}, Total vertices: {bspFile.Vertices.Count}");
             
-            // DEBUG: Output raw vertex data to console for analysis
-            Console.WriteLine("\n[DEBUG] Raw WMO vertices (first 12):");
-            for (int i = 0; i < Math.Min(12, bspFile.Vertices.Count); i++)
-            {
-                var v = bspFile.Vertices[i].Position;
-                Console.WriteLine($"  v{i}: X={v.X:F4}, Y={v.Y:F4}, Z={v.Z:F4}");
-            }
-            
-            // Generate brushes from all faces in the BSP data
             int brushCount = 0;
             int skippedCount = 0;
             foreach (var face in bspFile.Faces)
@@ -673,7 +906,6 @@ namespace WmoBspConverter.Wmo
                 
                 brushCount++;
                 
-                // Add spacing every 10 brushes to keep file readable
                 if (brushCount % 10 == 0)
                 {
                     mapContent.AppendLine();
@@ -681,10 +913,89 @@ namespace WmoBspConverter.Wmo
             }
             
             mapContent.AppendLine();
-            Console.WriteLine($"[DEBUG] Generated {brushCount} geometry brushes from WMO data");
+            Console.WriteLine($"[DEBUG] Generated {brushCount} geometry brushes from Mesh data");
             if (skippedCount > 0)
                 Console.WriteLine($"[DEBUG] Skipped {skippedCount} degenerate triangles");
         }
+
+        /// <summary>
+        /// Generate brushes from a WMO group using BSP tree reconstruction for interiors
+        /// or triangle mesh fallback for exteriors.
+        /// </summary>
+        private void GenerateBrushesFromWmoGroup(
+            StringBuilder mapContent, 
+            WmoV14Parser.WmoGroupData group, 
+            WmoV14Parser.WmoV14Data wmoData,
+            MapContext context)
+        {
+            // Check if this is an interior group with BSP data
+            bool isExterior = (group.Flags & (0x8 | 0x2000)) != 0;
+            bool hasBsp = group.BspNodes.Count > 0;
+            bool useBsp = !isExterior && hasBsp;
+            
+            Console.WriteLine($"[BSP] Group '{group.Name}' Flags=0x{group.Flags:X} Exterior={isExterior} BspNodes={group.BspNodes.Count} -> {(useBsp ? "BSP RECONSTRUCTION" : "MESH FALLBACK")}");
+
+            if (useBsp)
+            {
+                try
+                {
+                    var walker = new BspTreeWalker();
+                    var brushes = walker.GenerateBrushes(group, context.GeometryOffset, wmoData.Materials, wmoData.Textures);
+                    
+                    mapContent.AppendLine($"// BSP Reconstructed Brushes: {brushes.Count} from {group.Name}");
+                    foreach (var brush in brushes)
+                    {
+                        mapContent.Append(brush);
+                    }
+                    Console.WriteLine($"[BSP] Generated {brushes.Count} brushes via BSP tree for '{group.Name}'");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[WARN] BSP reconstruction failed for '{group.Name}': {ex.Message}. Falling back to mesh.");
+                }
+            }
+
+            // Fallback: Triangle mesh (for exteriors or BSP failure)
+            mapContent.AppendLine($"// Mesh Fallback Brushes for {group.Name}");
+            int brushCount = 0;
+            for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+            {
+                var i0 = group.Indices[i];
+                var i1 = group.Indices[i + 1];
+                var i2 = group.Indices[i + 2];
+                
+                if (i0 >= group.Vertices.Count || i1 >= group.Vertices.Count || i2 >= group.Vertices.Count)
+                    continue;
+                
+                var v0 = group.Vertices[i0];
+                var v1 = group.Vertices[i1];
+                var v2 = group.Vertices[i2];
+                
+                // Cull degenerates
+                var e1 = v1 - v0;
+                var e2 = v2 - v0;
+                if (Vector3.Cross(e1, e2).Length() < 1e-6f) continue;
+                
+                string tex = CaulkTexture;
+                int faceIdx = i / 3;
+                if (faceIdx < group.FaceMaterials.Count)
+                {
+                    int matId = group.FaceMaterials[faceIdx];
+                    if (matId < wmoData.Textures.Count)
+                        tex = wmoData.Textures[matId];
+                }
+                
+                var brush = GenerateTriangleBrushFromGeometry(v0, v1, v2, tex, context.GeometryOffset);
+                if (!string.IsNullOrEmpty(brush))
+                {
+                    mapContent.Append(brush);
+                    brushCount++;
+                }
+            }
+            Console.WriteLine($"[MESH] Generated {brushCount} triangle brushes for '{group.Name}'");
+        }
+
 
         private const string CaulkTexture = "common/caulk";
         private const float TriangleThickness = 2.0f; // Reduced thickness to preserve detail and prevent spikes
@@ -1077,15 +1388,20 @@ namespace WmoBspConverter.Wmo
                     }
                 }
                 
-                // Add padding
+                // Add padding for outer walls/ceiling
+                var geoMin = min; // Save actual geometry bounds
+                var geoMax = max;
+                
+                Console.WriteLine($"[DEBUG] Geometry bounds: min={geoMin}, max={geoMax}");
+                Console.WriteLine($"[DEBUG] Floor will be at Z={geoMin.Z - 16}");
+                
                 min -= new Vector3(512);
                 max += new Vector3(512);
                 
-                // Write Sealed Room (Using WriteBrush helper logic if available, or manual)
-                // We'll write manually to be safe
+                // Write Sealed Room with floor at geometry level
                 string caulk = "common/caulk";
-                // Floor
-                WritePlaneBrush(writer, min, max, caulk);
+                // Floor sits just below geometry, not 512 units down
+                WritePlaneBrushWithFloorAt(writer, min, max, geoMin.Z - 16, caulk);
                 
                 writer.WriteLine("}"); // Close worldspawn
                 
@@ -1100,13 +1416,15 @@ namespace WmoBspConverter.Wmo
                     writer.WriteLine("\"classname\" \"misc_model\"");
                     writer.WriteLine($"\"model\" \"{modelRelPath}\"");
                     writer.WriteLine("\"origin\" \"0 0 0\"");
+                    writer.WriteLine("\"spawnflags\" \"2\""); // 2 = solid, bake into BSP
                     writer.WriteLine("}");
                 }
                 
-                // Add Player Spawn
+                // Add Player Spawn (use geometry bounds, not padded)
                 writer.WriteLine("{");
                 writer.WriteLine("\"classname\" \"info_player_deathmatch\"");
-                writer.WriteLine($"\"origin\" \"{min.X + 64} {min.Y + 64} {min.Z + 64}\"");
+                // Spawn slightly above the floor (geoMin.Z)
+                writer.WriteLine($"\"origin\" \"{geoMin.X} {geoMin.Y} {geoMin.Z + 48}\"");
                 writer.WriteLine("}");
             }
         }
@@ -1128,16 +1446,36 @@ namespace WmoBspConverter.Wmo
              WriteSimpleBrushContent(w, min.X, min.Y, min.Z, max.X, min.Y+t, max.Z, texture); // -Y
              WriteSimpleBrushContent(w, min.X, max.Y-t, min.Z, max.X, max.Y, max.Z, texture); // +Y
         }
+
+        private void WritePlaneBrushWithFloorAt(StreamWriter w, Vector3 min, Vector3 max, float floorZ, string texture)
+        {
+             // Sealed room with floor at specific Z level
+             float t = 16f; // thickness
+             
+             // Floor at geometry level (not padded min)
+             WriteSimpleBrushContent(w, min.X, min.Y, floorZ, max.X, max.Y, floorZ+t, texture); 
+             // Ceiling
+             WriteSimpleBrushContent(w, min.X, min.Y, max.Z-t, max.X, max.Y, max.Z, texture);
+             // Walls (extend from floor to ceiling)
+             WriteSimpleBrushContent(w, min.X, min.Y, floorZ, min.X+t, max.Y, max.Z, texture); // -X
+             WriteSimpleBrushContent(w, max.X-t, min.Y, floorZ, max.X, max.Y, max.Z, texture); // +X
+             WriteSimpleBrushContent(w, min.X, min.Y, floorZ, max.X, min.Y+t, max.Z, texture); // -Y
+             WriteSimpleBrushContent(w, min.X, max.Y-t, floorZ, max.X, max.Y, max.Z, texture); // +Y
+        }
         
         private void WriteSimpleBrushContent(StreamWriter w, float x1, float y1, float z1, float x2, float y2, float z2, string texture)
         {
+            // Round to integers - q3map2 works best with integer coordinates
+            int ix1 = (int)Math.Round(x1), iy1 = (int)Math.Round(y1), iz1 = (int)Math.Round(z1);
+            int ix2 = (int)Math.Round(x2), iy2 = (int)Math.Round(y2), iz2 = (int)Math.Round(z2);
+            
             w.WriteLine("{");
-            w.WriteLine($"( {x2} {y1} {z1} ) ( {x2} {y2} {z1} ) ( {x2} {y1} {z2} ) {texture} 0 0 0 1 1"); // +X
-            w.WriteLine($"( {x1} {y1} {z1} ) ( {x1} {y1} {z2} ) ( {x1} {y2} {z1} ) {texture} 0 0 0 1 1"); // -X
-            w.WriteLine($"( {x1} {y2} {z1} ) ( {x1} {y2} {z2} ) ( {x2} {y2} {z1} ) {texture} 0 0 0 1 1"); // +Y
-            w.WriteLine($"( {x1} {y1} {z1} ) ( {x2} {y1} {z1} ) ( {x1} {y1} {z2} ) {texture} 0 0 0 1 1"); // -Y
-            w.WriteLine($"( {x1} {y1} {z2} ) ( {x2} {y1} {z2} ) ( {x1} {y2} {z2} ) {texture} 0 0 0 1 1"); // +Z
-            w.WriteLine($"( {x1} {y1} {z1} ) ( {x1} {y2} {z1} ) ( {x2} {y1} {z1} ) {texture} 0 0 0 1 1"); // -Z
+            w.WriteLine($"( {ix2} {iy1} {iz1} ) ( {ix2} {iy2} {iz1} ) ( {ix2} {iy1} {iz2} ) {texture} 0 0 0 1 1"); // +X
+            w.WriteLine($"( {ix1} {iy1} {iz1} ) ( {ix1} {iy1} {iz2} ) ( {ix1} {iy2} {iz1} ) {texture} 0 0 0 1 1"); // -X
+            w.WriteLine($"( {ix1} {iy2} {iz1} ) ( {ix1} {iy2} {iz2} ) ( {ix2} {iy2} {iz1} ) {texture} 0 0 0 1 1"); // +Y
+            w.WriteLine($"( {ix1} {iy1} {iz1} ) ( {ix2} {iy1} {iz1} ) ( {ix1} {iy1} {iz2} ) {texture} 0 0 0 1 1"); // -Y
+            w.WriteLine($"( {ix1} {iy1} {iz2} ) ( {ix2} {iy1} {iz2} ) ( {ix1} {iy2} {iz2} ) {texture} 0 0 0 1 1"); // +Z
+            w.WriteLine($"( {ix1} {iy1} {iz1} ) ( {ix1} {iy2} {iz1} ) ( {ix2} {iy1} {iz1} ) {texture} 0 0 0 1 1"); // -Z
             w.WriteLine("}");
         }
     }

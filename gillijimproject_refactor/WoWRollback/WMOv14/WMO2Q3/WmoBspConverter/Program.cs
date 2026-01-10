@@ -43,6 +43,7 @@ namespace WmoBspConverter
             bool outputMap = false;
             bool listGroups = false;
             bool outputAse = false;
+            bool bspMode = false;
 
             // Parse simple command line arguments (start from 0 if first arg is a flag)
             int startIdx = args[0].StartsWith("-") ? 0 : 1;
@@ -143,6 +144,9 @@ namespace WmoBspConverter
                     case "--ase":
                         outputAse = true;
                         break;
+                    case "--bsp-mode":
+                        bspMode = true;
+                        break;
                     case "--help":
                     case "-h":
                         ShowUsage();
@@ -183,7 +187,7 @@ namespace WmoBspConverter
                 }
                 else if (outputMap)
                 {
-                    await ConvertToMapAsync(inputFile, outputFile, outputDir, verbose, splitGroups, extractTextures);
+                    await ConvertToMapAsync(inputFile, outputFile, outputDir, verbose, splitGroups, extractTextures, bspMode);
                 }
                 else if (useQ3V2)
                 {
@@ -229,6 +233,7 @@ namespace WmoBspConverter
             Console.WriteLine("  --q3v2                    Use V2 BSP converter with proper BSP tree/visibility");
             Console.WriteLine("  --map                     Output .map file for GtkRadiant (instead of .bsp)");
             Console.WriteLine("  --ase                     Export to ASE format (3DS Max ASCII, Q3 misc_model)");
+            Console.WriteLine("  --bsp-mode                Use BSP tree reconstruction for interior brushes (experimental)");
             Console.WriteLine("  --list-groups             List all group names and info in the WMO");
             Console.WriteLine("  --help, -h                Show this help message");
             Console.WriteLine();
@@ -716,7 +721,7 @@ namespace WmoBspConverter
             await Task.CompletedTask;
         }
 
-        static async Task ConvertToMapAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups, bool extractTextures)
+        static async Task ConvertToMapAsync(string inputFile, string? outputFile, string? outputDir, bool verbose, bool splitGroups, bool extractTextures, bool bspMode = false)
         {
             if (!File.Exists(inputFile))
                 throw new FileNotFoundException($"Input file not found: {inputFile}");
@@ -733,6 +738,7 @@ namespace WmoBspConverter
             Console.WriteLine("================================");
             Console.WriteLine($"Input:  {Path.GetFullPath(inputFile)}");
             Console.WriteLine($"Output: {Path.GetFullPath(outputFile)}");
+            Console.WriteLine($"Mode:   {(bspMode ? "BSP Reconstruction (Interiors)" : "Standard (ASE Models)")}");
             Console.WriteLine();
 
             // Parse WMO v14
@@ -750,75 +756,74 @@ namespace WmoBspConverter
                 texConverter.ConvertTextures(wmoData.Textures, inputDir, outputDirectory, verbose);
             }
 
-            // Create BspFile with actual geometry for the map generator
-            var bspFile = new BspFile();
-            
-            // Add textures
-            foreach (var tex in wmoData.Textures)
+            var mapGen = new WmoMapGenerator();
+
+            if (bspMode)
             {
-                var cleanName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
-                bspFile.Textures.Add(new BspTexture { Name = $"textures/wmo/{cleanName}.tga" });
+                // NEW: Use BSP tree reconstruction with portal-based clustering
+                Console.WriteLine("[INFO] Using BSP Reconstruction Mode (Portal Clusters)...");
+                mapGen.GenerateClusteredBspMaps(outputFile, wmoData);
             }
-            if (bspFile.Textures.Count == 0)
+            else
             {
-                bspFile.Textures.Add(new BspTexture { Name = "textures/common/caulk" });
-            }
-            
-            // Add geometry from all groups
-            foreach (var group in wmoData.Groups)
-            {
-                int vertexBase = bspFile.Vertices.Count;
+                // LEGACY: ASE Model Export workflow
+                Console.WriteLine("[INFO] Using ASE Model Export (Standard Mode)...");
+
+                // Create BspFile with actual geometry for the map generator
+                var bspFile = new BspFile();
                 
-                // Add vertices
-                foreach (var v in group.Vertices)
+                // Add textures
+                foreach (var tex in wmoData.Textures)
                 {
-                    bspFile.Vertices.Add(new BspVertex { Position = v });
+                    var cleanName = Path.GetFileNameWithoutExtension(tex).ToLowerInvariant();
+                    bspFile.Textures.Add(new BspTexture { Name = $"textures/wmo/{cleanName}.tga" });
+                }
+                if (bspFile.Textures.Count == 0)
+                {
+                    bspFile.Textures.Add(new BspTexture { Name = "textures/common/caulk" });
                 }
                 
-                // Add faces (triangles)
-                for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+                // Add geometry from all groups
+                foreach (var group in wmoData.Groups)
                 {
-                    var i0 = group.Indices[i];
-                    var i1 = group.Indices[i + 1];
-                    var i2 = group.Indices[i + 2];
-                    int triIndex = i / 3;
-                    int matId = triIndex < group.FaceMaterials.Count ? group.FaceMaterials[triIndex] : 0;
+                    int vertexBase = bspFile.Vertices.Count;
                     
-                    bspFile.Faces.Add(new BspFace
+                    // Add vertices
+                    foreach (var v in group.Vertices)
                     {
-                        FirstVertex = vertexBase + i0,
-                        NumVertices = 3,
-                        Texture = matId,
-                        // Store explicit vertex indices for the triangle
-                        Vertex0 = vertexBase + i0,
-                        Vertex1 = vertexBase + i1,
-                        Vertex2 = vertexBase + i2
-                    });
+                        bspFile.Vertices.Add(new BspVertex { Position = v });
+                    }
+                    
+                    // Add faces (triangles)
+                    for (int i = 0; i + 2 < group.Indices.Count; i += 3)
+                    {
+                        var i0 = group.Indices[i];
+                        var i1 = group.Indices[i + 1];
+                        var i2 = group.Indices[i + 2];
+                        int triIndex = i / 3;
+                        int matId = triIndex < group.FaceMaterials.Count ? group.FaceMaterials[triIndex] : 0;
+                        
+                        bspFile.Faces.Add(new BspFace
+                        {
+                            FirstVertex = vertexBase + i0,
+                            NumVertices = 3,
+                            Texture = matId,
+                            Vertex0 = vertexBase + i0,
+                            Vertex1 = vertexBase + i1,
+                            Vertex2 = vertexBase + i2
+                        });
+                    }
                 }
-            }
-            
-            Console.WriteLine($"[INFO] Prepared {bspFile.Vertices.Count} vertices, {bspFile.Faces.Count} faces for .map generation");
-
-            // Generate .map file
-                // CRITICAL RESCUE: Use ASE Models + Reference Map
-                // Brush generation for complex WMOs (Ironforge) is failing due to non-convex geometry.
-                // Switching to ASE-Only workflow:
-                // 1. Export each Group as an .ase model
-                // 2. Generate a .map file that references these models as misc_model entities
-                // 3. NO brushes except the bounding box.
                 
-                Console.WriteLine("[INFO] Switching to ASE Model Export (Robust Mode)...");
+                Console.WriteLine($"[INFO] Prepared {bspFile.Vertices.Count} vertices, {bspFile.Faces.Count} faces for .map generation");
 
-                // Generate clustered map files which reference the ASE models
-                // This method also handles exporting the ASE files
-                var mapGen = new WmoMapGenerator();
                 mapGen.GenerateClusteredMapWithASE(
                     outputFile, 
                     wmoData, 
                     bspFile, 
                     outputDirectory, 
                     Path.GetFileNameWithoutExtension(inputFile));
-
+            }
 
             Console.WriteLine();
             Console.WriteLine("✓ Conversion completed!");

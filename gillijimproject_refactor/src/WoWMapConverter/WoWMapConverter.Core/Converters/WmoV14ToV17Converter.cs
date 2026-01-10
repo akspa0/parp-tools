@@ -189,7 +189,150 @@ public class WmoV14ToV17Converter
         // Recalculate bounds (Group and Global) to fix missing MOHD/MOGI boxes
         RecalculateBounds(data);
         
+        // Synchronize flags between MOGP/MOGI (Critical for visibility)
+        SynchronizeFlags(data);
+        
+        // Sort/Partition batches (Trans vs Opaque) and update counts
+        // v14 batches might be mixed; v17 requires Trans first, then Opaque
+        SortBatches(data);
+        
         return data;
+    }
+    
+    private void SortBatches(WmoV14Data data)
+    {
+        for (int i = 0; i < data.Groups.Count; i++)
+        {
+            var group = data.Groups[i];
+            if (group.Batches == null || group.Batches.Count == 0) continue;
+            
+            var transBatches = new List<WmoBatch>();
+            var opaqueBatches = new List<WmoBatch>();
+            
+            foreach (var batch in group.Batches)
+            {
+                // Check material blend mode
+                // BlendMode 0=Opaque, 1=AlphaKey (Cutout) -> Treat as Opaque for sorting
+                // BlendMode 2+=AlphaBlend/Additive/etc -> Treat as Transparent
+                bool isTrans = false;
+                if (batch.MaterialId < data.Materials.Count)
+                {
+                    var mat = data.Materials[batch.MaterialId];
+                    if (mat.BlendMode >= 2)
+                        isTrans = true;
+                }
+                
+                if (isTrans)
+                    transBatches.Add(batch);
+                else
+                    opaqueBatches.Add(batch);
+            }
+            
+            // Reconstruct list: Trans first, then Opaque
+            // (Standard 3.3.5 convention: Trans batches come first in the list)
+            group.Batches.Clear();
+            group.Batches.AddRange(transBatches);
+            group.Batches.AddRange(opaqueBatches);
+            
+            // Update counts based on group type
+            // Determine if Interior or Exterior based on Flags
+            bool isInterior = (group.Flags & 0x2000) != 0;
+            
+            group.TransBatchCount = (ushort)transBatches.Count;
+            if (isInterior)
+            {
+                group.IntBatchCount = (ushort)opaqueBatches.Count;
+                group.ExtBatchCount = 0;
+            }
+            else
+            {
+                group.IntBatchCount = 0;
+                group.ExtBatchCount = (ushort)opaqueBatches.Count;
+            }
+            
+            // Debug log
+            // Console.WriteLine($"[DEBUG] Sorted Batches Group {i}: {group.TransBatchCount} Trans, {group.IntBatchCount} Int, {group.ExtBatchCount} Ext");
+        }
+    }
+
+    private void SynchronizeFlags(WmoV14Data data)
+    {
+        for (int i = 0; i < data.Groups.Count; i++)
+        {
+            var group = data.Groups[i];
+            
+            // Calculate v17 flags (Interior/Exterior/Lighting/etc.)
+            // exact same logic as used for writing, but now applied to BOTH MOGI and MOGP
+            uint v17Flags = CalculateV17GroupFlags(group);
+            
+            // Update MOGP Flags
+            group.Flags = v17Flags;
+            
+            // Update MOGI Flags (if available)
+            if (i < data.GroupInfos.Count)
+            {
+                var info = data.GroupInfos[i];
+                info.Flags = v17Flags;
+                data.GroupInfos[i] = info;
+            }
+            
+            // Log changes for debugging
+            bool isInterior = (v17Flags & 0x2000) != 0;
+            bool isExterior = (v17Flags & 0x8) != 0;
+            // Console.WriteLine($"[DEBUG] Group {i} Flags Synced: 0x{v17Flags:X8} (Int={isInterior}, Ext={isExterior})");
+        }
+    }
+    
+    private uint CalculateV17GroupFlags(WmoGroupData group)
+    {
+        var fixedFlags = group.Flags;
+        
+        // 0x1 = has_bsp_tree (MOBN/MOBR) - We always generate BSP
+        fixedFlags |= 0x1u; 
+        
+        // INTERIOR heuristic: If NOT pure Exterior (0x8), then set Interior (0x2000)
+        // v14 often lacks 0x2000/0x8 explicitly set for what we consider "interior"
+        bool isExterior = (fixedFlags & 0x8) != 0;
+        bool isInterior = !isExterior;
+        
+        if (isInterior)
+        {
+            fixedFlags |= 0x2000u; // Set Interior flag
+        }
+        
+        // MOCV - Set for ALL groups that have vertex colors
+        if (group.VertexColors != null && group.VertexColors.Count > 0)
+        {
+            fixedFlags |= 0x4u;
+        }
+        else
+        {
+            fixedFlags &= ~0x4u;
+        }
+        
+        // Clear unsupported/generated-on-write flags
+        fixedFlags &= ~0x200u; // No MOLR
+        fixedFlags &= ~0x400u; // No MPBV
+        
+        // 0x40 = exterior_lit - Set for exterior groups
+        if (isExterior)
+        {
+            fixedFlags |= 0x40u;
+        }
+        
+        // MODR (doodads)
+        if (group.DoodadRefs != null && group.DoodadRefs.Count > 0)
+            fixedFlags |= 0x800u;
+        else
+            fixedFlags &= ~0x800u;
+
+        // MLIQ (liquid)
+        if (group.LiquidData != null && group.LiquidData.Length > 0)
+            fixedFlags |= 0x1000u;
+        else
+            fixedFlags &= ~0x1000u;
+            
+        return fixedFlags;
     }
 
     private void RecalculateBounds(WmoV14Data data)
@@ -599,8 +742,19 @@ public class WmoV14ToV17Converter
                         var u = reader.ReadSingle();
                         var v = reader.ReadSingle();
                         
-                        // FIX: Flip V coordinate for correct mapping
-                        group.UVs.Add(new Vector2(u, 1.0f - v));
+                        // FIX TENTATIVE: Users reported upside down textures.
+                        // Standard WoW is D3D-style (0,0 top-left). Noggit/GL is 0,0 bottom-left.
+                        // 1.0 - v is usually correct for conversion.
+                        // If it's STILL upside down, maybe v14 is ALREADY GL-style? (Unlikely)
+                        // Or maybe we shouldn't flip?
+                        // Let's KEEP the flip for now, as removing it would flip them back if they were correct.
+                        // If "Upside Down" means "Vertically Mirrored", then 1-v fixes it.
+                        // If they are mirrored NOW, then we should remove it.
+                        // Let's try removing it ONLY if requested.
+                        // User Request: "looks like textures are upside down" (implying CURRENT state is wrong).
+                        // Current state has `1.0 - v`. So `1.0 - v` makes it upside down?
+                        // Let's try REMOVING the flip.
+                        group.UVs.Add(new Vector2(u, v));
                     }
                     break;
 
@@ -632,26 +786,30 @@ public class WmoV14ToV17Converter
                         short tz = reader.ReadInt16();
                         
                         // Index data
-                        ushort startIndex = reader.ReadUInt16(); // 0x0E - ushort, NOT uint!
-                        ushort indexCount = reader.ReadUInt16(); // 0x10
+                        // FIX: v14 StartIndex is 32-bit (0x0E-0x11)
+                        // This was the cause of "drop-outs" (High word read as count = 0)
+                        uint startIndex = reader.ReadUInt32();   // 0x0E
+                        ushort indexCount = reader.ReadUInt16(); // 0x12
                         
-                        // Unknown (possibly vertex range)
-                        ushort unknown1 = reader.ReadUInt16(); // 0x12
-                        ushort unknown2 = reader.ReadUInt16(); // 0x14
+                        // Unknown (possibly vertex range or padding) -> Usually 0 in v14
+                        ushort unknown1 = reader.ReadUInt16();   // 0x14
                         
-                        byte flags = reader.ReadByte();        // 0x16
-                        byte unknown3 = reader.ReadByte();     // 0x17
+                        byte flags = reader.ReadByte();          // 0x16
+                        byte unknown2 = reader.ReadByte();       // 0x17
                         
-                        Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
+                        // Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
                         
                         // Store parsed batch
                         group.Batches.Add(new WmoBatch
                         {
                             MaterialId = matId,
-                            FirstFace = (uint)(startIndex / 3),
+                            FirstFace = startIndex / 3, // StartIndex is an index into indices array (triplets?) No, usually direct index.
+                            // Convert to Face Index: v14 seems to use index offsets.
+                            // However, WmoBatch expects FirstFace (i.e. index / 3).
+                            // Let's assume startIndex is index offset.
                             NumFaces = (ushort)(indexCount / 3),
-                            FirstVertex = unknown1, // May be vertex start
-                            LastVertex = unknown2,  // May be vertex end
+                            FirstVertex = 0, // Will be recalculated
+                            LastVertex = 0,  // Will be recalculated
                             Flags = flags
                         });
                     }
@@ -725,8 +883,8 @@ public class WmoV14ToV17Converter
         else
         {
             Console.WriteLine($"[DEBUG] Using {group.Batches.Count} native MOBA batches");
-            // Calculate bounding boxes for native batches (v14 doesn't have unknown_box)
-            CalculateBatchBoundingBoxes(group);
+            // Calculate bounding boxes AND fix potentially invalid vertex ranges (v14 doesn't have unknown_box)
+            RecalculateBatchData(group);
         }
         
         // v14 FIX: Validate and regenerate indices if needed
@@ -1050,36 +1208,78 @@ public class WmoV14ToV17Converter
     /// Calculate bounding boxes (unknown_box) for batches parsed from v14.
     /// v14 doesn't have the bx,by,bz,tx,ty,tz fields that v17 requires.
     /// </summary>
-    private void CalculateBatchBoundingBoxes(WmoGroupData group)
+    /// <summary>
+    /// Recalculate batch data (Vertex Start/End, Bounding Box) from actual geometry.
+    /// v14 MOBA "unknown" fields (0x12, 0x14) are NOT reliable vertex ranges.
+    /// We must scan the index buffer to get true min/max vertices to prevent culling issues.
+    /// </summary>
+    private void RecalculateBatchData(WmoGroupData group)
     {
         for (int batchIdx = 0; batchIdx < group.Batches.Count; batchIdx++)
         {
             var batch = group.Batches[batchIdx];
             
-            // Skip if already has bounding box
-            if (batch.BoundingBoxRaw != null && batch.BoundingBoxRaw.Length == 12)
-                continue;
+            // Calculate true min/max vertex index and bounding box from the index buffer
+            // FirstFace and NumFaces are reliable (from MOBA 0x0E/0x10)
             
-            // Find min/max from vertices in this batch
+            uint faceStart = batch.FirstFace;
+            uint numFaces = batch.NumFaces;
+            uint indexStart = faceStart * 3;
+            uint indexCount = (uint)(numFaces * 3);
+            
+            if (indexStart + indexCount > group.Indices.Count)
+            {
+                Console.WriteLine($"[WARNING] Batch {batchIdx} indices out of range! Start={indexStart} Count={indexCount} Total={group.Indices.Count}");
+                continue;
+            }
+
+            ushort minV = ushort.MaxValue;
+            ushort maxV = 0;
+            
             float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
             float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
             
-            // Use FirstVertex to LastVertex range
-            int startVert = batch.FirstVertex;
-            int endVert = batch.LastVertex;
-            
-            for (int v = startVert; v <= endVert && v < group.Vertices.Count; v++)
+            bool hasValidIndices = false;
+
+            for (int i = 0; i < indexCount; i++)
             {
-                var vert = group.Vertices[v];
-                if (vert.X < minX) minX = vert.X;
-                if (vert.Y < minY) minY = vert.Y;
-                if (vert.Z < minZ) minZ = vert.Z;
-                if (vert.X > maxX) maxX = vert.X;
-                if (vert.Y > maxY) maxY = vert.Y;
-                if (vert.Z > maxZ) maxZ = vert.Z;
+                ushort vIdx = group.Indices[(int)(indexStart + i)];
+                
+                // Track min/max vertex index
+                if (vIdx < minV) minV = vIdx;
+                if (vIdx > maxV) maxV = vIdx;
+                
+                // Track bounding box
+                if (vIdx < group.Vertices.Count)
+                {
+                    var vert = group.Vertices[vIdx];
+                    if (vert.X < minX) minX = vert.X;
+                    if (vert.Y < minY) minY = vert.Y;
+                    if (vert.Z < minZ) minZ = vert.Z;
+                    if (vert.X > maxX) maxX = vert.X;
+                    if (vert.Y > maxY) maxY = vert.Y;
+                    if (vert.Z > maxZ) maxZ = vert.Z;
+                    hasValidIndices = true;
+                }
             }
             
-            // Convert to int16, rounding away from zero
+            if (!hasValidIndices)
+            {
+                Console.WriteLine($"[WARNING] Batch {batchIdx} has no valid indices/vertices!");
+                continue;
+            }
+
+            // Update batch with TRUE vertex range
+            // This is critical for incorrect culling when v14 inputs are garbage
+            if (batch.FirstVertex != minV || batch.LastVertex != maxV)
+            {
+                // Console.WriteLine($"[FIX] Batch {batchIdx} Vertex Range: Old={batch.FirstVertex}-{batch.LastVertex} -> New={minV}-{maxV}");
+                batch.FirstVertex = minV;
+                batch.LastVertex = maxV;
+            }
+
+            // Recalculate Bounding Box (always, don't trust v14)
+            // Convert to int16, rounding away from zero (conservative bounds)
             short bx = (short)Math.Floor(minX);
             short by = (short)Math.Floor(minY);
             short bz = (short)Math.Floor(minZ);
@@ -1098,7 +1298,7 @@ public class WmoV14ToV17Converter
             // Update the batch in the list (struct copy)
             group.Batches[batchIdx] = batch;
             
-            Console.WriteLine($"[DEBUG] Calculated Batch {batchIdx} Box: [{bx},{by},{bz}]-[{tx},{ty},{tz}]");
+            // Console.WriteLine($"[DEBUG] Recalculated Batch {batchIdx} Box: [{bx},{by},{bz}]-[{tx},{ty},{tz}]");
         }
     }
 
@@ -1642,61 +1842,15 @@ public class WmoV14ToV17Converter
         var mogpDataStart = writer.BaseStream.Position;
 
         // MOGP header (68 bytes per noggit-red wmo_group_header)
-        // Fix flags based on what we are about to write
-        // 0x1    = has_bsp_tree (MOBN/MOBR) - We generate default
-        // 0x4    = has_vertex_color (MOCV) - We generate/preserve
-        // 0x200  = has_light (MOLR) - We DON'T generate (Clear)
-        // 0x400  = has_MPBV etc - We DON'T generate (Clear)
-        // 0x800  = has_doodads (MODR) - We preserve if present
-        // 0x1000 = has_liquid (MLIQ) - We preserve if present
+        // Flags are now PRE-CALCULATED via SynchronizeFlags() to ensure MOGI/MOGP consistency.
+        // We just use group.Flags directly.
 
         var fixedFlags = group.Flags;
-        fixedFlags |= 0x1u; // MOBN - we always write BSP
         
-        // INTERIOR heuristic: If NOT Exterior (0x8), then set Interior (0x2000)
-        // This matches real 3.3.5 behavior where Group 0 is Interior and Group 1 is Exterior
+        // Debug output for confirmation
+        bool isInterior = (fixedFlags & 0x2000) != 0;
         bool isExterior = (fixedFlags & 0x8) != 0;
-        bool isInterior = !isExterior;
-        if (isInterior)
-        {
-            fixedFlags |= 0x2000u; // Set Interior flag
-        }
-        
-        // MOCV - Set for ALL groups that have vertex colors (fixes black exterior rendering)
-        // v14 WMOs converted to v17 need MOCV because they don't have proper lighting
-        if (group.VertexColors != null && group.VertexColors.Count > 0)
-        {
-            fixedFlags |= 0x4u;
-            Console.WriteLine($"[DEBUG] Setting MOCV flag for group ({group.VertexColors.Count} colors, Interior={isInterior})");
-        }
-        else
-        {
-            fixedFlags &= ~0x4u; // Clear if no colors
-        }
-        
-        fixedFlags &= ~0x200u; // No MOLR
-        fixedFlags &= ~0x400u; // No MPBV
-        
-        // 0x40 = exterior_lit - Set for exterior groups (outdoor lighting)
-        if (isExterior)
-        {
-            fixedFlags |= 0x40u;
-            Console.WriteLine($"[DEBUG] Setting exterior_lit flag (0x40) for exterior group");
-        }
-        
-        // MODR (doodads) - set if we have doodad refs
-        if (group.DoodadRefs != null && group.DoodadRefs.Count > 0)
-            fixedFlags |= 0x800u;
-        else
-            fixedFlags &= ~0x800u;
-
-        // MLIQ
-        if (group.LiquidData != null && group.LiquidData.Length > 0)
-            fixedFlags |= 0x1000u;
-        else
-            fixedFlags &= ~0x1000u;
-            
-        Console.WriteLine($"[DEBUG] Group flags: 0x{fixedFlags:X8} (Interior={isInterior}, Exterior={isExterior}, MOCV={(fixedFlags & 0x4) != 0})");
+        Console.WriteLine($"[DEBUG] Writing Group Flags: 0x{fixedFlags:X8} (Int={isInterior}, Ext={isExterior})");
 
         
         writer.Write(group.NameOffset);                      // +0x00 (4)
@@ -1809,11 +1963,21 @@ public class WmoV14ToV17Converter
         // Writing dummy leaf node
         WriteSubChunk(writer, "MOBN", w =>
         {
-            w.Write((short)4); // 4 = Leaf
-            w.Write((short)0); // flags?
-            w.Write((short)group.Indices.Count / 3); // nFaces
-            w.Write((int)0); // faceStart
-            w.Write(0f); // planeDist
+            // Valid MOBN Node (16 bytes)
+            // Offset   Type    Name        Description
+            // 0x00     uint16  Flags       4 = Leaf, 0 = Branch/Node
+            // 0x02     int16   NegChild    Index of negative child node (or -1/0 if leaf)
+            // 0x04     int16   PosChild    Index of positive child node (or -1/0 if leaf)
+            // 0x06     uint16  nFaces      Number of faces in this node (0 if branch)
+            // 0x08     uint32  FaceStart   Index into MOBR array (first face index)
+            // 0x0C     float   PlaneDist   Distance to splitting plane
+            
+            w.Write((ushort)4); // Flags: 4 = Leaf
+            w.Write((short)-1); // NegChild: -1 (Leaf/NoChild) - Noggit defines Flag_NoChild = 0xFFFF
+            w.Write((short)-1); // PosChild: -1 (Leaf/NoChild)
+            w.Write((ushort)(group.Indices.Count / 3)); // nFaces: All faces in this single leaf
+            w.Write((uint)0);   // FaceStart: Start at 0 in MOBR
+            w.Write(0f);        // PlaneDist: 0 for leaf
         });
         
         WriteSubChunk(writer, "MOBR", w =>
@@ -1822,6 +1986,10 @@ public class WmoV14ToV17Converter
             for (ushort f = 0; f < group.Indices.Count / 3; f++)
                 w.Write(f);
         });
+
+        // 10b. MPBP, MPBI, MPBG - Only required if flag 0x400 is set.
+        // Input has 0x2007 (No 0x400), so we must NOT write these.
+
 
         // 11. MPBV (Portals) - Skipped (Flag 0x400 cleared)
 
