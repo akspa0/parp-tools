@@ -2,64 +2,58 @@
 
 **Complete workflows for converting map data between World of Warcraft versions.**
 
+> **Tool**: [WoWMapConverter v3](../src/WoWMapConverter/README.md)  
+> Bidirectional conversion toolkit supporting Alpha 0.5.3 through modern retail.
+
 ---
 
 ## Overview
 
-| Workflow | Source | Target | Status |
+| Workflow | Source | Target | Tool |
 |:---|:---|:---|:---|
-| Alpha → WotLK | 0.5.3 | 3.3.5a | Automated |
-| Modern → Alpha | 11.0+ | 0.5.3 | Manual steps |
-| WMO v14 → v17 | 0.5.3 | 3.3.5a | Automated |
+| Alpha → WotLK | 0.5.3 | 3.3.5a | WoWMapConverter.Cli |
+| WMO v14 → v17 | 0.5.3 | 3.3.5a | WoWMapConverter.Cli |
+| Modern → Alpha | 11.0+ | 0.5.3 | Manual (WoWMapConverter + BlpResize) |
 
 ---
 
-# Part 1: Alpha (0.5.3) to WotLK (3.3.5)
-
-Fully automated by the **WoWRollback** toolchain.
+# Part 1: WoWMapConverter v3 Quick Start
 
 ## Prerequisites
-- **WoWRollback** (built from source)
-- **Alpha Data**: Extracted 0.5.3 client data (WDT/ADT/DBC)
-- **LK Data**: 3.3.5 DBFilesClient (for crosswalks)
+- .NET 9.0 SDK
+- Community listfile CSV (optional but recommended)
 
-## Data Layout
-```
-test_data/
-├── 0.5.3/tree/
-│   ├── DBFilesClient/     (AreaTable.dbc, Map.dbc)
-│   └── World/Maps/<Map>/
-└── 3.3.5/tree/DBFilesClient/
-```
-
-## Workflow
-
-### Step 1: Run Conversion
+## Build
 ```powershell
-dotnet run --project WoWRollback.Orchestrator -- \
-  --maps Shadowfang \
-  --versions 0.5.3 \
-  --alpha-root ../test_data \
-  --lk-dbc-dir ../test_data/3.3.5/tree/DBFilesClient \
-  --serve --port 8080
+dotnet build src/WoWMapConverter/WoWMapConverter.Cli
 ```
 
-### Step 2: Verify Results
-The tool will:
-- Generate AreaID crosswalks
-- Convert ADTs to 3.3.5 format
-- Fix coordinates (Y/Z swap)
-- Launch web viewer
+## Supported Versions
+| Version | ADT | WMO | Models | Status |
+|:---|:---|:---|:---|:---|
+| Alpha 0.5.3 | Monolithic WDT | v14 | MDX | ✅ Ghidra-verified |
+| Classic-WotLK | v18 | v17 | M2 | ✅ Full support |
+| Cata+ | Split (_tex0/_obj0) | v17+ | M2/M3 | 🔧 In progress |
 
-### Output Locations
-- ADTs: `parp_out/session_.../03_adts`
-- Crosswalks: `parp_out/session_.../02_crosswalks`
+> [!NOTE]
+> **CASC Loading**: The core library includes `CascReader.cs` for direct modern client loading. This feature is implemented but **untested** - revisit when needed.
+
 
 ---
 
 # Part 2: WMO v14 to v17 Conversion
 
 Converts Alpha WMO files to WotLK-compatible format.
+
+## Command
+```powershell
+dotnet run --project src/WoWMapConverter/WoWMapConverter.Cli -- \
+  convert-wmo \
+  --input path/to/Ironforge.wmo \
+  --output path/to/output.wmo \
+  --verbose
+```
+
 
 ## Prerequisites
 - **WoWMapConverter.Cli** (built)
@@ -76,11 +70,14 @@ dotnet run --project WoWMapConverter.Cli -- \
   --verbose
 ```
 
-### Step 2: Copy Textures
-The converter lists referenced textures. Copy them from Alpha data to your output:
+### Step 2: Textures (Automatic)
+The converter automatically exports all referenced textures alongside the WMO:
 ```
-DUNGEONS\TEXTURES\...
+output/
+├── Ironforge.wmo
+└── DUNGEONS/TEXTURES/...  (all referenced BLPs)
 ```
+
 
 ### Step 3: Verify in Noggit
 Load the converted WMO in Noggit 3.x to verify:
@@ -134,6 +131,14 @@ float alphaX = modernX;
 float alphaY = modernZ;  // Height moves to Y
 float alphaZ = modernY;  // Forward moves to Z
 ```
+
+### WMO Troubleshooting
+> [!TIP]
+> **Corrupt Groups in Noggit / Visible Gaps**:
+> This often indicates a mismatch in `MOGP` header size handling. Alpha WMOs on disk may have 68-byte headers, while the client expects 128 bytes. The Converter (v3) uses **Adaptive Header Skipping** to handle this automatically. If you see corrupt groups, ensure you are using the latest build.
+>
+> **Upside-Down Textures**:
+> If textures appear vertically flipped in Noggit, it may be due to incorrect V-coordinate flipping in the converter. The current converter uses a **Clean Pass-Through** strategy (no flip on read, no flip on write), which preserves the original Alpha orientation. This usually produces correct results for WotLK/Noggit.
 
 ### Step 4: ADT Conversion
 - Strip modern chunks (MFBO, MTXF)

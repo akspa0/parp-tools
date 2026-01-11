@@ -150,30 +150,100 @@ In later clients (3.3.5a+), audio zone data is stored in:
 The SndDebug tool was likely used by Blizzard developers to **prototype** audio zones, then the results were manually entered into DBC files for production builds.
 
 
-### Cheat Commands
+#### WMO v14 Format Specification
+**Based on Ghidra Analysis of 0.5.3 Client (Build 3368) and Debugging**
 
-| Command | Syntax | Description | Opcode |
+#### Group File Structure
+Unlike WotLK (v17), Alpha WMO Groups use a different chunk order and header handling.
+
+1.  **MOGP Header Size**:
+    *   **Memory / Conversion**: The 0.5.3 client unconditionally adds `0x80` (128 bytes) to the MOGP chunk pointer to find the first subchunk (`MOPY`, `MOVI`, etc.).
+    *   **Disk**: Files on disk (like `Ironforge.wmo`) may use a shorter header (68 bytes).
+    *   **Handling**: A robust converter must use **Adaptive Header Skipping** by peeking for subchunk signatures (`MOPY`, `MOVI`) at offset 0x44 (68) and 0x80 (128). Blindly skipping 128 bytes on a 68-byte header file leads to "Corrupt Groups" (skipping valid data).
+
+2.  **Chunk Order**:
+    Analysis of `CMapObjGroup::ReadRequiredChunks` confirms the parsing order:
+    1.  `MOGP` (Header)
+    2.  `MOPY` (Material Info)
+    3.  `MOVT` (Vertices)
+    4.  `MONR` (Normals)
+    5.  `MOTV` (UV Coordinates - **Required** if texture used)
+    6.  `MOIN` (Indices - **Note Token Change!**)
+    7.  `MOBA` (Batches)
+    8.  Optional Chunks: `MOLR` (Lights), `MODR` (Doodad Refs), `MOBN/MOBR` (BSP), `MOCV` (Colors).
+
+3.  **Key Chunk Differences**:
+    *   **MOIN (Indices)**: v14 uses the token `MOIN` (Little Endian: `NIOM`) instead of `MOVI`. The content is standard `ushort` indices.
+    *   **MOTV (UVs)**: Standard `Vector2` (float, float). Coordinate system matches WotLK (no V-flip required for pass-through conversion).
+    *   **MOBA (Batches)**:
+        *   `StartIndex` is `ushort` (vs `uint32` in v17).
+        *   `IndexCount` is `ushort`.
+        *   Noggit/WotLK expects `StartIndex` to be an index into the index array.
+        *   Converter strategy: Cast `ushort` to `uint` for v17 output.
+
+#### Debugging Setup (MCP-x64dbg)
+To debug WMO loading in 0.5.3:
+*   **Target**: `wowclient.exe` (0.5.3).
+*   **Breakpoint**: `CMapObjGroup::CreateOptionalDataPointers` (`006af4d0` in standard mapping, verify with pattern `55 8B EC 83 EC 08 56 8B F1 8B 06`).
+*   **Chunk Inspection**: The chunk data pointer is passed as `Arg1` (`[EBP+0x08]`) to this function. Note that this function processes *optional* chunks (after `MOBA`). Required chunks are parsed by the caller (`CMapObjGroup::ReadRequiredChunks`, near `006af...`).
+
+---
+
+## Cheat Commands
+ (Ghidra-Verified)
+
+All commands registered via `ConsoleCommandRegister` in category `DEBUG` or `GAME`.
+
+| Command | Address | Syntax | Description |
 |:---|:---|:---|:---|
-| `speed` | `speed <float>` | Set run speed | - |
-| `teleport` | `teleport <x> <y> <z>` | Teleport to coords | 0xC6 |
-| `money` | `money <copper>` | Set money | 0x24 |
-| `level` | `level <1-100>` | Set level | 0x25 |
-| `ci` | `ci <itemId>` | Create item | 0x13 |
-| `cm` | `cm <creatureId>` | Create monster | 0x11 |
+| `speed` | 00832a9c | `speed <float>` | Set run speed multiplier |
+| `walkspeed` | 00832a90 | `walkspeed <float>` | Set walk speed |
+| `swimspeed` | 00832a84 | `swimspeed <float>` | Set swim speed |
+| `turnspeed` | 00832a78 | `turnspeed <float>` | Set turn speed |
+| `teleport` | 008540d0 | `teleport <x> <y> <z> [o]` | Teleport to coordinates |
+| `worldport` | 00832a64 | `worldport <continent> [x y z] [facing]` | Change continent |
+| `money` | 00832a5c | `money [copper]` | Set player money |
+| `level` | 00832998 | `level <1-100>` | Set player level |
+| `petlevel` | 0083298c | `petlevel <level>` | Set pet level |
+| `beastmaster` | 008329bc | `beastmaster <on/off>` | Toggle beastmaster mode |
+| `godmode` | 0085e494 | `godmode` | Toggle god mode |
 
 ### Quest Commands
 
-| Command | Syntax | Opcode |
+| Command | Address | Description |
 |:---|:---|:---|
-| `flagquest` | `flagquest <id>` | 0x2A |
-| `finishquest` | `finishquest <id>` | 0x2B |
-| `clearquest` | `clearquest <id>` | 0x2C |
+| `flagquest` | 00832974 | Flag quest as active |
+| `finishquest` | 0083291c | Mark quest as finished |
+| `clearquest` | 00832980 | Clear quest from log |
+| `questquery` | 00832900 | Query quest giver |
+| `questaccept` | 008328f4 | Accept quest |
+| `questcomplete` | 008328e4 | Complete quest |
+| `questcancel` | 008328d8 | Abandon quest |
 
 ### GM Commands
-`ghost`, `invis`, `bindplayer`, `summon`, `showlabel`, `setsecurity`, `nuke`
 
-### Dead Code
-- **MDL Exporter**: `007b3a7a` - Warcraft 3 model export header writer (unreachable)
+| Command | Address | Description |
+|:---|:---|:---|
+| `ghost` | 00833144 | Enter ghost mode |
+| `invis` | 00833138 | GM Invisibility ("Go GM Invis") |
+| `nuke` | 0083301c | Forcibly remove player from server |
+| `summon` | 008330c8 | Summon player to location |
+| `showlabel` | 0083309c | Toggle showing 'GM' label |
+
+### Debug CVars
+
+| CVar | Address | Description |
+|:---|:---|:---|
+| `debugobjectpathing` | 00846b4c | Object pathing debug |
+| `playercombatlogdebug` | 00865254 | Combat log debug |
+| `CombatDebugShowFlags` | 0085e28c | Show combat debug flags |
+| `debugTargetInfo` | 0083207c | Toggle target tooltips |
+| `CombatDebugForceActionOn` | 0085e300 | Force combat action |
+
+---
+
+## Dead Code & Latent Tools
+**MDL Exporter**: `007b3a7a` - Warcraft 3 model export header writer (unreachable)
 - **God Mode**: Logic exists but command stripped
 
 ---

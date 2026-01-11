@@ -362,8 +362,8 @@ public class WmoV14ToV17ExtendedConverter
                         group.Batches.Add(new WmoV14ToV17Converter.WmoBatch
                         {
                             MaterialId = matId,
-                            FirstFace = (uint)(startIndex / 3),
-                            NumFaces = (ushort)(count / 3),
+                            FirstIndex = startIndex,
+                            IndexCount = count,
                             FirstVertex = u1,
                             LastVertex = u2,
                             Flags = flags,
@@ -409,10 +409,10 @@ public class WmoV14ToV17ExtendedConverter
         group.FaceMaterials.Clear();
         group.Batches = new List<WmoV14ToV17Converter.WmoBatch>();
         
-        uint currentFace = 0;
+        uint currentIndex = 0;
         foreach (var kvp in facesByMat.OrderBy(k => k.Key))
         {
-             var batch = new WmoV14ToV17Converter.WmoBatch { MaterialId = kvp.Key, FirstFace = currentFace, NumFaces = (ushort)(kvp.Value.Count / 3) };
+             var batch = new WmoV14ToV17Converter.WmoBatch { MaterialId = kvp.Key, FirstIndex = currentIndex, IndexCount = (ushort)kvp.Value.Count };
              ushort min=ushort.MaxValue, max=0;
              foreach(var idx in kvp.Value) {
                  if (idx < min) min = idx;
@@ -422,12 +422,12 @@ public class WmoV14ToV17ExtendedConverter
              batch.FirstVertex = min;
              batch.LastVertex = max;
              // Add MOPY
-             for(int i=0; i < batch.NumFaces; i++) group.FaceMaterials.Add(batch.MaterialId);
+             for(int i=0; i < batch.IndexCount / 3; i++) group.FaceMaterials.Add(batch.MaterialId);
              
              // Box
              batch.BoundingBoxRaw = new byte[12]; // Dummy
              group.Batches.Add(batch);
-             currentFace += batch.NumFaces;
+             currentIndex += batch.IndexCount;
         }
     }
 
@@ -690,8 +690,8 @@ public class WmoV14ToV17ExtendedConverter
                    if (b.BoundingBoxRaw != null && b.BoundingBoxRaw.Length == 12) w.Write(b.BoundingBoxRaw);
                    else w.Write(new byte[12]);
                    
-                   w.Write((uint)(b.FirstFace * 3)); 
-                   w.Write((ushort)(b.NumFaces * 3)); 
+                   w.Write(b.FirstIndex); 
+                   w.Write(b.IndexCount); 
                    w.Write(b.FirstVertex);
                    w.Write(b.LastVertex);
                    w.Write(b.Flags);

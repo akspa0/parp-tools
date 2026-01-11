@@ -666,7 +666,33 @@ public class WmoV14ToV17Converter
         
         // Skip remaining header bytes to reach offset 0x80 where subchunks start
         // We've read 48 bytes (0x30), need to skip to 0x80
-        reader.ReadBytes(0x80 - 0x30); // Skip 80 bytes (fog indices, batch info, etc.)
+        // ADAPTIVE HEADER SKIP:
+        // Check for subchunk magic at offset 0x44 (68 bytes) vs 0x80 (128 bytes)
+        // We have read 0x30 (48) bytes.
+        long currentPos = reader.BaseStream.Position;
+        
+        // Peek at offset 0x44 (current + (0x44 - 0x30) = current + 20)
+        reader.BaseStream.Seek(currentPos + (0x44 - 0x30), SeekOrigin.Begin);
+        byte[] magicPeek = reader.ReadBytes(4);
+        string magicStr = new string(magicPeek.Select(b => (char)b).Reverse().ToArray());
+
+        bool isShortHeader = (magicStr == "MOPY" || magicStr == "MOVI" || magicStr == "MOVT");
+        
+        // Reset and skip properly
+        reader.BaseStream.Seek(currentPos, SeekOrigin.Begin);
+
+        if (isShortHeader)
+        {
+             // Skip to 0x44 (68 bytes)
+             reader.ReadBytes(0x44 - 0x30);
+             Console.WriteLine($"[DEBUG] Detected SHORT MOGP Header (68 bytes) for group {group.NameOffset}");
+        }
+        else
+        {
+             // Skip to 0x80 (128 bytes) - Standard Alpha
+             reader.ReadBytes(0x80 - 0x30);
+             Console.WriteLine($"[DEBUG] Detected LONG MOGP Header (128 bytes) for group {group.NameOffset}");
+        }
 
 
         // Parse sub-chunks
@@ -743,7 +769,7 @@ public class WmoV14ToV17Converter
                         var v = reader.ReadSingle();
                         
                         // FIX: Flip V coordinate for correct mapping
-                        group.UVs.Add(new Vector2(u, 1.0f - v));
+                        group.UVs.Add(new Vector2(u, v));
                     }
                     break;
 
@@ -791,8 +817,8 @@ public class WmoV14ToV17Converter
                         group.Batches.Add(new WmoBatch
                         {
                             MaterialId = matId,
-                            FirstFace = (uint)(startIndex / 3),
-                            NumFaces = (ushort)(indexCount / 3),
+                            FirstIndex = startIndex, // Store raw index offset (v17 uses uint32)
+                            IndexCount = indexCount, // Store raw index count
                             FirstVertex = unknown1, // May be vertex start
                             LastVertex = unknown2,  // May be vertex end
                             Flags = flags
@@ -1104,18 +1130,18 @@ public class WmoV14ToV17Converter
         group.FaceMaterials.Clear(); // Rebuild MOPY to match index order
         group.Batches = new List<WmoBatch>();
         
-        uint currentFaceStart = 0;
+        uint currentIndexStart = 0;
         
         foreach (var kvp in facesByMat.OrderBy(k => k.Key))
         {
             byte matId = kvp.Key;
             var indices = kvp.Value;
-            var numFaces = (ushort)(indices.Count / 3);
+            var indexCount = (ushort)indices.Count;
             
             var batch = new WmoBatch();
             batch.MaterialId = matId;
-            batch.FirstFace = currentFaceStart;
-            batch.NumFaces = numFaces;
+            batch.FirstIndex = currentIndexStart;
+            batch.IndexCount = indexCount;
             batch.Flags = 0; // Default flags
             
             // Rebuild Indices and MOPY
@@ -1183,9 +1209,9 @@ public class WmoV14ToV17Converter
             }
             
             group.Batches.Add(batch);
-            currentFaceStart += numFaces;
+            currentIndexStart += indexCount;
             
-            Console.WriteLine($"[DEBUG] Rebuilt Batch Mat={matId}: Faces={numFaces}, Verts=[{minV}-{maxV}], Box=[{bx},{by},{bz}]-[{tx},{ty},{tz}]");
+            Console.WriteLine($"[DEBUG] Rebuilt Batch Mat={matId}: Faces={indexCount/3}, Verts=[{minV}-{maxV}], Box=[{bx},{by},{bz}]-[{tx},{ty},{tz}]");
         }
     }
     
@@ -1205,12 +1231,10 @@ public class WmoV14ToV17Converter
             var batch = group.Batches[batchIdx];
             
             // Calculate true min/max vertex index and bounding box from the index buffer
-            // FirstFace and NumFaces are reliable (from MOBA 0x0E/0x10)
+            // FirstIndex and IndexCount are reliable (from MOBA 0x0E/0x10)
             
-            uint faceStart = batch.FirstFace;
-            uint numFaces = batch.NumFaces;
-            uint indexStart = faceStart * 3;
-            uint indexCount = (uint)(numFaces * 3);
+            uint indexStart = batch.FirstIndex;
+            uint indexCount = batch.IndexCount;
             
             if (indexStart + indexCount > group.Indices.Count)
             {
@@ -1893,7 +1917,7 @@ public class WmoV14ToV17Converter
                 WriteVector3(w, n);
         });
 
-        // 5. MOTV (UVs)
+        // 5. MOTV (UVs) - V coordinate flipped for v17 compatibility
         WriteSubChunk(writer, "MOTV", w =>
         {
             foreach (var uv in group.UVs)
@@ -1918,8 +1942,8 @@ public class WmoV14ToV17Converter
                     else
                         w.Write(new byte[12]); // Empty box
                     
-                    w.Write((uint)(b.FirstFace * 3)); // v17 expects Index Start (Offset), not Face Index
-                    w.Write((ushort)(b.NumFaces * 3)); // v17 expects Index Count, not Face Count
+                    w.Write(b.FirstIndex); // v17 expects Index Start
+                    w.Write(b.IndexCount); // v17 expects Index Count
                     w.Write(b.FirstVertex);
                     w.Write(b.LastVertex);
                     w.Write(b.Flags);
@@ -2157,8 +2181,8 @@ public class WmoV14ToV17Converter
     public struct WmoBatch
     {
         public byte[] BoundingBoxRaw; // 12 bytes (2x 3x int16)
-        public uint FirstFace;
-        public ushort NumFaces, FirstVertex, LastVertex;
+        public uint FirstIndex;
+        public ushort IndexCount, FirstVertex, LastVertex;
         public byte Flags, MaterialId;
     }
 
