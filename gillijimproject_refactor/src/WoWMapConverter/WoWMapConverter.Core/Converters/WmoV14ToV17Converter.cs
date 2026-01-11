@@ -1945,14 +1945,18 @@ public class WmoV14ToV17Converter
         }
 
         // 10. MOBN + MOBR (BSP Tree) - Flag 0x1
-        // Writing dummy leaf node
+        // Writing a single dummy LEAF node (CAaBspNode = 16 bytes)
+        // struct CAaBspNode { uint16 flags; int16 negChild; int16 posChild; uint16 nFaces; uint32 faceStart; float planeDist; }
         WriteSubChunk(writer, "MOBN", w =>
         {
-            w.Write((short)4); // 4 = Leaf
-            w.Write((short)0); // flags?
-            w.Write((short)group.Indices.Count / 3); // nFaces
-            w.Write((int)0); // faceStart
-            w.Write(0f); // planeDist
+            ushort numFaces = (ushort)(group.Indices.Count / 3);
+            w.Write((ushort)0x4);      // flags: 4 = Leaf
+            w.Write((short)-1);        // negChild: -1 (Flag_NoChild)
+            w.Write((short)-1);        // posChild: -1 (Flag_NoChild)
+            w.Write(numFaces);         // nFaces
+            w.Write((uint)0);          // faceStart: index in MOBR
+            w.Write(0.0f);             // planeDist
+            // Total: 2+2+2+2+4+4 = 16 bytes
         });
         
         WriteSubChunk(writer, "MOBR", w =>

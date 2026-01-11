@@ -96,3 +96,100 @@ To support these versions, the converter must handle:
 
 3.  **WDT Compatibility**:
     *   WDT format (MDDF/MODF) is **identical** across 0.5.3, 0.5.5, and 0.6.0.
+
+---
+
+## 4. WMO v17 (Standard) - Reference Specification
+
+**File Spec**: `v17`  
+**Used in**: WoW 3.3.5a (Wrath of the Lich King) and later.
+
+This section documents the **definitive v17 format** based on wowdev.wiki and Ghidra analysis of the 3.3.5a client.
+
+### 4.1 MOGP Header (68 bytes)
+
+```c
+struct SMOGroupHeader {
+  /*0x00*/ uint32_t groupName;           // Offset into MOGN
+  /*0x04*/ uint32_t descriptiveGroupName;
+  /*0x08*/ uint32_t flags;               // See group flags below
+  /*0x0C*/ CAaBox boundingBox;           // 24 bytes (2x C3Vector)
+  /*0x24*/ uint16_t portalStart;         // Index into MOPR
+  /*0x26*/ uint16_t portalCount;
+  /*0x28*/ uint16_t transBatchCount;     // Transparent batches
+  /*0x2A*/ uint16_t intBatchCount;       // Interior batches
+  /*0x2C*/ uint16_t extBatchCount;       // Exterior batches
+  /*0x2E*/ uint16_t padding;
+  /*0x30*/ uint8_t fogIds[4];
+  /*0x34*/ uint32_t groupLiquid;
+  /*0x38*/ uint32_t uniqueID;            // WMOAreaTable ID
+  /*0x3C*/ uint32_t flags2;
+  /*0x40*/ uint32_t unk;
+}; // Total: 68 bytes (0x44)
+```
+
+**Critical**: `transBatchCount + intBatchCount + extBatchCount` MUST equal total batch count in MOBA.
+
+### 4.2 MOBA (Render Batches) - 24 bytes per batch
+
+```c
+struct SMOBatch {
+  /*0x00*/ int16_t bx, by, bz;           // Bounding box min (truncated floats)
+  /*0x06*/ int16_t tx, ty, tz;           // Bounding box max
+  /*0x0C*/ uint32_t startIndex;          // First index in MOVI (vertex indices)
+  /*0x10*/ uint16_t count;               // Number of MOVI indices
+  /*0x12*/ uint16_t minIndex;            // First vertex in MOVT
+  /*0x14*/ uint16_t maxIndex;            // Last vertex in MOVT (inclusive)
+  /*0x16*/ uint8_t flags;
+  /*0x17*/ uint8_t material_id;          // Index into MOMT
+}; // Total: 24 bytes (0x18)
+```
+
+**Bounding Box**: Used for batch-level culling. Must be calculated from actual vertices.
+
+### 4.3 MOBN (BSP Tree Nodes) - 16 bytes per node
+
+```c
+struct CAaBspNode {
+  /*0x00*/ uint16_t flags;      // 0=YZ, 1=XZ, 2=XY, 4=Leaf
+  /*0x02*/ int16_t negChild;    // -1 (0xFFFF) for no child
+  /*0x04*/ int16_t posChild;    // -1 (0xFFFF) for no child
+  /*0x06*/ uint16_t nFaces;     // Number of faces (for leaves)
+  /*0x08*/ uint32_t faceStart;  // Index into MOBR
+  /*0x0C*/ float planeDist;     // Split plane distance
+}; // Total: 16 bytes (0x10)
+```
+
+> [!CAUTION]
+> The BSP node is **exactly 16 bytes**. Writing fewer bytes (e.g., 14) will corrupt all subsequent chunk reads.
+
+### 4.4 Key Group Flags
+
+| Flag | Hex | Description |
+|:---|:---|:---|
+| HAS_BSP | 0x0001 | MOBN/MOBR chunks present |
+| HAS_LIGHTMAP | 0x0002 | MOLM/MOLD (v14 only, unused in v17) |
+| HAS_VERTEX_COLORS | 0x0004 | MOCV chunk present |
+| EXTERIOR | 0x0008 | Outdoor group |
+| EXTERIOR_LIT | 0x0040 | Use exterior lighting |
+| HAS_LIGHTS | 0x0200 | MOLR chunk present |
+| HAS_DOODADS | 0x0800 | MODR chunk present |
+| HAS_WATER | 0x1000 | MLIQ chunk present |
+| INTERIOR | 0x2000 | Indoor group |
+
+### 4.5 Required Chunk Order (v17)
+
+Groups must contain chunks in this exact order:
+1. MOGP (header + all subchunks)
+2. MOPY (triangle flags/materials)
+3. MOVI (vertex indices)
+4. MOVT (vertices)
+5. MONR (normals)
+6. MOTV (texture coordinates)
+7. MOBA (render batches)
+8. [MOLR] (light refs, if flag 0x200)
+9. [MODR] (doodad refs, if flag 0x800)
+10. [MOBN] (BSP nodes, if flag 0x1)
+11. [MOBR] (BSP face refs, if flag 0x1)
+12. [MOCV] (vertex colors, if flag 0x4)
+13. [MLIQ] (liquid, if flag 0x1000)

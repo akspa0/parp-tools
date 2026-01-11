@@ -81,3 +81,80 @@ Strings like `D:\build\buildWoW\WoW\Source\Object\ObjectClient\ZoneDebug.cpp` su
 
 ## 3. Conclusion
 Alpha 0.5.3 is "dirty" with development code. Unlike the cleaner 0.5.5/0.6.0 builds, it exposes raw creation tools (Sound Editor) and contains unstripped linker artifacts (MDL Exporter), making it a goldmine for understanding the development pipeline.
+
+---
+
+# WoW 3.3.5a (Wrath of the Lich King) Hidden Tools & Dead Code
+
+**Analysis Date**: Jan 10 2026  
+**Binary**: `wow.exe` (3.3.5a Build 12340)
+
+## 4. Active Developer/Debug Features (3.3.5a)
+
+### 4.1 Godmode System
+The client contains active Godmode toggle logic, likely server-side controlled:
+*   **Strings**: `"Godmode enabled"`, `"Godmode disabled"`, `"Pet Godmode enabled/disabled"`
+*   **Opcode**: `SPELL_FAILED_BM_OR_INVISGOD` - confirms server-side validation
+*   **Status**: **Server-Gated**. Client displays messages but GM command requires server support.
+
+### 4.2 Debug Console Commands
+The console infrastructure is fully active:
+*   `ConsoleExec("command")` - Execute console commands from Lua
+*   `closeconsole` - Close console window
+*   `cvarlist` - List all CVars
+*   `cvar_reset` - Reset all CVars to default
+*   `consolelines` - Set console line count
+
+### 4.3 Debug Lua API
+| Function | Description |
+|:---|:---|
+| `TeleportToDebugObject` | Teleport to a debug object (requires server) |
+| `GetDebugZoneMap` | Get debug zone map info |
+| `HasDebugZoneMap` | Check for debug zone map |
+| `GetMapDebugObjectInfo` | Get debug object info |
+| `GetNumMapDebugObjects` | Count debug objects |
+| `IsDebugBuild` | Check if debug build |
+| `GetDebugStats` | Get debug statistics |
+| `CommentatorSetMoveSpeed(speed)` | Set spectator move speed |
+
+### 4.4 Internal CVars
+Hidden CVars for internal tracking:
+*   `"Internal cvar for saving completed tutorials in order"`
+*   `"Internal cvar for saving tracked achievements in order"`
+*   `"Internal cvar for saving tracked quests in order"`
+
+## 5. Legacy Code & Dead Artifacts (3.3.5a)
+
+### 5.1 Warcraft 3 MDX/MDL Support
+The client still contains references to Warcraft 3 model formats:
+*   **File**: `Environments\Stars\stars.mdl` - Original WC3 skybox
+*   **MDX Paths**: `Interface\Minimap\MinimapArrow.mdx`, `Spells\ErrorCube.mdx`
+*   **Spell Effects**: Many spells reference `.mdx` files (`TalkToMe.mdx`, `Blizzard_Impact_Base.mdx`)
+*   **Status**: **Active but Legacy**. The loader exists but assets are progressively replaced with M2.
+
+### 5.2 SavedVariables System
+Full Lua variable persistence:
+*   `RegisterForSave` - Register addon for save
+*   `RegisterForSavePerCharacter` - Per-character saves
+*   `SaveAddOns` - Trigger addon save
+*   Path: `\SavedVariables.lua`
+
+## 6. Source File Paths (Debug Artifacts)
+The binary contains debug path strings revealing internal structure:
+*   `d:\buildserver\wow\...\NetInternal.h` - Network subsystem
+*   `.\\ConsoleClient.cpp` - Console implementation
+*   `.\\ConsoleVar.cpp` - CVar system
+*   `.\\ConsoleDetect.cpp` - Hardware detection
+*   `.\\SoundInterface2Internal.cpp` - Sound system
+
+## 7. Comparison: 0.5.3 vs 3.3.5a
+
+| Feature | Alpha 0.5.3 | WotLK 3.3.5a |
+|:---|:---|:---|
+| **Godmode** | Dead (stripped) | Active (server-gated) |
+| **Sound Editor** | Active (SndDebug) | Removed |
+| **MDL Exporter** | Dead (latent code) | Absent |
+| **MDX Support** | Active | Legacy (still present) |
+| **Console** | Full GM suite | Lua API only |
+| **CVar System** | Basic | Full API (`GetCVar`, etc.) |
+| **Debug Zone Maps** | N/A | Active API |
